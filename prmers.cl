@@ -17,6 +17,7 @@
  */
 
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
+#pragma OPENCL EXTENSION cl_khr_int64 : enable
 
 typedef uint  uint32_t;
 typedef ulong uint64_t;
@@ -160,35 +161,22 @@ __kernel void kernel_square(__global ulong* x, const ulong n)
         x[i] = modMul(val, val);
     }
 }
-__kernel void kernel_forward_ntt(__global ulong *x,
-                                 const ulong n)
-{
-    // Un seul work-group => on synchronise tout le monde dans ce groupe
-    // via barrier(CLK_LOCAL_MEM_FENCE) ou barrier(CLK_GLOBAL_MEM_FENCE).
-    // On suppose get_global_size(0) == n.
+// Forward Number Theoretic Transform (NTT)
+__kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
+    __local ulong d;
 
-    // On pré-calcule la racine de base : root = 7^((MOD_P-1)/n) mod p
-    // (Pour info, MOD_P - 1 est divisible par n)
     ulong bigBase   = 7UL;
-    ulong exponent  = (MOD_P - 1UL) / n;  // On suppose n divise p-1
-    ulong root      = modExp(bigBase, exponent);  // la "racine de l'unité"
+    ulong exponent  = (MOD_P - 1UL) / n;
+    ulong root      = modExp(bigBase, exponent);
 
-    // d_global sera stocké en local pour être partagé
-    __local ulong d_global;
-
-    // On itère sur m = n/2 jusqu'à 1 (log2(n) passes)
-    // s est l'exposant pour la racine : root^s
-    for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) 
-    {
-        // Le work-item 0 calcule d_global = root^s
+    for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) {
         if (get_local_id(0) == 0) {
-            d_global = modExp(root, s);
+            d = modExp(root, s);
         }
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        // Phase de butterfly parallèle
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
-            if ((i % (2UL * m)) < m) {  // <-- Correction : traiter tous les i et i+m
+            if ((i % (2UL * m)) < m) {
                 ulong i1 = i;
                 ulong i2 = i + m;
                 if (i2 < n) {
@@ -196,7 +184,7 @@ __kernel void kernel_forward_ntt(__global ulong *x,
                     ulong v = x[i2];
 
                     ulong inBlockIndex = i % m;
-                    ulong d_j = modExp(d_global, inBlockIndex);  // Utilisation correcte de la racine
+                    ulong d_j = modExp(d, inBlockIndex); 
 
                     ulong sum  = modAdd_correct(u, v);
                     ulong diff = modSub_correct(u, v);
@@ -206,10 +194,10 @@ __kernel void kernel_forward_ntt(__global ulong *x,
                 }
             }
         }
-
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
+
 
 /**
  * kernel_sub2
@@ -240,36 +228,30 @@ __kernel void kernel_sub2(__global ulong* x,
 }
 
 
-__kernel void kernel_inverse_ntt(__global ulong* x,
-                                 const ulong n)
+__kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
 {
-    // Un seul work-group => on synchronise tout le monde avec barrier().
-    // On suppose get_global_size(0) == n, ou un multiple qui >= n.
+    // Déclaration au début de la fonction (corrige l'erreur "most scope of a kernel function")
+    __local ulong d_global;  
 
-    __local ulong d_global;
+    // Calcul de la racine de l'unité : root = 7^((MOD_P-1)/n) mod p
+    ulong root = modExp((ulong)7, (MOD_P - 1UL)/n);
 
-    // 1) Calcul de la racine "root = 7^((p-1)/n) mod p"
-    ulong root     = modExp((ulong)7, (MOD_P - 1UL)/n);
-
-    // 2) Inverse de root => root_inv = root^(p-2) mod p
-    //    (car x^(p-2) mod p = x^(-1) mod p)
+    // Calcul de l'inverse de root : root_inv = root^(p-2) mod p
     ulong root_inv = modExp(root, MOD_P - 2UL);
 
-    // 3) Boucle de la NTT inverse
+    // Boucle de la NTT inverse
     for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1)
     {
-        // Work-item 0 calcule d_global = root_inv^s
+        // Le work-item 0 calcule d_global = root_inv^s
         if (get_local_id(0) == 0) {
             d_global = modExp(root_inv, s);
         }
-        barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE); // Synchronisation pour que tous aient d_global
 
         // Butterfly parallèle
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
         {
-            // Comme pour la forward-NTT, on peut faire un test sur (i / m) % 2
-            // ou directement if((i % (2*m)) < m). Ici, on illustre la 2e forme :
-            if ( (i % (2UL * m)) < m )
+            if ((i % (2UL * m)) < m)  // Correction : traiter tous les indices i et i+m
             {
                 ulong i1 = i;
                 ulong i2 = i + m;
@@ -294,7 +276,7 @@ __kernel void kernel_inverse_ntt(__global ulong* x,
                 }
             }
         }
-        barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE); // Assurer la synchronisation après chaque étape
     }
 }
 
