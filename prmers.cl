@@ -22,7 +22,6 @@ typedef uint  uint32_t;
 typedef ulong uint64_t;
 
 constant ulong MOD_P = (((1UL << 32) - 1UL) << 32) + 1UL;  // p = 2^64 - 2^32 + 1
-#define N_MAX 2048
 
 // Compute the 128-bit product of a and b as high:low.
 inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
@@ -139,93 +138,51 @@ __kernel void lucas_lehmer_mersenne_test(
     __global uint *results,
 
     // Precomputed buffers.
-    __global ulong *g_digit_weight,
-    __global ulong *g_digit_invweight,
-    __global int   *g_digit_width
+    __global ulong *digit_weight,
+    __global ulong *digit_invweight,
+    __global int   *digit_width,
+    __global ulong *x,
+    const ulong n_size
 )
 {
+
     // Each work-group handles one candidate.
     uint candidate_index = get_group_id(0);
-    if(candidate_index >= candidate_count)
+    if (candidate_index >= candidate_count)
         return;
-    
+
     // Compute candidate p = p_min + 2 * candidate_index.
     uint p = p_min + 2 * candidate_index;
-    
-    // Naive primality test.
-    bool isprime;
-    if(get_local_id(0) == 0) {
-        isprime = true;
-        for(uint d = 3; d * d <= p; d += 2) {
-            if((p % d) == 0) { isprime = false; break; }
-        }
-    }
-    __local bool local_isprime;
-    if(get_local_id(0)==0)
-        local_isprime = isprime;
-    barrier(CLK_LOCAL_MEM_FENCE);
-    isprime = local_isprime;
-    if(!isprime) {
-        if(get_local_id(0)==0) {
-            // Candidate is not prime.
-            results[candidate_index] = 0;
-        }
-        return;
-    }
-    
-    // Compute transform size n.
+
+    bool isprime = true;
     uint64_t n;
     int log_n, w;
-    if(get_local_id(0)==0) {
-        log_n = 0; w = 0;
-        do {
-            ++log_n;
-            w = p / (1 << log_n);
-        } while(((w + 1) * 2 + log_n) >= 63);
-        n = 1UL << log_n;
-    }
-    __local ulong n_local;
-    if(get_local_id(0)==0)
-        n_local = n;
-    barrier(CLK_LOCAL_MEM_FENCE);
-    n = n_local;
-    if(n > N_MAX) {
-        if(get_local_id(0)==0) {
-            results[candidate_index] = 0;
-        }
-        return;
-    }
-    
-    // Initialize local arrays.
-    __local ulong x[N_MAX];
-    __local ulong digit_weight[N_MAX];
-    __local ulong digit_invweight[N_MAX];
-    __local int digit_width[N_MAX];
-    for(uint i = get_local_id(0); i < N_MAX; i += get_local_size(0)) {
-        x[i] = 0UL;
-        digit_weight[i] = 0UL;
-        digit_invweight[i] = 0UL;
-        if(i < N_MAX) digit_width[i] = 0;
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-    
-    __local ulong d_global;
-    __local ulong d_inv_global;
 
+
+    n = n_size;
+    w = p / n;
     if(get_local_id(0)==0) {
         // Initialize x: set x[0] = 4 and the rest = 0.
         x[0] = 4UL;
         for(uint i = 1; i < n; i++)
             x[i] = 0UL;
         
-        // Copy precomputed values from global memory.
-        for(uint i = 0; i < n; i++){
-            digit_weight[i] = g_digit_weight[i];      
-            digit_invweight[i] = g_digit_invweight[i];
-            digit_width[i] = g_digit_width[i];
-        }
     }
+
+    barrier(CLK_LOCAL_MEM_FENCE);  // synchronize work-items
+
+    // Broadcast n to all work-items in the group using local memory.
+    __local ulong n_local;
+    if (get_local_id(0) == 0)
+        n_local = n;
     barrier(CLK_LOCAL_MEM_FENCE);
+    n = n_local;
+    barrier(CLK_GLOBAL_MEM_FENCE);  // Ensure initialization is complete
+
+    __local ulong d_global;
+    __local ulong d_inv_global;
+
+
     
     // Determine progress update interval for Lucas–Lehmer iterations.
     uint total_iters = p - 2;
@@ -333,7 +290,6 @@ __kernel void lucas_lehmer_mersenne_test(
         }
         barrier(CLK_LOCAL_MEM_FENCE);
         
-        // (Mise à jour de progression supprimée)
     }
     
     // Final reduction: check if x equals 0.
