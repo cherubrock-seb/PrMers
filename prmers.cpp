@@ -404,7 +404,8 @@ int main(int argc, char** argv) {
     size_t nmax = std::min(n, (size_t)16);  // Limite d'affichage
 
     uint32_t total_iters = p - 2;
-    
+    if globalSize > 256
+        globalSize = 256
     auto start = std::chrono::high_resolution_clock::now();
     auto lastDisplay = start; // Pour l'affichage toutes les 5s
 

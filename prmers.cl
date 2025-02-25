@@ -188,21 +188,15 @@ __kernel void kernel_forward_ntt(__global ulong *x,
 
         // Phase de butterfly parallèle
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
-            ulong group = i / m;       // pour voir si pair/impair dans bloc
-            ulong inBlockIndex = i % m;
-            // On ne traite que la "moitié" du bloc => si i < m dans le bloc
-            if ((group % 2) == 0) {
-                // group est pair => i1 = i, i2 = i + m
-                // Mais on doit s'assurer que i2 < n
+            if ((i % (2UL * m)) < m) {  // <-- Correction : traiter tous les i et i+m
                 ulong i1 = i;
                 ulong i2 = i + m;
                 if (i2 < n) {
-                    // butterfly
                     ulong u = x[i1];
                     ulong v = x[i2];
 
-                    // On calcule d_j = (d_global)^inBlockIndex
-                    ulong d_j = modExp(d_global, inBlockIndex);
+                    ulong inBlockIndex = i % m;
+                    ulong d_j = modExp(d_global, inBlockIndex);  // Utilisation correcte de la racine
 
                     ulong sum  = modAdd_correct(u, v);
                     ulong diff = modSub_correct(u, v);
@@ -212,6 +206,7 @@ __kernel void kernel_forward_ntt(__global ulong *x,
                 }
             }
         }
+
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
