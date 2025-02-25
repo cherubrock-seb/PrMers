@@ -209,20 +209,18 @@ int main(int argc, char** argv) {
     std::cout << "Using OpenCL device ID: " << device_id << std::endl;
 
     cl_int err;
-    
-    // Obtain the OpenCL platform
+    // 1. Get an OpenCL platform.
     cl_uint numPlatforms = 0;
     err = clGetPlatformIDs(0, nullptr, &numPlatforms);
     if(err != CL_SUCCESS || numPlatforms == 0) {
         std::cerr << "No OpenCL platform found." << std::endl;
         return 1;
     }
-
     std::vector<cl_platform_id> platforms(numPlatforms);
     clGetPlatformIDs(numPlatforms, platforms.data(), nullptr);
     cl_platform_id platform = platforms[0];
-    
-    // 2. Get a GPU device.
+
+    // 2. Get GPU devices from the selected platform.
     cl_uint numDevices = 0;
     err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices);
     if(err != CL_SUCCESS || numDevices == 0) {
@@ -231,26 +229,29 @@ int main(int argc, char** argv) {
     }
     std::vector<cl_device_id> devices(numDevices);
     clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, numDevices, devices.data(), nullptr);
-    cl_device_id device = devices[0];
-    
-    // 3. Create an OpenCL context.
+
+    // 3. Validate the device_id argument and select the corresponding device.
+    if(device_id < 0 || device_id >= static_cast<int>(numDevices)) {
+        std::cerr << "Invalid device id specified (" << device_id << "). Using device 0 instead." << std::endl;
+        device_id = 0;
+    }
+    cl_device_id device = devices[device_id];
+
+    // 4. Create an OpenCL context.
     cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
     if(err != CL_SUCCESS) {
         std::cerr << "Failed to create OpenCL context." << std::endl;
         return 1;
     }
-    
-    // 4. Create a command queue.
-#if defined(CL_VERSION_2_0)
+    // Crée une file de commandes pour le device sélectionné
     cl_command_queue queue = clCreateCommandQueueWithProperties(context, device, 0, &err);
-#else
-    cl_command_queue queue = clCreateCommandQueue(context, device, 0, &err);
-#endif
-    if(err != CL_SUCCESS) {
+    // Pour OpenCL 1.x, tu peux utiliser :
+    // cl_command_queue queue = clCreateCommandQueue(context, device, 0, &err);
+    if (err != CL_SUCCESS) {
         std::cerr << "Failed to create command queue." << std::endl;
-        clReleaseContext(context);
         return 1;
     }
+
     
     // 5. Load the kernel source from "prmers.cl".
     std::string kernelSource;
