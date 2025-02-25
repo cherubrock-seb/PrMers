@@ -131,6 +131,209 @@ inline ulong modSub_correct(ulong a, ulong b) {
     }
 }
 
+
+__kernel void kernel_precomp(__global ulong* x,
+                             __global ulong* digit_weight,
+                             const ulong n)
+{
+    size_t i = get_global_id(0);
+    if (i < n) {
+        x[i] = modMul(x[i], digit_weight[i]);
+    }
+}
+
+__kernel void kernel_postcomp(__global ulong* x,
+                             __global ulong* digit_invweight,
+                             const ulong n)
+{
+    size_t i = get_global_id(0);
+    if (i < n) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+    }
+}
+
+__kernel void kernel_square(__global ulong* x, const ulong n)
+{
+    size_t i = get_global_id(0);
+    if (i < n) {
+        ulong val = x[i];
+        x[i] = modMul(val, val);
+    }
+}
+__kernel void kernel_forward_ntt(__global ulong *x,
+                                 const ulong n)
+{
+    // Un seul work-group => on synchronise tout le monde dans ce groupe
+    // via barrier(CLK_LOCAL_MEM_FENCE) ou barrier(CLK_GLOBAL_MEM_FENCE).
+    // On suppose get_global_size(0) == n.
+
+    // On pré-calcule la racine de base : root = 7^((MOD_P-1)/n) mod p
+    // (Pour info, MOD_P - 1 est divisible par n)
+    ulong bigBase   = 7UL;
+    ulong exponent  = (MOD_P - 1UL) / n;  // On suppose n divise p-1
+    ulong root      = modExp(bigBase, exponent);  // la "racine de l'unité"
+
+    // d_global sera stocké en local pour être partagé
+    __local ulong d_global;
+
+    // On itère sur m = n/2 jusqu'à 1 (log2(n) passes)
+    // s est l'exposant pour la racine : root^s
+    for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) 
+    {
+        // Le work-item 0 calcule d_global = root^s
+        if (get_local_id(0) == 0) {
+            d_global = modExp(root, s);
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        // Phase de butterfly parallèle
+        for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
+            ulong group = i / m;       // pour voir si pair/impair dans bloc
+            ulong inBlockIndex = i % m;
+            // On ne traite que la "moitié" du bloc => si i < m dans le bloc
+            if ((group % 2) == 0) {
+                // group est pair => i1 = i, i2 = i + m
+                // Mais on doit s'assurer que i2 < n
+                ulong i1 = i;
+                ulong i2 = i + m;
+                if (i2 < n) {
+                    // butterfly
+                    ulong u = x[i1];
+                    ulong v = x[i2];
+
+                    // On calcule d_j = (d_global)^inBlockIndex
+                    ulong d_j = modExp(d_global, inBlockIndex);
+
+                    ulong sum  = modAdd_correct(u, v);
+                    ulong diff = modSub_correct(u, v);
+
+                    x[i1] = sum;
+                    x[i2] = modMul(diff, d_j);
+                }
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+}
+
+/**
+ * kernel_sub2
+ * Soustrait 2 à x en base mixte. 
+ */
+__kernel void kernel_sub2(__global ulong* x,
+                          __global int* digit_width,
+                          const ulong n)
+{
+    if (get_global_id(0) == 0)
+    {
+        uint c = 2U;
+        while(c != 0U){
+            for(uint i = 0; i < n; i++){
+                ulong val = x[i];
+                ulong b   = (1UL << digit_width[i]);
+                if(val >= c){
+                    x[i] = val - c;
+                    c = 0U;
+                    break;
+                } else {
+                    x[i] = val - c + b;
+                    c = 1U;
+                }
+            }
+        }
+    }
+}
+
+
+__kernel void kernel_inverse_ntt(__global ulong* x,
+                                 const ulong n)
+{
+    // Un seul work-group => on synchronise tout le monde avec barrier().
+    // On suppose get_global_size(0) == n, ou un multiple qui >= n.
+
+    __local ulong d_global;
+
+    // 1) Calcul de la racine "root = 7^((p-1)/n) mod p"
+    ulong root     = modExp((ulong)7, (MOD_P - 1UL)/n);
+
+    // 2) Inverse de root => root_inv = root^(p-2) mod p
+    //    (car x^(p-2) mod p = x^(-1) mod p)
+    ulong root_inv = modExp(root, MOD_P - 2UL);
+
+    // 3) Boucle de la NTT inverse
+    for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1)
+    {
+        // Work-item 0 calcule d_global = root_inv^s
+        if (get_local_id(0) == 0) {
+            d_global = modExp(root_inv, s);
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        // Butterfly parallèle
+        for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
+        {
+            // Comme pour la forward-NTT, on peut faire un test sur (i / m) % 2
+            // ou directement if((i % (2*m)) < m). Ici, on illustre la 2e forme :
+            if ( (i % (2UL * m)) < m )
+            {
+                ulong i1 = i;
+                ulong i2 = i + m;
+                if (i2 < n) {
+                    ulong u = x[i1];
+                    ulong v = x[i2];
+
+                    // inBlockIndex = i % m => exponent pour d_global^inBlockIndex
+                    ulong inBlockIndex = i % m;
+                    ulong d_j = modExp(d_global, inBlockIndex);
+
+                    // v *= d_j (mod p)
+                    v = modMul(v, d_j);
+
+                    // new_u = u + v
+                    // new_v = u - v
+                    ulong new_u = modAdd_correct(u, v);
+                    ulong new_v = modSub_correct(u, v);
+
+                    x[i1] = new_u;
+                    x[i2] = new_v;
+                }
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+}
+
+/**
+ * kernel_carry
+ * Propagation de retenues dans x, selon digit_width[i].
+ * 
+ * Ici, on peut le faire avec un seul work-item (séquentiel)
+ * ou avec un algo parallèle. La version la plus simple
+ * (comme dans vos codes) est la version séquentielle.
+ */
+__kernel void kernel_carry(__global ulong* x,
+                           __global int* digit_width,
+                           const ulong n)
+{
+    // On peut se limiter à get_global_id(0)==0
+    // et exécuter la boucle en séquentiel
+    if (get_global_id(0) == 0)
+    {
+        ulong c = 0UL;
+        for (ulong i = 0; i < n; i++){
+            x[i] = digit_adc(x[i], digit_width[i], &c);
+        }
+        // Tant que c != 0, on refait...
+        while(c != 0UL) {
+            for (ulong i = 0; i < n; i++){
+                x[i] = digit_adc(x[i], digit_width[i], &c);
+                if(c == 0UL) break;
+            }
+        }
+    }
+    
+}
+
 // Main kernel for the Lucas–Lehmer Mersenne test.
 __kernel void lucas_lehmer_mersenne_test(
     const uint p_min,
