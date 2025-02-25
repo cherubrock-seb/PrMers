@@ -325,6 +325,8 @@ int main(int argc, char** argv) {
                             digit_width_cpu.size() * sizeof(int),
                             digit_width_cpu.data(), &err);
 
+    cl_mem buf_x = clCreateBuffer(context, CL_MEM_READ_WRITE, digit_weight_cpu.size()  * sizeof(uint64_t), nullptr, &err);
+
     // 10. Create the kernel.
     cl_kernel kernel = clCreateKernel(program, "lucas_lehmer_mersenne_test", &err);
     if(err != CL_SUCCESS) {
@@ -342,6 +344,10 @@ int main(int argc, char** argv) {
     err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &buf_digit_weight);
     err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &buf_digit_invweight);
     err |= clSetKernelArg(kernel, 5, sizeof(cl_mem), &buf_digit_width);
+    err |= clSetKernelArg(kernel, 6, sizeof(cl_mem), &buf_x);
+    uint64_t n_size = static_cast<uint64_t>(digit_weight_cpu.size());
+    err |= clSetKernelArg(kernel, 7, sizeof(uint64_t), &n_size);
+
     if(err != CL_SUCCESS) {
         std::cerr << "Failed to set kernel arguments." << std::endl;
         clReleaseMemObject(buffer_results);
