@@ -179,7 +179,10 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
                              cl_mem buf_x, std::vector<uint64_t>& x, size_t n, 
                              const std::string& kernelName, size_t nmax) 
 {
-    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &n, nullptr, 0, nullptr, nullptr);
+    size_t localSize = 256;  // 256 est souvent une taille optimale pour GPU
+    size_t globalSize = (n + localSize - 1) / localSize * localSize;  // Ajuste globalSize à un multiple de localSize
+
+    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &globalSize, &localSize, 0, nullptr, nullptr);
 
     if (debug) {
         
@@ -406,6 +409,7 @@ int main(int argc, char** argv) {
     uint32_t total_iters = p - 2;
     //if globalSize > 256
     //    globalSize = 256
+
     auto start = std::chrono::high_resolution_clock::now();
     auto lastDisplay = start; // Pour l'affichage toutes les 5s
 

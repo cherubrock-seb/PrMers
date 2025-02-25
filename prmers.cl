@@ -230,28 +230,28 @@ __kernel void kernel_sub2(__global ulong* x,
 
 __kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
 {
-    // Déclaration au début de la fonction (corrige l'erreur "most scope of a kernel function")
-    __local ulong d_global;  
+    // Shared variable for the twiddle factor (one per work-group)
+    __local ulong twiddle_factor;
 
-    // Calcul de la racine de l'unité : root = 7^((MOD_P-1)/n) mod p
-    ulong root = modExp((ulong)7, (MOD_P - 1UL)/n);
+    // Compute the base root of unity: root = 7^((MOD_P-1)/n) mod p
+    ulong root = modExp(7UL, (MOD_P - 1UL) / n);
 
-    // Calcul de l'inverse de root : root_inv = root^(p-2) mod p
+    // Compute its modular inverse: root_inv = root^(p-2) mod p
     ulong root_inv = modExp(root, MOD_P - 2UL);
 
-    // Boucle de la NTT inverse
+    // Iteratively perform the inverse NTT
     for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1)
     {
-        // Le work-item 0 calcule d_global = root_inv^s
+        // The first thread in each work-group computes twiddle_factor = root_inv^s
         if (get_local_id(0) == 0) {
-            d_global = modExp(root_inv, s);
+            twiddle_factor = modExp(root_inv, s);
         }
-        barrier(CLK_LOCAL_MEM_FENCE); // Synchronisation pour que tous aient d_global
+        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize all threads before using twiddle_factor
 
-        // Butterfly parallèle
+        // Perform the butterfly operation in parallel
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
         {
-            if ((i % (2UL * m)) < m)  // Correction : traiter tous les indices i et i+m
+            if ((i % (2UL * m)) < m) // Ensures each butterfly pair is processed correctly
             {
                 ulong i1 = i;
                 ulong i2 = i + m;
@@ -259,26 +259,20 @@ __kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
                     ulong u = x[i1];
                     ulong v = x[i2];
 
-                    // inBlockIndex = i % m => exponent pour d_global^inBlockIndex
-                    ulong inBlockIndex = i % m;
-                    ulong d_j = modExp(d_global, inBlockIndex);
+                    // Compute the twiddle factor for this index
+                    ulong twiddle = modExp(twiddle_factor, i % m);
 
-                    // v *= d_j (mod p)
-                    v = modMul(v, d_j);
-
-                    // new_u = u + v
-                    // new_v = u - v
-                    ulong new_u = modAdd_correct(u, v);
-                    ulong new_v = modSub_correct(u, v);
-
-                    x[i1] = new_u;
-                    x[i2] = new_v;
+                    // Apply butterfly transformation
+                    v = modMul(v, twiddle);
+                    x[i1] = modAdd_correct(u, v);
+                    x[i2] = modSub_correct(u, v);
                 }
             }
         }
-        barrier(CLK_LOCAL_MEM_FENCE); // Assurer la synchronisation après chaque étape
+        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize threads before the next stage
     }
 }
+
 
 /**
  * kernel_carry
