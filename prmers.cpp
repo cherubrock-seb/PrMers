@@ -32,10 +32,11 @@
 #include <cstring>
 #include <cstdint>
 #include <chrono>
-
+#include <algorithm> 
 // 1) Helpers for 64-bit arithmetic modulo p
 // p = 2^64 - 2^32 + 1
 static constexpr uint64_t MOD_P = (((1ULL << 32) - 1ULL) << 32) + 1ULL;
+bool debug = false;
 
 // Multiply a and b modulo p using __uint128_t arithmetic.
 uint64_t mulModP(uint64_t a, uint64_t b)
@@ -174,6 +175,31 @@ void printUsage(const char* progName) {
     std::cout << "  -h            : Display this help message" << std::endl;
 }
 
+void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
+                             cl_mem buf_x, std::vector<uint64_t>& x, size_t n, 
+                             const std::string& kernelName, size_t nmax) 
+{
+    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &n, nullptr, 0, nullptr, nullptr);
+
+    if (debug) {
+        
+        clFinish(queue);  // Assure la complétion du kernel
+        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+
+        // Affichage limité à nmax éléments
+        std::cout << "After " << kernelName << " : x = [ ";
+        for (size_t i = 0; i < nmax; i++) std::cout << x[i] << " ";
+        std::cout << "]" << std::endl;
+    }
+}
+
+void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
+    double percent = (100.0 * iter) / total_iters;
+    std::cout << "[Progress] Iteration " << iter << " / " << total_iters 
+              << " (" << percent << "%) - Time elapsed: " 
+              << elapsedTime << " sec" << std::endl;
+}
+
 int main(int argc, char** argv) {
     if(argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
@@ -181,12 +207,16 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    uint32_t p_min_i = 0;
+    uint32_t p = 0;
+
     int device_id = 0;  // Default device ID
 
     // Parse arguments
     for(int i = 1; i < argc; ++i) {
-        if(std::strcmp(argv[i], "-h") == 0) {
+        if (std::strcmp(argv[i], "-debug") == 0) {
+            debug = true;
+        }
+        else if(std::strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
         }
@@ -200,12 +230,12 @@ int main(int argc, char** argv) {
             }
         }
         else {
-            p_min_i = std::atoi(argv[i]);
+            p = std::atoi(argv[i]);
         }
     }
 
     std::cout << "PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)" << std::endl;
-    std::cout << "Testing exponent: " << p_min_i << std::endl;
+    std::cout << "Testing exponent: " << p << std::endl;
     std::cout << "Using OpenCL device ID: " << device_id << std::endl;
 
     cl_int err;
@@ -293,10 +323,13 @@ int main(int argc, char** argv) {
     // 8. Precompute values on the CPU.
     std::vector<uint64_t> digit_weight_cpu, digit_invweight_cpu;
     std::vector<int> digit_width_cpu;
-    precalc_for_p(p_min_i, digit_weight_cpu, digit_invweight_cpu, digit_width_cpu);
-
+    precalc_for_p(p, digit_weight_cpu, digit_invweight_cpu, digit_width_cpu);
+    size_t n = transformsize(p);
+    if (debug) {
+        std::cout << "Size n for transform is n=" << n << std::endl;
+    }
     // 9. Create OpenCL buffers.
-    cl_uint p_min = p_min_i;
+    cl_uint p_min = p;
     cl_uint candidate_count = 1;
     std::vector<cl_uint> results(candidate_count, 0);
     
@@ -324,92 +357,116 @@ int main(int argc, char** argv) {
                             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                             digit_width_cpu.size() * sizeof(int),
                             digit_width_cpu.data(), &err);
+    std::vector<uint64_t> x(n, 0ULL);
+    x[0] = 4ULL;
+    cl_mem buf_x           = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
+                                              n*sizeof(uint64_t), x.data(), &err);
+    // 10. Création et compilation du program 
+    //    Puis création des kernels individuels
+    cl_kernel k_precomp     = clCreateKernel(program, "kernel_precomp",     &err);
+    cl_kernel k_forwardNTT  = clCreateKernel(program, "kernel_forward_ntt", &err);
+    cl_kernel k_square      = clCreateKernel(program, "kernel_square",      &err);
+    cl_kernel k_inverseNTT  = clCreateKernel(program, "kernel_inverse_ntt", &err);
+    cl_kernel k_postcomp    = clCreateKernel(program, "kernel_postcomp",    &err);
+    cl_kernel k_carry       = clCreateKernel(program, "kernel_carry",       &err);
+    cl_kernel k_sub2        = clCreateKernel(program, "kernel_sub2",        &err);
 
-    cl_mem buf_x = clCreateBuffer(context, CL_MEM_READ_WRITE, digit_weight_cpu.size()  * sizeof(uint64_t), nullptr, &err);
+    // 11. On fixe les arguments de chaque kernel. 
+    //    Exemple pour k_precomp:
+    clSetKernelArg(k_precomp, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_precomp, 1, sizeof(cl_mem), &buf_digit_weight);
+    clSetKernelArg(k_precomp, 2, sizeof(uint64_t), &n);
 
-    // 10. Create the kernel.
-    cl_kernel kernel = clCreateKernel(program, "lucas_lehmer_mersenne_test", &err);
-    if(err != CL_SUCCESS) {
-        std::cerr << "Failed to create kernel." << std::endl;
-        clReleaseProgram(program);
-        clReleaseCommandQueue(queue);
-        clReleaseContext(context);
-        return 1;
-    }
+    clSetKernelArg(k_forwardNTT, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_forwardNTT, 1, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_square, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_square, 1, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_inverseNTT, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_inverseNTT, 1, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_postcomp, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_postcomp, 1, sizeof(cl_mem), &buf_digit_invweight);
+    clSetKernelArg(k_postcomp, 2, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
+    clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
+    clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
+
+
+    std::cout << "\nLaunching OpenCL kernel (p = " << p << ") without progress display; computation may take a while depending on the exponent." << std::endl;
+    size_t globalSize = n;
+    size_t nmax = std::min(n, (size_t)16);  // Limite d'affichage
+
+    uint32_t total_iters = p - 2;
     
-    // 11. Set kernel arguments.
-    err  = clSetKernelArg(kernel, 0, sizeof(cl_uint), &p_min);
-    err |= clSetKernelArg(kernel, 1, sizeof(cl_uint), &candidate_count);
-    err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &buffer_results);
-    err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &buf_digit_weight);
-    err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &buf_digit_invweight);
-    err |= clSetKernelArg(kernel, 5, sizeof(cl_mem), &buf_digit_width);
-    err |= clSetKernelArg(kernel, 6, sizeof(cl_mem), &buf_x);
-    uint64_t n_size = static_cast<uint64_t>(digit_weight_cpu.size());
-    err |= clSetKernelArg(kernel, 7, sizeof(uint64_t), &n_size);
-
-    if(err != CL_SUCCESS) {
-        std::cerr << "Failed to set kernel arguments." << std::endl;
-        clReleaseMemObject(buffer_results);
-        clReleaseKernel(kernel);
-        clReleaseProgram(program);
-        clReleaseCommandQueue(queue);
-        clReleaseContext(context);
-        return 1;
-    }
-    std::cout << "\nLaunching OpenCL kernel (p_min_i = " << p_min_i << ") without progress display; computation may take a while depending on the exponent." << std::endl;
-
-    // 12. Launch the kernel.
-    size_t localWorkSize = 256;
-    size_t globalWorkSize = candidate_count * localWorkSize;
-
-    // Measure kernel execution time.
     auto start = std::chrono::high_resolution_clock::now();
-    err = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &globalWorkSize, &localWorkSize, 0, nullptr, nullptr);
-    if(err != CL_SUCCESS) {
-        std::cerr << "Failed to enqueue kernel." << std::endl;
-        clReleaseMemObject(buffer_results);
-        clReleaseKernel(kernel);
-        clReleaseProgram(program);
-        clReleaseCommandQueue(queue);
-        clReleaseContext(context);
-        return 1;
-    }
-    clFinish(queue);
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    
-    // 13. Read the results.
-    err = clEnqueueReadBuffer(queue, buffer_results, CL_TRUE, 0,
-                              sizeof(cl_uint) * candidate_count, results.data(), 0, nullptr, nullptr);
-    if(err != CL_SUCCESS) {
-        std::cerr << "Failed to read results." << std::endl;
-    } else {
-        std::cout << "Lucas-Lehmer test results:" << std::endl;
-        for(cl_uint i = 0; i < candidate_count; i++) {
-            if(results[i] != 0)
-                std::cout << "Mp with p = " << results[i] << " is a Mersenne prime." << std::endl;
-            else
-                std::cout << "Mp with p = " << p_min_i << " is NOT a Mersenne prime." << std::endl;
+    auto lastDisplay = start; // Pour l'affichage toutes les 5s
+
+    for (uint32_t iter = 0; iter < total_iters; iter++) {
+        executeKernelAndDisplay(queue, k_precomp, buf_x, x, n, "k_precomp", nmax);
+        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, n, "k_forwardNTT", nmax);
+        executeKernelAndDisplay(queue, k_square, buf_x, x, n, "k_square", nmax);
+        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, n, "k_inverseNTT", nmax);
+        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, n, "k_postcomp", nmax);
+        
+        size_t one = 1;
+        executeKernelAndDisplay(queue, k_carry, buf_x, x, one, "k_carry", nmax);
+        executeKernelAndDisplay(queue, k_sub2, buf_x, x, one, "k_sub2", nmax);
+
+        // Affichage toutes les 5 secondes
+        auto now = std::chrono::high_resolution_clock::now();
+        double elapsedSinceLastDisplay = std::chrono::duration<double>(now - lastDisplay).count();
+        if (elapsedSinceLastDisplay >= 5.0) {
+            double elapsedTime = std::chrono::duration<double>(now - start).count();
+            displayProgress(iter, total_iters, elapsedTime);
+            lastDisplay = now;  // Reset du timer pour la prochaine mise à jour
         }
     }
+
+    clFinish(queue);
+    auto end = std::chrono::high_resolution_clock::now();
     
-    // Calculate iterations per second (iterations = p - 2).
-    uint64_t iterations = (uint64_t)p_min - 2ULL;
-    double iters_per_sec = iterations / elapsed.count();
-    std::cout << "Kernel execution time: " << elapsed.count() << " seconds" << std::endl;
+    // Vérification finale si M_p est premier
+    clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+    bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
+
+    std::cout << "M" << p << " is " << (isPrime ? "prime !" : "composite.") << std::endl;
+
+    // Calcul des performances
+    std::chrono::duration<double> elapsed = end - start;
+    double elapsedTime = elapsed.count();
+    double iters_per_sec = total_iters / elapsedTime;
+
+    std::cout << "Kernel execution time: " << elapsedTime << " seconds" << std::endl;
     std::cout << "Iterations per second: " << iters_per_sec 
-              << " (" << iterations << " iterations in total)" << std::endl;
-    
+              << " (" << total_iters << " iterations in total)" << std::endl;
+
+
     // 14. Release OpenCL resources.
+    // Libérer les buffers mémoire GPU
+    clReleaseMemObject(buf_x);
     clReleaseMemObject(buffer_results);
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
-    clReleaseKernel(kernel);
+    // Libérer les kernels un par un
+    clReleaseKernel(k_precomp);
+    clReleaseKernel(k_forwardNTT);
+    clReleaseKernel(k_square);
+    clReleaseKernel(k_inverseNTT);
+    clReleaseKernel(k_postcomp);
+    clReleaseKernel(k_carry);
+    clReleaseKernel(k_sub2);
+    // Libérer le programme et la file de commandes
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
-    
+
     return 0;
 }
