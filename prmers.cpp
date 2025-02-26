@@ -388,40 +388,44 @@ int main(int argc, char** argv) {
                                   n * sizeof(uint64_t), x.data(), &err);
     
     // Create kernels.
-    cl_kernel k_fusionne_global = clCreateKernel(program, "kernel_fusionne", &err);
-    cl_kernel k_fusionne_radix4 = clCreateKernel(program, "kernel_fusionne_radix4", &err);
-    cl_kernel k_carry = clCreateKernel(program, "kernel_carry", &err);
-    cl_kernel k_sub2  = clCreateKernel(program, "kernel_sub2", &err);
+    cl_kernel k_fusionne = clCreateKernel(program, "kernel_fusionne_radix4", &err);
     
-    // Set arguments for k_carry and k_sub2 (unchanged).
-    clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
-    clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
-    
-    clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
-    clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
-    
-    // Choose the fused kernel based on n.
-    cl_kernel k_fusionne;
-    if(n < 4) {
-        // Use the original kernel (radix-2/global version) for very small transforms.
-        k_fusionne = k_fusionne_global;
-        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
-        clSetKernelArg(k_fusionne, 3, sizeof(uint64_t), &n);
-    } else {
+
         // Use the radix-4 fused kernel.
-        k_fusionne = k_fusionne_radix4;
-        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
-        clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
-        clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
-        clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
+     
+    clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
+    clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
+    clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
+    clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
+    clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
+    clSetKernelArg(k_fusionne, 6, sizeof(cl_mem), &buf_digit_width);
+    // 1️⃣ Récupérer la taille max du workgroup
+    size_t maxWorkGroupSize;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, nullptr);
+
+    std::cout << "Max Workgroup Size: " << maxWorkGroupSize << std::endl;
+
+    size_t n_4;
+    if(n>=4)
+        n_4 = n / 4;
+    else
+        n_4 = n;
+    size_t WG_SIZE = maxWorkGroupSize;
+
+    while (n_4 % WG_SIZE != 0) {
+        WG_SIZE--;
+        if (WG_SIZE == 0) {
+            std::cerr << "Error: No valid WG_SIZE found!" << std::endl;
+            exit(1);
+        }
     }
-    
+    if (WG_SIZE > 256)
+        WG_SIZE = 256;
+    std::cout << "Final Workgroup Size (WG_SIZE): " << WG_SIZE << std::endl;
+
+    clSetKernelArg(k_fusionne, 7, sizeof(size_t), &WG_SIZE);
+
     std::cout << "\nLaunching OpenCL kernel (p = " << p 
               << "); computation may take a while depending on the exponent." << std::endl;
     
@@ -444,6 +448,7 @@ int main(int argc, char** argv) {
             }
         }
     }
+    
     std::cout << "Final workers count: " << workers << std::endl;
     size_t localSize = workers;
     
@@ -457,12 +462,6 @@ int main(int argc, char** argv) {
     for (uint32_t iter = 0; iter < total_iters; iter++) {
         // Execute the chosen kernel fusionne (either global or radix4)
         executeKernelAndDisplay(queue, k_fusionne, buf_x, x, workers, localSize, "kernel_fusionne", nmax);
-        checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
-        
-        // Process carry and subtraction as before.
-        executeKernelAndDisplay(queue, k_carry, buf_x, x, 1, 1, "kernel_carry", nmax);
-        checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
-        executeKernelAndDisplay(queue, k_sub2, buf_x, x, 1, 1, "kernel_sub2", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
     }
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
@@ -492,10 +491,7 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
-    clReleaseKernel(k_fusionne_global);
-    clReleaseKernel(k_fusionne_radix4);
-    clReleaseKernel(k_carry);
-    clReleaseKernel(k_sub2);
+    clReleaseKernel(k_fusionne);
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
