@@ -404,112 +404,127 @@ __kernel void kernel_fusionne(__global ulong* x,
 }
 
 
-#define WG_SIZE 256  // Maximum allocation size for local memory; actual group size = n/4
+#define WG_SIZE 256  
+
 __kernel void kernel_fusionne_radix4(__global ulong* x,
                                       __global ulong* digit_weight,
                                       __global ulong* digit_invweight,
-                                      __global ulong* w,    // Facteurs de twiddle pour la NTT directe
-                                      __global ulong* wi,   // Facteurs de twiddle pour la NTT inverse
+                                      __global ulong* w,
+                                      __global ulong* wi,
                                       const ulong n)
 {
-    // n_4 est le nombre de papillons.
     const ulong n_4 = n / 4;
-    // Chaque work–item, identifié par k, traite un papillon.
     const ulong k = get_global_id(0);
+    const ulong lid = get_local_id(0);
+    const ulong group_id = get_group_id(0);
     
-    // --- Pré–multiplication ---
-    // Chaque work–item traite les indices avec un pas de n_4.
-    for (ulong i = k; i < n; i += n_4) {
-        x[i] = modMul(x[i], digit_weight[i]);
+    // Mémoire locale pour stocker les valeurs temporairement
+    __local ulong local_x[WG_SIZE];
+
+    // Chaque workgroup traite une portion de x.
+    const ulong chunk_size = n / get_num_groups(0);
+    const ulong start = group_id * chunk_size;
+    const ulong end = start + chunk_size;
+
+    // Chargement initial des données en mémoire locale
+    for (ulong i = start + lid; i < end; i += WG_SIZE) {
+        local_x[lid] = x[i];
     }
     barrier(CLK_LOCAL_MEM_FENCE);
-    
+
+    // --- Pré–multiplication ---
+    for (ulong i = start + lid; i < end; i += WG_SIZE) {
+        local_x[lid] = modMul(local_x[lid], digit_weight[i]);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
     // --- NTT Direct (Radix-4) ---
     for (ulong m = n_4; m >= 1; m /= 4) {
         __global const ulong* wm = w + (3 * 2 * m);
         const ulong j = k & (m - 1);
         const ulong i = 4 * (k - j) + j;
-        
-        // Utilisation d'un tableau privé pour stocker les 4 coefficients du papillon.
+
         ulong coeff[4];
-        coeff[0] = x[i + 0 * m];
-        coeff[1] = x[i + 1 * m];
-        coeff[2] = x[i + 2 * m];
-        coeff[3] = x[i + 3 * m];
-        
-        // Récupérer les twiddles pour ce papillon.
+        coeff[0] = local_x[i + 0 * m];
+        coeff[1] = local_x[i + 1 * m];
+        coeff[2] = local_x[i + 2 * m];
+        coeff[3] = local_x[i + 3 * m];
+
         const ulong w2  = wm[3 * j + 0];
         const ulong w1  = wm[3 * j + 1];
         const ulong w12 = wm[3 * j + 2];
-        
-        // Calcul du papillon radix-4.
+
         ulong v0 = modAdd_correct(coeff[0], coeff[2]);
         ulong v1 = modAdd_correct(coeff[1], coeff[3]);
         ulong v2 = modSub_correct(coeff[0], coeff[2]);
         ulong v3 = modMuli(modSub_correct(coeff[1], coeff[3]));
-        
+
         coeff[0] = modAdd_correct(v0, v1);
         coeff[1] = modMul(modSub_correct(v0, v1), w1);
         coeff[2] = modMul(modAdd_correct(v2, v3), w2);
         coeff[3] = modMul(modSub_correct(v2, v3), w12);
-        
-        // Écriture des résultats dans la mémoire globale.
-        x[i + 0 * m] = coeff[0];
-        x[i + 1 * m] = coeff[1];
-        x[i + 2 * m] = coeff[2];
-        x[i + 3 * m] = coeff[3];
-        
+
+        local_x[i + 0 * m] = coeff[0];
+        local_x[i + 1 * m] = coeff[1];
+        local_x[i + 2 * m] = coeff[2];
+        local_x[i + 3 * m] = coeff[3];
+
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    
-    // --- Carré point–à–point ---
-    for (ulong i = k; i < n; i += n_4) {
-        x[i] = modMul(x[i], x[i]);
+
+    // --- Carré point-à-point ---
+    for (ulong i = start + lid; i < end; i += WG_SIZE) {
+        local_x[lid] = modMul(local_x[lid], local_x[lid]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
-    
+
     // --- NTT Inverse (Radix-4) ---
     for (ulong m = 1; m <= n_4; m *= 4) {
         __global const ulong* invwm = wi + (3 * 2 * m);
         const ulong j = k & (m - 1);
         const ulong i = 4 * (k - j) + j;
-        
+
         ulong coeff[4];
-        coeff[0] = x[i + 0 * m];
-        coeff[1] = x[i + 1 * m];
-        coeff[2] = x[i + 2 * m];
-        coeff[3] = x[i + 3 * m];
-        
+        coeff[0] = local_x[i + 0 * m];
+        coeff[1] = local_x[i + 1 * m];
+        coeff[2] = local_x[i + 2 * m];
+        coeff[3] = local_x[i + 3 * m];
+
         const ulong iw2  = invwm[3 * j + 0];
         const ulong iw1  = invwm[3 * j + 1];
         const ulong iw12 = invwm[3 * j + 2];
-        
+
         ulong u0 = coeff[0];
         ulong u1 = modMul(coeff[1], iw1);
         ulong u2 = modMul(coeff[2], iw2);
         ulong u3 = modMul(coeff[3], iw12);
-        
+
         ulong v0 = modAdd_correct(u0, u1);
         ulong v1 = modSub_correct(u0, u1);
         ulong v2 = modAdd_correct(u2, u3);
         ulong v3 = modMuli(modSub_correct(u3, u2));
-        
+
         coeff[0] = modAdd_correct(v0, v2);
         coeff[1] = modAdd_correct(v1, v3);
         coeff[2] = modSub_correct(v0, v2);
         coeff[3] = modSub_correct(v1, v3);
-        
-        x[i + 0 * m] = coeff[0];
-        x[i + 1 * m] = coeff[1];
-        x[i + 2 * m] = coeff[2];
-        x[i + 3 * m] = coeff[3];
-        
+
+        local_x[i + 0 * m] = coeff[0];
+        local_x[i + 1 * m] = coeff[1];
+        local_x[i + 2 * m] = coeff[2];
+        local_x[i + 3 * m] = coeff[3];
+
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    
+
     // --- Post–multiplication ---
-    for (ulong i = k; i < n; i += n_4) {
-        x[i] = modMul(x[i], digit_invweight[i]);
+    for (ulong i = start + lid; i < end; i += WG_SIZE) {
+        local_x[lid] = modMul(local_x[lid], digit_invweight[i]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Réécriture en mémoire globale après traitement
+    for (ulong i = start + lid; i < end; i += WG_SIZE) {
+        x[i] = local_x[lid];
+    }
 }
