@@ -41,6 +41,10 @@
 #define COLOR_YELLOW "\033[33m"
 #define COLOR_RED "\033[31m"
 #define COLOR_RESET "\033[0m"
+
+
+using namespace std::chrono;
+
 // 1) Helpers for 64-bit arithmetic modulo p
 // p = 2^64 - 2^32 + 1
 static constexpr uint64_t MOD_P = (((1ULL << 32) - 1ULL) << 32) + 1ULL;
@@ -203,9 +207,8 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
 }
 
 
+// Display progress function
 void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
-    elapsedTime /= 1e9;
-
     double progress = (100.0 * iter) / total_iters;
     double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
     double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
@@ -226,6 +229,23 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
               << COLOR_RESET  
               << std::flush;
 }
+
+// Function that checks progress and updates display every 2 seconds
+void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters, 
+                             time_point<high_resolution_clock>& lastDisplay, 
+                             const time_point<high_resolution_clock>& start, 
+                             cl_command_queue queue) {
+    auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
+
+    if (duration >= 2) {  
+        double elapsedTime = duration_cast<nanoseconds>(high_resolution_clock::now() - start).count() / 1e9;
+        displayProgress(iter, total_iters, elapsedTime);
+        lastDisplay = high_resolution_clock::now();
+    }
+    clFinish(queue);
+}
+
+
 
 
 int main(int argc, char** argv) {
@@ -436,31 +456,38 @@ int main(int argc, char** argv) {
     size_t globalSize = n;
     size_t nmax = std::min(n, (size_t)16);
     uint32_t total_iters = p - 2;
-    using clock = std::chrono::system_clock;
-    using sec = std::chrono::duration<double>;
 
-    auto start = clock::now();
-    sec duration = clock::now() - start;
+
+    auto start = high_resolution_clock::now();
     auto lastDisplay = start;
+
     size_t one = 1;
     size_t workers = 256;
+    
     for (uint32_t iter = 0; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, x, workers, "k_precomp", nmax);
-        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, one, "k_forwardNTT", nmax);
-        executeKernelAndDisplay(queue, k_square, buf_x, x, workers, "k_square", nmax);   
-        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, one, "k_inverseNTT", nmax);
-        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, workers , "k_postcomp", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
+        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, workers, "k_forwardNTT", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
+
+        executeKernelAndDisplay(queue, k_square, buf_x, x, workers, "k_square", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
+
+        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, workers, "k_inverseNTT", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
+        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, workers, "k_postcomp", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
         executeKernelAndDisplay(queue, k_carry, buf_x, x, one, "k_carry", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
         executeKernelAndDisplay(queue, k_sub2, buf_x, x, one, "k_sub2", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
-
-        duration = clock::now() - lastDisplay;
-        if (duration.count() >= 2) {  // 5000ms = 5s
-            auto elapsedTime =  clock::now() - start;
-            displayProgress(iter, total_iters, elapsedTime.count());
-            lastDisplay = clock::now();  // Reset timer
-        }
-        clFinish(queue);
 
     }
     std::cout << "End loop ";
