@@ -131,84 +131,41 @@ inline ulong modSub_correct(ulong a, ulong b) {
     }
 }
 
+
 __kernel void kernel_precomp(__global ulong* x,
                              __global ulong* digit_weight,
                              const ulong n)
 {
-    size_t local_id  = get_local_id(0);
-    size_t group_size = get_local_size(0);
-    size_t group_id  = get_group_id(0);
-    size_t num_groups = get_num_groups(0);
-    
-    // Déclaration de la mémoire locale pour charger un bloc de digit_weight
-    __local ulong local_weights[256]; // Adaptez la taille si nécessaire
-
-    // Chaque workgroup traite plusieurs blocs espacés de num_groups * group_size
-    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
-        // Chargement du bloc en mémoire locale (si dans les bornes)
-        if (base + local_id < n) {
-            local_weights[local_id] = digit_weight[base + local_id];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        
-        // Traitement du bloc en utilisant la mémoire locale
-        if (base + local_id < n) {
-            x[base + local_id] = modMul(x[base + local_id], local_weights[local_id]);
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
+    size_t i = get_global_id(0);
+    while (i < n) {
+        x[i] = modMul(x[i], digit_weight[i]);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
 
 __kernel void kernel_postcomp(__global ulong* x,
-                              __global ulong* digit_invweight,
-                              const ulong n)
+                             __global ulong* digit_invweight,
+                             const ulong n)
 {
-    size_t local_id  = get_local_id(0);
-    size_t group_size = get_local_size(0);
-    size_t group_id  = get_group_id(0);
-    size_t num_groups = get_num_groups(0);
-    
-    // Déclaration de la mémoire locale pour charger un bloc de digit_invweight
-    __local ulong local_invweights[256]; // Adaptez la taille si nécessaire
-
-    // Itération sur les blocs assignés à ce workgroup
-    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
-        // Chargement du bloc dans la mémoire locale
-        if (base + local_id < n) {
-            local_invweights[local_id] = digit_invweight[base + local_id];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        
-        // Traitement du bloc en utilisant les poids chargés en local
-        if (base + local_id < n) {
-            x[base + local_id] = modMul(x[base + local_id], local_invweights[local_id]);
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
+    size_t i = get_global_id(0);
+    while (i < n) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
+
 
 __kernel void kernel_square(__global ulong* x, const ulong n)
 {
-    size_t local_id  = get_local_id(0);
-    size_t group_size = get_local_size(0);
-    size_t group_id  = get_group_id(0);
-    size_t num_groups = get_num_groups(0);
-    
-    // Itération sur les blocs assignés à ce workgroup
-    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
-        if (base + local_id < n) {
-            ulong val = x[base + local_id];
-            x[base + local_id] = modMul(val, val);
-        }
+    size_t i = get_global_id(0);
+    while (i < n) {
+        ulong val = x[i];
+        x[i] = modMul(val, val);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
 
 
-
-/**
- * kernel_sub2
- * Soustrait 2 à x en base mixte. 
- */
 __kernel void kernel_sub2(__global ulong* x,
                           __global int* digit_width,
                           const ulong n)
@@ -233,8 +190,6 @@ __kernel void kernel_sub2(__global ulong* x,
     }
 }
 
-
-// Forward Number Theoretic Transform (NTT)
 __kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
     __local ulong d;
 
@@ -270,8 +225,6 @@ __kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
-
-
 
 __kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
 {
@@ -318,27 +271,18 @@ __kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
     }
 }
 
-/**
- * kernel_carry
- * Propagation de retenues dans x, selon digit_width[i].
- * 
- * Ici, on peut le faire avec un seul work-item (séquentiel)
- * ou avec un algo parallèle. La version la plus simple
- * (comme dans vos codes) est la version séquentielle.
- */
 __kernel void kernel_carry(__global ulong* x,
                            __global int* digit_width,
                            const ulong n)
 {
-    // On peut se limiter à get_global_id(0)==0
-    // et exécuter la boucle en séquentiel
+    // We can limit execution to get_global_id(0)==0 and run the loop sequentially
     if (get_global_id(0) == 0)
     {
         ulong c = 0UL;
         for (ulong i = 0; i < n; i++){
             x[i] = digit_adc(x[i], digit_width[i], &c);
         }
-        // Tant que c != 0, on refait...
+        // While c != 0, repeat...
         while(c != 0UL) {
             for (ulong i = 0; i < n; i++){
                 x[i] = digit_adc(x[i], digit_width[i], &c);
@@ -354,11 +298,11 @@ __kernel void kernel_fusionne(__global ulong* x,
                                        __global ulong* digit_invweight,
                                        const ulong n)
 {
-    // Chaque work-item traite sa tranche d'indices.
+    // Each work-item processes its range of indices.
     size_t id = get_global_id(0);
     size_t total = get_global_size(0);
 
-    // --- Pré‑multiplication : x[i] = modMul(x[i], digit_weight[i]) ---
+    // --- Pre-multiplication: x[i] = modMul(x[i], digit_weight[i]) ---
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], digit_weight[i]);
     }
@@ -399,7 +343,7 @@ __kernel void kernel_fusionne(__global ulong* x,
     }
 
     barrier(CLK_GLOBAL_MEM_FENCE);
-    // --- Mise au carré point à point ---
+    // --- Pointwise squaring ---
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], x[i]);
     }
@@ -448,12 +392,9 @@ __kernel void kernel_fusionne(__global ulong* x,
         barrier(CLK_GLOBAL_MEM_FENCE); // Synchronize threads before the next stage
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
-    // --- Post‑multiplication : x[i] = modMul(x[i], digit_invweight[i]) ---
+    // --- Post-multiplication: x[i] = modMul(x[i], digit_invweight[i]) ---
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], digit_invweight[i]);
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
 }
-
-
-
