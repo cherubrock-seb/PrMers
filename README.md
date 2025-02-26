@@ -9,11 +9,30 @@ g++ -std=c++11 -o prmers prmers.cpp -lOpenCL
 ## Usage
 Example of execution:
 ```bash
-./prmers 13 -d 0
+ ./prmers 9279 -d 1
+PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
+Testing exponent: 9279
+Using OpenCL device ID: 1
+
+Launching OpenCL kernel (p = 9279); computation may take a while depending on the exponent.
+Max global workers possible: 256
+Final workers count: 256
+Progress: 100.00% | Elapsed: 11.09s | Iterations/sec: 836.78 | ETA: 0.00s       
+M9279 is composite.
+Kernel execution time: 11.09 seconds
+Iterations per second: 836.77 (9277 iterations in total)
 ```
 Or without specifying a device:
 ```bash
-./prmers 21701
+./prmers 216091
+PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
+Testing exponent: 216091
+Using OpenCL device ID: 0
+
+Launching OpenCL kernel (p = 216091); computation may take a while depending on the exponent.
+Max global workers possible: 256
+Final workers count: 256
+Progress: 0.11% | Elapsed: 4.05s | Iterations/sec: 57.50 | ETA: 3754.28s
 ```
 
 ## Output Example
@@ -88,4 +107,3 @@ This project is inspired by:
 Special thanks to **Yves Gallot** for his explanations regarding **NTT and IBDWT**.
 
 **Author:** Cherubrock
-
