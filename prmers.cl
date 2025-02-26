@@ -131,41 +131,77 @@ inline ulong modSub_correct(ulong a, ulong b) {
     }
 }
 
-
 __kernel void kernel_precomp(__global ulong* x,
                              __global ulong* digit_weight,
                              const ulong n)
 {
-    size_t i = get_global_id(0);
-    while (i < n) {
-        x[i] = modMul(x[i], digit_weight[i]);
-        i += get_global_size(0); // Chaque thread traite plusieurs éléments
+    size_t local_id  = get_local_id(0);
+    size_t group_size = get_local_size(0);
+    size_t group_id  = get_group_id(0);
+    size_t num_groups = get_num_groups(0);
+    
+    // Déclaration de la mémoire locale pour charger un bloc de digit_weight
+    __local ulong local_weights[256]; // Adaptez la taille si nécessaire
+
+    // Chaque workgroup traite plusieurs blocs espacés de num_groups * group_size
+    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
+        // Chargement du bloc en mémoire locale (si dans les bornes)
+        if (base + local_id < n) {
+            local_weights[local_id] = digit_weight[base + local_id];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        
+        // Traitement du bloc en utilisant la mémoire locale
+        if (base + local_id < n) {
+            x[base + local_id] = modMul(x[base + local_id], local_weights[local_id]);
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
 
 __kernel void kernel_postcomp(__global ulong* x,
-                             __global ulong* digit_invweight,
-                             const ulong n)
+                              __global ulong* digit_invweight,
+                              const ulong n)
 {
-    size_t i = get_global_id(0);
-    while (i < n) {
-        x[i] = modMul(x[i], digit_invweight[i]);
-        i += get_global_size(0); // Chaque thread traite plusieurs éléments
+    size_t local_id  = get_local_id(0);
+    size_t group_size = get_local_size(0);
+    size_t group_id  = get_group_id(0);
+    size_t num_groups = get_num_groups(0);
+    
+    // Déclaration de la mémoire locale pour charger un bloc de digit_invweight
+    __local ulong local_invweights[256]; // Adaptez la taille si nécessaire
+
+    // Itération sur les blocs assignés à ce workgroup
+    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
+        // Chargement du bloc dans la mémoire locale
+        if (base + local_id < n) {
+            local_invweights[local_id] = digit_invweight[base + local_id];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        
+        // Traitement du bloc en utilisant les poids chargés en local
+        if (base + local_id < n) {
+            x[base + local_id] = modMul(x[base + local_id], local_invweights[local_id]);
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 }
-
 
 __kernel void kernel_square(__global ulong* x, const ulong n)
 {
-    size_t i = get_global_id(0);
-    while (i < n) {
-        ulong val = x[i];
-        x[i] = modMul(val, val);
-        i += get_global_size(0); // Chaque thread traite plusieurs éléments
+    size_t local_id  = get_local_id(0);
+    size_t group_size = get_local_size(0);
+    size_t group_id  = get_group_id(0);
+    size_t num_groups = get_num_groups(0);
+    
+    // Itération sur les blocs assignés à ce workgroup
+    for (size_t base = group_id * group_size; base < n; base += num_groups * group_size) {
+        if (base + local_id < n) {
+            ulong val = x[base + local_id];
+            x[base + local_id] = modMul(val, val);
+        }
     }
 }
-
-
 
 
 
@@ -312,3 +348,112 @@ __kernel void kernel_carry(__global ulong* x,
     }
     
 }
+
+__kernel void kernel_fusionne(__global ulong* x,
+                                       __global ulong* digit_weight,
+                                       __global ulong* digit_invweight,
+                                       const ulong n)
+{
+    // Chaque work-item traite sa tranche d'indices.
+    size_t id = get_global_id(0);
+    size_t total = get_global_size(0);
+
+    // --- Pré‑multiplication : x[i] = modMul(x[i], digit_weight[i]) ---
+    for (ulong i = id; i < n; i += total) {
+        x[i] = modMul(x[i], digit_weight[i]);
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    __local ulong d;
+
+    ulong bigBase   = 7UL;
+    ulong exponent  = (MOD_P - 1UL) / n;
+    ulong root      = modExp(bigBase, exponent);
+
+    for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) {
+        if (get_local_id(0) == 0) {
+            d = modExp(root, s);
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE);
+
+        for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
+            if ((i % (2UL * m)) < m) {
+                ulong i1 = i;
+                ulong i2 = i + m;
+                if (i2 < n) {
+                    ulong u = x[i1];
+                    ulong v = x[i2];
+
+                    ulong inBlockIndex = i % m;
+                    ulong d_j = modExp(d, inBlockIndex); 
+
+                    ulong sum  = modAdd_correct(u, v);
+                    ulong diff = modSub_correct(u, v);
+
+                    x[i1] = sum;
+                    x[i2] = modMul(diff, d_j);
+                }
+            }
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE);
+    }
+
+    barrier(CLK_GLOBAL_MEM_FENCE);
+    // --- Mise au carré point à point ---
+    for (ulong i = id; i < n; i += total) {
+        x[i] = modMul(x[i], x[i]);
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    // --- Inverse NTT ---
+    // Shared variable for the twiddle factor (one per work-group)
+    __local ulong twiddle_factor;
+
+    // Compute the base root of unity: root = 7^((MOD_P-1)/n) mod p
+    root = modExp(7UL, (MOD_P - 1UL) / n);
+
+    // Compute its modular inverse: root_inv = root^(p-2) mod p
+    ulong root_inv = modExp(root, MOD_P - 2UL);
+
+    // Iteratively perform the inverse NTT
+    for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1)
+    {
+        // The first thread in each work-group computes twiddle_factor = root_inv^s
+        if (get_local_id(0) == 0) {
+            twiddle_factor = modExp(root_inv, s);
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE); // Synchronize all threads before using twiddle_factor
+
+        // Perform the butterfly operation in parallel
+        for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
+        {
+            if ((i % (2UL * m)) < m) // Ensures each butterfly pair is processed correctly
+            {
+                ulong i1 = i;
+                ulong i2 = i + m;
+                if (i2 < n) {
+                    ulong u = x[i1];
+                    ulong v = x[i2];
+
+                    // Compute the twiddle factor for this index
+                    ulong twiddle = modExp(twiddle_factor, i % m);
+
+                    // Apply butterfly transformation
+                    v = modMul(v, twiddle);
+                    x[i1] = modAdd_correct(u, v);
+                    x[i2] = modSub_correct(u, v);
+                }
+            }
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE); // Synchronize threads before the next stage
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+    // --- Post‑multiplication : x[i] = modMul(x[i], digit_invweight[i]) ---
+    for (ulong i = id; i < n; i += total) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+}
+
+
+
