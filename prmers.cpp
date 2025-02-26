@@ -188,11 +188,11 @@ void printUsage(const char* progName) {
 }
 
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
-                             cl_mem buf_x, std::vector<uint64_t>& x, size_t workers, 
+                             cl_mem buf_x, std::vector<uint64_t>& x, size_t workers,  size_t localSize,
                              const std::string& kernelName, size_t nmax) 
 {
 
-    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, nullptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, &localSize, 0, nullptr, nullptr);
 
     if (debug) {
         
@@ -490,29 +490,52 @@ int main(int argc, char** argv) {
 
 
     std::cout << "Final workers count: " << workers << std::endl;
+    size_t maxLocalSize;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxLocalSize, nullptr);
+    std::cout << "Max local work size: " << maxLocalSize << std::endl;
+
+    size_t localSize;
+
+    // Choose the best local size
+    if (n <= maxLocalSize) {
+        localSize = n;  // Use full `n` if it's small
+    } else {
+        if (n % maxLocalSize == 0) {
+            localSize = maxLocalSize;  // Perfect multiple
+        } else {
+            // Find largest divisor of `n` that fits in `maxLocalSize`
+            for (localSize = maxLocalSize; localSize > 0; localSize--) {
+                if (n % localSize == 0) {
+                    break;  // Found the best fit
+                }
+            }
+        }
+    }
+
+    std::cout << "Final local workers: " << localSize << std::endl;
     
     for (uint32_t iter = 0; iter < total_iters; iter++) {
-        executeKernelAndDisplay(queue, k_precomp, buf_x, x, workers, "k_precomp", nmax);
+        executeKernelAndDisplay(queue, k_precomp, buf_x, x, workers, one, "k_precomp", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
-        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, workers, "k_forwardNTT", nmax);
-        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
-
-
-        executeKernelAndDisplay(queue, k_square, buf_x, x, workers, "k_square", nmax);
+        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, workers, localSize, "k_forwardNTT", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
 
-        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, workers, "k_inverseNTT", nmax);
+        executeKernelAndDisplay(queue, k_square, buf_x, x, workers, one, "k_square", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
-        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, workers, "k_postcomp", nmax);
+
+        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, workers, localSize, "k_inverseNTT", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
-        executeKernelAndDisplay(queue, k_carry, buf_x, x, one, "k_carry", nmax);
+        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, workers, one, "k_postcomp", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
-        executeKernelAndDisplay(queue, k_sub2, buf_x, x, one, "k_sub2", nmax);
+        executeKernelAndDisplay(queue, k_carry, buf_x, x, one, one,  "k_carry", nmax);
+        checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
+
+        executeKernelAndDisplay(queue, k_sub2, buf_x, x, one, one,  "k_sub2", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, start, queue);
 
 

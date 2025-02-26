@@ -312,4 +312,3 @@ __kernel void kernel_carry(__global ulong* x,
     }
     
 }
-
