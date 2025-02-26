@@ -34,13 +34,11 @@
 #include <cmath>
 #include <iomanip>
 
-// ANSI color codes for terminal output
 #define COLOR_GREEN "\033[32m"
 #define COLOR_YELLOW "\033[33m"
 #define COLOR_RED "\033[31m"
 #define COLOR_RESET "\033[0m"
 
-// Using chrono for timing functions
 using namespace std::chrono;
 
 // 1) Helpers for 64-bit arithmetic modulo p
@@ -48,7 +46,6 @@ using namespace std::chrono;
 static constexpr uint64_t MOD_P = (((1ULL << 32) - 1ULL) << 32) + 1ULL;
 bool debug = false;
 
-// Multiply a and b modulo p using 128-bit arithmetic
 uint64_t mulModP(uint64_t a, uint64_t b)
 {
     __uint128_t prod = (__uint128_t)a * b;
@@ -72,7 +69,6 @@ uint64_t mulModP(uint64_t a, uint64_t b)
     return r;
 }
 
-// Fast modular exponentiation: computes (base^exp) mod p
 uint64_t powModP(uint64_t base, uint64_t exp)
 {
     uint64_t result = 1ULL;
@@ -85,14 +81,12 @@ uint64_t powModP(uint64_t base, uint64_t exp)
     return result;
 }
 
-// Compute modular inverse using Fermat's little theorem
 uint64_t invModP(uint64_t x)
 {
     return powModP(x, MOD_P - 2ULL);
 }
 
 // 2) Compute transform size for the given exponent.
-// This function determines the size (n) for the Number Theoretic Transform (NTT)
 static size_t transformsize(uint32_t exponent)
 {
     int log_n = 0, w = 0;
@@ -104,7 +98,6 @@ static size_t transformsize(uint32_t exponent)
 }
 
 // 3) Precompute digit weights, inverse weights, and digit widths for a given p.
-// The precomputation is used for the NTT and subsequent arithmetic operations.
 void precalc_for_p(uint32_t p,
                    std::vector<uint64_t>& digit_weight,
                    std::vector<uint64_t>& digit_invweight,
@@ -150,7 +143,6 @@ void precalc_for_p(uint32_t p,
     }
 }
 
-// Read file content into a string
 std::string readFile(const std::string &filename) {
     std::ifstream file(filename);
     if (!file)
@@ -160,7 +152,6 @@ std::string readFile(const std::string &filename) {
     return oss.str();
 }
 
-// Display usage information for the program
 void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p_min> [-d <device_id>]" << std::endl;
     std::cout << "  <p_min>       : Minimum exponent to test (required)" << std::endl;
@@ -168,8 +159,7 @@ void printUsage(const char* progName) {
     std::cout << "  -h            : Display this help message" << std::endl;
 }
 
-// If localSize is 0, pass NULL for the local size pointer.
-// This function executes a given OpenCL kernel and displays partial results if debugging is enabled.
+// Si localSize vaut 0, on passe NULL pour la taille locale.
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
                              cl_mem buf_x, std::vector<uint64_t>& x, size_t workers,  size_t localSize,
                              const std::string& kernelName, size_t nmax) 
@@ -185,7 +175,6 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     }
 }
 
-// Display progress information with color coding based on progress percentage.
 void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
     double progress = (100.0 * iter) / total_iters;
     double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
@@ -206,7 +195,6 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
               << std::flush;
 }
 
-// Check and display progress periodically (at least once per second) and synchronize with the OpenCL queue.
 void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters, 
                              time_point<high_resolution_clock>& lastDisplay, 
                              const time_point<high_resolution_clock>& start, 
@@ -224,7 +212,6 @@ void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters,
 }
 
 int main(int argc, char** argv) {
-    // Check for minimum required arguments
     if(argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
@@ -232,7 +219,6 @@ int main(int argc, char** argv) {
     }
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
-    // Parse command line arguments
     for(int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -284,7 +270,6 @@ int main(int argc, char** argv) {
     }
     cl_device_id device = devices[device_id];
     
-    // Create an OpenCL context and command queue
     cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &err);
     if(err != CL_SUCCESS) {
         std::cerr << "Failed to create OpenCL context." << std::endl;
@@ -296,7 +281,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Load the OpenCL kernel source code from file "prmers.cl"
     std::string kernelSource;
     try {
         kernelSource = readFile("prmers.cl");
@@ -309,7 +293,6 @@ int main(int argc, char** argv) {
     const char* src = kernelSource.c_str();
     size_t srclen = kernelSource.size();
     
-    // Create and build the OpenCL program
     cl_program program = clCreateProgramWithSource(context, 1, &src, &srclen, &err);
     if(err != CL_SUCCESS) {
         std::cerr << "Failed to create OpenCL program." << std::endl;
@@ -332,7 +315,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Precompute necessary parameters for the transform
     std::vector<uint64_t> digit_weight_cpu, digit_invweight_cpu;
     std::vector<int> digit_width_cpu;
     precalc_for_p(p, digit_weight_cpu, digit_invweight_cpu, digit_width_cpu);
@@ -341,7 +323,6 @@ int main(int argc, char** argv) {
         std::cout << "Size n for transform is n=" << n << std::endl;
     }
     
-    // Create buffer for results (not used in computation in this version)
     cl_uint candidate_count = 1;
     std::vector<cl_uint> results(candidate_count, 0);
     cl_mem buffer_results = clCreateBuffer(context, CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR,
@@ -354,7 +335,6 @@ int main(int argc, char** argv) {
         return 1;
     }
     
-    // Create OpenCL buffers for precomputed arrays
     cl_mem buf_digit_weight = clCreateBuffer(context,
                             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                             digit_weight_cpu.size() * sizeof(uint64_t),
@@ -369,19 +349,18 @@ int main(int argc, char** argv) {
                             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                             digit_width_cpu.size() * sizeof(int),
                             digit_width_cpu.data(), &err);
-    // Initialize the number x array used in the transform; starting with x[0] = 4
     std::vector<uint64_t> x(n, 0ULL);
     x[0] = 4ULL;
     cl_mem buf_x = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
                                   n*sizeof(uint64_t), x.data(), &err);
     
-    // Create OpenCL kernels from the program
-    // Using kernel_fusionne_global (version without local memory)
+    // Création des kernels
+    // Utilisation de kernel_fusionne_global (version sans mémoire locale)
     cl_kernel k_fusionne_global = clCreateKernel(program, "kernel_fusionne", &err);
     cl_kernel k_carry = clCreateKernel(program, "kernel_carry", &err);
     cl_kernel k_sub2  = clCreateKernel(program, "kernel_sub2", &err);
     
-    // Set arguments for k_carry and k_sub2 (unchanged)
+    // Fixation des arguments pour k_carry et k_sub2 (inchangés)
     clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
@@ -390,7 +369,7 @@ int main(int argc, char** argv) {
     clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
     
-    // Set arguments for k_fusionne_global (only 4 arguments)
+    // Fixation des arguments pour k_fusionne_global (seulement 4 arguments)
     clSetKernelArg(k_fusionne_global, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_fusionne_global, 1, sizeof(cl_mem), &buf_digit_weight);
     clSetKernelArg(k_fusionne_global, 2, sizeof(cl_mem), &buf_digit_invweight);
@@ -399,30 +378,33 @@ int main(int argc, char** argv) {
     std::cout << "\nLaunching OpenCL kernel (p = " << p 
               << "); computation may take a while depending on the exponent." << std::endl;
     
-    // Determine the maximum number of work-items that can be launched
     size_t one = 1;
     size_t maxWork;
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWork, nullptr);
 
     std::cout << "Max global workers possible: " << maxWork << std::endl;
 
-    // Choose the optimal number of global workers based on n and maxWork
+    // Case 1: If `n` is smaller than `maxWork`, use `maxWork`
     size_t workers;
     if (n <= maxWork) {
         workers = maxWork;
     } 
+    // Case 2: If `n` is greater than `maxWork`
     else {
+        // If `n` is exactly divisible by `maxWork`, use `maxWork`
         if (n % maxWork == 0) {
             workers = maxWork;
         } 
+        // Otherwise, find the largest possible `workers` value such that `n` is divisible by `workers`
         else {
             for (workers = maxWork; workers > 0; workers--) {
                 if (n % workers == 0) {
-                    break; // Stop when a valid multiple is found
+                    break; // Stop when we find a valid multiple
                 }
             }
         }
     }
+
 
     std::cout << "Final workers count: " << workers << std::endl;
     size_t localSize = workers;
@@ -435,14 +417,13 @@ int main(int argc, char** argv) {
 
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
         
-    // Main iteration loop for the Lucas-Lehmer test
     for (uint32_t iter = 0; iter < total_iters; iter++) {
-        // Call the fused kernel for:
-        // Precomputation, Forward NTT, Squaring, Inverse NTT, and Postcomputation
+        // Appel du kernel fusionné global pour :
+        // Précomp, Forward NTT, Square, Inverse NTT, Postcomp
         executeKernelAndDisplay(queue, k_fusionne_global, buf_x, x, workers, localSize, "kernel_fusionne", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
         
-        // Process carry propagation and subtraction
+        // Traitement des retenues et soustraction
         executeKernelAndDisplay(queue, k_carry, buf_x, x, 1, 1, "kernel_carry", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
         executeKernelAndDisplay(queue, k_sub2, buf_x, x, 1, 1, "kernel_sub2", nmax);
@@ -453,7 +434,6 @@ int main(int argc, char** argv) {
     clFinish(queue);
     auto endTime = high_resolution_clock::now();
     
-    // Read back the result from the device and check if all digits are 0 (indicating a prime)
     clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
     bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
     
@@ -467,7 +447,7 @@ int main(int argc, char** argv) {
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
     
-    // Release OpenCL resources
+    // Libération des ressources OpenCL
     clReleaseMemObject(buf_x);
     clReleaseMemObject(buffer_results);
     clReleaseMemObject(buf_digit_weight);
