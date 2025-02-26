@@ -9,7 +9,7 @@ g++ -std=c++11 -o prmers prmers.cpp -lOpenCL
 ## Usage
 Example of execution:
 ```bash
- ./prmers 9279 -d 1
+./prmers 9279 -d 1
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 9279
 Using OpenCL device ID: 1
