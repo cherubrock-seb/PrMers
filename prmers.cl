@@ -21,24 +21,46 @@
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
-constant ulong MOD_P = (((1UL << 32) - 1UL) << 32) + 1UL;  // p = 2^64 - 2^32 + 1
+//constant ulong MOD_P = (((1UL << 32) - 1UL) << 32) + 1UL;  // p = 2^64 - 2^32 + 1
+
+//constant uint32_t MOD_P_COMP = 0xffffffffu;  // 2^64 - p = 2^32 - 1
+
+
+#define MOD_P 0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
+#define MOD_P_COMP 0xffffffffU          // 2^64 - p = 2^32 - 1
+
+inline long GetLong(const ulong lhs) { return (lhs > MOD_P  / 2) ? (long)(lhs + MOD_P_COMP ) : (long)lhs; }
+
+inline ulong ToZp(const long i) { return (i >= 0) ? (ulong)i : MOD_P  + i; }
+
+inline ulong Add(const ulong lhs, const ulong rhs)
+{
+	const uint c = (lhs >= MOD_P  - rhs) ? MOD_P_COMP  : 0;
+	return lhs + rhs + c;
+}
+
+inline ulong Sub(const ulong lhs, const ulong rhs)
+{
+	const uint c = (lhs < rhs) ? MOD_P_COMP  : 0;
+	return lhs - rhs - c;
+}
+
+inline ulong Reduce(const ulong lo, const ulong hi)
+{
+	// hih * 2^96 + hil * 2^64 + lo = lo + hil * 2^32 - (hih + hil)
+	const uint c = (lo >= MOD_P ) ? MOD_P_COMP  : 0;
+	ulong r = lo + c;
+	r = Add(r, hi << 32);				// lhs * rhs < p^2 => hi * 2^32 < p^2 / 2^32 < p.
+	r = Sub(r, (hi >> 32) + (uint)hi);
+	return r;
+}
+
+
 
 // Compute the 128-bit product of a and b as high:low.
 inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
-    uint a0 = (uint)(a & 0xFFFFFFFFUL);
-    uint a1 = (uint)(a >> 32);
-    uint b0 = (uint)(b & 0xFFFFFFFFUL);
-    uint b1 = (uint)(b >> 32);
-    ulong p0 = (ulong)a0 * (ulong)b0;
-    ulong p1 = (ulong)a0 * (ulong)b1;
-    ulong p2 = (ulong)a1 * (ulong)b0;
-    ulong p3 = (ulong)a1 * (ulong)b1;
-    ulong mid = p1 + p2;
-    ulong carry = (mid < p1) ? (1UL << 32) : 0UL;
-    *hi = p3 + (mid >> 32) + carry;
-    *lo = (mid << 32) + p0;
-    if(*lo < p0)
-        (*hi)++;
+    *lo = a * b;
+    *hi = mul_hi(a, b);
 }
 
 // Modular addition modulo MOD_P.
@@ -47,42 +69,24 @@ inline ulong modAdd(ulong a, ulong b) {
     return (s >= MOD_P) ? s - MOD_P : s;
 }
 
+
 // Modular subtraction modulo MOD_P.
 inline ulong modSub(ulong a, ulong b) {
     return (a >= b) ? a - b : a + MOD_P - b;
 }
 
-// Modular multiplication using the 128-bit multiplication.
-inline ulong modMul(ulong a, ulong b) {
-    ulong hi, lo;
-    mul128(a, b, &hi, &lo);
-    
-    // Decompose hi into high and low 32-bit parts.
-    uint A = (uint)(hi >> 32);
-    uint B = (uint)(hi & 0xffffffffUL);
 
-    // Step 1: r = lo + (B << 32)
-    ulong r = lo;
-    ulong old_r = r;
-    r += ((ulong)B << 32);
+inline ulong modMul(const ulong lhs, const ulong rhs)
+{
+	const ulong lo = lhs * rhs, hi = mul_hi(lhs, rhs);
+	return Reduce(lo, hi);
+}
 
-    // Correct for overflow.
-    if(r < old_r) {
-        r += ((1UL << 32) - 1UL);
-    }
 
-    // Step 2: Subtract (A + B) modulo MOD_P.
-    ulong sub_val = (ulong)A + (ulong)B;
-    if(r >= sub_val)
-        r -= sub_val;
-    else
-        r = r + MOD_P - sub_val;
 
-    // Step 3: Final reduction.
-    if(r >= MOD_P)
-        r -= MOD_P;
-
-    return r;
+// modMuli multiplies by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p.
+inline ulong modMuli(ulong x) {
+    return modMul(x, (1UL << 48));
 }
 
 // Modular exponentiation: computes base^exp modulo MOD_P.
@@ -397,4 +401,115 @@ __kernel void kernel_fusionne(__global ulong* x,
         x[i] = modMul(x[i], digit_invweight[i]);
     }
     barrier(CLK_GLOBAL_MEM_FENCE);
+}
+
+
+#define WG_SIZE 256  // Maximum allocation size for local memory; actual group size = n/4
+__kernel void kernel_fusionne_radix4(__global ulong* x,
+                                      __global ulong* digit_weight,
+                                      __global ulong* digit_invweight,
+                                      __global ulong* w,    // Facteurs de twiddle pour la NTT directe
+                                      __global ulong* wi,   // Facteurs de twiddle pour la NTT inverse
+                                      const ulong n)
+{
+    // n_4 est le nombre de papillons.
+    const ulong n_4 = n / 4;
+    // Chaque work–item, identifié par k, traite un papillon.
+    const ulong k = get_global_id(0);
+    
+    // --- Pré–multiplication ---
+    // Chaque work–item traite les indices avec un pas de n_4.
+    for (ulong i = k; i < n; i += n_4) {
+        x[i] = modMul(x[i], digit_weight[i]);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // --- NTT Direct (Radix-4) ---
+    for (ulong m = n_4; m >= 1; m /= 4) {
+        __global const ulong* wm = w + (3 * 2 * m);
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        
+        // Utilisation d'un tableau privé pour stocker les 4 coefficients du papillon.
+        ulong coeff[4];
+        coeff[0] = x[i + 0 * m];
+        coeff[1] = x[i + 1 * m];
+        coeff[2] = x[i + 2 * m];
+        coeff[3] = x[i + 3 * m];
+        
+        // Récupérer les twiddles pour ce papillon.
+        const ulong w2  = wm[3 * j + 0];
+        const ulong w1  = wm[3 * j + 1];
+        const ulong w12 = wm[3 * j + 2];
+        
+        // Calcul du papillon radix-4.
+        ulong v0 = modAdd_correct(coeff[0], coeff[2]);
+        ulong v1 = modAdd_correct(coeff[1], coeff[3]);
+        ulong v2 = modSub_correct(coeff[0], coeff[2]);
+        ulong v3 = modMuli(modSub_correct(coeff[1], coeff[3]));
+        
+        coeff[0] = modAdd_correct(v0, v1);
+        coeff[1] = modMul(modSub_correct(v0, v1), w1);
+        coeff[2] = modMul(modAdd_correct(v2, v3), w2);
+        coeff[3] = modMul(modSub_correct(v2, v3), w12);
+        
+        // Écriture des résultats dans la mémoire globale.
+        x[i + 0 * m] = coeff[0];
+        x[i + 1 * m] = coeff[1];
+        x[i + 2 * m] = coeff[2];
+        x[i + 3 * m] = coeff[3];
+        
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    // --- Carré point–à–point ---
+    for (ulong i = k; i < n; i += n_4) {
+        x[i] = modMul(x[i], x[i]);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // --- NTT Inverse (Radix-4) ---
+    for (ulong m = 1; m <= n_4; m *= 4) {
+        __global const ulong* invwm = wi + (3 * 2 * m);
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        
+        ulong coeff[4];
+        coeff[0] = x[i + 0 * m];
+        coeff[1] = x[i + 1 * m];
+        coeff[2] = x[i + 2 * m];
+        coeff[3] = x[i + 3 * m];
+        
+        const ulong iw2  = invwm[3 * j + 0];
+        const ulong iw1  = invwm[3 * j + 1];
+        const ulong iw12 = invwm[3 * j + 2];
+        
+        ulong u0 = coeff[0];
+        ulong u1 = modMul(coeff[1], iw1);
+        ulong u2 = modMul(coeff[2], iw2);
+        ulong u3 = modMul(coeff[3], iw12);
+        
+        ulong v0 = modAdd_correct(u0, u1);
+        ulong v1 = modSub_correct(u0, u1);
+        ulong v2 = modAdd_correct(u2, u3);
+        ulong v3 = modMuli(modSub_correct(u3, u2));
+        
+        coeff[0] = modAdd_correct(v0, v2);
+        coeff[1] = modAdd_correct(v1, v3);
+        coeff[2] = modSub_correct(v0, v2);
+        coeff[3] = modSub_correct(v1, v3);
+        
+        x[i + 0 * m] = coeff[0];
+        x[i + 1 * m] = coeff[1];
+        x[i + 2 * m] = coeff[2];
+        x[i + 3 * m] = coeff[3];
+        
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    // --- Post–multiplication ---
+    for (ulong i = k; i < n; i += n_4) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
 }

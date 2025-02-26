@@ -86,7 +86,7 @@ uint64_t invModP(uint64_t x)
     return powModP(x, MOD_P - 2ULL);
 }
 
-// 2) Compute transform size for the given exponent.
+// 2) Compute transform size for the given exponent : force to be a power of 4 (radix 4)
 static size_t transformsize(uint32_t exponent)
 {
     int log_n = 0, w = 0;
@@ -94,8 +94,12 @@ static size_t transformsize(uint32_t exponent)
         ++log_n;
         w = exponent / (1 << log_n);
     } while (((w + 1) * 2 + log_n) >= 63);
+    if (log_n & 1)
+        ++log_n;
     return (size_t)(1ULL << log_n);
 }
+
+
 
 // 3) Precompute digit weights, inverse weights, and digit widths for a given p.
 void precalc_for_p(uint32_t p,
@@ -159,7 +163,7 @@ void printUsage(const char* progName) {
     std::cout << "  -h            : Display this help message" << std::endl;
 }
 
-// Si localSize vaut 0, on passe NULL pour la taille locale.
+// If localSize is 0, pass NULL for the local size.
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
                              cl_mem buf_x, std::vector<uint64_t>& x, size_t workers,  size_t localSize,
                              const std::string& kernelName, size_t nmax) 
@@ -323,18 +327,35 @@ int main(int argc, char** argv) {
         std::cout << "Size n for transform is n=" << n << std::endl;
     }
     
-    cl_uint candidate_count = 1;
-    std::vector<cl_uint> results(candidate_count, 0);
-    cl_mem buffer_results = clCreateBuffer(context, CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR,
-                                           sizeof(cl_uint) * candidate_count, results.data(), &err);
-    if(err != CL_SUCCESS) {
-        std::cerr << "Failed to create results buffer." << std::endl;
-        clReleaseProgram(program);
-        clReleaseCommandQueue(queue);
-        clReleaseContext(context);
-        return 1;
+    // Precompute twiddle factors for radix-4 (forward and inverse).
+    std::vector<uint64_t> twiddles(3 * n, 0ULL), inv_twiddles(3 * n, 0ULL);
+    if(n >= 4) {  // Only needed if n>=4
+        uint64_t exp = (MOD_P - 1) / n;
+        uint64_t root = powModP(7ULL, exp);
+        uint64_t invroot = invModP(root);
+        for (size_t m = n / 2, s = 1; m >= 1; m /= 2, s *= 2) {
+            uint64_t r_s = powModP(root, s);
+            uint64_t invr_s = powModP(invroot, s);
+            uint64_t w_m = 1ULL, invw_m = 1ULL;
+            for (size_t j = 0; j < m; j++) {
+                size_t idx = 3 * (m + j);
+                twiddles[idx + 0] = w_m;
+                uint64_t w_m2 = mulModP(w_m, w_m);
+                twiddles[idx + 1] = w_m2;
+                twiddles[idx + 2] = mulModP(w_m2, w_m);
+                
+                inv_twiddles[idx + 0] = invw_m;
+                uint64_t invw_m2 = mulModP(invw_m, invw_m);
+                inv_twiddles[idx + 1] = invw_m2;
+                inv_twiddles[idx + 2] = mulModP(invw_m2, invw_m);
+                
+                w_m = mulModP(w_m, r_s);
+                invw_m = mulModP(invw_m, invr_s);
+            }
+        }
     }
     
+    // Create OpenCL buffers.
     cl_mem buf_digit_weight = clCreateBuffer(context,
                             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                             digit_weight_cpu.size() * sizeof(uint64_t),
@@ -349,18 +370,30 @@ int main(int argc, char** argv) {
                             CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                             digit_width_cpu.size() * sizeof(int),
                             digit_width_cpu.data(), &err);
+    
+    cl_mem buf_twiddles = clCreateBuffer(context,
+                            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                            twiddles.size() * sizeof(uint64_t),
+                            twiddles.data(), &err);
+    
+    cl_mem buf_inv_twiddles = clCreateBuffer(context,
+                            CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                            inv_twiddles.size() * sizeof(uint64_t),
+                            inv_twiddles.data(), &err);
+    
+    
     std::vector<uint64_t> x(n, 0ULL);
     x[0] = 4ULL;
     cl_mem buf_x = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
-                                  n*sizeof(uint64_t), x.data(), &err);
+                                  n * sizeof(uint64_t), x.data(), &err);
     
-    // Création des kernels
-    // Utilisation de kernel_fusionne_global (version sans mémoire locale)
+    // Create kernels.
     cl_kernel k_fusionne_global = clCreateKernel(program, "kernel_fusionne", &err);
+    cl_kernel k_fusionne_radix4 = clCreateKernel(program, "kernel_fusionne_radix4", &err);
     cl_kernel k_carry = clCreateKernel(program, "kernel_carry", &err);
     cl_kernel k_sub2  = clCreateKernel(program, "kernel_sub2", &err);
     
-    // Fixation des arguments pour k_carry et k_sub2 (inchangés)
+    // Set arguments for k_carry and k_sub2 (unchanged).
     clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
@@ -369,43 +402,48 @@ int main(int argc, char** argv) {
     clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
     
-    // Fixation des arguments pour k_fusionne_global (seulement 4 arguments)
-    clSetKernelArg(k_fusionne_global, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(k_fusionne_global, 1, sizeof(cl_mem), &buf_digit_weight);
-    clSetKernelArg(k_fusionne_global, 2, sizeof(cl_mem), &buf_digit_invweight);
-    clSetKernelArg(k_fusionne_global, 3, sizeof(uint64_t), &n);
+    // Choose the fused kernel based on n.
+    cl_kernel k_fusionne;
+    if(n < 4) {
+        // Use the original kernel (radix-2/global version) for very small transforms.
+        k_fusionne = k_fusionne_global;
+        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
+        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
+        clSetKernelArg(k_fusionne, 3, sizeof(uint64_t), &n);
+    } else {
+        // Use the radix-4 fused kernel.
+        k_fusionne = k_fusionne_radix4;
+        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
+        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
+        clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
+        clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
+        clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
+    }
     
     std::cout << "\nLaunching OpenCL kernel (p = " << p 
               << "); computation may take a while depending on the exponent." << std::endl;
     
-    size_t one = 1;
     size_t maxWork;
     clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWork, nullptr);
-
     std::cout << "Max global workers possible: " << maxWork << std::endl;
-
-    // Case 1: If `n` is smaller than `maxWork`, use `maxWork`
+    
+    // Determine workers count.
     size_t workers;
     if (n <= maxWork) {
         workers = maxWork;
-    } 
-    // Case 2: If `n` is greater than `maxWork`
-    else {
-        // If `n` is exactly divisible by `maxWork`, use `maxWork`
+    } else {
         if (n % maxWork == 0) {
             workers = maxWork;
-        } 
-        // Otherwise, find the largest possible `workers` value such that `n` is divisible by `workers`
-        else {
+        } else {
             for (workers = maxWork; workers > 0; workers--) {
                 if (n % workers == 0) {
-                    break; // Stop when we find a valid multiple
+                    break;
                 }
             }
         }
     }
-
-
     std::cout << "Final workers count: " << workers << std::endl;
     size_t localSize = workers;
     
@@ -414,23 +452,21 @@ int main(int argc, char** argv) {
     
     auto startTime = high_resolution_clock::now();
     auto lastDisplay = startTime;
-
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
-        
+    
     for (uint32_t iter = 0; iter < total_iters; iter++) {
-        // Appel du kernel fusionné global pour :
-        // Précomp, Forward NTT, Square, Inverse NTT, Postcomp
-        executeKernelAndDisplay(queue, k_fusionne_global, buf_x, x, workers, localSize, "kernel_fusionne", nmax);
+        // Execute the chosen kernel fusionne (either global or radix4)
+        executeKernelAndDisplay(queue, k_fusionne, buf_x, x, workers, localSize, "kernel_fusionne", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
         
-        // Traitement des retenues et soustraction
+        // Process carry and subtraction as before.
         executeKernelAndDisplay(queue, k_carry, buf_x, x, 1, 1, "kernel_carry", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
         executeKernelAndDisplay(queue, k_sub2, buf_x, x, 1, 1, "kernel_sub2", nmax);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
     }
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
-
+    
     clFinish(queue);
     auto endTime = high_resolution_clock::now();
     
@@ -447,13 +483,17 @@ int main(int argc, char** argv) {
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
     
-    // Libération des ressources OpenCL
+    // Release OpenCL resources.
     clReleaseMemObject(buf_x);
-    clReleaseMemObject(buffer_results);
+    if(n >= 4) {
+        clReleaseMemObject(buf_twiddles);
+        clReleaseMemObject(buf_inv_twiddles);
+    }
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
     clReleaseKernel(k_fusionne_global);
+    clReleaseKernel(k_fusionne_radix4);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_sub2);
     clReleaseProgram(program);
