@@ -17,7 +17,6 @@
  */
 
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
-#pragma OPENCL EXTENSION cl_khr_int64 : enable
 
 typedef uint  uint32_t;
 typedef ulong uint64_t;
@@ -138,8 +137,9 @@ __kernel void kernel_precomp(__global ulong* x,
                              const ulong n)
 {
     size_t i = get_global_id(0);
-    if (i < n) {
+    while (i < n) {
         x[i] = modMul(x[i], digit_weight[i]);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
 
@@ -148,55 +148,25 @@ __kernel void kernel_postcomp(__global ulong* x,
                              const ulong n)
 {
     size_t i = get_global_id(0);
-    if (i < n) {
+    while (i < n) {
         x[i] = modMul(x[i], digit_invweight[i]);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
+
 
 __kernel void kernel_square(__global ulong* x, const ulong n)
 {
     size_t i = get_global_id(0);
-    if (i < n) {
+    while (i < n) {
         ulong val = x[i];
         x[i] = modMul(val, val);
+        i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
-// Forward Number Theoretic Transform (NTT)
-__kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
-    __local ulong d;
 
-    ulong bigBase   = 7UL;
-    ulong exponent  = (MOD_P - 1UL) / n;
-    ulong root      = modExp(bigBase, exponent);
 
-    for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) {
-        if (get_local_id(0) == 0) {
-            d = modExp(root, s);
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
 
-        for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
-            if ((i % (2UL * m)) < m) {
-                ulong i1 = i;
-                ulong i2 = i + m;
-                if (i2 < n) {
-                    ulong u = x[i1];
-                    ulong v = x[i2];
-
-                    ulong inBlockIndex = i % m;
-                    ulong d_j = modExp(d, inBlockIndex); 
-
-                    ulong sum  = modAdd_correct(u, v);
-                    ulong diff = modSub_correct(u, v);
-
-                    x[i1] = sum;
-                    x[i2] = modMul(diff, d_j);
-                }
-            }
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-}
 
 
 /**
@@ -228,51 +198,68 @@ __kernel void kernel_sub2(__global ulong* x,
 }
 
 
-__kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
-{
-    // Shared variable for the twiddle factor (one per work-group)
-    __local ulong twiddle_factor;
+__kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
+    ulong bigBase  = 7UL;
+    ulong exponent = (MOD_P - 1UL) / n;
+    ulong root     = modExp(bigBase, exponent);
+    if (get_local_id(0) == 0) {
+        for (ulong m = n >> 1, s = 1; m >= 1; m >>= 1, s <<= 1) {
+            ulong d = modExp(root, s);
+            //barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Compute the base root of unity: root = 7^((MOD_P-1)/n) mod p
-    ulong root = modExp(7UL, (MOD_P - 1UL) / n);
+            for (ulong i = 0; i < n; i += 1) {
+                if ((i % (2UL * m)) < m) {
+                    ulong i1 = i;
+                    ulong i2 = i + m;
+                    if (i2 < n) {
+                        ulong u = x[i1];
+                        ulong v = x[i2];
+                        ulong inBlockIndex = i % m;
+                        ulong d_j = modExp(d, inBlockIndex);
 
-    // Compute its modular inverse: root_inv = root^(p-2) mod p
-    ulong root_inv = modExp(root, MOD_P - 2UL);
-
-    // Iteratively perform the inverse NTT
-    for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1)
-    {
-        // The first thread in each work-group computes twiddle_factor = root_inv^s
-        if (get_local_id(0) == 0) {
-            twiddle_factor = modExp(root_inv, s);
-        }
-        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize all threads before using twiddle_factor
-
-        // Perform the butterfly operation in parallel
-        for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
-        {
-            if ((i % (2UL * m)) < m) // Ensures each butterfly pair is processed correctly
-            {
-                ulong i1 = i;
-                ulong i2 = i + m;
-                if (i2 < n) {
-                    ulong u = x[i1];
-                    ulong v = x[i2];
-
-                    // Compute the twiddle factor for this index
-                    ulong twiddle = modExp(twiddle_factor, i % m);
-
-                    // Apply butterfly transformation
-                    v = modMul(v, twiddle);
-                    x[i1] = modAdd_correct(u, v);
-                    x[i2] = modSub_correct(u, v);
+                        x[i1] = modAdd_correct(u, v);
+                        x[i2] = modMul(modSub_correct(u, v), d_j);
+                    }
                 }
             }
+            //barrier(CLK_LOCAL_MEM_FENCE);
         }
-        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize threads before the next stage
     }
+    //barrier(CLK_GLOBAL_MEM_FENCE);
 }
 
+
+__kernel void kernel_inverse_ntt(__global ulong *x, const ulong n) {
+   
+
+    ulong root     = modExp(7UL, (MOD_P - 1UL) / n);
+    ulong root_inv = modExp(root, MOD_P - 2UL);
+    if (get_local_id(0) == 0) {
+        for (ulong m = 1, s = (n >> 1); m <= (n >> 1); m <<= 1, s >>= 1) {
+            ulong d_global = modExp(root_inv, s);
+            //barrier(CLK_LOCAL_MEM_FENCE);
+
+            for (ulong i = 0; i < n; i += 1) {
+                if ((i % (2UL * m)) < m) {
+                    ulong i1 = i;
+                    ulong i2 = i + m;
+                    if (i2 < n) {
+                        ulong u = x[i1];
+                        ulong v = x[i2];
+                        ulong inBlockIndex = i % m;
+                        ulong d_j = modExp(d_global, inBlockIndex);
+
+                        v = modMul(v, d_j);
+                        x[i1] = modAdd_correct(u, v);
+                        x[i2] = modSub_correct(u, v);
+                    }
+                }
+            }
+            //barrier(CLK_LOCAL_MEM_FENCE);
+        }
+    }
+    //barrier(CLK_GLOBAL_MEM_FENCE);
+}
 
 /**
  * kernel_carry

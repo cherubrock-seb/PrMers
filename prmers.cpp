@@ -33,6 +33,14 @@
 #include <cstdint>
 #include <chrono>
 #include <algorithm> 
+#include <cmath>
+#include <iomanip>
+
+
+#define COLOR_GREEN "\033[32m"
+#define COLOR_YELLOW "\033[33m"
+#define COLOR_RED "\033[31m"
+#define COLOR_RESET "\033[0m"
 // 1) Helpers for 64-bit arithmetic modulo p
 // p = 2^64 - 2^32 + 1
 static constexpr uint64_t MOD_P = (((1ULL << 32) - 1ULL) << 32) + 1ULL;
@@ -176,18 +184,16 @@ void printUsage(const char* progName) {
 }
 
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
-                             cl_mem buf_x, std::vector<uint64_t>& x, size_t n, 
+                             cl_mem buf_x, std::vector<uint64_t>& x, size_t workers, 
                              const std::string& kernelName, size_t nmax) 
 {
-    size_t localSize = 256;  // 256 est souvent une taille optimale pour GPU
-    size_t globalSize = (n + localSize - 1) / localSize * localSize;  // Ajuste globalSize à un multiple de localSize
 
-    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &globalSize, &localSize, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, nullptr, 0, nullptr, nullptr);
 
     if (debug) {
         
         clFinish(queue);  // Assure la complétion du kernel
-        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, workers * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
 
         // Affichage limité à nmax éléments
         std::cout << "After " << kernelName << " : x = [ ";
@@ -196,12 +202,31 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     }
 }
 
+
 void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
-    double percent = (100.0 * iter) / total_iters;
-    std::cout << "[Progress] Iteration " << iter << " / " << total_iters 
-              << " (" << percent << "%) - Time elapsed: " 
-              << elapsedTime << " sec" << std::endl;
+    elapsedTime /= 1e9;
+
+    double progress = (100.0 * iter) / total_iters;
+    double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
+    double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
+
+    std::string color;
+    if (progress < 50.0)
+        color = COLOR_RED;
+    else if (progress < 90.0)
+        color = COLOR_YELLOW;
+    else
+        color = COLOR_GREEN;
+
+    std::cout << "\r" << color  
+              << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
+              << "Elapsed: " << elapsedTime << "s | "
+              << "Iterations/sec: " << iters_per_sec << " | "
+              << "ETA: " << (remaining_time > 0 ? remaining_time : 0.0) << "s       "
+              << COLOR_RESET  
+              << std::flush;
 }
+
 
 int main(int argc, char** argv) {
     if(argc < 2) {
@@ -402,48 +427,51 @@ int main(int argc, char** argv) {
     clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
 
 
-    std::cout << "\nLaunching OpenCL kernel (p = " << p << ") without progress display; computation may take a while depending on the exponent." << std::endl;
+
+
+
+    std::cout << "\nLaunching OpenCL kernel (p = " << p 
+              << "); computation may take a while depending on the exponent." << std::endl;
+
     size_t globalSize = n;
-    size_t nmax = std::min(n, (size_t)16);  // Limite d'affichage
-
+    size_t nmax = std::min(n, (size_t)16);
     uint32_t total_iters = p - 2;
-    //if globalSize > 256
-    //    globalSize = 256
+    using clock = std::chrono::system_clock;
+    using sec = std::chrono::duration<double>;
 
-    auto start = std::chrono::high_resolution_clock::now();
-    auto lastDisplay = start; // Pour l'affichage toutes les 5s
-
+    auto start = clock::now();
+    sec duration = clock::now() - start;
+    auto lastDisplay = start;
+    size_t one = 1;
+    size_t workers = 256;
     for (uint32_t iter = 0; iter < total_iters; iter++) {
-        executeKernelAndDisplay(queue, k_precomp, buf_x, x, n, "k_precomp", nmax);
-        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, n, "k_forwardNTT", nmax);
-        executeKernelAndDisplay(queue, k_square, buf_x, x, n, "k_square", nmax);
-        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, n, "k_inverseNTT", nmax);
-        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, n, "k_postcomp", nmax);
-        
-        size_t one = 1;
+        executeKernelAndDisplay(queue, k_precomp, buf_x, x, workers, "k_precomp", nmax);
+        executeKernelAndDisplay(queue, k_forwardNTT, buf_x, x, one, "k_forwardNTT", nmax);
+        executeKernelAndDisplay(queue, k_square, buf_x, x, workers, "k_square", nmax);   
+        executeKernelAndDisplay(queue, k_inverseNTT, buf_x, x, one, "k_inverseNTT", nmax);
+        executeKernelAndDisplay(queue, k_postcomp, buf_x, x, workers , "k_postcomp", nmax);
         executeKernelAndDisplay(queue, k_carry, buf_x, x, one, "k_carry", nmax);
         executeKernelAndDisplay(queue, k_sub2, buf_x, x, one, "k_sub2", nmax);
 
-        // Affichage toutes les 5 secondes
-        auto now = std::chrono::high_resolution_clock::now();
-        double elapsedSinceLastDisplay = std::chrono::duration<double>(now - lastDisplay).count();
-        if (elapsedSinceLastDisplay >= 5.0) {
-            double elapsedTime = std::chrono::duration<double>(now - start).count();
-            displayProgress(iter, total_iters, elapsedTime);
-            lastDisplay = now;  // Reset du timer pour la prochaine mise à jour
-        }
-    }
 
+        duration = clock::now() - lastDisplay;
+        if (duration.count() >= 2) {  // 5000ms = 5s
+            auto elapsedTime =  clock::now() - start;
+            displayProgress(iter, total_iters, elapsedTime.count());
+            lastDisplay = clock::now();  // Reset timer
+        }
+        clFinish(queue);
+
+    }
+    std::cout << "End loop ";
     clFinish(queue);
     auto end = std::chrono::high_resolution_clock::now();
-    
-    // Vérification finale si M_p est premier
+
     clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
     bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
 
-    std::cout << "M" << p << " is " << (isPrime ? "prime !" : "composite.") << std::endl;
+    std::cout << "\nM" << p << " is " << (isPrime ? "prime !" : "composite.") << std::endl;
 
-    // Calcul des performances
     std::chrono::duration<double> elapsed = end - start;
     double elapsedTime = elapsed.count();
     double iters_per_sec = total_iters / elapsedTime;
@@ -451,7 +479,6 @@ int main(int argc, char** argv) {
     std::cout << "Kernel execution time: " << elapsedTime << " seconds" << std::endl;
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
-
 
     // 14. Release OpenCL resources.
     // Libérer les buffers mémoire GPU
