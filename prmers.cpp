@@ -462,7 +462,34 @@ int main(int argc, char** argv) {
     auto lastDisplay = start;
 
     size_t one = 1;
-    size_t workers = 256;
+    size_t maxWork;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWork, nullptr);
+
+    std::cout << "Max global workers possible: " << maxWork << std::endl;
+
+    // Case 1: If `n` is smaller than `maxWork`, use `maxWork`
+    size_t workers;
+    if (n <= maxWork) {
+        workers = maxWork;
+    } 
+    // Case 2: If `n` is greater than `maxWork`
+    else {
+        // If `n` is exactly divisible by `maxWork`, use `maxWork`
+        if (n % maxWork == 0) {
+            workers = maxWork;
+        } 
+        // Otherwise, find the largest possible `workers` value such that `n` is divisible by `workers`
+        else {
+            for (workers = maxWork; workers > 0; workers--) {
+                if (n % workers == 0) {
+                    break; // Stop when we find a valid multiple
+                }
+            }
+        }
+    }
+
+
+    std::cout << "Final workers count: " << workers << std::endl;
     
     for (uint32_t iter = 0; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, x, workers, "k_precomp", nmax);
