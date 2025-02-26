@@ -403,15 +403,15 @@ __kernel void kernel_fusionne(__global ulong* x,
     barrier(CLK_GLOBAL_MEM_FENCE);
 }
 
-
-#define WG_SIZE 256  
-
+#define WG_SIZE_MAX 256
 __kernel void kernel_fusionne_radix4(__global ulong* x,
                                       __global ulong* digit_weight,
                                       __global ulong* digit_invweight,
                                       __global ulong* w,
                                       __global ulong* wi,
-                                      const ulong n)
+                                      const ulong n,
+                                       __global int* digit_width,
+                                       const ulong WG_SIZE)
 {
     const ulong n_4 = n / 4;
     const ulong k = get_global_id(0);
@@ -419,112 +419,153 @@ __kernel void kernel_fusionne_radix4(__global ulong* x,
     const ulong group_id = get_group_id(0);
     
     // Mémoire locale pour stocker les valeurs temporairement
-    __local ulong local_x[WG_SIZE];
+    __local ulong local_x[WG_SIZE_MAX];
 
     // Chaque workgroup traite une portion de x.
     const ulong chunk_size = n / get_num_groups(0);
     const ulong start = group_id * chunk_size;
     const ulong end = start + chunk_size;
 
-    // Chargement initial des données en mémoire locale
+    // ✅ 🔹 Optimisation du chargement mémoire
     for (ulong i = start + lid; i < end; i += WG_SIZE) {
         local_x[lid] = x[i];
+        barrier(CLK_LOCAL_MEM_FENCE);  // Synchronisation pour éviter des lectures incorrectes
     }
-    barrier(CLK_LOCAL_MEM_FENCE);
 
-    // --- Pré–multiplication ---
+    // 🔹 Pré-multiplication
     for (ulong i = start + lid; i < end; i += WG_SIZE) {
         local_x[lid] = modMul(local_x[lid], digit_weight[i]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // --- NTT Direct (Radix-4) ---
+    // 🔹 NTT Direct (Radix-4)
     for (ulong m = n_4; m >= 1; m /= 4) {
         __global const ulong* wm = w + (3 * 2 * m);
-        const ulong j = k & (m - 1);
-        const ulong i = 4 * (k - j) + j;
+        const ulong j = lid & (m - 1);
+        const ulong i = 4 * (lid - j) + j;
 
         ulong coeff[4];
-        coeff[0] = local_x[i + 0 * m];
-        coeff[1] = local_x[i + 1 * m];
-        coeff[2] = local_x[i + 2 * m];
-        coeff[3] = local_x[i + 3 * m];
+        if (i + 3 * m < WG_SIZE) { // Assurer l'accès valide
+            coeff[0] = local_x[i + 0 * m];
+            coeff[1] = local_x[i + 1 * m];
+            coeff[2] = local_x[i + 2 * m];
+            coeff[3] = local_x[i + 3 * m];
 
-        const ulong w2  = wm[3 * j + 0];
-        const ulong w1  = wm[3 * j + 1];
-        const ulong w12 = wm[3 * j + 2];
+            const ulong w2  = wm[3 * j + 0];
+            const ulong w1  = wm[3 * j + 1];
+            const ulong w12 = wm[3 * j + 2];
 
-        ulong v0 = modAdd_correct(coeff[0], coeff[2]);
-        ulong v1 = modAdd_correct(coeff[1], coeff[3]);
-        ulong v2 = modSub_correct(coeff[0], coeff[2]);
-        ulong v3 = modMuli(modSub_correct(coeff[1], coeff[3]));
+            ulong v0 = modAdd_correct(coeff[0], coeff[2]);
+            ulong v1 = modAdd_correct(coeff[1], coeff[3]);
+            ulong v2 = modSub_correct(coeff[0], coeff[2]);
+            ulong v3 = modMuli(modSub_correct(coeff[1], coeff[3]));
 
-        coeff[0] = modAdd_correct(v0, v1);
-        coeff[1] = modMul(modSub_correct(v0, v1), w1);
-        coeff[2] = modMul(modAdd_correct(v2, v3), w2);
-        coeff[3] = modMul(modSub_correct(v2, v3), w12);
+            coeff[0] = modAdd_correct(v0, v1);
+            coeff[1] = modMul(modSub_correct(v0, v1), w1);
+            coeff[2] = modMul(modAdd_correct(v2, v3), w2);
+            coeff[3] = modMul(modSub_correct(v2, v3), w12);
 
-        local_x[i + 0 * m] = coeff[0];
-        local_x[i + 1 * m] = coeff[1];
-        local_x[i + 2 * m] = coeff[2];
-        local_x[i + 3 * m] = coeff[3];
+            local_x[i + 0 * m] = coeff[0];
+            local_x[i + 1 * m] = coeff[1];
+            local_x[i + 2 * m] = coeff[2];
+            local_x[i + 3 * m] = coeff[3];
+        }
 
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    // --- Carré point-à-point ---
+    // 🔹 Carré point-à-point
     for (ulong i = start + lid; i < end; i += WG_SIZE) {
         local_x[lid] = modMul(local_x[lid], local_x[lid]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // --- NTT Inverse (Radix-4) ---
+    // 🔹 NTT Inverse (Radix-4)
     for (ulong m = 1; m <= n_4; m *= 4) {
         __global const ulong* invwm = wi + (3 * 2 * m);
-        const ulong j = k & (m - 1);
-        const ulong i = 4 * (k - j) + j;
+        const ulong j = lid & (m - 1);
+        const ulong i = 4 * (lid - j) + j;
 
         ulong coeff[4];
-        coeff[0] = local_x[i + 0 * m];
-        coeff[1] = local_x[i + 1 * m];
-        coeff[2] = local_x[i + 2 * m];
-        coeff[3] = local_x[i + 3 * m];
+        if (i + 3 * m < WG_SIZE) { // Vérifier les accès
+            coeff[0] = local_x[i + 0 * m];
+            coeff[1] = local_x[i + 1 * m];
+            coeff[2] = local_x[i + 2 * m];
+            coeff[3] = local_x[i + 3 * m];
 
-        const ulong iw2  = invwm[3 * j + 0];
-        const ulong iw1  = invwm[3 * j + 1];
-        const ulong iw12 = invwm[3 * j + 2];
+            const ulong iw2  = invwm[3 * j + 0];
+            const ulong iw1  = invwm[3 * j + 1];
+            const ulong iw12 = invwm[3 * j + 2];
 
-        ulong u0 = coeff[0];
-        ulong u1 = modMul(coeff[1], iw1);
-        ulong u2 = modMul(coeff[2], iw2);
-        ulong u3 = modMul(coeff[3], iw12);
+            ulong u0 = coeff[0];
+            ulong u1 = modMul(coeff[1], iw1);
+            ulong u2 = modMul(coeff[2], iw2);
+            ulong u3 = modMul(coeff[3], iw12);
 
-        ulong v0 = modAdd_correct(u0, u1);
-        ulong v1 = modSub_correct(u0, u1);
-        ulong v2 = modAdd_correct(u2, u3);
-        ulong v3 = modMuli(modSub_correct(u3, u2));
+            ulong v0 = modAdd_correct(u0, u1);
+            ulong v1 = modSub_correct(u0, u1);
+            ulong v2 = modAdd_correct(u2, u3);
+            ulong v3 = modMuli(modSub_correct(u3, u2));
 
-        coeff[0] = modAdd_correct(v0, v2);
-        coeff[1] = modAdd_correct(v1, v3);
-        coeff[2] = modSub_correct(v0, v2);
-        coeff[3] = modSub_correct(v1, v3);
+            coeff[0] = modAdd_correct(v0, v2);
+            coeff[1] = modAdd_correct(v1, v3);
+            coeff[2] = modSub_correct(v0, v2);
+            coeff[3] = modSub_correct(v1, v3);
 
-        local_x[i + 0 * m] = coeff[0];
-        local_x[i + 1 * m] = coeff[1];
-        local_x[i + 2 * m] = coeff[2];
-        local_x[i + 3 * m] = coeff[3];
+            local_x[i + 0 * m] = coeff[0];
+            local_x[i + 1 * m] = coeff[1];
+            local_x[i + 2 * m] = coeff[2];
+            local_x[i + 3 * m] = coeff[3];
+        }
 
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    // --- Post–multiplication ---
+    // 🔹 Post-multiplication
     for (ulong i = start + lid; i < end; i += WG_SIZE) {
         local_x[lid] = modMul(local_x[lid], digit_invweight[i]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Réécriture en mémoire globale après traitement
+
+    // 🔹 Réécriture en mémoire globale après traitement
     for (ulong i = start + lid; i < end; i += WG_SIZE) {
         x[i] = local_x[lid];
+    }
+        barrier(CLK_GLOBAL_MEM_FENCE);
+    //Carry propagation
+    if (get_global_id(0) == 0)
+    {
+        ulong c = 0UL;
+        for (ulong i = 0; i < n; i++){
+            x[i] = digit_adc(x[i], digit_width[i], &c);
+        }
+        // While c != 0, repeat...
+        while(c != 0UL) {
+            for (ulong i = 0; i < n; i++){
+                x[i] = digit_adc(x[i], digit_width[i], &c);
+                if(c == 0UL) break;
+            }
+        }
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+    //sub2
+    if (get_global_id(0) == 0)
+    {
+        uint c = 2U;
+        while(c != 0U){
+            for(uint i = 0; i < n; i++){
+                ulong val = x[i];
+                ulong b   = (1UL << digit_width[i]);
+                if(val >= c){
+                    x[i] = val - c;
+                    c = 0U;
+                    break;
+                } else {
+                    x[i] = val - c + b;
+                    c = 1U;
+                }
+            }
+        }
     }
 }
