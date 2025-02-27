@@ -403,7 +403,6 @@ __kernel void kernel_fusionne(__global ulong* x,
     barrier(CLK_GLOBAL_MEM_FENCE);
 }
 
-#define WG_SIZE 256  // Maximum allocation size for local memory; actual group size = n/4
 __kernel void kernel_fusionne_radix4(__global ulong* x,
                                       __global ulong* digit_weight,
                                       __global ulong* digit_invweight,
