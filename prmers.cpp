@@ -400,22 +400,7 @@ int main(int argc, char** argv) {
     clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
     clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
     clSetKernelArg(k_fusionne, 6, sizeof(cl_mem), &buf_digit_width);
-    // 1️⃣ Récupérer la taille max du workgroup
-    size_t maxWorkGroupSize;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, nullptr);
-
-
-    size_t WG_SIZE = maxWorkGroupSize;
-
-    while (n_4 % WG_SIZE != 0) {
-        WG_SIZE--;
-        if (WG_SIZE == 0) {
-            std::cerr << "Error: No valid WG_SIZE found!" << std::endl;
-            exit(1);
-        }
-    }
-    if (WG_SIZE > 256)
-    WG_SIZE = 256;
+    size_t WG_SIZE = 256;
     std::cout << "Final Workgroup Size (WG_SIZE): " << WG_SIZE << std::endl;
 
     clSetKernelArg(k_fusionne, 7, sizeof(size_t), &WG_SIZE);
