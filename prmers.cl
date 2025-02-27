@@ -15,7 +15,6 @@
  *
  * This code is released as free software.
  */
-#define CL_TARGET_OPENCL_VERSION 200
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
 typedef uint  uint32_t;

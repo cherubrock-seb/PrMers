@@ -1,3 +1,4 @@
+#define CL_TARGET_OPENCL_VERSION 200
 /*
  * Mersenne OpenCL Primality Test Host Code
  *
