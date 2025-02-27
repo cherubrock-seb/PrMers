@@ -490,9 +490,9 @@ int main(int argc, char** argv) {
               << "); computation may take a while depending on the exponent." << std::endl;
          
      
-    size_t workers = n / 4;
-    size_t localSize = n / 4;
-    if(workers < 0){
+    size_t workers = n;
+    size_t localSize = maxWork;
+    /*if(workers < 0){
         workers = 1;
         localSize = 1;
     }
@@ -508,7 +508,7 @@ int main(int argc, char** argv) {
 
     if(workers < 0){
         workers = 1;
-    }
+    }*/
 
     std::cout << "Final workers count: " << workers << std::endl;
     std::cout << "Local size: " << localSize << std::endl;
