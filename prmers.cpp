@@ -165,16 +165,18 @@ void printUsage(const char* progName) {
 
 // If localSize is 0, pass NULL for the local size.
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
-                             cl_mem buf_x, std::vector<uint64_t>& x, size_t workers,  size_t localSize,
+                             cl_mem buf_x, size_t workers,  size_t localSize,
                              const std::string& kernelName, size_t nmax) 
 {
-    size_t* local_ptr = (localSize == 0) ? nullptr : &localSize;
-    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, local_ptr, 0, nullptr, nullptr);
+    clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, &localSize, 0, nullptr, nullptr);
+    clFinish(queue);
     if (debug) {
         clFinish(queue);
-        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, workers * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+        std::vector<uint64_t> locx(nmax, 0ULL);
+        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, nmax * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
         std::cout << "After " << kernelName << " : x = [ ";
-        for (size_t i = 0; i < nmax; i++) std::cout << x[i] << " ";
+        
+        for (size_t i = 0; i < nmax; i++) std::cout << locx[i] << " ";
         std::cout << "]" << std::endl;
     }
 }
@@ -204,7 +206,7 @@ void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters,
                              const time_point<high_resolution_clock>& start, 
                              cl_command_queue queue) {
     auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
-    if (duration >= 1 || iter==-1) {  
+    if (duration >= 5 || iter==-1) {  
         if(iter==-1){
             iter = total_iters;
         }
@@ -388,8 +390,7 @@ int main(int argc, char** argv) {
                                   n * sizeof(uint64_t), x.data(), &err);
     
     // Create kernels.
-    cl_kernel k_fusionne_global = clCreateKernel(program, "kernel_fusionne", &err);
-    cl_kernel k_fusionne_radix4 = clCreateKernel(program, "kernel_fusionne_radix4", &err);
+    cl_kernel k_fusionne = clCreateKernel(program, "kernel_fusionne_radix4", &err);
     cl_kernel k_carry = clCreateKernel(program, "kernel_carry", &err);
     cl_kernel k_sub2  = clCreateKernel(program, "kernel_sub2", &err);
     
@@ -397,30 +398,17 @@ int main(int argc, char** argv) {
     clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
-    
+
     clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
     
-    // Choose the fused kernel based on n.
-    cl_kernel k_fusionne;
-    if(n < 4) {
-        // Use the original kernel (radix-2/global version) for very small transforms.
-        k_fusionne = k_fusionne_global;
-        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
-        clSetKernelArg(k_fusionne, 3, sizeof(uint64_t), &n);
-    } else {
-        // Use the radix-4 fused kernel.
-        k_fusionne = k_fusionne_radix4;
-        clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
-        clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
-        clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
-        clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
-    }
+    clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
+    clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
+    clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
+    clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
+    clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
     
     std::cout << "\nLaunching OpenCL kernel (p = " << p 
               << "); computation may take a while depending on the exponent." << std::endl;
@@ -446,7 +434,19 @@ int main(int argc, char** argv) {
     }
     std::cout << "Final workers count: " << workers << std::endl;
     size_t localSize = workers;
-    
+    size_t sizeCarryBuffer =  workers;
+    if(n<workers){
+        sizeCarryBuffer = n;
+    }
+    std::vector<uint64_t> carry_array(sizeCarryBuffer, 0ULL);
+    cl_mem buf_carry_array= clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
+                            sizeCarryBuffer * sizeof(uint64_t), carry_array.data(), &err);
+    clSetKernelArg(k_carry, 3, sizeof(cl_mem), &buf_carry_array);
+        // Création du buffer flag
+    cl_int zero = 0;
+    cl_mem flagBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &zero, &err);
+    clSetKernelArg(k_carry, 4, sizeof(cl_mem), &flagBuffer);
+
     size_t nmax = std::min(n, (size_t)16);
     uint32_t total_iters = p - 2;
     
@@ -455,14 +455,9 @@ int main(int argc, char** argv) {
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
     
     for (uint32_t iter = 0; iter < total_iters; iter++) {
-        // Execute the chosen kernel fusionne (either global or radix4)
-        executeKernelAndDisplay(queue, k_fusionne, buf_x, x, workers, localSize, "kernel_fusionne", nmax);
-        checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
-        
-        // Process carry and subtraction as before.
-        executeKernelAndDisplay(queue, k_carry, buf_x, x, 1, 1, "kernel_carry", nmax);
-        checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
-        executeKernelAndDisplay(queue, k_sub2, buf_x, x, 1, 1, "kernel_sub2", nmax);
+        executeKernelAndDisplay(queue, k_fusionne, buf_x, workers, localSize, "kernel_fusionne", n);
+        executeKernelAndDisplay(queue, k_carry, buf_x, sizeCarryBuffer, sizeCarryBuffer, "kernel_carry", n);
+        executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
     }
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
@@ -485,15 +480,11 @@ int main(int argc, char** argv) {
     
     // Release OpenCL resources.
     clReleaseMemObject(buf_x);
-    if(n >= 4) {
-        clReleaseMemObject(buf_twiddles);
-        clReleaseMemObject(buf_inv_twiddles);
-    }
+    clReleaseMemObject(buf_twiddles);
+    clReleaseMemObject(buf_inv_twiddles);
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
-    clReleaseKernel(k_fusionne_global);
-    clReleaseKernel(k_fusionne_radix4);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_sub2);
     clReleaseProgram(program);
