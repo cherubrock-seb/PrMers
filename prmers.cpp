@@ -511,8 +511,8 @@ int main(int argc, char** argv) {
     }*/
 
     std::cout << "Final workers count: " << workers << std::endl;
-    std::cout << "Local size: " << localSize << std::endl;
-    std::cout << "Work-groups count: " << workers / localSize << std::endl;
+    std::cout << "Work-groups count: " << localSize << std::endl;
+    std::cout << "Work-groups size: " << workers / localSize << std::endl;
 
     std::cout << "Final workers count: " << workers << std::endl;
     size_t sizeCarryBuffer =  maxWork;
