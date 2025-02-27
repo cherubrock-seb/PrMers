@@ -136,7 +136,7 @@ inline ulong modSub_correct(ulong a, ulong b) {
 }
 
 
-__kernel void kernel_precomp(__global ulong* x,
+__kernel void kernel_precomp2(__global ulong* x,
                              __global ulong* digit_weight,
                              const ulong n)
 {
@@ -147,7 +147,7 @@ __kernel void kernel_precomp(__global ulong* x,
     }
 }
 
-__kernel void kernel_postcomp(__global ulong* x,
+__kernel void kernel_postcomp2(__global ulong* x,
                              __global ulong* digit_invweight,
                              const ulong n)
 {
@@ -159,7 +159,7 @@ __kernel void kernel_postcomp(__global ulong* x,
 }
 
 
-__kernel void kernel_square(__global ulong* x, const ulong n)
+__kernel void kernel_square2(__global ulong* x, const ulong n)
 {
     size_t i = get_global_id(0);
     while (i < n) {
@@ -168,7 +168,6 @@ __kernel void kernel_square(__global ulong* x, const ulong n)
         i += get_global_size(0); // Chaque thread traite plusieurs éléments
     }
 }
-
 
 __kernel void kernel_sub2(__global ulong* x,
                           __global int* digit_width,
@@ -181,18 +180,20 @@ __kernel void kernel_sub2(__global ulong* x,
             for(uint i = 0; i < n; i++){
                 ulong val = x[i];
                 ulong b   = (1UL << digit_width[i]);
-                if(val >= c){
-                    x[i] = val - c;
+
+                if (val >= c) {
+                    x[i] = modSub_correct(val, c);  // Utiliser une soustraction modulaire
                     c = 0U;
                     break;
                 } else {
-                    x[i] = val - c + b;
+                    x[i] = modAdd_correct(modSub_correct(val, c), b);  // Correction de l'ajout
                     c = 1U;
                 }
             }
         }
     }
 }
+
 
 __kernel void kernel_forward_ntt(__global ulong *x, const ulong n) {
     __local ulong d;
@@ -275,9 +276,12 @@ __kernel void kernel_inverse_ntt(__global ulong* x, const ulong n)
     }
 }
 
-__kernel void kernel_carry(__global ulong* x,
+/*
+__kernel void kernel_carry2(__global ulong* x,
                            __global int* digit_width,
-                           const ulong n)
+                           const ulong n,
+                            __global ulong* carry_array,
+                            __global int* flag)
 {
     // We can limit execution to get_global_id(0)==0 and run the loop sequentially
     if (get_global_id(0) == 0)
@@ -295,7 +299,69 @@ __kernel void kernel_carry(__global ulong* x,
         }
     }
     
+}*/
+
+__kernel void kernel_carry(__global ulong* x,
+                                     __global int* digit_width,
+                                     const ulong n,
+                                     __global ulong* carry_array,
+                                     __global int* flag)  
+{
+   
+    ulong thread_id = get_global_id(0);
+    ulong num_threads = get_global_size(0);
+    ulong chunk_size = (n > num_threads) ? (n / num_threads) : 1;
+    ulong start = thread_id * chunk_size;
+    ulong end = (thread_id == num_threads - 1) ? n : (start + chunk_size);
+
+    if (num_threads > n && start >= n)
+        return;
+
+    // Phase initiale de propagation (comme dans votre code)
+    ulong carry = 0UL;
+    for (ulong i = start; i < end; i++) {
+        x[i] = digit_adc(x[i], digit_width[i], &carry);
+    }
+    carry_array[thread_id] = carry;
+
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    // Boucle de propagation tant que le flag indique la présence d'une retenue
+    do {
+        // On remet le flag à 0 (un seul thread le fait)
+        if (thread_id == 0) {
+            flag[0] = 0;
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE);
+
+        // --- Phase de propagation ---
+        ulong prev_thread = (thread_id == 0) ? num_threads - 1 : thread_id - 1;
+        ulong extra_carry = carry_array[prev_thread];
+
+        // Appliquer le carry sur le premier élément de la tranche
+        x[start] = digit_adc(x[start], digit_width[start], &extra_carry);
+        barrier(CLK_GLOBAL_MEM_FENCE);
+
+        carry = extra_carry;
+        for (ulong i = start + 1; i < end; i++) {
+            x[i] = digit_adc(x[i], digit_width[i], &carry);
+        }
+        carry_array[thread_id] = carry;
+
+        barrier(CLK_GLOBAL_MEM_FENCE);
+
+        // Chaque thread vérifie son carry ; s'il est non nul, on le signale via le flag
+        if (carry_array[thread_id] != 0UL) {
+            atomic_or(&flag[0], 1);
+        }
+        barrier(CLK_GLOBAL_MEM_FENCE);
+    } while(flag[0] != 0);
 }
+
+
+
+
+
 
 __kernel void kernel_fusionne(__global ulong* x,
                                        __global ulong* digit_weight,
@@ -310,7 +376,7 @@ __kernel void kernel_fusionne(__global ulong* x,
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], digit_weight[i]);
     }
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
 
     __local ulong d;
 
@@ -322,7 +388,7 @@ __kernel void kernel_fusionne(__global ulong* x,
         if (get_local_id(0) == 0) {
             d = modExp(root, s);
         }
-        barrier(CLK_GLOBAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE);
 
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0)) {
             if ((i % (2UL * m)) < m) {
@@ -343,15 +409,15 @@ __kernel void kernel_fusionne(__global ulong* x,
                 }
             }
         }
-        barrier(CLK_GLOBAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
     // --- Pointwise squaring ---
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], x[i]);
     }
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
 
     // --- Inverse NTT ---
     // Shared variable for the twiddle factor (one per work-group)
@@ -370,7 +436,7 @@ __kernel void kernel_fusionne(__global ulong* x,
         if (get_local_id(0) == 0) {
             twiddle_factor = modExp(root_inv, s);
         }
-        barrier(CLK_GLOBAL_MEM_FENCE); // Synchronize all threads before using twiddle_factor
+        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize all threads before using twiddle_factor
 
         // Perform the butterfly operation in parallel
         for (ulong i = get_global_id(0); i < n; i += get_global_size(0))
@@ -393,15 +459,150 @@ __kernel void kernel_fusionne(__global ulong* x,
                 }
             }
         }
-        barrier(CLK_GLOBAL_MEM_FENCE); // Synchronize threads before the next stage
+        barrier(CLK_LOCAL_MEM_FENCE); // Synchronize threads before the next stage
     }
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
     // --- Post-multiplication: x[i] = modMul(x[i], digit_invweight[i]) ---
     for (ulong i = id; i < n; i += total) {
         x[i] = modMul(x[i], digit_invweight[i]);
     }
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    barrier(CLK_LOCAL_MEM_FENCE);
 }
+
+__kernel void kernel_fusionne_radix42(__global ulong* x,
+                                      __global ulong* digit_weight,
+                                      __global ulong* digit_invweight,
+                                      __global ulong* w,    // Facteurs de twiddle pour la NTT directe
+                                      __global ulong* wi,   // Facteurs de twiddle pour la NTT inverse
+                                      const ulong n)
+{
+
+    // n_4 est le nombre de papillons.
+    const ulong n_4 = n / 4;
+    // Chaque work–item, identifié par k, traite un papillon.
+    
+    
+    // --- Pré–multiplication ---
+    // Chaque work–item traite les indices avec un pas de n_4.
+    ulong thread_id = get_global_id(0);
+    
+    ulong num_threads = get_global_size(0);
+    ulong chunk_size = (n > num_threads) ? ((n / num_threads)) : 1;
+   
+    ulong start = thread_id * chunk_size;
+    const ulong k = get_global_id(0);
+    ulong end = start + chunk_size;
+
+    for (ulong i = start; i < end; i += 1) {
+        x[i] = modMul(x[i], digit_weight[i]);
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+    ulong k_4_c = k;
+    for(ulong chunki = 0; chunki<((chunk_size/4 <= 1) ? 1 : chunk_size/4);chunki+=1){
+        barrier(CLK_GLOBAL_MEM_FENCE);
+
+        // --- NTT Direct (Radix-4) ---
+        for (ulong m = n_4; m >= 1; m /= 4) {
+            __global const ulong* wm = w + (3 * 2 * m);
+            const ulong j = k_4_c & (m - 1);
+            const ulong i = 4 * (k_4_c - j) + j;
+            
+            // Utilisation d'un tableau privé pour stocker les 4 coefficients du papillon.
+            ulong coeff[4];
+            coeff[0] = x[i + 0 * m];
+            coeff[1] = x[i + 1 * m];
+            coeff[2] = x[i + 2 * m];
+            coeff[3] = x[i + 3 * m];
+            
+            // Récupérer les twiddles pour ce papillon.
+            const ulong w2  = wm[3 * j + 0];
+            const ulong w1  = wm[3 * j + 1];
+            const ulong w12 = wm[3 * j + 2];
+            
+            // Calcul du papillon radix-4.
+            ulong v0 = modAdd_correct(coeff[0], coeff[2]);
+            ulong v1 = modAdd_correct(coeff[1], coeff[3]);
+            ulong v2 = modSub_correct(coeff[0], coeff[2]);
+            ulong v3 = modMuli(modSub_correct(coeff[1], coeff[3]));
+            
+            coeff[0] = modAdd_correct(v0, v1);
+            coeff[1] = modMul(modSub_correct(v0, v1), w1);
+            coeff[2] = modMul(modAdd_correct(v2, v3), w2);
+            coeff[3] = modMul(modSub_correct(v2, v3), w12);
+            
+            // Écriture des résultats dans la mémoire globale.
+            x[i + 0 * m] = coeff[0];
+            x[i + 1 * m] = coeff[1];
+            x[i + 2 * m] = coeff[2];
+            x[i + 3 * m] = coeff[3];
+            
+            barrier(CLK_GLOBAL_MEM_FENCE);
+        }
+        k_4_c+=4;
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    // --- Carré point–à–point ---
+    for (ulong i = start; i < end; i += 1) {
+        x[i] = modMul(x[i], x[i]);
+    }
+    
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    // --- NTT Inverse (Radix-4) ---
+    k_4_c = k;
+    for(ulong chunki = 0; chunki<((chunk_size/4 <= 1) ? 1 : chunk_size/4);chunki+=1){    
+        barrier(CLK_GLOBAL_MEM_FENCE);
+        for (ulong m = 1; m <= n_4; m *= 4) {
+            __global const ulong* invwm = wi + (3 * 2 * m);
+            const ulong j = k_4_c & (m - 1);
+            const ulong i = 4 * (k_4_c - j) + j;
+            
+            ulong coeff[4];
+            coeff[0] = x[i + 0 * m];
+            coeff[1] = x[i + 1 * m];
+            coeff[2] = x[i + 2 * m];
+            coeff[3] = x[i + 3 * m];
+            
+            const ulong iw2  = invwm[3 * j + 0];
+            const ulong iw1  = invwm[3 * j + 1];
+            const ulong iw12 = invwm[3 * j + 2];
+            
+            ulong u0 = coeff[0];
+            ulong u1 = modMul(coeff[1], iw1);
+            ulong u2 = modMul(coeff[2], iw2);
+            ulong u3 = modMul(coeff[3], iw12);
+            
+            ulong v0 = modAdd_correct(u0, u1);
+            ulong v1 = modSub_correct(u0, u1);
+            ulong v2 = modAdd_correct(u2, u3);
+            ulong v3 = modMuli(modSub_correct(u3, u2));
+            
+            coeff[0] = modAdd_correct(v0, v2);
+            coeff[1] = modAdd_correct(v1, v3);
+            coeff[2] = modSub_correct(v0, v2);
+            coeff[3] = modSub_correct(v1, v3);
+            
+            x[i + 0 * m] = coeff[0];
+            x[i + 1 * m] = coeff[1];
+            x[i + 2 * m] = coeff[2];
+            x[i + 3 * m] = coeff[3];
+            
+            barrier(CLK_GLOBAL_MEM_FENCE);
+        }
+        k_4_c+=4;
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    // --- Post–multiplication ---
+    for (ulong i = start; i < end; i += 1) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+    }
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+
+}
+
 
 __kernel void kernel_fusionne_radix4(__global ulong* x,
                                       __global ulong* digit_weight,
@@ -410,18 +611,31 @@ __kernel void kernel_fusionne_radix4(__global ulong* x,
                                       __global ulong* wi,   // Facteurs de twiddle pour la NTT inverse
                                       const ulong n)
 {
+    ulong global_id = get_global_id(0);
+    ulong local_id = get_local_id(0);
+    ulong group_id = get_group_id(0);
+
+
     // n_4 est le nombre de papillons.
-    const ulong n_4 = n / 4;
+    const ulong n_4 = n/4;
     // Chaque work–item, identifié par k, traite un papillon.
-    const ulong k = get_global_id(0);
+    
     
     // --- Pré–multiplication ---
     // Chaque work–item traite les indices avec un pas de n_4.
-    for (ulong i = k; i < n; i += n_4) {
+    ulong thread_id = local_id;
+    
+    ulong num_threads = get_global_size(0);
+    ulong chunk_size = (n > num_threads) ? ((n / num_threads)) : 1;
+   
+    ulong start = thread_id * chunk_size;
+    const ulong k = local_id;
+    ulong end = start + chunk_size;
+
+    for (ulong i = start; i < end; i += 1) {
         x[i] = modMul(x[i], digit_weight[i]);
     }
-    barrier(CLK_LOCAL_MEM_FENCE);
-    
+    barrier(CLK_GLOBAL_MEM_FENCE);
     // --- NTT Direct (Radix-4) ---
     for (ulong m = n_4; m >= 1; m /= 4) {
         __global const ulong* wm = w + (3 * 2 * m);
@@ -457,16 +671,20 @@ __kernel void kernel_fusionne_radix4(__global ulong* x,
         x[i + 2 * m] = coeff[2];
         x[i + 3 * m] = coeff[3];
         
-        barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_GLOBAL_MEM_FENCE);
     }
     
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
     // --- Carré point–à–point ---
-    for (ulong i = k; i < n; i += n_4) {
+    for (ulong i = start; i < end; i += 1) {
         x[i] = modMul(x[i], x[i]);
     }
-    barrier(CLK_LOCAL_MEM_FENCE);
     
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
     // --- NTT Inverse (Radix-4) ---
+
     for (ulong m = 1; m <= n_4; m *= 4) {
         __global const ulong* invwm = wi + (3 * 2 * m);
         const ulong j = k & (m - 1);
@@ -502,12 +720,107 @@ __kernel void kernel_fusionne_radix4(__global ulong* x,
         x[i + 2 * m] = coeff[2];
         x[i + 3 * m] = coeff[3];
         
-        barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_GLOBAL_MEM_FENCE);
     }
+
     
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
     // --- Post–multiplication ---
-    for (ulong i = k; i < n; i += n_4) {
+    for (ulong i = start; i < end; i += 1) {
         x[i] = modMul(x[i], digit_invweight[i]);
     }
-    barrier(CLK_LOCAL_MEM_FENCE);
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+
+}
+
+__kernel void kernel_ntt_radix4(__global ulong* x, __global ulong* w, const ulong n, const ulong m) {
+   
+    ulong k = get_global_id(0);
+    
+    if (k >= n / 4) return;  // Ne pas dépasser les limites
+
+    ulong j = k & (m - 1);
+    ulong i = 4 * (k - j) + j;
+
+    __global ulong* wm = &w[3 * 2 * m];
+
+    ulong w2  = wm[3 * j + 0];
+    ulong w1  = wm[3 * j + 1];
+    ulong w12 = wm[3 * j + 2];
+
+    ulong u0 = x[i + 0 * m], u1 = x[i + 1 * m], u2 = x[i + 2 * m], u3 = x[i + 3 * m];
+    ulong v0 = modAdd_correct(u0, u2);
+    ulong v1 = modAdd_correct(u1, u3);
+    ulong v2 = modSub_correct(u0, u2);
+    ulong v3 = modMuli(modSub_correct(u1, u3));
+    
+    x[i + 0 * m] = modAdd_correct(v0, v1);
+    x[i + 1 * m] = modMul(modSub_correct(v0, v1), w1);
+    x[i + 2 * m] = modMul(modAdd_correct(v2, v3), w2);
+    x[i + 3 * m] = modMul(modSub_correct(v2, v3), w12);
+}
+
+
+__kernel void kernel_inverse_ntt_radix4(__global ulong* x, __global ulong* wi, const ulong n, const ulong m) {
+    ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+    __global const ulong* invwm = wi + (3 * 2 * m);
+    const ulong j = k & (m - 1);
+    const ulong i = 4 * (k - j) + j;
+    
+    ulong coeff[4];
+    coeff[0] = x[i + 0 * m];
+    coeff[1] = x[i + 1 * m];
+    coeff[2] = x[i + 2 * m];
+    coeff[3] = x[i + 3 * m];
+    
+    const ulong iw2  = invwm[3 * j + 0];
+    const ulong iw1  = invwm[3 * j + 1];
+    const ulong iw12 = invwm[3 * j + 2];
+    
+    ulong u0 = coeff[0];
+    ulong u1 = modMul(coeff[1], iw1);
+    ulong u2 = modMul(coeff[2], iw2);
+    ulong u3 = modMul(coeff[3], iw12);
+    
+    ulong v0 = modAdd_correct(u0, u1);
+    ulong v1 = modSub_correct(u0, u1);
+    ulong v2 = modAdd_correct(u2, u3);
+    ulong v3 = modMuli(modSub_correct(u3, u2));
+    
+    coeff[0] = modAdd_correct(v0, v2);
+    coeff[1] = modAdd_correct(v1, v3);
+    coeff[2] = modSub_correct(v0, v2);
+    coeff[3] = modSub_correct(v1, v3);
+    
+    x[i + 0 * m] = coeff[0];
+    x[i + 1 * m] = coeff[1];
+    x[i + 2 * m] = coeff[2];
+    x[i + 3 * m] = coeff[3];
+}
+
+
+__kernel void kernel_square(__global ulong* x, const ulong n) {
+    size_t i = get_global_id(0);
+    while (i < n) {
+        x[i] = modMul(x[i], x[i]);
+        i += get_global_size(0);
+    }
+}
+
+__kernel void kernel_precomp(__global ulong* x, __global ulong* digit_weight, const ulong n) {
+    size_t i = get_global_id(0);
+    while (i < n) {
+        x[i] = modMul(x[i], digit_weight[i]);
+        i += get_global_size(0);
+    }
+}
+__kernel void kernel_postcomp(__global ulong* x, __global ulong* digit_invweight, const ulong n) {
+    size_t i = get_global_id(0);
+    while (i < n) {
+        x[i] = modMul(x[i], digit_invweight[i]);
+        i += get_global_size(0);
+    }
 }
