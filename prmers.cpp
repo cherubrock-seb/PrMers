@@ -214,7 +214,59 @@ void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters,
         displayProgress(iter, total_iters, elapsedTime);
         lastDisplay = high_resolution_clock::now();
     }
-    clFinish(queue);
+}
+
+void executeFusionneNTT_Forward(cl_command_queue queue, cl_kernel kernel_ntt, 
+                        cl_mem buf_x, cl_mem buf_w, size_t n, size_t workers,  size_t localSize ) {
+    //size_t workers = n / 4;
+    
+    for (size_t m = n / 4; m >= 1; m /= 4) {
+        clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
+        clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+        clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
+
+        clEnqueueNDRangeKernel(queue, kernel_ntt, 1, nullptr, &workers, &localSize, 0, nullptr, nullptr);
+        clFinish(queue);  // Synchronisation globale après chaque passe
+        if (debug) {
+            std::cout << "After kernelntt forward workers" << workers << std::endl;
+            std::cout << "After localSize workers" << localSize << std::endl;
+            
+            std::vector<uint64_t> locx(n, 0ULL);
+            clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
+            std::cout << "After kernelntt forward" << " : x = [ ";
+            
+            for (size_t i = 0; i < n; i++) std::cout << locx[i] << " ";
+            std::cout << "]" << std::endl;
+        }
+    }
+}
+
+
+void executeFusionneNTT_Inverse(cl_command_queue queue, cl_kernel kernel_ntt, 
+                        cl_mem buf_x, cl_mem buf_w, size_t n, size_t workers,  size_t localSize ) {
+    //size_t workers = n / 4;
+    
+    for (size_t m = 1; m <= n/4; m *= 4) {
+        clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
+        clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+        clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
+
+        clEnqueueNDRangeKernel(queue, kernel_ntt, 1, nullptr, &workers, &localSize, 0, nullptr, nullptr);
+        clFinish(queue);  // Synchronisation globale après chaque passe
+        if (debug) {
+            std::cout << "After kernelntt workers" << workers << std::endl;
+            std::cout << "After localSize workers" << localSize << std::endl;
+            
+            std::vector<uint64_t> locx(n, 0ULL);
+            clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
+            std::cout << "After kernelntt inverse " << " : x = [ ";
+            
+            for (size_t i = 0; i < n; i++) std::cout << locx[i] << " ";
+            std::cout << "]" << std::endl;
+        }
+    }
 }
 
 int main(int argc, char** argv) {
@@ -390,51 +442,80 @@ int main(int argc, char** argv) {
                                   n * sizeof(uint64_t), x.data(), &err);
     
     // Create kernels.
-    cl_kernel k_fusionne = clCreateKernel(program, "kernel_fusionne_radix4", &err);
+    cl_kernel k_precomp      = clCreateKernel(program, "kernel_precomp", &err);
+    cl_kernel k_postcomp     = clCreateKernel(program, "kernel_postcomp", &err);
+    cl_kernel k_forward_ntt  = clCreateKernel(program, "kernel_ntt_radix4", &err);
+    cl_kernel k_inverse_ntt  = clCreateKernel(program, "kernel_inverse_ntt_radix4", &err);
+    cl_kernel k_square       = clCreateKernel(program, "kernel_square", &err);
     cl_kernel k_carry = clCreateKernel(program, "kernel_carry", &err);
     cl_kernel k_sub2  = clCreateKernel(program, "kernel_sub2", &err);
     
-    // Set arguments for k_carry and k_sub2 (unchanged).
+    if (err != CL_SUCCESS) {
+        std::cerr << "Error creating kernels." << std::endl;
+        return 1;
+    }
+
+    clSetKernelArg(k_precomp, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_precomp, 1, sizeof(cl_mem), &buf_digit_weight);
+    clSetKernelArg(k_precomp, 2, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_postcomp, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_postcomp, 1, sizeof(cl_mem), &buf_digit_invweight);
+    clSetKernelArg(k_postcomp, 2, sizeof(uint64_t), &n);
+
+    clSetKernelArg(k_square, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(k_square, 1, sizeof(uint64_t), &n);
+
+        // Set arguments for k_carry and k_sub2 (unchanged).
     clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_carry, 2, sizeof(uint64_t), &n);
-
+    
     clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
     clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
     
-    clSetKernelArg(k_fusionne, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(k_fusionne, 1, sizeof(cl_mem), &buf_digit_weight);
-    clSetKernelArg(k_fusionne, 2, sizeof(cl_mem), &buf_digit_invweight);
-    clSetKernelArg(k_fusionne, 3, sizeof(cl_mem), &buf_twiddles);
-    clSetKernelArg(k_fusionne, 4, sizeof(cl_mem), &buf_inv_twiddles);
-    clSetKernelArg(k_fusionne, 5, sizeof(uint64_t), &n);
-    
+
+    size_t maxThreads;
+    size_t workitem_size[3];
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(workitem_size), &workitem_size, NULL);
+    printf("CL_DEVICE_MAX_WORK_ITEM_SIZES:\t%lu / %lu / %lu \n", workitem_size[0], workitem_size[1], workitem_size[2]);
+    maxThreads = workitem_size[0];
+    size_t maxWork;
+   
+    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWork, nullptr);
+    std::cout << "Max CL_DEVICE_MAX_WORK_GROUP_SIZE = " << maxWork << std::endl;
+    std::cout << "Max CL_DEVICE_MAX_WORK_ITEM_SIZES = " << maxThreads << std::endl;
     std::cout << "\nLaunching OpenCL kernel (p = " << p 
               << "); computation may take a while depending on the exponent." << std::endl;
-    
-    size_t maxWork;
-    clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWork, nullptr);
-    std::cout << "Max global workers possible: " << maxWork << std::endl;
-    
-    // Determine workers count.
-    size_t workers;
-    if (n <= maxWork) {
-        workers = maxWork;
-    } else {
-        if (n % maxWork == 0) {
-            workers = maxWork;
-        } else {
-            for (workers = maxWork; workers > 0; workers--) {
-                if (n % workers == 0) {
-                    break;
-                }
-            }
-        }
+         
+     
+    size_t workers = n / 4;
+    size_t localSize = n / 4;
+    if(workers < 0){
+        workers = 1;
+        localSize = 1;
     }
+    else{
+        if (workers > maxThreads) {
+            workers = maxThreads;
+            localSize = maxWork;
+        }
+        else{
+            localSize = n / 4;
+        }
+     }
+
+    if(workers < 0){
+        workers = 1;
+    }
+
     std::cout << "Final workers count: " << workers << std::endl;
-    size_t localSize = workers;
-    size_t sizeCarryBuffer =  workers;
+    std::cout << "Local size: " << localSize << std::endl;
+    std::cout << "Work-groups count: " << workers / localSize << std::endl;
+
+    std::cout << "Final workers count: " << workers << std::endl;
+    size_t sizeCarryBuffer =  maxWork;
     if(n<workers){
         sizeCarryBuffer = n;
     }
@@ -447,15 +528,18 @@ int main(int argc, char** argv) {
     cl_mem flagBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &zero, &err);
     clSetKernelArg(k_carry, 4, sizeof(cl_mem), &flagBuffer);
 
-    size_t nmax = std::min(n, (size_t)16);
     uint32_t total_iters = p - 2;
     
     auto startTime = high_resolution_clock::now();
     auto lastDisplay = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
     
-    for (uint32_t iter = 0; iter < total_iters; iter++) {
-        executeKernelAndDisplay(queue, k_fusionne, buf_x, workers, localSize, "kernel_fusionne", n);
+    for (uint32_t iter = 0; iter < total_iters; iter++) {executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n);
+
+        executeFusionneNTT_Forward(queue, k_forward_ntt, buf_x, buf_twiddles, n,workers, localSize);
+        executeKernelAndDisplay(queue, k_square, buf_x, workers, localSize, "kernel_square", n);
+        executeFusionneNTT_Inverse(queue, k_inverse_ntt, buf_x, buf_inv_twiddles, n,workers, localSize);
+        executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n);
         executeKernelAndDisplay(queue, k_carry, buf_x, sizeCarryBuffer, sizeCarryBuffer, "kernel_carry", n);
         executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n);
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
@@ -482,12 +566,18 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_x);
     clReleaseMemObject(buf_twiddles);
     clReleaseMemObject(buf_inv_twiddles);
+    clReleaseMemObject(buf_carry_array);
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
+    clReleaseKernel(k_precomp);
+    clReleaseKernel(k_postcomp);
+    clReleaseKernel(k_forward_ntt);
+    clReleaseKernel(k_inverse_ntt);
+    clReleaseKernel(k_square);
+    clReleaseProgram(program);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_sub2);
-    clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
     
