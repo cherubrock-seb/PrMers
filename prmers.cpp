@@ -158,8 +158,8 @@ std::string readFile(const std::string &filename) {
 }
 
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p_min> [-d <device_id>] [-O <options>]" << std::endl;
-    std::cout << "  <p_min>       : Minimum exponent to test (required)" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-profile]" << std::endl;
+    std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (can combine multiple)." << std::endl;
     std::cout << "                  Available options: " << std::endl;
@@ -168,8 +168,10 @@ void printUsage(const char* progName) {
     std::cout << "                    unsafe      => Enables -cl-unsafe-math-optimizations" << std::endl;
     std::cout << "                    nans        => Disables NaN/Inf checks (-cl-no-signed-zeros)" << std::endl;
     std::cout << "                    optdisable  => Disables compiler optimizations (-cl-opt-disable)" << std::endl;
-    std::cout << "  Example: " << progName << " 127 -O fastmath mad" << std::endl;
+    std::cout << "  -profile      : (Optional) Enable kernel execution profiling to measure execution times." << std::endl;
+    std::cout << "  Example: " << progName << " 127 -O fastmath mad -profile" << std::endl;
 }
+
 std::string getBuildOptions(int argc, char** argv) {
     std::string build_options = "";
     bool found_O = false;
