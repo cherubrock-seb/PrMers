@@ -158,12 +158,46 @@ std::string readFile(const std::string &filename) {
 }
 
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p_min> [-d <device_id>]" << std::endl;
+    std::cout << "Usage: " << progName << " <p_min> [-d <device_id>] [-O <options>]" << std::endl;
     std::cout << "  <p_min>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
-    std::cout << "  -h            : Display this help message" << std::endl;
+    std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (can combine multiple)." << std::endl;
+    std::cout << "                  Available options: " << std::endl;
+    std::cout << "                    fastmath    => Enables -cl-fast-relaxed-math" << std::endl;
+    std::cout << "                    mad         => Enables -cl-mad-enable" << std::endl;
+    std::cout << "                    unsafe      => Enables -cl-unsafe-math-optimizations" << std::endl;
+    std::cout << "                    nans        => Disables NaN/Inf checks (-cl-no-signed-zeros)" << std::endl;
+    std::cout << "                    optdisable  => Disables compiler optimizations (-cl-opt-disable)" << std::endl;
+    std::cout << "  Example: " << progName << " 127 -O fastmath mad" << std::endl;
 }
+std::string getBuildOptions(int argc, char** argv) {
+    std::string build_options = "";
+    bool found_O = false;
 
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-O") == 0 && i + 1 < argc) {
+            found_O = true;
+            for (int j = i + 1; j < argc; ++j) {
+                std::string opt = argv[j];
+
+                if (opt == "fastmath") build_options += " -cl-fast-relaxed-math";
+                else if (opt == "mad") build_options += " -cl-mad-enable";
+                else if (opt == "unsafe") build_options += " -cl-unsafe-math-optimizations";
+                else if (opt == "nans") build_options += " -cl-no-signed-zeros";
+                else if (opt == "optdisable") build_options += " -cl-opt-disable";
+                else if (opt[0] == '-') break;  // Arrêter si un autre flag est rencontré
+            }
+            break;
+        }
+    }
+
+    if (found_O && build_options.empty()) {
+        std::cerr << "Error: -O specified but no valid options given. Use -h for help." << std::endl;
+        exit(1);
+    }
+
+    return build_options;
+}
 // If localSize is 0, pass NULL for the local size.
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel, 
                              cl_mem buf_x, size_t workers,  size_t localSize,
@@ -359,8 +393,11 @@ int main(int argc, char** argv) {
         clReleaseContext(context);
         return 1;
     }
-    
-    err = clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
+    std::string build_options = getBuildOptions(argc, argv);
+    if (!build_options.empty()) {
+        std::cout << "Building OpenCL program with options: " << build_options << std::endl;
+    }
+    err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {
         size_t logSize;
         clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize);
