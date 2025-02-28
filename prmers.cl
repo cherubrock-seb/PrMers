@@ -62,19 +62,6 @@ inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
     *hi = mul_hi(a, b);
 }
 
-// Modular addition modulo MOD_P.
-inline ulong modAdd(ulong a, ulong b) {
-    ulong s = a + b;
-    return (s >= MOD_P) ? s - MOD_P : s;
-}
-
-
-// Modular subtraction modulo MOD_P.
-inline ulong modSub(ulong a, ulong b) {
-    return (a >= b) ? a - b : a + MOD_P - b;
-}
-
-
 inline ulong modMul(const ulong lhs, const ulong rhs)
 {
 	const ulong lo = lhs * rhs, hi = mul_hi(lhs, rhs);
@@ -86,19 +73,6 @@ inline ulong modMul(const ulong lhs, const ulong rhs)
 // modMuli multiplies by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p.
 inline ulong modMuli(ulong x) {
     return modMul(x, (1UL << 48));
-}
-
-// Modular exponentiation: computes base^exp modulo MOD_P.
-inline ulong modExp(ulong base, ulong exp) {
-    ulong result = 1UL;
-    while(exp > 0) {
-        if(exp & 1UL) {
-            result = modMul(result, base);
-        }
-        base = modMul(base, base);
-        exp >>= 1;
-    }
-    return result;
 }
 
 // Add-with-carry for a digit of specified width.
@@ -147,11 +121,11 @@ __kernel void kernel_sub2(__global ulong* x,
                 ulong b   = (1UL << digit_width[i]);
 
                 if (val >= c) {
-                    x[i] = modSub_correct(val, c);  // Utiliser une soustraction modulaire
+                    x[i] = Sub(val, c);  // Utiliser une soustraction modulaire
                     c = 0U;
                     break;
                 } else {
-                    x[i] = modAdd_correct(modSub_correct(val, c), b);  // Correction de l'ajout
+                    x[i] = Add(Sub(val, c), b);  // Correction de l'ajout
                     c = 1U;
                 }
             }
@@ -237,15 +211,15 @@ __kernel void kernel_ntt_radix4(__global ulong* x, __global ulong* w, const ulon
     ulong w12 = wm[3 * j + 2];
 
     ulong u0 = x[i + 0 * m], u1 = x[i + 1 * m], u2 = x[i + 2 * m], u3 = x[i + 3 * m];
-    ulong v0 = modAdd_correct(u0, u2);
-    ulong v1 = modAdd_correct(u1, u3);
-    ulong v2 = modSub_correct(u0, u2);
-    ulong v3 = modMuli(modSub_correct(u1, u3));
+    ulong v0 = Add(u0, u2);
+    ulong v1 = Add(u1, u3);
+    ulong v2 = Sub(u0, u2);
+    ulong v3 = modMuli(Sub(u1, u3));
     
-    x[i + 0 * m] = modAdd_correct(v0, v1);
-    x[i + 1 * m] = modMul(modSub_correct(v0, v1), w1);
-    x[i + 2 * m] = modMul(modAdd_correct(v2, v3), w2);
-    x[i + 3 * m] = modMul(modSub_correct(v2, v3), w12);
+    x[i + 0 * m] = Add(v0, v1);
+    x[i + 1 * m] = modMul(Sub(v0, v1), w1);
+    x[i + 2 * m] = modMul(Add(v2, v3), w2);
+    x[i + 3 * m] = modMul(Sub(v2, v3), w12);
 }
 
 
@@ -271,15 +245,15 @@ __kernel void kernel_inverse_ntt_radix4(__global ulong* x, __global ulong* wi, c
     ulong u2 = modMul(coeff[2], iw2);
     ulong u3 = modMul(coeff[3], iw12);
     
-    ulong v0 = modAdd_correct(u0, u1);
-    ulong v1 = modSub_correct(u0, u1);
-    ulong v2 = modAdd_correct(u2, u3);
-    ulong v3 = modMuli(modSub_correct(u3, u2));
+    ulong v0 = Add(u0, u1);
+    ulong v1 = Sub(u0, u1);
+    ulong v2 = Add(u2, u3);
+    ulong v3 = modMuli(Sub(u3, u2));
     
-    coeff[0] = modAdd_correct(v0, v2);
-    coeff[1] = modAdd_correct(v1, v3);
-    coeff[2] = modSub_correct(v0, v2);
-    coeff[3] = modSub_correct(v1, v3);
+    coeff[0] = Add(v0, v2);
+    coeff[1] = Add(v1, v3);
+    coeff[2] = Sub(v0, v2);
+    coeff[3] = Sub(v1, v3);
     
     x[i + 0 * m] = coeff[0];
     x[i + 1 * m] = coeff[1];
