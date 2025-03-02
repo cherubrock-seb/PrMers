@@ -20,17 +20,8 @@
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
-//constant ulong MOD_P = (((1UL << 32) - 1UL) << 32) + 1UL;  // p = 2^64 - 2^32 + 1
-
-//constant uint32_t MOD_P_COMP = 0xffffffffu;  // 2^64 - p = 2^32 - 1
-
-
 #define MOD_P 0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
 #define MOD_P_COMP 0xffffffffU          // 2^64 - p = 2^32 - 1
-
-inline long GetLong(const ulong lhs) { return (lhs > MOD_P  / 2) ? (long)(lhs + MOD_P_COMP ) : (long)lhs; }
-
-inline ulong ToZp(const long i) { return (i >= 0) ? (ulong)i : MOD_P  + i; }
 
 inline ulong Add(const ulong lhs, const ulong rhs)
 {
@@ -74,6 +65,7 @@ inline ulong modMul(const ulong lhs, const ulong rhs)
 inline ulong modMuli(ulong x) {
     return modMul(x, (1UL << 48));
 }
+
 
 // Add-with-carry for a digit of specified width.
 inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
@@ -133,66 +125,60 @@ __kernel void kernel_sub2(__global ulong* x,
     }
 }
 
-
+#ifndef LOCAL_PROPAGATION_DEPTH
+#define LOCAL_PROPAGATION_DEPTH 8
+#endif
 
 __kernel void kernel_carry(__global ulong* x,
+                                    __global ulong* carry_array,
                                      __global int* digit_width,
                                      const ulong n,
-                                     __global ulong* carry_array,
-                                     __global int* flag)  
+                                     __global int* flag
+                                     ) 
 {
-   
-    ulong thread_id = get_global_id(0);
-    ulong num_threads = get_global_size(0);
-    ulong chunk_size = (n > num_threads) ? (n / num_threads) : 1;
-    ulong start = thread_id * chunk_size;
-    ulong end = (thread_id == num_threads - 1) ? n : (start + chunk_size);
 
-    if (num_threads > n && start >= n)
-        return;
 
-    // Phase initiale de propagation (comme dans votre code)
-    ulong carry = 0UL;
-    for (ulong i = start; i < end; i++) {
-        x[i] = digit_adc(x[i], digit_width[i], &carry);
-    }
-    carry_array[thread_id] = carry;
-
-    barrier(CLK_GLOBAL_MEM_FENCE);
-
-    // Boucle de propagation tant que le flag indique la présence d'une retenue
-    do {
-        // On remet le flag à 0 (un seul thread le fait)
-        if (thread_id == 0) {
-            flag[0] = 0;
-        }
-        barrier(CLK_GLOBAL_MEM_FENCE);
-
-        // --- Phase de propagation ---
-        ulong prev_thread = (thread_id == 0) ? num_threads - 1 : thread_id - 1;
-        ulong extra_carry = carry_array[prev_thread];
-
-        // Appliquer le carry sur le premier élément de la tranche
-        x[start] = digit_adc(x[start], digit_width[start], &extra_carry);
-        barrier(CLK_GLOBAL_MEM_FENCE);
-
-        carry = extra_carry;
-        for (ulong i = start + 1; i < end; i++) {
+        ulong start = get_global_id(0)*LOCAL_PROPAGATION_DEPTH;
+        ulong carry = 0UL;
+        for (ulong i = start; i < (start + LOCAL_PROPAGATION_DEPTH); i++) {
             x[i] = digit_adc(x[i], digit_width[i], &carry);
         }
-        carry_array[thread_id] = carry;
-
-        barrier(CLK_GLOBAL_MEM_FENCE);
-
-        // Chaque thread vérifie son carry ; s'il est non nul, on le signale via le flag
-        if (carry_array[thread_id] != 0UL) {
-            atomic_or(&flag[0], 1);
-        }
-        barrier(CLK_GLOBAL_MEM_FENCE);
-    } while(flag[0] != 0);
+        carry_array[get_global_id(0)] = carry;
 }
 
 
+#ifndef CARRY_WORKER
+#define CARRY_WORKER 1
+#endif
+
+__kernel void kernel_carry_2(__global ulong* x,
+                                    __global ulong* carry_array,
+                                    __global ulong* carry_array_out,
+                                     __global int* digit_width,
+                                     const ulong n,
+                                     __global int* flag
+                                     )
+{
+        ulong start = get_global_id(0)*LOCAL_PROPAGATION_DEPTH;
+        ulong carry = carry_array[start == 0 ? CARRY_WORKER -1 : (get_global_id(0) - 1) ];
+        for (ulong i = start; i < (start + LOCAL_PROPAGATION_DEPTH); i++) {
+            x[i] = digit_adc(x[i], digit_width[i], &carry);
+        }
+        
+        carry_array_out[get_global_id(0)] = carry;
+        //printf("Final carry step 2 Thread %ul = %ul",start, carry);
+}
+
+__kernel void kernel_carry_3(__global ulong* x,
+                            __global ulong* carry_array,
+                            __global int* flag)
+{
+
+        //printf("Thread %u read carry = %u",get_global_id(0), carry_array[get_global_id(0)]);
+        ulong start = get_global_id(0)*LOCAL_PROPAGATION_DEPTH;
+        ulong carry = carry_array[start == 0 ? CARRY_WORKER -1 : (get_global_id(0) - 1) ];
+        x[start] += carry;
+}
 
 
 __kernel void kernel_ntt_radix4(__global ulong* x, __global ulong* w, const ulong n, const ulong m) {
@@ -272,15 +258,11 @@ __kernel void kernel_square(__global ulong* x, const ulong n) {
 
 __kernel void kernel_precomp(__global ulong* x, __global ulong* digit_weight, const ulong n) {
     size_t i = get_global_id(0);
-    while (i < n) {
-        x[i] = modMul(x[i], digit_weight[i]);
-        i += get_global_size(0);
-    }
+    x[i] = modMul(x[i], digit_weight[i]);
 }
+
 __kernel void kernel_postcomp(__global ulong* x, __global ulong* digit_invweight, const ulong n) {
     size_t i = get_global_id(0);
-    while (i < n) {
-        x[i] = modMul(x[i], digit_invweight[i]);
-        i += get_global_size(0);
-    }
+    x[i] = modMul(x[i], digit_invweight[i]);
 }
+
