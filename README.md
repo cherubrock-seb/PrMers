@@ -38,6 +38,8 @@ Progress: 0.11% | Elapsed: 4.05s | Iterations/sec: 57.50 | ETA: 3754.28s
 ```
 
 ## Output Example
+
+```bash
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 13
 Using OpenCL device ID: 1
@@ -48,7 +50,8 @@ Lucas-Lehmer test results:
 Mp with p = 13 is a Mersenne prime.
 Kernel execution time: 0.00150793 seconds
 Iterations per second: 7294.76 (11 iterations in total)
-
+ ```
+ 
 ## New Features
 
 - **Modes:**
