@@ -44,15 +44,15 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   ```
 
 ## Command-Line Options
-<p>: Minimum exponent to test (required)
--d <device_id>: Specify the OpenCL device ID (default: 0)
--O <options>: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
--c <localCarryPropagationDepth>: Set the local carry propagation depth (default: 8)
--profile: Enable kernel execution profiling
--prp: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
--ll: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
--t <backup_interval>: Specify the backup interval in seconds (default: 60)
--f <path>: Specify the directory path for saving/loading backup files (default: current directory)
+- <p>: Minimum exponent to test (required)
+- -d <device_id>: Specify the OpenCL device ID (default: 0)
+- -O <options>: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
+- -c <localCarryPropagationDepth>: Set the local carry propagation depth (default: 8)
+- -profile: Enable kernel execution profiling
+- -prp: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
+- -ll: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
+- -t <backup_interval>: Specify the backup interval in seconds (default: 60)
+- -f <path>: Specify the directory path for saving/loading backup files (default: current directory)
 
 ## Uninstallation
 To uninstall PrMers, run:
