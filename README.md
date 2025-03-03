@@ -44,7 +44,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   ```
 
 ## Command-Line Options
-- <p>: Minimum exponent to test (required)
+- < p >: Minimum exponent to test (required)
 - -d <device_id>: Specify the OpenCL device ID (default: 0)
 - -O <options>: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
 - -c <localCarryPropagationDepth>: Set the local carry propagation depth (default: 8)
