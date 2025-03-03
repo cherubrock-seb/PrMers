@@ -1,6 +1,60 @@
-# PrMers: GPU-accelerated Mersenne primality test
+# PrMers: GPU-accelerated Mersenne Primality Test
+
+PrMers is a high-performance application that uses OpenCL, Number Theoretic Transforms (NTT), and Lucas–Lehmer / PRP algorithms to perform Mersenne prime tests on GPUs. It features automatic state backup and resume functionality to allow long-running computations to be restarted.
+
+## Features
+
+- GPU-accelerated Mersenne prime testing using OpenCL
+- Implementation of NTT and Lucas–Lehmer algorithms
+- Automatic backup of computation state with resume support
+- Command-line options for performance tuning and debugging
+
+## Requirements
+
+- GNU g++ with C++11 support
+- OpenCL development libraries (e.g., `ocl-icd-opencl-dev`)
+- Git
+
+## Installation
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/cherubrock-seb/PrMers.git
+   cd PrMers
+2. **Compile the software:**
+   ```bash
+   make
+   ```
+3. **Install the executable and kernel file:**
+The following command installs the executable to /usr/local/bin and the OpenCL kernel file to /usr/local/share/prmers.
+  ```bash
+   sudo make install
+  ```
+The Makefile compiles the executable with a compile-time macro (KERNEL_PATH) so that, after installation, PrMers automatically finds its kernel file.
 
 ## Compilation
+Once installed, you can run PrMers directly from the command line. The basic syntax is:
+  ```bash
+prmers <p> [options]
+  ```
+for example 
+  ```bash
+prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
+  ```
+
+## Command-Line Options
+<p>: Minimum exponent to test (required)
+-d <device_id>: Specify the OpenCL device ID (default: 0)
+-O <options>: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
+-c <localCarryPropagationDepth>: Set the local carry propagation depth (default: 8)
+-profile: Enable kernel execution profiling
+-prp: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
+-ll: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
+-t <backup_interval>: Specify the backup interval in seconds (default: 60)
+-f <path>: Specify the directory path for saving/loading backup files (default: current directory)
+
+## Another option for manual compilation
 To compile:
 
 ```bash
