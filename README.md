@@ -5,7 +5,7 @@ PrMers is a high-performance application that uses OpenCL, Number Theoretic Tran
 ## Features
 
 - GPU-accelerated Mersenne prime testing using OpenCL
-- Implementation of NTT and Lucas–Lehmer algorithms
+- Implementation of NTT / Lucas–Lehmer algorithms / PRP / IBDWT
 - Automatic backup of computation state with resume support
 - Command-line options for performance tuning and debugging
 
