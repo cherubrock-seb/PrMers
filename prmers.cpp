@@ -20,7 +20,7 @@
  *
  * This code is released as free software.
  */
- #include <CL/cl.h>
+#include <CL/cl.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -68,6 +68,15 @@ uint64_t mulModP(uint64_t a, uint64_t b) {
         r -= MOD_P;
     return r;
 }
+// Add a carry onto the number and return the carry of the first digit_width bits
+	uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry)
+	{
+		const uint64_t s = lhs + carry;
+		const uint64_t c =  s < lhs;
+		carry = (s >> digit_width) + (c << (64 - digit_width));
+		return s & ((uint64_t(1) << digit_width) - 1);
+	}
+
 
 uint64_t powModP(uint64_t base, uint64_t exp) {
     uint64_t result = 1ULL;
@@ -386,6 +395,25 @@ void printVector2(const std::vector<uint64_t>& vec, const std::string& name) {
     }
     std::cout << "]" << std::endl;
 }
+
+void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_width_cpu, size_t n) {
+    x[0] += 1;
+    uint64_t c = 0;
+    
+    for (size_t k = 0; k < n; ++k) {
+        x[k] = digit_adc(x[k], digit_width_cpu[k], c);
+    }
+
+    while (c != 0) {
+        for (size_t k = 0; k < n; ++k) {
+            x[k] = digit_adc(x[k], digit_width_cpu[k], c);
+            if (c == 0) break;
+        }
+    }
+
+    x[0] -= 1;
+}
+
 // -----------------------------------------------------------------------------
 // Main function
 // -----------------------------------------------------------------------------
@@ -757,19 +785,22 @@ int main(int argc, char** argv) {
         executeFusionneNTT_Forward(queue, k_forward_ntt, buf_x, buf_twiddles, n, workers, localSize, profiling);
         executeKernelAndDisplay(queue, k_square, buf_x, workers, localSize, "kernel_square", n, profiling);
         executeFusionneNTT_Inverse(queue, k_inverse_ntt, buf_x, buf_inv_twiddles, n, workers, localSize, profiling);
+
         executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
-        executeKernelAndDisplay(queue, k_carry_3, buf_x, workersCarry, localSizeCarry, "kernel_carry_3", n, profiling);
-        executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
+        executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);        
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
     }
+
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
     clFinish(queue);
     auto endTime = high_resolution_clock::now();
 
     // Read back result from buf_x
     clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+    handleFinalCarry(x, digit_width_cpu, n);
+
     bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
     std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
     
