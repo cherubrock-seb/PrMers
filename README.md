@@ -9,6 +9,7 @@ g++ -std=c++11 -o prmers prmers.cpp -lOpenCL
 
 ## Usage
 Example of execution:
+```bash
 ./prmers 9279 -d 1
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 9279
@@ -21,8 +22,10 @@ Progress: 100.00% | Elapsed: 11.09s | Iterations/sec: 836.78 | ETA: 0.00s
 M9279 is composite.
 Kernel execution time: 11.09 seconds
 Iterations per second: 836.77 (9277 iterations in total)
+```
 
 Or without specifying a device:
+```bash
 ./prmers 216091
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 216091
@@ -32,6 +35,7 @@ Launching OpenCL kernel (p = 216091); computation may take a while depending on 
 Max global workers possible: 256
 Final workers count: 256
 Progress: 0.11% | Elapsed: 4.05s | Iterations/sec: 57.50 | ETA: 3754.28s
+```
 
 ## Output Example
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
