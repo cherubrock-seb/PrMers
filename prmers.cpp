@@ -1,4 +1,7 @@
 #define CL_TARGET_OPENCL_VERSION 200
+#ifndef KERNEL_PATH
+#define KERNEL_PATH ""
+#endif
 /*
  * Mersenne OpenCL Primality Test Host Code
  *
@@ -351,7 +354,7 @@ void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) 
 }
 
 
-void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters,
+void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
                              time_point<high_resolution_clock>& lastDisplay,
                              const time_point<high_resolution_clock>& start,
                              cl_command_queue queue) {
@@ -516,6 +519,9 @@ int main(int argc, char** argv) {
             p = std::atoi(argv[i]);
         }
     }
+    if(p<13){
+        mode = "ll";
+    }
     bool profiling = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-profile") == 0)
@@ -574,7 +580,8 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------------
     std::string kernelSource;
     try {
-        kernelSource = readFile("prmers.cl");
+        std::string kernelFile = std::string(KERNEL_PATH) + "prmers.cl";
+        kernelSource = readFile(kernelFile);
     } catch(const std::exception &e) {
         std::cerr << e.what() << std::endl;
         clReleaseCommandQueue(queue);
@@ -679,7 +686,6 @@ int main(int argc, char** argv) {
     std::cout << "Local size carry: " <<  localSizeCarry << std::endl;
     
     size_t workGroupSize = ((workers < localSize) ? 1 : (workers / localSize));
-    int groupSize = static_cast<int>(workGroupSize);
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
     build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) ;
@@ -867,7 +873,6 @@ int main(int argc, char** argv) {
     auto last_backup_time = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
     
-    cl_uint flag_value = 0;
 
     // Main loop now starts from resume_iter (if any) to total_iters.
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {

@@ -1,12 +1,12 @@
-# Chemin d'installation (modifiable via "make install PREFIX=/mon/chemin")
+# Installation path (modifiable via "make install PREFIX=/your/path")
 PREFIX ?= /usr/local
 
-# Compilateur et options de compilation
+# Compiler and compilation options
 CXX = g++
 CXXFLAGS = -std=c++11 -O2 -Wall
 LDFLAGS = -lOpenCL
 
-# Nom de l'exécutable et fichiers sources
+# Target executable and source/kernel files
 TARGET = prmers
 SRC = prmers.cpp
 KERNEL = prmers.cl
@@ -14,25 +14,24 @@ KERNEL = prmers.cl
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -DKERNEL_PATH="\"$(PREFIX)/share/$(TARGET)/\"" -o $(TARGET) $(SRC) $(LDFLAGS)
 
 install: $(TARGET)
-	@echo "Installation de $(TARGET)..."
+	@echo "Installing $(TARGET)..."
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
 	install -d $(DESTDIR)$(PREFIX)/share/$(TARGET)
 	install -m 644 $(KERNEL) $(DESTDIR)$(PREFIX)/share/$(TARGET)
-	@echo "$(TARGET) installé dans $(PREFIX)/bin"
-	@echo "Kernel installé dans $(PREFIX)/share/$(TARGET)"
+	@echo "$(TARGET) installed in $(PREFIX)/bin"
+	@echo "Kernel installed in $(PREFIX)/share/$(TARGET)"
 
 uninstall:
-	@echo "Désinstallation de $(TARGET)..."
+	@echo "Uninstalling $(TARGET)..."
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -rf $(DESTDIR)$(PREFIX)/share/$(TARGET)
-	@echo "$(TARGET) a été désinstallé."
+	@echo "$(TARGET) has been uninstalled."
 
 clean:
 	rm -f $(TARGET)
 
 .PHONY: all install uninstall clean
-
