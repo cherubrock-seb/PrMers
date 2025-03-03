@@ -69,14 +69,13 @@ uint64_t mulModP(uint64_t a, uint64_t b) {
     return r;
 }
 // Add a carry onto the number and return the carry of the first digit_width bits
-	uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry)
-	{
-		const uint64_t s = lhs + carry;
-		const uint64_t c =  s < lhs;
-		carry = (s >> digit_width) + (c << (64 - digit_width));
-		return s & ((uint64_t(1) << digit_width) - 1);
-	}
-
+uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry)
+{
+    const uint64_t s = lhs + carry;
+    const uint64_t c =  s < lhs;
+    carry = (s >> digit_width) + (c << (64 - digit_width));
+    return s & ((uint64_t(1) << digit_width) - 1);
+}
 
 uint64_t powModP(uint64_t base, uint64_t exp) {
     uint64_t result = 1ULL;
@@ -167,16 +166,18 @@ std::string readFile(const std::string &filename) {
 }
 
 // -----------------------------------------------------------------------------
-// Usage printing helper
+// Usage printing helper (updated with new mode options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile]" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll]" << std::endl;
     std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
     std::cout << "  -c <localCarryPropagationDepth>: (Optional) Set local carry propagation depth (default: 8)." << std::endl;
     std::cout << "  -profile      : (Optional) Enable kernel execution profiling." << std::endl;
-    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile" << std::endl;
+    std::cout << "  -prp          : (Optional) Run in PRP mode (default). Set initial value to 3 and perform p iterations without executing kernel_sub2; final result must equal 9." << std::endl;
+    std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
+    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll" << std::endl;
 }
 
 // -----------------------------------------------------------------------------
@@ -426,6 +427,7 @@ int main(int argc, char** argv) {
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
     size_t localCarryPropagationDepth = 8;
+    std::string mode = "prp"; // Default mode is PRP
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
             debug = true;
@@ -451,7 +453,14 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
+        else if (std::strcmp(argv[i], "-prp") == 0) {
+            mode = "prp";
+        }
+        else if (std::strcmp(argv[i], "-ll") == 0) {
+            mode = "ll";
+        }
         else {
+            // Assume this argument is the exponent p if it does not match any flag.
             p = std::atoi(argv[i]);
         }
     }
@@ -466,6 +475,7 @@ int main(int argc, char** argv) {
     std::cout << "PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)" << std::endl;
     std::cout << "Testing exponent: " << p << std::endl;
     std::cout << "Using OpenCL device ID: " << device_id << std::endl;
+    std::cout << "Mode selected: " << (mode == "prp" ? "PRP" : "Lucas-Lehmer") << std::endl;
 
     // -------------------------------------------------------------------------
     // Platform, Device, Context, and Command Queue Setup
@@ -667,7 +677,11 @@ int main(int argc, char** argv) {
     std::vector<uint64_t> x(n, 0ULL);
     std::vector<uint64_t> block_carry_init(workersCarry, 0ULL);
     std::vector<uint64_t> block_carry_init_out(workersCarry, 0ULL);
-    x[0] = 4ULL;
+    // Set initial value based on mode: 3 for PRP, 4 for Lucas-Lehmer (LL)
+    if (mode == "prp")
+        x[0] = 3ULL;
+    else
+        x[0] = 4ULL;
     cl_mem buf_x = createBuffer(context,
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
         n * sizeof(uint64_t),
@@ -737,7 +751,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error setting arguments for kernel_sub2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
     }
-    //kernel_carry
+    // kernel_carry
     errKernel  = clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_block_carry);
     errKernel |= clSetKernelArg(k_carry, 2, sizeof(cl_mem), &buf_digit_width);
@@ -747,7 +761,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error setting arguments for carry: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
     }
-    //kernel_carry_2
+    // kernel_carry_2
     errKernel  = clSetKernelArg(k_carry_2, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry_2, 1, sizeof(cl_mem), &buf_block_carry);
     errKernel |= clSetKernelArg(k_carry_2, 2, sizeof(cl_mem), &buf_block_carry_out);
@@ -758,7 +772,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error setting arguments for carry 2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
     }
-    //kernel_carry_3
+    // kernel_carry_3
     errKernel  = clSetKernelArg(k_carry_3, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry_3, 1, sizeof(cl_mem), &buf_block_carry_out);
     errKernel |= clSetKernelArg(k_carry_3, 2, sizeof(cl_mem), &flagBuffer);
@@ -768,12 +782,15 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-
-
     // -------------------------------------------------------------------------
     // Main Computation Loop
     // -------------------------------------------------------------------------
-    uint32_t total_iters = p - 2;
+    uint32_t total_iters;
+    if (mode == "prp") {
+        total_iters = p;  // For PRP mode, execute p iterations.
+    } else {
+        total_iters = p - 2;  // For Lucas-Lehmer mode, execute p-2 iterations.
+    }
     auto startTime = high_resolution_clock::now();
     auto lastDisplay = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
@@ -789,7 +806,10 @@ int main(int argc, char** argv) {
         executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
-        executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);        
+        // In Lucas-Lehmer mode, execute kernel_sub2; in PRP mode, skip it.
+        if (mode == "ll") {
+            executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
+        }
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
     }
 
@@ -801,8 +821,14 @@ int main(int argc, char** argv) {
     clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
     handleFinalCarry(x, digit_width_cpu, n);
 
-    bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
-    std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
+    if (mode == "prp") {
+        // In PRP mode, check that the result is exactly 9 (x[0]==9 and all other digits are 0)
+        bool resultIs9 = (x[0] == 9) && std::all_of(x.begin() + 1, x.end(), [](uint64_t v){ return v == 0; });
+        std::cout << "\nM" << p << " PRP test " << (resultIs9 ? "succeeded (result is 9)." : "failed (result is not 9).") << std::endl;
+    } else {
+        bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
+        std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
+    }
     
     std::chrono::duration<double> elapsed = endTime - startTime;
     double elapsedTime = elapsed.count();
