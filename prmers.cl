@@ -160,13 +160,12 @@ __kernel void kernel_carry_2(__global ulong* x,
                                      )
 {
         ulong start = get_global_id(0)*LOCAL_PROPAGATION_DEPTH;
-        ulong carry = carry_array[start == 0 ? CARRY_WORKER -1 : (get_global_id(0) - 1) ];
-        for (ulong i = start; i < (start + LOCAL_PROPAGATION_DEPTH); i++) {
+//        ulong carry = carry_array[start == 0 ? CARRY_WORKER -1 : (get_global_id(0) - 1) ];
+        ulong carry = carry_array[start == 0 ? get_global_size(0) -1 : (get_global_id(0) - 1)];
+        for (ulong i = start; i < (start + LOCAL_PROPAGATION_DEPTH -1); i++) {
             x[i] = digit_adc(x[i], digit_width[i], &carry);
         }
-        
-        carry_array_out[get_global_id(0)] = carry;
-        //printf("Final carry step 2 Thread %ul = %ul",start, carry);
+        x[(start + LOCAL_PROPAGATION_DEPTH -1)] += carry;
 }
 
 __kernel void kernel_carry_3(__global ulong* x,
