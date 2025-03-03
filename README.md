@@ -77,19 +77,22 @@ sudo apt-get update
 # Install OpenCL development packages and tools
 sudo apt-get install ocl-icd-opencl-dev opencl-headers clinfo
 
-## For NVIDIA GPUs 
-# Install the proprietary NVIDIA driver (adjust version as needed) along with its OpenCL ICD.
+For NVIDIA GPUs 
+Install the proprietary NVIDIA driver (adjust version as needed) along with its OpenCL ICD.
+
 sudo apt-get install nvidia-driver-525 nvidia-opencl-icd-525
 
-## For AMD GPUs 
-# Download the AMDGPU-PRO driver package from AMD's website.
-# Then install it with OpenCL support using the following command (run in the extracted directory):
+For AMD GPUs 
+Download the AMDGPU-PRO driver package from AMD's website.
+Then install it with OpenCL support using the following command (run in the extracted directory):
+
 ./amdgpu-pro-install -y --opencl=pal,legacy
 
-## For Intel GPUs 
+For Intel GPUs 
+
 sudo apt-get install intel-opencl-icd
 
-# Verify your OpenCL installation by running:
+Verify your OpenCL installation by running:
 clinfo
 
 
