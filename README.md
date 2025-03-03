@@ -54,6 +54,19 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 -t <backup_interval>: Specify the backup interval in seconds (default: 60)
 -f <path>: Specify the directory path for saving/loading backup files (default: current directory)
 
+## Uninstallation
+To uninstall PrMers, run:
+```bash
+sudo make uninstall
+```
+
+## Cleaning Up
+To remove compiled files from the build directory, run:
+
+```bash
+make clean
+```
+
 ## Another option for manual compilation
 To compile:
 
