@@ -20,6 +20,7 @@
  *
  * This code is released as free software.
  */
+
 #include <CL/cl.h>
 #include <iostream>
 #include <fstream>
@@ -34,11 +35,25 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <csignal>
+#include <cstdio>    // For std::remove
+
+// Global variables for backup functionality
+volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
+unsigned int backup_interval = 60; // Default backup interval in seconds
+std::string save_path = ".";       // Default save/load directory (current directory)
+
+// Signal handler for SIGINT (Ctrl-C)
+void signalHandler(int signum) {
+    g_interrupt_flag = 1;
+}
 
 #define COLOR_GREEN "\033[32m"
 #define COLOR_YELLOW "\033[33m"
 #define COLOR_RED "\033[31m"
 #define COLOR_RESET "\033[0m"
+#define COLOR_MAGENTA "\033[35m"
+
 
 using namespace std::chrono;
 
@@ -166,10 +181,10 @@ std::string readFile(const std::string &filename) {
 }
 
 // -----------------------------------------------------------------------------
-// Usage printing helper (updated with new mode options)
+// Usage printing helper (updated with new backup and path options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll]" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
@@ -177,7 +192,9 @@ void printUsage(const char* progName) {
     std::cout << "  -profile      : (Optional) Enable kernel execution profiling." << std::endl;
     std::cout << "  -prp          : (Optional) Run in PRP mode (default). Set initial value to 3 and perform p iterations without executing kernel_sub2; final result must equal 9." << std::endl;
     std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
-    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll" << std::endl;
+    std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 60)." << std::endl;
+    std::cout << "  -f <path>           : (Optional) Specify path for saving/loading files (default: current directory)." << std::endl;
+    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path" << std::endl;
 }
 
 // -----------------------------------------------------------------------------
@@ -321,6 +338,19 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
               << COLOR_RESET << std::flush;
 }
 
+void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) {
+    double progress = (100.0 * iter) / total_iters;
+    double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
+    double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
+    std::cout << "\r" << COLOR_MAGENTA
+              << "[Backup] Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
+              << "Elapsed: " << elapsedTime << "s | "
+              << "Iterations/sec: " << iters_per_sec << " | "
+              << "ETA: " << (remaining_time > 0 ? remaining_time : 0.0) << "s       "
+              << COLOR_RESET << std::flush;
+}
+
+
 void checkAndDisplayProgress(uint32_t iter, uint32_t total_iters,
                              time_point<high_resolution_clock>& lastDisplay,
                              const time_point<high_resolution_clock>& start,
@@ -419,6 +449,9 @@ void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_wi
 // Main function
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    // Set the signal handler for SIGINT (Ctrl-C)
+    std::signal(SIGINT, signalHandler);
+
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
@@ -428,6 +461,7 @@ int main(int argc, char** argv) {
     int device_id = 0;  // Default device ID
     size_t localCarryPropagationDepth = 8;
     std::string mode = "prp"; // Default mode is PRP
+    // Parse command-line options (including new -t and -f)
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
             debug = true;
@@ -459,6 +493,24 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "-ll") == 0) {
             mode = "ll";
         }
+        else if (std::strcmp(argv[i], "-t") == 0) {
+            if (i + 1 < argc) {
+                backup_interval = std::atoi(argv[i+1]);
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -t <backup_interval>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-f") == 0) {
+            if (i + 1 < argc) {
+                save_path = argv[i+1];
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -f <path>." << std::endl;
+                return 1;
+            }
+        }
         else {
             // Assume this argument is the exponent p if it does not match any flag.
             p = std::atoi(argv[i]);
@@ -476,6 +528,8 @@ int main(int argc, char** argv) {
     std::cout << "Testing exponent: " << p << std::endl;
     std::cout << "Using OpenCL device ID: " << device_id << std::endl;
     std::cout << "Mode selected: " << (mode == "prp" ? "PRP" : "Lucas-Lehmer") << std::endl;
+    std::cout << "Backup interval: " << backup_interval << " seconds" << std::endl;
+    std::cout << "Save/Load path: " << save_path << std::endl;
 
     // -------------------------------------------------------------------------
     // Platform, Device, Context, and Command Queue Setup
@@ -608,8 +662,6 @@ int main(int argc, char** argv) {
             workersCarry = workers / localCarryPropagationDepth;
             localCarryPropagationDepth *= 2;
         }
-        
-             
     }
     if (workersCarry<=1){
         workersCarry = 1;
@@ -674,19 +726,37 @@ int main(int argc, char** argv) {
         inv_twiddles.size() * sizeof(uint64_t),
         (void*)inv_twiddles.data(), "buf_inv_twiddles");
 
+    // Initialize vector x for state; later used to create buf_x.
     std::vector<uint64_t> x(n, 0ULL);
+    // Check for existing state files to resume computation.
+    unsigned int resume_iter = 0;
+    std::string mers_filename = save_path + "/" + std::to_string(p) + mode + ".mers";
+    std::string loop_filename = save_path + "/" + std::to_string(p) + mode + ".loop";
+    std::ifstream loopFile(loop_filename);
+    if(loopFile) {
+        loopFile >> resume_iter;
+        loopFile.close();
+        std::cout << "Resuming from iteration " << resume_iter << " based on existing file " << loop_filename << std::endl;
+        std::ifstream mersFile(mers_filename, std::ios::binary);
+        if(mersFile) {
+             mersFile.read(reinterpret_cast<char*>(x.data()), n * sizeof(uint64_t));
+             mersFile.close();
+             std::cout << "Loaded state from " << mers_filename << std::endl;
+        }
+    } else {
+        // Initialize x based on mode: 3 for PRP, 4 for Lucas-Lehmer (LL)
+        if (mode == "prp")
+            x[0] = 3ULL;
+        else
+            x[0] = 4ULL;
+    }
+
     std::vector<uint64_t> block_carry_init(workersCarry, 0ULL);
     std::vector<uint64_t> block_carry_init_out(workersCarry, 0ULL);
-    // Set initial value based on mode: 3 for PRP, 4 for Lucas-Lehmer (LL)
-    if (mode == "prp")
-        x[0] = 3ULL;
-    else
-        x[0] = 4ULL;
     cl_mem buf_x = createBuffer(context,
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
         n * sizeof(uint64_t),
         x.data(), "buf_x");
-
 
     cl_mem buf_block_carry = createBuffer(context,
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
@@ -791,13 +861,16 @@ int main(int argc, char** argv) {
     } else {
         total_iters = p - 2;  // For Lucas-Lehmer mode, execute p-2 iterations.
     }
+    // Adjust loop start if resuming from a saved state.
     auto startTime = high_resolution_clock::now();
     auto lastDisplay = startTime;
+    auto last_backup_time = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
     
     cl_uint flag_value = 0;
 
-    for (uint32_t iter = 0; iter < total_iters; iter++) {
+    // Main loop now starts from resume_iter (if any) to total_iters.
+    for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue, k_forward_ntt, buf_x, buf_twiddles, n, workers, localSize, profiling);
         executeKernelAndDisplay(queue, k_square, buf_x, workers, localSize, "kernel_square", n, profiling);
@@ -811,7 +884,66 @@ int main(int argc, char** argv) {
             executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
         }
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
+
+        // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
+        auto now = high_resolution_clock::now();
+        if(duration_cast<seconds>(now - last_backup_time).count() >= backup_interval || g_interrupt_flag) {
+            clFinish(queue);
+            // Read back buf_x from GPU
+            clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+            // Save buf_x state to file (binary file)
+            std::ofstream mersOut(mers_filename, std::ios::binary);
+            if(mersOut) {
+                mersOut.write(reinterpret_cast<const char*>(x.data()), n * sizeof(uint64_t));
+                mersOut.close();
+                std::cout << "\nState saved to " << mers_filename << std::endl;
+            } else {
+                std::cerr << "\nError saving state to " << mers_filename << std::endl;
+            }
+            // Save current iteration state to file (text file)
+            std::ofstream loopOut(loop_filename);
+            if(loopOut) {
+                loopOut << (iter + 1);
+                loopOut.close();
+                std::cout << "Loop iteration saved to " << loop_filename << std::endl;
+            } else {
+                std::cerr << "Error saving loop state to " << loop_filename << std::endl;
+            }
+            last_backup_time = now;
+            double backup_elapsed = duration_cast<nanoseconds>(now - startTime).count() / 1e9;
+            displayBackupInfo(iter, total_iters, backup_elapsed);
+
+            // If interrupted by SIGINT, exit gracefully after saving state.
+            // If interrupted, exit early after cleanup.
+            if (g_interrupt_flag) {
+                std::cout << "Exiting early due to interrupt." << std::endl;
+                // Perform cleanup and release resources:
+                clReleaseMemObject(buf_x);
+                clReleaseMemObject(buf_twiddles);
+                clReleaseMemObject(buf_inv_twiddles);
+                clReleaseMemObject(buf_digit_weight);
+                clReleaseMemObject(buf_digit_invweight);
+                clReleaseMemObject(buf_digit_width);
+                clReleaseMemObject(buf_block_carry);
+                clReleaseMemObject(buf_block_carry_out);
+                clReleaseKernel(k_precomp);
+                clReleaseKernel(k_postcomp);
+                clReleaseKernel(k_forward_ntt);
+                clReleaseKernel(k_inverse_ntt);
+                clReleaseKernel(k_square);
+                clReleaseKernel(k_sub2);
+                clReleaseKernel(k_carry);
+                clReleaseKernel(k_carry_2);
+                clReleaseKernel(k_carry_3);
+                clReleaseProgram(program);
+                clReleaseCommandQueue(queue);
+                clReleaseContext(context);
+                return 0;
+            }
+        }
     }
+    // After successful completion, remove the loop state file as it is no longer needed.
+    std::remove(loop_filename.c_str());
 
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
     clFinish(queue);
