@@ -51,7 +51,7 @@ Mp with p = 13 is a Mersenne prime.
 Kernel execution time: 0.00150793 seconds
 Iterations per second: 7294.76 (11 iterations in total)
  ```
- 
+
 ## New Features
 
 - **Modes:**
@@ -212,10 +212,3 @@ Iterations per second: 7294.76 (11 iterations in total)
 - GPUOwl: https://github.com/preda/gpuowl
 
 **Author:** Cherubrock
-
-## Compilation
-To compile:
-```bash
-g++ -std=c++11 -o prmers prmers.cpp -lOpenCL
-'''
-## Usage
