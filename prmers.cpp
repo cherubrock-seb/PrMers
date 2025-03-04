@@ -333,12 +333,20 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
         color = COLOR_YELLOW;
     else
         color = COLOR_GREEN;
+    uint32_t seconds = static_cast<uint32_t>(remaining_time);
+    uint32_t days = seconds / (24 * 3600);
+    seconds %= (24 * 3600);
+    uint32_t hours = seconds / 3600;
+    seconds %= 3600;
+    uint32_t minutes = seconds / 60;
+    seconds %= 60;
+
     std::cout << "\r" << color
-              << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
-              << "Elapsed: " << elapsedTime << "s | "
-              << "Iterations/sec: " << iters_per_sec << " | "
-              << "ETA: " << (remaining_time > 0 ? remaining_time : 0.0) << "s       "
-              << COLOR_RESET << std::flush;
+            << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
+            << "Elapsed: " << elapsedTime << "s | "
+            << "Iterations/sec: " << iters_per_sec << " | "
+            << "ETA: " << days << "j " << hours << "h " << minutes << "m " << seconds << "s       "
+            << COLOR_RESET << std::flush;
 }
 
 void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) {
