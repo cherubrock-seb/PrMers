@@ -438,6 +438,154 @@ __kernel void kernel_inverse_ntt_radix4_alt(__global ulong* restrict x,
     }
 }
 
+__kernel void kernel_ntt_radix4_last(__global ulong* restrict x,
+                                     __global ulong* restrict w,
+                                     const ulong n,
+                                     const ulong m,
+                                     __local ulong* local_w) {
+    // Preload twiddle factors into local memory.
+    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong T = 3 * m;
+    const uint lid = get_local_id(0);
+    const uint lsize = get_local_size(0);
+    for (ulong i = lid; i < T; i += lsize) {
+        local_w[i] = w[twiddle_offset + i];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
+    if (m == 1) {
+        // Contiguous case: vector load/store.
+        ulong4 coeff = vload4(0, x + 4 * k);
+        const ulong w2  = local_w[0];
+        const ulong w1  = local_w[1];
+        const ulong w12 = local_w[2];
+
+        ulong u0 = coeff.s0;
+        ulong u1 = coeff.s1;
+        ulong u2 = coeff.s2;
+        ulong u3 = coeff.s3;
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
+        ulong4 result = (ulong4)( Add(v0, v1),
+                                  modMul(Sub(v0, v1), w1),
+                                  modMul(Add(v2, v3), w2),
+                                  modMul(Sub(v2, v3), w12) );
+        // Fused square: square each component.
+        result.s0 = modMul(result.s0, result.s0);
+        result.s1 = modMul(result.s1, result.s1);
+        result.s2 = modMul(result.s2, result.s2);
+        result.s3 = modMul(result.s3, result.s3);
+        vstore4(result, 0, x + 4 * k);
+    } else {
+        // Non-contiguous case.
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        // Load twiddle factors from local memory.
+        const ulong w2  = local_w[3 * j + 0];
+        const ulong w1  = local_w[3 * j + 1];
+        const ulong w12 = local_w[3 * j + 2];
+
+        ulong u0 = x[i + 0 * m];
+        ulong u1 = x[i + 1 * m];
+        ulong u2 = x[i + 2 * m];
+        ulong u3 = x[i + 3 * m];
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
+        // Compute results and fuse with square.
+        ulong r0 = Add(v0, v1);
+        ulong r1 = modMul(Sub(v0, v1), w1);
+        ulong r2 = modMul(Add(v2, v3), w2);
+        ulong r3 = modMul(Sub(v2, v3), w12);
+
+        // Square each result before storing.
+        x[i + 0 * m] = modMul(r0, r0);
+        x[i + 1 * m] = modMul(r1, r1);
+        x[i + 2 * m] = modMul(r2, r2);
+        x[i + 3 * m] = modMul(r3, r3);
+    }
+}
+
+__kernel void kernel_ntt_radix4_last_alt(__global ulong* restrict x,
+                                         __global ulong* restrict w,
+                                         const ulong n,
+                                         const ulong m) {
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
+    // Base offset for twiddle factors in global memory.
+    const ulong twiddle_offset = 3 * 2 * m;
+    
+    if (m == 1) {
+        ulong4 coeff = vload4(0, x + 4 * k);
+        const __global ulong* wm = w + twiddle_offset;
+        const ulong w2  = wm[0];
+        const ulong w1  = wm[1];
+        const ulong w12 = wm[2];
+
+        ulong u0 = coeff.s0;
+        ulong u1 = coeff.s1;
+        ulong u2 = coeff.s2;
+        ulong u3 = coeff.s3;
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
+        ulong4 result = (ulong4)( Add(v0, v1),
+                                  modMul(Sub(v0, v1), w1),
+                                  modMul(Add(v2, v3), w2),
+                                  modMul(Sub(v2, v3), w12) );
+        // Fused square.
+        result.s0 = modMul(result.s0, result.s0);
+        result.s1 = modMul(result.s1, result.s1);
+        result.s2 = modMul(result.s2, result.s2);
+        result.s3 = modMul(result.s3, result.s3);
+        vstore4(result, 0, x + 4 * k);
+    } else {
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        const __global ulong* wm = w + twiddle_offset;
+
+        const ulong w2  = wm[3 * j + 0];
+        const ulong w1  = wm[3 * j + 1];
+        const ulong w12 = wm[3 * j + 2];
+
+        ulong u0 = x[i + 0 * m];
+        ulong u1 = x[i + 1 * m];
+        ulong u2 = x[i + 2 * m];
+        ulong u3 = x[i + 3 * m];
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
+        ulong r0 = Add(v0, v1);
+        ulong r1 = modMul(Sub(v0, v1), w1);
+        ulong r2 = modMul(Add(v2, v3), w2);
+        ulong r3 = modMul(Sub(v2, v3), w12);
+
+        // Fused square: square each computed digit.
+        x[i + 0 * m] = modMul(r0, r0);
+        x[i + 1 * m] = modMul(r1, r1);
+        x[i + 2 * m] = modMul(r2, r2);
+        x[i + 3 * m] = modMul(r3, r3);
+    }
+}
+
+
 
 __kernel void kernel_square(__global ulong* restrict x, const ulong n) {
     const size_t gid = get_global_id(0);
