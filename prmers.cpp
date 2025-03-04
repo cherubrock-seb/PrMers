@@ -43,7 +43,7 @@
 
 // Global variables for backup functionality
 volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
-unsigned int backup_interval = 60; // Default backup interval in seconds
+unsigned int backup_interval = 120; // Default backup interval in seconds
 std::string save_path = ".";       // Default save/load directory (current directory)
 
 // Signal handler for SIGINT (Ctrl-C)
@@ -195,7 +195,7 @@ void printUsage(const char* progName) {
     std::cout << "  -profile      : (Optional) Enable kernel execution profiling." << std::endl;
     std::cout << "  -prp          : (Optional) Run in PRP mode (default). Set initial value to 3 and perform p iterations without executing kernel_sub2; final result must equal 9." << std::endl;
     std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
-    std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 60)." << std::endl;
+    std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 120)." << std::endl;
     std::cout << "  -f <path>           : (Optional) Specify path for saving/loading files (default: current directory)." << std::endl;
     std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path" << std::endl;
 }
@@ -465,9 +465,13 @@ int main(int argc, char** argv) {
     size_t localCarryPropagationDepth = 8;
     std::string mode = "prp"; // Default mode is PRP
     // Parse command-line options (including new -t and -f)
+    bool profiling = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
             debug = true;
+        else if (std::strcmp(argv[i], "-profile") == 0) {
+            profiling = true;
+        }
         else if (std::strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
@@ -522,11 +526,7 @@ int main(int argc, char** argv) {
     if(p<13){
         mode = "ll";
     }
-    bool profiling = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "-profile") == 0)
-            profiling = true;
-    }
+   
     if (profiling)
         std::cout << "\n🔍 Kernel profiling is activated. Performance metrics will be displayed.\n" << std::endl;
 
@@ -789,7 +789,6 @@ int main(int argc, char** argv) {
     cl_kernel k_sub2 = createKernel(program, "kernel_sub2");
     cl_kernel k_carry = createKernel(program, "kernel_carry");
     cl_kernel k_carry_2 = createKernel(program, "kernel_carry_2");
-    cl_kernel k_carry_3 = createKernel(program, "kernel_carry_3");
 
 
     // --------------------
@@ -848,15 +847,7 @@ int main(int argc, char** argv) {
         std::cerr << "Error setting arguments for carry 2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
     }
-    // kernel_carry_3
-    errKernel  = clSetKernelArg(k_carry_3, 0, sizeof(cl_mem), &buf_x);
-    errKernel |= clSetKernelArg(k_carry_3, 1, sizeof(cl_mem), &buf_block_carry_out);
-    errKernel |= clSetKernelArg(k_carry_3, 2, sizeof(cl_mem), &flagBuffer);
 
-    if (errKernel != CL_SUCCESS) {
-        std::cerr << "Error setting arguments for carry 3: " << getCLErrorString(errKernel) << std::endl;
-        exit(1);
-    }
 
     // -------------------------------------------------------------------------
     // Main Computation Loop
@@ -939,7 +930,6 @@ int main(int argc, char** argv) {
                 clReleaseKernel(k_sub2);
                 clReleaseKernel(k_carry);
                 clReleaseKernel(k_carry_2);
-                clReleaseKernel(k_carry_3);
                 clReleaseProgram(program);
                 clReleaseCommandQueue(queue);
                 clReleaseContext(context);
@@ -993,7 +983,6 @@ int main(int argc, char** argv) {
     clReleaseKernel(k_sub2);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_carry_2);
-    clReleaseKernel(k_carry_3);
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
