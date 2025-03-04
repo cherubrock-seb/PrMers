@@ -181,68 +181,127 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 __kernel void kernel_ntt_radix4(__global ulong* restrict x,
                                 __global ulong* restrict w,
                                 const ulong n,
-                                const ulong m) {
-    const ulong k = get_global_id(0);
+                                const ulong m,
+                                __local ulong* local_w) {
+    // Préchargement des twiddle factors dans la mémoire locale.
+    // On charge les 3*m éléments situés à l'offset 3*2*m dans w.
+    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong T = 3 * m;  // Nombre d'éléments à charger.
+    const uint lid = get_local_id(0);
+    const uint lsize = get_local_size(0);
+    for (ulong i = lid; i < T; i += lsize) {
+        local_w[i] = w[twiddle_offset + i];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Contiguous case: if m == 1, the data is stored contiguously and vector loading can be used
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
+    // Cas contigu (m == 1) : utilisation de vload4/vstore4.
     if (m == 1) {
-        // Vector loading of the 4 coefficients
         ulong4 coeff = vload4(0, x + 4 * k);
-        
-        // wm points to the twiddle factor table, in read-only mode via "restrict"
-        const __global ulong* restrict wm = w + (3 * 2 * m);
-        
-        // For j == 0, directly retrieve the factors
-        const ulong w2  = wm[0];
-        const ulong w1  = wm[1];
-        const ulong w12 = wm[2];
-        
-        // Extract coefficients
+        // Utilisation des facteurs chargés en mémoire locale.
+        const ulong w2  = local_w[0];
+        const ulong w1  = local_w[1];
+        const ulong w12 = local_w[2];
+
         ulong u0 = coeff.s0;
         ulong u1 = coeff.s1;
         ulong u2 = coeff.s2;
         ulong u3 = coeff.s3;
-        
-        // Perform butterfly transformation
+
         ulong v0 = Add(u0, u2);
         ulong v1 = Add(u1, u3);
         ulong v2 = Sub(u0, u2);
         ulong v3 = modMuli(Sub(u1, u3));
-        
-        // Calculate the results
+
         ulong4 result = (ulong4)( Add(v0, v1),
                                   modMul(Sub(v0, v1), w1),
                                   modMul(Add(v2, v3), w2),
                                   modMul(Sub(v2, v3), w12) );
-        
-        // Vector store of the result
         vstore4(result, 0, x + 4 * k);
     } else {
-        // Compute indices to access non-contiguous coefficients
+        // Cas non contigu : indices calculés en fonction de j.
         const ulong j = k & (m - 1);
         const ulong i = 4 * (k - j) + j;
-        
-        // Declare wm with restrict to optimize access
-        __global ulong* restrict wm = w + (3 * 2 * m);
-        
-        // Load twiddle factors for index j
-        const ulong w2  = wm[3 * j + 0];
-        const ulong w1  = wm[3 * j + 1];
-        const ulong w12 = wm[3 * j + 2];
-        
-        // Individual loading of coefficients
+
+        // Utilisation des twiddle factors depuis la mémoire locale.
+        const ulong w2  = local_w[3 * j + 0];
+        const ulong w1  = local_w[3 * j + 1];
+        const ulong w12 = local_w[3 * j + 2];
+
         ulong u0 = x[i + 0 * m];
         ulong u1 = x[i + 1 * m];
         ulong u2 = x[i + 2 * m];
         ulong u3 = x[i + 3 * m];
-        
-        // Perform radix-4 transformation
+
         ulong v0 = Add(u0, u2);
         ulong v1 = Add(u1, u3);
         ulong v2 = Sub(u0, u2);
         ulong v3 = modMuli(Sub(u1, u3));
-        
-        // Write the results to global memory
+
+        x[i + 0 * m] = Add(v0, v1);
+        x[i + 1 * m] = modMul(Sub(v0, v1), w1);
+        x[i + 2 * m] = modMul(Add(v2, v3), w2);
+        x[i + 3 * m] = modMul(Sub(v2, v3), w12);
+    }
+}
+
+__kernel void kernel_ntt_radix4_alt(__global ulong* restrict x,
+                                    __global ulong* restrict w,
+                                    const ulong n,
+                                    const ulong m) {
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
+    // Calculate the base offset for twiddle factors in global memory.
+    const ulong twiddle_offset = 3 * 2 * m;
+    
+    if (m == 1) {
+        // When m == 1, coefficients are stored contiguously.
+        ulong4 coeff = vload4(0, x + 4 * k);
+        const __global ulong* wm = w + twiddle_offset;
+        // Use global memory twiddle factors.
+        const ulong w2  = wm[0];
+        const ulong w1  = wm[1];
+        const ulong w12 = wm[2];
+
+        ulong u0 = coeff.s0;
+        ulong u1 = coeff.s1;
+        ulong u2 = coeff.s2;
+        ulong u3 = coeff.s3;
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
+        ulong4 result = (ulong4)( Add(v0, v1),
+                                  modMul(Sub(v0, v1), w1),
+                                  modMul(Add(v2, v3), w2),
+                                  modMul(Sub(v2, v3), w12) );
+        vstore4(result, 0, x + 4 * k);
+    } else {
+        // For non-contiguous data: compute j and index.
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        const __global ulong* wm = w + twiddle_offset;
+
+        // Each work-item fetches its own required twiddle factors from global memory.
+        const ulong w2  = wm[3 * j + 0];
+        const ulong w1  = wm[3 * j + 1];
+        const ulong w12 = wm[3 * j + 2];
+
+        ulong u0 = x[i + 0 * m];
+        ulong u1 = x[i + 1 * m];
+        ulong u2 = x[i + 2 * m];
+        ulong u3 = x[i + 3 * m];
+
+        ulong v0 = Add(u0, u2);
+        ulong v1 = Add(u1, u3);
+        ulong v2 = Sub(u0, u2);
+        ulong v3 = modMuli(Sub(u1, u3));
+
         x[i + 0 * m] = Add(v0, v1);
         x[i + 1 * m] = modMul(Sub(v0, v1), w1);
         x[i + 2 * m] = modMul(Add(v2, v3), w2);
@@ -254,65 +313,63 @@ __kernel void kernel_ntt_radix4(__global ulong* restrict x,
 __kernel void kernel_inverse_ntt_radix4(__global ulong* restrict x,
                                          __global ulong* restrict wi,
                                          const ulong n,
-                                         const ulong m) {
-    const ulong k = get_global_id(0);
+                                         const ulong m,
+                                         __local ulong* local_iw) {
+    // Préchargement des inverse twiddle factors dans la mémoire locale.
+    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong T = 3 * m;
+    const uint lid = get_local_id(0);
+    const uint lsize = get_local_size(0);
+    for (ulong i = lid; i < T; i += lsize) {
+        local_iw[i] = wi[twiddle_offset + i];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Pre-calculate the address of the inverse table (read-only)
-    __global const ulong* restrict invwm = wi + (3 * 2 * m);
-    
-    // If m equals 1, the data is contiguous and vector operations can be used
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
     if (m == 1) {
-        // k & (m-1) is always 0, so coefficients are stored contiguously
         ulong4 coeff = vload4(0, x + 4 * k);
-        
-        const ulong iw2  = invwm[0];
-        const ulong iw1  = invwm[1];
-        const ulong iw12 = invwm[2];
-        
+        const ulong iw2  = local_iw[0];
+        const ulong iw1  = local_iw[1];
+        const ulong iw12 = local_iw[2];
+
         ulong u0 = coeff.s0;
         ulong u1 = modMul(coeff.s1, iw1);
         ulong u2 = modMul(coeff.s2, iw2);
         ulong u3 = modMul(coeff.s3, iw12);
-        
+
         ulong v0 = Add(u0, u1);
         ulong v1 = Sub(u0, u1);
         ulong v2 = Add(u2, u3);
         ulong v3 = modMuli(Sub(u3, u2));
-        
-        // Final computation and write using a vector operation
+
         ulong4 result = (ulong4)(Add(v0, v2), Add(v1, v3),
                                  Sub(v0, v2), Sub(v1, v3));
         vstore4(result, 0, x + 4 * k);
-    }
-    else {
-        // Compute indices for potentially non-contiguous memory access
+    } else {
         const ulong j = k & (m - 1);
         const ulong base = 4 * (k - j) + j;
-        
-        // Individual loading of coefficients
+
         ulong coeff0 = x[base + 0 * m];
         ulong coeff1 = x[base + 1 * m];
         ulong coeff2 = x[base + 2 * m];
         ulong coeff3 = x[base + 3 * m];
-        
-        // Load the "twiddle" factors from the precomputed table
-        const ulong iw2  = invwm[3 * j + 0];
-        const ulong iw1  = invwm[3 * j + 1];
-        const ulong iw12 = invwm[3 * j + 2];
-        
-        // Modular multiplications with inlining (assumed implemented inline)
+
+        const ulong iw2  = local_iw[3 * j + 0];
+        const ulong iw1  = local_iw[3 * j + 1];
+        const ulong iw12 = local_iw[3 * j + 2];
+
         ulong u0 = coeff0;
         ulong u1 = modMul(coeff1, iw1);
         ulong u2 = modMul(coeff2, iw2);
         ulong u3 = modMul(coeff3, iw12);
-        
-        // Butterfly combination
+
         ulong v0 = Add(u0, u1);
         ulong v1 = Sub(u0, u1);
         ulong v2 = Add(u2, u3);
         ulong v3 = modMuli(Sub(u3, u2));
-        
-        // Calculate final coefficients and write to global memory
+
         x[base + 0 * m] = Add(v0, v2);
         x[base + 1 * m] = Add(v1, v3);
         x[base + 2 * m] = Sub(v0, v2);
@@ -320,6 +377,66 @@ __kernel void kernel_inverse_ntt_radix4(__global ulong* restrict x,
     }
 }
 
+__kernel void kernel_inverse_ntt_radix4_alt(__global ulong* restrict x,
+                                             __global ulong* restrict wi,
+                                             const ulong n,
+                                             const ulong m) {
+    const ulong k = get_global_id(0);
+    if (k >= n / 4) return;
+
+    // Base offset for inverse twiddle factors.
+    const ulong twiddle_offset = 3 * 2 * m;
+    
+    if (m == 1) {
+        ulong4 coeff = vload4(0, x + 4 * k);
+        const __global ulong* invwm = wi + twiddle_offset;
+        const ulong iw2  = invwm[0];
+        const ulong iw1  = invwm[1];
+        const ulong iw12 = invwm[2];
+
+        ulong u0 = coeff.s0;
+        ulong u1 = modMul(coeff.s1, iw1);
+        ulong u2 = modMul(coeff.s2, iw2);
+        ulong u3 = modMul(coeff.s3, iw12);
+
+        ulong v0 = Add(u0, u1);
+        ulong v1 = Sub(u0, u1);
+        ulong v2 = Add(u2, u3);
+        ulong v3 = modMuli(Sub(u3, u2));
+
+        ulong4 result = (ulong4)(Add(v0, v2), Add(v1, v3),
+                                 Sub(v0, v2), Sub(v1, v3));
+        vstore4(result, 0, x + 4 * k);
+    } else {
+        const ulong j = k & (m - 1);
+        const ulong base = 4 * (k - j) + j;
+        const __global ulong* invwm = wi + twiddle_offset;
+
+        ulong coeff0 = x[base + 0 * m];
+        ulong coeff1 = x[base + 1 * m];
+        ulong coeff2 = x[base + 2 * m];
+        ulong coeff3 = x[base + 3 * m];
+
+        const ulong iw2  = invwm[3 * j + 0];
+        const ulong iw1  = invwm[3 * j + 1];
+        const ulong iw12 = invwm[3 * j + 2];
+
+        ulong u0 = coeff0;
+        ulong u1 = modMul(coeff1, iw1);
+        ulong u2 = modMul(coeff2, iw2);
+        ulong u3 = modMul(coeff3, iw12);
+
+        ulong v0 = Add(u0, u1);
+        ulong v1 = Sub(u0, u1);
+        ulong v2 = Add(u2, u3);
+        ulong v3 = modMuli(Sub(u3, u2));
+
+        x[base + 0 * m] = Add(v0, v2);
+        x[base + 1 * m] = Add(v1, v3);
+        x[base + 2 * m] = Sub(v0, v2);
+        x[base + 3 * m] = Sub(v1, v3);
+    }
+}
 
 
 __kernel void kernel_square(__global ulong* restrict x, const ulong n) {
