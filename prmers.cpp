@@ -397,32 +397,41 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
     }
     return kernel;
 }
-// Example functions for launching NTT kernels (you already have similar functions)
+
 void executeFusionneNTT_Forward(cl_command_queue queue, cl_kernel kernel_ntt,
                                 cl_mem buf_x, cl_mem buf_w, size_t n,
                                 size_t workers, size_t localSize, bool profiling) {
+    // Set kernel arguments that remain constant across iterations
+    clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+    
+    // Loop over m (only m varies in each iteration)
     for (size_t m = n / 4; m >= 1; m /= 4) {
-        clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
-        clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+        // Update the varying argument m
         clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
         executeKernelAndDisplay(queue, kernel_ntt, buf_x, workers, localSize,
-                                "kernel_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
+                                  "kernel_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
     }
 }
 
 void executeFusionneNTT_Inverse(cl_command_queue queue, cl_kernel kernel_ntt,
                                 cl_mem buf_x, cl_mem buf_w, size_t n,
                                 size_t workers, size_t localSize, bool profiling) {
+    // Set kernel arguments that remain constant across iterations
+    clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+    
+    // Loop over m (only m varies in each iteration)
     for (size_t m = 1; m <= n / 4; m *= 4) {
-        clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
-        clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
+        // Update the varying argument m
         clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
         executeKernelAndDisplay(queue, kernel_ntt, buf_x, workers, localSize,
-                                "kernel_inverse_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
+                                  "kernel_inverse_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
     }
 }
+
 void printVector(const std::vector<int>& vec, const std::string& name) {
     std::cout << name << " = [ ";
     for (const auto& val : vec) {

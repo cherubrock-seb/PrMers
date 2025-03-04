@@ -183,8 +183,7 @@ __kernel void kernel_ntt_radix4(__global ulong* restrict x,
                                 const ulong n,
                                 const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
-    
+
     // Contiguous case: if m == 1, the data is stored contiguously and vector loading can be used
     if (m == 1) {
         // Vector loading of the 4 coefficients
@@ -257,8 +256,7 @@ __kernel void kernel_inverse_ntt_radix4(__global ulong* restrict x,
                                          const ulong n,
                                          const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
-    
+
     // Pre-calculate the address of the inverse table (read-only)
     __global const ulong* restrict invwm = wi + (3 * 2 * m);
     
