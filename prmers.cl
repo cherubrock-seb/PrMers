@@ -107,6 +107,7 @@ __kernel void kernel_sub2(__global ulong* restrict x,
     if (get_global_id(0) == 0) {
         uint c = 2U;
         while(c != 0U) {
+            #pragma unroll
             for(uint i = 0; i < n; i++){
                 const int d = digit_width[i];
                 ulong val = x[i];
@@ -189,6 +190,7 @@ __kernel void kernel_ntt_radix4(__global ulong* restrict x,
     const ulong T = 3 * m;  // Nombre d'éléments à charger.
     const uint lid = get_local_id(0);
     const uint lsize = get_local_size(0);
+    #pragma unroll
     for (ulong i = lid; i < T; i += lsize) {
         local_w[i] = w[twiddle_offset + i];
     }
@@ -320,6 +322,7 @@ __kernel void kernel_inverse_ntt_radix4(__global ulong* restrict x,
     const ulong T = 3 * m;
     const uint lid = get_local_id(0);
     const uint lsize = get_local_size(0);
+    #pragma unroll
     for (ulong i = lid; i < T; i += lsize) {
         local_iw[i] = wi[twiddle_offset + i];
     }
@@ -448,6 +451,7 @@ __kernel void kernel_ntt_radix4_last(__global ulong* restrict x,
     const ulong T = 3 * m;
     const uint lid = get_local_id(0);
     const uint lsize = get_local_size(0);
+    #pragma unroll
     for (ulong i = lid; i < T; i += lsize) {
         local_w[i] = w[twiddle_offset + i];
     }
@@ -590,6 +594,7 @@ __kernel void kernel_ntt_radix4_last_alt(__global ulong* restrict x,
 __kernel void kernel_square(__global ulong* restrict x, const ulong n) {
     const size_t gid = get_global_id(0);
     const size_t gsize = get_global_size(0);
+    #pragma unroll
     for (size_t i = gid; i < n; i += gsize) {
         x[i] = modMul(x[i], x[i]);
     }
