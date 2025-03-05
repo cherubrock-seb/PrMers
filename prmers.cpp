@@ -40,6 +40,7 @@
 #include <iomanip>
 #include <csignal>
 #include <cstdio> 
+#include <cstdarg> 
 #include "proof/proof.h"
 
 
@@ -47,6 +48,8 @@
 volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
 unsigned int backup_interval = 120; // Default backup interval in seconds
 std::string save_path = ".";       // Default save/load directory (current directory)
+// Vector to store accumulated log messages
+static std::vector<std::string> log_messages;
 
 // Signal handler for SIGINT (Ctrl-C)
 void signalHandler(int signum) {
@@ -378,6 +381,23 @@ void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
     }
 }
 
+// For quick logging (accumulate messages)
+static void logmsg(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), fmt, ap);
+    va_end(ap);
+    log_messages.push_back(std::string(buffer));
+}
+
+// Function to display all accumulated log messages
+static void flush_log() {
+    for (const auto& msg : log_messages) {
+        std::cerr << msg;
+    }
+    log_messages.clear();
+}
 // Helper function to create an OpenCL buffer with error checking
 cl_mem createBuffer(cl_context context, cl_mem_flags flags, size_t size, void* host_ptr, const std::string& name) {
     cl_int err;
@@ -946,7 +966,8 @@ int main(int argc, char** argv) {
             clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
             Words partialRes = ProofSet::fromUint64(x, p);
             proofSet.save(iter, partialRes);
-            std::cout << "\nProof generation : Saved partial residue at iteration " << iter << std::endl;
+            //std::cout << "\nProof generation : Saved partial residue at iteration " << iter << std::endl;
+             logmsg("\nProof generation : Saved partial residue at iteration %lu\n", iter);
         }
 
         // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
@@ -1006,6 +1027,7 @@ int main(int argc, char** argv) {
             }
         }
     }
+    flush_log();
     // After successful completion, remove the loop state file as it is no longer needed.
     std::remove(loop_filename.c_str());
 
