@@ -400,99 +400,69 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
 
 
 void executeFusionneNTT_Forward(cl_command_queue queue,
-                                cl_kernel kernel_ntt, cl_kernel kernel_ntt_alt,
-                                cl_kernel kernel_ntt_last, cl_kernel kernel_ntt_alt_last,
-                                cl_mem buf_x, cl_mem buf_w, size_t n,
-                                size_t workers, size_t localSize, bool profiling,
-                                size_t maxLocalMem) {
-    // Loop over m values: from n/4 down to 1.
-    // The last iteration occurs when m == 1.
-    for (size_t m = n / 4; m >= 1; m /= 4) {
+    cl_kernel kernel_ntt_alt_mm, cl_kernel kernel_ntt_alt_last_m1,
+    cl_mem buf_x, cl_mem buf_w, size_t n,
+    size_t workers, size_t localSize, bool profiling,
+    size_t maxLocalMem) {
+
+
+    clSetKernelArg(kernel_ntt_alt_mm, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt_alt_mm, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt_alt_mm, 2, sizeof(size_t), &n);
+
+    for (size_t m = n / 4; m > 1; m /= 4) {
         size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
-        // Determine if this is the last iteration (for forward, last when m == 1)
-        bool isLast = (m == 1);
-        if (local_twiddle_size > maxLocalMem) {
-            // Use the alternative kernel that does not use local memory.
-            if (isLast) {
-                // Use alternative fused kernel for the last iteration.
-                clSetKernelArg(kernel_ntt_alt_last, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt_alt_last, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt_alt_last, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt_alt_last, 3, sizeof(size_t), &m);
-                // Do not allocate local memory.
-                clSetKernelArg(kernel_ntt_alt_last, 4, 0, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt_alt_last, buf_x, workers, localSize,
-                                         "kernel_ntt_radix4_last_alt (m=" + std::to_string(m) + ")", n, profiling);
-            } else {
-                // Use alternative regular kernel.
-                clSetKernelArg(kernel_ntt_alt, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt_alt, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt_alt, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt_alt, 3, sizeof(size_t), &m);
-                clSetKernelArg(kernel_ntt_alt, 4, 0, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt_alt, buf_x, workers, localSize,
-                                         "kernel_ntt_radix4_alt (m=" + std::to_string(m) + ")", n, profiling);
-            }
-        } else {
-            // Use the main kernel which uses local memory.
-            if (isLast) {
-                // Use the fused version for the last iteration.
-                clSetKernelArg(kernel_ntt_last, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt_last, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt_last, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt_last, 3, sizeof(size_t), &m);
-                clSetKernelArg(kernel_ntt_last, 4, local_twiddle_size, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt_last, buf_x, workers, localSize,
-                                         "kernel_ntt_radix4_last (m=" + std::to_string(m) + ")", n, profiling);
-            } else {
-                // Use the regular main kernel.
-                clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
-                clSetKernelArg(kernel_ntt, 4, local_twiddle_size, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt, buf_x, workers, localSize,
-                                         "kernel_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
-            }
-        }
-        // Prevent infinite loop when m == 1 (since m would remain 1 on unsigned division).
-        if (m == 1)
-            break;
+        clSetKernelArg(kernel_ntt_alt_mm, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_ntt_alt_mm, 4, 0, NULL); // Aucun argument local
+        executeKernelAndDisplay(queue, kernel_ntt_alt_mm, buf_x, workers, localSize,
+            "kernel_ntt_radix4_alt_mm (m=" + std::to_string(m) + ")", n, profiling);
     }
+    size_t m = 1;
+    size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
+    clSetKernelArg(kernel_ntt_alt_last_m1, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt_alt_last_m1, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt_alt_last_m1, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_ntt_alt_last_m1, 3, sizeof(size_t), &m);
+    clSetKernelArg(kernel_ntt_alt_last_m1, 4, 0, NULL);
+    executeKernelAndDisplay(queue, kernel_ntt_alt_last_m1, buf_x, workers, localSize,
+        "kernel_ntt_radix4_last_alt_m1 (m=" + std::to_string(m) + ")", n, profiling);
+
+
 }
 
 void executeFusionneNTT_Inverse(cl_command_queue queue,
-                                cl_kernel kernel_ntt, cl_kernel kernel_ntt_alt,
-                                cl_mem buf_x, cl_mem buf_w, size_t n,
-                                size_t workers, size_t localSize, bool profiling,
-                                size_t maxLocalMem) {
-    // In the inverse loop, m increases from 1 to n/4.
-    // The last iteration is when m == n/4.
-    for (size_t m = 1; m <= n / 4; m *= 4) {
-        size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
-        bool isLast = (m == n / 4);
-        if (local_twiddle_size > maxLocalMem) {
-            // Use the alternative inverse kernel.
-                clSetKernelArg(kernel_ntt_alt, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt_alt, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt_alt, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt_alt, 3, sizeof(size_t), &m);
-                clSetKernelArg(kernel_ntt_alt, 4, 0, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt_alt, buf_x, workers, localSize,
-                                         "kernel_inverse_ntt_radix4_alt (m=" + std::to_string(m) + ")", n, profiling);
-        } else {
-            // Use the main inverse kernel with local memory.
-                clSetKernelArg(kernel_ntt, 0, sizeof(cl_mem), &buf_x);
-                clSetKernelArg(kernel_ntt, 1, sizeof(cl_mem), &buf_w);
-                clSetKernelArg(kernel_ntt, 2, sizeof(size_t), &n);
-                clSetKernelArg(kernel_ntt, 3, sizeof(size_t), &m);
-                clSetKernelArg(kernel_ntt, 4, local_twiddle_size, NULL);
-                executeKernelAndDisplay(queue, kernel_ntt, buf_x, workers, localSize,
-                                         "kernel_inverse_ntt_radix4 (m=" + std::to_string(m) + ")", n, profiling);
-        }
-    }
-}
+    cl_kernel kernel_inverse_ntt_alt_mm, cl_kernel kernel_inverse_ntt_alt_m1,
+    cl_mem buf_x, cl_mem buf_wi, size_t n,
+    size_t workers, size_t localSize, bool profiling,
+    size_t maxLocalMem) {
 
+
+    clSetKernelArg(kernel_inverse_ntt_alt_mm, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_inverse_ntt_alt_mm, 1, sizeof(cl_mem), &buf_wi);
+    clSetKernelArg(kernel_inverse_ntt_alt_mm, 2, sizeof(size_t), &n);
+    size_t m = 1;
+    size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
+
+    clSetKernelArg(kernel_inverse_ntt_alt_m1, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_inverse_ntt_alt_m1, 1, sizeof(cl_mem), &buf_wi);
+    clSetKernelArg(kernel_inverse_ntt_alt_m1, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_inverse_ntt_alt_m1, 3, sizeof(size_t), &m);
+    clSetKernelArg(kernel_inverse_ntt_alt_m1, 4, 0, NULL);
+    executeKernelAndDisplay(queue, kernel_inverse_ntt_alt_m1, buf_x, workers, localSize,
+        "kernel_inverse_ntt_radix4_alt_m1 (m=" + std::to_string(m) + ")", n, profiling);
+
+    for (size_t m = 4; m <= n / 4; m *= 4) {
+        size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
+        clSetKernelArg(kernel_inverse_ntt_alt_mm, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_inverse_ntt_alt_mm, 4, 0, NULL);
+        executeKernelAndDisplay(queue, kernel_inverse_ntt_alt_mm, buf_x, workers, localSize,
+            "kernel_inverse_ntt_radix4_alt_mm (m=" + std::to_string(m) + ")", n, profiling);
+    }
+
+
+
+    
+}
 
 
 void printVector(const std::vector<int>& vec, const std::string& name) {
@@ -866,13 +836,10 @@ int main(int argc, char** argv) {
     // --------------------
     cl_kernel k_precomp = createKernel(program, "kernel_precomp");
     cl_kernel k_postcomp = createKernel(program, "kernel_postcomp");
-    cl_kernel k_forward_ntt         = createKernel(program, "kernel_ntt_radix4");
-    cl_kernel k_inverse_ntt         = createKernel(program, "kernel_inverse_ntt_radix4");
-    cl_kernel k_forward_ntt_alt     = createKernel(program, "kernel_ntt_radix4_alt");
-    cl_kernel k_inverse_ntt_alt     = createKernel(program, "kernel_inverse_ntt_radix4_alt");
-    cl_kernel k_forward_ntt_last    = createKernel(program, "kernel_ntt_radix4_last");
-    cl_kernel k_forward_ntt_alt_last = createKernel(program, "kernel_ntt_radix4_last_alt");
-    cl_kernel k_square = createKernel(program, "kernel_square");
+    cl_kernel k_forward_ntt_alt_mm     = createKernel(program, "kernel_ntt_radix4_alt_mm");
+    cl_kernel k_forward_ntt_alt_last_m1 = createKernel(program, "kernel_ntt_radix4_last_alt_m1");
+    cl_kernel k_inverse_ntt_alt_m1     = createKernel(program, "kernel_inverse_ntt_radix4_alt_m1");
+    cl_kernel k_inverse_ntt_alt_mm     = createKernel(program, "kernel_inverse_ntt_radix4_alt_mm");
     cl_kernel k_sub2 = createKernel(program, "kernel_sub2");
     cl_kernel k_carry = createKernel(program, "kernel_carry");
     cl_kernel k_carry_2 = createKernel(program, "kernel_carry_2");
@@ -896,13 +863,6 @@ int main(int argc, char** argv) {
     errKernel |= clSetKernelArg(k_postcomp, 2, sizeof(uint64_t), &n);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for kernel_postcomp: " << getCLErrorString(errKernel) << std::endl;
-        exit(1);
-    }
-    // kernel_square
-    errKernel  = clSetKernelArg(k_square, 0, sizeof(cl_mem), &buf_x);
-    errKernel |= clSetKernelArg(k_square, 1, sizeof(uint64_t), &n);
-    if (errKernel != CL_SUCCESS) {
-        std::cerr << "Error setting arguments for kernel_square: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
     }
     // kernel_sub2
@@ -956,11 +916,13 @@ int main(int argc, char** argv) {
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue,
-            k_forward_ntt, k_forward_ntt_alt, k_forward_ntt_last, k_forward_ntt_alt_last,
+            k_forward_ntt_alt_mm, k_forward_ntt_alt_last_m1,
             buf_x, buf_twiddles, n, workers, localSize, profiling, maxLocalMem);
+
         executeFusionneNTT_Inverse(queue,
-            k_inverse_ntt, k_inverse_ntt_alt,
+            k_inverse_ntt_alt_mm, k_inverse_ntt_alt_m1,
             buf_x, buf_inv_twiddles, n, workers, localSize, profiling, maxLocalMem);
+
         executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
@@ -1013,13 +975,10 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_block_carry_out);
                 clReleaseKernel(k_precomp);
                 clReleaseKernel(k_postcomp);
-                clReleaseKernel(k_forward_ntt);
-                clReleaseKernel(k_inverse_ntt);
-                clReleaseKernel(k_forward_ntt_alt);
-                clReleaseKernel(k_inverse_ntt_alt);
-                clReleaseKernel(k_forward_ntt_last);
-                clReleaseKernel(k_forward_ntt_alt_last);
-                clReleaseKernel(k_square);
+                clReleaseKernel(k_forward_ntt_alt_mm);
+                clReleaseKernel(k_forward_ntt_alt_last_m1);
+                clReleaseKernel(k_inverse_ntt_alt_m1);
+                clReleaseKernel(k_inverse_ntt_alt_mm);
                 clReleaseKernel(k_sub2);
                 clReleaseKernel(k_carry);
                 clReleaseKernel(k_carry_2);
@@ -1070,13 +1029,10 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_block_carry_out);
     clReleaseKernel(k_precomp);
     clReleaseKernel(k_postcomp);
-    clReleaseKernel(k_forward_ntt);
-    clReleaseKernel(k_inverse_ntt);
-    clReleaseKernel(k_forward_ntt_alt);
-    clReleaseKernel(k_inverse_ntt_alt);
-    clReleaseKernel(k_forward_ntt_last);
-    clReleaseKernel(k_forward_ntt_alt_last);
-    clReleaseKernel(k_square);
+    clReleaseKernel(k_forward_ntt_alt_mm);
+    clReleaseKernel(k_forward_ntt_alt_last_m1);
+    clReleaseKernel(k_inverse_ntt_alt_m1);
+    clReleaseKernel(k_inverse_ntt_alt_mm);
     clReleaseKernel(k_sub2);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_carry_2);
