@@ -966,7 +966,7 @@ int main(int argc, char** argv) {
             Words partialRes = ProofSet::fromUint64(x, p);
             proofSet.save(iter, partialRes);
             //std::cout << "\nProof generation : Saved partial residue at iteration " << iter << std::endl;
-             logmsg("\nProof generation : Saved partial residue at iteration %lu\n", iter);
+             logmsg("Proof generation : Saved partial residue at iteration %lu\n", iter);
         }
 
         // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
@@ -1026,14 +1026,14 @@ int main(int argc, char** argv) {
             }
         }
     }
-    flush_log();
+    //
     // After successful completion, remove the loop state file as it is no longer needed.
     std::remove(loop_filename.c_str());
 
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
     clFinish(queue);
     auto endTime = high_resolution_clock::now();
-
+    
     // Read back result from buf_x
     clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
     handleFinalCarry(x, digit_width_cpu, n);
@@ -1054,6 +1054,7 @@ int main(int argc, char** argv) {
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
     if(proof){
+        flush_log();
         Words finalRes = ProofSet::fromUint64(x, p);
         auto [myProof, rExps] = proofSet.computeProof(finalRes);
         std::filesystem::path outDir = save_path; 
