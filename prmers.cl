@@ -139,8 +139,7 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 
 __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
-                           __global int* restrict digit_width,
-                           __global int* restrict flag)
+                           __global int* restrict digit_width)
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -166,8 +165,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
 
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global int* restrict digit_width,
-                             __global int* restrict flag)
+                             __global int* restrict digit_width)
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
