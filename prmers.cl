@@ -46,7 +46,6 @@ inline ulong Reduce(const ulong lo, const ulong hi)
 }
 
 
-
 // Compute the 128-bit product of a and b as high:low.
 inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
     *lo = a * b;
@@ -156,7 +155,6 @@ __kernel void kernel_carry(__global ulong* restrict x,
 
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global ulong* restrict carry_array_out,
                              __global int* restrict digit_width,
                              const ulong n,
                              __global int* restrict flag)
@@ -166,7 +164,7 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     // The loop executes over LOCAL_PROPAGATION_DEPTH-1 elements, the last one being used to accumulate the carry.
     const ulong end = start + LOCAL_PROPAGATION_DEPTH - 1;
     // Retrieve the carry from the previous block: if gid == 0, use the last block (circular).
-    const ulong prev_gid = (gid == 0) ? (get_global_size(0) - 1) : (gid - 1);
+    const ulong prev_gid = (gid == 0) ? (CARRY_WORKER - 1) : (gid - 1);
     ulong carry = carry_array[prev_gid];
     
     #pragma unroll
