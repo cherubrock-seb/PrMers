@@ -946,7 +946,7 @@ int main(int argc, char** argv) {
             clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
             Words partialRes = ProofSet::fromUint64(x, p);
             proofSet.save(iter, partialRes);
-            std::cout << "Proof generation : Saved partial residue at iteration " << iter << std::endl;
+            std::cout << "\nProof generation : Saved partial residue at iteration " << iter << std::endl;
         }
 
         // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
