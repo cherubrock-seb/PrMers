@@ -135,7 +135,7 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 #define CARRY_WORKER 1
 #endif
 
-__kernel void kernel_carry(__global ulong* restrict x,
+__kernel void kernel_carryX(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
                            __global int* restrict digit_width,
                            const ulong n,
@@ -153,6 +153,34 @@ __kernel void kernel_carry(__global ulong* restrict x,
     carry_array[gid] = carry;
 }
 
+__kernel void kernel_carry(__global ulong* restrict x,
+                           __global ulong* restrict carry_array,
+                           __global int* restrict digit_width,
+                           const ulong n,
+                           __global int* restrict flag)
+{
+    const ulong gid = get_global_id(0);
+    const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
+    const ulong end = start + LOCAL_PROPAGATION_DEPTH; 
+    ulong carry = 0UL;
+
+    #pragma unroll
+    for (ulong i = start; i < end; i += 4) {
+        ulong4 x_vec = vload4(0, x + i);
+        int4 digit_width_vec = vload4(0, digit_width + i);
+        #pragma unroll
+        for (int j = 0; j < 4; ++j) {
+            x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
+        }
+        vstore4(x_vec, 0, x + i);
+    }
+    if (carry != 0) {
+        carry_array[gid] = carry;
+    }
+}
+
+
+
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
                              __global int* restrict digit_width,
@@ -161,18 +189,29 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
-    // The loop executes over LOCAL_PROPAGATION_DEPTH-1 elements, the last one being used to accumulate the carry.
-    const ulong end = start + LOCAL_PROPAGATION_DEPTH - 1;
-    // Retrieve the carry from the previous block: if gid == 0, use the last block (circular).
+    const ulong end = start + LOCAL_PROPAGATION_DEPTH - 4;  
+
     const ulong prev_gid = (gid == 0) ? (CARRY_WORKER - 1) : (gid - 1);
     ulong carry = carry_array[prev_gid];
-    
+
+    if (carry == 0) return;
+
     #pragma unroll
-    for (ulong i = start; i < end; i++) {
-        x[i] = digit_adc(x[i], digit_width[i], &carry);
+    for (ulong i = start; i < end; i += 4) {
+        ulong4 x_vec = vload4(0, x + i);
+        int4 digit_width_vec = vload4(0, digit_width + i);
+        #pragma unroll
+        for (int j = 0; j < 4; ++j) {
+            x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
+        }
+        vstore4(x_vec, 0, x + i);
+        if (carry == 0) return;
     }
-    x[end] += carry;
+    if (carry != 0) {
+        x[end] += carry;
+    }
 }
+
 
 
 
