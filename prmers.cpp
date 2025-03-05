@@ -23,7 +23,6 @@
  *
  * This code is released as free software.
  */
-
 #include <CL/cl.h>
 #include <iostream>
 #include <fstream>
