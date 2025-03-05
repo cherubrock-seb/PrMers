@@ -43,16 +43,21 @@ for example
 prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   ```
 
+
+
 ## Command-Line Options
-- < p >: Minimum exponent to test (required)
-- -d <device_id>: Specify the OpenCL device ID (default: 0)
-- -O <options>: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
-- -c <localCarryPropagationDepth>: Set the local carry propagation depth (default: 8)
-- -profile: Enable kernel execution profiling
-- -prp: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
-- -ll: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
-- -t <backup_interval>: Specify the backup interval in seconds (default: 60)
-- -f <path>: Specify the directory path for saving/loading backup files (default: current directory)
+
+- `< p >`: Minimum exponent to test (required)
+- `-d <device_id>`: Specify the OpenCL device ID (default: 0)
+- `-O <options>`: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
+- `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8)
+- `-profile`: Enable kernel execution profiling
+- `-prp`: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
+- `-ll`: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
+- `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
+- `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
+- `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification.
+
 
 ## Uninstallation
 To uninstall PrMers, run:
@@ -163,6 +168,19 @@ Iterations per second: 7294.76 (11 iterations in total)
   - Use **-f \<path>** to specify the directory for saving and loading files (default: current directory).
   - If backup files (for example, "127prp.mers" and "127prp.loop") exist in the specified path, the program will resume computation from the saved iteration.
   - During computation, when a backup occurs (either because the backup interval has elapsed or the user presses Ctrl-C), a status line is displayed with the same progress information as the normal progress display but in a distinct color (MAGENTA) and prefixed by "[Backup]".
+
+## Proof Generation (Experimental)
+
+This project includes an **experimental** implementation of proof generation for verifying Mersenne prime tests.  
+The proof system is **heavily based on** the one used in [GpuOwl](https://github.com/preda/gpuowl), with substantial code reuse.  
+
+The proof process generates a `.proof` file, which contains:
+- The final residue after all PRP iterations.
+- A sequence of intermediate residues at exponentially spaced iteration points.
+- A verification mechanism that ensures `B == A^(2^span) (mod 2^E - 1)`.
+
+Currently, verification is **not fully stable** and needs further debugging.  
+Performance is also significantly slower than GpuOwl, as optimizations are still in progress.  
 
 ## Example Executions
 
