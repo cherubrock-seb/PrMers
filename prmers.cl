@@ -135,28 +135,11 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 #define CARRY_WORKER 1
 #endif
 
-__kernel void kernel_carryX(__global ulong* restrict x,
-                           __global ulong* restrict carry_array,
-                           __global int* restrict digit_width,
-                           const ulong n,
-                           __global int* restrict flag)
-{
-    const ulong gid = get_global_id(0);
-    const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
-    const ulong end = start + LOCAL_PROPAGATION_DEPTH;
-    ulong carry = 0UL;
-    
-    #pragma unroll
-    for (ulong i = start; i < end; i++) {
-        x[i] = digit_adc(x[i], digit_width[i], &carry);
-    }
-    carry_array[gid] = carry;
-}
+
 
 __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
                            __global int* restrict digit_width,
-                           const ulong n,
                            __global int* restrict flag)
 {
     const ulong gid = get_global_id(0);
@@ -184,7 +167,6 @@ __kernel void kernel_carry(__global ulong* restrict x,
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
                              __global int* restrict digit_width,
-                             const ulong n,
                              __global int* restrict flag)
 {
     const ulong gid = get_global_id(0);
@@ -215,7 +197,6 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
                                                 __global ulong* restrict wi,
-                                                const ulong n,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
     
@@ -258,7 +239,6 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
 __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
                                                 __global ulong* restrict wi,
                                                 __global ulong* restrict digit_invweight,
-                                                const ulong n,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
     
@@ -301,7 +281,6 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
 
 __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
                                             __global ulong* restrict w,
-                                            const ulong n,
                                             const ulong m) {
     const ulong k = get_global_id(0);
     
@@ -340,7 +319,6 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
 
 __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
                                        __global ulong* restrict w,
-                                       const ulong n,
                                        const ulong m) {
     const ulong k = get_global_id(0);
     
@@ -377,7 +355,6 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
 __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
                                        __global ulong* restrict w,
                                         __global ulong* restrict digit_weight,
-                                       const ulong n,
                                        const ulong m) {
     const ulong k = get_global_id(0);
     
@@ -415,7 +392,6 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
 // kernel_inverse_ntt_radix4_m1: Inverse NTT (radix-4) for m == 1 using global inverse twiddle factors.
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                 __global ulong* restrict wi,
-                                                const ulong n,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
     
