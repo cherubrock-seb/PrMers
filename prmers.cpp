@@ -425,7 +425,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
     cl_mem buf_x, cl_mem buf_w,cl_mem buf_digit_weight, size_t n,
     size_t workers, size_t localSize, bool profiling,
     size_t maxLocalMem) {
-/*
+
     size_t m = n / 4;
     clSetKernelArg(kernel_ntt_mm_first, 0, sizeof(cl_mem), &buf_x);
     clSetKernelArg(kernel_ntt_mm_first, 1, sizeof(cl_mem), &buf_w);
@@ -454,29 +454,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
         clSetKernelArg(kernel_ntt_last_m1, 4, 0, NULL);
         executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
             "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
-    }*/
-
-
-
-    clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-    clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &n);
-
-    for (size_t m = n / 4; m > 1; m /= 4) {
-        clSetKernelArg(kernel_ntt_mm, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_ntt_mm, 4, 0, NULL); // Aucun argument local
-        executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
-            "kernel_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
     }
-    size_t m = 1;
-    clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_ntt_last_m1, 1, sizeof(cl_mem), &buf_w);
-    clSetKernelArg(kernel_ntt_last_m1, 2, sizeof(size_t), &n);
-    clSetKernelArg(kernel_ntt_last_m1, 3, sizeof(size_t), &m);
-    clSetKernelArg(kernel_ntt_last_m1, 4, 0, NULL);
-    executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
-        "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
-
 }
 
 void executeFusionneNTT_Inverse(cl_command_queue queue,
@@ -901,8 +879,6 @@ int main(int argc, char** argv) {
     // --------------------
     // Create Kernels using helper functions
     // --------------------
-    cl_kernel k_precomp = createKernel(program, "kernel_precomp");
-    cl_kernel k_postcomp = createKernel(program, "kernel_postcomp");
     cl_kernel k_forward_ntt_mm     = createKernel(program, "kernel_ntt_radix4_mm");
     cl_kernel k_forward_ntt_mm_first     = createKernel(program, "kernel_ntt_radix4_mm_first");
     cl_kernel k_forward_ntt_last_m1 = createKernel(program, "kernel_ntt_radix4_last_m1");
@@ -918,22 +894,6 @@ int main(int argc, char** argv) {
     // Set Kernel Arguments
     // --------------------
     cl_int errKernel = CL_SUCCESS;
-    // kernel_precomp
-    errKernel  = clSetKernelArg(k_precomp, 0, sizeof(cl_mem), &buf_x);
-    errKernel |= clSetKernelArg(k_precomp, 1, sizeof(cl_mem), &buf_digit_weight);
-    errKernel |= clSetKernelArg(k_precomp, 2, sizeof(uint64_t), &n);
-    if (errKernel != CL_SUCCESS) {
-        std::cerr << "Error setting arguments for kernel_precomp: " << getCLErrorString(errKernel) << std::endl;
-        exit(1);
-    }
-    // kernel_postcomp
-    errKernel  = clSetKernelArg(k_postcomp, 0, sizeof(cl_mem), &buf_x);
-    errKernel |= clSetKernelArg(k_postcomp, 1, sizeof(cl_mem), &buf_digit_invweight);
-    errKernel |= clSetKernelArg(k_postcomp, 2, sizeof(uint64_t), &n);
-    if (errKernel != CL_SUCCESS) {
-        std::cerr << "Error setting arguments for kernel_postcomp: " << getCLErrorString(errKernel) << std::endl;
-        exit(1);
-    }
     // kernel_sub2
     errKernel  = clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
@@ -982,7 +942,6 @@ int main(int argc, char** argv) {
 
     // Main loop now starts from resume_iter (if any) to total_iters.
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
-        executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue,
             k_forward_ntt_mm, k_forward_ntt_mm_first, k_forward_ntt_last_m1,
             buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, profiling, maxLocalMem);
@@ -990,8 +949,6 @@ int main(int argc, char** argv) {
         executeFusionneNTT_Inverse(queue,
             k_inverse_ntt_mm, k_inverse_ntt_mm_last, k_inverse_ntt_m1,
             buf_x, buf_inv_twiddles,buf_digit_invweight, n, workers/4, localSize, profiling, maxLocalMem);
-
-        //executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
         // In Lucas-Lehmer mode, execute kernel_sub2; in PRP mode, skip it.
@@ -1048,8 +1005,6 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_digit_invweight);
                 clReleaseMemObject(buf_digit_width);
                 clReleaseMemObject(buf_block_carry);
-                clReleaseKernel(k_precomp);
-                clReleaseKernel(k_postcomp);
                 clReleaseKernel(k_forward_ntt_mm);
                 clReleaseKernel(k_forward_ntt_mm_first);
                 clReleaseKernel(k_forward_ntt_last_m1);
@@ -1120,8 +1075,6 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
     clReleaseMemObject(buf_block_carry);
-    clReleaseKernel(k_precomp);
-    clReleaseKernel(k_postcomp);
     clReleaseKernel(k_forward_ntt_mm);
     clReleaseKernel(k_forward_ntt_mm_first);
     clReleaseKernel(k_forward_ntt_last_m1);

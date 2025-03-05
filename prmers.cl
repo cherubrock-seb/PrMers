@@ -395,20 +395,21 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
     const ulong w1  = wm[3 * j + 1];
     const ulong w12 = wm[3 * j + 2];
 
-    ulong u0 = x[i + 0 * m];
-    ulong u1 = x[i + 1 * m];
-    ulong u2 = x[i + 2 * m];
-    ulong u3 = x[i + 3 * m];
+
+    ulong u0 = modMul(x[i + 0 * m], digit_weight[i + 0 * m]);
+    ulong u1 = modMul(x[i + 1 * m], digit_weight[i + 1 * m]);
+    ulong u2 = modMul(x[i + 2 * m], digit_weight[i + 2 * m]);
+    ulong u3 = modMul(x[i + 3 * m], digit_weight[i + 3 * m]);
 
     ulong v0 = Add(u0, u2);
     ulong v1 = Add(u1, u3);
     ulong v2 = Sub(u0, u2);
     ulong v3 = modMuli(Sub(u1, u3));
 
-    x[i + 0 * m] = modMul(Add(v0, v1), digit_weight[i + 0 * m]);
-    x[i + 1 * m] = modMul(modMul(Sub(v0, v1), w1), digit_weight[i + 1 * m]);
-    x[i + 2 * m] = modMul(modMul(Add(v2, v3), w2), digit_weight[i + 2 * m]);
-    x[i + 3 * m] = modMul(modMul(Sub(v2, v3), w12), digit_weight[i + 3 * m]);
+    x[i + 0 * m] = Add(v0, v1);
+    x[i + 1 * m] = modMul(Sub(v0, v1), w1);
+    x[i + 2 * m] = modMul(Add(v2, v3), w2);
+    x[i + 3 * m] = modMul(Sub(v2, v3), w12);
 }
 
 // kernel_inverse_ntt_radix4_m1: Inverse NTT (radix-4) for m == 1 using global inverse twiddle factors.
@@ -447,39 +448,4 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                               Sub(v0, v2),
                               Sub(v1, v3) );
     vstore4(result, 0, x + 4 * k);
-}
-
-
-__kernel void kernel_precomp(__global ulong* restrict x,
-                             __global ulong* restrict digit_weight,
-                             const ulong n) {
-    const size_t gid = get_global_id(0);
-    // Assume that n is a multiple of 4 and that x and digit_weight are aligned.
-    if(gid * 4 < n) {
-        ulong4 vx = vload4(0, x + gid * 4);
-        ulong4 vw = vload4(0, digit_weight + gid * 4);
-        // Apply modMul to each component.
-        vx.s0 = modMul(vx.s0, vw.s0);
-        vx.s1 = modMul(vx.s1, vw.s1);
-        vx.s2 = modMul(vx.s2, vw.s2);
-        vx.s3 = modMul(vx.s3, vw.s3);
-        vstore4(vx, 0, x + gid * 4);
-    }
-}
-
-__kernel void kernel_postcomp(__global ulong* restrict x,
-                              __global ulong* restrict digit_invweight,
-                              const ulong n) {
-    const size_t gid = get_global_id(0);
-    // Assume that n is a multiple of 4 and that x and digit_invweight are aligned.
-    if(gid * 4 < n) {
-        ulong4 vx = vload4(0, x + gid * 4);
-        ulong4 vw = vload4(0, digit_invweight + gid * 4);
-        // Apply modMul to each component.
-        vx.s0 = modMul(vx.s0, vw.s0);
-        vx.s1 = modMul(vx.s1, vw.s1);
-        vx.s2 = modMul(vx.s2, vw.s2);
-        vx.s3 = modMul(vx.s3, vw.s3);
-        vstore4(vx, 0, x + gid * 4);
-    }
 }
