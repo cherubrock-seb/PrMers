@@ -371,7 +371,7 @@ void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
                              const time_point<high_resolution_clock>& start,
                              cl_command_queue queue) {
     auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
-    if (duration >= 10 || iter == -1) {
+    if (duration >= 5 || iter == -1) {
         if (iter == -1)
             iter = total_iters;
         double elapsedTime = duration_cast<nanoseconds>(high_resolution_clock::now() - start).count() / 1e9;
@@ -421,10 +421,41 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
 
 
 void executeFusionneNTT_Forward(cl_command_queue queue,
-    cl_kernel kernel_ntt_mm, cl_kernel kernel_ntt_last_m1,
-    cl_mem buf_x, cl_mem buf_w, size_t n,
+    cl_kernel kernel_ntt_mm, cl_kernel kernel_ntt_mm_first, cl_kernel kernel_ntt_last_m1,
+    cl_mem buf_x, cl_mem buf_w,cl_mem buf_digit_weight, size_t n,
     size_t workers, size_t localSize, bool profiling,
     size_t maxLocalMem) {
+/*
+    size_t m = n / 4;
+    clSetKernelArg(kernel_ntt_mm_first, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt_mm_first, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt_mm_first, 2, sizeof(cl_mem), &buf_digit_weight);
+    clSetKernelArg(kernel_ntt_mm_first, 3, sizeof(size_t), &n);
+    clSetKernelArg(kernel_ntt_mm_first, 4, sizeof(size_t), &m);
+    clSetKernelArg(kernel_ntt_mm_first, 5, 0, NULL); 
+    executeKernelAndDisplay(queue, kernel_ntt_mm_first, buf_x, workers, localSize,
+        "kernel_ntt_radix4_mm_first (m=" + std::to_string(m) + ")", n, profiling);
+    if(n/4 !=1){
+        clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
+        clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &n);
+        for (size_t m = n / 16; m > 1; m /= 4) {
+            clSetKernelArg(kernel_ntt_mm, 3, sizeof(size_t), &m);
+            clSetKernelArg(kernel_ntt_mm, 4, 0, NULL); 
+            executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
+                "kernel_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
+        }
+    
+        m = 1;
+        clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt_last_m1, 1, sizeof(cl_mem), &buf_w);
+        clSetKernelArg(kernel_ntt_last_m1, 2, sizeof(size_t), &n);
+        clSetKernelArg(kernel_ntt_last_m1, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_ntt_last_m1, 4, 0, NULL);
+        executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
+            "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
+    }*/
+
 
 
     clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
@@ -446,35 +477,47 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
     executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
         "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
 
-
 }
 
 void executeFusionneNTT_Inverse(cl_command_queue queue,
-    cl_kernel kernel_inverse_ntt_mm, cl_kernel kernel_inverse_ntt_m1,
-    cl_mem buf_x, cl_mem buf_wi, size_t n,
+    cl_kernel kernel_inverse_ntt_mm, cl_kernel kernel_inverse_ntt_mm_last, cl_kernel kernel_inverse_ntt_m1,
+    cl_mem buf_x, cl_mem buf_wi, cl_mem buf_digit_invweight, size_t n,
     size_t workers, size_t localSize, bool profiling,
     size_t maxLocalMem) {
+    size_t m = 0;
+    if(n/4 != 1){
+        clSetKernelArg(kernel_inverse_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_inverse_ntt_mm, 1, sizeof(cl_mem), &buf_wi);
+        clSetKernelArg(kernel_inverse_ntt_mm, 2, sizeof(size_t), &n);
+        
+        m = 1;
 
+        clSetKernelArg(kernel_inverse_ntt_m1, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_inverse_ntt_m1, 1, sizeof(cl_mem), &buf_wi);
+        clSetKernelArg(kernel_inverse_ntt_m1, 2, sizeof(size_t), &n);
+        clSetKernelArg(kernel_inverse_ntt_m1, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_inverse_ntt_m1, 4, 0, NULL);
+        executeKernelAndDisplay(queue, kernel_inverse_ntt_m1, buf_x, workers, localSize,
+            "kernel_inverse_ntt_radix4_m1 (m=" + std::to_string(m) + ")", n, profiling);
 
-    clSetKernelArg(kernel_inverse_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_inverse_ntt_mm, 1, sizeof(cl_mem), &buf_wi);
-    clSetKernelArg(kernel_inverse_ntt_mm, 2, sizeof(size_t), &n);
-    size_t m = 1;
-
-    clSetKernelArg(kernel_inverse_ntt_m1, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_inverse_ntt_m1, 1, sizeof(cl_mem), &buf_wi);
-    clSetKernelArg(kernel_inverse_ntt_m1, 2, sizeof(size_t), &n);
-    clSetKernelArg(kernel_inverse_ntt_m1, 3, sizeof(size_t), &m);
-    clSetKernelArg(kernel_inverse_ntt_m1, 4, 0, NULL);
-    executeKernelAndDisplay(queue, kernel_inverse_ntt_m1, buf_x, workers, localSize,
-        "kernel_inverse_ntt_radix4_m1 (m=" + std::to_string(m) + ")", n, profiling);
-
-    for (size_t m = 4; m <= n / 4; m *= 4) {
-        clSetKernelArg(kernel_inverse_ntt_mm, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_inverse_ntt_mm, 4, 0, NULL);
-        executeKernelAndDisplay(queue, kernel_inverse_ntt_mm, buf_x, workers, localSize,
-            "kernel_inverse_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
+        for (size_t m = 4; m < n / 4; m *= 4) {
+            clSetKernelArg(kernel_inverse_ntt_mm, 3, sizeof(size_t), &m);
+            clSetKernelArg(kernel_inverse_ntt_mm, 4, 0, NULL);
+            executeKernelAndDisplay(queue, kernel_inverse_ntt_mm, buf_x, workers, localSize,
+                "kernel_inverse_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
+        }
+        
     }
+
+    m = n/4;
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 1, sizeof(cl_mem), &buf_wi);
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 2, sizeof(cl_mem), &buf_digit_invweight);
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 3, sizeof(size_t), &n);
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 4, sizeof(size_t), &m);
+    clSetKernelArg(kernel_inverse_ntt_mm_last, 5, 0, NULL);
+    executeKernelAndDisplay(queue, kernel_inverse_ntt_mm_last, buf_x, workers, localSize,
+        "kernel_inverse_ntt_radix4_mm_last (m=" + std::to_string(m) + ")", n, profiling);
 
 
 
@@ -861,9 +904,11 @@ int main(int argc, char** argv) {
     cl_kernel k_precomp = createKernel(program, "kernel_precomp");
     cl_kernel k_postcomp = createKernel(program, "kernel_postcomp");
     cl_kernel k_forward_ntt_mm     = createKernel(program, "kernel_ntt_radix4_mm");
+    cl_kernel k_forward_ntt_mm_first     = createKernel(program, "kernel_ntt_radix4_mm_first");
     cl_kernel k_forward_ntt_last_m1 = createKernel(program, "kernel_ntt_radix4_last_m1");
     cl_kernel k_inverse_ntt_m1     = createKernel(program, "kernel_inverse_ntt_radix4_m1");
     cl_kernel k_inverse_ntt_mm     = createKernel(program, "kernel_inverse_ntt_radix4_mm");
+    cl_kernel k_inverse_ntt_mm_last     = createKernel(program, "kernel_inverse_ntt_radix4_mm_last");
     cl_kernel k_sub2 = createKernel(program, "kernel_sub2");
     cl_kernel k_carry = createKernel(program, "kernel_carry");
     cl_kernel k_carry_2 = createKernel(program, "kernel_carry_2");
@@ -939,14 +984,14 @@ int main(int argc, char** argv) {
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue,
-            k_forward_ntt_mm, k_forward_ntt_last_m1,
-            buf_x, buf_twiddles, n, workers/4, localSize, profiling, maxLocalMem);
+            k_forward_ntt_mm, k_forward_ntt_mm_first, k_forward_ntt_last_m1,
+            buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, profiling, maxLocalMem);
 
         executeFusionneNTT_Inverse(queue,
-            k_inverse_ntt_mm, k_inverse_ntt_m1,
-            buf_x, buf_inv_twiddles, n, workers/4, localSize, profiling, maxLocalMem);
+            k_inverse_ntt_mm, k_inverse_ntt_mm_last, k_inverse_ntt_m1,
+            buf_x, buf_inv_twiddles,buf_digit_invweight, n, workers/4, localSize, profiling, maxLocalMem);
 
-        executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
+        //executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
         // In Lucas-Lehmer mode, execute kernel_sub2; in PRP mode, skip it.
@@ -1006,9 +1051,11 @@ int main(int argc, char** argv) {
                 clReleaseKernel(k_precomp);
                 clReleaseKernel(k_postcomp);
                 clReleaseKernel(k_forward_ntt_mm);
+                clReleaseKernel(k_forward_ntt_mm_first);
                 clReleaseKernel(k_forward_ntt_last_m1);
                 clReleaseKernel(k_inverse_ntt_m1);
                 clReleaseKernel(k_inverse_ntt_mm);
+                clReleaseKernel(k_inverse_ntt_mm_last);
                 clReleaseKernel(k_sub2);
                 clReleaseKernel(k_carry);
                 clReleaseKernel(k_carry_2);
@@ -1076,9 +1123,11 @@ int main(int argc, char** argv) {
     clReleaseKernel(k_precomp);
     clReleaseKernel(k_postcomp);
     clReleaseKernel(k_forward_ntt_mm);
+    clReleaseKernel(k_forward_ntt_mm_first);
     clReleaseKernel(k_forward_ntt_last_m1);
     clReleaseKernel(k_inverse_ntt_m1);
     clReleaseKernel(k_inverse_ntt_mm);
+    clReleaseKernel(k_inverse_ntt_mm_last);
     clReleaseKernel(k_sub2);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_carry_2);
