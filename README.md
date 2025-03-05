@@ -100,7 +100,7 @@ clinfo
 To compile:
 
 ```bash
-g++ -std=c++11 -o prmers prmers.cpp -lOpenCL
+g++ -std=c++20 -I. -o prmers prmers.cpp proof/common.cpp proof/proof.cpp proof/md5.cpp proof/sha3.cpp -lOpenCL -O3 -Wall
 ```
 
 ## Usage

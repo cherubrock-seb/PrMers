@@ -39,7 +39,9 @@
 #include <cmath>
 #include <iomanip>
 #include <csignal>
-#include <cstdio>    // For std::remove
+#include <cstdio> 
+#include "proof/proof.h"
+
 
 // Global variables for backup functionality
 volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
@@ -400,63 +402,59 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
 
 
 void executeFusionneNTT_Forward(cl_command_queue queue,
-    cl_kernel kernel_ntt_alt_mm, cl_kernel kernel_ntt_alt_last_m1,
+    cl_kernel kernel_ntt_mm, cl_kernel kernel_ntt_last_m1,
     cl_mem buf_x, cl_mem buf_w, size_t n,
     size_t workers, size_t localSize, bool profiling,
     size_t maxLocalMem) {
 
 
-    clSetKernelArg(kernel_ntt_alt_mm, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_ntt_alt_mm, 1, sizeof(cl_mem), &buf_w);
-    clSetKernelArg(kernel_ntt_alt_mm, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &n);
 
     for (size_t m = n / 4; m > 1; m /= 4) {
-        size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
-        clSetKernelArg(kernel_ntt_alt_mm, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_ntt_alt_mm, 4, 0, NULL); // Aucun argument local
-        executeKernelAndDisplay(queue, kernel_ntt_alt_mm, buf_x, workers, localSize,
-            "kernel_ntt_radix4_alt_mm (m=" + std::to_string(m) + ")", n, profiling);
+        clSetKernelArg(kernel_ntt_mm, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_ntt_mm, 4, 0, NULL); // Aucun argument local
+        executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
+            "kernel_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
     }
     size_t m = 1;
-    size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
-    clSetKernelArg(kernel_ntt_alt_last_m1, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_ntt_alt_last_m1, 1, sizeof(cl_mem), &buf_w);
-    clSetKernelArg(kernel_ntt_alt_last_m1, 2, sizeof(size_t), &n);
-    clSetKernelArg(kernel_ntt_alt_last_m1, 3, sizeof(size_t), &m);
-    clSetKernelArg(kernel_ntt_alt_last_m1, 4, 0, NULL);
-    executeKernelAndDisplay(queue, kernel_ntt_alt_last_m1, buf_x, workers, localSize,
-        "kernel_ntt_radix4_last_alt_m1 (m=" + std::to_string(m) + ")", n, profiling);
+    clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_ntt_last_m1, 1, sizeof(cl_mem), &buf_w);
+    clSetKernelArg(kernel_ntt_last_m1, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_ntt_last_m1, 3, sizeof(size_t), &m);
+    clSetKernelArg(kernel_ntt_last_m1, 4, 0, NULL);
+    executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
+        "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
 
 
 }
 
 void executeFusionneNTT_Inverse(cl_command_queue queue,
-    cl_kernel kernel_inverse_ntt_alt_mm, cl_kernel kernel_inverse_ntt_alt_m1,
+    cl_kernel kernel_inverse_ntt_mm, cl_kernel kernel_inverse_ntt_m1,
     cl_mem buf_x, cl_mem buf_wi, size_t n,
     size_t workers, size_t localSize, bool profiling,
     size_t maxLocalMem) {
 
 
-    clSetKernelArg(kernel_inverse_ntt_alt_mm, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_inverse_ntt_alt_mm, 1, sizeof(cl_mem), &buf_wi);
-    clSetKernelArg(kernel_inverse_ntt_alt_mm, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_inverse_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_inverse_ntt_mm, 1, sizeof(cl_mem), &buf_wi);
+    clSetKernelArg(kernel_inverse_ntt_mm, 2, sizeof(size_t), &n);
     size_t m = 1;
-    size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
 
-    clSetKernelArg(kernel_inverse_ntt_alt_m1, 0, sizeof(cl_mem), &buf_x);
-    clSetKernelArg(kernel_inverse_ntt_alt_m1, 1, sizeof(cl_mem), &buf_wi);
-    clSetKernelArg(kernel_inverse_ntt_alt_m1, 2, sizeof(size_t), &n);
-    clSetKernelArg(kernel_inverse_ntt_alt_m1, 3, sizeof(size_t), &m);
-    clSetKernelArg(kernel_inverse_ntt_alt_m1, 4, 0, NULL);
-    executeKernelAndDisplay(queue, kernel_inverse_ntt_alt_m1, buf_x, workers, localSize,
-        "kernel_inverse_ntt_radix4_alt_m1 (m=" + std::to_string(m) + ")", n, profiling);
+    clSetKernelArg(kernel_inverse_ntt_m1, 0, sizeof(cl_mem), &buf_x);
+    clSetKernelArg(kernel_inverse_ntt_m1, 1, sizeof(cl_mem), &buf_wi);
+    clSetKernelArg(kernel_inverse_ntt_m1, 2, sizeof(size_t), &n);
+    clSetKernelArg(kernel_inverse_ntt_m1, 3, sizeof(size_t), &m);
+    clSetKernelArg(kernel_inverse_ntt_m1, 4, 0, NULL);
+    executeKernelAndDisplay(queue, kernel_inverse_ntt_m1, buf_x, workers, localSize,
+        "kernel_inverse_ntt_radix4_m1 (m=" + std::to_string(m) + ")", n, profiling);
 
     for (size_t m = 4; m <= n / 4; m *= 4) {
-        size_t local_twiddle_size = 3 * m * sizeof(cl_ulong);
-        clSetKernelArg(kernel_inverse_ntt_alt_mm, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_inverse_ntt_alt_mm, 4, 0, NULL);
-        executeKernelAndDisplay(queue, kernel_inverse_ntt_alt_mm, buf_x, workers, localSize,
-            "kernel_inverse_ntt_radix4_alt_mm (m=" + std::to_string(m) + ")", n, profiling);
+        clSetKernelArg(kernel_inverse_ntt_mm, 3, sizeof(size_t), &m);
+        clSetKernelArg(kernel_inverse_ntt_mm, 4, 0, NULL);
+        executeKernelAndDisplay(queue, kernel_inverse_ntt_mm, buf_x, workers, localSize,
+            "kernel_inverse_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
     }
 
 
@@ -515,10 +513,13 @@ int main(int argc, char** argv) {
     size_t localCarryPropagationDepth = 8;
     std::string mode = "prp"; // Default mode is PRP
     // Parse command-line options (including new -t and -f)
+    bool proof = false;
     bool profiling = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
             debug = true;
+        if (std::strcmp(argv[i], "-proof") == 0)
+            proof = true;
         else if (std::strcmp(argv[i], "-profile") == 0) {
             profiling = true;
         }
@@ -576,6 +577,8 @@ int main(int argc, char** argv) {
     if(p<13){
         mode = "ll";
     }
+    if(mode == "ll")
+        proof = false;
    
     if (profiling)
         std::cout << "\n🔍 Kernel profiling is activated. Performance metrics will be displayed.\n" << std::endl;
@@ -730,6 +733,9 @@ int main(int argc, char** argv) {
     if(workersCarry<localSizeCarry){
         localSizeCarry = workersCarry;
     }
+
+
+
     std::cout << "Transform size: " <<  n << std::endl;
     std::cout << "Final workers count: " << workers << std::endl;
     std::cout << "Work-groups count: " << localSize << std::endl;
@@ -737,7 +743,11 @@ int main(int argc, char** argv) {
     std::cout << "Workers for carry propagation count: " << workersCarry << std::endl;
     std::cout << "Local carry propagation depht: " <<  localCarryPropagationDepth << std::endl;
     std::cout << "Local size carry: " <<  localSizeCarry << std::endl;
-    
+    uint32_t proofPower = ProofSet::bestPower(p);
+    ProofSet proofSet(p, proofPower);
+    if(proof)
+        std::cout << "Proof Power : " <<  proofPower << std::endl;
+
     size_t workGroupSize = ((workers < localSize) ? 1 : (workers / localSize));
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
@@ -836,10 +846,10 @@ int main(int argc, char** argv) {
     // --------------------
     cl_kernel k_precomp = createKernel(program, "kernel_precomp");
     cl_kernel k_postcomp = createKernel(program, "kernel_postcomp");
-    cl_kernel k_forward_ntt_alt_mm     = createKernel(program, "kernel_ntt_radix4_alt_mm");
-    cl_kernel k_forward_ntt_alt_last_m1 = createKernel(program, "kernel_ntt_radix4_last_alt_m1");
-    cl_kernel k_inverse_ntt_alt_m1     = createKernel(program, "kernel_inverse_ntt_radix4_alt_m1");
-    cl_kernel k_inverse_ntt_alt_mm     = createKernel(program, "kernel_inverse_ntt_radix4_alt_mm");
+    cl_kernel k_forward_ntt_mm     = createKernel(program, "kernel_ntt_radix4_mm");
+    cl_kernel k_forward_ntt_last_m1 = createKernel(program, "kernel_ntt_radix4_last_m1");
+    cl_kernel k_inverse_ntt_m1     = createKernel(program, "kernel_inverse_ntt_radix4_m1");
+    cl_kernel k_inverse_ntt_mm     = createKernel(program, "kernel_inverse_ntt_radix4_mm");
     cl_kernel k_sub2 = createKernel(program, "kernel_sub2");
     cl_kernel k_carry = createKernel(program, "kernel_carry");
     cl_kernel k_carry_2 = createKernel(program, "kernel_carry_2");
@@ -916,11 +926,11 @@ int main(int argc, char** argv) {
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue,
-            k_forward_ntt_alt_mm, k_forward_ntt_alt_last_m1,
+            k_forward_ntt_mm, k_forward_ntt_last_m1,
             buf_x, buf_twiddles, n, workers, localSize, profiling, maxLocalMem);
 
         executeFusionneNTT_Inverse(queue,
-            k_inverse_ntt_alt_mm, k_inverse_ntt_alt_m1,
+            k_inverse_ntt_mm, k_inverse_ntt_m1,
             buf_x, buf_inv_twiddles, n, workers, localSize, profiling, maxLocalMem);
 
         executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
@@ -931,6 +941,13 @@ int main(int argc, char** argv) {
             executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
         }
         checkAndDisplayProgress(iter, total_iters, lastDisplay, startTime, queue);
+
+        if (proof && std::find(proofSet.points.begin(), proofSet.points.end(), iter) != proofSet.points.end()) {
+            clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+            Words partialRes = ProofSet::fromUint64(x, p);
+            proofSet.save(iter, partialRes);
+            std::cout << "Proof generation : Saved partial residue at iteration " << iter << std::endl;
+        }
 
         // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
         auto now = high_resolution_clock::now();
@@ -975,10 +992,10 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_block_carry_out);
                 clReleaseKernel(k_precomp);
                 clReleaseKernel(k_postcomp);
-                clReleaseKernel(k_forward_ntt_alt_mm);
-                clReleaseKernel(k_forward_ntt_alt_last_m1);
-                clReleaseKernel(k_inverse_ntt_alt_m1);
-                clReleaseKernel(k_inverse_ntt_alt_mm);
+                clReleaseKernel(k_forward_ntt_mm);
+                clReleaseKernel(k_forward_ntt_last_m1);
+                clReleaseKernel(k_inverse_ntt_m1);
+                clReleaseKernel(k_inverse_ntt_mm);
                 clReleaseKernel(k_sub2);
                 clReleaseKernel(k_carry);
                 clReleaseKernel(k_carry_2);
@@ -1015,6 +1032,25 @@ int main(int argc, char** argv) {
     std::cout << "Kernel execution time: " << elapsedTime << " seconds" << std::endl;
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
+    if(proof){
+        Words finalRes = ProofSet::fromUint64(x, p);
+        auto [myProof, rExps] = proofSet.computeProof(finalRes);
+        std::filesystem::path outDir = save_path; 
+        std::filesystem::create_directories(outDir);
+        auto proofFile = myProof.fileName(outDir);
+        myProof.save(proofFile);
+        std::cout << "Proof is saved in a file!\n";
+    }
+
+    /*
+    if(proof){
+        if (!myProof.verify()) {
+            std::cout << "Proof is invalid!\n";
+        } else {
+            std::cout << "Proof is valid. M" << p 
+                    << (myProof.isProbablePrime() ? " prime?\n" : " composite.\n");
+        }
+    }*/
 
     // -------------------------------------------------------------------------
     // Cleanup: Release all OpenCL resources
@@ -1029,10 +1065,10 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_block_carry_out);
     clReleaseKernel(k_precomp);
     clReleaseKernel(k_postcomp);
-    clReleaseKernel(k_forward_ntt_alt_mm);
-    clReleaseKernel(k_forward_ntt_alt_last_m1);
-    clReleaseKernel(k_inverse_ntt_alt_m1);
-    clReleaseKernel(k_inverse_ntt_alt_mm);
+    clReleaseKernel(k_forward_ntt_mm);
+    clReleaseKernel(k_forward_ntt_last_m1);
+    clReleaseKernel(k_inverse_ntt_m1);
+    clReleaseKernel(k_inverse_ntt_mm);
     clReleaseKernel(k_sub2);
     clReleaseKernel(k_carry);
     clReleaseKernel(k_carry_2);

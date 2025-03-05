@@ -179,9 +179,9 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
 
 
-// kernel_inverse_ntt_radix4_alt_mm: Inverse NTT (radix-4) for m ≠ 1 using global inverse twiddle factors.
+// kernel_inverse_ntt_radix4_mm: Inverse NTT (radix-4) for m ≠ 1 using global inverse twiddle factors.
 // Computes proper indices for non‑contiguous memory.
-__kernel void kernel_inverse_ntt_radix4_alt_mm(__global ulong* restrict x,
+__kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
                                                 __global ulong* restrict wi,
                                                 const ulong n,
                                                 const ulong m) {
@@ -225,9 +225,9 @@ __kernel void kernel_inverse_ntt_radix4_alt_mm(__global ulong* restrict x,
 
 
 
-// kernel_ntt_radix4_last_alt_m1: Last stage of forward NTT (radix-4) for m == 1 using global twiddle factors.
+// kernel_ntt_radix4_last_m1: Last stage of forward NTT (radix-4) for m == 1 using global twiddle factors.
 // Performs the butterfly and then fuses a square, with twiddle factors read from global memory.
-__kernel void kernel_ntt_radix4_last_alt_m1(__global ulong* restrict x,
+__kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
                                             __global ulong* restrict w,
                                             const ulong n,
                                             const ulong m) {
@@ -268,9 +268,9 @@ __kernel void kernel_ntt_radix4_last_alt_m1(__global ulong* restrict x,
 
 
 
-// kernel_ntt_radix4_alt_mm: Forward NTT (radix-4) for m ≠ 1 using global twiddle factors.
+// kernel_ntt_radix4_mm: Forward NTT (radix-4) for m ≠ 1 using global twiddle factors.
 // Computes the proper indices for non‑contiguous data access.
-__kernel void kernel_ntt_radix4_alt_mm(__global ulong* restrict x,
+__kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
                                        __global ulong* restrict w,
                                        const ulong n,
                                        const ulong m) {
@@ -307,8 +307,8 @@ __kernel void kernel_ntt_radix4_alt_mm(__global ulong* restrict x,
 }
 
 
-// kernel_inverse_ntt_radix4_alt_m1: Inverse NTT (radix-4) for m == 1 using global inverse twiddle factors.
-__kernel void kernel_inverse_ntt_radix4_alt_m1(__global ulong* restrict x,
+// kernel_inverse_ntt_radix4_m1: Inverse NTT (radix-4) for m == 1 using global inverse twiddle factors.
+__kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                 __global ulong* restrict wi,
                                                 const ulong n,
                                                 const ulong m) {
