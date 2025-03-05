@@ -866,9 +866,7 @@ int main(int argc, char** argv) {
         block_carry_init.data(), "buf_block_carry");
 
 
-    cl_int zero = 0;
-    cl_mem flagBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &zero, &err);
-    
+
 
     // --------------------
     // Create Kernels using helper functions
@@ -900,7 +898,6 @@ int main(int argc, char** argv) {
     errKernel  = clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_block_carry);
     errKernel |= clSetKernelArg(k_carry, 2, sizeof(cl_mem), &buf_digit_width);
-    errKernel |= clSetKernelArg(k_carry, 3, sizeof(cl_mem), &flagBuffer);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for carry: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
@@ -909,7 +906,6 @@ int main(int argc, char** argv) {
     errKernel  = clSetKernelArg(k_carry_2, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry_2, 1, sizeof(cl_mem), &buf_block_carry);
     errKernel |= clSetKernelArg(k_carry_2, 2, sizeof(cl_mem), &buf_digit_width);
-    errKernel |= clSetKernelArg(k_carry_2, 3, sizeof(cl_mem), &flagBuffer);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for carry 2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
