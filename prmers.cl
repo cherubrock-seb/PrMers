@@ -223,7 +223,7 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
                                                 const ulong n,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
+    
 
     // Calculate base offset for inverse twiddle factors.
     const ulong twiddle_offset = 3 * 2 * m;
@@ -269,7 +269,7 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
                                             const ulong n,
                                             const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
+    
 
     // Calculate base offset for twiddle factors.
     const ulong twiddle_offset = 3 * 2 * m;
@@ -312,7 +312,7 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
                                        const ulong n,
                                        const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
+    
 
     // Calculate the base offset for twiddle factors.
     const ulong twiddle_offset = 3 * 2 * m;
@@ -350,7 +350,7 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                 const ulong n,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
-    if (k >= n / 4) return;
+    
 
     // Calculate base offset for inverse twiddle factors.
     const ulong twiddle_offset = 3 * 2 * m;
