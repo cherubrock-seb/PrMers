@@ -3,12 +3,12 @@ PREFIX ?= /usr/local
 
 # Compiler and compilation options
 CXX = g++
-CXXFLAGS = -std=c++11 -O2 -Wall
+CXXFLAGS = -std=c++20 -O3 -Wall
 LDFLAGS = -lOpenCL
 
 # Target executable and source/kernel files
 TARGET = prmers
-SRC = prmers.cpp
+SRC = prmers.cpp proof/common.cpp proof/proof.cpp proof/md5.cpp proof/sha3.cpp
 KERNEL = prmers.cl
 
 all: $(TARGET)
