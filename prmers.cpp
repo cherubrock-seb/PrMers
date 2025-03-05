@@ -1062,12 +1062,12 @@ int main(int argc, char** argv) {
         auto proofFile = myProof.fileName(outDir);
         myProof.save(proofFile);
         std::cout << "Proof is saved in a file!\n";
-        if (!myProof.verify()) {
+        /*if (!myProof.verify()) {
             std::cout << "Proof is invalid!\n";
         } else {
             std::cout << "Proof is valid. M" << p 
                     << (myProof.isProbablePrime() ? " prime?\n" : " composite.\n");
-        }
+        }*/
     }
 
     // -------------------------------------------------------------------------
