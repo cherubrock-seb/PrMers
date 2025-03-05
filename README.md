@@ -111,7 +111,7 @@ g++ -std=c++20 -I. -o prmers prmers.cpp proof/common.cpp proof/proof.cpp proof/m
 ## Usage
 Example of execution:
 ```bash
-./prmers 9279 -d 1
+prmers 9279 -d 1
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 9279
 Using OpenCL device ID: 1
@@ -127,7 +127,7 @@ Iterations per second: 836.77 (9277 iterations in total)
 
 Or without specifying a device:
 ```bash
-./prmers 216091
+prmers 216091
 PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 216091
 Using OpenCL device ID: 0
@@ -189,7 +189,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Command:
 
   ```bash
-   ./prmers 216091 -t 10
+   prmers 216091 -t 10
   ```
 
    Output:
@@ -245,7 +245,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Command:
 
   ```bash
-   ./prmers 127 -prp
+   prmers 127 -prp
   ```
 
    Output:
@@ -277,7 +277,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    
    Command:
   ```bash
-   ./prmers 756839 -prp
+   prmers 756839 -prp
   ```   
    Output:
   ```bash
