@@ -840,7 +840,6 @@ int main(int argc, char** argv) {
     }
 
     std::vector<uint64_t> block_carry_init(workersCarry, 0ULL);
-    std::vector<uint64_t> block_carry_init_out(workersCarry, 0ULL);
     cl_mem buf_x = createBuffer(context,
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
         n * sizeof(uint64_t),
@@ -851,10 +850,6 @@ int main(int argc, char** argv) {
         workersCarry * sizeof(uint64_t),
         block_carry_init.data(), "buf_block_carry");
 
-    cl_mem buf_block_carry_out = createBuffer(context,
-        CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-        workersCarry * sizeof(uint64_t),
-        block_carry_init_out.data(), "buf_block_carry_out");
 
     cl_int zero = 0;
     cl_mem flagBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &zero, &err);
@@ -915,10 +910,9 @@ int main(int argc, char** argv) {
     // kernel_carry_2
     errKernel  = clSetKernelArg(k_carry_2, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry_2, 1, sizeof(cl_mem), &buf_block_carry);
-    errKernel |= clSetKernelArg(k_carry_2, 2, sizeof(cl_mem), &buf_block_carry_out);
-    errKernel |= clSetKernelArg(k_carry_2, 3, sizeof(cl_mem), &buf_digit_width);
-    errKernel |= clSetKernelArg(k_carry_2, 4, sizeof(uint64_t), &n);
-    errKernel |= clSetKernelArg(k_carry_2, 5, sizeof(cl_mem), &flagBuffer);
+    errKernel |= clSetKernelArg(k_carry_2, 2, sizeof(cl_mem), &buf_digit_width);
+    errKernel |= clSetKernelArg(k_carry_2, 3, sizeof(uint64_t), &n);
+    errKernel |= clSetKernelArg(k_carry_2, 4, sizeof(cl_mem), &flagBuffer);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for carry 2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
@@ -946,11 +940,11 @@ int main(int argc, char** argv) {
         executeKernelAndDisplay(queue, k_precomp, buf_x, workers, localSize, "kernel_precomp", n, profiling);
         executeFusionneNTT_Forward(queue,
             k_forward_ntt_mm, k_forward_ntt_last_m1,
-            buf_x, buf_twiddles, n, workers, localSize, profiling, maxLocalMem);
+            buf_x, buf_twiddles, n, workers/4, localSize, profiling, maxLocalMem);
 
         executeFusionneNTT_Inverse(queue,
             k_inverse_ntt_mm, k_inverse_ntt_m1,
-            buf_x, buf_inv_twiddles, n, workers, localSize, profiling, maxLocalMem);
+            buf_x, buf_inv_twiddles, n, workers/4, localSize, profiling, maxLocalMem);
 
         executeKernelAndDisplay(queue, k_postcomp, buf_x, workers, localSize, "kernel_postcomp", n, profiling);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
@@ -1009,7 +1003,6 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_digit_invweight);
                 clReleaseMemObject(buf_digit_width);
                 clReleaseMemObject(buf_block_carry);
-                clReleaseMemObject(buf_block_carry_out);
                 clReleaseKernel(k_precomp);
                 clReleaseKernel(k_postcomp);
                 clReleaseKernel(k_forward_ntt_mm);
@@ -1080,7 +1073,6 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_digit_invweight);
     clReleaseMemObject(buf_digit_width);
     clReleaseMemObject(buf_block_carry);
-    clReleaseMemObject(buf_block_carry_out);
     clReleaseKernel(k_precomp);
     clReleaseKernel(k_postcomp);
     clReleaseKernel(k_forward_ntt_mm);
