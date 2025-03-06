@@ -432,8 +432,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
         clSetKernelArg(kernel_ntt_last_m1_n4, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_ntt_last_m1_n4, 1, sizeof(cl_mem), &buf_w);
         clSetKernelArg(kernel_ntt_last_m1_n4, 2, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(kernel_ntt_last_m1_n4, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_ntt_last_m1_n4, 4, 0, NULL); 
+        clSetKernelArg(kernel_ntt_last_m1_n4, 3, 0, NULL); 
         executeKernelAndDisplay(queue, kernel_ntt_last_m1_n4, buf_x, workers, localSize,
             "kernel_ntt_last_m1_n4 (m=" + std::to_string(m) + ")", n, profiling);
     }
@@ -460,8 +459,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
         m = 1;
         clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_ntt_last_m1, 1, sizeof(cl_mem), &buf_w);
-        clSetKernelArg(kernel_ntt_last_m1, 2, sizeof(size_t), &m);
-        clSetKernelArg(kernel_ntt_last_m1, 3, 0, NULL);
+        clSetKernelArg(kernel_ntt_last_m1, 2, 0, NULL);
         executeKernelAndDisplay(queue, kernel_ntt_last_m1, buf_x, workers, localSize,
             "kernel_ntt_radix4_last_m1 (m=" + std::to_string(m) + ")", n, profiling);
     }
@@ -478,8 +476,7 @@ void executeFusionneNTT_Inverse(cl_command_queue queue,
         clSetKernelArg(kernel_inverse_ntt_m1_n4, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_inverse_ntt_m1_n4, 1, sizeof(cl_mem), &buf_wi);
         clSetKernelArg(kernel_inverse_ntt_m1_n4, 2, sizeof(cl_mem), &buf_digit_invweight);
-        clSetKernelArg(kernel_inverse_ntt_m1_n4, 3, sizeof(size_t), &m);
-        clSetKernelArg(kernel_inverse_ntt_m1_n4, 4, 0, NULL);
+        clSetKernelArg(kernel_inverse_ntt_m1_n4, 3, 0, NULL);
         executeKernelAndDisplay(queue, kernel_inverse_ntt_m1_n4, buf_x, workers, localSize,
             "kernel_inverse_ntt_m1_n4 (m=" + std::to_string(m) + ")", n, profiling);
     }
@@ -491,8 +488,7 @@ void executeFusionneNTT_Inverse(cl_command_queue queue,
 
         clSetKernelArg(kernel_inverse_ntt_m1, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_inverse_ntt_m1, 1, sizeof(cl_mem), &buf_wi);
-        clSetKernelArg(kernel_inverse_ntt_m1, 2, sizeof(size_t), &m);
-        clSetKernelArg(kernel_inverse_ntt_m1, 3, 0, NULL);
+        clSetKernelArg(kernel_inverse_ntt_m1, 2, 0, NULL);
         executeKernelAndDisplay(queue, kernel_inverse_ntt_m1, buf_x, workers, localSize,
             "kernel_inverse_ntt_radix4_m1 (m=" + std::to_string(m) + ")", n, profiling);
 
