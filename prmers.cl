@@ -166,8 +166,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
     const ulong end = start + LOCAL_PROPAGATION_DEPTH; 
-    ulong4 carry = (ulong4)0UL;  // carry comme un vecteur, mais seulement carry.s0 sera stocké
-
+    ulong carry = 0UL; 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
@@ -177,8 +176,8 @@ __kernel void kernel_carry(__global ulong* restrict x,
         vstore4(x_vec, 0, x + i);
     }
     
-    if (carry.s0 != 0) { // Seule la première valeur du ulong4 est utilisée
-        carry_array[gid] = carry.s0;
+    if (carry != 0) {
+        carry_array[gid] = carry;
     }
 }
 
