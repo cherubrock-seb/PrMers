@@ -796,9 +796,14 @@ int main(int argc, char** argv) {
         std::cout << "Proof Power : " <<  proofPower << std::endl;
 
     size_t workGroupSize = ((workers < localSize) ? 1 : (workers / localSize));
+    size_t adjustedDepth = localCarryPropagationDepth / 4;
+    if (adjustedDepth < 1) {
+        adjustedDepth = 1;
+    }
+
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
-    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(localCarryPropagationDepth/4) ;
+    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth) ;
     std::cout << "Building OpenCL program with options: " << build_options << std::endl;
     err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {
