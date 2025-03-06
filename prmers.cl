@@ -130,6 +130,20 @@ inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *carry)
     return res;
 }
 
+inline ulong4 digit_adc4_last(ulong4 lhs, ulong4 digit_width, __private ulong *carry) {
+    ulong4 res;
+    uint64_t c = *carry;
+    #pragma unroll 3
+    for (int i = 0; i < 3; i++) {
+        uint64_t s = lhs[i] + c;                        
+        res[i] = s & ((1UL << digit_width[i]) - 1UL);    
+        c = s >> digit_width[i];
+    }
+    *carry = c;
+    res[3] = lhs[3] + c;
+    return res;
+}
+
 __kernel void kernel_sub2(__global ulong* restrict x,
                           __global ulong* restrict digit_width,
                           const ulong n)
@@ -164,6 +178,9 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 #endif
 #ifndef LOCAL_PROPAGATION_DEPTH_DIV4
 #define LOCAL_PROPAGATION_DEPTH_DIV4 2
+#endif
+#ifndef LOCAL_PROPAGATION_DEPTH_DIV4_MIN
+#define LOCAL_PROPAGATION_DEPTH_DIV4_MIN 2
 #endif
 #ifndef CARRY_WORKER
 #define CARRY_WORKER 1
@@ -208,7 +225,7 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
     if (carry == 0) return;
 
-    PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
+    PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
         ulong4 digit_width_vec = vload4(0, digit_width + i);
@@ -217,8 +234,13 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
         if (carry == 0) return;
     }
     if (carry != 0) {
-        x[end] += carry;
+        ulong4 x_vec = vload4(0, x + end);
+        ulong4 digit_width_vec = vload4(0, digit_width + end);
+        x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
+        vstore4(x_vec, 0, x + end);
     }
+
+
 }
 
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
