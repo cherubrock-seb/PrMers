@@ -176,14 +176,14 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
 
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
-                                                __global ulong* restrict wi,
+                                                __constant ulong* restrict wi,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
 
     // For m ≠ 1, calculate j and base index.
     const ulong j = k & (m - 1);
     const ulong base = 4 * (k - j) + j;
-    const ulong twiddle_offset = 3 * 2 * m + j*3;
+    const ulong twiddle_offset = 6 * m + 3 * j;
 
     const ulong coeff0 = x[base + 0 * m];
     const ulong coeff1 = x[base + 1 * m];
@@ -213,13 +213,12 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
 
 __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
                                             __global ulong* restrict w,
-                                             __global ulong* restrict digit_weight,
-                                            const ulong m) {
+                                             __global ulong* restrict digit_weight) {
     const ulong k = get_global_id(0);
     
 
     // Calculate base offset for twiddle factors.
-    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong twiddle_offset = 6;
 
     // For m == 1, use contiguous vector load/store.
     const ulong4 coeff = vload4(0, x + 4 * k);
@@ -253,7 +252,7 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
 
 
 __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
-                                                __global ulong* restrict wi,
+                                                __constant ulong* restrict wi,
                                                 __global ulong* restrict digit_invweight,
                                                 const ulong m) {
     const ulong k = get_global_id(0);
@@ -262,7 +261,8 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
     // For m ≠ 1, calculate j and base index.
     const ulong j = k & (m - 1);
     const ulong base = 4 * (k - j) + j;
-    const ulong twiddle_offset = 3 * 2 * m + j*3;
+    const ulong twiddle_offset = 6 * m + 3 * j;
+
 
     const ulong coeff0 = x[base + 0 * m];
     const ulong coeff1 = x[base + 1 * m];
@@ -293,13 +293,12 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
 
 
 __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
-                                            __global ulong* restrict w,
-                                            const ulong m) {
+                                            __global ulong* restrict w) {
     const ulong k = get_global_id(0);
     
 
     // Calculate base offset for twiddle factors.
-    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong twiddle_offset = 6;
 
     // For m == 1, use contiguous vector load/store.
     const ulong4 coeff = vload4(0, x + 4 * k);
@@ -339,7 +338,8 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
     // For m ≠ 1, compute j and the proper index i.
     const ulong j = k & (m - 1);
     const ulong i = 4 * (k - j) + j;
-    const ulong twiddle_offset = 3 * 2 * m + j*3;
+    const ulong twiddle_offset = 6 * m + 3 * j;
+
 
     // Fetch the required twiddle factors from global memory.
     const ulong w2  = w[twiddle_offset];
@@ -374,7 +374,7 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
     // For m ≠ 1, compute j and the proper index i.
     const ulong j = k & (m - 1);
     const ulong i = 4 * (k - j) + j;
-    const ulong twiddle_offset = 3 * 2 * m + 3*j;
+    const ulong twiddle_offset = 6 * m + 3 * j;
 
     // Fetch the required twiddle factors from global memory.
     const ulong w2  = w[twiddle_offset];
@@ -400,13 +400,12 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
 
 
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
-                                                __global ulong* restrict wi,
-                                                const ulong m) {
+                                                __global ulong* restrict wi) {
     const ulong k = get_global_id(0);
     
 
     // Calculate base offset for inverse twiddle factors.
-    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong twiddle_offset = 6;
     
     // For m == 1, use contiguous vector load/store.
     const ulong4 coeff = vload4(0, x + 4 * k);
@@ -435,14 +434,13 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
 }
 
 __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
-                                                __global ulong* restrict wi,
-                                                __global ulong* restrict digit_invweight,
-                                                const ulong m) {
+                                                __constant ulong* restrict wi,
+                                                __global ulong* restrict digit_invweight) {
     const ulong k = get_global_id(0);
     
 
     // Calculate base offset for inverse twiddle factors.
-    const ulong twiddle_offset = 3 * 2 * m;
+    const ulong twiddle_offset = 6;
     
     // For m == 1, use contiguous vector load/store.
     const ulong4 coeff = vload4(0, x + 4 * k);
