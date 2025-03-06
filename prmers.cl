@@ -359,104 +359,79 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
 }
 
 
+__kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
+                                             __global ulong* restrict w,
+                                             __global ulong* restrict digit_weight,
+                                             const ulong m) {
+    const ulong k = get_global_id(0);
+    const ulong j = k & (m - 1);
+    const ulong i = 4 * (k - j) + j;
+    const ulong twiddle_offset = 6 * m + 3 * j;
+    const ulong w2 = w[twiddle_offset];
+    const ulong w1 = w[twiddle_offset + 1];
+    const ulong w12 = w[twiddle_offset + 2];
+    ulong4 coeff = (ulong4)( x[i + 0*m], x[i + 1*m], x[i + 2*m], x[i + 3*m] );
+    ulong4 weight = (ulong4)( digit_weight[i + 0*m], digit_weight[i + 1*m], digit_weight[i + 2*m], digit_weight[i + 3*m] );
+    ulong4 u = modMul4(coeff, weight);
+    ulong v0 = modAdd(u.s0, u.s2);
+    ulong v1 = modAdd(u.s1, u.s3);
+    ulong v2 = modSub(u.s0, u.s2);
+    ulong v3 = modMuli(modSub(u.s1, u.s3));
+    ulong4 tmp;
+    tmp.s0 = modAdd(v0, v1);
+    tmp.s1 = modSub(v0, v1);
+    tmp.s2 = modAdd(v2, v3);
+    tmp.s3 = modSub(v2, v3);
+    ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+    ulong4 result = modMul4(tmp, factors);
+    x[i + 0*m] = result.s0;
+    x[i + 1*m] = result.s1;
+    x[i + 2*m] = result.s2;
+    x[i + 3*m] = result.s3;
+}
+
 __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
                                        __global ulong* restrict w,
                                        const ulong m) {
     const ulong k = get_global_id(0);
-    
-
-
-    // For m ≠ 1, compute j and the proper index i.
     const ulong j = k & (m - 1);
     const ulong i = 4 * (k - j) + j;
     const ulong twiddle_offset = 6 * m + 3 * j;
-
-
-    // Fetch the required twiddle factors from global memory.
-    const ulong w2  = w[twiddle_offset];
-    const ulong w1  = w[twiddle_offset + 1];
+    const ulong w2 = w[twiddle_offset];
+    const ulong w1 = w[twiddle_offset + 1];
     const ulong w12 = w[twiddle_offset + 2];
-
-    const ulong u0 = x[i + 0 * m];
-    const ulong u1 = x[i + 1 * m];
-    const ulong u2 = x[i + 2 * m];
-    const ulong u3 = x[i + 3 * m];
-
-    const ulong v0 = modAdd(u0, u2);
-    const ulong v1 = modAdd(u1, u3);
-    const ulong v2 = modSub(u0, u2);
-    const ulong v3 = modMuli(modSub(u1, u3));
-
-    x[i + 0 * m] = modAdd(v0, v1);
-    x[i + 1 * m] = modMul(modSub(v0, v1), w1);
-    x[i + 2 * m] = modMul(modAdd(v2, v3), w2);
-    x[i + 3 * m] = modMul(modSub(v2, v3), w12);
+    ulong4 coeff = (ulong4)( x[i + 0*m], x[i + 1*m], x[i + 2*m], x[i + 3*m] );
+    ulong v0 = modAdd(coeff.s0, coeff.s2);
+    ulong v1 = modAdd(coeff.s1, coeff.s3);
+    ulong v2 = modSub(coeff.s0, coeff.s2);
+    ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+    ulong4 tmp;
+    tmp.s0 = modAdd(v0, v1);
+    tmp.s1 = modSub(v0, v1);
+    tmp.s2 = modAdd(v2, v3);
+    tmp.s3 = modSub(v2, v3);
+    ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+    ulong4 result = modMul4(tmp, factors);
+    x[i + 0*m] = result.s0;
+    x[i + 1*m] = result.s1;
+    x[i + 2*m] = result.s2;
+    x[i + 3*m] = result.s3;
 }
-
-__kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
-                                       __global ulong* restrict w,
-                                        __global ulong* restrict digit_weight,
-                                       const ulong m) {
-    const ulong k = get_global_id(0);
-    
-
-    // Calculate the base offset for twiddle factors.
-
-    // For m ≠ 1, compute j and the proper index i.
-    const ulong j = k & (m - 1);
-    const ulong i = 4 * (k - j) + j;
-    const ulong twiddle_offset = 6 * m + 3 * j;
-
-    // Fetch the required twiddle factors from global memory.
-    const ulong w2  = w[twiddle_offset];
-    const ulong w1  = w[twiddle_offset + 1];
-    const ulong w12 = w[twiddle_offset + 2];
-
-
-    const ulong u0 = modMul(x[i + 0 * m], digit_weight[i + 0 * m]);
-    const ulong u1 = modMul(x[i + 1 * m], digit_weight[i + 1 * m]);
-    const ulong u2 = modMul(x[i + 2 * m], digit_weight[i + 2 * m]);
-    const ulong u3 = modMul(x[i + 3 * m], digit_weight[i + 3 * m]);
-
-    const ulong v0 = modAdd(u0, u2);
-    const ulong v1 = modAdd(u1, u3);
-    const ulong v2 = modSub(u0, u2);
-    const ulong v3 = modMuli(modSub(u1, u3));
-
-    x[i + 0 * m] = modAdd(v0, v1);
-    x[i + 1 * m] = modMul(modSub(v0, v1), w1);
-    x[i + 2 * m] = modMul(modAdd(v2, v3), w2);
-    x[i + 3 * m] = modMul(modSub(v2, v3), w12);
-}
-
 
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
-                                                __global ulong* restrict wi) {
+                                               __global ulong* restrict wi) {
     const ulong k = get_global_id(0);
-    
-
-    // Calculate base offset for inverse twiddle factors.
     const ulong twiddle_offset = 6;
-    
-    // For m == 1, use contiguous vector load/store.
-    const ulong4 coeff = vload4(0, x + 4 * k);
-    const ulong iw2  = wi[twiddle_offset];
-    const ulong iw1  = wi[twiddle_offset + 1];
+    ulong4 coeff = vload4(0, x + 4 * k);
+    const ulong iw2 = wi[twiddle_offset];
+    const ulong iw1 = wi[twiddle_offset + 1];
     const ulong iw12 = wi[twiddle_offset + 2];
-
-
-    const ulong u0 = coeff.s0;
-    const ulong u1 = modMul(coeff.s1, iw1);
-    const ulong u2 = modMul(coeff.s2, iw2);
-    const ulong u3 = modMul(coeff.s3, iw12);
-
-
-    const ulong v0 = modAdd(u0, u1);
-    const ulong v1 = modSub(u0, u1);
-    const ulong v2 = modAdd(u2, u3);
-    const ulong v3 = modMuli(modSub(u3, u2));
-
-
+    ulong4 twiddles = (ulong4)(1UL, iw1, iw2, iw12);
+    ulong4 u = modMul4(coeff, twiddles);
+    ulong v0 = modAdd(u.s0, u.s1);
+    ulong v1 = modSub(u.s0, u.s1);
+    ulong v2 = modAdd(u.s2, u.s3);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
     ulong4 result = (ulong4)( modAdd(v0, v2),
                               modAdd(v1, v3),
                               modSub(v0, v2),
@@ -465,37 +440,27 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
 }
 
 __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
-                                                __constant ulong* restrict wi,
-                                                __global ulong* restrict digit_invweight) {
+                                                  __constant ulong* restrict wi,
+                                                  __global ulong* restrict digit_invweight) {
     const ulong k = get_global_id(0);
-    
-
-    // Calculate base offset for inverse twiddle factors.
     const ulong twiddle_offset = 6;
-    
-    // For m == 1, use contiguous vector load/store.
-    const ulong4 coeff = vload4(0, x + 4 * k);
-    const ulong4 div  = vload4(0, digit_invweight + 4 * k);
-    const ulong iw2  = wi[twiddle_offset];
-    const ulong iw1  = wi[twiddle_offset + 1];
+    ulong4 coeff = vload4(0, x + 4 * k);
+    ulong4 div = vload4(0, digit_invweight + 4 * k);
+    const ulong iw2 = wi[twiddle_offset];
+    const ulong iw1 = wi[twiddle_offset + 1];
     const ulong iw12 = wi[twiddle_offset + 2];
-
-
-    const ulong u0 = coeff.s0;
-    const ulong u1 = modMul(coeff.s1, iw1);
-    const ulong u2 = modMul(coeff.s2, iw2);
-    const ulong u3 = modMul(coeff.s3, iw12);
-
-
-    const ulong v0 = modAdd(u0, u1);
-    const ulong v1 = modSub(u0, u1);
-    const ulong v2 = modAdd(u2, u3);
-    const ulong v3 = modMuli(modSub(u3, u2));
-
-
-    ulong4 result = (ulong4)( modMul(modAdd(v0, v2),div.s0),
-                              modMul(modAdd(v1, v3),div.s1),
-                              modMul(modSub(v0, v2),div.s2),
-                              modMul(modSub(v1, v3),div.s3));
+    ulong4 twiddles = (ulong4)(1UL, iw1, iw2, iw12);
+    ulong4 u = modMul4(coeff, twiddles);
+    ulong v0 = modAdd(u.s0, u.s1);
+    ulong v1 = modSub(u.s0, u.s1);
+    ulong v2 = modAdd(u.s2, u.s3);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
+    ulong4 tmp;
+    tmp.s0 = modAdd(v0, v2);
+    tmp.s1 = modAdd(v1, v3);
+    tmp.s2 = modSub(v0, v2);
+    tmp.s3 = modSub(v1, v3);
+    ulong4 result = modMul4(tmp, div);
     vstore4(result, 0, x + 4 * k);
 }
+
