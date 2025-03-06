@@ -544,10 +544,11 @@ int main(int argc, char** argv) {
     }
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
-    size_t localCarryPropagationDepth = 8;
+    size_t localCarryPropagationDepth = 4;
     std::string mode = "prp"; // Default mode is PRP
     // Parse command-line options (including new -t and -f)
     bool proof = false;
+    bool force_carry = false;
     bool profiling = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
@@ -574,6 +575,7 @@ int main(int argc, char** argv) {
             if (i + 1 < argc) {
                 localCarryPropagationDepth = std::atoi(argv[i + 1]);
                 i++;
+                force_carry = true;
             } else {
                 std::cerr << "Error: Missing value for -c <localCarryPropagationDepth>." << std::endl;
                 return 1;
@@ -742,7 +744,16 @@ int main(int argc, char** argv) {
     std::cout << "\nLaunching OpenCL kernel (p = " << p << "); computation may take a while." << std::endl;
     size_t workers = n;
     size_t localSize = maxWork;
-   
+    if(!force_carry){
+        // check b^s > n * b2
+        int max_digit_width_cpu = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
+
+        // Boucle pour ajuster localCarryPropagationDepth
+        while (std::pow(std::pow(2, max_digit_width_cpu), localCarryPropagationDepth) < 
+            std::pow(std::pow(2, max_digit_width_cpu), 2) * n) {
+            localCarryPropagationDepth *= 2;
+        }
+    }
     size_t constraint = std::max(n / 4, (size_t)1);
     while (workers % localSize != 0 || constraint % localSize != 0) {
         localSize /= 2;
