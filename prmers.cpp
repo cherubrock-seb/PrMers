@@ -548,7 +548,7 @@ int main(int argc, char** argv) {
     std::string mode = "prp"; // Default mode is PRP
     // Parse command-line options (including new -t and -f)
     bool proof = false;
-    bool force_carry = false;
+    //bool force_carry = false;
     bool profiling = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0)
@@ -575,7 +575,7 @@ int main(int argc, char** argv) {
             if (i + 1 < argc) {
                 localCarryPropagationDepth = std::atoi(argv[i + 1]);
                 i++;
-                force_carry = true;
+                //force_carry = true;
             } else {
                 std::cerr << "Error: Missing value for -c <localCarryPropagationDepth>." << std::endl;
                 return 1;
