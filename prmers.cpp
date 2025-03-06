@@ -943,8 +943,9 @@ int main(int argc, char** argv) {
         if (mode == "ll") {
             executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
         }
-        checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue);
-        
+        if(iter%300 == 0){
+            checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue);
+        }
         if (proof && std::find(proofSet.points.begin(), proofSet.points.end(), iter) != proofSet.points.end()) {
             clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
             Words partialRes = ProofSet::fromUint64(x, p);
