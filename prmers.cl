@@ -23,6 +23,33 @@ typedef ulong uint64_t;
 #define MOD_P 0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
 #define MOD_P_COMP 0xffffffffU       // 2^64 - p = 2^32 - 1
 
+
+inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
+    ulong4 sum = lhs + rhs;
+    return sum - select((ulong4)0, (ulong4)MOD_P, sum >= (ulong4)MOD_P);
+}
+
+inline ulong4 modSub4(ulong4 lhs, ulong4 rhs) {
+    ulong4 diff = lhs - rhs;
+    return diff + select((ulong4)0, (ulong4)MOD_P, lhs < rhs);
+}
+
+inline ulong4 Reduce4(ulong4 lo, ulong4 hi) {
+    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lo >= (ulong4)MOD_P);
+    ulong4 r = lo + c;
+    r = modAdd4(r, hi << (ulong4)32);
+    r = modSub4(r, (hi >> (ulong4)32) + convert_ulong4(hi));
+    return r;
+}
+
+inline ulong4 modMul4(ulong4 lhs, ulong4 rhs) {
+    ulong4 lo = lhs * rhs;
+    ulong4 hi = mul_hi(lhs, rhs);
+    return Reduce4(lo, hi);
+}
+
+
+
 inline ulong modAdd(const ulong lhs, const ulong rhs)
 {
     const uint c = (lhs >= MOD_P - rhs) ? MOD_P_COMP : 0;
@@ -78,8 +105,21 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
     return res;
 }
 
+inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *carry) {
+    ulong4 res;
+    uint64_t c = *carry;
+    #pragma unroll 4
+    for (int i = 0; i < 4; i++) {
+        uint64_t s = lhs[i] + c;                        
+        res[i] = s & ((1UL << digit_width[i]) - 1UL);    
+        c = s >> digit_width[i];
+    }
+    *carry = c;
+    return res;
+}
+
 __kernel void kernel_sub2(__global ulong* restrict x,
-                          __global int* restrict digit_width,
+                          __global ulong* restrict digit_width,
                           const ulong n)
 {
     if (get_global_id(0) == 0) {
@@ -121,25 +161,24 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 
 __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
-                           __global int* restrict digit_width)
+                           __global ulong* restrict digit_width)
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
     const ulong end = start + LOCAL_PROPAGATION_DEPTH; 
-    ulong carry = 0UL;
+    ulong4 carry = (ulong4)0UL;  // carry comme un vecteur, mais seulement carry.s0 sera stocké
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
-        int4 digit_width_vec = vload4(0, digit_width + i);
-        #pragma unroll 4
-        for (int j = 0; j < 4; ++j) {
-            x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
-        }
+        ulong4 digit_width_vec = vload4(0, digit_width + i);
+
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry); 
         vstore4(x_vec, 0, x + i);
     }
-    if (carry != 0) {
-        carry_array[gid] = carry;
+    
+    if (carry.s0 != 0) { // Seule la première valeur du ulong4 est utilisée
+        carry_array[gid] = carry.s0;
     }
 }
 
@@ -147,7 +186,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
 
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global int* restrict digit_width)
+                             __global ulong* restrict digit_width)
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -161,11 +200,8 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
-        int4 digit_width_vec = vload4(0, digit_width + i);
-        #pragma unroll 4
-        for (int j = 0; j < 4; ++j) {
-            x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
-        }
+        ulong4 digit_width_vec = vload4(0, digit_width + i);
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry); 
         vstore4(x_vec, 0, x + i);
         if (carry == 0) return;
     }
@@ -228,15 +264,12 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
     const ulong w1  = w[twiddle_offset + 1];
     const ulong w12 = w[twiddle_offset + 2];
 
-    const ulong u0 = modMul(coeff.s0, dw.s0);
-    const ulong u1 = modMul(coeff.s1, dw.s1);
-    const ulong u2 = modMul(coeff.s2, dw.s2);
-    const ulong u3 = modMul(coeff.s3, dw.s3);
-
-    const ulong v0 = modAdd(u0, u2);
-    const ulong v1 = modAdd(u1, u3);
-    const ulong v2 = modSub(u0, u2);
-    const ulong v3 = modMuli(modSub(u1, u3));
+    const ulong4 u = modMul4(coeff, dw);
+    
+    const ulong v0 = modAdd(u.s0, u.s2);
+    const ulong v1 = modAdd(u.s1, u.s3);
+    const ulong v2 = modSub(u.s0, u.s2);
+    const ulong v3 = modMuli(modSub(u.s1, u.s3));
 
     ulong4 result = (ulong4)( modAdd(v0, v1),
                               modMul(modSub(v0, v1), w1),
