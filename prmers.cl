@@ -262,7 +262,7 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
     const ulong twiddle_offset = 3 * 2 * m;
 
     // For m == 1, use contiguous vector load/store.
-    ulong4 coeff = vload4(0, x + 4 * k);
+    const ulong4 coeff = vload4(0, x + 4 * k);
     const ulong w2  = w[twiddle_offset];
     const ulong w1  = w[twiddle_offset + 1];
     const ulong w12 = w[twiddle_offset + 2];
@@ -369,7 +369,7 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
     const ulong twiddle_offset = 3 * 2 * m;
     
     // For m == 1, use contiguous vector load/store.
-    ulong4 coeff = vload4(0, x + 4 * k);
+    const ulong4 coeff = vload4(0, x + 4 * k);
     const ulong iw2  = wi[twiddle_offset];
     const ulong iw1  = wi[twiddle_offset + 1];
     const ulong iw12 = wi[twiddle_offset + 2];
