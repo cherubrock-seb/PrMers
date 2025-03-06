@@ -548,16 +548,18 @@ int main(int argc, char** argv) {
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
     size_t localCarryPropagationDepth = 8;
-    std::string mode = "prp"; // Default mode is PRP
-    // Parse command-line options (including new -t and -f)
+    std::string mode = "prp"; 
     bool proof = false;
-    //bool force_carry = false;
     bool profiling = false;
+    bool has_p = false;
+
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "-debug") == 0)
+        if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
-        if (std::strcmp(argv[i], "-proof") == 0)
+        }
+        else if (std::strcmp(argv[i], "-proof") == 0) {
             proof = true;
+        }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             profiling = true;
         }
@@ -578,7 +580,6 @@ int main(int argc, char** argv) {
             if (i + 1 < argc) {
                 localCarryPropagationDepth = std::atoi(argv[i + 1]);
                 i++;
-                //force_carry = true;
             } else {
                 std::cerr << "Error: Missing value for -c <localCarryPropagationDepth>." << std::endl;
                 return 1;
@@ -608,11 +609,20 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
-        else {
-            // Assume this argument is the exponent p if it does not match any flag.
+        else if (!has_p) { 
             p = std::atoi(argv[i]);
+            has_p = true;
+        }
+        else {
+            std::cerr << "Warning: Ignoring unexpected argument '" << argv[i] << "'" << std::endl;
         }
     }
+
+    if (!has_p) {
+        std::cerr << "Error: No exponent provided. You must specify <p> as the first argument." << std::endl;
+        return 1;
+    }
+
     if(p<13){
         mode = "ll";
     }
@@ -860,7 +870,7 @@ int main(int argc, char** argv) {
     std::string mers_filename = save_path + "/" + std::to_string(p) + mode + ".mers";
     std::string loop_filename = save_path + "/" + std::to_string(p) + mode + ".loop";
     std::ifstream loopFile(loop_filename);
-    if(loopFile) {
+    if(!debug && loopFile) {
         loopFile >> resume_iter;
         loopFile.close();
         std::cout << "Resuming from iteration " << resume_iter << " based on existing file " << loop_filename << std::endl;
@@ -877,6 +887,10 @@ int main(int argc, char** argv) {
         else
             x[0] = 4ULL;
     }
+    
+
+
+
 
     std::vector<uint64_t> block_carry_init(workersCarry, 0ULL);
     cl_mem buf_x = createBuffer(context,
@@ -951,6 +965,9 @@ int main(int argc, char** argv) {
     auto last_backup_time = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
     
+    if(debug)
+        std::cout << "Number of iterations to be done = " << total_iters << std::endl;
+            
 
     // Main loop now starts from resume_iter (if any) to total_iters.
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
