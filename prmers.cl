@@ -23,31 +23,15 @@ typedef ulong uint64_t;
 #define MOD_P 0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
 #define MOD_P_COMP 0xffffffffU       // 2^64 - p = 2^32 - 1
 
-
 inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
-    ulong4 sum = lhs + rhs;
-    return sum - select((ulong4)0, (ulong4)MOD_P, sum >= (ulong4)MOD_P);
+    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lhs >= ((ulong4)MOD_P - rhs));
+    return lhs + rhs + c;
 }
 
 inline ulong4 modSub4(ulong4 lhs, ulong4 rhs) {
-    ulong4 diff = lhs - rhs;
-    return diff + select((ulong4)0, (ulong4)MOD_P, lhs < rhs);
+    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lhs < rhs);
+    return lhs - rhs - c;
 }
-
-inline ulong4 Reduce4(ulong4 lo, ulong4 hi) {
-    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lo >= (ulong4)MOD_P);
-    ulong4 r = lo + c;
-    r = modAdd4(r, hi << (ulong4)32);
-    r = modSub4(r, (hi >> (ulong4)32) + convert_ulong4(hi));
-    return r;
-}
-
-inline ulong4 modMul4(ulong4 lhs, ulong4 rhs) {
-    ulong4 lo = lhs * rhs;
-    ulong4 hi = mul_hi(lhs, rhs);
-    return Reduce4(lo, hi);
-}
-
 
 
 inline ulong modAdd(const ulong lhs, const ulong rhs)
@@ -62,6 +46,8 @@ inline ulong modSub(const ulong lhs, const ulong rhs)
     return lhs - rhs - c;
 }
 
+
+
 inline ulong Reduce(const ulong lo, const ulong hi)
 {
     // hi_hi * 2^96 + hi_lo * 2^64 + lo = lo + hi_lo * 2^32 - (hi_hi + hi_lo)
@@ -72,6 +58,32 @@ inline ulong Reduce(const ulong lo, const ulong hi)
     return r;
 }
 
+
+inline ulong4 Reduce4(ulong4 lo, ulong4 hi) {
+    const ulong4 MOD_P_COMP4 = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
+    const ulong4 MOD_P4      = (ulong4)(MOD_P,      MOD_P,      MOD_P,      MOD_P);
+
+    ulong4 c = select((ulong4)0, MOD_P_COMP4, lo >= MOD_P4);
+    ulong4 r = lo + c;
+
+    ulong4 hi_shifted = hi << 32;
+    ulong4 hi_high = hi >> 32;
+    ulong4 hi_low = convert_ulong4(convert_uint4(hi));
+    ulong4 hi_reduced = hi_high + hi_low;
+
+    r = modAdd4(r, hi_shifted);
+    r = modSub4(r, hi_reduced);
+
+    return r;
+}
+
+
+
+inline ulong4 modMul4(ulong4 lhs, ulong4 rhs) {
+    ulong4 lo = lhs * rhs;
+    ulong4 hi = mul_hi(lhs, rhs);
+    return Reduce4(lo, hi);
+}
 
 // Compute the 128-bit product of a and b as high:low.
 inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
@@ -275,10 +287,7 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
                               modMul(modAdd(v2, v3), w2),
                               modMul(modSub(v2, v3), w12) );
     // Fuse with square.
-    result.s0 = modMul(result.s0, result.s0);
-    result.s1 = modMul(result.s1, result.s1);
-    result.s2 = modMul(result.s2, result.s2);
-    result.s3 = modMul(result.s3, result.s3);
+    result = modMul4(result,result);
     vstore4(result, 0, x + 4 * k);
 }
 
@@ -353,10 +362,7 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
                               modMul(modAdd(v2, v3), w2),
                               modMul(modSub(v2, v3), w12) );
     // Fuse with square.
-    result.s0 = modMul(result.s0, result.s0);
-    result.s1 = modMul(result.s1, result.s1);
-    result.s2 = modMul(result.s2, result.s2);
-    result.s3 = modMul(result.s3, result.s3);
+    result = modMul4(result,result);
     vstore4(result, 0, x + 4 * k);
 }
 
