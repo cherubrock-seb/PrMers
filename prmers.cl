@@ -317,8 +317,6 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
                                  digit_invweight[base + 1*m],
                                  digit_invweight[base + 2*m],
                                  digit_invweight[base + 3*m] );
-
-    
     ulong4 temp;
     temp.s0 = modAdd(v.s0, v.s2);
     temp.s1 = modAdd(v.s1, v.s3);
@@ -332,40 +330,34 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
 }
 
 
-
-
 __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
                                             __global ulong* restrict w) {
     const ulong k = get_global_id(0);
-    
-
-    // Calculate base offset for twiddle factors.
+    ulong4 coeff = vload4(0, x + 4 * k);
     const ulong twiddle_offset = 6;
+    ulong v0 = modAdd(coeff.s0, coeff.s2);
+    ulong v1 = modAdd(coeff.s1, coeff.s3);
+    ulong v2 = modSub(coeff.s0, coeff.s2);
+    ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
 
-    // For m == 1, use contiguous vector load/store.
-    const ulong4 coeff = vload4(0, x + 4 * k);
-    const ulong w2  = w[twiddle_offset];
-    const ulong w1  = w[twiddle_offset + 1];
-    const ulong w12 = w[twiddle_offset + 2];
+    ulong4 tmp;
+    tmp.s0 = modAdd(v0, v1);
+    tmp.s1 = modSub(v0, v1);
+    tmp.s2 = modAdd(v2, v3);
+    tmp.s3 = modSub(v2, v3);
 
-    const ulong u0 = coeff.s0;
-    const ulong u1 = coeff.s1;
-    const ulong u2 = coeff.s2;
-    const ulong u3 = coeff.s3;
+    ulong4 factors = (ulong4)( 1UL, 
+                               w[twiddle_offset + 1],  // w1
+                               w[twiddle_offset + 0],  // w2 (w[6])
+                               w[twiddle_offset + 2] );// w12
 
-    const ulong v0 = modAdd(u0, u2);
-    const ulong v1 = modAdd(u1, u3);
-    const ulong v2 = modSub(u0, u2);
-    const ulong v3 = modMuli(modSub(u1, u3));
+    ulong4 result = modMul4(tmp, factors);
 
-    ulong4 result = (ulong4)( modAdd(v0, v1),
-                              modMul(modSub(v0, v1), w1),
-                              modMul(modAdd(v2, v3), w2),
-                              modMul(modSub(v2, v3), w12) );
-    // Fuse with square.
-    result = modMul4(result,result);
+    result = modMul4(result, result);
+
     vstore4(result, 0, x + 4 * k);
 }
+
 
 __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
                                        __global ulong* restrict w,
