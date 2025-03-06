@@ -185,10 +185,10 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
     const ulong base = 4 * (k - j) + j;
     const ulong twiddle_offset = 3 * 2 * m + j*3;
 
-    ulong coeff0 = x[base + 0 * m];
-    ulong coeff1 = x[base + 1 * m];
-    ulong coeff2 = x[base + 2 * m];
-    ulong coeff3 = x[base + 3 * m];
+    const ulong coeff0 = x[base + 0 * m];
+    const ulong coeff1 = x[base + 1 * m];
+    const ulong coeff2 = x[base + 2 * m];
+    const ulong coeff3 = x[base + 3 * m];
 
     // Fetch inverse twiddle factors from global memory.
     const ulong iw2  = wi[twiddle_offset];
@@ -224,10 +224,10 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
     const ulong base = 4 * (k - j) + j;
     const ulong twiddle_offset = 3 * 2 * m + j*3;
 
-    ulong coeff0 = x[base + 0 * m];
-    ulong coeff1 = x[base + 1 * m];
-    ulong coeff2 = x[base + 2 * m];
-    ulong coeff3 = x[base + 3 * m];
+    const ulong coeff0 = x[base + 0 * m];
+    const ulong coeff1 = x[base + 1 * m];
+    const ulong coeff2 = x[base + 2 * m];
+    const ulong coeff3 = x[base + 3 * m];
 
     // Fetch inverse twiddle factors from global memory.
     const ulong iw2  = wi[twiddle_offset];
