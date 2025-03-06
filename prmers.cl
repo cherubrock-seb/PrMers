@@ -110,11 +110,14 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 #ifndef LOCAL_PROPAGATION_DEPTH
 #define LOCAL_PROPAGATION_DEPTH 8
 #endif
+#ifndef LOCAL_PROPAGATION_DEPTH_DIV4
+#define LOCAL_PROPAGATION_DEPTH_DIV4 2
+#endif
 #ifndef CARRY_WORKER
 #define CARRY_WORKER 1
 #endif
-
-
+#define PRAGMA_UNROLL_HELPER(x) _Pragma(#x)
+#define PRAGMA_UNROLL(n) PRAGMA_UNROLL_HELPER(unroll n)
 
 __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
@@ -125,11 +128,11 @@ __kernel void kernel_carry(__global ulong* restrict x,
     const ulong end = start + LOCAL_PROPAGATION_DEPTH; 
     ulong carry = 0UL;
 
-    #pragma unroll
+    PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
         int4 digit_width_vec = vload4(0, digit_width + i);
-        #pragma unroll
+        #pragma unroll 4
         for (int j = 0; j < 4; ++j) {
             x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
         }
@@ -155,11 +158,11 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
     if (carry == 0) return;
 
-    #pragma unroll
+    PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
         int4 digit_width_vec = vload4(0, digit_width + i);
-        #pragma unroll
+        #pragma unroll 4
         for (int j = 0; j < 4; ++j) {
             x_vec[j] = digit_adc(x_vec[j], digit_width_vec[j], &carry);
         }
