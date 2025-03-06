@@ -544,7 +544,7 @@ int main(int argc, char** argv) {
     }
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
-    size_t localCarryPropagationDepth = 4;
+    size_t localCarryPropagationDepth = 8;
     std::string mode = "prp"; // Default mode is PRP
     // Parse command-line options (including new -t and -f)
     bool proof = false;
@@ -741,19 +741,21 @@ int main(int argc, char** argv) {
     clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(maxLocalMem), &maxLocalMem, NULL);
     std::cout << "Max CL_DEVICE_LOCAL_MEM_SIZE = " << maxLocalMem << std::endl;
     
-    std::cout << "\nLaunching OpenCL kernel (p = " << p << "); computation may take a while." << std::endl;
     size_t workers = n;
     size_t localSize = maxWork;
+    /*
     if(!force_carry){
-        // check b^s > n * b2
+        // check b^s > n * b^2
         int max_digit_width_cpu = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
-
-        // Boucle pour ajuster localCarryPropagationDepth
+        std::cout << "Max max_digit_width for IBDWT = " << max_digit_width_cpu << std::endl;
+    
         while (std::pow(std::pow(2, max_digit_width_cpu), localCarryPropagationDepth) < 
             std::pow(std::pow(2, max_digit_width_cpu), 2) * n) {
             localCarryPropagationDepth *= 2;
         }
-    }
+    }*/
+    std::cout << "\nLaunching OpenCL kernel (p = " << p << "); computation may take a while." << std::endl;
+    
     size_t constraint = std::max(n / 4, (size_t)1);
     while (workers % localSize != 0 || constraint % localSize != 0) {
         localSize /= 2;
