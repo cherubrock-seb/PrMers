@@ -136,6 +136,9 @@ void precalc_for_p(uint32_t p,
                    std::vector<uint64_t>& digit_invweight,
                    std::vector<int>& digit_width) {
     size_t n = transformsize(p);
+    if(n<16){
+        n = 16;
+    }
     digit_weight.resize(n);
     digit_invweight.resize(n);
     digit_width.resize(n);
@@ -698,6 +701,9 @@ int main(int argc, char** argv) {
     }
    
     size_t n = transformsize(p);
+    if(n<16){
+        n=16;
+    }
     if (debug)
         std::cout << "Size n for transform is n=" << n << std::endl;
 
@@ -961,9 +967,8 @@ int main(int argc, char** argv) {
         if (mode == "ll") {
             executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
         }
-        if(iter%300 == 0){
-            checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue);
-        }
+        checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue);
+        
         if (proof && std::find(proofSet.points.begin(), proofSet.points.end(), iter) != proofSet.points.end()) {
             clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
             Words partialRes = ProofSet::fromUint64(x, p);
@@ -973,62 +978,62 @@ int main(int argc, char** argv) {
         }
 
         // Check if backup interval has been reached or if SIGINT (Ctrl-C) was received.
-        if(iter%300 == 0){
-            auto now = high_resolution_clock::now();
-            if(duration_cast<seconds>(now - last_backup_time).count() >= backup_interval || g_interrupt_flag) {
-                clFinish(queue);
-                // Read back buf_x from GPU
-                clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
-                // Save buf_x state to file (binary file)
-                std::ofstream mersOut(mers_filename, std::ios::binary);
-                if(mersOut) {
-                    mersOut.write(reinterpret_cast<const char*>(x.data()), n * sizeof(uint64_t));
-                    mersOut.close();
-                    std::cout << "\nState saved to " << mers_filename << std::endl;
-                } else {
-                    std::cerr << "\nError saving state to " << mers_filename << std::endl;
-                }
-                // Save current iteration state to file (text file)
-                std::ofstream loopOut(loop_filename);
-                if(loopOut) {
-                    loopOut << (iter + 1);
-                    loopOut.close();
-                    std::cout << "Loop iteration saved to " << loop_filename << std::endl;
-                } else {
-                    std::cerr << "Error saving loop state to " << loop_filename << std::endl;
-                }
-                last_backup_time = now;
-                double backup_elapsed = duration_cast<nanoseconds>(now - startTime).count() / 1e9;
-                displayBackupInfo(iter, total_iters, backup_elapsed);
 
-                // If interrupted by SIGINT, exit gracefully after saving state.
-                // If interrupted, exit early after cleanup.
-                if (g_interrupt_flag) {
-                    std::cout << "Exiting early due to interrupt." << std::endl;
-                    // Perform cleanup and release resources:
-                    clReleaseMemObject(buf_x);
-                    clReleaseMemObject(buf_twiddles);
-                    clReleaseMemObject(buf_inv_twiddles);
-                    clReleaseMemObject(buf_digit_weight);
-                    clReleaseMemObject(buf_digit_invweight);
-                    clReleaseMemObject(buf_digit_width);
-                    clReleaseMemObject(buf_block_carry);
-                    clReleaseKernel(k_forward_ntt_mm);
-                    clReleaseKernel(k_forward_ntt_mm_first);
-                    clReleaseKernel(k_forward_ntt_last_m1);
-                    clReleaseKernel(k_inverse_ntt_m1);
-                    clReleaseKernel(k_inverse_ntt_mm);
-                    clReleaseKernel(k_inverse_ntt_mm_last);
-                    clReleaseKernel(k_sub2);
-                    clReleaseKernel(k_carry);
-                    clReleaseKernel(k_carry_2);
-                    clReleaseProgram(program);
-                    clReleaseCommandQueue(queue);
-                    clReleaseContext(context);
-                    return 0;
-                }
+        auto now = high_resolution_clock::now();
+        if(duration_cast<seconds>(now - last_backup_time).count() >= backup_interval || g_interrupt_flag) {
+            clFinish(queue);
+            // Read back buf_x from GPU
+            clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
+            // Save buf_x state to file (binary file)
+            std::ofstream mersOut(mers_filename, std::ios::binary);
+            if(mersOut) {
+                mersOut.write(reinterpret_cast<const char*>(x.data()), n * sizeof(uint64_t));
+                mersOut.close();
+                std::cout << "\nState saved to " << mers_filename << std::endl;
+            } else {
+                std::cerr << "\nError saving state to " << mers_filename << std::endl;
+            }
+            // Save current iteration state to file (text file)
+            std::ofstream loopOut(loop_filename);
+            if(loopOut) {
+                loopOut << (iter + 1);
+                loopOut.close();
+                std::cout << "Loop iteration saved to " << loop_filename << std::endl;
+            } else {
+                std::cerr << "Error saving loop state to " << loop_filename << std::endl;
+            }
+            last_backup_time = now;
+            double backup_elapsed = duration_cast<nanoseconds>(now - startTime).count() / 1e9;
+            displayBackupInfo(iter, total_iters, backup_elapsed);
+
+            // If interrupted by SIGINT, exit gracefully after saving state.
+            // If interrupted, exit early after cleanup.
+            if (g_interrupt_flag) {
+                std::cout << "Exiting early due to interrupt." << std::endl;
+                // Perform cleanup and release resources:
+                clReleaseMemObject(buf_x);
+                clReleaseMemObject(buf_twiddles);
+                clReleaseMemObject(buf_inv_twiddles);
+                clReleaseMemObject(buf_digit_weight);
+                clReleaseMemObject(buf_digit_invweight);
+                clReleaseMemObject(buf_digit_width);
+                clReleaseMemObject(buf_block_carry);
+                clReleaseKernel(k_forward_ntt_mm);
+                clReleaseKernel(k_forward_ntt_mm_first);
+                clReleaseKernel(k_forward_ntt_last_m1);
+                clReleaseKernel(k_inverse_ntt_m1);
+                clReleaseKernel(k_inverse_ntt_mm);
+                clReleaseKernel(k_inverse_ntt_mm_last);
+                clReleaseKernel(k_sub2);
+                clReleaseKernel(k_carry);
+                clReleaseKernel(k_carry_2);
+                clReleaseProgram(program);
+                clReleaseCommandQueue(queue);
+                clReleaseContext(context);
+                return 0;
             }
         }
+        
     }
     //
     // After successful completion, remove the loop state file as it is no longer needed.
