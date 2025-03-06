@@ -563,12 +563,12 @@ int main(int argc, char** argv) {
     }
     uint32_t p = 0;
     int device_id = 0;  // Default device ID
-    size_t localCarryPropagationDepth = 8;
+    size_t localCarryPropagationDepth = 4;
     std::string mode = "prp"; 
     bool proof = false;
     bool profiling = false;
     bool has_p = false;
-
+    bool force_carry = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -595,6 +595,7 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "-c") == 0) {
             if (i + 1 < argc) {
                 localCarryPropagationDepth = std::atoi(argv[i + 1]);
+                force_carry = true;
                 i++;
             } else {
                 std::cerr << "Error: Missing value for -c <localCarryPropagationDepth>." << std::endl;
@@ -773,7 +774,7 @@ int main(int argc, char** argv) {
     
     size_t workers = n;
     size_t localSize = maxWork;
-    /*
+    
     if(!force_carry){
         // check b^s > n * b^2
         int max_digit_width_cpu = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
@@ -783,7 +784,7 @@ int main(int argc, char** argv) {
             std::pow(std::pow(2, max_digit_width_cpu), 2) * n) {
             localCarryPropagationDepth *= 2;
         }
-    }*/
+    }
     std::cout << "\nLaunching OpenCL kernel (p = " << p << "); computation may take a while." << std::endl;
     
     size_t constraint = std::max(n / 4, (size_t)1);
@@ -827,13 +828,17 @@ int main(int argc, char** argv) {
 
     size_t workGroupSize = ((workers < localSize) ? 1 : (workers / localSize));
     size_t adjustedDepth = localCarryPropagationDepth / 4;
+    size_t adjustedDepthMin = (localCarryPropagationDepth - 4) / 4;
+    if (adjustedDepthMin < 1) {
+        adjustedDepthMin = 1;
+    }
     if (adjustedDepth < 1) {
         adjustedDepth = 1;
     }
 
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
-    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth) ;
+    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) ;
     std::cout << "Building OpenCL program with options: " << build_options << std::endl;
     err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {
