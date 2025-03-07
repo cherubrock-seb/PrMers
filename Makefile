@@ -9,7 +9,7 @@ LDFLAGS = -lOpenCL
 # Target executable and source/kernel files
 TARGET = prmers
 SRC = prmers.cpp proof/common.cpp proof/proof.cpp proof/md5.cpp proof/sha3.cpp
-KERNEL = prmers.cl
+KERNELS = prmers.cl prmers_vload2.cl
 
 all: $(TARGET)
 
@@ -21,9 +21,9 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
 	install -d $(DESTDIR)$(PREFIX)/share/$(TARGET)
-	install -m 644 $(KERNEL) $(DESTDIR)$(PREFIX)/share/$(TARGET)
+	install -m 644 $(KERNELS) $(DESTDIR)$(PREFIX)/share/$(TARGET)
 	@echo "$(TARGET) installed in $(PREFIX)/bin"
-	@echo "Kernel installed in $(PREFIX)/share/$(TARGET)"
+	@echo "Kernels installed in $(PREFIX)/share/$(TARGET)"
 
 uninstall:
 	@echo "Uninstalling $(TARGET)..."
