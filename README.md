@@ -57,6 +57,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
 - `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification.
+- `-vload2`: Enable data loading in blocks of 2 instead of 4
 
 
 ## Uninstallation
