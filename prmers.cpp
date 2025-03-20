@@ -423,7 +423,7 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
 }
 
 
-void executeFusionneNTT_Forward(cl_command_queue queue,
+void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_2_steps,
     cl_kernel kernel_ntt_mm, cl_kernel kernel_ntt_mm_first, cl_kernel kernel_ntt_last_m1,
     cl_kernel kernel_ntt_last_m1_n4,
     cl_mem buf_x, cl_mem buf_w,cl_mem buf_digit_weight, size_t n,
@@ -448,15 +448,25 @@ void executeFusionneNTT_Forward(cl_command_queue queue,
         executeKernelAndDisplay(queue, kernel_ntt_mm_first, buf_x, workers, localSize,
             "kernel_ntt_radix4_mm_first (m=" + std::to_string(m) + ")", n, profiling);
 
-        clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-        clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-        for (size_t m = n / 16; m > 1; m /= 4) {
-            clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &m);
+        clSetKernelArg(kernel_ntt_mm_2_steps, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt_mm_2_steps, 1, sizeof(cl_mem), &buf_w);
+        size_t mm = n / 16;
+        for (size_t m = n / 16; m > 4; m /= 16) {
+            mm = m;
+            clSetKernelArg(kernel_ntt_mm_2_steps, 2, sizeof(size_t), &m);
+            clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
+            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize/4,
+                "kernel_ntt_mm_2_steps (m=" + std::to_string(m) + ")", n, profiling);
+        }
+        if(mm==64){
+            mm = 4;
+            clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+            clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
+            clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &mm);
             clSetKernelArg(kernel_ntt_mm, 3, 0, NULL); 
             executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
-                "kernel_ntt_radix4_mm (m=" + std::to_string(m) + ")", n, profiling);
-        }
-        
+                "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling);
+       }
         
         m = 1;
         clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
@@ -958,6 +968,8 @@ int main(int argc, char** argv) {
     cl_kernel k_sub2 = createKernel(program, "kernel_sub2");
     cl_kernel k_carry = createKernel(program, "kernel_carry");
     cl_kernel k_carry_2 = createKernel(program, "kernel_carry_2");
+    cl_kernel k_forward_ntt_mm_2steps     = createKernel(program, "kernel_ntt_radix4_mm_2steps");
+
 
 
     // --------------------
@@ -1011,7 +1023,7 @@ int main(int argc, char** argv) {
 
     // Main loop now starts from resume_iter (if any) to total_iters.
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
-        executeFusionneNTT_Forward(queue,
+        executeFusionneNTT_Forward(queue,k_forward_ntt_mm_2steps,
             k_forward_ntt_mm, k_forward_ntt_mm_first, k_forward_ntt_last_m1,k_forward_ntt_last_m1_n4,
             buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, profiling, maxLocalMem);
 
@@ -1076,6 +1088,7 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_digit_width);
                 clReleaseMemObject(buf_block_carry);
                 clReleaseKernel(k_forward_ntt_mm);
+                clReleaseKernel(k_forward_ntt_mm_2steps);
                 clReleaseKernel(k_forward_ntt_mm_first);
                 clReleaseKernel(k_forward_ntt_last_m1);
                 clReleaseKernel(k_forward_ntt_last_m1_n4);
@@ -1149,6 +1162,7 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_digit_width);
     clReleaseMemObject(buf_block_carry);
     clReleaseKernel(k_forward_ntt_mm);
+    clReleaseKernel(k_forward_ntt_mm_2steps);
     clReleaseKernel(k_forward_ntt_mm_first);
     clReleaseKernel(k_forward_ntt_last_m1);
     clReleaseKernel(k_forward_ntt_last_m1_n4);
