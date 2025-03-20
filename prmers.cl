@@ -454,3 +454,66 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     vstore4(result, 0, x + 4 * k);
 }
 
+__kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
+                                            __global ulong* restrict w,
+                                            const ulong m) {
+    const ulong gid = get_global_id(0);
+    const ulong quarter = m / 4;
+    const ulong block = gid / quarter;
+    const ulong offset = gid % quarter;
+    const ulong base_k = block * m + offset;
+    ulong local_x[16];
+    for (uint ii = 0; ii < 4; ii++) {
+        const ulong k_iter = base_k + ii * quarter;
+        const ulong j = k_iter & (m - 1);
+        const ulong i = 4 * (k_iter - j) + j;
+        const ulong to = 6 * m + 3 * j;
+        const ulong w2 = w[to];
+        const ulong w1 = w[to + 1];
+        const ulong w12 = w[to + 2];
+        ulong4 coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
+        ulong v0 = modAdd(coeff.s0, coeff.s2);
+        ulong v1 = modAdd(coeff.s1, coeff.s3);
+        ulong v2 = modSub(coeff.s0, coeff.s2);
+        ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        ulong4 tmp;
+        tmp.s0 = modAdd(v0, v1);
+        tmp.s1 = modSub(v0, v1);
+        tmp.s2 = modAdd(v2, v3);
+        tmp.s3 = modSub(v2, v3);
+        ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+        ulong4 result = modMul4(tmp, factors);
+        const uint base_index = ii * 4;
+        local_x[base_index] = result.s0;
+        local_x[base_index + 1] = result.s1;
+        local_x[base_index + 2] = result.s2;
+        local_x[base_index + 3] = result.s3;
+    }
+    const ulong new_m = quarter;
+    const ulong j_mod = offset;
+    const ulong to2 = 6 * new_m + 3 * j_mod;
+    const ulong tw2 = w[to2];
+    const ulong tw1 = w[to2 + 1];
+    const ulong tw12 = w[to2 + 2];
+    for (uint col = 0; col < 4; col++) {
+        const ulong k_iter = base_k + col * new_m;
+        const ulong i = 4 * (k_iter - j_mod) + j_mod;
+        ulong4 coeff = (ulong4)(local_x[col], local_x[col + 4],
+                                local_x[col + 8], local_x[col + 12]);
+        ulong v0 = modAdd(coeff.s0, coeff.s2);
+        ulong v1 = modAdd(coeff.s1, coeff.s3);
+        ulong v2 = modSub(coeff.s0, coeff.s2);
+        ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        ulong4 tmp;
+        tmp.s0 = modAdd(v0, v1);
+        tmp.s1 = modSub(v0, v1);
+        tmp.s2 = modAdd(v2, v3);
+        tmp.s3 = modSub(v2, v3);
+        ulong4 factors = (ulong4)(1UL, tw1, tw2, tw12);
+        ulong4 result = modMul4(tmp, factors);
+        x[i] = result.s0;
+        x[i + new_m] = result.s1;
+        x[i + 2 * new_m] = result.s2;
+        x[i + 3 * new_m] = result.s3;
+    }
+}
