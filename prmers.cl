@@ -504,7 +504,8 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     const ulong tw2  = w[to2];
     const ulong tw1  = w[to2 + 1];
     const ulong tw12 = w[to2 + 2];
-
+    const ulong4 factors = (ulong4)(1UL, tw1, tw2, tw12);
+    
     for (uint col = 0; col < 4; col++) {
         const ulong i = base_second + col * m;
         
@@ -521,7 +522,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         coeff.s2 = modAdd(v2, v3);
         coeff.s3 = modSub(v2, v3);
         
-        ulong4 factors = (ulong4)(1UL, tw1, tw2, tw12);
+        
         ulong4 result = modMul4(coeff, factors);
         
         x[i]         = result.s0;
