@@ -475,7 +475,8 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     ulong k = base_k;
     ulong w1, w2, w12;
     ulong4 coeff;
-    ulong4 r0, r1, r2, r3;
+    ulong4 r0;
+    ulong4 t0, t1, t2, t3;
 
     {
         const ulong j = k & m_mask;
@@ -493,61 +494,72 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         r0 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
         k += step;
     }
-    {
-        const ulong j = k & m_mask;
-        const ulong i = 4 * k - 3 * j;
-        load_twiddles(w, six_m, j, &w1, &w2, &w12);
-        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
-        const ulong v0 = modAdd(coeff.s0, coeff.s2);
-        const ulong v1 = modAdd(coeff.s1, coeff.s3);
-        const ulong v2 = modSub(coeff.s0, coeff.s2);
-        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-        coeff.s0 = modAdd(v0, v1);
-        coeff.s1 = modSub(v0, v1);
-        coeff.s2 = modAdd(v2, v3);
-        coeff.s3 = modSub(v2, v3);
-        r1 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
-        k += step;
-    }
-    {
-        const ulong j = k & m_mask;
-        const ulong i = 4 * k - 3 * j;
-        load_twiddles(w, six_m, j, &w1, &w2, &w12);
-        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
-        const ulong v0 = modAdd(coeff.s0, coeff.s2);
-        const ulong v1 = modAdd(coeff.s1, coeff.s3);
-        const ulong v2 = modSub(coeff.s0, coeff.s2);
-        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-        coeff.s0 = modAdd(v0, v1);
-        coeff.s1 = modSub(v0, v1);
-        coeff.s2 = modAdd(v2, v3);
-        coeff.s3 = modSub(v2, v3);
-        r2 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
-        k += step;
-    }
-    {
-        const ulong j = k & m_mask;
-        const ulong i = 4 * k - 3 * j;
-        load_twiddles(w, six_m, j, &w1, &w2, &w12);
-        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
-        const ulong v0 = modAdd(coeff.s0, coeff.s2);
-        const ulong v1 = modAdd(coeff.s1, coeff.s3);
-        const ulong v2 = modSub(coeff.s0, coeff.s2);
-        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-        coeff.s0 = modAdd(v0, v1);
-        coeff.s1 = modSub(v0, v1);
-        coeff.s2 = modAdd(v2, v3);
-        coeff.s3 = modSub(v2, v3);
-        r3 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
-        k += step;
-    }
+    t0.s0 = r0.s0;
+    t1.s0 = r0.s1;
+    t2.s0 = r0.s2;
+    t3.s0 = r0.s3;
 
-    ulong4 t0, t1, t2, t3;
-    t0.s0 = r0.s0; t0.s1 = r1.s0; t0.s2 = r2.s0; t0.s3 = r3.s0;
-    t1.s0 = r0.s1; t1.s1 = r1.s1; t1.s2 = r2.s1; t1.s3 = r3.s1;
-    t2.s0 = r0.s2; t2.s1 = r1.s2; t2.s2 = r2.s2; t2.s3 = r3.s2;
-    t3.s0 = r0.s3; t3.s1 = r1.s3; t3.s2 = r2.s3; t3.s3 = r3.s3;
-
+    {
+        const ulong j = k & m_mask;
+        const ulong i = 4 * k - 3 * j;
+        load_twiddles(w, six_m, j, &w1, &w2, &w12);
+        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
+        const ulong v0 = modAdd(coeff.s0, coeff.s2);
+        const ulong v1 = modAdd(coeff.s1, coeff.s3);
+        const ulong v2 = modSub(coeff.s0, coeff.s2);
+        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        r0 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
+        k += step;
+    }
+    t0.s1 = r0.s0;
+    t1.s1 = r0.s1;
+    t2.s1 = r0.s2;
+    t3.s1 = r0.s3;
+    {
+        const ulong j = k & m_mask;
+        const ulong i = 4 * k - 3 * j;
+        load_twiddles(w, six_m, j, &w1, &w2, &w12);
+        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
+        const ulong v0 = modAdd(coeff.s0, coeff.s2);
+        const ulong v1 = modAdd(coeff.s1, coeff.s3);
+        const ulong v2 = modSub(coeff.s0, coeff.s2);
+        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        r0 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
+        k += step;
+    }
+    t0.s2 = r0.s0;
+    t1.s2 = r0.s1;
+    t2.s2 = r0.s2;
+    t3.s2 = r0.s3;
+    {
+        const ulong j = k & m_mask;
+        const ulong i = 4 * k - 3 * j;
+        load_twiddles(w, six_m, j, &w1, &w2, &w12);
+        coeff = (ulong4)(x[i], x[i + m], x[i + 2 * m], x[i + 3 * m]);
+        const ulong v0 = modAdd(coeff.s0, coeff.s2);
+        const ulong v1 = modAdd(coeff.s1, coeff.s3);
+        const ulong v2 = modSub(coeff.s0, coeff.s2);
+        const ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        r0 = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
+        k += step;
+    }
+    t0.s3 = r0.s0;
+    t1.s3 = r0.s1;
+    t2.s3 = r0.s2;
+    t3.s3 = r0.s3;
+    
     const ulong new_m = step;
     const ulong new_m_mask = new_m - 1;
     const ulong six_new_m = 6 * new_m;
