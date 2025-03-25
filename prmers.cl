@@ -243,29 +243,41 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
 }
 
+static inline ulong4 butterfly(const ulong4 u) {
+    return (ulong4)(
+        modAdd(u.s0, u.s1),
+        modSub(u.s0, u.s1),
+        modAdd(u.s2, u.s3),
+        modMuli(modSub(u.s3, u.s2))
+    );
+}
+
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
-                                                __constant ulong* restrict wi,
-                                                const ulong m) {
+                                            __constant ulong* restrict wi,
+                                            const ulong m) {
     const ulong k = get_global_id(0);
     const ulong j = k & (m - 1);
     const ulong base = 4 * (k - j) + j;
     const ulong twiddle_offset = 6 * m + 3 * j;
-    ulong4 coeff = (ulong4)( x[base + 0*m],
-                              x[base + 1*m],
-                              x[base + 2*m],
-                              x[base + 3*m] );
-    ulong4 twiddles = (ulong4)(1UL, wi[twiddle_offset + 1], wi[twiddle_offset + 0], wi[twiddle_offset + 2]);
-    ulong4 u = modMul4(coeff, twiddles);
-    ulong4 v;
-    v.s0 = modAdd(u.s0, u.s1);
-    v.s1 = modSub(u.s0, u.s1);
-    v.s2 = modAdd(u.s2, u.s3);
-    v.s3 = modMuli(modSub(u.s3, u.s2));
-    x[base + 0*m] = modAdd(v.s0, v.s2);
-    x[base + 1*m] = modAdd(v.s1, v.s3);
-    x[base + 2*m] = modSub(v.s0, v.s2);
-    x[base + 3*m] = modSub(v.s1, v.s3);
+    
+    const ulong a = x[base];
+    const ulong b = x[base + m];
+    const ulong c = x[base + 2 * m];
+    const ulong d = x[base + 3 * m];
+    const ulong4 coeff = (ulong4)(a, b, c, d);
+    
+    const ulong4 tmp = vload4(0, wi + twiddle_offset);
+    const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
+    
+    const ulong4 u = modMul4(coeff, twiddles);
+    const ulong4 r = butterfly(u);
+    
+    x[base]         = modAdd(r.s0, r.s2);
+    x[base + m]     = modAdd(r.s1, r.s3);
+    x[base + 2 * m] = modSub(r.s0, r.s2);
+    x[base + 3 * m] = modSub(r.s1, r.s3);
 }
+
 
 __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
                                                __global ulong* restrict w,
