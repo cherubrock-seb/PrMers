@@ -484,14 +484,13 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         ulong v2 = modSub(coeff.s0, coeff.s2);
         ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
         
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
         
         ulong4 factors = (ulong4)(1UL, w1, w2, w12);
-        ulong4 result = modMul4(tmp, factors);
+        ulong4 result = modMul4(coeff, factors);
         
         const uint base_index = ii * 4;
         local_x[base_index]     = result.s0;
@@ -517,14 +516,13 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         ulong v2 = modSub(coeff.s0, coeff.s2);
         ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
         
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
         
         ulong4 factors = (ulong4)(1UL, tw1, tw2, tw12);
-        ulong4 result = modMul4(tmp, factors);
+        ulong4 result = modMul4(coeff, factors);
         
         x[i]         = result.s0;
         x[i + new_m] = result.s1;
