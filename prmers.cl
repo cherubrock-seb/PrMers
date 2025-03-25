@@ -454,80 +454,87 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     vstore4(result, 0, x + 4 * k);
 }
 
-
 __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
-                                            __constant ulong* restrict w,
-                                            const ulong m) {
-    const ulong quarter = m >> 2;      // m/4
-    const ulong six_m = 6 * m;
-    
-    const ulong gid = get_global_id(0);
-    const ulong block = gid / quarter;
-    const ulong offset = gid % quarter;
-    const ulong base4m = block * (4 * m);
-    const ulong base_second = m * (4 * block) + offset;
-
+                                          __global ulong* restrict w,
+                                          const ulong m) {
+    uint ii;
+    ulong k;
+    k = (get_global_id(0)/(m/4));
+    k = k*m;
+    k += get_global_id(0)%(m/4);
     ulong local_x[16];
+    int write_index = 0;
 
-    for (uint ii = 0; ii < 4; ii++) {
-        const ulong index = offset + ii * quarter;
-        const ulong i = base4m + index;
+    #pragma unroll 4
+    for (ii = 0; ii < 4; ii++) {
+        const ulong j = k & (m - 1);
+        const ulong i = 4 * (k - j) + j;
+        const ulong twiddle_offset = 6 * m + 3 * j;
+        const ulong w2  = w[twiddle_offset];
+        const ulong w1  = w[twiddle_offset + 1];
+        const ulong w12 = w[twiddle_offset + 2];
         
-        const ulong to = six_m + 3 * index;
-        const ulong w2   = w[to];
-        const ulong w1   = w[to + 1];
-        const ulong w12  = w[to + 2];
-        ulong4 coeff = (ulong4)(x[i], x[i + m], x[i + 2*m], x[i + 3*m]);
-        
+        ulong4 coeff = (ulong4)( x[i + 0 * m], x[i + 1 * m], x[i + 2 * m], x[i + 3 * m] );
         ulong v0 = modAdd(coeff.s0, coeff.s2);
         ulong v1 = modAdd(coeff.s1, coeff.s3);
         ulong v2 = modSub(coeff.s0, coeff.s2);
         ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-        
-        coeff.s0 = modAdd(v0, v1);
-        coeff.s1 = modSub(v0, v1);
-        coeff.s2 = modAdd(v2, v3);
-        coeff.s3 = modSub(v2, v3);
-        
+        ulong4 tmp;
+        tmp.s0 = modAdd(v0, v1);
+        tmp.s1 = modSub(v0, v1);
+        tmp.s2 = modAdd(v2, v3);
+        tmp.s3 = modSub(v2, v3);
         ulong4 factors = (ulong4)(1UL, w1, w2, w12);
-        ulong4 result = modMul4(coeff, factors);
+        ulong4 result = modMul4(tmp, factors);
         
-        const uint base_index = ii * 4;
-        local_x[base_index]     = result.s0;
-        local_x[base_index + 1] = result.s1;
-        local_x[base_index + 2] = result.s2;
-        local_x[base_index + 3] = result.s3;
+        local_x[write_index] = result.s0;
+        local_x[write_index+1] = result.s1;
+        local_x[write_index+2] = result.s2;
+        local_x[write_index+3] = result.s3;
+        write_index += 4;
+        k += m/4;
     }
-
-    const ulong new_m = quarter;
-    const ulong to2 = 6 * new_m + 3 * offset;
-    const ulong tw2  = w[to2];
-    const ulong tw1  = w[to2 + 1];
-    const ulong tw12 = w[to2 + 2];
-    const ulong4 factors = (ulong4)(1UL, tw1, tw2, tw12);
     
-    for (uint col = 0; col < 4; col++) {
-        const ulong i = base_second + col * m;
+    const ulong new_m = m / 4;
+    write_index = 0;
+    int indice1[16] = {0, 4, 8, 12,
+                       1, 5, 9, 13,
+                       2, 6, 10, 14,
+                       3, 7, 11, 15};
+    k = (get_global_id(0)/(m/4));
+    k = k*m;
+    k += get_global_id(0)%(m/4);
+    
+    #pragma unroll 4
+    for (ii = 0; ii < 4; ii++) {
+        const ulong j = k & (new_m - 1);
+        const ulong i = 4 * (k - j) + j;
+        const ulong twiddle_offset = 6 * new_m + 3 * j;
+        const ulong w2  = w[twiddle_offset];
+        const ulong w1  = w[twiddle_offset + 1];
+        const ulong w12 = w[twiddle_offset + 2];
         
-        ulong4 coeff = (ulong4)(local_x[col], local_x[col + 4],
-                                local_x[col + 8], local_x[col + 12]);
-        
+        ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
+                                 local_x[indice1[write_index + 1]],
+                                 local_x[indice1[write_index + 2]],
+                                 local_x[indice1[write_index + 3]] );
+        write_index += 4;
         ulong v0 = modAdd(coeff.s0, coeff.s2);
         ulong v1 = modAdd(coeff.s1, coeff.s3);
         ulong v2 = modSub(coeff.s0, coeff.s2);
         ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+        ulong4 tmp;
+        tmp.s0 = modAdd(v0, v1);
+        tmp.s1 = modSub(v0, v1);
+        tmp.s2 = modAdd(v2, v3);
+        tmp.s3 = modSub(v2, v3);
+        ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+        ulong4 result = modMul4(tmp, factors);
         
-        coeff.s0 = modAdd(v0, v1);
-        coeff.s1 = modSub(v0, v1);
-        coeff.s2 = modAdd(v2, v3);
-        coeff.s3 = modSub(v2, v3);
-        
-        
-        ulong4 result = modMul4(coeff, factors);
-        
-        x[i]         = result.s0;
-        x[i + new_m] = result.s1;
-        x[i + 2*new_m] = result.s2;
-        x[i + 3*new_m] = result.s3;
+        x[i + 0 * new_m] = result.s0;
+        x[i + 1 * new_m] = result.s1;
+        x[i + 2 * new_m] = result.s2;
+        x[i + 3 * new_m] = result.s3;
+        k += m/4;
     }
 }
