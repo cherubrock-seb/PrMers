@@ -337,13 +337,13 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
     ulong v1 = modAdd(coeff.s1, coeff.s3);
     ulong v2 = modSub(coeff.s0, coeff.s2);
     ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-    ulong4 tmp;
-    tmp.s0 = modAdd(v0, v1);
-    tmp.s1 = modSub(v0, v1);
-    tmp.s2 = modAdd(v2, v3);
-    tmp.s3 = modSub(v2, v3);
+    
+    coeff.s0 = modAdd(v0, v1);
+    coeff.s1 = modSub(v0, v1);
+    coeff.s2 = modAdd(v2, v3);
+    coeff.s3 = modSub(v2, v3);
     ulong4 factors = (ulong4)(1UL, w[twiddle_offset + 1], w[twiddle_offset + 0], w[twiddle_offset + 2]);
-    ulong4 result = modMul4(tmp, factors);
+    ulong4 result = modMul4(coeff, factors);
     result = modMul4(result, result);
     vstore4(result, 0, x + 4 * k);
 }
@@ -367,13 +367,13 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
     ulong v1 = modAdd(u.s1, u.s3);
     ulong v2 = modSub(u.s0, u.s2);
     ulong v3 = modMuli(modSub(u.s1, u.s3));
-    ulong4 tmp;
-    tmp.s0 = modAdd(v0, v1);
-    tmp.s1 = modSub(v0, v1);
-    tmp.s2 = modAdd(v2, v3);
-    tmp.s3 = modSub(v2, v3);
+    
+    coeff.s0 = modAdd(v0, v1);
+    coeff.s1 = modSub(v0, v1);
+    coeff.s2 = modAdd(v2, v3);
+    coeff.s3 = modSub(v2, v3);
     ulong4 factors = (ulong4)(1UL, w1, w2, w12);
-    ulong4 result = modMul4(tmp, factors);
+    ulong4 result = modMul4(coeff, factors);
     x[i + 0*m] = result.s0;
     x[i + 1*m] = result.s1;
     x[i + 2*m] = result.s2;
@@ -395,13 +395,13 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
     ulong v1 = modAdd(coeff.s1, coeff.s3);
     ulong v2 = modSub(coeff.s0, coeff.s2);
     ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-    ulong4 tmp;
-    tmp.s0 = modAdd(v0, v1);
-    tmp.s1 = modSub(v0, v1);
-    tmp.s2 = modAdd(v2, v3);
-    tmp.s3 = modSub(v2, v3);
+    
+    coeff.s0 = modAdd(v0, v1);
+    coeff.s1 = modSub(v0, v1);
+    coeff.s2 = modAdd(v2, v3);
+    coeff.s3 = modSub(v2, v3);
     ulong4 factors = (ulong4)(1UL, w1, w2, w12);
-    ulong4 result = modMul4(tmp, factors);
+    ulong4 result = modMul4(coeff, factors);
     x[i + 0*m] = result.s0;
     x[i + 1*m] = result.s1;
     x[i + 2*m] = result.s2;
@@ -445,12 +445,11 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
     ulong v3 = modMuli(modSub(u.s3, u.s2));
-    ulong4 tmp;
-    tmp.s0 = modAdd(v0, v2);
-    tmp.s1 = modAdd(v1, v3);
-    tmp.s2 = modSub(v0, v2);
-    tmp.s3 = modSub(v1, v3);
-    ulong4 result = modMul4(tmp, div);
+    coeff.s0 = modAdd(v0, v2);
+    coeff.s1 = modAdd(v1, v3);
+    coeff.s2 = modSub(v0, v2);
+    coeff.s3 = modSub(v1, v3);
+    ulong4 result = modMul4(coeff, div);
     vstore4(result, 0, x + 4 * k);
 }
 static inline void load_twiddles(const __global ulong* restrict w,
@@ -559,7 +558,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     t1.s3 = r0.s1;
     t2.s3 = r0.s2;
     t3.s3 = r0.s3;
-    
+
     const ulong new_m = step;
     const ulong new_m_mask = new_m - 1;
     const ulong six_new_m = 6 * new_m;
@@ -573,12 +572,12 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         const ulong v1 = modAdd(t0.s1, t0.s3);
         const ulong v2 = modSub(t0.s0, t0.s2);
         const ulong v3 = modMuli(modSub(t0.s1, t0.s3));
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
-        ulong4 res = modMul4(tmp, (ulong4)(1UL, w1, w2, w12));
+        
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        ulong4 res = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
         x[i] = res.s0;
         x[i + new_m] = res.s1;
         x[i + 2 * new_m] = res.s2;
@@ -593,12 +592,12 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         const ulong v1 = modAdd(t1.s1, t1.s3);
         const ulong v2 = modSub(t1.s0, t1.s2);
         const ulong v3 = modMuli(modSub(t1.s1, t1.s3));
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
-        ulong4 res = modMul4(tmp, (ulong4)(1UL, w1, w2, w12));
+        
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        ulong4 res = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
         x[i] = res.s0;
         x[i + new_m] = res.s1;
         x[i + 2 * new_m] = res.s2;
@@ -613,12 +612,12 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         const ulong v1 = modAdd(t2.s1, t2.s3);
         const ulong v2 = modSub(t2.s0, t2.s2);
         const ulong v3 = modMuli(modSub(t2.s1, t2.s3));
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
-        ulong4 res = modMul4(tmp, (ulong4)(1UL, w1, w2, w12));
+        
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        ulong4 res = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
         x[i] = res.s0;
         x[i + new_m] = res.s1;
         x[i + 2 * new_m] = res.s2;
@@ -633,12 +632,12 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         const ulong v1 = modAdd(t3.s1, t3.s3);
         const ulong v2 = modSub(t3.s0, t3.s2);
         const ulong v3 = modMuli(modSub(t3.s1, t3.s3));
-        ulong4 tmp;
-        tmp.s0 = modAdd(v0, v1);
-        tmp.s1 = modSub(v0, v1);
-        tmp.s2 = modAdd(v2, v3);
-        tmp.s3 = modSub(v2, v3);
-        ulong4 res = modMul4(tmp, (ulong4)(1UL, w1, w2, w12));
+        
+        coeff.s0 = modAdd(v0, v1);
+        coeff.s1 = modSub(v0, v1);
+        coeff.s2 = modAdd(v2, v3);
+        coeff.s3 = modSub(v2, v3);
+        ulong4 res = modMul4(coeff, (ulong4)(1UL, w1, w2, w12));
         x[i] = res.s0;
         x[i + new_m] = res.s1;
         x[i + 2 * new_m] = res.s2;
