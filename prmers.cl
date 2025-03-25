@@ -340,17 +340,25 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
 {
     const ulong k = get_global_id(0);
     ulong4 coeff = vload4(0, x + 4 * k);
-    const ulong tw = 6;
+    ulong4 wvec = vload4(0, w + 6);
+    ulong4 fac = (ulong4)(1UL, wvec.s1, wvec.s0, wvec.s2);
+    
     ulong a = modAdd(coeff.s0, coeff.s2);
     ulong b = modAdd(coeff.s1, coeff.s3);
     ulong c = modSub(coeff.s0, coeff.s2);
     ulong d = modMuli(modSub(coeff.s1, coeff.s3));
-    coeff = (ulong4)(modAdd(a, b), modSub(a, b), modAdd(c, d), modSub(c, d));
-    ulong4 fac = (ulong4)(1UL, w[tw + 1], w[tw + 0], w[tw + 2]);
+    
+    coeff.s0 = modAdd(a, b);
+    coeff.s1 = modSub(a, b);
+    coeff.s2 = modAdd(c, d);
+    coeff.s3 = modSub(c, d);
+    
     coeff = modMul4(coeff, fac);
-    coeff = modMul4(coeff, coeff);
+    coeff = modMul4(coeff, coeff); 
+    
     vstore4(coeff, 0, x + 4 * k);
 }
+
 
 
 
