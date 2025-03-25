@@ -336,24 +336,22 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
 
 
 __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
-                                             __global ulong* restrict w) {
+                                        __global ulong* restrict w)
+{
     const ulong k = get_global_id(0);
     ulong4 coeff = vload4(0, x + 4 * k);
-    const ulong twiddle_offset = 6;
-    ulong v0 = modAdd(coeff.s0, coeff.s2);
-    ulong v1 = modAdd(coeff.s1, coeff.s3);
-    ulong v2 = modSub(coeff.s0, coeff.s2);
-    ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
-    
-    coeff.s0 = modAdd(v0, v1);
-    coeff.s1 = modSub(v0, v1);
-    coeff.s2 = modAdd(v2, v3);
-    coeff.s3 = modSub(v2, v3);
-    ulong4 factors = (ulong4)(1UL, w[twiddle_offset + 1], w[twiddle_offset + 0], w[twiddle_offset + 2]);
-    ulong4 result = modMul4(coeff, factors);
-    result = modMul4(result, result);
-    vstore4(result, 0, x + 4 * k);
+    const ulong tw = 6;
+    ulong a = modAdd(coeff.s0, coeff.s2);
+    ulong b = modAdd(coeff.s1, coeff.s3);
+    ulong c = modSub(coeff.s0, coeff.s2);
+    ulong d = modMuli(modSub(coeff.s1, coeff.s3));
+    coeff = (ulong4)(modAdd(a, b), modSub(a, b), modAdd(c, d), modSub(c, d));
+    ulong4 fac = (ulong4)(1UL, w[tw + 1], w[tw + 0], w[tw + 2]);
+    coeff = modMul4(coeff, fac);
+    coeff = modMul4(coeff, coeff);
+    vstore4(coeff, 0, x + 4 * k);
 }
+
 
 
 __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
