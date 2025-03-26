@@ -552,3 +552,195 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         k += m/4;
     }
 }
+
+
+__kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
+                                          __global ulong* restrict w,
+                                          ulong m) {
+    uint ii;
+    ulong k;
+    k = (get_global_id(0)/(m/16));
+    k = k*m;
+    k += get_global_id(0)%(m/16);
+    ulong local_x[64];
+    int write_index = 0;
+    uint iii;
+    
+    #pragma unroll 4
+    for (iii = 0; iii < 4; iii++) {
+        k = (get_global_id(0)/(m/16));
+        k = k*m;
+        k += get_global_id(0)%(m/16);
+        k += iii*(m/16);
+        #pragma unroll 4
+        for (ii = 0; ii < 4; ii++) {
+            const ulong j = k & (m - 1);
+            const ulong i = 4 * (k - j) + j;
+            const ulong twiddle_offset = 6 * m + 3 * j;
+            const ulong w2  = w[twiddle_offset];
+            const ulong w1  = w[twiddle_offset + 1];
+            const ulong w12 = w[twiddle_offset + 2];
+            
+            ulong4 coeff = (ulong4)( x[i + 0 * m], x[i + 1 * m], x[i + 2 * m], x[i + 3 * m] );
+            ulong v0 = modAdd(coeff.s0, coeff.s2);
+            ulong v1 = modAdd(coeff.s1, coeff.s3);
+            ulong v2 = modSub(coeff.s0, coeff.s2);
+            ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+            ulong4 tmp;
+            tmp.s0 = modAdd(v0, v1);
+            tmp.s1 = modSub(v0, v1);
+            tmp.s2 = modAdd(v2, v3);
+            tmp.s3 = modSub(v2, v3);
+            ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+            ulong4 result = modMul4(tmp, factors);
+            
+            local_x[write_index] = result.s0;
+            local_x[write_index+1] = result.s1;
+            local_x[write_index+2] = result.s2;
+            local_x[write_index+3] = result.s3;
+            //printf("Step 1 Thread %lu i=%lu m=%lu write_index = %lu",get_global_id(0), i,m, write_index);
+            write_index += 4;
+            k += m/4;
+        }  
+    }  
+    m = m / 4;
+    write_index = 0;
+    int indice1[64] = {0, 4, 8, 12,
+                       1, 5, 9, 13,
+                       2, 6, 10, 14,
+                       3, 7, 11, 15,
+                       16,20,24,28,
+                       17,21,25,29,
+                       18,22,26,30,
+                       19,23,27,31,
+                       32,36,40,44,
+                       33,37,41,45,
+                       34,38,42,46,
+                       35,39,43,47,
+                       48,52,56,60,
+                       49,53,57,61,
+                       50,54,58,62,
+                       51,55,59,63,
+                       };
+
+    k = (get_global_id(0)/(m*4/16));
+    k = k*m*4;
+    k += get_global_id(0)%(m*4/16);
+    
+    
+    #pragma unroll 4
+    for (iii = 0; iii < 4; iii++) {
+        k = (get_global_id(0)/(m*4/16));
+        k = k*m*4;
+        k += get_global_id(0)%(m*4/16);
+        k += iii*(m/4);
+        #pragma unroll 4
+        for (ii = 0; ii < 4; ii++) {
+            const ulong j = k & (m - 1);
+            const ulong i = 4 * (k - j) + j;
+            const ulong twiddle_offset = 6 * m + 3 * j;
+            const ulong w2  = w[twiddle_offset];
+            const ulong w1  = w[twiddle_offset + 1];
+            const ulong w12 = w[twiddle_offset + 2];
+            
+            ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
+                                    local_x[indice1[write_index + 1]],
+                                    local_x[indice1[write_index + 2]],
+                                    local_x[indice1[write_index + 3]] );
+            ulong v0 = modAdd(coeff.s0, coeff.s2);
+            ulong v1 = modAdd(coeff.s1, coeff.s3);
+            ulong v2 = modSub(coeff.s0, coeff.s2);
+            ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+            ulong4 tmp;
+            tmp.s0 = modAdd(v0, v1);
+            tmp.s1 = modSub(v0, v1);
+            tmp.s2 = modAdd(v2, v3);
+            tmp.s3 = modSub(v2, v3);
+            ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+            ulong4 result = modMul4(tmp, factors);
+            
+            local_x[indice1[write_index]] = result.s0;
+            local_x[indice1[write_index + 1]] = result.s1;
+            local_x[indice1[write_index + 2]] = result.s2;
+            local_x[indice1[write_index + 3]] = result.s3;
+            //printf("Step 2 Thread %lu i=%lu m=%lu indice1[write_index] = %lu",get_global_id(0), i,m,indice1[write_index]);
+            write_index += 4;
+            k += m;
+        }  
+    }
+
+
+    m = m / 4;
+    write_index = 0;
+    int indice2[64] = {
+        0, 16, 32, 48,
+        4, 20, 36, 52,
+        8, 24, 40, 56,
+        12, 28, 44, 60,
+
+        1, 17, 33, 49,
+        5, 21, 37, 53,
+        9, 25, 41, 57,
+        13, 29, 45, 61,
+
+        2, 18, 34, 50,
+        6, 22, 38, 54,
+        10, 26, 42, 58,
+        14, 30, 46, 62,
+
+        3, 19, 35, 51,
+        7, 23, 39, 55,
+        11, 27, 43, 59,
+        15, 31, 47, 63
+    };
+
+
+
+    k = (get_global_id(0)/(m*16/16));
+    k = k*m*16;
+    k += get_global_id(0)%(m*16/16);
+    
+    
+    #pragma unroll 4
+    for (iii = 0; iii < 4; iii++) {
+        k = (get_global_id(0)/(m*16/16));
+        k = k*m*16;
+        k += get_global_id(0)%(m*16/16);
+        k += iii*(m*4);
+        #pragma unroll 4
+        for (ii = 0; ii < 4; ii++) {
+            const ulong j = k & (m - 1);
+            const ulong i = 4 * (k - j) + j;
+            const ulong twiddle_offset = 6 * m + 3 * j;
+            const ulong w2  = w[twiddle_offset];
+            const ulong w1  = w[twiddle_offset + 1];
+            const ulong w12 = w[twiddle_offset + 2];
+            
+            ulong4 coeff = (ulong4)( local_x[indice2[write_index]],
+                                    local_x[indice2[write_index + 1]],
+                                    local_x[indice2[write_index + 2]],
+                                    local_x[indice2[write_index + 3]] );
+            ulong v0 = modAdd(coeff.s0, coeff.s2);
+            ulong v1 = modAdd(coeff.s1, coeff.s3);
+            ulong v2 = modSub(coeff.s0, coeff.s2);
+            ulong v3 = modMuli(modSub(coeff.s1, coeff.s3));
+            ulong4 tmp;
+            tmp.s0 = modAdd(v0, v1);
+            tmp.s1 = modSub(v0, v1);
+            tmp.s2 = modAdd(v2, v3);
+            tmp.s3 = modSub(v2, v3);
+            ulong4 factors = (ulong4)(1UL, w1, w2, w12);
+            ulong4 result = modMul4(tmp, factors);
+            
+            x[i + 0 * m] = result.s0;
+            x[i + 1 * m] = result.s1;
+            x[i + 2 * m] = result.s2;
+            x[i + 3 * m] = result.s3;
+            //printf("Step 3 Thread %lu i=%lu m=%lu indice2[write_index] = %lu",get_global_id(0), i,m,indice2[write_index]);
+
+            write_index += 4;
+            k += m;
+        }  
+    }
+
+}
