@@ -802,8 +802,7 @@ int main(int argc, char** argv) {
         int max_digit_width_cpu = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
         std::cout << "Max max_digit_width for IBDWT = " << max_digit_width_cpu << std::endl;
     
-        while (std::pow(std::pow(2, max_digit_width_cpu), localCarryPropagationDepth) < 
-            std::pow(std::pow(2, max_digit_width_cpu), 2) * n) {
+        while (std::pow(max_digit_width_cpu, localCarryPropagationDepth) < std::pow(max_digit_width_cpu,2) * n) {
             localCarryPropagationDepth *= 2;
         }
     }
