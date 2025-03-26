@@ -447,7 +447,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
         clSetKernelArg(kernel_ntt_mm_first, 4, 0, NULL); 
         executeKernelAndDisplay(queue, kernel_ntt_mm_first, buf_x, workers, localSize,
             "kernel_ntt_radix4_mm_first (m=" + std::to_string(m) + ")", n, profiling);
-
+        /*
         clSetKernelArg(kernel_ntt_mm_3_steps, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_ntt_mm_3_steps, 1, sizeof(cl_mem), &buf_w);
         size_t mm = n / 16;
@@ -457,9 +457,19 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_ntt_mm_3_steps, 3, 0, NULL); 
             executeKernelAndDisplay(queue, kernel_ntt_mm_3_steps, buf_x, workers/16, localSize/4,
                 "kernel_ntt_mm_3_steps (m=" + std::to_string(m) + ")", n, profiling);
+        }*/
+        clSetKernelArg(kernel_ntt_mm_2_steps, 0, sizeof(cl_mem), &buf_x);
+        clSetKernelArg(kernel_ntt_mm_2_steps, 1, sizeof(cl_mem), &buf_w);
+        size_t mm = n / 16;
+        for (size_t m = n / 16; m > 16; m /= 16) {
+            mm = m;
+            clSetKernelArg(kernel_ntt_mm_2_steps, 2, sizeof(size_t), &m);
+            clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
+            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize/4,
+                "kernel_ntt_mm_3_steps (m=" + std::to_string(m) + ")", n, profiling);
         }
        
-        if(mm==1024){
+/*        if(mm==1024){
             mm = 16;
             clSetKernelArg(kernel_ntt_mm_2_steps, 0, sizeof(cl_mem), &buf_x);
             clSetKernelArg(kernel_ntt_mm_2_steps, 1, sizeof(cl_mem), &buf_w);
@@ -467,23 +477,24 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
             executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize/4,
                     "kernel_ntt_mm_2_steps (m=" + std::to_string(m) + ")", n, profiling);
-                    /*
-            mm = 16;
-            clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-            clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-            clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &mm);
-            clSetKernelArg(kernel_ntt_mm, 3, 0, NULL); 
-            executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
-                "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling);
-            mm = 4;
-            clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-            clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-            clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &mm);
-            clSetKernelArg(kernel_ntt_mm, 3, 0, NULL); 
-            executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
-                "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling);*/
-       }
-       if(mm==256){
+            //////        
+            //mm = 16;
+            //clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+            //clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
+            //clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &mm);
+            //clSetKernelArg(kernel_ntt_mm, 3, 0, NULL); 
+            //executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
+            //    "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling);
+            //mm = 4;
+            //clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
+            //clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
+            //clSetKernelArg(kernel_ntt_mm, 2, sizeof(size_t), &mm);
+            //clSetKernelArg(kernel_ntt_mm, 3, 0, NULL); 
+            //executeKernelAndDisplay(queue, kernel_ntt_mm, buf_x, workers, localSize,
+            //    "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling);
+       }*/
+       //if(mm==256){
+        if(mm==64){
             mm = 4;
             clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
             clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
