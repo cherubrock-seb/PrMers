@@ -744,3 +744,25 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
     }
 
 }
+
+__kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
+{
+    // Chaque work-item traite une paire d'éléments.
+    const ulong k = get_global_id(0) * 2;
+
+    // Chargement des deux éléments.
+    const ulong u0 = x[k];
+    const ulong u1 = x[k + 1];
+
+    // Radix-2 NTT (forward) : calcul de la somme et de la différence.
+    const ulong v0 = modAdd(u0, u1);
+    const ulong v1 = modSub(u0, u1);
+
+    // Carré : calcul de (v0)^2 et (v1)^2.
+    const ulong s0 = modMul(v0, v0);
+    const ulong s1 = modMul(v1, v1);
+
+    // Radix-2 inverse NTT : recombinaison pour obtenir le résultat final.
+    x[k]     = modAdd(s0, s1);
+    x[k + 1] = modSub(s0, s1);
+}
