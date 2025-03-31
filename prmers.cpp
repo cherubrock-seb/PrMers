@@ -363,7 +363,7 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
             << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
             << "Elapsed: " << elapsedTime << "s | "
             << "Iterations/sec: " << iters_per_sec << " | "
-            << "ETA: " << days << "j " << hours << "h " << minutes << "m " << seconds << "s       "
+            << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
             << COLOR_RESET << std::flush;
 }
 
