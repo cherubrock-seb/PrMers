@@ -468,6 +468,83 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     vstore4(result, 0, x + 4 * k);
 }
 
+__kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
+                                          __global ulong* restrict wi,
+                                          const ulong m) {
+    uint ii;
+    ulong k;
+    k = (get_global_id(0))/(m);
+    k = k*m*4;
+    k += get_global_id(0)%(m);
+    //printf("get_global_id(0) = %lu ; start k=%lu",get_global_id(0) ,k);
+    ulong local_x[16];
+    int write_index = 0;
+
+    #pragma unroll 4
+    for (ii = 0; ii < 4; ii++) {
+        const ulong j = k & (m - 1);
+        const ulong base = 4 * (k - j) + j;
+        //printf("get_global_id(0) = %lu ; base=%lu",get_global_id(0) ,base);
+        const ulong twiddle_offset = 6 * m + 3 * j;
+        //printf("get_global_id(0) = %lu ; m=%lu; (%lu,%lu,%lu,%lu)",get_global_id(0),m,base + 0 * m,base + 1 * m,base + 2 * m,base + 3 * m);
+        ulong4 coeff = (ulong4)( x[base + 0 * m], x[base + 1 * m], x[base + 2 * m], x[base + 3 * m] );        
+        const ulong4 tmp = vload4(0, wi + twiddle_offset);
+        const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
+        ulong4 u = modMul4(coeff, twiddles);
+        const ulong4 r = butterfly(u);        
+        local_x[write_index]       = modAdd(r.s0, r.s2);
+        local_x[write_index+1]     = modAdd(r.s1, r.s3);
+        local_x[write_index+2]     = modSub(r.s0, r.s2);
+        local_x[write_index+3]     = modSub(r.s1, r.s3);
+        //printf("WRITE get_global_id(0) = %lu ; m=%lu; write_index = (%i,%i,%i,%i)",get_global_id(0),m,write_index,write_index+1, write_index+2,write_index+3);
+        
+        write_index += 4;
+        k += m;
+    }
+    
+    const ulong new_m = m * 4;
+    write_index = 0;
+    int indice1[16] = {0, 4, 8, 12,
+                       1, 5, 9, 13,
+                       2, 6, 10, 14,
+                       3, 7, 11, 15};
+    k = (get_global_id(0))/(m);
+    k = k*m*4;
+    k += get_global_id(0)%(m);
+
+    #pragma unroll 4
+    for (ii = 0; ii < 4; ii++) {
+        const ulong j = k & (new_m - 1);
+        const ulong base = 4 * (k - j) + j;
+        const ulong twiddle_offset = 6 * new_m + 3 * j;
+
+        ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
+                                 local_x[indice1[write_index + 1]],
+                                 local_x[indice1[write_index + 2]],
+                                 local_x[indice1[write_index + 3]] );
+        //printf("READ get_global_id(0) = %lu ; m=%lu; write_index = (%i,%i,%i,%i)",get_global_id(0),m,indice1[write_index],indice1[write_index+1], indice1[write_index+2],indice1[write_index+3]);
+        
+        write_index += 4;
+        const ulong4 tmp = vload4(0, wi + twiddle_offset);
+        const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
+        ulong4 u = modMul4(coeff, twiddles);
+        const ulong4 r = butterfly(u);
+        
+        //printf("get_global_id(0) = %lu ; m=%lu; (%lu,%lu,%lu,%lu)",get_global_id(0),m,base + 0 * new_m,base + 1 * new_m,base + 2 * new_m,base + 3 * new_m);
+        
+        x[base + 0 * new_m]      = modAdd(r.s0, r.s2);
+        x[base + 1 * new_m]      = modAdd(r.s1, r.s3);
+        x[base + 2 * new_m]      = modSub(r.s0, r.s2);
+        x[base + 3 * new_m]      = modSub(r.s1, r.s3);
+        k += m;
+    }
+}
+
+
+
+
+
+
 __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict w,
                                           const ulong m) {
@@ -598,7 +675,7 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             local_x[write_index+1] = result.s1;
             local_x[write_index+2] = result.s2;
             local_x[write_index+3] = result.s3;
-            //printf("Step 1 Thread %lu i=%lu m=%lu write_index = %lu",get_global_id(0), i,m, write_index);
+            ////printf("Step 1 Thread %lu i=%lu m=%lu write_index = %lu",get_global_id(0), i,m, write_index);
             write_index += 4;
             k += m/4;
         }  
@@ -663,7 +740,7 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             local_x[indice1[write_index + 1]] = result.s1;
             local_x[indice1[write_index + 2]] = result.s2;
             local_x[indice1[write_index + 3]] = result.s3;
-            //printf("Step 2 Thread %lu i=%lu m=%lu indice1[write_index] = %lu",get_global_id(0), i,m,indice1[write_index]);
+            ////printf("Step 2 Thread %lu i=%lu m=%lu indice1[write_index] = %lu",get_global_id(0), i,m,indice1[write_index]);
             write_index += 4;
             k += m;
         }  
@@ -736,7 +813,7 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             x[i + 1 * m] = result.s1;
             x[i + 2 * m] = result.s2;
             x[i + 3 * m] = result.s3;
-            //printf("Step 3 Thread %lu i=%lu m=%lu indice2[write_index] = %lu",get_global_id(0), i,m,indice2[write_index]);
+            ////printf("Step 3 Thread %lu i=%lu m=%lu indice2[write_index] = %lu",get_global_id(0), i,m,indice2[write_index]);
 
             write_index += 4;
             k += m;
