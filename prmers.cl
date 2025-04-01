@@ -606,7 +606,6 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     k = (get_global_id(0))/(m);
     k = k*m*4;
     k += get_global_id(0)%(m);
-    //printf("get_global_id(0) = %lu ; start k=%lu",get_global_id(0) ,k);
     ulong local_x[16];
     int write_index = 0;
 
@@ -614,9 +613,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     for (ii = 0; ii < 4; ii++) {
         const ulong j = k & (m - 1);
         const ulong base = 4 * (k - j) + j;
-        //printf("get_global_id(0) = %lu ; base=%lu",get_global_id(0) ,base);
         const ulong twiddle_offset = 6 * m + 3 * j;
-        //printf("get_global_id(0) = %lu ; m=%lu; (%lu,%lu,%lu,%lu)",get_global_id(0),m,base + 0 * m,base + 1 * m,base + 2 * m,base + 3 * m);
         ulong4 coeff = (ulong4)( x[base + 0 * m], x[base + 1 * m], x[base + 2 * m], x[base + 3 * m] );        
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
@@ -626,8 +623,6 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         local_x[write_index+1]     = modAdd(r.s1, r.s3);
         local_x[write_index+2]     = modSub(r.s0, r.s2);
         local_x[write_index+3]     = modSub(r.s1, r.s3);
-        //printf("WRITE get_global_id(0) = %lu ; m=%lu; write_index = (%i,%i,%i,%i)",get_global_id(0),m,write_index,write_index+1, write_index+2,write_index+3);
-        
         write_index += 4;
         k += m;
     }
@@ -644,12 +639,12 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         const ulong base = 4 * (k - j) + j;
         const ulong twiddle_offset = 6 * new_m + 3 * j;
 
-ulong4 coeff = (ulong4)(
-    local_x[((write_index  ) % 4) * 4 + (write_index  ) / 4],
-    local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],
-    local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4],
-    local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]
-);
+        ulong4 coeff = (ulong4)(
+            local_x[((write_index  ) % 4) * 4 + (write_index  ) / 4],
+            local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],
+            local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4],
+            local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]
+        );
         write_index += 4;
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
