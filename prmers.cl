@@ -117,16 +117,47 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
     return res;
 }
 
-inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *carry) {
+inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *restrict carry) {
     ulong4 res;
-    uint64_t c = *carry;
-    #pragma unroll 4
-    for (int i = 0; i < 4; i++) {
-        uint64_t s = lhs[i] + c;                        
-        res[i] = s & ((1UL << digit_width[i]) - 1UL);    
-        c = s >> digit_width[i];
+    ulong c = *carry;
+
+    // Vérifie si tous les digit_width sont égaux
+    if (digit_width.s0 == digit_width.s1 &&
+        digit_width.s1 == digit_width.s2 &&
+        digit_width.s2 == digit_width.s3) {
+
+        ulong w = digit_width.s0;
+        ulong mask = (1UL << w) - 1UL;
+
+        // Étape 1 : addition avec carry injecté dans le lane 0
+        ulong s0 = lhs.s0 + c;
+        res.s0 = s0 & mask;
+        c = s0 >> w;
+
+        ulong s1 = lhs.s1 + c;
+        res.s1 = s1 & mask;
+        c = s1 >> w;
+
+        ulong s2 = lhs.s2 + c;
+        res.s2 = s2 & mask;
+        c = s2 >> w;
+
+        ulong s3 = lhs.s3 + c;
+        res.s3 = s3 & mask;
+        c = s3 >> w;
+
+        *carry = c;
+    } else {
+        // Version générique avec largeur variable
+        #pragma unroll 4
+        for (int i = 0; i < 4; i++) {
+            ulong s = lhs[i] + c;
+            res[i] = s & ((1UL << digit_width[i]) - 1UL);
+            c = s >> digit_width[i];
+        }
+        *carry = c;
     }
-    *carry = c;
+
     return res;
 }
 
@@ -468,6 +499,8 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     vstore4(result, 0, x + 4 * k);
 }
 
+
+
 __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict wi,
                                           const ulong m) {
@@ -504,10 +537,6 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     
     const ulong new_m = m * 4;
     write_index = 0;
-    int indice1[16] = {0, 4, 8, 12,
-                       1, 5, 9, 13,
-                       2, 6, 10, 14,
-                       3, 7, 11, 15};
     k = (get_global_id(0))/(m);
     k = k*m*4;
     k += get_global_id(0)%(m);
@@ -518,19 +547,17 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         const ulong base = 4 * (k - j) + j;
         const ulong twiddle_offset = 6 * new_m + 3 * j;
 
-        ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
-                                 local_x[indice1[write_index + 1]],
-                                 local_x[indice1[write_index + 2]],
-                                 local_x[indice1[write_index + 3]] );
-        //printf("READ get_global_id(0) = %lu ; m=%lu; write_index = (%i,%i,%i,%i)",get_global_id(0),m,indice1[write_index],indice1[write_index+1], indice1[write_index+2],indice1[write_index+3]);
-        
+ulong4 coeff = (ulong4)(
+    local_x[((write_index  ) % 4) * 4 + (write_index  ) / 4],
+    local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],
+    local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4],
+    local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]
+);
         write_index += 4;
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
         ulong4 u = modMul4(coeff, twiddles);
         const ulong4 r = butterfly(u);
-        
-        //printf("get_global_id(0) = %lu ; m=%lu; (%lu,%lu,%lu,%lu)",get_global_id(0),m,base + 0 * new_m,base + 1 * new_m,base + 2 * new_m,base + 3 * new_m);
         
         x[base + 0 * new_m]      = modAdd(r.s0, r.s2);
         x[base + 1 * new_m]      = modAdd(r.s1, r.s3);
@@ -588,10 +615,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     
     const ulong new_m = m / 4;
     write_index = 0;
-    int indice1[16] = {0, 4, 8, 12,
-                       1, 5, 9, 13,
-                       2, 6, 10, 14,
-                       3, 7, 11, 15};
+
     k = (get_global_id(0)/(m/4));
     k = k*m;
     k += get_global_id(0)%(m/4);
@@ -605,10 +629,12 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         const ulong w1  = w[twiddle_offset + 1];
         const ulong w12 = w[twiddle_offset + 2];
         
-        ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
-                                 local_x[indice1[write_index + 1]],
-                                 local_x[indice1[write_index + 2]],
-                                 local_x[indice1[write_index + 3]] );
+        ulong4 coeff = (ulong4)(
+            local_x[((write_index  ) % 4) * 4 + (write_index  ) / 4],
+            local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],
+            local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4],
+            local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]
+        );
         write_index += 4;
         ulong v0 = modAdd(coeff.s0, coeff.s2);
         ulong v1 = modAdd(coeff.s1, coeff.s3);
@@ -825,21 +851,25 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
 __kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
 {
     // Chaque work-item traite une paire d'éléments.
-    const ulong k = get_global_id(0) * 2;
+    const uint idx = get_global_id(0) << 1; // équivalent à get_global_id(0) * 2
 
-    // Chargement des deux éléments.
-    const ulong u0 = x[k];
-    const ulong u1 = x[k + 1];
+    // Chargement vectorisé de deux éléments.
+    ulong2 u = vload2(0, x + idx);
 
-    // Radix-2 NTT (forward) : calcul de la somme et de la différence.
-    const ulong v0 = modAdd(u0, u1);
-    const ulong v1 = modSub(u0, u1);
+    // Radix-2 NTT (forward) : somme et différence.
+    ulong s = modAdd(u.x, u.y);
+    ulong d = modSub(u.x, u.y);
 
-    // Carré : calcul de (v0)^2 et (v1)^2.
-    const ulong s0 = modMul(v0, v0);
-    const ulong s1 = modMul(v1, v1);
+    // Carré : calcul des carrés de la somme et de la différence.
+    s = modMul(s, s);
+    d = modMul(d, d);
 
-    // Radix-2 inverse NTT : recombinaison pour obtenir le résultat final.
-    x[k]     = modAdd(s0, s1);
-    x[k + 1] = modSub(s0, s1);
+    // Radix-2 inverse NTT : recombinaison.
+    // On calcule le résultat final directement dans des variables locales.
+    ulong r0 = modAdd(s, d);
+    ulong r1 = modSub(s, d);
+
+    // Stockage vectorisé des deux résultats.
+    vstore2((ulong2)(r0, r1), 0, x + idx);
 }
+
