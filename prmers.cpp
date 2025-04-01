@@ -143,7 +143,7 @@ static size_t transformsize(uint32_t exponent) {
 void precalc_for_p(uint32_t p,
                    std::vector<uint64_t>& digit_weight,
                    std::vector<uint64_t>& digit_invweight,
-                   std::vector<uint64_t>& digit_width) {
+                   std::vector<int>& digit_width) {
     size_t n = transformsize(p);
     if(n<4){
         n=4;
@@ -679,8 +679,15 @@ void printVector2(const std::vector<uint64_t>& vec, const std::string& name) {
     }
     std::cout << "]" << std::endl;
 }
+void printVector3(const std::vector<int>& vec, const std::string& name) {
+    std::cout << name << " = [ ";
+    for (const auto& val : vec) {
+        std::cout << val << " ";
+    }
+    std::cout << "]" << std::endl;
+}
 
-void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<uint64_t>& digit_width_cpu, size_t n) {
+void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_width_cpu, size_t n) {
     x[0] += 1;
     uint64_t c = 0;
     
@@ -899,12 +906,12 @@ int main(int argc, char** argv) {
 
     // Precompute parameters
     std::vector<uint64_t> digit_weight_cpu, digit_invweight_cpu;
-    std::vector<uint64_t> digit_width_cpu;
+    std::vector<int> digit_width_cpu;
     precalc_for_p(p, digit_weight_cpu, digit_invweight_cpu, digit_width_cpu);
     if(debug){
         printVector2(digit_weight_cpu, "digit_weight_cpu");
         printVector2(digit_invweight_cpu, "digit_invweight_cpu");
-        printVector(digit_width_cpu, "digit_width_cpu");
+        printVector3(digit_width_cpu, "digit_width_cpu");
     }
    
     size_t n = transformsize(p);
@@ -1068,8 +1075,9 @@ int main(int argc, char** argv) {
 
     cl_mem buf_digit_width = createBuffer(context,
         CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        digit_width_cpu.size() * sizeof(uint64_t),
+        digit_width_cpu.size() * sizeof(int),
         (void*)digit_width_cpu.data(), "buf_digit_width");
+
 
     cl_mem buf_twiddles = createBuffer(context,
         CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,

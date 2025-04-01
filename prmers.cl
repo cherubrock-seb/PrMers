@@ -117,19 +117,18 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
     return res;
 }
 
-inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *restrict carry) {
+inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict carry) {
     ulong4 res;
     ulong c = *carry;
 
-    // Vérifie si tous les digit_width sont égaux
     if (digit_width.s0 == digit_width.s1 &&
         digit_width.s1 == digit_width.s2 &&
         digit_width.s2 == digit_width.s3) {
 
-        ulong w = digit_width.s0;
-        ulong mask = (1UL << w) - 1UL;
+        ulong w = (ulong) digit_width.s0;  
+        ulong mask = (1UL << ((uint)w)) - 1UL; 
 
-        // Étape 1 : addition avec carry injecté dans le lane 0
+
         ulong s0 = lhs.s0 + c;
         res.s0 = s0 & mask;
         c = s0 >> w;
@@ -148,27 +147,28 @@ inline ulong4 digit_adc4(ulong4 lhs, ulong4 digit_width, __private ulong *restri
 
         *carry = c;
     } else {
-        // Version générique avec largeur variable
         #pragma unroll 4
         for (int i = 0; i < 4; i++) {
             ulong s = lhs[i] + c;
-            res[i] = s & ((1UL << digit_width[i]) - 1UL);
-            c = s >> digit_width[i];
+            res[i] = s & ((1UL << ((uint)digit_width[i])) - 1UL);
+            c = s >> ((uint)digit_width[i]);
         }
+
         *carry = c;
     }
 
     return res;
 }
 
-inline ulong4 digit_adc4_last(ulong4 lhs, ulong4 digit_width, __private ulong *carry) {
+inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *carry) {
     ulong4 res;
     uint64_t c = *carry;
     #pragma unroll 3
     for (int i = 0; i < 3; i++) {
         uint64_t s = lhs[i] + c;                        
-        res[i] = s & ((1UL << digit_width[i]) - 1UL);    
-        c = s >> digit_width[i];
+        res[i] = s & ((1UL << ((uint)digit_width[i])) - 1UL);
+        c = s >> ((uint)digit_width[i]);
+
     }
     *carry = c;
     res[3] = lhs[3] + c;
@@ -176,7 +176,7 @@ inline ulong4 digit_adc4_last(ulong4 lhs, ulong4 digit_width, __private ulong *c
 }
 
 __kernel void kernel_sub2(__global ulong* restrict x,
-                          __global ulong* restrict digit_width,
+                          __global int* restrict digit_width,
                           const ulong n)
 {
     if (get_global_id(0) == 0) {
@@ -221,7 +221,7 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 
 __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array,
-                           __global ulong* restrict digit_width)
+                           __global int* restrict digit_width)
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -230,9 +230,13 @@ __kernel void kernel_carry(__global ulong* restrict x,
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
-        ulong4 digit_width_vec = vload4(0, digit_width + i);
 
-        x_vec = digit_adc4(x_vec, digit_width_vec, &carry); 
+        int4 digit_width_vec = (int4)(digit_width[i],
+                                      digit_width[i + 1],
+                                      digit_width[i + 2],
+                                      digit_width[i + 3]);
+
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
     }
     
@@ -245,7 +249,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
 
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global ulong* restrict digit_width)
+                             __global int* restrict digit_width)  // CHANGEMENT ICI
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -259,19 +263,34 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
-        ulong4 digit_width_vec = vload4(0, digit_width + i);
-        x_vec = digit_adc4(x_vec, digit_width_vec, &carry); 
+
+        ulong4 digit_width_vec = (ulong4)(
+            digit_width[i + 0],
+            digit_width[i + 1],
+            digit_width[i + 2],
+            digit_width[i + 3]
+        );
+
+        x_vec = digit_adc4(x_vec, convert_int4(digit_width_vec), &carry);
+
         vstore4(x_vec, 0, x + i);
+
         if (carry == 0) return;
     }
+
     if (carry != 0) {
         ulong4 x_vec = vload4(0, x + end);
-        ulong4 digit_width_vec = vload4(0, digit_width + end);
-        x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
+
+        ulong4 digit_width_vec = (ulong4)(
+            digit_width[end + 0],
+            digit_width[end + 1],
+            digit_width[end + 2],
+            digit_width[end + 3]
+        );
+
+        x_vec = digit_adc4_last(x_vec, convert_int4(digit_width_vec), &carry); 
         vstore4(x_vec, 0, x + end);
     }
-
-
 }
 
 static inline ulong4 butterfly(const ulong4 u) {
@@ -850,26 +869,19 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
 
 __kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
 {
-    // Chaque work-item traite une paire d'éléments.
     const uint idx = get_global_id(0) << 1; // équivalent à get_global_id(0) * 2
 
-    // Chargement vectorisé de deux éléments.
     ulong2 u = vload2(0, x + idx);
 
-    // Radix-2 NTT (forward) : somme et différence.
     ulong s = modAdd(u.x, u.y);
     ulong d = modSub(u.x, u.y);
 
-    // Carré : calcul des carrés de la somme et de la différence.
     s = modMul(s, s);
     d = modMul(d, d);
 
-    // Radix-2 inverse NTT : recombinaison.
-    // On calcule le résultat final directement dans des variables locales.
     ulong r0 = modAdd(s, d);
     ulong r1 = modSub(s, d);
 
-    // Stockage vectorisé des deux résultats.
     vstore2((ulong2)(r0, r1), 0, x + idx);
 }
 
