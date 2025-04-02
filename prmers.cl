@@ -125,106 +125,95 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
         digit_width.s1 == digit_width.s2 &&
         digit_width.s2 == digit_width.s3) {
 
-        ulong w = (ulong) digit_width.s0;
-        ulong mask = (1UL << ((uint)w)) - 1UL;
+        ulong mask = (1UL << (digit_width.s0)) - 1UL;
 
         ulong s = lhs.s0 + c;
         res.s0 = s & mask;
-        c = s >> w;
+        c = s >> digit_width.s0;
 
         s = lhs.s1 + c;
         res.s1 = s & mask;
-        c = s >> w;
+        c = s >> digit_width.s0;
 
         s = lhs.s2 + c;
         res.s2 = s & mask;
-        c = s >> w;
+        c = s >> digit_width.s0;
 
         s = lhs.s3 + c;
         res.s3 = s & mask;
-        c = s >> w;
+        c = s >> digit_width.s0;
 
         *carry = c;
     }
     else if (digit_width.s0 == digit_width.s1 &&
              digit_width.s1 == digit_width.s2) {
 
-        ulong w = (ulong) digit_width.s0;
-        ulong mask = (1UL << ((uint)w)) - 1UL;
+        ulong mask = (1UL << ( digit_width.s0)) - 1UL;
 
         ulong s = lhs.s0 + c;
         res.s0 = s & mask;
-        c = s >> w;
+        c = s >>  digit_width.s0;
 
         s = lhs.s1 + c;
         res.s1 = s & mask;
-        c = s >> w;
+        c = s >>  digit_width.s0;
 
         s = lhs.s2 + c;
         res.s2 = s & mask;
-        c = s >> w;
+        c = s >>  digit_width.s0;
 
-        // Pour le 4ème, on utilise sa propre largeur
-        ulong w3 = (ulong) digit_width.s3;
-        ulong mask3 = (1UL << ((uint)w3)) - 1UL;
+        ulong mask3 = (1UL << (digit_width.s3)) - 1UL;
         s = lhs.s3 + c;
         res.s3 = s & mask3;
-        c = s >> ((uint)w3);
+        c = s >> (digit_width.s3);
 
         *carry = c;
     }
     else if (digit_width.s0 == digit_width.s1 &&
              digit_width.s2 == digit_width.s3) {
 
-        ulong w01 = (ulong) digit_width.s0;
-        ulong mask01 = (1UL << ((uint)w01)) - 1UL;
+        ulong mask01 = (1UL << (digit_width.s0)) - 1UL;
         ulong s = lhs.s0 + c;
         res.s0 = s & mask01;
-        c = s >> w01;
+        c = s >> digit_width.s0;
         s = lhs.s1 + c;
         res.s1 = s & mask01;
-        c = s >> w01;
-
-        ulong w23 = (ulong) digit_width.s2;
-        ulong mask23 = (1UL << ((uint)w23)) - 1UL;
+        c = s >> digit_width.s0;
+        ulong mask23 = (1UL << (digit_width.s2)) - 1UL;
         s = lhs.s2 + c;
         res.s2 = s & mask23;
-        c = s >> w23;
+        c = s >> digit_width.s2;
         s = lhs.s3 + c;
         res.s3 = s & mask23;
-        c = s >> w23;
+        c = s >> digit_width.s2;
 
         *carry = c;
     }
-    // Cas 4 : Alternance (s0 == s2) et (s1 == s3)
     else if (digit_width.s0 == digit_width.s2 &&
              digit_width.s1 == digit_width.s3) {
 
-        ulong w0 = (ulong) digit_width.s0;
-        ulong mask0 = (1UL << ((uint)w0)) - 1UL;
+        ulong mask0 = (1UL << (digit_width.s0)) - 1UL;
         ulong s = lhs.s0 + c;
         res.s0 = s & mask0;
-        c = s >> w0;
+        c = s >> digit_width.s0;
 
-        ulong w1 = (ulong) digit_width.s1;
-        ulong mask1 = (1UL << ((uint)w1)) - 1UL;
+        ulong mask1 = (1UL << (digit_width.s1)) - 1UL;
         s = lhs.s1 + c;
         res.s1 = s & mask1;
-        c = s >> w1;
+        c = s >> digit_width.s1;
 
         // Pour s2, on réutilise la largeur de s0
         s = lhs.s2 + c;
         res.s2 = s & mask0;
-        c = s >> w0;
+        c = s >> digit_width.s0;
 
         // Pour s3, on réutilise la largeur de s1
         s = lhs.s3 + c;
         res.s3 = s & mask1;
-        c = s >> w1;
+        c = s >> digit_width.s1;
 
         *carry = c;
     }
-    // Cas générique
     else {
         #pragma unroll 4
         for (int i = 0; i < 4; i++) {
