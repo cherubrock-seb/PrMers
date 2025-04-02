@@ -652,17 +652,20 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict w,
                                           const ulong m) {
     uint ii;
-    ulong k;
-    k = (get_global_id(0)/(m/4));
-    k = k*m;
-    k += get_global_id(0)%(m/4);
+    const ulong gid = get_global_id(0);
+    const ulong group = gid / (m / 4);
+    const ulong local_id = gid % (m / 4);
+
+    // Initialiser k pour la première passe
+    ulong k_first = group * m + local_id;
+    
     ulong local_x[16];
     int write_index = 0;
 
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
-        const ulong j = k & (m - 1);
-        const ulong i = 4 * (k - j) + j;
+        const ulong j = k_first & (m - 1);
+        const ulong i = 4 * (k_first - j) + j;
         const ulong twiddle_offset = 6 * m + 3 * j;
         ulong4 tmp = vload4(0, w + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
@@ -683,20 +686,18 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         local_x[write_index+2] = result.s2;
         local_x[write_index+3] = result.s3;
         write_index += 4;
-        k += m/4;
+        k_first += m / 4;
     }
     
     const ulong new_m = m / 4;
     write_index = 0;
 
-    k = (get_global_id(0)/(m/4));
-    k = k*m;
-    k += get_global_id(0)%(m/4);
-    
+    ulong k_second = group * m + local_id;
+
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
-        const ulong j = k & (new_m - 1);
-        const ulong i = 4 * (k - j) + j;
+        const ulong j = k_second & (new_m - 1);
+        const ulong i = 4 * (k_second - j) + j;
         const ulong twiddle_offset = 6 * new_m + 3 * j;
         ulong4 tmp = vload4(0, w + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
@@ -722,7 +723,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         x[i + 1 * new_m] = result.s1;
         x[i + 2 * new_m] = result.s2;
         x[i + 3 * new_m] = result.s3;
-        k += m/4;
+        k_second += m / 4;
     }
 }
 
