@@ -586,12 +586,13 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict wi,
                                           const ulong m) {
     uint ii;
+
     ulong local_x[16];
     int write_index = 0;
     const ulong gid = get_global_id(0);
     const ulong group = gid / (m);
     const ulong local_id = gid % (m);
-    ulong k_first = group * m + local_id;
+    ulong k_first = group * m * 4 + local_id;
 
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
@@ -613,8 +614,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     
     const ulong new_m = m * 4;
     write_index = 0;
-
-    ulong k_second = group * m*4 + local_id;
+    ulong k_second = group * m * 4 + local_id;
 
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
