@@ -668,7 +668,6 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     ulong local_x[16];
     int write_index = 0;
 
-    // Première passe
     #pragma unroll 4
     for (int pass = 0; pass < 4; pass++) {
         const gid_t j = k_first & (m - 1);
@@ -702,7 +701,6 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
 
     gid_t k_second = group * m + local_id;
 
-    // Seconde passe
     #pragma unroll 4
     for (int pass = 0; pass < 4; pass++) {
         const gid_t j = k_second & (new_m - 1);
