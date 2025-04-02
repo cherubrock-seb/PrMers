@@ -586,17 +586,17 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict wi,
                                           const ulong m) {
     uint ii;
-    ulong k;
-    k = (get_global_id(0))/(m);
-    k = k*m*4;
-    k += get_global_id(0)%(m);
     ulong local_x[16];
     int write_index = 0;
+    const ulong gid = get_global_id(0);
+    const ulong group = gid / (m);
+    const ulong local_id = gid % (m);
+    ulong k_first = group * m + local_id;
 
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
-        const ulong j = k & (m - 1);
-        const ulong base = 4 * (k - j) + j;
+        const ulong j = k_first & (m - 1);
+        const ulong base = 4 * (k_first - j) + j;
         const ulong twiddle_offset = 6 * m + 3 * j;
         ulong4 coeff = (ulong4)( x[base + 0 * m], x[base + 1 * m], x[base + 2 * m], x[base + 3 * m] );        
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
@@ -608,19 +608,18 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         local_x[write_index+2]     = modSub(r.s0, r.s2);
         local_x[write_index+3]     = modSub(r.s1, r.s3);
         write_index += 4;
-        k += m;
+        k_first += m;
     }
     
     const ulong new_m = m * 4;
     write_index = 0;
-    k = (get_global_id(0))/(m);
-    k = k*m*4;
-    k += get_global_id(0)%(m);
+
+    ulong k_second = group * m*4 + local_id;
 
     #pragma unroll 4
     for (ii = 0; ii < 4; ii++) {
-        const ulong j = k & (new_m - 1);
-        const ulong base = 4 * (k - j) + j;
+        const ulong j = k_second & (new_m - 1);
+        const ulong base = 4 * (k_second - j) + j;
         const ulong twiddle_offset = 6 * new_m + 3 * j;
 
         ulong4 coeff = (ulong4)(
@@ -639,7 +638,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         x[base + 1 * new_m]      = modAdd(r.s1, r.s3);
         x[base + 2 * new_m]      = modSub(r.s0, r.s2);
         x[base + 3 * new_m]      = modSub(r.s1, r.s3);
-        k += m;
+        k_second += m;
     }
 }
 
@@ -651,19 +650,17 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
 __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict w,
                                           const ulong m) {
-    uint ii;
+
     const ulong gid = get_global_id(0);
     const ulong group = gid / (m / 4);
     const ulong local_id = gid % (m / 4);
-
-    // Initialiser k pour la première passe
     ulong k_first = group * m + local_id;
     
     ulong local_x[16];
     int write_index = 0;
 
     #pragma unroll 4
-    for (ii = 0; ii < 4; ii++) {
+    for (uint ii = 0; ii < 4; ii++) {
         const ulong j = k_first & (m - 1);
         const ulong i = 4 * (k_first - j) + j;
         const ulong twiddle_offset = 6 * m + 3 * j;
@@ -695,7 +692,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     ulong k_second = group * m + local_id;
 
     #pragma unroll 4
-    for (ii = 0; ii < 4; ii++) {
+    for (uint ii = 0; ii < 4; ii++) {
         const ulong j = k_second & (new_m - 1);
         const ulong i = 4 * (k_second - j) + j;
         const ulong twiddle_offset = 6 * new_m + 3 * j;
