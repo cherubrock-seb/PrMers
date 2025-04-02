@@ -587,74 +587,70 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
 
 
 
+#if WORKER_NTT_2_STEPS <= 0xFFFFFFFF
+typedef uint gid_t;
+#else
+typedef ulong gid_t;
+#endif
+
+
 __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
-                                          __global ulong* restrict wi,
-                                          const ulong m) {
-    uint ii;
+                                                  __global ulong* restrict wi,
+                                                  const ulong m) {
 
     ulong local_x[16];
     int write_index = 0;
-    const ulong gid = get_global_id(0);
-    const ulong group = gid / (m);
-    const ulong local_id = gid % (m);
-    ulong k_first = group * m * 4 + local_id;
+    const gid_t gid = get_global_id(0);
+    const gid_t group = gid / m;
+    const gid_t local_id = gid % m;
+    gid_t k_first = group * m * 4 + local_id;
 
     #pragma unroll 4
-    for (ii = 0; ii < 4; ii++) {
-        const ulong j = k_first & (m - 1);
-        const ulong base = 4 * (k_first - j) + j;
-        const ulong twiddle_offset = 6 * m + 3 * j;
-        ulong4 coeff = (ulong4)( x[base + 0 * m], x[base + 1 * m], x[base + 2 * m], x[base + 3 * m] );        
+    for (int pass = 0; pass < 4; pass++) {
+        const gid_t j = k_first & (m - 1);
+        const gid_t base = 4 * (k_first - j) + j;
+        const gid_t twiddle_offset = 6 * m + 3 * j;
+        ulong4 coeff = (ulong4)( x[base + 0 * m], x[base + 1 * m], x[base + 2 * m], x[base + 3 * m] );
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
         ulong4 u = modMul4(coeff, twiddles);
-        const ulong4 r = butterfly(u);        
-        local_x[write_index]       = modAdd(r.s0, r.s2);
-        local_x[write_index+1]     = modAdd(r.s1, r.s3);
-        local_x[write_index+2]     = modSub(r.s0, r.s2);
-        local_x[write_index+3]     = modSub(r.s1, r.s3);
-        write_index += 4;
+        const ulong4 r = butterfly(u);
+        local_x[write_index++] = modAdd(r.s0, r.s2);
+        local_x[write_index++] = modAdd(r.s1, r.s3);
+        local_x[write_index++] = modSub(r.s0, r.s2);
+        local_x[write_index++] = modSub(r.s1, r.s3);
         k_first += m;
     }
-    
-    const ulong new_m = m * 4;
+
+    const gid_t new_m = m * 4;
     write_index = 0;
-    ulong k_second = group * m * 4 + local_id;
+    gid_t k_second = group * m * 4 + local_id;
 
     #pragma unroll 4
-    for (ii = 0; ii < 4; ii++) {
-        const ulong j = k_second & (new_m - 1);
-        const ulong base = 4 * (k_second - j) + j;
-        const ulong twiddle_offset = 6 * new_m + 3 * j;
+    for (int pass = 0; pass < 4; pass++) {
+        const gid_t j = k_second & (new_m - 1);
+        const gid_t base = 4 * (k_second - j) + j;
+        const gid_t twiddle_offset = 6 * new_m + 3 * j;
 
         ulong4 coeff = (ulong4)(
-            local_x[((write_index  ) % 4) * 4 + (write_index  ) / 4],
-            local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],
-            local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4],
-            local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]
+            local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4],
+            local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4],
+            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4],
+            local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4]
         );
         write_index += 4;
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
         const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
         ulong4 u = modMul4(coeff, twiddles);
         const ulong4 r = butterfly(u);
-        
-        x[base + 0 * new_m]      = modAdd(r.s0, r.s2);
-        x[base + 1 * new_m]      = modAdd(r.s1, r.s3);
-        x[base + 2 * new_m]      = modSub(r.s0, r.s2);
-        x[base + 3 * new_m]      = modSub(r.s1, r.s3);
+
+        x[base + 0 * new_m] = modAdd(r.s0, r.s2);
+        x[base + 1 * new_m] = modAdd(r.s1, r.s3);
+        x[base + 2 * new_m] = modSub(r.s0, r.s2);
+        x[base + 3 * new_m] = modSub(r.s1, r.s3);
         k_second += m;
     }
 }
-
-
-
-
-#if WORKER_NTT_2_STEPS <= 0xFFFFFFFF
-typedef uint gid_t;
-#else
-typedef ulong gid_t;
-#endif
 
 __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict w,
@@ -669,7 +665,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     int write_index = 0;
 
     #pragma unroll 4
-    for (int pass = 0; pass < 4; pass++) {
+    for (uint pass = 0; pass < 4; pass++) {
         const gid_t j = k_first & (m - 1);
         const gid_t i = 4 * (k_first - j) + j;
         const gid_t twiddle_offset = 6 * m + 3 * j;
@@ -702,7 +698,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     gid_t k_second = group * m + local_id;
 
     #pragma unroll 4
-    for (int pass = 0; pass < 4; pass++) {
+    for (uint pass = 0; pass < 4; pass++) {
         const gid_t j = k_second & (new_m - 1);
         const gid_t i = 4 * (k_second - j) + j;
         const gid_t twiddle_offset = 6 * new_m + 3 * j;
