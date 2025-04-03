@@ -44,8 +44,11 @@ jobs:
           copy prmers_vload2.cl prmers_package\kernels\
           powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload release to GitHub
+        uses: softprops/action-gh-release@v2
         with:
-          name: prmers-windows
-          path: prmers-windows.zip
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: prmers-windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
