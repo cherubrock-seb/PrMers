@@ -1,5 +1,6 @@
-# Installation path (modifiable via "make install PREFIX=/your/path")
+# Installation path
 PREFIX ?= /usr/local
+KERNEL_PATH ?= $(PREFIX)/share/$(TARGET)/
 
 # Compiler and compilation options
 CXX = g++
@@ -14,21 +15,21 @@ KERNELS = prmers.cl prmers_vload2.cl
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) -DKERNEL_PATH="\"$(PREFIX)/share/$(TARGET)/\"" -o $(TARGET) $(SRC) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -DKERNEL_PATH="\"$(KERNEL_PATH)\"" -o $(TARGET) $(SRC) $(LDFLAGS)
 
 install: $(TARGET)
 	@echo "Installing $(TARGET)..."
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
-	install -d $(DESTDIR)$(PREFIX)/share/$(TARGET)
-	install -m 644 $(KERNELS) $(DESTDIR)$(PREFIX)/share/$(TARGET)
+	install -d $(DESTDIR)$(KERNEL_PATH)
+	install -m 644 $(KERNELS) $(DESTDIR)$(KERNEL_PATH)
 	@echo "$(TARGET) installed in $(PREFIX)/bin"
-	@echo "Kernels installed in $(PREFIX)/share/$(TARGET)"
+	@echo "Kernels installed in $(KERNEL_PATH)"
 
 uninstall:
 	@echo "Uninstalling $(TARGET)..."
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
-	rm -rf $(DESTDIR)$(PREFIX)/share/$(TARGET)
+	rm -rf $(DESTDIR)$(KERNEL_PATH)
 	@echo "$(TARGET) has been uninstalled."
 
 clean:
