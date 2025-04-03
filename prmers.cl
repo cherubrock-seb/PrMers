@@ -621,10 +621,17 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         );
         ulong4 u = modMul4(coeff, twiddles);
         const ulong4 r = butterfly(u);
-        local_x[write_index++] = modAdd(r.s0, r.s2);
-        local_x[write_index++] = modAdd(r.s1, r.s3);
-        local_x[write_index++] = modSub(r.s0, r.s2);
-        local_x[write_index++] = modSub(r.s1, r.s3);
+
+        ulong4 result = (ulong4)(
+            modAdd(r.s0, r.s2),
+            modAdd(r.s1, r.s3),
+            modSub(r.s0, r.s2),
+            modSub(r.s1, r.s3)
+        );
+
+        vstore4(result, write_index, local_x);
+        write_index += 4;
+
         k_first += m;
     }
     
@@ -689,12 +696,8 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         tmp.s2 = modAdd(v2, v3);
         tmp.s3 = modSub(v2, v3);
         ulong4 result = modMul4(tmp, twiddles);
-
-        local_x[write_index++] = result.s0;
-        local_x[write_index++] = result.s1;
-        local_x[write_index++] = result.s2;
-        local_x[write_index++] = result.s3;
-
+        vstore4(result, write_index, local_x);
+        write_index += 4;
         k_first += m / 4;
     }
 
