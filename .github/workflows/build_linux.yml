@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: Build Linux
 
 on:
   push:
@@ -8,10 +8,15 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: make
-      run: make
+      - uses: actions/checkout@v4
+
+      - name: Install OpenCL dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+
+      - name: Build with Makefile
+        run: make
