@@ -20,4 +20,11 @@ add_executable(prmers
 target_link_libraries(prmers ${OpenCL_LIBRARIES})
 
 # Define macro for kernel path
-target_compile_definitions(prmers PRIVATE KERNEL_PATH="\"/usr/local/share/prmers/\"")
+if (WIN32)
+    set(DEFAULT_KERNEL_PATH "\"./kernels/\"")
+else()
+    set(DEFAULT_KERNEL_PATH "\"/usr/local/share/prmers/\"")
+endif()
+
+target_compile_definitions(prmers PRIVATE KERNEL_PATH=${DEFAULT_KERNEL_PATH})
+
