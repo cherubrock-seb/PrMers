@@ -38,9 +38,10 @@ jobs:
       - name: Package
         run: |
           mkdir prmers_package
+          mkdir prmers_package\kernels
           copy build\Release\prmers.exe prmers_package\
-          copy prmers.cl prmers_package\
-          copy prmers_vload2.cl prmers_package\
+          copy prmers.cl prmers_package\kernels\
+          copy prmers_vload2.cl prmers_package\kernels\
           powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
       - name: Upload artifact
