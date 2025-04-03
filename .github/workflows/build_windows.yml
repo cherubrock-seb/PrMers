@@ -1,0 +1,46 @@
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    name: Build on Windows with MSYS2
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-opencl-headers
+            mingw-w64-x86_64-make
+
+      - name: Build with Makefile
+        shell: msys2 {0}
+        run: |
+          make PREFIX=/usr/local
+
+      - name: Create ZIP package
+        shell: powershell
+        run: |
+          mkdir prmers_package
+          Copy-Item prmers.exe prmers_package\
+          Copy-Item prmers.cl prmers_package\
+          Copy-Item prmers_vload2.cl prmers_package\
+          Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
+
+      - name: Upload Windows binary ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: prmers-windows
+          path: prmers-windows.zip
