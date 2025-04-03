@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  OPENCL_VERSION: 2023.04.17
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -17,13 +20,17 @@ jobs:
       - name: Install zip utility
         run: choco install zip --no-progress
 
-      - name: Download Intel OpenCL SDK (headers + lib)
+      - name: Download OpenCL SDK from Khronos
         run: |
-          Invoke-WebRequest -Uri "https://github.com/intel/compute-runtime/releases/download/23.43.27141.41/opencl_headers_windows.zip" -OutFile opencl_headers_windows.zip
-          Expand-Archive opencl_headers_windows.zip -DestinationPath opencl_sdk
+          curl.exe -o $env:RUNNER_TEMP/opencl.zip -L "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
+          mkdir $env:RUNNER_TEMP\opencl
+          tar.exe -xf $env:RUNNER_TEMP\opencl.zip --strip-components=1 -C $env:RUNNER_TEMP\opencl
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DOpenCL_INCLUDE_DIR=%GITHUB_WORKSPACE%\opencl_sdk\include -DOpenCL_LIBRARY=%GITHUB_WORKSPACE%\opencl_sdk\lib\OpenCL.lib
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release `
+            -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
+            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib"
 
       - name: Build
         run: cmake --build build --config Release
