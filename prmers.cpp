@@ -3,7 +3,7 @@
 #define KERNEL_PATH ""
 #endif
 
-
+/*
  * Mersenne OpenCL Primality Test Host Code
  *
  * This code is inspired by:
