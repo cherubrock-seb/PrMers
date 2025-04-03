@@ -11,11 +11,46 @@ PrMers is a high-performance application that uses OpenCL, Number Theoretic Tran
 
 ## Requirements
 
-- GNU g++ with C++11 support
-- OpenCL development libraries (e.g., `ocl-icd-opencl-dev`)
-- Git
+PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 
-## Installation
+### ✅ Common Requirements
+- A GPU supporting **OpenCL 1.2** or higher (OpenCL 2.0 recommended)
+- OpenCL-compatible drivers installed
+
+### 🐧 On Linux
+- `g++` with C++20 support (e.g., GNU g++ 10+)
+- OpenCL development libraries:
+  - `ocl-icd-opencl-dev`
+  - `opencl-headers`
+- Git (to clone the repository)
+
+### 🪟 On Windows
+- A compiler supporting C++20 (e.g., MSVC or MinGW64)
+- OpenCL SDK (e.g., [Khronos OpenCL SDK](https://github.com/KhronosGroup/OpenCL-SDK))
+- CMake (if building via CMake)
+- Git for Windows (optional, if cloning directly)
+
+Alternatively, **precompiled binaries** are available from the [Releases](https://github.com/cherubrock-seb/PrMers/releases) page.
+
+
+## 💾 Download Precompiled Binaries (Windows & Linux)
+
+You can download **precompiled binaries** for **Linux** and **Windows** directly from the [Releases page](https://github.com/cherubrock-seb/PrMers/releases).
+
+Each release contains:
+- A compiled executable: `prmers` (Linux) or `prmers.exe` (Windows)
+- Required OpenCL kernel files inside a `kernels/` folder
+- A SHA256 checksum file to verify integrity
+
+All releases are built automatically using **GitHub Actions**, a continuous integration system provided by GitHub. This ensures that the binaries are **consistently built** from the source code in the repository.
+
+You can view the exact build process and logs by visiting:
+👉 [GitHub Actions for PrMers](https://github.com/cherubrock-seb/PrMers/actions)
+
+This setup guarantees that even users without development tools can safely download and verify that the binaries match the public source code.
+
+
+## Installation from sources
 
 1. **Clone the repository:**
 
