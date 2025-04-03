@@ -1,47 +1,39 @@
-name: Build Windows
+name: Build Windows with CMake
 
 on:
+  workflow_dispatch:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - "v*"
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    name: Build on Windows with MSYS2
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          install: >-
-            base-devel
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-opencl-headers
-            mingw-w64-x86_64-pocl
-            mingw-w64-x86_64-make
-
-
-      - name: Build with Makefile
-        shell: msys2 {0}
+      - name: Install Chocolatey packages (OpenCL SDK)
         run: |
-          make PREFIX=/usr/local
+          choco install opencl-sdk --no-progress
+          choco install zip --no-progress
 
-      - name: Create ZIP package
-        shell: powershell
+      - name: Configure with CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package
         run: |
           mkdir prmers_package
-          Copy-Item prmers.exe prmers_package\
-          Copy-Item prmers.cl prmers_package\
-          Copy-Item prmers_vload2.cl prmers_package\
-          Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
+          copy build\Release\prmers.exe prmers_package\
+          copy prmers.cl prmers_package\
+          copy prmers_vload2.cl prmers_package\
+          powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
-      - name: Upload Windows binary ZIP
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: prmers-windows
