@@ -694,7 +694,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         tmp.s2 = modAdd(v2, v3);
         tmp.s3 = modSub(v2, v3);
         ulong4 result = modMul4(tmp, twiddles);
-        vstore4(result, write_index / 4, local_x);
+        vstore4(result, write_index >> 2, local_x);
         write_index += 4;
         k_first += m / 4;
     }
