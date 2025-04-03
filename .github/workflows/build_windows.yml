@@ -23,8 +23,9 @@ jobs:
             base-devel
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-opencl-headers
+            mingw-w64-x86_64-pocl
             mingw-w64-x86_64-make
-            mingw-w64-x86_64-opencl
+
 
       - name: Build with Makefile
         shell: msys2 {0}
