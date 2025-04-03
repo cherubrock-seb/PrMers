@@ -2,6 +2,12 @@
 #ifndef KERNEL_PATH
 #define KERNEL_PATH ""
 #endif
+#ifdef _MSC_VER
+    using uint128_t = unsigned __int64;  // fallback ou struct perso
+#else
+    using uint128_t = __uint128_t;
+#endif
+
 /*
  * Mersenne OpenCL Primality Test Host Code
  *
