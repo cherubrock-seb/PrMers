@@ -159,11 +159,18 @@ void precalc_for_p(uint32_t p,
     digit_weight.resize(n);
     digit_invweight.resize(n);
     digit_width.resize(n);
-    __uint128_t bigPminus1 = ((__uint128_t)MOD_P) - 1ULL;
-    __uint128_t tmp = bigPminus1 / 192ULL;
-    tmp /= n;
-    tmp *= 5ULL;
-    uint64_t exponent = (uint64_t)tmp;
+    #ifdef _MSC_VER
+        uint64_t high = 0, low = MOD_P - 1ULL;
+        uint64_t tmp1 = _udiv128(high, low, 192ULL, &low);
+        uint64_t tmp2 = tmp1 / n;
+        uint64_t exponent = tmp2 * 5ULL;
+    #else
+        __uint128_t bigPminus1 = (__uint128_t)MOD_P - 1ULL;
+        __uint128_t tmp = bigPminus1 / 192ULL;
+        tmp /= n;
+        uint64_t exponent = (uint64_t)(tmp * 5ULL);
+    #endif
+
     uint64_t nr2 = powModP(7ULL, exponent);
     uint64_t inv_n = invModP((uint64_t)n);
     uint32_t w_val = p / (uint32_t)n;
