@@ -1,10 +1,10 @@
-name: Build Windows with CMake
+name: Build Windows with OpenCL
 
 on:
   workflow_dispatch:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 jobs:
   build-windows:
@@ -14,13 +14,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Chocolatey packages (OpenCL SDK)
-        run: |
-          choco install opencl-sdk --no-progress
-          choco install zip --no-progress
+      - name: Install zip utility
+        run: choco install zip --no-progress
 
-      - name: Configure with CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Download Intel OpenCL SDK (headers + lib)
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/intel/compute-runtime/releases/download/23.43.27141.41/opencl_headers_windows.zip" -OutFile opencl_headers_windows.zip
+          Expand-Archive opencl_headers_windows.zip -DestinationPath opencl_sdk
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DOpenCL_INCLUDE_DIR=%GITHUB_WORKSPACE%\opencl_sdk\include -DOpenCL_LIBRARY=%GITHUB_WORKSPACE%\opencl_sdk\lib\OpenCL.lib
 
       - name: Build
         run: cmake --build build --config Release
