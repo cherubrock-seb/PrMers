@@ -44,11 +44,28 @@ jobs:
           copy prmers_vload2.cl prmers_package\kernels\
           powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
+      - name: Calculate SHA256 checksum
+        shell: powershell
+        run: |
+          $hash = Get-FileHash -Algorithm SHA256 -Path prmers-windows.zip
+          $hash.Hash | Out-File -Encoding ASCII -NoNewline prmers-windows.zip.sha256
+
+      - name: Read SHA256 for release body
+        id: read-sha
+        run: echo "SHA_SUM=$(Get-Content prmers-windows.zip.sha256)" >> $env:GITHUB_ENV
+
       - name: Upload release to GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          files: prmers-windows.zip
+          body: |
+            SHA256 checksum of the .zip:
+
+            `${{ env.SHA_SUM }}`
+          files: |
+            prmers-windows.zip
+            prmers-windows.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
