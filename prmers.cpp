@@ -2,13 +2,8 @@
 #ifndef KERNEL_PATH
 #define KERNEL_PATH ""
 #endif
-#ifdef _MSC_VER
-    using uint128_t = unsigned __int64;  // fallback ou struct perso
-#else
-    using uint128_t = __uint128_t;
-#endif
 
-/*
+
  * Mersenne OpenCL Primality Test Host Code
  *
  * This code is inspired by:
@@ -78,9 +73,15 @@ static constexpr uint64_t MOD_P = (((1ULL << 32) - 1ULL) << 32) + 1ULL;
 bool debug = false;
 
 uint64_t mulModP(uint64_t a, uint64_t b) {
+#ifdef _MSC_VER
+    uint64_t hi;
+    uint64_t lo = _umul128(a, b, &hi);
+#else
     __uint128_t prod = (__uint128_t)a * b;
     uint64_t hi = (uint64_t)(prod >> 64);
     uint64_t lo = (uint64_t)prod;
+#endif
+
     uint32_t A = (uint32_t)(hi >> 32);
     uint32_t B = (uint32_t)(hi & 0xffffffffULL);
     uint64_t r = lo;
@@ -97,6 +98,7 @@ uint64_t mulModP(uint64_t a, uint64_t b) {
         r -= MOD_P;
     return r;
 }
+
 // Add a carry onto the number and return the carry of the first digit_width bits
 uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry)
 {
