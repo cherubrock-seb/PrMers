@@ -303,10 +303,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = (int4)(digit_width[i],
-                                      digit_width[i + 1],
-                                      digit_width[i + 2],
-                                      digit_width[i + 3]);
+        int4 digit_width_vec = vload4(0, digit_width + i);
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
@@ -336,12 +333,8 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        ulong4 digit_width_vec = (ulong4)(
-            digit_width[i + 0],
-            digit_width[i + 1],
-            digit_width[i + 2],
-            digit_width[i + 3]
-        );
+        int4 digit_width_vec = vload4(0, digit_width + i);
+
 
         x_vec = digit_adc4(x_vec, convert_int4(digit_width_vec), &carry);
 
