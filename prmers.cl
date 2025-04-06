@@ -218,8 +218,8 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
         #pragma unroll 4
         for (int i = 0; i < 4; i++) {
             ulong s = lhs[i] + c;
-            res[i] = s & ((1UL << ((uint)digit_width[i])) - 1UL);
-            c = s >> ((uint)digit_width[i]);
+            res[i] = s & ((1UL << (digit_width[i])) - 1UL);
+            c = s >> (digit_width[i]);
         }
         *carry = c;
     }
@@ -233,8 +233,8 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
     #pragma unroll 3
     for (int i = 0; i < 3; i++) {
         uint64_t s = lhs[i] + c;                        
-        res[i] = s & ((1UL << ((uint)digit_width[i])) - 1UL);
-        c = s >> ((uint)digit_width[i]);
+        res[i] = s & ((1UL << (digit_width[i])) - 1UL);
+        c = s >> (digit_width[i]);
 
     }
     *carry = c;
@@ -242,33 +242,6 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
     return res;
 }
 
-__kernel void kernel_sub2(__global ulong* restrict x,
-                          __global int* restrict digit_width,
-                          const ulong n)
-{
-    if (get_global_id(0) == 0) {
-        uint c = 2U;
-        while(c != 0U) {
-            #pragma unroll
-            for(uint i = 0; i < n; i++){
-                const int d = digit_width[i];
-                ulong val = x[i];
-                // Calculate b only once
-                const ulong b = 1UL << d;
-                if (val >= c) {
-                    x[i] = modSub(val, c);
-                    c = 0U;
-                    break;
-                } else {
-                    // Reuse the result of Sub to avoid redundant computation
-                    const ulong temp = modSub(val, c);
-                    x[i] = modAdd(temp, b);
-                    c = 1U;
-                }
-            }
-        }
-    }
-}
 
 
 #ifndef LOCAL_PROPAGATION_DEPTH
@@ -291,9 +264,54 @@ __kernel void kernel_sub2(__global ulong* restrict x,
 #ifndef WORKER_NTT_2_STEPS
 #define WORKER_NTT_2_STEPS 1
 #endif
+#ifndef MODULUS_P
+#define MODULUS_P 0 
+#endif
+
+#ifndef TRANSFORM_SIZE_N
+#define TRANSFORM_SIZE_N 1
+#endif
+
+inline int get_digit_width(uint i) {
+    uint j = i + 1;
+
+    uint64_t pj  = (uint64_t)(MODULUS_P) * j;
+    uint64_t pj1 = (uint64_t)(MODULUS_P) * i;
+
+    uint64_t ceil1 = (pj - 1U) / (uint64_t)(TRANSFORM_SIZE_N);
+    uint64_t ceil2 = (pj1 - 1U) / (uint64_t)(TRANSFORM_SIZE_N);
+
+    return (int)(ceil1 - ceil2);
+}
+
+
+__kernel void kernel_sub2(__global ulong* restrict x)
+{
+    if (get_global_id(0) == 0) {
+        uint c = 2U;
+        while(c != 0U) {
+            #pragma unroll
+            for(uint i = 0; i < TRANSFORM_SIZE_N; i++){
+                const int d = get_digit_width(i);
+                ulong val = x[i];
+                const ulong b = 1UL << d;
+                if (val >= c) {
+                    x[i] = modSub(val, c);
+                    c = 0U;
+                    break;
+                } else {
+                    const ulong temp = modSub(val, c);
+                    x[i] = modAdd(temp, b);
+                    c = 1U;
+                }
+            }
+        }
+    }
+}
+
 __kernel void kernel_carry(__global ulong* restrict x,
-                           __global ulong* restrict carry_array,
-                           __global int* restrict digit_width)
+                           __global ulong* restrict carry_array
+                           )
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -303,7 +321,12 @@ __kernel void kernel_carry(__global ulong* restrict x,
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = vload4(0, digit_width + i);
+        int4 digit_width_vec = (int4)(
+            get_digit_width(i),
+            get_digit_width(i + 1),
+            get_digit_width(i + 2),
+            get_digit_width(i + 3)
+        );
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
@@ -317,8 +340,7 @@ __kernel void kernel_carry(__global ulong* restrict x,
 
 
 __kernel void kernel_carry_2(__global ulong* restrict x,
-                             __global ulong* restrict carry_array,
-                             __global int* restrict digit_width) 
+                             __global ulong* restrict carry_array) 
 {
     const ulong gid = get_global_id(0);
     const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -333,10 +355,13 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     for (ulong i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = vload4(0, digit_width + i);
-
-
-        x_vec = digit_adc4(x_vec, convert_int4(digit_width_vec), &carry);
+        int4 digit_width_vec = (int4)(
+            get_digit_width(i),
+            get_digit_width(i + 1),
+            get_digit_width(i + 2),
+            get_digit_width(i + 3)
+        );
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
 
         vstore4(x_vec, 0, x + i);
 
@@ -346,14 +371,14 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     if (carry != 0) {
         ulong4 x_vec = vload4(0, x + end);
 
-        ulong4 digit_width_vec = (ulong4)(
-            digit_width[end + 0],
-            digit_width[end + 1],
-            digit_width[end + 2],
-            digit_width[end + 3]
+        int4 digit_width_vec = (int4)(
+            get_digit_width(end),
+            get_digit_width(end + 1),
+            get_digit_width(end + 2),
+            get_digit_width(end + 3)
         );
 
-        x_vec = digit_adc4_last(x_vec, convert_int4(digit_width_vec), &carry); 
+        x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
         vstore4(x_vec, 0, x + end);
     }
 }
