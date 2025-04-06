@@ -41,6 +41,7 @@
 #include <csignal>
 #include <cstdio> 
 #include <cstdarg> 
+#include <set>
 #include <map>
 #include "proof/proof.h"
 
@@ -1062,7 +1063,7 @@ int main(int argc, char** argv) {
     }
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
-    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) ;
+    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) + " -DMODULUS_P=" + std::to_string(p) + " -DTRANSFORM_SIZE_N=" + std::to_string(n);
     std::cout << "Building OpenCL program with options: " << build_options << std::endl;
     err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {
@@ -1090,11 +1091,6 @@ int main(int argc, char** argv) {
         CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
         digit_invweight_cpu.size() * sizeof(uint64_t),
         (void*)digit_invweight_cpu.data(), "buf_digit_invweight");
-
-    cl_mem buf_digit_width = createBuffer(context,
-        CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        digit_width_cpu.size() * sizeof(int),
-        (void*)digit_width_cpu.data(), "buf_digit_width");
 
 
     cl_mem buf_twiddles = createBuffer(context,
@@ -1176,8 +1172,6 @@ int main(int argc, char** argv) {
     cl_int errKernel = CL_SUCCESS;
     // kernel_sub2
     errKernel  = clSetKernelArg(k_sub2, 0, sizeof(cl_mem), &buf_x);
-    errKernel |= clSetKernelArg(k_sub2, 1, sizeof(cl_mem), &buf_digit_width);
-    errKernel |= clSetKernelArg(k_sub2, 2, sizeof(uint64_t), &n);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for kernel_sub2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
@@ -1185,7 +1179,6 @@ int main(int argc, char** argv) {
     // kernel_carry
     errKernel  = clSetKernelArg(k_carry, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry, 1, sizeof(cl_mem), &buf_block_carry);
-    errKernel |= clSetKernelArg(k_carry, 2, sizeof(cl_mem), &buf_digit_width);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for carry: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
@@ -1193,7 +1186,6 @@ int main(int argc, char** argv) {
     // kernel_carry_2
     errKernel  = clSetKernelArg(k_carry_2, 0, sizeof(cl_mem), &buf_x);
     errKernel |= clSetKernelArg(k_carry_2, 1, sizeof(cl_mem), &buf_block_carry);
-    errKernel |= clSetKernelArg(k_carry_2, 2, sizeof(cl_mem), &buf_digit_width);
     if (errKernel != CL_SUCCESS) {
         std::cerr << "Error setting arguments for carry 2: " << getCLErrorString(errKernel) << std::endl;
         exit(1);
@@ -1284,7 +1276,6 @@ int main(int argc, char** argv) {
                 clReleaseMemObject(buf_inv_twiddles);
                 clReleaseMemObject(buf_digit_weight);
                 clReleaseMemObject(buf_digit_invweight);
-                clReleaseMemObject(buf_digit_width);
                 clReleaseMemObject(buf_block_carry);
                 clReleaseKernel(k_forward_ntt_mm);
                 clReleaseKernel(k_forward_ntt_mm_3steps);
@@ -1364,7 +1355,6 @@ int main(int argc, char** argv) {
     clReleaseMemObject(buf_inv_twiddles);
     clReleaseMemObject(buf_digit_weight);
     clReleaseMemObject(buf_digit_invweight);
-    clReleaseMemObject(buf_digit_width);
     clReleaseMemObject(buf_block_carry);
     clReleaseKernel(k_forward_ntt_mm);
     clReleaseKernel(k_forward_ntt_mm_3steps);
