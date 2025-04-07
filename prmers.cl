@@ -20,90 +20,89 @@
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
-#define MOD_P 0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
+// Definition of the prime modulus and its complement
+#define MOD_P  0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
 #define MOD_P_COMP 0xffffffffU       // 2^64 - p = 2^32 - 1
 
+// Constants stored in __constant memory for fast GPU access
+__constant ulong  mod_p_const         = MOD_P;
+__constant uint   mod_p_comp_const    = MOD_P_COMP;
+__constant ulong4 mod_p4_const        = (ulong4)(MOD_P, MOD_P, MOD_P, MOD_P);
+__constant ulong4 mod_p_comp4_const   = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
+
+// Modular addition for vectors of 4 ulong
 inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
-    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lhs >= ((ulong4)MOD_P - rhs));
+    // 'select' avoids branching (if-else) on GPU
+    ulong4 c = select((ulong4)0, mod_p_comp4_const, lhs >= (mod_p4_const - rhs));
     return lhs + rhs + c;
 }
 
+// Modular subtraction for vectors of 4 ulong
 inline ulong4 modSub4(ulong4 lhs, ulong4 rhs) {
-    ulong4 c = select((ulong4)0, (ulong4)MOD_P_COMP, lhs < rhs);
+    ulong4 c = select((ulong4)0, mod_p_comp4_const, lhs < rhs);
     return lhs - rhs - c;
 }
 
-
-inline ulong modAdd(const ulong lhs, const ulong rhs)
-{
-    const uint c = (lhs >= MOD_P - rhs) ? MOD_P_COMP : 0;
+// Modular addition for scalar ulong
+inline ulong modAdd(const ulong lhs, const ulong rhs) {
+    const uint c = (lhs >= mod_p_const - rhs) ? mod_p_comp_const : 0;
     return lhs + rhs + c;
 }
 
-inline ulong modSub(const ulong lhs, const ulong rhs)
-{
-    const uint c = (lhs < rhs) ? MOD_P_COMP : 0;
+// Modular subtraction for scalar ulong
+inline ulong modSub(const ulong lhs, const ulong rhs) {
+    const uint c = (lhs < rhs) ? mod_p_comp_const : 0;
     return lhs - rhs - c;
 }
 
-
-
-inline ulong Reduce(const ulong lo, const ulong hi)
-{
-    // hi_hi * 2^96 + hi_lo * 2^64 + lo = lo + hi_lo * 2^32 - (hi_hi + hi_lo)
-    const uint c = (lo >= MOD_P) ? MOD_P_COMP : 0;
+// Modular reduction of a 128-bit product (lo, hi) to a 64-bit result mod p
+inline ulong Reduce(const ulong lo, const ulong hi) {
+    const uint c = (lo >= mod_p_const) ? mod_p_comp_const : 0;
     ulong r = lo + c;
-    r = modAdd(r, hi << 32);             // lhs * rhs < p^2 => hi * 2^32 < p^2 / 2^32 < p.
-    r = modSub(r, (hi >> 32) + (uint)hi);
+    r = modAdd(r, hi << 32);                           // Add hi * 2^32
+    r = modSub(r, (hi >> 32) + (uint)hi);              // Subtract hi_high + hi_low
     return r;
 }
 
-
+// Vectorized version of Reduce: reduces four (lo, hi) pairs simultaneously
 inline ulong4 Reduce4(ulong4 lo, ulong4 hi) {
-    const ulong4 MOD_P_COMP4 = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
-    const ulong4 MOD_P4      = (ulong4)(MOD_P,      MOD_P,      MOD_P,      MOD_P);
-
-    ulong4 c = select((ulong4)0, MOD_P_COMP4, lo >= MOD_P4);
+    ulong4 c = select((ulong4)0, mod_p_comp4_const, lo >= mod_p4_const);
     ulong4 r = lo + c;
 
     ulong4 hi_shifted = hi << 32;
     ulong4 hi_high = hi >> 32;
-    ulong4 hi_low = convert_ulong4(convert_uint4(hi));
+    ulong4 hi_low  = convert_ulong4(convert_uint4(hi));
     ulong4 hi_reduced = hi_high + hi_low;
 
     r = modAdd4(r, hi_shifted);
     r = modSub4(r, hi_reduced);
-
     return r;
 }
 
-
-
+// Modular multiplication of 4 ulong vectors
 inline ulong4 modMul4(ulong4 lhs, ulong4 rhs) {
     ulong4 lo = lhs * rhs;
     ulong4 hi = mul_hi(lhs, rhs);
     return Reduce4(lo, hi);
 }
 
-// Compute the 128-bit product of a and b as high:low.
+// Computes the full 128-bit product of two 64-bit integers
 inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
     *lo = a * b;
     *hi = mul_hi(a, b);
 }
 
-inline ulong modMul(const ulong lhs, const ulong rhs)
-{
-    const ulong lo = lhs * rhs, hi = mul_hi(lhs, rhs);
+// Scalar modular multiplication using full 128-bit product
+inline ulong modMul(const ulong lhs, const ulong rhs) {
+    const ulong lo = lhs * rhs;
+    const ulong hi = mul_hi(lhs, rhs);
     return Reduce(lo, hi);
 }
 
-
-
-// modMuli multiplies by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p.
+// Multiply x by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p
 inline ulong modMuli(ulong x) {
     return modMul(x, (1UL << 48));
 }
-
 
 // Add-with-carry for a digit of specified width.
 inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
