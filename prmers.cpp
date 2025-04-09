@@ -453,7 +453,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
     cl_kernel kernel_ntt_mm, cl_kernel kernel_ntt_mm_first, cl_kernel kernel_ntt_last_m1,
     cl_kernel kernel_ntt_last_m1_n4,
     cl_mem buf_x, cl_mem buf_w,cl_mem buf_digit_weight, cl_uint n,
-    size_t workers, size_t localSize, bool profiling,
+    size_t workers, size_t localSize,size_t localSize2,size_t localSize3, bool profiling,
     cl_uint maxLocalMem, bool _even_exponent, cl_kernel kernel_radix4_radix2_square_radix2_radix4, cl_mem buf_wi) {
     if(n==4){
         cl_uint m = 1;
@@ -483,7 +483,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             
             clSetKernelArg(kernel_ntt_mm_2_steps, 2, sizeof(cl_uint), &m);
             clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
-            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize/4,
+            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize2,
                 "kernel_ntt_mm_2_steps (m=" + std::to_string(m) + ")", n, profiling);
             mm = m/4;
         }
@@ -533,7 +533,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 0, sizeof(cl_mem), &buf_x);
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 1, sizeof(cl_mem), &buf_w);
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 2, sizeof(cl_mem), &buf_wi);
-            executeKernelAndDisplay(queue, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize/2,
+            executeKernelAndDisplay(queue, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize3,
                 "kernel_radix4_radix2_square_radix2_radix4 (m=" + std::to_string(m) + ")", n, profiling);
         } 
         else if(mm==64){
@@ -543,7 +543,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_ntt_mm_2_steps, 1, sizeof(cl_mem), &buf_w);
             clSetKernelArg(kernel_ntt_mm_2_steps, 2, sizeof(cl_uint), &m);
             clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
-            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize/4,
+            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize,
             "kernel_ntt_mm_3_steps (m=" + std::to_string(m) + ")", n, profiling);
             
             clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
@@ -558,7 +558,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 0, sizeof(cl_mem), &buf_x);
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 1, sizeof(cl_mem), &buf_w);
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 2, sizeof(cl_mem), &buf_wi);
-            executeKernelAndDisplay(queue, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize/2,
+            executeKernelAndDisplay(queue, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize,
                 "kernel_radix4_radix2_square_radix2_radix4 (m=" + std::to_string(m) + ")", n, profiling);
        }
        else if(mm==4){
@@ -598,7 +598,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
 void executeFusionneNTT_Inverse(cl_command_queue queue,cl_kernel kernel_ntt_inverse_mm_2_steps,
     cl_kernel kernel_inverse_ntt_mm, cl_kernel kernel_inverse_ntt_mm_last, cl_kernel kernel_inverse_ntt_m1,
     cl_kernel kernel_inverse_ntt_m1_n4,cl_mem buf_x, cl_mem buf_wi, cl_mem buf_digit_invweight, cl_uint n,
-    size_t workers, size_t localSize, bool profiling,
+    size_t workers, size_t localSize,size_t localSize2, bool profiling,
     cl_uint maxLocalMem, bool _even_exponent) {
     cl_uint m = 0;
     if(n==4){
@@ -631,7 +631,7 @@ void executeFusionneNTT_Inverse(cl_command_queue queue,cl_kernel kernel_ntt_inve
                 
                 clSetKernelArg(kernel_ntt_inverse_mm_2_steps, 2, sizeof(cl_uint), &m);
                 clSetKernelArg(kernel_ntt_inverse_mm_2_steps, 3, 0, NULL); 
-                executeKernelAndDisplay(queue, kernel_ntt_inverse_mm_2_steps, buf_x, workers/4, localSize/4,
+                executeKernelAndDisplay(queue, kernel_ntt_inverse_mm_2_steps, buf_x, workers/4, localSize2,
                     "kernel_ntt_inverse_mm_2_steps (m=" + std::to_string(m) + ")", n, profiling);
                 mm = m*16;
             }
@@ -654,7 +654,7 @@ void executeFusionneNTT_Inverse(cl_command_queue queue,cl_kernel kernel_ntt_inve
                 
                 clSetKernelArg(kernel_ntt_inverse_mm_2_steps, 2, sizeof(cl_uint), &m);
                 clSetKernelArg(kernel_ntt_inverse_mm_2_steps, 3, 0, NULL); 
-                executeKernelAndDisplay(queue, kernel_ntt_inverse_mm_2_steps, buf_x, workers/4, localSize/4,
+                executeKernelAndDisplay(queue, kernel_ntt_inverse_mm_2_steps, buf_x, workers/4, localSize2,
                     "kernel_ntt_inverse_mm_2_steps (m=" + std::to_string(m) + ")", n, profiling);
                 mm = m*16;
             }
@@ -989,7 +989,9 @@ int main(int argc, char** argv) {
     size_t workersNtt2step = static_cast<size_t>(n)/16;
     
     size_t localSize = maxWork;
-    
+    size_t localSize2 = maxWork;
+    size_t localSize3 = maxWork;
+
     if(!force_carry){
         // check b^s > n * b^2
         int max_digit_width_cpu = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
@@ -1026,11 +1028,18 @@ int main(int argc, char** argv) {
         localSizeCarry = workersCarry;
     }
 
+    if(workers < maxWork){
+        localSize = 1;
+        localSize2 = 1;
+        localSize3 = 1;
+    }
 
 
     std::cout << "Transform size: " <<  n << std::endl;
     std::cout << "Final workers count: " << workers << std::endl;
     std::cout << "Work-groups count: " << localSize << std::endl;
+    std::cout << "Work-groups count 2: " << localSize2 << std::endl;
+    std::cout << "Work-groups count 3: " << localSize3 << std::endl;
     std::cout << "Work-groups size: " << ((workers < localSize) ? 1 : (workers / localSize)) << std::endl;
     std::cout << "Workers for carry propagation count: " << workersCarry << std::endl;
     std::cout << "Local carry propagation depht: " <<  localCarryPropagationDepth << std::endl;
@@ -1212,11 +1221,11 @@ int main(int argc, char** argv) {
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
         executeFusionneNTT_Forward(queue,k_forward_ntt_mm_3steps,k_forward_ntt_mm_2steps,k_ntt_radix2_square_radix2,
             k_forward_ntt_mm, k_forward_ntt_mm_first, k_forward_ntt_last_m1,k_forward_ntt_last_m1_n4,
-            buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, profiling, maxLocalMem, _even_exponent, k_ntt_radix4_radix2_square_radix2_radix4, buf_inv_twiddles);
+            buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, localSize2, localSize3, profiling, maxLocalMem, _even_exponent, k_ntt_radix4_radix2_square_radix2_radix4, buf_inv_twiddles);
 
         executeFusionneNTT_Inverse(queue,k_inverse_ntt_mm_2steps,
             k_inverse_ntt_mm, k_inverse_ntt_mm_last, k_inverse_ntt_m1,k_inverse_ntt_m1_n4,
-            buf_x, buf_inv_twiddles,buf_digit_invweight, n, workers/4, localSize, profiling, maxLocalMem, _even_exponent);
+            buf_x, buf_inv_twiddles,buf_digit_invweight, n, workers/4, localSize, localSize2, profiling, maxLocalMem, _even_exponent);
         executeKernelAndDisplay(queue, k_carry, buf_x, workersCarry, localSizeCarry, "kernel_carry", n, profiling);
         executeKernelAndDisplay(queue, k_carry_2, buf_x, workersCarry, localSizeCarry, "kernel_carry_2", n, profiling);
         // In Lucas-Lehmer mode, execute kernel_sub2; in PRP mode, skip it.
