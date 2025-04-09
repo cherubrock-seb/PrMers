@@ -266,7 +266,9 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 #ifndef MODULUS_P
 #define MODULUS_P 0 
 #endif
-
+#ifndef LOCAL_SIZE
+#define LOCAL_SIZE 256
+#endif
 #ifndef TRANSFORM_SIZE_N
 #define TRANSFORM_SIZE_N 1
 #endif
@@ -1273,6 +1275,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
 }
 */
 
+
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* restrict x,
                                                              __global ulong* restrict w,
                                                              __global ulong* restrict wi)
@@ -1283,7 +1286,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
     const uint groupSize = get_local_size(0);
     uint global_base_idx = gid * 8;
     uint local_base_idx  = lid * 8;
-    __local ulong localX[256 * 8];
+    __local ulong localX[LOCAL_SIZE * 8];
 
     vstore8(vload8(0, x + global_base_idx), 0, localX + local_base_idx);
     barrier(CLK_LOCAL_MEM_FENCE);
