@@ -1274,37 +1274,27 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
 */
 
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* restrict x,
-                                                               __global ulong* restrict w,
-                                                               __global ulong* restrict wi)
+                                                             __global ulong* restrict w,
+                                                             __global ulong* restrict wi)
 {
     const int m = 2;
-    // Récupération des indices global et local
-    uint gid = get_global_id(0);        // identifiant global du thread
-    uint lid = get_local_id(0);         // identifiant local dans le workgroup
-    const uint groupSize = get_local_size(0); // doit être égal à 256
-  
-    // Chaque thread traite 8 ulong, donc on calcule les indices de base
-    uint global_base_idx = gid * 8;     // indice de départ dans la mémoire globale
-    uint local_base_idx  = lid * 8;       // indice de départ dans le tampon local
-
-    // Allocation statique de la mémoire locale pour tout le workgroup.
-    // Ici, la taille est 256*8 ulong, soit 256 threads x 8 ulong par thread.
+    uint gid = get_global_id(0);
+    uint lid = get_local_id(0);
+    const uint groupSize = get_local_size(0);
+    uint global_base_idx = gid * 8;
+    uint local_base_idx  = lid * 8;
     __local ulong localX[256 * 8];
 
-    // 1. Charger la donnée depuis la mémoire globale vers la mémoire locale
     vstore8(vload8(0, x + global_base_idx), 0, localX + local_base_idx);
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // 2. Charger les données de notre segment de mémoire locale dans des registres
     ulong8 X = vload8(0, localX + local_base_idx);
 
-    // Déclarations de variables
     uint k, j, i;
     uint k2, j2, ii;
     ulong4 tmp, tmp2, twiddles, uu, r;
     ulong a, b, d, e, s, r0, r1;
 
-    // Charger les twiddles depuis la mémoire globale
     ulong4 tmp_w12 = vload4(0, w + 12);
     ulong4 twiddles_w12 = (ulong4)(1UL, tmp_w12.s1, tmp_w12.s0, tmp_w12.s2);
     ulong4 tmp_w15 = vload4(0, w + 15);
@@ -1315,7 +1305,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
     ulong4 tmp_wi15 = vload4(0, wi + 15);
     ulong4 twiddles_wi15 = (ulong4)(1UL, tmp_wi15.s1, tmp_wi15.s0, tmp_wi15.s2);
 
-    // Première passe de calcul (opérations sur les éléments en position paire)
     k = gid * 2;
     j = k & (m - 1);
     i = 4 * (k - j) + j;
@@ -1336,7 +1325,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         X.s6 = c.s3;
     }
 
-    // Seconde passe de calcul (opérations sur les éléments en position impaire)
     k2 = gid * 2 + 1;
     j2 = k2 & (m - 1);
     ii = 4 * (k2 - j2) + j2;
@@ -1357,7 +1345,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         X.s7 = c2.s3;
     }
 
-    // Étape intermédiaire : opérations de carré sur les sommes et différences
     {
         ulong2 u = (ulong2)(X.s0, X.s1);
         s = modAdd(u.x, u.y);
@@ -1403,7 +1390,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         X.s7 = r1;
     }
 
-    // Troisième passe : opérations butterfly pour mélanger les coefficients
     k = gid * 2;
     j = k & (m - 1);
     {
@@ -1440,10 +1426,8 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         }
     }
 
-    // Stocker le résultat dans la mémoire locale
     vstore8(X, 0, localX + local_base_idx);
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Écrire le résultat depuis la mémoire locale vers la mémoire globale
     vstore8(vload8(0, localX + local_base_idx), 0, x + global_base_idx);
 }
