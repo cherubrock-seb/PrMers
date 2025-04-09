@@ -219,7 +219,7 @@ std::string readFile(const std::string &filename) {
 // Usage printing helper (updated with new backup and path options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-vload2]" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
@@ -229,8 +229,7 @@ void printUsage(const char* progName) {
     std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
     std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 120)." << std::endl;
     std::cout << "  -f <path>           : (Optional) Specify path for saving/loading files (default: current directory)." << std::endl;
-    std::cout << "  -vload2            : (Optional) Enable data loading in blocks of 2 instead of 4." << std::endl;
-    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path -vload2" << std::endl;
+    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path" << std::endl;
 }
 
 
@@ -746,7 +745,6 @@ int main(int argc, char** argv) {
     bool profiling = false;
     bool has_p = false;
     bool force_carry = false;
-    bool vload2 = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -760,9 +758,6 @@ int main(int argc, char** argv) {
         else if (std::strcmp(argv[i], "-h") == 0) {
             printUsage(argv[0]);
             return 0;
-        }
-        else if (std::strcmp(argv[i], "-vload2") == 0) {
-            vload2 = true;
         }
         else if (std::strcmp(argv[i], "-d") == 0) {
             if (i + 1 < argc) {
@@ -857,8 +852,6 @@ int main(int argc, char** argv) {
     std::cout << "Mode selected: " << (mode == "prp" ? "PRP" : "Lucas-Lehmer") << std::endl;
     std::cout << "Backup interval: " << backup_interval << " seconds" << std::endl;
     std::cout << "Save/Load path: " << save_path << std::endl;
-    if(vload2)
-        std::cout << "Mode vload2 " << save_path << std::endl;
 
     // -------------------------------------------------------------------------
     // Platform, Device, Context, and Command Queue Setup
@@ -904,9 +897,7 @@ int main(int argc, char** argv) {
     std::string kernelSource;
     try {
         std::string kernelFile = std::string(KERNEL_PATH) + "prmers.cl";
-        if(vload2){
-            kernelFile = std::string(KERNEL_PATH) + "prmers_vload2.cl";
-        }
+
         
         kernelSource = readFile(kernelFile);
     } catch(const std::exception &e) {
