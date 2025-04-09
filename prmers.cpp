@@ -987,7 +987,10 @@ int main(int argc, char** argv) {
     size_t workers = static_cast<size_t>(n);;
     size_t workersNtt = static_cast<size_t>(n)/4;
     size_t workersNtt2step = static_cast<size_t>(n)/16;
-    
+    size_t maxWorkMax = 256;
+    if (maxWork > maxWorkMax){
+        maxWork = maxWorkMax;
+    }
     size_t localSize = maxWork;
 
 
@@ -1039,8 +1042,6 @@ int main(int argc, char** argv) {
     std::cout << "Transform size: " <<  n << std::endl;
     std::cout << "Final workers count: " << workers << std::endl;
     std::cout << "Work-groups count: " << localSize << std::endl;
-    std::cout << "Work-groups count 2: " << localSize2 << std::endl;
-    std::cout << "Work-groups count 3: " << localSize3 << std::endl;
     std::cout << "Work-groups size: " << ((workers < localSize) ? 1 : (workers / localSize)) << std::endl;
     std::cout << "Workers for carry propagation count: " << workersCarry << std::endl;
     std::cout << "Local carry propagation depht: " <<  localCarryPropagationDepth << std::endl;
@@ -1069,7 +1070,7 @@ int main(int argc, char** argv) {
     }
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
-    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) + " -DMODULUS_P=" + std::to_string(p) + " -DTRANSFORM_SIZE_N=" + std::to_string(n);
+    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) + " -DMODULUS_P=" + std::to_string(p) + " -DTRANSFORM_SIZE_N=" + std::to_string(n) + " -DLOCAL_SIZE=" + std::to_string(localSize);
     std::cout << "Building OpenCL program with options: " << build_options << std::endl;
     err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {
