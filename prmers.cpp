@@ -989,8 +989,7 @@ int main(int argc, char** argv) {
     size_t workersNtt2step = static_cast<size_t>(n)/16;
     
     size_t localSize = maxWork;
-    size_t localSize2 = maxWork;
-    size_t localSize3 = maxWork;
+
 
     if(!force_carry){
         // check b^s > n * b^2
@@ -1003,7 +1002,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "\nLaunching OpenCL kernel (p = " << p << "); computation may take a while." << std::endl;
     
-    cl_uint constraint = std::max(n / 4, (cl_uint)1);
+    cl_uint constraint = std::max(n / 16, (cl_uint)1);
     while (workers % localSize != 0 || constraint % localSize != 0) {
         localSize /= 2;
         if (localSize < 1) { localSize = 1; break; }
@@ -1027,11 +1026,13 @@ int main(int argc, char** argv) {
     if(workersCarry<localSizeCarry){
         localSizeCarry = workersCarry;
     }
+    size_t localSize2 = localSize;
+    size_t localSize3 = localSize;
 
-    if(workers < maxWork){
-        localSize = 1;
-        localSize2 = 1;
-        localSize3 = 1;
+    if(localSize < maxWork){
+        localSize = (localSize/4 <= 0) ? 1 : (localSize/4);
+        localSize2 = (localSize/16  <= 0) ? 1 : (localSize/16);
+        localSize3 = (localSize/8  <= 0) ? 1 : (localSize/8);
     }
 
 
