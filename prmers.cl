@@ -1132,18 +1132,25 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
     uint id = get_global_id(0);
     uint base_idx = id * 8;
     ulong8 X = vload8(0, x + base_idx);
-    ulong4 tmp, tmp2, twiddles, twiddles2, uu, r;
+    ulong4 tmp, tmp2, twiddles, uu, r;
     ulong a, b, d, e, s, r0, r1;
     uint k, j, i;
     uint k2, j2, ii;
-    uint twiddle_offset;
+    
+
+    ulong4 tmp_w12 = vload4(0, w + 12);
+    ulong4 twiddles_w12 = (ulong4)(1UL, tmp_w12.s1, tmp_w12.s0, tmp_w12.s2);
+    ulong4 tmp_w15 = vload4(0, w + 15);
+    ulong4 twiddles_w15 = (ulong4)(1UL, tmp_w15.s1, tmp_w15.s0, tmp_w15.s2);
+
+    ulong4 tmp_wi12 = vload4(0, wi + 12);
+    ulong4 twiddles_wi12 = (ulong4)(1UL, tmp_wi12.s1, tmp_wi12.s0, tmp_wi12.s2);
+    ulong4 tmp_wi15 = vload4(0, wi + 15);
+    ulong4 twiddles_wi15 = (ulong4)(1UL, tmp_wi15.s1, tmp_wi15.s0, tmp_wi15.s2);
 
     k = id * 2;
     j = k & (m - 1);
     i = 4 * (k - j) + j;
-    twiddle_offset = 6 * m + 3 * j;
-    tmp = vload4(0, w + twiddle_offset);
-    twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
     {
         ulong4 c = (ulong4)(X.s0, X.s2, X.s4, X.s6);
         a = modAdd(c.s0, c.s2);
@@ -1154,7 +1161,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         c.s1 = modSub(a, b);
         c.s2 = modAdd(d, e);
         c.s3 = modSub(d, e);
-        c = modMul4(c, twiddles);
+        c = modMul4(c, twiddles_w12);
         X.s0 = c.s0;
         X.s2 = c.s1;
         X.s4 = c.s2;
@@ -1164,9 +1171,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
     k2 = id * 2 + 1;
     j2 = k2 & (m - 1);
     ii = 4 * (k2 - j2) + j2;
-    uint twiddle_offset2 = 6 * m + 3 * j2;
-    tmp2 = vload4(0, w + twiddle_offset2);
-    twiddles2 = (ulong4)(1UL, tmp2.s1, tmp2.s0, tmp2.s2);
     {
         ulong4 c2 = (ulong4)(X.s1, X.s3, X.s5, X.s7);
         a = modAdd(c2.s0, c2.s2);
@@ -1177,7 +1181,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
         c2.s1 = modSub(a, b);
         c2.s2 = modAdd(d, e);
         c2.s3 = modSub(d, e);
-        c2 = modMul4(c2, twiddles2);
+        c2 = modMul4(c2, twiddles_w15);
         X.s1 = c2.s0;
         X.s3 = c2.s1;
         X.s5 = c2.s2;
@@ -1231,42 +1235,38 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
 
     k = id * 2;
     j = k & (m - 1);
-    uint base = 4 * (k - j) + j;
-    twiddle_offset = 6 * m + 3 * j;
-    a = X.s0;
-    b = X.s2;
-    d = X.s4;
-    e = X.s6;
     {
-        ulong4 coeff = (ulong4)(a, b, d, e);
-        tmp = vload4(0, wi + twiddle_offset);
-        twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
-        uu = modMul4(coeff, twiddles);
-        r = butterfly(uu);
-        X.s0 = modAdd(r.s0, r.s2);
-        X.s2 = modAdd(r.s1, r.s3);
-        X.s4 = modSub(r.s0, r.s2);
-        X.s6 = modSub(r.s1, r.s3);
+        a = X.s0;
+        b = X.s2;
+        d = X.s4;
+        e = X.s6;
+        {
+            ulong4 coeff = (ulong4)(a, b, d, e);
+            coeff = modMul4(coeff, twiddles_wi12);
+            r = butterfly(coeff);
+            X.s0 = modAdd(r.s0, r.s2);
+            X.s2 = modAdd(r.s1, r.s3);
+            X.s4 = modSub(r.s0, r.s2);
+            X.s6 = modSub(r.s1, r.s3);
+        }
     }
 
     k = id * 2 + 1;
     j = k & (m - 1);
-    base = 4 * (k - j) + j;
-    twiddle_offset = 6 * m + 3 * j;
-    a = X.s1;
-    b = X.s3;
-    d = X.s5;
-    e = X.s7;
     {
-        ulong4 coeff = (ulong4)(a, b, d, e);
-        tmp = vload4(0, wi + twiddle_offset);
-        twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
-        uu = modMul4(coeff, twiddles);
-        r = butterfly(uu);
-        X.s1 = modAdd(r.s0, r.s2);
-        X.s3 = modAdd(r.s1, r.s3);
-        X.s5 = modSub(r.s0, r.s2);
-        X.s7 = modSub(r.s1, r.s3);
+        a = X.s1;
+        b = X.s3;
+        d = X.s5;
+        e = X.s7;
+        {
+            ulong4 coeff = (ulong4)(a, b, d, e);
+            coeff = modMul4(coeff, twiddles_wi15);
+            r = butterfly(coeff);
+            X.s1 = modAdd(r.s0, r.s2);
+            X.s3 = modAdd(r.s1, r.s3);
+            X.s5 = modSub(r.s0, r.s2);
+            X.s7 = modSub(r.s1, r.s3);
+        }
     }
 
     vstore8(X, 0, x + base_idx);
