@@ -1122,7 +1122,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
 
 }*/
 
-
+/*
 
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* restrict x,
                                                                __global ulong* restrict w,
@@ -1270,4 +1270,180 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* rest
     }
 
     vstore8(X, 0, x + base_idx);
+}
+*/
+
+__kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(__global ulong* restrict x,
+                                                               __global ulong* restrict w,
+                                                               __global ulong* restrict wi)
+{
+    const int m = 2;
+    // Récupération des indices global et local
+    uint gid = get_global_id(0);        // identifiant global du thread
+    uint lid = get_local_id(0);         // identifiant local dans le workgroup
+    const uint groupSize = get_local_size(0); // doit être égal à 256
+  
+    // Chaque thread traite 8 ulong, donc on calcule les indices de base
+    uint global_base_idx = gid * 8;     // indice de départ dans la mémoire globale
+    uint local_base_idx  = lid * 8;       // indice de départ dans le tampon local
+
+    // Allocation statique de la mémoire locale pour tout le workgroup.
+    // Ici, la taille est 256*8 ulong, soit 256 threads x 8 ulong par thread.
+    __local ulong localX[256 * 8];
+
+    // 1. Charger la donnée depuis la mémoire globale vers la mémoire locale
+    vstore8(vload8(0, x + global_base_idx), 0, localX + local_base_idx);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // 2. Charger les données de notre segment de mémoire locale dans des registres
+    ulong8 X = vload8(0, localX + local_base_idx);
+
+    // Déclarations de variables
+    uint k, j, i;
+    uint k2, j2, ii;
+    ulong4 tmp, tmp2, twiddles, uu, r;
+    ulong a, b, d, e, s, r0, r1;
+
+    // Charger les twiddles depuis la mémoire globale
+    ulong4 tmp_w12 = vload4(0, w + 12);
+    ulong4 twiddles_w12 = (ulong4)(1UL, tmp_w12.s1, tmp_w12.s0, tmp_w12.s2);
+    ulong4 tmp_w15 = vload4(0, w + 15);
+    ulong4 twiddles_w15 = (ulong4)(1UL, tmp_w15.s1, tmp_w15.s0, tmp_w15.s2);
+
+    ulong4 tmp_wi12 = vload4(0, wi + 12);
+    ulong4 twiddles_wi12 = (ulong4)(1UL, tmp_wi12.s1, tmp_wi12.s0, tmp_wi12.s2);
+    ulong4 tmp_wi15 = vload4(0, wi + 15);
+    ulong4 twiddles_wi15 = (ulong4)(1UL, tmp_wi15.s1, tmp_wi15.s0, tmp_wi15.s2);
+
+    // Première passe de calcul (opérations sur les éléments en position paire)
+    k = gid * 2;
+    j = k & (m - 1);
+    i = 4 * (k - j) + j;
+    {
+        ulong4 c = (ulong4)(X.s0, X.s2, X.s4, X.s6);
+        a = modAdd(c.s0, c.s2);
+        b = modAdd(c.s1, c.s3);
+        d = modSub(c.s0, c.s2);
+        e = modMuli(modSub(c.s1, c.s3));
+        c.s0 = modAdd(a, b);
+        c.s1 = modSub(a, b);
+        c.s2 = modAdd(d, e);
+        c.s3 = modSub(d, e);
+        c = modMul4(c, twiddles_w12);
+        X.s0 = c.s0;
+        X.s2 = c.s1;
+        X.s4 = c.s2;
+        X.s6 = c.s3;
+    }
+
+    // Seconde passe de calcul (opérations sur les éléments en position impaire)
+    k2 = gid * 2 + 1;
+    j2 = k2 & (m - 1);
+    ii = 4 * (k2 - j2) + j2;
+    {
+        ulong4 c2 = (ulong4)(X.s1, X.s3, X.s5, X.s7);
+        a = modAdd(c2.s0, c2.s2);
+        b = modAdd(c2.s1, c2.s3);
+        d = modSub(c2.s0, c2.s2);
+        e = modMuli(modSub(c2.s1, c2.s3));
+        c2.s0 = modAdd(a, b);
+        c2.s1 = modSub(a, b);
+        c2.s2 = modAdd(d, e);
+        c2.s3 = modSub(d, e);
+        c2 = modMul4(c2, twiddles_w15);
+        X.s1 = c2.s0;
+        X.s3 = c2.s1;
+        X.s5 = c2.s2;
+        X.s7 = c2.s3;
+    }
+
+    // Étape intermédiaire : opérations de carré sur les sommes et différences
+    {
+        ulong2 u = (ulong2)(X.s0, X.s1);
+        s = modAdd(u.x, u.y);
+        d = modSub(u.x, u.y);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        r0 = modAdd(s, d);
+        r1 = modSub(s, d);
+        X.s0 = r0;
+        X.s1 = r1;
+    }
+    {
+        ulong2 u = (ulong2)(X.s2, X.s3);
+        s = modAdd(u.x, u.y);
+        d = modSub(u.x, u.y);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        r0 = modAdd(s, d);
+        r1 = modSub(s, d);
+        X.s2 = r0;
+        X.s3 = r1;
+    }
+    {
+        ulong2 u = (ulong2)(X.s4, X.s5);
+        s = modAdd(u.x, u.y);
+        d = modSub(u.x, u.y);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        r0 = modAdd(s, d);
+        r1 = modSub(s, d);
+        X.s4 = r0;
+        X.s5 = r1;
+    }
+    {
+        ulong2 u = (ulong2)(X.s6, X.s7);
+        s = modAdd(u.x, u.y);
+        d = modSub(u.x, u.y);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        r0 = modAdd(s, d);
+        r1 = modSub(s, d);
+        X.s6 = r0;
+        X.s7 = r1;
+    }
+
+    // Troisième passe : opérations butterfly pour mélanger les coefficients
+    k = gid * 2;
+    j = k & (m - 1);
+    {
+        a = X.s0;
+        b = X.s2;
+        d = X.s4;
+        e = X.s6;
+        {
+            ulong4 coeff = (ulong4)(a, b, d, e);
+            coeff = modMul4(coeff, twiddles_wi12);
+            r = butterfly(coeff);
+            X.s0 = modAdd(r.s0, r.s2);
+            X.s2 = modAdd(r.s1, r.s3);
+            X.s4 = modSub(r.s0, r.s2);
+            X.s6 = modSub(r.s1, r.s3);
+        }
+    }
+
+    k = gid * 2 + 1;
+    j = k & (m - 1);
+    {
+        a = X.s1;
+        b = X.s3;
+        d = X.s5;
+        e = X.s7;
+        {
+            ulong4 coeff = (ulong4)(a, b, d, e);
+            coeff = modMul4(coeff, twiddles_wi15);
+            r = butterfly(coeff);
+            X.s1 = modAdd(r.s0, r.s2);
+            X.s3 = modAdd(r.s1, r.s3);
+            X.s5 = modSub(r.s0, r.s2);
+            X.s7 = modSub(r.s1, r.s3);
+        }
+    }
+
+    // Stocker le résultat dans la mémoire locale
+    vstore8(X, 0, localX + local_base_idx);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Écrire le résultat depuis la mémoire locale vers la mémoire globale
+    vstore8(vload8(0, localX + local_base_idx), 0, x + global_base_idx);
 }
