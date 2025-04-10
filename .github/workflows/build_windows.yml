@@ -61,10 +61,6 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          body: |
-            SHA256 checksum of the .zip:
-
-            `${{ env.SHA_SUM }}`
           files: |
             prmers-windows.zip
             prmers-windows.zip.sha256
