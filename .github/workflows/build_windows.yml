@@ -49,6 +49,7 @@ jobs:
           mkdir prmers_package\kernels
           copy build\Release\prmers.exe prmers_package\
           copy prmers.cl prmers_package\kernels\
+          copy vcpkg\installed\x64-windows\bin\*.dll prmers_package\
           powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
       - name: Calculate SHA256 checksum
