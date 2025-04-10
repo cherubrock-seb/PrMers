@@ -59,6 +59,7 @@
 #include <cstdarg> 
 #include <set>
 #include <map>
+#include <curl/curl.h>
 #ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
@@ -148,6 +149,130 @@ uint64_t powModP(uint64_t base, uint64_t exp) {
 uint64_t invModP(uint64_t x) {
     return powModP(x, MOD_P - 2ULL);
 }
+
+
+
+//------------------------------------------------------------------------------
+// Helper function to escape a string for JSON output.
+// This function adds backslashes before quotes and returns the string enclosed in quotes.
+//------------------------------------------------------------------------------
+std::string jsonEscape(const std::string &s) {
+    std::string escaped;
+    for (char c : s) {
+        switch (c) {
+            case '"': escaped += "\\\""; break;
+            case '\\': escaped += "\\\\"; break;
+            case '\b': escaped += "\\b"; break;
+            case '\f': escaped += "\\f"; break;
+            case '\n': escaped += "\\n"; break;
+            case '\r': escaped += "\\r"; break;
+            case '\t': escaped += "\\t"; break;
+            default: escaped += c; break;
+        }
+    }
+    return "\"" + escaped + "\"";
+}
+
+//------------------------------------------------------------------------------
+// Function: generatePrimeNetJson
+// Purpose:  Generates a JSON string with all required fields to be sent to PrimeNet.
+// Parameters:
+//   status          - Status string (e.g., "P" for prime, "C" for composite)
+//   exponent        - Exponent being tested (e.g., 197487599)
+//   worktype        - Work type string (e.g., "PRP-3")
+//   res64           - A hexadecimal string result (64-bit result)
+//   res2048         - A long hexadecimal string representing a 2048-bit result
+//   residueType     - An integer code describing the residue type (typically 1)
+//   gerbiczError    - Error count associated with the Gerbicz test (e.g., 0)
+//   fftLength       - FFT length used (e.g., 11534336)
+//   proofVersion    - Version number of the proof (e.g., 1)
+//   proofPower      - Proof power value (e.g., 10)
+//   proofHashSize   - Hash size used in the proof (e.g., 64)
+//   proofMd5        - MD5 hash as a string (e.g., "cbb1774df764197be28c4bcb659086fd")
+//   programName     - Name of the program (e.g., "prpll")
+//   programVersion  - Version string of the program (e.g., "0.15-125-ga1349df-dirty")
+//   programPort     - Platform port number (e.g., 8)
+//   osName          - Operating system name (e.g., "Linux")
+//   osVersion       - OS version string (e.g., "6.8.0-52-generic")
+//   osArchitecture  - CPU architecture (e.g., "x86_64")
+//   user            - Username (e.g., "cherubrock")
+//   aid             - Application ID (e.g., "921AC7D5516755497E546BC5BEFB095C")
+//   uid             - Unique ID (e.g., "a25018e172fd5d75")
+//   timestamp       - Timestamp string (e.g., "2025-04-10 09:41:06")
+// Returns: a std::string containing the JSON result.
+//------------------------------------------------------------------------------
+std::string generatePrimeNetJson(
+    const std::string &status,
+    unsigned int exponent,
+    const std::string &worktype,
+    const std::string &res64,
+    const std::string &res2048,
+    int residueType,
+    int gerbiczError,
+    unsigned int fftLength,
+    int proofVersion,
+    int proofPower,
+    int proofHashSize,
+    const std::string &proofMd5,
+    const std::string &programName,
+    const std::string &programVersion,
+    unsigned int programPort,
+    const std::string &osName,
+    const std::string &osVersion,
+    const std::string &osArchitecture,
+    const std::string &user,
+    const std::string &aid,
+    const std::string &uid,
+    const std::string &timestamp)
+{
+    std::ostringstream oss;
+    oss << "{"; // Start of JSON object
+
+    // Basic result fields.
+    oss << "\"status\":" << jsonEscape(status) << ", ";
+    oss << "\"exponent\":" << exponent << ", ";
+    oss << "\"worktype\":" << jsonEscape(worktype) << ", ";
+    oss << "\"res64\":" << jsonEscape(res64) << ", ";
+    oss << "\"res2048\":" << jsonEscape(res2048) << ", ";
+    oss << "\"residue-type\":" << residueType << ", ";
+    
+    // Errors object (for example, Gerbicz error count).
+    oss << "\"errors\": {\"gerbicz\":" << gerbiczError << "}, ";
+    
+    oss << "\"fft-length\":" << fftLength << ", ";
+    
+    // Proof information object.
+    oss << "\"proof\": {";
+    oss << "\"version\":" << proofVersion << ", ";
+    oss << "\"power\":" << proofPower << ", ";
+    oss << "\"hashsize\":" << proofHashSize << ", ";
+    oss << "\"md5\":" << jsonEscape(proofMd5);
+    oss << "}, ";
+    
+    // Program information including OS details.
+    oss << "\"program\": {";
+    oss << "\"name\":" << jsonEscape(programName) << ", ";
+    oss << "\"version\":" << jsonEscape(programVersion) << ", ";
+    oss << "\"port\":" << programPort << ", ";
+    oss << "\"os\": {";
+    oss << "\"os\":" << jsonEscape(osName) << ", ";
+    oss << "\"version\":" << jsonEscape(osVersion) << ", ";
+    oss << "\"architecture\":" << jsonEscape(osArchitecture);
+    oss << "}";
+    oss << "}, ";
+    
+    // User information and timestamp.
+    oss << "\"user\":" << jsonEscape(user) << ", ";
+    oss << "\"aid\":" << jsonEscape(aid) << ", ";
+    oss << "\"uid\":" << jsonEscape(uid) << ", ";
+    oss << "\"timestamp\":" << jsonEscape(timestamp);
+    
+    oss << "}"; // End of JSON object
+
+    return oss.str();
+}
+
+
 
 // -----------------------------------------------------------------------------
 // Compute transform size for the given exponent (forcing power-of-4)
@@ -821,6 +946,204 @@ void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_wi
     x[0] -= 1;
 }
 
+
+#include <string>
+
+std::string promptHiddenPassword() {
+    std::string pwd;
+#if defined(_WIN32)
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE); DWORD mode; GetConsoleMode(hStdin, &mode);
+    SetConsoleMode(hStdin, mode & ~(ENABLE_ECHO_INPUT));
+    std::cout << "Enter your PrimeNet password: ";
+    std::getline(std::cin, pwd);
+    SetConsoleMode(hStdin, mode); std::cout << std::endl;
+#else
+    std::cout << "Enter your PrimeNet password: ";
+    int ret1 = system("stty -echo");
+    (void)ret1; // ignore warning
+    std::getline(std::cin, pwd);
+    int ret2 = system("stty echo");
+    (void)ret2; // ignore warning
+
+#endif
+    return pwd;
+}
+
+
+namespace fs = std::filesystem;
+
+// Helper to rename file after successful upload
+void markJsonAsSent(const std::string& path) {
+    std::string newPath = path + ".sent";
+    try {
+        fs::rename(path, newPath);
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Couldn't rename file to mark as sent: " << e.what() << std::endl;
+    }
+}
+
+bool sendResultToPrimeNet(const std::string& resultLine, const std::string& user, const std::string& password) {
+    try {
+        CURL* curl = curl_easy_init();
+        if (!curl) {
+            std::cerr << "Error initializing libcurl." << std::endl;
+            return false;
+        }
+
+        CURLcode res;
+        std::string readBuffer;
+
+        // Construct login and result submission payload
+        std::ostringstream postData;
+        postData << "user_login=" << curl_easy_escape(curl, user.c_str(), 0)
+                 << "&user_password=" << curl_easy_escape(curl, password.c_str(), 0)
+                 << "&data=" << curl_easy_escape(curl, resultLine.c_str(), 0);
+
+        struct curl_slist* headers = nullptr;
+        headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+
+        curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/manual_result/");
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.str().c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies.txt");
+        curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies.txt");
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](void* contents, size_t size, size_t nmemb, void* userp) -> size_t {
+            ((std::string*)userp)->append((char*)contents, size * nmemb);
+            return size * nmemb;
+        });
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+        res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+        curl_slist_free_all(headers);
+
+        if (res != CURLE_OK) {
+            std::cerr << "Failed to send result: " << curl_easy_strerror(res) << std::endl;
+            return false;
+        }
+
+        if (readBuffer.find("Error code") != std::string::npos) {
+            size_t begin = readBuffer.find("Error code");
+            size_t end = readBuffer.find("</div>", begin);
+            if (end != std::string::npos) {
+                std::cerr << "Server responded with error: " << readBuffer.substr(begin, end - begin) << std::endl;
+            } else {
+                std::cerr << "Server responded with error:\n" << readBuffer << std::endl;
+            }
+            return false;
+        } else if (readBuffer.find("CPU credit is") != std::string::npos) {
+            size_t begin = readBuffer.find("CPU credit is");
+            size_t end = readBuffer.find("</div>", begin);
+            if (end != std::string::npos) {
+                std::cout << readBuffer.substr(begin, end - begin) << std::endl;
+            } else {
+                std::cout << readBuffer << std::endl;
+            }
+            return true;
+        } else {
+            std::cerr << "Unexpected response from PrimeNet:\n" << readBuffer.substr(0, 500) << "..." << std::endl;
+            return false;
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Exception while sending result: " << ex.what() << std::endl;
+        return false;
+    }
+}
+
+
+
+
+void promptToSendResult(const std::string& jsonPath, const std::string& resultLine, std::string& user) {
+    std::string response;
+    std::cout << "\n✅ JSON result written to: " << jsonPath << std::endl;
+    std::cout << "Do you want to send the result to PrimeNet? (y/n): ";
+    std::getline(std::cin, response);
+
+    if (!response.empty() && (response[0] == 'y' || response[0] == 'Y')) {
+        if (user.empty()) {
+            std::cout << "Enter your PrimeNet username: ";
+            std::getline(std::cin, user);
+        }
+
+        std::string password = promptHiddenPassword();
+        bool success = sendResultToPrimeNet(resultLine, user, password);
+        while (!success) {
+            std::cout << "❌ Failed to send result to PrimeNet." << std::endl;
+            std::cout << "Do you want to retry? (y/n): ";
+            std::getline(std::cin, response);
+            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+                std::cout << "Result not sent." << std::endl;
+                break;
+            }
+
+            std::cout << "Re-enter your PrimeNet username (leave empty to reuse '" << user << "'): ";
+            std::string newUser;
+            std::getline(std::cin, newUser);
+            if (!newUser.empty()) user = newUser;
+
+            password = promptHiddenPassword();
+            success = sendResultToPrimeNet(resultLine, user, password);
+        }
+
+        if (success) {
+            std::cout << "✅ Result successfully sent to PrimeNet." << std::endl;
+            std::ofstream(jsonPath + ".sent").put('\n');
+        }
+        // --- 🔍 Check for other unsent JSONs in the same folder
+        fs::path dir = fs::path(jsonPath).parent_path();
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.is_regular_file()) {
+                auto p = entry.path();
+                if (p.extension() == ".json" && !fs::exists(p.string() + ".sent")) {
+                    if (p == jsonPath) continue; // Already handled
+
+                    // Forge result line from filename and content
+                    std::ifstream f(p);
+                    std::stringstream buffer;
+                    buffer << f.rdbuf();
+                    std::string content = buffer.str();
+
+                    std::string exponent;
+                    std::string res64;
+                    std::string testType;
+
+                    try {
+                        size_t underscore = p.filename().string().find("_");
+                        exponent = p.filename().string().substr(0, underscore);
+
+                        size_t res64_pos = content.find("\"res64\":\"");
+                        if (res64_pos != std::string::npos) {
+                            size_t start = res64_pos + 10;
+                            size_t end = content.find('"', start);
+                            res64 = content.substr(start, end - start);
+                        }
+
+                        if (content.find("PRP") != std::string::npos) {
+                            testType = "PRP";
+                        } else {
+                            testType = "LL";
+                        }
+                    } catch (...) {
+                        std::cerr << "Failed to parse file " << p << " for result line." << std::endl;
+                        continue;
+                    }
+
+                    std::string forgedLine = testType + "=" + exponent + "," + res64 + ",0xAID-PRMERS-1234," + user;
+                    promptToSendResult(p.string(), forgedLine, user);
+                }
+            }
+        }
+    } else {
+        std::cout << "Result not sent." << std::endl;
+    }
+
+
+}
+
+
+
+
 // -----------------------------------------------------------------------------
 // Main function
 // -----------------------------------------------------------------------------
@@ -856,7 +1179,7 @@ int main(int argc, char** argv) {
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;
-
+    std::string user;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -938,6 +1261,15 @@ int main(int argc, char** argv) {
                 i++;
             } else {
                 std::cerr << "Error: Missing value for -l3 <max_local_size3>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-user") == 0) {
+            if (i + 1 < argc) {
+                user = argv[i + 1];
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -user <name>." << std::endl;
                 return 1;
             }
         }
@@ -1523,42 +1855,120 @@ int main(int argc, char** argv) {
     std::cout << "\nKernel execution time: " << elapsedTime << " seconds" << std::endl;
     std::cout << "Iterations per second: " << iters_per_sec 
               << " (" << total_iters << " iterations in total)" << std::endl;
-    if(proof){
+    std::filesystem::path proofFile;  // Déclaré en dehors
+
+    if (proof) {
         flush_log();
         Words finalRes = ProofSet::fromUint64(x, p);
         auto [myProof, rExps] = proofSet.computeProof(finalRes);
         std::filesystem::path outDir = save_path; 
         std::filesystem::create_directories(outDir);
-        auto proofFile = myProof.fileName(outDir);
+        proofFile = myProof.fileName(outDir);  // Affectation ici
         myProof.save(proofFile);
         std::cout << "Proof is saved in a file!\n\n";
-        /*if (!myProof.verify()) {
-            std::cout << "Proof is invalid!\n";
-        } else {
-            std::cout << "Proof is valid. M" << p 
-                    << (myProof.isProbablePrime() ? " prime?\n" : " composite.\n");
-        }*/
     }
+    try {
+        std::ostringstream res64oss;
+        for (int i = 0; i < 64 / 64; ++i) {
+            res64oss << std::hex << std::setw(16) << std::setfill('0') << x[i];
+        }
+
+        std::ostringstream res2048oss;
+        for (int i = 0; i < std::min((int)n, 2048 / 64); ++i) {
+            res2048oss << std::hex << std::setw(16) << std::setfill('0') << x[i];
+        }
+
+        std::time_t now = std::time(nullptr);
+        char timestampBuf[32];
+        std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+
+        std::string jsonResult = generatePrimeNetJson(
+            (mode == "ll") ? (std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; }) ? "P" : "C")
+                        : ((x[0] == 9 && std::all_of(x.begin() + 1, x.end(), [](uint64_t v) { return v == 0; })) ? "P" : "C"),
+            p,
+            (mode == "prp") ? "PRP-3" : "LL",
+            res64oss.str(),
+            res2048oss.str(),
+            1, // residueType
+            0, // gerbiczError
+            n,
+            proof ? 1 : 0,
+            proof ? proofPower : 0,
+            proof ? 64 : 0,
+            proof ? proof_util::fileMD5(proofFile) : "",
+            "prmers",
+            "0.1",
+            device_id,
+    #ifdef _WIN32
+            "Windows",
+    #elif __APPLE__
+            "macOS",
+    #else
+            "Linux",
+    #endif
+            "",
+    #ifdef __x86_64__
+            "x86_64",
+    #elif __aarch64__
+            "arm64",
+    #else
+            "unknown",
+    #endif
+            user.empty() ? "cherubrock":user,
+            "AID-PRMERS-1234",
+            "UID-PRMERS-5678",
+            timestampBuf
+        );
+
+        std::ofstream jsonOut(save_path + "/" + std::to_string(p) + "_" + mode + "_result.json");
+        jsonOut << jsonResult;
+        jsonOut.close();
+        std::cout << "\n✅ JSON result written to: " << save_path + "/" + std::to_string(p) + "_" + mode + "_result.json" << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "❌ Error while generating the final JSON: " << e.what() << std::endl;
+    }
+
+
+
+    std::string resultLine;
+    std::string jsonFile = save_path + "/" + std::to_string(p) + "_" + mode + "_result.json";
+
     if (mode == "prp") {
         bool resultIs9 = (x[0] == 9) && std::all_of(x.begin() + 1, x.end(), [](uint64_t v){ return v == 0; });
         std::cout << "\nM" << p << " PRP test " << (resultIs9 ? "succeeded (result is 9)." : "failed (result is not 9).") << std::endl;
-        //if (!isLaunchedFromTerminal()) {
+
+        // Build the PrimeNet result line for PRP
+        std::ostringstream oss;
+        oss << "PRP=" << p << ","
+            << (proof ? "1" : "0") << ","
+            << user << ","
+            << (resultIs9 ? "P" : "F") << ",0x"
+            << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
+        resultLine = oss.str();
+
+        promptToSendResult(jsonFile, resultLine, user);
+
         std::cout << "\nPress Enter to exit...";
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        //}
         return resultIs9 ? 0 : 1;
     } else {
         bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
         std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
-        //if (!isLaunchedFromTerminal()) {
+
+        // Build the PrimeNet result line for LL
+        std::ostringstream oss;
+        oss << "LL=" << p << ","
+            << user << ","
+            << (isPrime ? "P" : "F") << ",0x"
+            << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
+        resultLine = oss.str();
+
+        promptToSendResult(jsonFile, resultLine, user);
+
         std::cout << "\nPress Enter to exit...";
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        //}
         return isPrime ? 0 : 1;
     }
-
-
-
 
 
     // -------------------------------------------------------------------------
