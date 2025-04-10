@@ -15,8 +15,6 @@
  *
  * This code is released as free software.
  */
-#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
-
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
