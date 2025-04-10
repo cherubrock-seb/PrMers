@@ -942,13 +942,15 @@ int main(int argc, char** argv) {
 
 
     #ifdef __APPLE__
-    if (major >= 2) {
-        queue = clCreateCommandQueueWithProperties(context, device, nullptr, &err);
-    } else
-    #endif
-    {
         queue = clCreateCommandQueue(context, device, 0, &err);
-    }
+    #else
+        if (major >= 2) {
+            queue = clCreateCommandQueueWithProperties(context, device, nullptr, &err);
+        } else {
+            queue = clCreateCommandQueue(context, device, 0, &err);
+        }
+    #endif
+
     
     if (err != CL_SUCCESS) {
         std::cerr << "Failed to create command queue." << std::endl;
