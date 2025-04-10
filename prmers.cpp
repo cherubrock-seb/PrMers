@@ -53,8 +53,10 @@
 #include <cstdarg> 
 #include <set>
 #include <map>
+#ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
+#endif
 #include "proof/proof.h"
 #ifdef max
 #undef max
