@@ -1062,8 +1062,8 @@ int main(int argc, char** argv) {
     }
 
     
-    size_t localSize2 = maxWork;
-    size_t localSize3 = maxWork ;  
+    size_t localSize2 = localSize;
+    size_t localSize3 = localSize ;  
     
     /*if (max_local_size1 == 0){
         max_local_size2 = (maxWork) <1 ? 1 : (maxWork) ;  
