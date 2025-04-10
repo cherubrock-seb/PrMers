@@ -17,10 +17,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install OpenCL dependencies
+      - name: Install OpenCL and libcurl dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers
+          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
 
       - name: Build with Makefile
         run: make KERNEL_PATH=./kernels/
