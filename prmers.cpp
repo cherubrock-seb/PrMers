@@ -53,6 +53,8 @@
 #include <cstdarg> 
 #include <set>
 #include <map>
+#include <unistd.h>
+#include <limits.h>
 #include "proof/proof.h"
 #ifdef max
 #undef max
@@ -797,32 +799,23 @@ int main(int argc, char** argv) {
                     system("start cmd /k prmers.exe");
         #else
             #ifdef __APPLE__
-                    system("osascript -e 'tell application \"Terminal\" to do script \"cd \\\"$(pwd)\\\"; ./prmers\"'");
+                    char cwd[PATH_MAX];
+                    if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+                        std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd \\\"" 
+                                            + std::string(cwd) + "\\\"; ./prmers'";
+                        system(command.c_str());
+                    } else {
+                        std::cerr << "❌ Impossible de récupérer le chemin actuel." << std::endl;
+                    }
             #else
                     int ret = system("x-terminal-emulator -e ./prmers");
                     if (ret != 0) {
                         std::cerr << "⚠️ Failed to launch terminal emulator." << std::endl;
                     }
-
-
             #endif
         #endif
             return 0;
         }
-
-        int exponent = askExponentInteractively();
-
-        #ifdef _WIN32
-                std::string cmd = "start cmd /k prmers.exe " + std::to_string(exponent);
-                int ret2 = system(cmd.c_str());
-                (void)ret2;
-
-        #else
-                std::string cmd = "./prmers " + std::to_string(exponent);
-                int ret2 = system(cmd.c_str());
-                (void)ret2;
-        #endif
-        return 0;
     }
 
     if (argc < 2) {
