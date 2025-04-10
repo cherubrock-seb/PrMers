@@ -24,6 +24,10 @@
  *
  * This code is released as free software.
  */
+#include <cstdlib>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -603,6 +607,49 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
        }   
     }
 }
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+bool isLaunchedFromTerminal() {
+#ifdef _WIN32
+    return GetConsoleWindow() != nullptr;
+#else
+    return isatty(fileno(stdin)); // POSIX: Linux/macOS
+#endif
+}
+
+int askExponentInteractively() {
+#ifdef _WIN32
+    char buffer[32];
+    MessageBoxA(
+        nullptr,
+        "PrMers: GPU-accelerated Mersenne primality tester\n\n"
+        "You'll now be asked which exponent you'd like to test.",
+        "PrMers - Select Exponent",
+        MB_OK | MB_ICONINFORMATION
+    );
+    std::cout << "Enter the exponent to test (e.g. 21701): ";
+    std::cin.getline(buffer, sizeof(buffer));
+    return std::atoi(buffer);
+#else
+    std::cout << "============================================\n";
+    std::cout << " PrMers: GPU-accelerated Mersenne primality test\n";
+    std::cout << " Powered by OpenCL | NTT | LL | PRP | IBDWT\n";
+    std::cout << "============================================\n\n";
+
+    std::string input;
+    std::cout << "Enter the exponent to test (e.g. 21701): ";
+    std::getline(std::cin, input);
+    try {
+        return std::stoi(input);
+    } catch (...) {
+        std::cerr << "Invalid input. Aborting." << std::endl;
+        std::exit(1);
+    }
+#endif
+}
+
 
 void executeFusionneNTT_Inverse(cl_command_queue queue,cl_kernel kernel_ntt_inverse_mm_2_steps,
     cl_kernel kernel_inverse_ntt_mm, cl_kernel kernel_inverse_ntt_mm_last, cl_kernel kernel_inverse_ntt_m1,
@@ -738,8 +785,39 @@ void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_wi
 // Main function
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    // Set the signal handler for SIGINT (Ctrl-C)
-    std::signal(SIGINT, signalHandler);
+    if (argc < 2) {
+        if (!isLaunchedFromTerminal()) {
+        #ifdef _WIN32
+                    system("start cmd /k prmers.exe");
+        #else
+            #ifdef __APPLE__
+                    system("osascript -e 'tell application \"Terminal\" to do script \"cd \\\"$(pwd)\\\"; ./prmers\"'");
+            #else
+                    int ret = system("x-terminal-emulator -e ./prmers");
+                    if (ret != 0) {
+                        std::cerr << "⚠️ Failed to launch terminal emulator." << std::endl;
+                    }
+
+
+            #endif
+        #endif
+            return 0;
+        }
+
+        int exponent = askExponentInteractively();
+
+        #ifdef _WIN32
+                std::string cmd = "start cmd /k prmers.exe " + std::to_string(exponent);
+                int ret2 = system(cmd.c_str());
+                (void)ret2;
+
+        #else
+                std::string cmd = "./prmers " + std::to_string(exponent);
+                int ret2 = system(cmd.c_str());
+                (void)ret2;
+        #endif
+        return 0;
+    }
 
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
