@@ -96,7 +96,6 @@ codesign -s - --deep --force --timestamp --options runtime ./prmers
 
 To distribute a notarized macOS app without this issue, an Apple Developer Account is required.
 
-
 ## Installation from sources
 
 1. **Clone the repository:**
