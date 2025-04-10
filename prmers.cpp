@@ -25,6 +25,7 @@
  * This code is released as free software.
  */
 #include <cstdlib>
+#define NOMINMAX
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -53,7 +54,12 @@
 #include <set>
 #include <map>
 #include "proof/proof.h"
-
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
 
 // Global variables for backup functionality
 volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
