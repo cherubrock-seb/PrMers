@@ -796,30 +796,30 @@ void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_wi
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
     if (argc < 2) {
-        if (!isLaunchedFromTerminal()) {
-        #ifdef _WIN32
-                    system("start cmd /k prmers.exe");
-        #else
-            #ifdef __APPLE__
-                    char cwd[PATH_MAX];
-                    if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-                        std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd \\\"" 
-                                            + std::string(cwd) + "\\\"; ./prmers'";
-                        system(command.c_str());
-                    } else {
-                        std::cerr << "❌ Impossible de récupérer le chemin actuel." << std::endl;
-                    }
-            #else
-                    int ret = system("x-terminal-emulator -e ./prmers");
-                    if (ret != 0) {
-                        std::cerr << "⚠️ Failed to launch terminal emulator." << std::endl;
-                    }
-            #endif
-        #endif
-            return 0;
-        }
-    }
+        int exponent = askExponentInteractively();
 
+        #ifdef _WIN32
+            std::string cmd = "start cmd /k prmers.exe " + std::to_string(exponent);
+            system(cmd.c_str());
+        #elif defined(__APPLE__)
+            char cwd[PATH_MAX];
+            if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+                std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd \\\"" 
+                                    + std::string(cwd) + "\\\"; ./prmers " + std::to_string(exponent) + "'\"";
+                system(command.c_str());
+            } else {
+                std::cerr << "❌ Impossible de récupérer le chemin actuel." << std::endl;
+            }
+        #else // Linux
+            std::string cmd = "x-terminal-emulator -e ./prmers " + std::to_string(exponent);
+            int ret = system(cmd.c_str());
+            if (ret != 0) {
+                std::cerr << "⚠️ Failed to launch terminal emulator." << std::endl;
+            }
+        #endif
+
+        return 0;
+    }
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
