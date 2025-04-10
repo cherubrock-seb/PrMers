@@ -804,8 +804,8 @@ int main(int argc, char** argv) {
         #elif defined(__APPLE__)
             char cwd[PATH_MAX];
             if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-                std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd \\\"" 
-                                    + std::string(cwd) + "\\\"; ./prmers " + std::to_string(exponent) + "'\"";
+                std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd " 
+                                    + std::string(cwd) + "; ./prmers " + std::to_string(exponent) + "\"'";
                 system(command.c_str());
             } else {
                 std::cerr << "❌ Impossible de récupérer le chemin actuel." << std::endl;
