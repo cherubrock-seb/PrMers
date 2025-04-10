@@ -38,7 +38,7 @@ jobs:
         run: .\vcpkg\vcpkg install curl:x64-windows
 
       - name: Configure CMake with vcpkg toolchain
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
         run: cmake --build build --config Release
