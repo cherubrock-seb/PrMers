@@ -795,31 +795,30 @@ void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_wi
 // Main function
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    std::string exponentStr;
+    std::vector<const char*> new_argv;
+
     if (argc < 2) {
-        int exponent = askExponentInteractively();
+        if (!isLaunchedFromTerminal()) {
+            int exp = askExponentInteractively();
+            exponentStr = std::to_string(exp);
 
-        #ifdef _WIN32
-            std::string cmd = "start cmd /k prmers.exe " + std::to_string(exponent);
-            system(cmd.c_str());
-        #elif defined(__APPLE__)
-            char cwd[PATH_MAX];
-            if (getcwd(cwd, sizeof(cwd)) != nullptr) {
-                std::string command = "osascript -e 'tell application \"Terminal\" to do script \"cd " 
-                                    + std::string(cwd) + "; ./prmers " + std::to_string(exponent) + "\"'";
-                system(command.c_str());
-            } else {
-                std::cerr << "❌ Impossible de récupérer le chemin actuel." << std::endl;
-            }
-        #else // Linux
-            std::string cmd = "x-terminal-emulator -e ./prmers " + std::to_string(exponent);
-            int ret = system(cmd.c_str());
-            if (ret != 0) {
-                std::cerr << "⚠️ Failed to launch terminal emulator." << std::endl;
-            }
-        #endif
-
-        return 0;
+            // Simuler comme si l'utilisateur avait tapé : ./prmers <exp>
+            new_argv.push_back(argv[0]);               // Nom du programme
+            new_argv.push_back(exponentStr.c_str());   // Argument 1
+            argc = 2;
+            argv = const_cast<char**>(new_argv.data());
+        } else {
+            std::cerr << "Error: Missing <p_min> argument.\n";
+            printUsage(argv[0]);
+            return 1;
+        }
     }
+
+    // À partir d’ici, argv[1] est garanti présent, que ce soit via ligne de commande ou interactif
+    uint32_t pp = static_cast<uint32_t>(std::stoi(argv[1]));
+    std::cout << "🧮 Testing exponent: " << pp << std::endl;
+
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
