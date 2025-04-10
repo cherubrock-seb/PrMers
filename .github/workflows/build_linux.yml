@@ -30,7 +30,6 @@ jobs:
           mkdir -p prmers_package/kernels
           cp prmers prmers_package/
           cp prmers.cl prmers_package/kernels/
-          cp prmers_vload2.cl prmers_package/kernels/
           tar -czvf prmers-linux.tar.gz -C prmers_package .
 
       - name: Upload release to GitHub
