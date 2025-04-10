@@ -623,7 +623,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
                                                   __global ulong* restrict wi,
                                                   const uint m) {
 
-    //ulong local_x[16];
+
     __local ulong shared_mem[LOCAL_SIZE2 * 16];
     __local ulong* local_x = shared_mem + get_local_id(0) * 16;
     int write_index = 0;
@@ -637,7 +637,8 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     ulong twiddle1 = wi[twiddle_offset];
     ulong twiddle2 = wi[twiddle_offset + 1];
     ulong twiddle3 = wi[twiddle_offset + 2];
-    
+    ulong r;
+    ulong r2;
     
     #pragma unroll 4
     for (int pass = 0; pass < 4; pass++) {
@@ -648,8 +649,8 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         local_x[write_index+2] = modMul(x[base + (m << 1)], twiddle1);
         local_x[write_index+3] = modMul(x[base + ((m << 1) + m)], twiddle3);
         
-        ulong r = modAdd(local_x[write_index], local_x[write_index+1]);
-        ulong r2  = modSub(local_x[write_index], local_x[write_index+1]);
+        r = modAdd(local_x[write_index], local_x[write_index+1]);
+        r2  = modSub(local_x[write_index], local_x[write_index+1]);
         local_x[write_index] = r;
         local_x[write_index + 1] = r2;
 
@@ -663,10 +664,9 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         r2                   =   modSub(local_x[write_index], local_x[write_index + 2]);
         local_x[write_index] = r;
         local_x[write_index + 2] = r2;
-        r                          =   modAdd(local_x[write_index + 1], local_x[write_index+3]);
-        r2  =   modSub(local_x[write_index + 1], local_x[write_index+3]);
+        r                        =   modAdd(local_x[write_index + 1], local_x[write_index+3]);
+        local_x[write_index + 3] =   modSub(local_x[write_index + 1], local_x[write_index+3]);
         local_x[write_index + 1] = r;
-        local_x[write_index + 3]  = r2;
         
         write_index += 4;
         k_first += m;
@@ -690,23 +690,19 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = modMul( local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4], twiddle3);
 
 
-        ulong r = modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
-        ulong r2  = modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        r = modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        r2  = modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
         local_x[((write_index) % 4) * 4 + (write_index) / 4] = r;
         local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]= r2;
 
 
         r = modAdd(local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
         r2 = modMuli(modSub(local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]));
-        local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4] = r;
-        local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
 
         x[base]     =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], r);
         x[base + (new_m << 1)]  =   modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], r);
-
-
-        x[base + new_m]                          =   modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        x[base + ((new_m << 1) + new_m)] =   modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        x[base + new_m]                          =   modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],r2);
+        x[base + ((new_m << 1) + new_m)] =   modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], r2);
 
         write_index += 4;
         k_second += m;
@@ -800,21 +796,16 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
 
 
-        r                    =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        x[i]                    =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
         r2                   =   modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
-        local_x[((write_index) % 4) * 4 + (write_index) / 4] = r;
         local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]= r2;
+        
         r                    =   modAdd(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
         r2                   =   modSub(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4] = r;
-        local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4] = r2;
 
-        x[i] = local_x[((write_index) % 4) * 4 + (write_index) / 4];
         x[i + new_m] = modMul(local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4],twiddle2);
-        x[i + (new_m << 1)] = modMul(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4],twiddle1);
-        x[i + ((new_m << 1) + new_m)] = modMul(local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4],twiddle3);
-        
-        
+        x[i + (new_m << 1)] = modMul(r,twiddle1);
+        x[i + ((new_m << 1) + new_m)] = modMul(r2,twiddle3);
         write_index += 4;
         k_second += m / 4;
     }
