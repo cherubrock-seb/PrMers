@@ -692,6 +692,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     gid_t k_first = group * m + local_id;
 
     ulong local_x[16];
+    
     int write_index = 0;
 
     #pragma unroll 4
