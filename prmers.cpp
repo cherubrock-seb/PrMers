@@ -809,9 +809,6 @@ int main(int argc, char** argv) {
 
     uint32_t pp = static_cast<uint32_t>(std::stoi(argv[1]));
     std::cout << "🧮 Testing exponent: " << pp << std::endl;
-    // À partir d’ici, argv[1] est garanti présent, que ce soit via ligne de commande ou interactif
-    uint32_t pp = static_cast<uint32_t>(std::stoi(argv[1]));
-    std::cout << "🧮 Testing exponent: " << pp << std::endl;
 
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
