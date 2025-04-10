@@ -24,10 +24,13 @@ else
     OPENCL_LDFLAGS = -lOpenCL
 endif
 
+# Additional libraries
+LIBS = -lcurl
+
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) $(OPENCL_CFLAGS) -DKERNEL_PATH="\"$(KERNEL_PATH)\"" -o $(TARGET) $(SRC) $(OPENCL_LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(OPENCL_CFLAGS) -DKERNEL_PATH="\"$(KERNEL_PATH)\"" -o $(TARGET) $(SRC) $(OPENCL_LDFLAGS) $(LIBS)
 
 install: $(TARGET)
 	@echo "Installing $(TARGET)..."
