@@ -1550,7 +1550,10 @@ int main(int argc, char** argv) {
     }
 
 
-    
+    if (!isLaunchedFromTerminal()) {
+        std::cout << "\nPress Enter to exit...";
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
 
 
     // -------------------------------------------------------------------------
