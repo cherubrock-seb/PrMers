@@ -219,7 +219,7 @@ std::string readFile(const std::string &filename) {
 // Usage printing helper (updated with new backup and path options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-l1 <value>] [-l2 <value>] [-l3 <value>]" << std::endl;
     std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
     std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
@@ -229,8 +229,12 @@ void printUsage(const char* progName) {
     std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
     std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 120)." << std::endl;
     std::cout << "  -f <path>           : (Optional) Specify path for saving/loading files (default: current directory)." << std::endl;
-    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path" << std::endl;
+    std::cout << "  -l1 <value>         : (Optional) Force local size for classic NTT kernel." << std::endl;
+    std::cout << "  -l2 <value>         : (Optional) Force local size for 2-step radix-16 NTT kernel." << std::endl;
+    std::cout << "  -l3 <value>         : (Optional) Force local size for mixed radix (radix-4 + radix-2 + Square + inverse) kernel." << std::endl;
+    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path -l1 256 -l2 128 -l3 64" << std::endl;
 }
+
 
 
 // -----------------------------------------------------------------------------

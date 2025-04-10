@@ -92,7 +92,9 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
 - `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification.
-
+- `-l1 <value>`: Force local size for classic NTT kernel  
+- `-l2 <value>`: Force local size for 2-step radix-16 NTT kernel  
+- `-l3 <value>`: Force local size for mixed radix kernel (radix-4 + radix-2 + Square + inverse)
 
 ## Uninstallation
 To uninstall PrMers, run:
