@@ -36,9 +36,12 @@ PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 - `g++` or `clang++` with C++20 support
 - Compatible with macOS Big Sur or later
 
+
 > ✅ macOS builds are supported and automatically generated in each release.
 
 Alternatively, **precompiled binaries** are available from the [Releases](https://github.com/cherubrock-seb/PrMers/releases) page.
+
+
 
 ---
 
@@ -57,6 +60,42 @@ You can view the exact build process and logs by visiting:
 👉 [GitHub Actions for PrMers](https://github.com/cherubrock-seb/PrMers/actions)
 
 This setup guarantees that even users without development tools can safely download and verify that the binaries match the public source code.
+
+### 🍏 macOS: Allow Execution of the Binary
+
+On macOS, running unsigned executables downloaded from the internet will trigger **Gatekeeper**, blocking the file by default.
+
+If you see this error:
+
+> “prmers” cannot be opened because the developer cannot be verified.
+
+Follow these steps to allow it:
+
+1. Attempt to run `prmers` once (via Terminal or double-click).
+2. Open **System Preferences → Security & Privacy → General**.
+3. At the bottom, you will see a message:
+   > “prmers” was blocked from use because it is not from an identified developer.
+4. Click **"Allow Anyway"**.
+5. Run the file again from Terminal:
+   ```bash
+   ./prmers
+   ```
+6. A dialog will appear asking for confirmation. Click **"Open"**.
+
+✅ The binary will now execute normally in the future.
+
+#### (Optional) Local code signing
+
+If you're a developer or wish to suppress some security warnings (e.g., `killed: 9`), you can locally self-sign the binary:
+
+```bash
+codesign -s - --deep --force --timestamp --options runtime ./prmers
+```
+
+> Note: This is *not* a notarized signature, but it may prevent runtime security blocks.
+
+To distribute a notarized macOS app without this issue, an Apple Developer Account is required.
+
 
 ## Installation from sources
 
