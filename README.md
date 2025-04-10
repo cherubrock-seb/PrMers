@@ -14,7 +14,7 @@ PrMers is a high-performance application that uses OpenCL, Number Theoretic Tran
 PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 
 ### ✅ Common Requirements
-- A GPU supporting **OpenCL 1.2** or higher (OpenCL 2.0 recommended)
+- A GPU supporting **OpenCL 1.2** or higher (**OpenCL 2.0** recommended)
 - OpenCL-compatible drivers installed
 
 ### 🐧 On Linux
@@ -30,15 +30,24 @@ PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 - CMake (if building via CMake)
 - Git for Windows (optional, if cloning directly)
 
+### 🍎 On macOS
+- Xcode (Command Line Tools)
+- OpenCL is **preinstalled** (no setup required)
+- `g++` or `clang++` with C++20 support
+- Compatible with macOS Big Sur or later
+
+> ✅ macOS builds are supported and automatically generated in each release.
+
 Alternatively, **precompiled binaries** are available from the [Releases](https://github.com/cherubrock-seb/PrMers/releases) page.
 
+---
 
-## 💾 Download Precompiled Binaries (Windows & Linux)
+## 💾 Download Precompiled Binaries (Linux, Windows & macOS)
 
-You can download **precompiled binaries** for **Linux** and **Windows** directly from the [Releases page](https://github.com/cherubrock-seb/PrMers/releases).
+You can download **precompiled binaries** for **Linux**, **Windows**, and **macOS** directly from the [Releases page](https://github.com/cherubrock-seb/PrMers/releases).
 
 Each release contains:
-- A compiled executable: `prmers` (Linux) or `prmers.exe` (Windows)
+- A compiled executable: `prmers` (Linux/macOS) or `prmers.exe` (Windows)
 - Required OpenCL kernel files inside a `kernels/` folder
 - A SHA256 checksum file to verify integrity
 
@@ -48,7 +57,6 @@ You can view the exact build process and logs by visiting:
 👉 [GitHub Actions for PrMers](https://github.com/cherubrock-seb/PrMers/actions)
 
 This setup guarantees that even users without development tools can safely download and verify that the binaries match the public source code.
-
 
 ## Installation from sources
 
