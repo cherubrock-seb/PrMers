@@ -29,6 +29,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -40,6 +41,11 @@
 #include <sstream>
 #include <vector>
 #include <stdexcept>
+#include <filesystem>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #include <string>
 #include <cstdlib>
 #include <cstring>
@@ -163,6 +169,30 @@ static cl_uint transformsize(uint32_t exponent) {
 		} while ((w + 1) * 2 + log_n >= 63);
 
 		return cl_uint(1) << log_n;
+}
+
+
+std::string getExecutableDir() {
+    char buffer[1024];
+
+#ifdef __APPLE__
+    uint32_t size = sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) != 0)
+        throw std::runtime_error("❌ Cannot get executable path (macOS).");
+
+#elif defined(_WIN32)
+    if (!GetModuleFileNameA(NULL, buffer, sizeof(buffer)))
+        throw std::runtime_error("❌ Cannot get executable path (Windows).");
+
+#else
+    ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer)-1);
+    if (len == -1)
+        throw std::runtime_error("❌ Cannot get executable path (Linux).");
+    buffer[len] = '\0';
+#endif
+
+    std::string fullPath(buffer);
+    return fullPath.substr(0, fullPath.find_last_of("/\\"));
 }
 
 // -----------------------------------------------------------------------------
@@ -1038,16 +1068,26 @@ int main(int argc, char** argv) {
     // -------------------------------------------------------------------------
     std::string kernelSource;
     try {
-        std::string kernelFile = std::string(KERNEL_PATH) + "prmers.cl";
+        std::string execDir = getExecutableDir();
 
-        
+        std::string kernelFile = execDir + "/prmers.cl";
+        if (!std::filesystem::exists(kernelFile)) {
+            kernelFile = execDir + "/kernels/prmers.cl";
+            if (!std::filesystem::exists(kernelFile)) {
+                throw std::runtime_error("Kernel file 'prmers.cl' not found in current or kernels/ directory.");
+            }
+        }
+
         kernelSource = readFile(kernelFile);
-    } catch(const std::exception &e) {
-        std::cerr << e.what() << std::endl;
+    } catch (const std::exception &e) {
+        std::cerr << "❌ Error loading OpenCL kernel: " << e.what() << std::endl;
         clReleaseCommandQueue(queue);
         clReleaseContext(context);
         return 1;
     }
+
+
+   
     const char* src = kernelSource.c_str();
     size_t srclen = kernelSource.size();
     cl_program program = clCreateProgramWithSource(context, 1, &src, &srclen, &err);
