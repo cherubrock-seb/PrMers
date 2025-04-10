@@ -29,11 +29,20 @@ jobs:
           mkdir $env:RUNNER_TEMP\opencl
           tar.exe -xf $env:RUNNER_TEMP\opencl.zip --strip-components=1 -C $env:RUNNER_TEMP\opencl
 
-      - name: Configure CMake
+      - name: Clone and bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+
+      - name: Install libcurl via vcpkg
+        run: .\vcpkg\vcpkg install curl:x64-windows
+
+      - name: Configure CMake with vcpkg toolchain
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release `
             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
-            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib"
+            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
+            -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake
 
       - name: Build
         run: cmake --build build --config Release
@@ -66,4 +75,3 @@ jobs:
             prmers-windows.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
