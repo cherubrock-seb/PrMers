@@ -24,6 +24,7 @@
  *
  * This code is released as free software.
  */
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #include <CL/cl.h>
 #include <iostream>
 #include <fstream>
@@ -920,7 +921,32 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to create OpenCL context." << std::endl;
         return 1;
     }
-    cl_command_queue queue = clCreateCommandQueueWithProperties(context, device, 0, &err);
+
+    char version_str[128];
+    err = clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(version_str), version_str, nullptr);
+    if (err != CL_SUCCESS) {
+        std::cerr << "Failed to get OpenCL device version." << std::endl;
+        return 1;
+    }
+
+    unsigned int major = 1, minor = 2;  // fallback au cas où
+    sscanf(version_str, "OpenCL %u.%u", &major, &minor);
+    std::cout << "OpenCL device version detected: " << major << "." << minor << std::endl;
+
+
+    cl_command_queue queue;
+    if (major >= 2) {
+        queue = clCreateCommandQueueWithProperties(context, device, nullptr, &err);
+    } else {
+        queue = clCreateCommandQueue(context, device, 0, &err);
+    }
+    if (err != CL_SUCCESS) {
+        std::cerr << "Failed to create command queue." << std::endl;
+        return 1;
+    }
+
+
+
     if (err != CL_SUCCESS) {
         std::cerr << "Failed to create command queue." << std::endl;
         return 1;
