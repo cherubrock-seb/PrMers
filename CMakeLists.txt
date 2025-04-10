@@ -8,6 +8,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(OpenCL REQUIRED)
 include_directories(${OpenCL_INCLUDE_DIRS})
 
+find_package(CURL)
+if (CURL_FOUND)
+    message(STATUS "libcurl found, enabling CURL support.")
+    include_directories(${CURL_INCLUDE_DIRS})
+    set(EXTRA_LIBS ${EXTRA_LIBS} ${CURL_LIBRARIES})
+    target_compile_definitions(prmers PRIVATE HAS_CURL=1)
+else()
+    message(WARNING "libcurl not found. Continuing without CURL support.")
+endif()
+
+
 # Add executable
 add_executable(prmers
     prmers.cpp
@@ -17,7 +28,8 @@ add_executable(prmers
     proof/sha3.cpp
 )
 
-target_link_libraries(prmers ${OpenCL_LIBRARIES})
+target_link_libraries(prmers ${OpenCL_LIBRARIES} ${EXTRA_LIBS})
+
 
 # Define macro for kernel path
 if (WIN32)
