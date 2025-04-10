@@ -1542,18 +1542,23 @@ int main(int argc, char** argv) {
     if (mode == "prp") {
         bool resultIs9 = (x[0] == 9) && std::all_of(x.begin() + 1, x.end(), [](uint64_t v){ return v == 0; });
         std::cout << "\nM" << p << " PRP test " << (resultIs9 ? "succeeded (result is 9)." : "failed (result is not 9).") << std::endl;
+        if (!isLaunchedFromTerminal()) {
+            std::cout << "\nPress Enter to exit...";
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
         return resultIs9 ? 0 : 1;
     } else {
         bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
         std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
+        if (!isLaunchedFromTerminal()) {
+            std::cout << "\nPress Enter to exit...";
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
         return isPrime ? 0 : 1;
     }
 
 
-    if (!isLaunchedFromTerminal()) {
-        std::cout << "\nPress Enter to exit...";
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    }
+
 
 
     // -------------------------------------------------------------------------
