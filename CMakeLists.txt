@@ -38,4 +38,4 @@ else()
 endif()
 
 # Link OpenCL last
-target_link_libraries(prmers ${OpenCL_LIBRARIES})
+target_link_libraries(prmers PRIVATE ${OpenCL_LIBRARIES})
