@@ -543,7 +543,7 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
             clSetKernelArg(kernel_ntt_mm_2_steps, 1, sizeof(cl_mem), &buf_w);
             clSetKernelArg(kernel_ntt_mm_2_steps, 2, sizeof(cl_uint), &m);
             clSetKernelArg(kernel_ntt_mm_2_steps, 3, 0, NULL); 
-            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize,
+            executeKernelAndDisplay(queue, kernel_ntt_mm_2_steps, buf_x, workers/4, localSize2,
             "kernel_ntt_mm_3_steps (m=" + std::to_string(m) + ")", n, profiling);
             
             clSetKernelArg(kernel_ntt_last_m1, 0, sizeof(cl_mem), &buf_x);
@@ -745,6 +745,10 @@ int main(int argc, char** argv) {
     bool profiling = false;
     bool has_p = false;
     bool force_carry = false;
+    int max_local_size1 = 0;
+    int max_local_size2 = 0;
+    int max_local_size3 = 0;
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -799,6 +803,33 @@ int main(int argc, char** argv) {
                 i++;
             } else {
                 std::cerr << "Error: Missing value for -f <path>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-l1") == 0) {
+            if (i + 1 < argc) {
+                max_local_size1 = std::atoi(argv[i + 1]);
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -l1 <max_local_size1>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-l2") == 0) {
+            if (i + 1 < argc) {
+                max_local_size2 = std::atoi(argv[i + 1]);
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -l2 <max_local_size2>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-l3") == 0) {
+            if (i + 1 < argc) {
+                max_local_size3 = std::atoi(argv[i + 1]);
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -l3 <max_local_size3>." << std::endl;
                 return 1;
             }
         }
@@ -1029,13 +1060,29 @@ int main(int argc, char** argv) {
     if(workersCarry<localSizeCarry){
         localSizeCarry = workersCarry;
     }
-    size_t localSize2 = localSize;
-    size_t localSize3 = localSize;
 
-    if(localSize < maxWork){
-        localSize = (localSize/4 <= 0) ? 1 : (localSize/4);
-        localSize2 = (localSize/16  <= 0) ? 1 : (localSize/16);
-        localSize3 = (localSize/8  <= 0) ? 1 : (localSize/8);
+    
+    size_t localSize2 = (localSize/4) <1 ? 1 : (localSize/4) ;
+    size_t localSize3 = (localSize/2) <1 ? 1 : (localSize/2) ;  
+    
+    /*if (max_local_size1 == 0){
+        max_local_size2 = (maxWork) <1 ? 1 : (maxWork) ;  
+    }
+    if (max_local_size2 == 0){
+        max_local_size2 = (maxWork/4) <1 ? 1 : (maxWork/4) ; 
+    }
+    if (max_local_size3 == 0){
+        max_local_size3 = (maxWork/2) <1 ? 1 : (maxWork/2) ; 
+    }*/
+
+    if (max_local_size1 > 0) {
+        localSize = max_local_size1;
+    }
+    if (max_local_size2 > 0) {
+        localSize2 = max_local_size2;
+    }
+    if (max_local_size3 > 0) {
+        localSize3 = max_local_size3;
     }
 
 
@@ -1070,7 +1117,7 @@ int main(int argc, char** argv) {
     }
     // Append work-group size to build options
     std::string build_options = getBuildOptions(argc, argv);
-    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) + " -DMODULUS_P=" + std::to_string(p) + " -DTRANSFORM_SIZE_N=" + std::to_string(n) + " -DLOCAL_SIZE=" + std::to_string(localSize);
+    build_options += " -DWG_SIZE=" + std::to_string(workGroupSize) + " -DLOCAL_PROPAGATION_DEPTH=" + std::to_string(localCarryPropagationDepth) + " -DCARRY_WORKER=" + std::to_string(workersCarry) + " -DLOCAL_PROPAGATION_DEPTH_DIV4=" + std::to_string(adjustedDepth)+ " -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=" + std::to_string(adjustedDepthMin) + " -DLOCAL_PROPAGATION_DEPTH_DIV2=" + std::to_string(adjustedDepth2)+ " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=" + std::to_string(adjustedDepthMin2) + " -DWORKER_NTT=" + std::to_string(workersNtt) + " -DWORKER_NTT_2_STEPS=" + std::to_string(workersNtt2step) + " -DMODULUS_P=" + std::to_string(p) + " -DTRANSFORM_SIZE_N=" + std::to_string(n) + " -DLOCAL_SIZE=" + std::to_string(localSize)+ " -DLOCAL_SIZE2=" + std::to_string(localSize2)+ " -DLOCAL_SIZE3=" + std::to_string(localSize3);
     std::cout << "Building OpenCL program with options: " << build_options << std::endl;
     err = clBuildProgram(program, 1, &device, build_options.empty() ? nullptr : build_options.c_str(), nullptr, nullptr);
     if(err != CL_SUCCESS) {

@@ -269,6 +269,12 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 #ifndef LOCAL_SIZE
 #define LOCAL_SIZE 256
 #endif
+#ifndef LOCAL_SIZE2
+#define LOCAL_SIZE2 64
+#endif
+#ifndef LOCAL_SIZE3
+#define LOCAL_SIZE3 128
+#endif
 #ifndef TRANSFORM_SIZE_N
 #define TRANSFORM_SIZE_N 1
 #endif
@@ -617,7 +623,9 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
                                                   __global ulong* restrict wi,
                                                   const uint m) {
 
-    ulong local_x[16];
+    //ulong local_x[16];
+    __local ulong shared_mem[LOCAL_SIZE2 * 16];
+    __local ulong* local_x = shared_mem + get_local_id(0) * 16;
     int write_index = 0;
     const gid_t gid = get_global_id(0);
     const gid_t group = gid / m;
@@ -632,22 +640,32 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     #pragma unroll 4
     for (int pass = 0; pass < 4; pass++) {
         const gid_t base = 4 * (k_first - j) + j;
-        ulong4 coeff = (ulong4)(
-            x[base + 0 * m],
-            x[base + 1 * m],
-            x[base + 2 * m],
-            x[base + 3 * m]
-        );
-        ulong4 u = modMul4(coeff, twiddles);
-        const ulong4 r = butterfly(u);
-        coeff = (ulong4)(
-            modAdd(r.s0, r.s2),
-            modAdd(r.s1, r.s3),
-            modSub(r.s0, r.s2),
-            modSub(r.s1, r.s3)
-        );
 
-        vstore4(coeff, write_index >> 2, local_x);
+        local_x[write_index] = x[base];
+        local_x[write_index+1] = modMul(x[base + m], tmp.s1);
+        local_x[write_index+2] = modMul(x[base + (m << 1)], tmp.s0);
+        local_x[write_index+3] = modMul(x[base + ((m << 1) + m)], tmp.s2);
+        
+        ulong r = modAdd(local_x[write_index], local_x[write_index+1]);
+        ulong r2  = modSub(local_x[write_index], local_x[write_index+1]);
+        local_x[write_index] = r;
+        local_x[write_index + 1] = r2;
+
+
+        r = modAdd(local_x[write_index+2], local_x[write_index+3]);
+        r2 = modMuli(modSub(local_x[write_index+3], local_x[write_index+2]));
+        local_x[write_index + 2] = r;
+        local_x[write_index+3] = r2;
+
+        r                    =   modAdd(local_x[write_index], local_x[write_index + 2]);
+        r2                   =   modSub(local_x[write_index], local_x[write_index + 2]);
+        local_x[write_index] = r;
+        local_x[write_index + 2] = r2;
+        r                          =   modAdd(local_x[write_index + 1], local_x[write_index+3]);
+        r2  =   modSub(local_x[write_index + 1], local_x[write_index+3]);
+        local_x[write_index + 1] = r;
+        local_x[write_index + 3]  = r2;
+        
         write_index += 4;
         k_first += m;
     }
@@ -658,26 +676,36 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
 
     #pragma unroll 4
     for (int pass = 0; pass < 4; pass++) {
-        const gid_t j = k_second & (new_m - 1);
+        gid_t j = k_second & (new_m - 1);
         const gid_t base = 4 * (k_second - j) + j;
         const gid_t twiddle_offset = 6 * new_m + 3 * j;
-
-        ulong4 coeff = (ulong4)(
-            local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4],
-            local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4],
-            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4],
-            local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4]
-        );
-        write_index += 4;
         const ulong4 tmp = vload4(0, wi + twiddle_offset);
-        const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
-        ulong4 u = modMul4(coeff, twiddles);
-        const ulong4 r = butterfly(u);
+        //const ulong4 twiddles = (ulong4)(1UL, tmp.s1, tmp.s0, tmp.s2);
 
-        x[base + 0 * new_m] = modAdd(r.s0, r.s2);
-        x[base + 1 * new_m] = modAdd(r.s1, r.s3);
-        x[base + 2 * new_m] = modSub(r.s0, r.s2);
-        x[base + 3 * new_m] = modSub(r.s1, r.s3);
+        local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4] = modMul( local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4], tmp.s1);
+        local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4] = modMul( local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], tmp.s0);
+        local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = modMul( local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4], tmp.s2);
+
+
+        ulong r = modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        ulong r2  = modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        local_x[((write_index) % 4) * 4 + (write_index) / 4] = r;
+        local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]= r2;
+
+
+        r = modAdd(local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        r2 = modMuli(modSub(local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]));
+        local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4] = r;
+        local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
+
+        x[base]     =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], r);
+        x[base + (new_m << 1)]  =   modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], r);
+
+
+        x[base + new_m]                          =   modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4],local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        x[base + ((new_m << 1) + new_m)] =   modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+
+        write_index += 4;
         k_second += m;
     }
 }
@@ -691,8 +719,9 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     const gid_t local_id = gid % (m / 4);
     gid_t k_first = group * m + local_id;
 
-    ulong local_x[16];
-    
+    //ulong local_x[16];
+    __local ulong shared_mem[LOCAL_SIZE2 * 16];
+    __local ulong* local_x = shared_mem + get_local_id(0) * 16;
     int write_index = 0;
 
     #pragma unroll 4
@@ -972,7 +1001,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     uint global_base_idx = gid * 8;
     uint local_base_idx  = lid * 8;
     
-    __local ulong localX[LOCAL_SIZE * 8];
+    __local ulong localX[LOCAL_SIZE3 * 8];
 
     #pragma unroll 8
     for (int i = 0; i < 8; i++) {
