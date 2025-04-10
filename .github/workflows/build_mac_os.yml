@@ -1,0 +1,46 @@
+name: Build macOS with OpenCL
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up OpenCL
+        run: |
+          echo "OpenCL is preinstalled on macOS. No action needed."
+
+      - name: Build with Makefile
+        run: make KERNEL_PATH=./kernels/
+
+      - name: Package for release
+        run: |
+          mkdir -p prmers_package/kernels
+          cp prmers prmers_package/
+          cp prmers.cl prmers_package/kernels/
+          tar -czvf prmers-macos.tar.gz -C prmers_package .
+
+      - name: Calculate SHA256 checksum
+        run: shasum -a 256 prmers-macos.tar.gz > prmers-macos.tar.gz.sha256
+
+      - name: Upload release to GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            prmers-macos.tar.gz
+            prmers-macos.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
