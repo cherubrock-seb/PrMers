@@ -29,7 +29,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
-
+#include <regex>
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -982,165 +982,255 @@ void markJsonAsSent(const std::string& path) {
     }
 }
 
-bool sendResultToPrimeNet(const std::string& resultLine, const std::string& user, const std::string& password) {
-    try {
-        CURL* curl = curl_easy_init();
-        if (!curl) {
-            std::cerr << "Error initializing libcurl." << std::endl;
-            return false;
-        }
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    std::string* response = static_cast<std::string*>(userp);
+    response->append(static_cast<char*>(contents), size * nmemb);
+    return size * nmemb;
+}
 
-        CURLcode res;
-        std::string readBuffer;
+std::string extractUID(const std::string& html) {
+    std::string key = "name=\"was_logged_in_as\" value=\"";
+    auto pos = html.find(key);
+    if (pos == std::string::npos) return "";
+    pos += key.length();
+    auto end = html.find("\"", pos);
+    if (end == std::string::npos) return "";
+    return html.substr(pos, end - pos);
+}
 
-        // Construct login and result submission payload
-        std::ostringstream postData;
-        postData << "user_login=" << curl_easy_escape(curl, user.c_str(), 0)
-                 << "&user_password=" << curl_easy_escape(curl, password.c_str(), 0)
-                 << "&data=" << curl_easy_escape(curl, resultLine.c_str(), 0);
-
-        struct curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
-
-        curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/manual_result/");
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.str().c_str());
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies.txt");
-        curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies.txt");
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](void* contents, size_t size, size_t nmemb, void* userp) -> size_t {
-            ((std::string*)userp)->append((char*)contents, size * nmemb);
-            return size * nmemb;
-        });
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-
-        res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(headers);
-
-        if (res != CURLE_OK) {
-            std::cerr << "Failed to send result: " << curl_easy_strerror(res) << std::endl;
-            return false;
-        }
-
-        if (readBuffer.find("Error code") != std::string::npos) {
-            size_t begin = readBuffer.find("Error code");
-            size_t end = readBuffer.find("</div>", begin);
-            if (end != std::string::npos) {
-                std::cerr << "Server responded with error: " << readBuffer.substr(begin, end - begin) << std::endl;
-            } else {
-                std::cerr << "Server responded with error:\n" << readBuffer << std::endl;
-            }
-            return false;
-        } else if (readBuffer.find("CPU credit is") != std::string::npos) {
-            size_t begin = readBuffer.find("CPU credit is");
-            size_t end = readBuffer.find("</div>", begin);
-            if (end != std::string::npos) {
-                std::cout << readBuffer.substr(begin, end - begin) << std::endl;
-            } else {
-                std::cout << readBuffer << std::endl;
-            }
-            return true;
-        } else {
-            std::cerr << "Unexpected response from PrimeNet:\n" << readBuffer.substr(0, 500) << "..." << std::endl;
-            return false;
-        }
-    } catch (const std::exception& ex) {
-        std::cerr << "Exception while sending result: " << ex.what() << std::endl;
+bool sendManualResultWithLogin(const std::string& jsonResult, const std::string& username, const std::string& password) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "❌ Failed to initialize libcurl.\n";
         return false;
     }
+
+    FILE* trace = fopen("curl_trace.txt", "w");
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(curl, CURLOPT_STDERR, trace);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies.txt");
+    curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies.txt");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+    std::string loginResponse;
+    curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &loginResponse);
+
+    std::ostringstream loginData;
+    char* escapedUser = curl_easy_escape(curl, username.c_str(), 0);
+    char* escapedPass = curl_easy_escape(curl, password.c_str(), 0);
+    loginData << "user_login=" << escapedUser << "&user_password=" << escapedPass;
+    curl_free(escapedUser);
+    curl_free(escapedPass);
+
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, loginData.str().c_str());
+
+    std::cerr << "[TRACE] Sending login with user: " << username << std::endl;
+    CURLcode loginRes = curl_easy_perform(curl);
+    std::cerr << "[TRACE] Login response size: " << loginResponse.size() << " bytes\n";
+
+    if (loginRes != CURLE_OK || loginResponse.find("logged in") == std::string::npos) {
+        std::cerr << "❌ Login failed or session not recognized.\n";
+        curl_easy_cleanup(curl);
+        fclose(trace);
+        return false;
+    }
+
+    std::string htmlFormPage;
+    curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/manual_result/");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);     // clear POST data
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);              // force GET
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &htmlFormPage);
+
+
+    CURLcode pageRes = curl_easy_perform(curl);
+    if (pageRes != CURLE_OK) {
+        std::cerr << "❌ Failed to get manual_result page: " << curl_easy_strerror(pageRes) << "\n";
+        curl_easy_cleanup(curl);
+        fclose(trace);
+        return false;
+    }
+
+    std::string uid = extractUID(htmlFormPage);
+    std::cerr << "[TRACE] Extracted was_logged_in_as UID: " << uid << "\n";
+    if (uid.empty()) {
+        std::cerr << "❌ Could not find was_logged_in_as value in form page.\n";
+        curl_easy_cleanup(curl);
+        fclose(trace);
+        return false;
+    }
+
+    curl_mime* form = curl_mime_init(curl);
+
+    curl_mimepart* field = curl_mime_addpart(form);
+    curl_mime_name(field, "data_file");
+    curl_mime_data(field, "", CURL_ZERO_TERMINATED);
+
+    field = curl_mime_addpart(form);
+    curl_mime_name(field, "was_logged_in_as");
+    curl_mime_data(field, uid.c_str(), CURL_ZERO_TERMINATED);
+
+    field = curl_mime_addpart(form);
+    curl_mime_name(field, "data");
+    curl_mime_data(field, jsonResult.c_str(), CURL_ZERO_TERMINATED);
+
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/manual_result/");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, nullptr);
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    std::cerr << "[TRACE] Sending manual result with was_logged_in_as = " << uid << std::endl;
+
+    CURLcode res = curl_easy_perform(curl);
+    fflush(trace);
+    fclose(trace);
+    curl_mime_free(form);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        std::cerr << "❌ Failed to send result: " << curl_easy_strerror(res) << "\n";
+        return false;
+    }
+
+    std::cerr << "[TRACE] Server response size: " << response.size() << " bytes\n";
+    std::cout << "✅ Server response:...\n";
+    std::string startTag = "<h2>Manually check in your results</h2>";
+    std::string endTagA = "<a href=\"/manual_result/\">Submit more results</a>";
+    std::string endTagB = "Aborting processing.</div>";
+
+    auto startPos = response.find(startTag);
+    size_t endPos = std::string::npos;
+    std::string chosenEndTag;
+    bool usedFallback = false;
+
+    if (startPos != std::string::npos) {
+        endPos = response.find(endTagA, startPos);
+        chosenEndTag = endTagA;
+
+        if (endPos == std::string::npos) {
+            endPos = response.find(endTagB, startPos);
+            chosenEndTag = endTagB;
+        }
+
+        if (endPos == std::string::npos && response.size() > startPos + 1000) {
+            endPos = startPos + 1000;
+            usedFallback = true;
+        }
+
+        if (endPos != std::string::npos) {
+            std::string htmlChunk = response.substr(startPos, endPos - startPos + (usedFallback ? 0 : chosenEndTag.length()));
+
+            std::string readable;
+            bool insideTag = false;
+            for (char c : htmlChunk) {
+                if (c == '<') {
+                    insideTag = true;
+                    continue;
+                }
+                if (c == '>') {
+                    insideTag = false;
+                    readable += ' ';
+                    continue;
+                }
+                if (!insideTag) readable += c;
+            }
+
+            std::regex spaceRegex("\\s+");
+            readable = std::regex_replace(readable, spaceRegex, " ");
+
+            std::cout << "\n📝 Parsed PrimeNet Result Summary:\n" << readable << "\n";
+        } else {
+            std::cout << "⚠️ Could not find an end marker. Raw response:\n\n" << response << "\n";
+        }
+    } else {
+        std::cout << "⚠️ Could not find start of results section. Raw response:\n\n" << response << "\n";
+    }
+
+    return true;
 }
 
 
 
-
-void promptToSendResult(const std::string& jsonPath, const std::string& resultLine, std::string& user) {
+void promptToSendResult(const std::string& jsonPath, std::string& user) {
     std::string response;
     std::cout << "\n✅ JSON result written to: " << jsonPath << std::endl;
     std::cout << "Do you want to send the result to PrimeNet? (y/n): ";
     std::getline(std::cin, response);
-
-    if (!response.empty() && (response[0] == 'y' || response[0] == 'Y')) {
-        if (user.empty()) {
-            std::cout << "Enter your PrimeNet username: ";
-            std::getline(std::cin, user);
-        }
-
-        std::string password = promptHiddenPassword();
-        bool success = sendResultToPrimeNet(resultLine, user, password);
-        while (!success) {
-            std::cout << "❌ Failed to send result to PrimeNet." << std::endl;
-            std::cout << "Do you want to retry? (y/n): ";
-            std::getline(std::cin, response);
-            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
-                std::cout << "Result not sent." << std::endl;
-                break;
-            }
-
-            std::cout << "Re-enter your PrimeNet username (leave empty to reuse '" << user << "'): ";
-            std::string newUser;
-            std::getline(std::cin, newUser);
-            if (!newUser.empty()) user = newUser;
-
-            password = promptHiddenPassword();
-            success = sendResultToPrimeNet(resultLine, user, password);
-        }
-
-        if (success) {
-            std::cout << "✅ Result successfully sent to PrimeNet." << std::endl;
-            std::ofstream(jsonPath + ".sent").put('\n');
-        }
-        // --- 🔍 Check for other unsent JSONs in the same folder
-        fs::path dir = fs::path(jsonPath).parent_path();
-        for (const auto& entry : fs::directory_iterator(dir)) {
-            if (entry.is_regular_file()) {
-                auto p = entry.path();
-                if (p.extension() == ".json" && !fs::exists(p.string() + ".sent")) {
-                    if (p == jsonPath) continue; // Already handled
-
-                    // Forge result line from filename and content
-                    std::ifstream f(p);
-                    std::stringstream buffer;
-                    buffer << f.rdbuf();
-                    std::string content = buffer.str();
-
-                    std::string exponent;
-                    std::string res64;
-                    std::string testType;
-
-                    try {
-                        size_t underscore = p.filename().string().find("_");
-                        exponent = p.filename().string().substr(0, underscore);
-
-                        size_t res64_pos = content.find("\"res64\":\"");
-                        if (res64_pos != std::string::npos) {
-                            size_t start = res64_pos + 10;
-                            size_t end = content.find('"', start);
-                            res64 = content.substr(start, end - start);
-                        }
-
-                        if (content.find("PRP") != std::string::npos) {
-                            testType = "PRP";
-                        } else {
-                            testType = "LL";
-                        }
-                    } catch (...) {
-                        std::cerr << "Failed to parse file " << p << " for result line." << std::endl;
-                        continue;
-                    }
-
-                    std::string forgedLine = testType + "=" + exponent + "," + res64 + ",0xAID-PRMERS-1234," + user;
-                    promptToSendResult(p.string(), forgedLine, user);
-                }
-            }
-        }
-    } else {
+    if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
         std::cout << "Result not sent." << std::endl;
+        return;
     }
 
+    if (user.empty()) {
+        std::cout << "Enter your PrimeNet username: ";
+        std::getline(std::cin, user);
+    }
 
+    std::string password = promptHiddenPassword();
+
+    std::ifstream fin(jsonPath);
+    if (!fin) {
+        std::cerr << "Cannot open file: " << jsonPath << std::endl;
+        return;
+    }
+
+    std::stringstream buffer;
+    buffer << fin.rdbuf();
+    std::string jsonContent = buffer.str();
+    fin.close();
+
+    bool success = sendManualResultWithLogin(jsonContent, user, password);
+
+    while (!success) {
+        std::cout << "❌ Failed to send result to PrimeNet." << std::endl;
+        std::cout << "Do you want to retry? (y/n): ";
+        std::getline(std::cin, response);
+        if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+            std::cout << "Result not sent." << std::endl;
+            break;
+        }
+
+        std::cout << "Re-enter your PrimeNet username (leave empty to reuse '" << user << "'): ";
+        std::string newUser;
+        std::getline(std::cin, newUser);
+        if (!newUser.empty()) user = newUser;
+        password = promptHiddenPassword();
+
+        std::ifstream fin2(jsonPath);
+        std::stringstream buffer2;
+        buffer2 << fin2.rdbuf();
+        jsonContent = buffer2.str();
+        fin2.close();
+
+        success = sendManualResultWithLogin(jsonContent, user, password);
+    }
+
+    if (success) {
+        std::cout << "✅ Result successfully sent to PrimeNet." << std::endl;
+        std::ofstream out(jsonPath + ".sent");
+        out.put('\n');
+        out.close();
+    }
+
+    fs::path dir = fs::path(jsonPath).parent_path();
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (entry.is_regular_file()) {
+            auto p = entry.path();
+            std::string filename = p.filename().string();
+            if (filename.size() >= 12 && filename.compare(filename.size() - 12, 12, "_result.json") == 0
+                && !fs::exists(p.string() + ".sent")) {
+                if (p == jsonPath) continue;
+                promptToSendResult(p.string(), user);
+            }
+        }
+    }
 }
-
 
 
 
@@ -1946,7 +2036,7 @@ int main(int argc, char** argv) {
             << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
         resultLine = oss.str();
 
-        promptToSendResult(jsonFile, resultLine, user);
+        promptToSendResult(jsonFile, user);
 
         std::cout << "\nPress Enter to exit...";
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -1963,7 +2053,7 @@ int main(int argc, char** argv) {
             << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
         resultLine = oss.str();
 
-        promptToSendResult(jsonFile, resultLine, user);
+        promptToSendResult(jsonFile, user);
 
         std::cout << "\nPress Enter to exit...";
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
