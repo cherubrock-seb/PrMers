@@ -1269,6 +1269,8 @@ int main(int argc, char** argv) {
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;
+    bool noAsk = false;
+
     std::string user;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
@@ -1292,6 +1294,9 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Missing value for -d <device_id>." << std::endl;
                 return 1;
             }
+        }
+        else if (std::strcmp(argv[i], "--noask") == 0 || std::strcmp(argv[i], "-noask") == 0) {
+            noAsk = true;
         }
         else if (std::strcmp(argv[i], "-c") == 0) {
             if (i + 1 < argc) {
@@ -2036,11 +2041,13 @@ int main(int argc, char** argv) {
             << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
         resultLine = oss.str();
 
-        promptToSendResult(jsonFile, user);
-
-        std::cout << "\nPress Enter to exit...";
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        return resultIs9 ? 0 : 1;
+        
+        if(!noAsk){
+            promptToSendResult(jsonFile, user);
+            std::cout << "\nPress Enter to exit...";
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            return resultIs9 ? 0 : 1;
+        }
     } else {
         bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
         std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
