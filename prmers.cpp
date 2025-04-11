@@ -533,7 +533,7 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     }
 }
 
-void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
+void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime, uint32_t expo) {
     double progress = (100.0 * iter) / total_iters;
     double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
     double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
@@ -554,6 +554,7 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime) {
 
     std::cout << "\r" << color
             << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
+            << "Exponent: " << expo << " | "
             << "Elapsed: " << elapsedTime << "s | "
             << "Iterations/sec: " << iters_per_sec << " | "
             << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
@@ -576,13 +577,13 @@ void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) 
 void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
                              time_point<high_resolution_clock>& lastDisplay,
                              const time_point<high_resolution_clock>& start,
-                             cl_command_queue queue) {
+                             cl_command_queue queue,int32_t expo) {
     auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
     if (duration >= 10 || iter == -1) {
         if (iter == -1)
             iter = total_iters;
         double elapsedTime = duration_cast<nanoseconds>(high_resolution_clock::now() - start).count() / 1e9;
-        displayProgress(iter, total_iters, elapsedTime);
+        displayProgress(iter, total_iters, elapsedTime, expo);
         lastDisplay = high_resolution_clock::now();
     }
 }
@@ -1838,7 +1839,7 @@ int main(int argc, char** argv) {
     auto startTime = high_resolution_clock::now();
     auto lastDisplay = startTime;
     auto last_backup_time = startTime;
-    checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue);
+    checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue, p);
     
     if(debug)
         std::cout << "Number of iterations to be done = " << total_iters << std::endl;
@@ -1859,7 +1860,7 @@ int main(int argc, char** argv) {
         if (mode == "ll") {
             executeKernelAndDisplay(queue, k_sub2, buf_x, 1, 1, "kernel_sub2", n, profiling);
         }
-        checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue);
+        checkAndDisplayProgress(iter-resume_iter, total_iters, lastDisplay, startTime, queue, p);
         
         if (proof && std::find(proofSet.points.begin(), proofSet.points.end(), iter) != proofSet.points.end()) {
             clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, n * sizeof(uint64_t), x.data(), 0, nullptr, nullptr);
@@ -1937,7 +1938,7 @@ int main(int argc, char** argv) {
     // After successful completion, remove the loop state file as it is no longer needed.
     std::remove(loop_filename.c_str());
 
-    checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue);
+    checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue, p);
     clFinish(queue);
     auto endTime = high_resolution_clock::now();
     
