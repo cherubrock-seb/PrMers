@@ -40,6 +40,17 @@ Key features:
 | 57885161  | 51.00   | 13d 3h 16m 30s   |
 ```
 
+#### 🧊 NVIDIA 840M (OpenCL 1.2, legacy GPU - Windows) 
+
+
+```
+| Exponent  | Iter/s  | ETA              |
+|-----------|---------|------------------|
+| 136279841 | 2.46    | 637d 18h 5m 0s   |
+| 1257787   | 245.44  | 0d 1h 24m 0s     |
+| 756839    | 249.23  | 0d 0h 49m 53s    |
+```
+
 For a full table of benchmark results, see the section below 👇
 
 
