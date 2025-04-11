@@ -48,6 +48,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          body: |
+            ✅ This release was built automatically via GitHub Actions from the source code in this repository.
+            🔒 Each binary is accompanied by a `.sha256` checksum file for verification.
+            💡 You can verify the integrity of the downloaded files using:
+
+                sha256sum -c <filename>.sha256
           files: prmers-linux.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
