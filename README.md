@@ -1,6 +1,33 @@
 # PrMers: GPU-accelerated Mersenne Primality Test
 
-PrMers is a high-performance application that uses OpenCL, Number Theoretic Transforms (NTT), and Lucas–Lehmer / PRP algorithms to perform Mersenne prime tests on GPUs. It features automatic state backup and resume functionality to allow long-running computations to be restarted.
+PrMers is a high-performance GPU application for testing the primality of Mersenne numbers using the Lucas–Lehmer and PRP (Probable Prime) algorithms. It leverages OpenCL and Number Theoretic Transforms (NTT) for fast large-integer arithmetic, and is optimized for long-running computations.
+
+Key features:
+- ⚡ GPU acceleration using OpenCL (including legacy OpenCL 1.2 devices)
+- 🔁 Automatic checkpointing with resume support
+- 📤 Submit results directly to your [mersenne.org](https://www.mersenne.org/) PrimeNet account
+- 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
+- 📊 Benchmark output for performance comparison across devices
+
+
+### 📈 Sample Performance Results on Radeon VII GPU
+
+```
+| Exponent  | Iter/s  | ETA             |
+|-----------|---------|-----------------|
+| 136279841 | 275.75  | 5d 17h 15m 57s  |
+| 82589933  | 473.57  | 2d 0h 25m 47s   |
+| 74207281  | 473.48  | 1d 19h 31m 18s  |
+| 57885161  | 473.77  | 1d 9h 55m 28s   |
+| 43112609  | 469.56  | 1d 1h 29m 25s   |
+| 37156667  | 849.48  | 0d 12h 8m 10s   |
+| 20996011  | 1117.04 | 0d 5h 12m 26s   |
+| 1257787   | 2292.34 | 0d 0h 8m 18s    |
+| 756839    | 2238.93 | 0d 0h 4m 48s    |
+```
+
+For a full table of benchmark results, see the section below 👇
+
 
 ## Features
 
@@ -42,8 +69,129 @@ PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 Alternatively, **precompiled binaries** are available from the [Releases](https://github.com/cherubrock-seb/PrMers/releases) page.
 
 
+## ⚙️ Example Execution and Submission
 
----
+Below is a typical run of `PrMers`, demonstrating the full process from launching a PRP test to submitting the result to PrimeNet.
+
+```
+sebastien@cherubrock:~/gpuowltest$ ./prmers 86243
+🧮 Testing exponent: 86243
+PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
+Testing exponent: 86243
+Using OpenCL device ID: 0
+Mode selected: PRP
+Backup interval: 120 seconds
+Save/Load path: .
+OpenCL device version detected: 2.0
+Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
+Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 0
+Max CL_DEVICE_LOCAL_MEM_SIZE = 0
+Max max_digit_width for IBDWT = 22
+
+Launching OpenCL kernel (p = 86243); computation may take a while.
+Transform size: 4096
+Final workers count: 4096
+Work-groups count: 256
+Work-groups size: 16
+Workers for carry propagation count: 512
+Local carry propagation depht: 8
+Local size carry: 256
+Building OpenCL program with options:  -DWG_SIZE=16 -DLOCAL_PROPAGATION_DEPTH=8 -DCARRY_WORKER=512 -DLOCAL_PROPAGATION_DEPTH_DIV4=2 -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=1 -DLOCAL_PROPAGATION_DEPTH_DIV2=2 -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=3 -DWORKER_NTT=1024 -DWORKER_NTT_2_STEPS=256 -DMODULUS_P=86243 -DTRANSFORM_SIZE_N=4096 -DLOCAL_SIZE=256 -DLOCAL_SIZE2=256 -DLOCAL_SIZE3=256
+Progress: 49.80% | Exponent: 86243 | Elapsed: 10.00s | Iterations/sec: 4294.69
+Progress: 98.52% | Exponent: 86243 | Elapsed: 20.00s | Iterations/sec: 4248.38
+Progress: 100.00% | Exponent: 86243 | Elapsed: 20.36s | Iterations/sec: 4236.91 | ETA: 0d 0h 0m 0s       
+Kernel execution time: 20.36 seconds
+Iterations per second: 4236.91 (86243 iterations in total)
+
+✅ JSON result written to: ./86243_prp_result.json
+
+M86243 PRP test succeeded (result is 9).
+
+✅ JSON result written to: ./86243_prp_result.json
+Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): y
+Enter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org)
+Enter your PrimeNet username : cherubrock
+Enter your PrimeNet password: 
+[TRACE] Sending login with user: cherubrock
+[TRACE] Login response size: 32966 bytes...
+[TRACE] Server response size: 13644 bytes
+✅ Server response:...
+
+📝 Parsed PrimeNet Result Summary:
+ Manually check in your results 
+ Found 1 lines to process at 2025-04-11T11:13:30 
+ Results for M 86243 ignored, it is a known Mersenne Prime and no further testing is required. 
+
+Done processing:
+* Parsed 1 lines.
+* Found 0 datestamps.
+GHz-days Qty Work Submitted Accepted Average 
+1 PRP (Probable Prime): PRIME 0.000 - 0.000 
+1 - all - 0.000 
+Did not understand 0 lines. 
+Recognized, but ignored 0/1 of the remaining lines. 
+Skipped 0 lines already in the database. 
+Accepted 1 lines.
+
+✅ Result successfully sent to PrimeNet.
+```
+
+> If a result was not submitted previously, PrMers will automatically prompt you to resend it on the next launch:
+```
+Found unsent result: ./9941_prp_result.json
+Do you want to send it to PrimeNet now? (y/n): 
+```
+
+**No result is lost**, and every completed test can be credited to your PrimeNet account.
+
+
+## 🔐 Submitting Results to PrimeNet
+
+PrMers supports direct submission of results to [PrimeNet](https://www.mersenne.org) using your personal account. If you don’t have an account yet, it’s free and quick to create one at:  
+👉 **https://www.mersenne.org**
+
+After a test completes, PrMers will prompt you to submit your result to PrimeNet:
+
+```
+✅ JSON result written to: ./86243_prp_result.json
+Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): y
+Enter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org)
+Enter your PrimeNet username : cherubrock
+Enter your PrimeNet password: 
+[TRACE] Sending login with user: cherubrock
+[TRACE] Login response size: 32966 bytes...
+[TRACE] Server response size: 13644 bytes
+✅ Server response:...
+
+📝 Parsed PrimeNet Result Summary:
+ Manually check in your results Found 1 lines to process at 2025-04-11T11:13:30 Results for M 86 243 ignored, it is a known Mersenne Prime and no further testing is required. 
+Done processing: 
+* Parsed 1 lines.
+* Found 0 datestamps.
+GHz-days Qty Work Submitted Accepted Average 
+1 PRP (Probable Prime): PRIME 0.000 - 0.000 
+1 - all - 0.000 
+Did not understand 0 lines. 
+Recognized, but ignored 0/1 of the remaining lines. 
+Skipped 0 lines already in the database. 
+Accepted 1 lines.
+```
+
+Once accepted, the result is marked as sent:
+
+```
+✅ Result successfully sent to PrimeNet.
+```
+
+If for any reason a result was not submitted (e.g. skipped, disconnected, closed), PrMers will automatically prompt you to re-submit the result later on launch.
+
+```bash
+Found unsent result: ./86243_prp_result.json
+Do you want to submit it to PrimeNet now? (y/n)
+```
+
+This ensures **you never lose credit** for a completed computation.
+
 
 ## 💾 Download Precompiled Binaries (Linux, Windows & macOS)
 
@@ -128,19 +276,21 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 
 ## Command-Line Options
 
-- `< p >`: Minimum exponent to test (required)
+- `<p>`: Minimum exponent to test (required)
 - `-d <device_id>`: Specify the OpenCL device ID (default: 0)
-- `-O <options>`: Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)
+- `-O <options>`: Enable OpenCL optimization flags (e.g., `fastmath`, `mad`, `unsafe`, `nans`, `optdisable`)
 - `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8)
 - `-profile`: Enable kernel execution profiling
-- `-prp`: Run in PRP mode (default) with an initial value of 3 and without executing kernel_sub2 (final result must equal 9)
-- `-ll`: Run in Lucas–Lehmer mode with an initial value of 4 and execution of kernel_sub2 (p-2 iterations)
+- `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9)
+- `-ll`: Run in Lucas–Lehmer mode, with an initial value of 4 and p-2 iterations of `kernel_sub2`
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
-- `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification.
-- `-l1 <value>`: Force local size for classic NTT kernel  
-- `-l2 <value>`: Force local size for 2-step radix-16 NTT kernel  
-- `-l3 <value>`: Force local size for mixed radix kernel (radix-4 + radix-2 + Square + inverse)
+- `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification
+- `-l1 <value>`: Force local size for the classic NTT kernel  
+- `-l2 <value>`: Force local size for the 2-step radix-16 NTT kernel  
+- `-l3 <value>`: Force local size for the mixed radix kernel (radix-4 + radix-2 + square + inverse)
+- `--noask`: Automatically submit results to PrimeNet without prompting
+- `-user <username>`: PrimeNet account username to use for automatic result submission
 
 ## Uninstallation
 To uninstall PrMers, run:
@@ -264,6 +414,42 @@ The proof process generates a `.proof` file, which contains:
 
 Currently, verification is **not fully stable** and needs further debugging.  
 Performance is also significantly slower than GpuOwl, as optimizations are still in progress.  
+
+
+
+## 📊 Full Performance Table on Radeon VII
+
+```
+| Exponent  | Iter/s  | ETA             |
+|-----------|---------|-----------------|
+| 136279841 | 275.75  | 5d 17h 15m 57s  |
+| 82589933  | 473.57  | 2d 0h 25m 47s   |
+| 77232917  | 474.60  | 1d 21h 11m 22s  |
+| 74207281  | 473.48  | 1d 19h 31m 18s  |
+| 57885161  | 473.77  | 1d 9h 55m 28s   |
+| 43112609  | 469.56  | 1d 1h 29m 25s   |
+| 42643801  | 471.80  | 1d 1h 5m 35s    |
+| 37156667  | 849.48  | 0d 12h 8m 10s   |
+| 32582657  | 889.28  | 0d 10h 9m 49s   |
+| 30402457  | 888.15  | 0d 9h 29m 41s   |
+| 25964951  | 895.79  | 0d 8h 2m 15s    |
+| 24036583  | 886.68  | 0d 7h 30m 58s   |
+| 20996011  | 1117.04 | 0d 5h 12m 26s   |
+| 13466917  | 1150.65 | 0d 3h 14m 13s   |
+| 6972593   | 1783.91 | 0d 1h 4m 18s    |
+| 3021377   | 1833.43 | 0d 0h 26m 37s   |
+| 2976221   | 1837.81 | 0d 0h 26m 9s    |
+| 1398269   | 2226.52 | 0d 0h 9m 38s    |
+| 1257787   | 2292.34 | 0d 0h 8m 18s    |
+| 859433    | 2257.62 | 0d 0h 5m 30s    |
+| 756839    | 2238.93 | 0d 0h 4m 48s    |
+| 216091    | 2540.35 | 0d 0h 0m 35s    |
+| 132049    | 3299.74 | 0d 0h 0m 0s     |
+| 110503    | 2872.99 | 0d 0h 0m 0s     |
+| 86243     | 3732.72 | 0d 0h 0m 0s     |
+| 44497     | 4223.44 | 0d 0h 0m 0s     |
+```
+
 
 ## Example Executions
 
