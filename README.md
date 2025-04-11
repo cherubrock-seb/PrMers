@@ -213,6 +213,62 @@ If no exponent is passed and no -worktodo is provided, the program will prompt y
 
 Note: Only the first valid PRP= line is used for now. Multi-line batching may be added later.
 
+
+## 🔧 Using a Configuration File (`-config`)
+
+You can run `prmers` using a configuration file to avoid passing long arguments on the command line every time.
+
+### 📄 Example `setting.cfg`
+
+```txt
+-d 1
+-O fastmath mad
+-c 16
+-profile
+-ll
+-t 300
+-f /home/user/checkpoints
+-l1 256
+-l2 128
+-l3 64
+--noask
+-user myusername
+-worktodo ./tasks/worktodo.txt
+```
+
+### 🚀 How to use
+
+You can launch `prmers` with this configuration file using:
+
+```bash
+./prmers -config ./setting.cfg
+```
+
+This will load all the parameters listed in `setting.cfg` as if you had typed them directly on the command line.
+
+### 📌 Supported use cases
+
+- ✅ If an exponent is **given on the command line**, it takes priority:
+  
+  ```bash
+  ./prmers 333 -config ./setting.cfg
+  ```
+
+- ✅ If **no exponent is given**, but `-worktodo <path>` is present (in config or command line), the exponent is read from the `worktodo.txt` file:
+
+  ```bash
+  ./prmers -config ./setting.cfg
+  # → uses the exponent found in tasks/worktodo.txt
+  ```
+
+- ✅ If no exponent and no valid `worktodo.txt` entry are found, the program will **prompt you to enter the exponent manually**.
+
+### ⚠️ Notes
+
+- The config file must contain arguments **exactly as they would be typed on the command line**, space-separated.
+- You can still override values from the config file by passing extra arguments on the command line.
+
+
 ## 🔐 Submitting Results to PrimeNet
 
 PrMers supports direct submission of results to [PrimeNet](https://www.mersenne.org) using your personal account. If you don’t have an account yet, it’s free and quick to create one at:  
@@ -362,7 +418,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-worktodo [path]`: Use a `worktodo.txt` file to load an exponent automatically.
   - If no path is given, the default `./worktodo.txt` is used.
   - Only the first valid `PRP=` line is processed.
-  
+
 ## Uninstallation
 To uninstall PrMers, run:
 ```bash
