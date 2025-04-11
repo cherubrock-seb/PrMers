@@ -10,7 +10,9 @@ Key features:
 - 📊 Benchmark output for performance comparison across devices
 
 
-### 📈 Sample Performance Results on Radeon VII GPU
+### 📈 Sample Performance Results
+
+#### 🔥 Radeon VII GPU
 
 ```
 | Exponent  | Iter/s  | ETA             |
@@ -24,6 +26,18 @@ Key features:
 | 20996011  | 1117.04 | 0d 5h 12m 26s   |
 | 1257787   | 2292.34 | 0d 0h 8m 18s    |
 | 756839    | 2238.93 | 0d 0h 4m 48s    |
+```
+
+#### 🍏 MacBook Air 2022 (Apple M2)
+
+```
+| Exponent  | Iter/s  | ETA              |
+|-----------|---------|------------------|
+| 136279841 | 29.49   | 53d 11h 43m 53s  |
+| 82589933  | 50.88   | 18d 18h 52m 10s  |
+| 77232917  | 51.17   | 17d 11h 16m 9s   |
+| 74207281  | 51.15   | 16d 18h 58m 41s  |
+| 57885161  | 51.00   | 13d 3h 16m 30s   |
 ```
 
 For a full table of benchmark results, see the section below 👇
