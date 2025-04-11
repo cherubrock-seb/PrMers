@@ -398,7 +398,7 @@ static inline ulong4 butterfly(const ulong4 u) {
 }
 
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
-                                            __constant ulong* restrict wi,
+                                           __global ulong* restrict wi,
                                             const uint m) {
     const ulong k = get_global_id(0);
     const ulong j = k & (m - 1);
@@ -449,7 +449,7 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
 
 
 __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
-                                                 __constant ulong* restrict wi,
+                                                 __global ulong* restrict wi,
                                                  __global ulong* restrict digit_invweight,
                                                  const uint m)
 {
@@ -587,7 +587,7 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
 }
 
 __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
-                                                  __constant ulong* restrict wi,
+                                                 __global ulong* restrict wi,
                                                   __global ulong* restrict digit_invweight) {
     const ulong k = get_global_id(0);
     const ulong twiddle_offset = 6;
