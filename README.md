@@ -169,6 +169,49 @@ Do you want to send it to PrimeNet now? (y/n):
 
 **No result is lost**, and every completed test can be credited to your PrimeNet account.
 
+# 📄 worktodo.txt support
+
+This program now supports reading assignments from a `worktodo.txt` file, similar to how Prime95 or other GIMPS tools operate.
+
+## ✅ Supported format
+
+Only lines beginning with the `PRP=` prefix are currently supported.
+
+Each `PRP=` line follows this format:
+
+PRP=assignment_id,k,b,n,c[,how_far_factored,tests_saved][,known_factors]
+
+Where:
+- `k × bⁿ + c` defines the number to test.
+- For Mersenne numbers, this is typically: `k=1`, `b=2`, `c=-1`.
+- `n` is the exponent (this is the value your program will extract and test).
+- Other fields are optional and currently ignored.
+
+### 📌 Example
+PRP=984550E64F2B4D4A05D7307E31090EF9,1,2,197493337,-1,76,0
+
+This line instructs the program to test the Mersenne number \( 2^{197493337} - 1 \).
+
+## 🔍 Usage
+
+You can either:
+- Provide the exponent manually on the command line:
+
+```bash
+./prmers 197493337
+```
+
+Or use a worktodo.txt file (default path: ./worktodo.txt):
+
+./prmers -worktodo
+
+Or specify a custom path to your worktodo file:
+
+./prmers -worktodo /path/to/worktodo.txt
+
+If no exponent is passed and no -worktodo is provided, the program will prompt you to enter one interactively.
+
+Note: Only the first valid PRP= line is used for now. Multi-line batching may be added later.
 
 ## 🔐 Submitting Results to PrimeNet
 
@@ -316,7 +359,10 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-l3 <value>`: Force local size for the mixed radix kernel (radix-4 + radix-2 + square + inverse)
 - `--noask`: Automatically submit results to PrimeNet without prompting
 - `-user <username>`: PrimeNet account username to use for automatic result submission
-
+- `-worktodo [path]`: Use a `worktodo.txt` file to load an exponent automatically.
+  - If no path is given, the default `./worktodo.txt` is used.
+  - Only the first valid `PRP=` line is processed.
+  
 ## Uninstallation
 To uninstall PrMers, run:
 ```bash

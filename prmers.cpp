@@ -396,8 +396,9 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
+    std::cout << "              [-worktodo <path>]" << std::endl;
     std::cout << std::endl;
-    std::cout << "  <p>       : Exponent to test (required)" << std::endl;
+    std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>   : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
     std::cout << "  -O <options>     : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
     std::cout << "  -c <depth>       : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
@@ -411,11 +412,11 @@ void printUsage(const char* progName) {
     std::cout << "  -l3 <value>      : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask          : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username> : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    std::cout << "  -worktodo <path> : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
-              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname" << std::endl;
+              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -worktodo ./mydir/worktodo.txt" << std::endl;
 }
-
 
 
 
@@ -1223,27 +1224,66 @@ void promptToSendResult(const std::string& jsonPath, std::string& user) {
     }
 }
 
+int extractExponentFromWorktodo(const std::string& path = "worktodo.txt") {
+    std::ifstream infile(path);
+    if (!infile) return -1;
 
+    std::string line;
+    std::regex prp_pattern(R"(PRP=.*?,.*?,.*?,(\d+),.*)");
+    std::smatch match;
+    while (std::getline(infile, line)) {
+        if (std::regex_match(line, match, prp_pattern)) {
+            return std::stoi(match[1].str());
+        }
+    }
+    return -1;
+}
 
 // -----------------------------------------------------------------------------
 // Main function
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
     std::string exponentStr;
+    std::string worktodo_path = "worktodo.txt";
     std::vector<const char*> new_argv;
+    bool has_p = false;
 
-    if (argc < 2) {
-        int exp = askExponentInteractively();  
-        exponentStr = std::to_string(exp);
-        new_argv.push_back(argv[0]);              
-        new_argv.push_back(exponentStr.c_str());  
-        argc = 2;
-        argv = const_cast<char**>(new_argv.data());
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+        if (arg == "-h" || arg == "--h" || arg == "-help" || arg == "--help") {
+            printUsage(argv[0]);
+            return 0;
+        }
+    }
+
+    for (int i = 1; i < argc - 1; ++i) {
+        if (std::strcmp(argv[i], "-worktodo") == 0) {
+            worktodo_path = argv[i + 1];
+            break;
+        }
+    }
+
+    if (argc < 2 || (argc == 2 && argv[1][0] == '-')) {
+        int exp = extractExponentFromWorktodo(worktodo_path);
+        if (exp > 0) {
+            exponentStr = std::to_string(exp);
+            new_argv.push_back(argv[0]);
+            new_argv.push_back(exponentStr.c_str());
+            for (int i = 1; i < argc; ++i) new_argv.push_back(argv[i]);
+            argc = static_cast<int>(new_argv.size());
+            argv = const_cast<char**>(new_argv.data());
+        } else {
+            int exp = askExponentInteractively();
+            exponentStr = std::to_string(exp);
+            new_argv.push_back(argv[0]);
+            new_argv.push_back(exponentStr.c_str());
+            argc = 2;
+            argv = const_cast<char**>(new_argv.data());
+        }
     }
 
     uint32_t pp = static_cast<uint32_t>(std::stoi(argv[1]));
     std::cout << "🧮 Testing exponent: " << pp << std::endl;
-
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
@@ -1255,7 +1295,6 @@ int main(int argc, char** argv) {
     std::string mode = "prp"; 
     bool proof = false;
     bool profiling = false;
-    bool has_p = false;
     bool force_carry = false;
     int max_local_size1 = 0;
     int max_local_size2 = 0;
@@ -1397,8 +1436,10 @@ int main(int argc, char** argv) {
     if(p<13){
         mode = "ll";
     }
-    if(mode == "ll")
+    if(mode == "ll"){
         proof = false;
+        noAsk = true;
+    }
    
     if (profiling)
         std::cout << "\n🔍 Kernel profiling is activated. Performance metrics will be displayed.\n" << std::endl;
