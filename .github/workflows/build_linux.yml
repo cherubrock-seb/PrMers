@@ -52,8 +52,9 @@ jobs:
             ✅ This release was built automatically via GitHub Actions from the source code in this repository.
             🔒 Each binary is accompanied by a `.sha256` checksum file for verification.
             💡 You can verify the integrity of the downloaded files using:
-
                 sha256sum -c <filename>.sha256
+            💡 You can view the exact build process and logs by visiting:
+              👉 [GitHub Actions for PrMers](https://github.com/cherubrock-seb/PrMers/actions)
           files: prmers-linux.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
