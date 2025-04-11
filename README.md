@@ -40,7 +40,7 @@ Key features:
 | 57885161  | 51.00   | 13d 3h 16m 30s   |
 ```
 
-#### 🧊 NVIDIA 840M (OpenCL 1.2, legacy GPU - Windows) 
+#### 🧊 NVIDIA Geforce 840M (OpenCL 1.2, legacy GPU - Windows) 
 
 
 ```
