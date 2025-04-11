@@ -393,21 +393,29 @@ std::string readFile(const std::string &filename) {
 // Usage printing helper (updated with new backup and path options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>] [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-l1 <value>] [-l2 <value>] [-l3 <value>]" << std::endl;
-    std::cout << "  <p>       : Minimum exponent to test (required)" << std::endl;
-    std::cout << "  -d <device_id>: (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
-    std::cout << "  -O <options>  : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
-    std::cout << "  -c <localCarryPropagationDepth>: (Optional) Set local carry propagation depth (default: 8)." << std::endl;
-    std::cout << "  -profile      : (Optional) Enable kernel execution profiling." << std::endl;
-    std::cout << "  -prp          : (Optional) Run in PRP mode (default). Set initial value to 3 and perform p iterations without executing kernel_sub2; final result must equal 9." << std::endl;
-    std::cout << "  -ll           : (Optional) Run in Lucas-Lehmer mode. (Initial value 4 and p-2 iterations with kernel_sub2 executed.)" << std::endl;
-    std::cout << "  -t <backup_interval>: (Optional) Specify backup interval in seconds (default: 120)." << std::endl;
-    std::cout << "  -f <path>           : (Optional) Specify path for saving/loading files (default: current directory)." << std::endl;
-    std::cout << "  -l1 <value>         : (Optional) Force local size for classic NTT kernel." << std::endl;
-    std::cout << "  -l2 <value>         : (Optional) Force local size for 2-step radix-16 NTT kernel." << std::endl;
-    std::cout << "  -l3 <value>         : (Optional) Force local size for mixed radix (radix-4 + radix-2 + Square + inverse) kernel." << std::endl;
-    std::cout << "Example: " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path -l1 256 -l2 128 -l3 64" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
+    std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
+    std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
+    std::cout << std::endl;
+    std::cout << "  <p>       : Exponent to test (required)" << std::endl;
+    std::cout << "  -d <device_id>   : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
+    std::cout << "  -O <options>     : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
+    std::cout << "  -c <depth>       : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
+    std::cout << "  -profile         : (Optional) Enable kernel execution profiling" << std::endl;
+    std::cout << "  -prp             : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
+    std::cout << "  -ll              : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -t <seconds>     : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
+    std::cout << "  -f <path>        : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
+    std::cout << "  -l1 <value>      : (Optional) Force local size for classic NTT kernel" << std::endl;
+    std::cout << "  -l2 <value>      : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
+    std::cout << "  -l3 <value>      : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
+    std::cout << "  --noask          : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
+    std::cout << "  -user <username> : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
+              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname" << std::endl;
 }
+
 
 
 
@@ -1161,7 +1169,7 @@ bool sendManualResultWithLogin(const std::string& jsonResult, const std::string&
 void promptToSendResult(const std::string& jsonPath, std::string& user) {
     std::string response;
     std::cout << "\n✅ JSON result written to: " << jsonPath << std::endl;
-    std::cout << "Do you want to send the result to PrimeNet? (y/n): ";
+    std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
     std::getline(std::cin, response);
     if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
         std::cout << "Result not sent." << std::endl;
@@ -1169,7 +1177,7 @@ void promptToSendResult(const std::string& jsonPath, std::string& user) {
     }
 
     if (user.empty()) {
-        std::cout << "Enter your PrimeNet username: ";
+        std::cout << "Enter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org)\nEnter your PrimeNet username : ";
         std::getline(std::cin, user);
     }
 
