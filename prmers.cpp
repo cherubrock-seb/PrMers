@@ -396,7 +396,7 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-worktodo <path>]" << std::endl;
+    std::cout << "              [-worktodo <path>] [-config <path>]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>   : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -413,10 +413,13 @@ void printUsage(const char* progName) {
     std::cout << "  --noask          : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username> : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
     std::cout << "  -worktodo <path> : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
+    std::cout << "  -config <path>   : (Optional) Load config file from specified path" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
-              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -worktodo ./mydir/worktodo.txt" << std::endl;
+              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -worktodo ./mydir/worktodo.txt \\\n"
+              << "            -config ./mydir/settings.cfg" << std::endl;
 }
+
 
 
 
@@ -1240,56 +1243,79 @@ int extractExponentFromWorktodo(const std::string& path = "worktodo.txt") {
 }
 
 // -----------------------------------------------------------------------------
+// Config file loader
+// -----------------------------------------------------------------------------
+#include <fstream>
+#include <sstream>
+#include <map>
+
+std::vector<std::string> parseConfigFile(const std::string& config_path) {
+    std::ifstream config(config_path);
+    std::vector<std::string> args;
+    std::string line;
+
+    while (std::getline(config, line)) {
+        std::istringstream iss(line);
+        std::string token;
+        while (iss >> token) {
+            args.push_back(token);
+        }
+    }
+    return args;
+}
+
+// -----------------------------------------------------------------------------
 // Main function
 // -----------------------------------------------------------------------------
 int main(int argc, char** argv) {
-    std::string exponentStr;
+    std::string config_path;
     std::string worktodo_path = "worktodo.txt";
-    std::vector<const char*> new_argv;
-    bool has_p = false;
+    std::string staticExponentStr;
+    std::vector<std::string> all_args;
+    std::vector<const char*> final_argv;
+
+    all_args.push_back(argv[0]);
 
     for (int i = 1; i < argc; ++i) {
-        std::string arg(argv[i]);
-        if (arg == "-h" || arg == "--h" || arg == "-help" || arg == "--help") {
-            printUsage(argv[0]);
-            return 0;
+        if ((std::strcmp(argv[i], "-config") == 0) && i + 1 < argc) {
+            config_path = argv[i + 1];
+            std::vector<std::string> cfg_args = parseConfigFile(config_path);
+            all_args.insert(all_args.end(), cfg_args.begin(), cfg_args.end());
+            i++;
+        } else {
+            all_args.push_back(argv[i]);
         }
     }
 
-    for (int i = 1; i < argc - 1; ++i) {
-        if (std::strcmp(argv[i], "-worktodo") == 0) {
-            worktodo_path = argv[i + 1];
+    for (size_t i = 0; i + 1 < all_args.size(); ++i) {
+        if (all_args[i] == "-worktodo") {
+            worktodo_path = all_args[i + 1];
             break;
         }
     }
 
-    if (argc < 2 || (argc == 2 && argv[1][0] == '-')) {
+    bool has_explicit_exponent = (all_args.size() >= 2 && all_args[1][0] != '-');
+    if (!has_explicit_exponent) {
         int exp = extractExponentFromWorktodo(worktodo_path);
-        if (exp > 0) {
-            exponentStr = std::to_string(exp);
-            new_argv.push_back(argv[0]);
-            new_argv.push_back(exponentStr.c_str());
-            for (int i = 1; i < argc; ++i) new_argv.push_back(argv[i]);
-            argc = static_cast<int>(new_argv.size());
-            argv = const_cast<char**>(new_argv.data());
-        } else {
-            int exp = askExponentInteractively();
-            exponentStr = std::to_string(exp);
-            new_argv.push_back(argv[0]);
-            new_argv.push_back(exponentStr.c_str());
-            argc = 2;
-            argv = const_cast<char**>(new_argv.data());
-        }
+        if (exp <= 0) exp = askExponentInteractively();
+        staticExponentStr = std::to_string(exp);
+        all_args.insert(all_args.begin() + 1, staticExponentStr);
     }
 
-    uint32_t pp = static_cast<uint32_t>(std::stoi(argv[1]));
-    std::cout << "🧮 Testing exponent: " << pp << std::endl;
+    for (const auto& s : all_args) final_argv.push_back(s.c_str());
+    argc = static_cast<int>(final_argv.size());
+    argv = const_cast<char**>(final_argv.data());
+
+    uint32_t p = std::atoi(argv[1]);
+    std::cout << "🧮 Testing exponent: " << p << std::endl;
+
+
     if (argc < 2) {
         std::cerr << "Error: Missing <p_min> argument.\n";
         printUsage(argv[0]);
         return 1;
     }
-    uint32_t p = 0;
+    //uint32_t p = 0;
     int device_id = 0;  // Default device ID
     cl_uint localCarryPropagationDepth = 4;
     std::string mode = "prp"; 
@@ -1397,20 +1423,20 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Missing value for -user <name>." << std::endl;
                 return 1;
             }
-        }
+        }/*
         else if (!has_p) { 
             p = std::atoi(argv[i]);
             has_p = true;
-        }
+        }*/
         else {
             std::cerr << "Warning: Ignoring unexpected argument '" << argv[i] << "'" << std::endl;
         }
     }
-
+/*
     if (!has_p) {
         std::cerr << "Error: No exponent provided. You must specify <p> as the first argument." << std::endl;
         return 1;
-    }
+    }*/
     if (p < 89) {
 
         std::map<uint32_t, bool> knownResults = {
