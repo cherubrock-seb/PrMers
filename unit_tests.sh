@@ -15,7 +15,7 @@ composite_exponents=(
 echo "=== Prime exponents ==="
 for p in "${prime_exponents[@]}"; do
     echo -n "Testing M$p... "
-    ./prmers "$p" -prp > "logs/ok_${p}.log" 2>&1
+    ./prmers "$p" --noask -prp > "logs/ok_${p}.log" 2>&1
     if [ $? -ne 0 ]; then
         echo "❌ Failed (see logs/ok_${p}.log)"
         exit 1
@@ -28,7 +28,7 @@ echo ""
 echo "=== Composite exponents ==="
 for p in "${composite_exponents[@]}"; do
     echo -n "Testing M$p (composite)... "
-    ./prmers "$p" -ll > "logs/fail_${p}.log" 2>&1
+    ./prmers "$p" --noask -ll > "logs/fail_${p}.log" 2>&1
     if [ $? -eq 0 ]; then
         echo "❌ Unexpected success"
         exit 1
