@@ -295,7 +295,7 @@ __kernel void kernel_sub2(__global ulong* restrict x)
     if (get_global_id(0) == 0) {
         uint c = 2U;
         while(c != 0U) {
-            #pragma unroll
+
             for(uint i = 0; i < TRANSFORM_SIZE_N; i++){
                 const int d = get_digit_width(i);
                 ulong val = x[i];
