@@ -590,7 +590,7 @@ void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
                              const time_point<high_resolution_clock>& start,
                              cl_command_queue queue,int32_t expo) {
     auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
-    if (duration >= 10 || iter == -1) {
+    if (duration >= 2 || iter == -1) {
         if (iter == -1)
             iter = total_iters;
         double elapsedTime = duration_cast<nanoseconds>(high_resolution_clock::now() - start).count() / 1e9;
