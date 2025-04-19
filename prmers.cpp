@@ -527,7 +527,6 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     if (err != CL_SUCCESS) {
         std::cerr << "Error executing kernel '" << kernelName << "': " << getCLErrorString(err) << " (" << err << ")" << std::endl;
     }
-    clFinish(queue);
     if (profiling && event) {
         cl_ulong start_time, end_time;
         clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start_time, nullptr);
@@ -1996,7 +1995,6 @@ int main(int argc, char** argv) {
     std::remove(loop_filename.c_str());
 
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue, p);
-    clFinish(queue);
     auto endTime = high_resolution_clock::now();
     
     // Read back result from buf_x
