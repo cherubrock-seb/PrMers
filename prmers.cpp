@@ -84,6 +84,8 @@ static std::vector<std::string> log_messages;
 static int enqueued_kernels = 0;
 //const size_t FINISH_THRESHOLD = 16384;  // ≃16 K kernels avant finish
 int FINISH_THRESHOLD = -1;
+double estimatedFlushDuration = -1.0;
+std::chrono::time_point<std::chrono::high_resolution_clock> lastDisplayFlush;
 
 
 #include <chrono>
@@ -91,7 +93,7 @@ int FINISH_THRESHOLD = -1;
 #include <atomic>
 #include <iostream>
 
-void displaySpinner(std::atomic<bool>& waiting) {
+void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds = -1) {
     const char symbols[] = {'|', '/', '-', '\\'};
     size_t i = 0;
     auto start = std::chrono::steady_clock::now();
@@ -100,14 +102,18 @@ void displaySpinner(std::atomic<bool>& waiting) {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 
-        std::cout << "\r🕒 GPU is flushing the command queue. Please wait "
+        std::cout << "\r🕒 GPU is flushing the command queue "
                   << symbols[i++ % 4]
-                  << " (" << elapsed << "s elapsed)..." << std::flush;
+                  << " (" << elapsed << "s elapsed";
+        if (estimatedSeconds > 0)
+            std::cout << " / ~" << (int)estimatedSeconds << "s estimated";
+        std::cout << ")..." << std::flush;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     std::cout << "\r✅ GPU command queue flushed.                          \n";
 }
+
 
 
 #define COLOR_GREEN "\033[32m"
@@ -560,15 +566,27 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
         std::cerr << "Error executing kernel '" << kernelName << "': " << getCLErrorString(err) << " (" << err << ")" << std::endl;
     }
     if (FINISH_THRESHOLD != -1 && (++enqueued_kernels >= FINISH_THRESHOLD)) {
-        std::atomic<bool> waiting(true);
-        std::thread spinner(displaySpinner, std::ref(waiting));
+        enqueued_kernels = 0;
 
-        clFinish(queue);  // blocage ici
+        std::atomic<bool> waiting(true);
+        std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration);
+
+        auto flushStart = std::chrono::high_resolution_clock::now();
+        clFinish(queue);
+        auto flushEnd = std::chrono::high_resolution_clock::now();
+
         waiting = false;
         spinner.join();
 
-        enqueued_kernels = 0;
+        double duration = std::chrono::duration<double>(flushEnd - flushStart).count();
+        if (estimatedFlushDuration < 0)
+            estimatedFlushDuration = duration;
+        else
+            estimatedFlushDuration = 0.7 * estimatedFlushDuration + 0.3 * duration;
+
+        lastDisplayFlush = std::chrono::high_resolution_clock::now();
     }
+
     if (profiling && event) {
         cl_ulong start_time, end_time;
         clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start_time, nullptr);
