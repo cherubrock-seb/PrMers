@@ -1338,12 +1338,21 @@ int main(int argc, char** argv) {
     all_args.push_back(argv[0]);
 
     for (int i = 1; i < argc; ++i) {
+
         if ((std::strcmp(argv[i], "-config") == 0) && i + 1 < argc) {
             config_path = argv[i + 1];
             std::vector<std::string> cfg_args = parseConfigFile(config_path);
             all_args.insert(all_args.end(), cfg_args.begin(), cfg_args.end());
             i++;
-        } else {
+        }else if (
+            std::strcmp(argv[i], "-h") == 0 ||
+            std::strcmp(argv[i], "--help") == 0 ||
+            std::strcmp(argv[i], "-help") == 0
+        ) {
+            printUsage(argv[0]);
+            return 0;
+        }
+        else {
             all_args.push_back(argv[i]);
         }
     }
