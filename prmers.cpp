@@ -1717,6 +1717,10 @@ int main(int argc, char** argv) {
             << "  max=" << maxSize << "\n";
             FINISH_THRESHOLD = preferredSize;
         }
+        
+    }
+    if(FINISH_THRESHOLD == 0){
+           FINISH_THRESHOLD = 16 * 1024;
     }
     // -------------------------------------------------------------------------
     // Read and Build OpenCL Program
