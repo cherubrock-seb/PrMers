@@ -751,7 +751,7 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
     }
 
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
     }
 
     std::cout << "\r✅ GPU command queue flushed.                          \n";
@@ -1698,7 +1698,7 @@ int main(int argc, char** argv) {
         std::string vendor(vendorBuf);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
 
-        if (vendor.find("NVIDIA") == std::string::npos) {
+       // if (vendor.find("NVIDIA") == std::string::npos) {
             size_t preferredSize = 0, maxSize = 0;
             clGetDeviceInfo(device,
                             CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
@@ -1714,7 +1714,7 @@ int main(int argc, char** argv) {
             << "Device on‐device queue preferred=" << preferredSize
             << "  max=" << maxSize << "\n";
             FINISH_THRESHOLD = preferredSize;
-        }
+        //}
     }
     // -------------------------------------------------------------------------
     // Read and Build OpenCL Program
