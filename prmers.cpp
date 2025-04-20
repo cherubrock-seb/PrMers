@@ -63,6 +63,9 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
+#include <atomic>
+#include <thread>
+
 #endif
 #include "proof/proof.h"
 #ifdef max
@@ -83,6 +86,28 @@ static int enqueued_kernels = 0;
 int FINISH_THRESHOLD = -1;
 
 
+#include <chrono>
+#include <thread>
+#include <atomic>
+#include <iostream>
+
+void displaySpinner(std::atomic<bool>& waiting) {
+    const char symbols[] = {'|', '/', '-', '\\'};
+    size_t i = 0;
+    auto start = std::chrono::steady_clock::now();
+
+    while (waiting) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
+
+        std::cout << "\r🕒 GPU is flushing the command queue. Please wait "
+                  << symbols[i++ % 4]
+                  << " (" << elapsed << "s elapsed)..." << std::flush;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    std::cout << "\r✅ GPU command queue flushed.                          \n";
+}
 
 
 #define COLOR_GREEN "\033[32m"
@@ -534,8 +559,14 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     if (err != CL_SUCCESS) {
         std::cerr << "Error executing kernel '" << kernelName << "': " << getCLErrorString(err) << " (" << err << ")" << std::endl;
     }
-    if (FINISH_THRESHOLD != -1 && ++enqueued_kernels >= FINISH_THRESHOLD) {
-        clFinish(queue);
+    if (FINISH_THRESHOLD != -1 && (++enqueued_kernels >= FINISH_THRESHOLD)) {
+        std::atomic<bool> waiting(true);
+        std::thread spinner(displaySpinner, std::ref(waiting));
+
+        clFinish(queue);  // blocage ici
+        waiting = false;
+        spinner.join();
+
         enqueued_kernels = 0;
     }
     if (profiling && event) {
@@ -603,7 +634,7 @@ void checkAndDisplayProgress(int32_t iter, uint32_t total_iters,
                              const time_point<high_resolution_clock>& start,
                              cl_command_queue queue,int32_t expo) {
     auto duration = duration_cast<seconds>(high_resolution_clock::now() - lastDisplay).count();
-    if (duration >= 2 || iter == -1) {
+    if (duration >= 5 || iter == -1) {
         if (iter == -1)
             iter = total_iters;
         double elapsedTime = duration_cast<nanoseconds>(high_resolution_clock::now() - start).count() / 1e9;
@@ -1568,6 +1599,8 @@ int main(int argc, char** argv) {
 
     if(enqueue_max>0){//line command parameteur 
         FINISH_THRESHOLD = enqueue_max;
+        std::cout  
+            << "Device on‐device queue set to enqueue_max = " << enqueue_max << "\n";
     }
     else{
         char vendorBuf[256] = {0};
@@ -1577,6 +1610,8 @@ int main(int argc, char** argv) {
                         vendorBuf,
                         nullptr);
         std::string vendor(vendorBuf);
+        std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
+
         if (vendor.find("NVIDIA") == std::string::npos) {
             size_t preferredSize = 0, maxSize = 0;
             clGetDeviceInfo(device,
