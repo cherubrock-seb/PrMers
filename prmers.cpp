@@ -86,35 +86,14 @@ static int enqueued_kernels = 0;
 int FINISH_THRESHOLD = -1;
 double estimatedFlushDuration = -1.0;
 std::chrono::time_point<std::chrono::high_resolution_clock> lastDisplayFlush;
-
-
-#include <chrono>
-#include <thread>
-#include <atomic>
-#include <iostream>
-
-void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds = -1) {
-    const char symbols[] = {'|', '/', '-', '\\'};
-    size_t i = 0;
-    auto start = std::chrono::steady_clock::now();
-
-    while (waiting) {
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
-
-        std::cout << "\r🕒 GPU is flushing the command queue "
-                  << symbols[i++ % 4]
-                  << " (" << elapsed << "s elapsed";
-        if (estimatedSeconds > 0)
-            std::cout << " / ~" << (int)estimatedSeconds << "s estimated";
-        std::cout << ")..." << std::flush;
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    std::cout << "\r✅ GPU command queue flushed.                          \n";
-}
-
-
+// Déclaration globale
+uint32_t current_iter(0);
+uint32_t total_itersz = 0;
+std::atomic<double> elapsedTimez(0.0);
+std::atomic<double> startTimez(0.0);
+uint32_t current_expo = 0;
+double iters_per_sec = 0;
+void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds = -1, bool isFirst = true);
 
 #define COLOR_GREEN "\033[32m"
 #define COLOR_YELLOW "\033[33m"
@@ -567,9 +546,11 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     }
     if (FINISH_THRESHOLD != -1 && (++enqueued_kernels >= FINISH_THRESHOLD)) {
         enqueued_kernels = 0;
-
+        
+        bool isFirstFlush = (estimatedFlushDuration < 0);
         std::atomic<bool> waiting(true);
-        std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration);
+        std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration, isFirstFlush);
+
 
         auto flushStart = std::chrono::high_resolution_clock::now();
         clFinish(queue);
@@ -586,6 +567,7 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
 
         lastDisplayFlush = std::chrono::high_resolution_clock::now();
     }
+
 
     if (profiling && event) {
         cl_ulong start_time, end_time;
@@ -608,7 +590,7 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
 
 void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime, uint32_t expo) {
     double progress = (100.0 * iter) / total_iters;
-    double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
+    iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
     double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
     std::string color;
     if (progress < 50.0)
@@ -631,7 +613,35 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime, ui
             << "Elapsed: " << elapsedTime << "s | "
             << "Iterations/sec: " << iters_per_sec << " | "
             << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
-            << COLOR_RESET << std::flush;
+            << COLOR_RESET << std::endl;
+}
+
+void displayProgressEstimated(uint32_t iter, uint32_t total_iters, double elapsedTime, uint32_t expo) {
+    double progress = (100.0 * iter) / total_iters;
+    //double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
+    double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
+    std::string color;
+    if (progress < 50.0)
+        color = COLOR_RED;
+    else if (progress < 90.0)
+        color = COLOR_YELLOW;
+    else
+        color = COLOR_GREEN;
+    uint32_t seconds = static_cast<uint32_t>(remaining_time);
+    uint32_t days = seconds / (24 * 3600);
+    seconds %= (24 * 3600);
+    uint32_t hours = seconds / 3600;
+    seconds %= 3600;
+    uint32_t minutes = seconds / 60;
+    seconds %= 60;
+
+    std::cout << "\r" << color
+            << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
+            << "Exponent: " << expo << " | "
+            << "Elapsed: " << elapsedTime << "s | "
+            << "Iterations/sec: " << iters_per_sec << " | "
+            << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
+            << COLOR_RESET << std::endl;
 }
 
 void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) {
@@ -643,7 +653,7 @@ void displayBackupInfo(uint32_t iter, uint32_t total_iters, double elapsedTime) 
               << "Elapsed: " << elapsedTime << "s | "
               << "Iterations/sec: " << iters_per_sec << " | "
               << "ETA: " << (remaining_time > 0 ? remaining_time : 0.0) << "s       "
-              << COLOR_RESET << std::flush;
+              << COLOR_RESET << std::endl;
 }
 
 
@@ -699,6 +709,55 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
     }
     return kernel;
 }
+
+void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool isFirst) {
+    const char symbols[] = {'|', '/', '-', '\\'};
+    size_t i = 0;
+
+    auto start = std::chrono::steady_clock::time_point(
+        std::chrono::steady_clock::duration(static_cast<long long>(startTimez.load() * 1e9))
+    );
+
+    auto lastDisplay = start;
+
+    while (waiting) {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
+
+        if (isFirst) {
+            std::cout << "\r🕒 GPU is flushing the command queue "
+                      << symbols[i++ % 4]
+                      << " (" << elapsed << "s elapsed";
+            if (estimatedSeconds > 0)
+                std::cout << " / ~" << (int)estimatedSeconds << "s estimated";
+            std::cout << ")..." << std::flush;
+        }
+
+    if (!isFirst && estimatedSeconds > 0 && elapsed > 0) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 1) {
+            double factor = std::min(elapsedTimez.load() / estimatedSeconds, 1.0);
+            uint32_t fake_iter = current_iter + static_cast<uint32_t>(
+                (total_itersz - current_iter) * factor
+            );
+            if (fake_iter >= total_itersz)
+                fake_iter = total_itersz - 1;
+
+
+            double fake_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - start).count();
+
+            displayProgressEstimated(fake_iter, total_itersz, fake_elapsed, current_expo);
+            lastDisplay = now;
+        }
+    }
+
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10000));
+    }
+
+    std::cout << "\r✅ GPU command queue flushed.                          \n";
+}
+
+
 
 
 void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3_steps,cl_kernel kernel_ntt_mm_2_steps, cl_kernel kernel_radix2_square_radix2,
@@ -2001,18 +2060,25 @@ int main(int argc, char** argv) {
     } else {
         total_iters = p - 2;  // For Lucas-Lehmer mode, execute p-2 iterations.
     }
+    total_itersz = total_iters;
     // Adjust loop start if resuming from a saved state.
     auto startTime = high_resolution_clock::now();
+    startTimez = std::chrono::duration<double>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+
     auto lastDisplay = startTime;
     auto last_backup_time = startTime;
     checkAndDisplayProgress(0, total_iters, lastDisplay, startTime, queue, p);
     
     if(debug)
         std::cout << "Number of iterations to be done = " << total_iters << std::endl;
-            
 
+    current_expo = p;
+    
     // Main loop now starts from resume_iter (if any) to total_iters.
     for (uint32_t iter = resume_iter; iter < total_iters; iter++) {
+        current_iter = iter;
+       
         executeFusionneNTT_Forward(queue,k_forward_ntt_mm_3steps,k_forward_ntt_mm_2steps,k_ntt_radix2_square_radix2,
             k_forward_ntt_mm, k_forward_ntt_mm_first, k_forward_ntt_last_m1,k_forward_ntt_last_m1_n4,
             buf_x, buf_twiddles, buf_digit_weight, n, workers/4, localSize, localSize2, localSize3, profiling, maxLocalMem, _even_exponent, k_ntt_radix4_radix2_square_radix2_radix4, buf_inv_twiddles);
