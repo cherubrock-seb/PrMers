@@ -78,11 +78,12 @@ unsigned int backup_interval = 120; // Default backup interval in seconds
 std::string save_path = ".";       // Default save/load directory (current directory)
 // Vector to store accumulated log messages
 static std::vector<std::string> log_messages;
+static int enqueued_kernels = 0;
+//const size_t FINISH_THRESHOLD = 16384;  // ≃16 K kernels avant finish
+int FINISH_THRESHOLD = -1;
 
-// Signal handler for SIGINT (Ctrl-C)
-void signalHandler(int signum) {
-    g_interrupt_flag = 1;
-}
+
+
 
 #define COLOR_GREEN "\033[32m"
 #define COLOR_YELLOW "\033[33m"
@@ -92,6 +93,9 @@ void signalHandler(int signum) {
 
 
 using namespace std::chrono;
+
+
+
 
 // -----------------------------------------------------------------------------
 // Helpers for 64-bit arithmetic modulo p (p = 2^64 - 2^32 + 1)
@@ -125,6 +129,8 @@ uint64_t mulModP(uint64_t a, uint64_t b) {
         r -= MOD_P;
     return r;
 }
+
+
 
 // Add a carry onto the number and return the carry of the first digit_width bits
 uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry)
@@ -396,28 +402,29 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-worktodo <path>] [-config <path>]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
-    std::cout << "  -d <device_id>   : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
-    std::cout << "  -O <options>     : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
-    std::cout << "  -c <depth>       : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
-    std::cout << "  -profile         : (Optional) Enable kernel execution profiling" << std::endl;
-    std::cout << "  -prp             : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
-    std::cout << "  -ll              : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
-    std::cout << "  -t <seconds>     : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
-    std::cout << "  -f <path>        : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
-    std::cout << "  -l1 <value>      : (Optional) Force local size for classic NTT kernel" << std::endl;
-    std::cout << "  -l2 <value>      : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
-    std::cout << "  -l3 <value>      : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
-    std::cout << "  --noask          : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
-    std::cout << "  -user <username> : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
-    std::cout << "  -worktodo <path> : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
-    std::cout << "  -config <path>   : (Optional) Load config file from specified path" << std::endl;
+    std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
+    std::cout << "  -O <options>         : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
+    std::cout << "  -c <depth>           : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
+    std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
+    std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
+    std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
+    std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
+    std::cout << "  -l1 <value>          : (Optional) Force local size for classic NTT kernel" << std::endl;
+    std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
+    std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
+    std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
+    std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
+    std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
+    std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
-              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -worktodo ./mydir/worktodo.txt \\\n"
-              << "            -config ./mydir/settings.cfg" << std::endl;
+              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
+              << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg" << std::endl;
 }
 
 
@@ -527,6 +534,10 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     if (err != CL_SUCCESS) {
         std::cerr << "Error executing kernel '" << kernelName << "': " << getCLErrorString(err) << " (" << err << ")" << std::endl;
     }
+    if (FINISH_THRESHOLD != -1 && ++enqueued_kernels >= FINISH_THRESHOLD) {
+        clFinish(queue);
+        enqueued_kernels = 0;
+    }
     if (profiling && event) {
         cl_ulong start_time, end_time;
         clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start_time, nullptr);
@@ -543,6 +554,8 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
         std::cout << "...]" << std::endl;
     }
 }
+
+
 
 void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime, uint32_t expo) {
     double progress = (100.0 * iter) / total_iters;
@@ -1324,6 +1337,7 @@ int main(int argc, char** argv) {
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;
+    int enqueue_max = 0;
     bool noAsk = false;
 
     std::string user;
@@ -1422,7 +1436,18 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Missing value for -user <name>." << std::endl;
                 return 1;
             }
-        }/*
+        }
+        else if (std::strcmp(argv[i], "-enqueue_max") == 0) {
+            if (i + 1 < argc) {
+                enqueue_max = std::atoi(argv[i + 1]);
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -enqueue_max <enqueue_max>." << std::endl;
+                return 1;
+            }
+        }
+        
+        /*
         else if (!has_p) { 
             p = std::atoi(argv[i]);
             has_p = true;
@@ -1541,12 +1566,35 @@ int main(int argc, char** argv) {
     }
 
 
-
-    if (err != CL_SUCCESS) {
-        std::cerr << "Failed to create command queue." << std::endl;
-        return 1;
+    if(enqueue_max>0){//line command parameteur 
+        FINISH_THRESHOLD = enqueue_max;
     }
-
+    else{
+        char vendorBuf[256] = {0};
+        clGetDeviceInfo(device,
+                        CL_DEVICE_VENDOR,
+                        sizeof(vendorBuf),
+                        vendorBuf,
+                        nullptr);
+        std::string vendor(vendorBuf);
+        if (vendor.find("NVIDIA") == std::string::npos) {
+            size_t preferredSize = 0, maxSize = 0;
+            clGetDeviceInfo(device,
+                            CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
+                            sizeof(preferredSize),
+                            &preferredSize,
+                            nullptr);
+            clGetDeviceInfo(device,
+                            CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE,
+                            sizeof(maxSize),
+                            &maxSize,
+                            nullptr);
+            std::cout  
+            << "Device on‐device queue preferred=" << preferredSize
+            << "  max=" << maxSize << "\n";
+            FINISH_THRESHOLD = preferredSize;
+        }
+    }
     // -------------------------------------------------------------------------
     // Read and Build OpenCL Program
     // -------------------------------------------------------------------------
@@ -1995,6 +2043,7 @@ int main(int argc, char** argv) {
     std::remove(loop_filename.c_str());
 
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue, p);
+    // clFinish(queue);
     auto endTime = high_resolution_clock::now();
     
     // Read back result from buf_x
