@@ -714,8 +714,8 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
 
 void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool isFirst) {
     const char symbols[] = {'|', '/', '-', '\\'};
+    size_t ii = 0;
     size_t i = 0;
-
     auto start = std::chrono::steady_clock::time_point(
         std::chrono::steady_clock::duration(static_cast<long long>(startTimez.load() * 1e9))
     );
@@ -723,6 +723,7 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
     auto lastDisplay = start;
 
     while (waiting) {
+        
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 
@@ -735,25 +736,26 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
             std::cout << ")..." << std::flush;
         }
 
-    if (!isFirst && estimatedSeconds > 0 && elapsed > 0) {
+        if (!isFirst && estimatedSeconds > 0 && elapsed > 0) {
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 1) {
-            double factor = std::min(elapsedTimez.load() / estimatedSeconds, 1.0);
-            uint32_t fake_iter = current_iter + static_cast<uint32_t>(
-                (total_itersz - current_iter) * factor
+             uint32_t fake_iter =  static_cast<uint32_t>(
+                elapsed * iters_per_sec
             );
             if (fake_iter >= total_itersz)
                 fake_iter = total_itersz - 1;
 
 
             double fake_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - start).count();
-
-            displayProgressEstimated(fake_iter, total_itersz, fake_elapsed, current_expo);
+            if(ii > 0)
+                displayProgressEstimated(fake_iter, total_itersz, fake_elapsed, current_expo);
+            
             lastDisplay = now;
         }
     }
 
 
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        ii++;
     }
 
     std::cout << "\r✅ GPU command queue flushed.                          \n";
