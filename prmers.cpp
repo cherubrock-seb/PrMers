@@ -610,6 +610,7 @@ void displayProgress(uint32_t iter, uint32_t total_iters, double elapsedTime, ui
     std::cout << "\r" << color
             << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
             << "Exponent: " << expo << " | "
+            << "Iteration: " << iter << " | "
             << "Elapsed: " << elapsedTime << "s | "
             << "Iterations/sec: " << iters_per_sec << " | "
             << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
@@ -638,6 +639,7 @@ void displayProgressEstimated(uint32_t iter, uint32_t total_iters, double elapse
     std::cout << "\r" << color
             << "Progress: " << std::fixed << std::setprecision(2) << progress << "% | "
             << "Exponent: " << expo << " | "
+            << "Iteration: " << iter << " | "
             << "Elapsed: " << elapsedTime << "s | "
             << "Iterations/sec: " << iters_per_sec << " | "
             << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s       "
