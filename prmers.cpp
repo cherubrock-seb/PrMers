@@ -1698,6 +1698,11 @@ int main(int argc, char** argv) {
         aid_value = task->aid;
         uid_value = task->aid.empty() ? "" : task->line.substr(0,32);
     }
+    else if (!hasExplicit){
+        int exp = askExponentInteractively();
+        staticExponentStr = std::to_string(exp);
+        all_args.insert(all_args.begin() + 1, staticExponentStr);
+    }
 
     for (const auto& s : all_args) final_argv.push_back(s.c_str());
     argc = static_cast<int>(final_argv.size());
