@@ -2400,6 +2400,26 @@ int main(int argc, char** argv) {
             aid_value = task->aid;
             uid_value = task->aid;
         }
+        unsigned int portCode = 0;
+        #if defined(__APPLE__)
+        #if defined(__x86_64__)
+            portCode = 10; // Mac OS X 64‑bit
+        #else
+            portCode = 9;  // Mac OS X 32‑bit
+        #endif
+        #elif defined(__linux__)
+        #if defined(__x86_64__)
+            portCode = 8;  // Linux 64‑bit
+        #else
+            portCode = 2;  // Linux 32‑bit
+        #endif
+        #elif defined(_WIN64)
+            portCode = 4;  // Windows 64‑bit
+        #elif defined(_WIN32)
+            portCode = 1;  // Windows 32‑bit
+        #else
+            portCode = 14; // Unix 64‑bit (fallback générique)
+        #endif
 
         std::string jsonResult = generatePrimeNetJson(
             (mode == "ll") ? (std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; }) ? "P" : "C")
@@ -2417,7 +2437,7 @@ int main(int argc, char** argv) {
             proof ? proof_util::fileMD5(proofFile) : "",
             "prmers",
             "0.1",
-            device_id,
+            portCode,
     #ifdef _WIN32
             "Windows",
     #elif __APPLE__
@@ -2438,58 +2458,90 @@ int main(int argc, char** argv) {
             uid_value,
             timestampBuf
         );
-
-        std::ofstream jsonOut(save_path + "/" + std::to_string(p) + "_" + mode + "_result.json");
+        std::string jsonFile = save_path + "/" + std::to_string(p) + "_" + mode + "_result.json";
+        std::ofstream jsonOut(jsonFile);
         jsonOut << jsonResult;
         jsonOut.close();
-        std::cout << "\n✅ JSON result written to: " << save_path + "/" + std::to_string(p) + "_" + mode + "_result.json" << std::endl;
+        std::cout << "\n✅ JSON result written to: " << jsonFile << std::endl;
+
+        std::string resultLine;
+
+        if (mode == "prp") {
+            bool resultIs9 = (x[0] == 9) && std::all_of(x.begin() + 1, x.end(), [](uint64_t v) { return v == 0; });
+
+            std::cout << "\n=============================================\n";
+            if (resultIs9) {
+                std::cout << "🟢 M" << p << " PRP TEST PASSED\n";
+                std::cout << "✅ RESULT: PROBABLY PRIME (residue is 9)\n";
+            } else {
+                std::cout << "🔴 M" << p << " PRP TEST FAILED\n";
+                std::cout << "❌ RESULT: PROBABLY COMPOSITE (residue is not 9)\n";
+            }
+            std::cout << "=============================================\n";
+
+            std::ostringstream oss;
+            oss << "PRP=" << p << ","
+                << (proof ? "1" : "0") << ","
+                << user << ","
+                << (resultIs9 ? "P" : "F") << ",0x"
+                << std::hex << std::setw(16) << std::setfill('0') << x[0];
+            resultLine = oss.str();
+
+            if (task) {
+                std::string resultPath = save_path + "/result.txt";
+                std::ofstream resOut(resultPath, std::ios::app);
+                if (resOut) {
+                    resOut << jsonResult << "\n";
+                    resOut.close();
+                    std::cout << "→ Result added to: " << resultPath << std::endl;
+                } else {
+                    std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
+                }
+            } else if (!noAsk) {
+                promptToSendResult(jsonFile, user);
+                std::cout << "\nPress Enter to exit...";
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            }
+
+            return resultIs9 ? 0 : 1;
+
+        } else {
+            bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
+            std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
+
+            std::ostringstream oss;
+            oss << "LL=" << p << ","
+                << user << ","
+                << (isPrime ? "P" : "F") << ",0x"
+                << std::hex << std::setw(16) << std::setfill('0') << x[0];
+            resultLine = oss.str();
+
+            if (task) {
+                std::string resultPath = save_path + "/result.txt";
+                std::ofstream resOut(resultPath, std::ios::app);
+                if (resOut) {
+                    resOut << jsonResult << "\n";
+                    resOut.close();
+                    std::cout << "→ Result added to: " << resultPath << std::endl;
+                } else {
+                    std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
+                }
+            } else {
+                promptToSendResult(jsonFile, user);
+                std::cout << "\nPress Enter to exit...";
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            }
+
+            return isPrime ? 0 : 1;
+        }
+
     } catch (const std::exception &e) {
         std::cerr << "❌ Error while generating the final JSON: " << e.what() << std::endl;
+        return 1;
     }
 
 
 
-    std::string resultLine;
-    std::string jsonFile = save_path + "/" + std::to_string(p) + "_" + mode + "_result.json";
-
-    if (mode == "prp") {
-        bool resultIs9 = (x[0] == 9) && std::all_of(x.begin() + 1, x.end(), [](uint64_t v){ return v == 0; });
-        std::cout << "\nM" << p << " PRP test " << (resultIs9 ? "succeeded (result is 9)." : "failed (result is not 9).") << std::endl;
-
-        // Build the PrimeNet result line for PRP
-        std::ostringstream oss;
-        oss << "PRP=" << p << ","
-            << (proof ? "1" : "0") << ","
-            << user << ","
-            << (resultIs9 ? "P" : "F") << ",0x"
-            << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
-        resultLine = oss.str();
-
-        
-        if(!noAsk){
-            promptToSendResult(jsonFile, user);
-            std::cout << "\nPress Enter to exit...";
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            return resultIs9 ? 0 : 1;
-        }
-    } else {
-        bool isPrime = std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; });
-        std::cout << "\nM" << p << " is " << (isPrime ? "prime!" : "composite.") << std::endl;
-
-        // Build the PrimeNet result line for LL
-        std::ostringstream oss;
-        oss << "LL=" << p << ","
-            << user << ","
-            << (isPrime ? "P" : "F") << ",0x"
-            << std::hex << std::setw(16) << std::setfill('0') << x[0]; // res64
-        resultLine = oss.str();
-
-        promptToSendResult(jsonFile, user);
-
-        std::cout << "\nPress Enter to exit...";
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        return isPrime ? 0 : 1;
-    }
 
 
     // -------------------------------------------------------------------------
