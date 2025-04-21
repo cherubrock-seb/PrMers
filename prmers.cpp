@@ -1429,22 +1429,45 @@ static std::optional<Task> bestTask(const std::filesystem::path& fn) {
   std::ifstream in(fn);
   if (!in) {
     std::cerr << "❌ Cannot open file: " << fn << "\n";
-    return {};
+    std::exit(EXIT_FAILURE);
   }
 
   std::string line;
   bool found = false;
+  int lineNumber = 0;
+
   while (std::getline(in, line)) {
+    lineNumber++;
+    std::cout << "📄 Line " << lineNumber << ": " << line << "\n";
+
     auto t = parseWorktodoLine(line);
-    if (!t) continue;
+    if (!t) {
+      std::cout << "   ⛔ Ignored: not a valid task.\n";
+      continue;
+    }
+
+    std::cout << "   ✅ Valid task: exponent = " << t->exponent;
+    if (t->kind == Task::CERT)
+      std::cout << " (CERT)";
+    else if (t->kind == Task::PRP)
+      std::cout << " (PRP)";
+    else
+      std::cout << " (LL)";
+    std::cout << "\n";
 
     found = true;
+    /*
     if (!best
         || (best->kind != Task::CERT && t->kind == Task::CERT)
         || ((best->kind == t->kind || t->kind == Task::CERT) && t->exponent < best->exponent))
     {
       best = t;
+    }*/
+    if (!best) {
+        best = t;
+        break;
     }
+
   }
 
   if (!found) {
@@ -1454,6 +1477,7 @@ static std::optional<Task> bestTask(const std::filesystem::path& fn) {
 
   return best;
 }
+
 
 
 // -----------------------------------------------------------------------------
