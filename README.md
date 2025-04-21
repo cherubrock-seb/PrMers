@@ -430,6 +430,20 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   - Only the first valid `PRP=` line is processed.
 - `-config <path>`: Load configuration from a specified `.cfg` file instead of passing options manually
 
+
+📌 Typical Usage Scenarios
+
+This program is designed for flexible, automated testing of Mersenne numbers using OpenCL. The most common use case involves running multiple tests in sequence using a `worktodo.txt` file, with automatic result submission enabled:
+
+- You can specify a list of exponents in `worktodo.txt` and run the program with `--noask`, `-user <username>`, and `-password <password>` to automatically submit results to PrimeNet without interaction.
+- For advanced control, backup files can be stored at a custom path using `-f`, and fine-grained OpenCL settings like local sizes or profiling can be adjusted with `-l1`, `-l2`, `-l3`, or `-profile`.
+- Command-line overrides (`-O`, `-c`, etc.) allow tailoring the run for performance tuning or testing alternative kernel behaviors.
+- You may also run single tests manually by specifying the exponent as a positional argument.
+
+This enables full automation on servers or multi-GPU rigs with minimal supervision.
+
+
+
 ## Uninstallation
 To uninstall PrMers, run:
 ```bash
