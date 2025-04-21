@@ -1387,6 +1387,83 @@ std::vector<std::string> parseConfigFile(const std::string& config_path) {
     }
     return args;
 }
+//-----------------------------------------------------------------------------
+// compactBits : passe du tableau x[] (mixed‑radix) à un vecteur de mots 32 bits
+//-----------------------------------------------------------------------------
+static std::vector<uint32_t> compactBits(
+    const std::vector<uint64_t>& x,
+    const std::vector<int>& digit_width,
+    uint32_t E
+) {
+    std::vector<uint32_t> out;
+    out.reserve((E - 1) / 32 + 1);
+
+    int carry = 0;
+    uint32_t outWord = 0;
+    int haveBits = 0;
+
+    for (size_t p = 0; p < x.size(); ++p) {
+        int w = digit_width[p];
+        // on combine le carry avec votre digit x[p]
+        uint64_t v64 = uint64_t(carry) + x[p];
+        carry = int(v64 >> w);
+        uint32_t v = uint32_t(v64 & ((1ULL << w) - 1));
+
+        // on packe dans outWord
+        int topBits = 32 - haveBits;
+        outWord |= v << haveBits;
+        if (w >= topBits) {
+            out.push_back(outWord);
+            outWord = (w > topBits) ? (v >> topBits) : 0;
+            haveBits = w - topBits;
+        } else {
+            haveBits += w;
+        }
+    }
+
+    // dernier mot s’il reste des bits ou un carry
+    if (haveBits > 0 || carry) {
+        out.push_back(outWord);
+        for (size_t i = 1; carry && i < out.size(); ++i) {
+            uint64_t sum = uint64_t(out[i]) + carry;
+            out[i]   = uint32_t(sum & 0xFFFFFFFF);
+            carry    = int(sum >> 32);
+        }
+    }
+
+    return out;
+}
+
+//-----------------------------------------------------------------------------
+// mod3, doDiv3 et doDiv9 : pour PRP‑3 on divise deux fois par 3
+//-----------------------------------------------------------------------------
+static uint32_t mod3(const std::vector<uint32_t>& W) {
+    uint32_t r = 0;
+    for (uint32_t w : W) r = (r + (w % 3)) % 3;
+    return r;
+}
+
+static void doDiv3(uint32_t E, std::vector<uint32_t>& W) {
+    uint32_t r = (3 - mod3(W)) % 3;
+    int topBits = E % 32;
+    // mot de poids fort
+    {
+        uint64_t t = (uint64_t(r) << topBits) + W.back();
+        W.back() = uint32_t(t / 3);
+        r        = uint32_t(t % 3);
+    }
+    // descente sur les mots inférieurs
+    for (auto it = W.rbegin() + 1; it != W.rend(); ++it) {
+        uint64_t t = (uint64_t(r) << 32) + *it;
+        *it       = uint32_t(t / 3);
+        r         = uint32_t(t % 3);
+    }
+}
+
+static void doDiv9(uint32_t E, std::vector<uint32_t>& W) {
+    doDiv3(E, W);
+    doDiv3(E, W);
+}
 
 // -----------------------------------------------------------------------------
 // Main function
@@ -2204,15 +2281,25 @@ int main(int argc, char** argv) {
         std::cout << "Proof is saved in a file!\n\n";
     }
     try {
-        std::ostringstream res64oss;
-        for (int i = 0; i < 64 / 64; ++i) {
-            res64oss << std::hex << std::setw(16) << std::setfill('0') << x[i];
+        auto words = compactBits(x, digit_width_cpu, p);
+
+        if (mode == "prp") {
+            doDiv9(p, words);
         }
 
-        std::ostringstream res2048oss;
-        for (int i = 0; i < std::min((int)n, 2048 / 64); ++i) {
-            res2048oss << std::hex << std::setw(16) << std::setfill('0') << x[i];
+        uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+
+        std::ostringstream oss64;
+        oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+            << finalRes64;
+        std::string res64 = oss64.str();
+
+        std::ostringstream oss2048;
+        for (int i = 63; i >= 0; --i) {
+            oss2048 << std::hex << std::nouppercase << std::setw(8) << std::setfill('0')
+                    << words[i];
         }
+        std::string res2048 = oss2048.str();
 
         std::time_t now = std::time(nullptr);
         char timestampBuf[32];
@@ -2223,8 +2310,8 @@ int main(int argc, char** argv) {
                         : ((x[0] == 9 && std::all_of(x.begin() + 1, x.end(), [](uint64_t v) { return v == 0; })) ? "P" : "C"),
             p,
             (mode == "prp") ? "PRP-3" : "LL",
-            res64oss.str(),
-            res2048oss.str(),
+            res64,
+            res2048,
             1, // residueType
             0, // gerbiczError
             n,
