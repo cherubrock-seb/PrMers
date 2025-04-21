@@ -2441,7 +2441,12 @@ int main(int argc, char** argv) {
     //
     // After successful completion, remove the loop state file as it is no longer needed.
     std::remove(loop_filename.c_str());
-
+    if (postSpinnerActive) {
+    keepSpinning = false;
+    if (postFlushSpinner.joinable())
+        postFlushSpinner.join();
+    postSpinnerActive = false;
+    }
     checkAndDisplayProgress(-1, total_iters, lastDisplay, startTime, queue, p);
     // clFinish(queue);
     auto endTime = high_resolution_clock::now();
