@@ -405,7 +405,6 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   ```
 
 
-
 ## Command-Line Options
 
 - `<p>`: Minimum exponent to test (required)
@@ -417,7 +416,8 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-ll`: Run in Lucas–Lehmer mode, with an initial value of 4 and p-2 iterations of `kernel_sub2`
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
-- `-proof`: Enable proof generation (experimental). Produces `.proof` files for verification
+- `-proof`: Disable proof generation (by default, a proof is created if PRP test passes)
+- `-enqueue_max <value>`: Manually set the maximum number of enqueued kernels before `clFinish` is called (default: autodetect)
 - `-l1 <value>`: Force local size for the classic NTT kernel  
 - `-l2 <value>`: Force local size for the 2-step radix-16 NTT kernel  
 - `-l3 <value>`: Force local size for the mixed radix kernel (radix-4 + radix-2 + square + inverse)
@@ -426,6 +426,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-worktodo [path]`: Use a `worktodo.txt` file to load an exponent automatically.
   - If no path is given, the default `./worktodo.txt` is used.
   - Only the first valid `PRP=` line is processed.
+- `-config <path>`: Load configuration from a specified `.cfg` file instead of passing options manually
 
 ## Uninstallation
 To uninstall PrMers, run:
