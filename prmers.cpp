@@ -2606,7 +2606,7 @@ int main(int argc, char** argv) {
             resultLine = oss.str();
 
             if (task.has_value()) {
-                std::string resultPath = save_path + "/result.txt";
+                std::string resultPath = save_path + "/results.txt";
                 std::ofstream resOut(resultPath, std::ios::app);
                 if (resOut) {
                     resOut << jsonResult << "\n";
@@ -2670,7 +2670,7 @@ int main(int argc, char** argv) {
             resultLine = oss.str();
 
             if (task.has_value()) {
-                std::string resultPath = save_path + "/result.txt";
+                std::string resultPath = save_path + "/results.txt";
                 std::ofstream resOut(resultPath, std::ios::app);
                 if (resOut) {
                     resOut << jsonResult << "\n";
