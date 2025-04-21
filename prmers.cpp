@@ -436,7 +436,7 @@ void printUsage(const char* progName) {
     std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
-    std::cout << "  -password <username> : (Optional) PrimeNet username to autosubmit the result without prompt" << std::endl;
+    std::cout << "  -password <username> : (Optional) PrimeNet username to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
     std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
