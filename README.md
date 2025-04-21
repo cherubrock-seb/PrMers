@@ -35,7 +35,7 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 ```
 | Exponent  | Iter/s  | ETA              |
 |-----------|---------|------------------|
-| 136279841 | 29.49   | 53d 11h 43m 53s  |
+| 136279841 | 31.16   | 50d 14h 57m 35s  |
 | 82589933  | 50.88   | 18d 18h 52m 10s  |
 | 77232917  | 51.17   | 17d 11h 16m 9s   |
 | 74207281  | 51.15   | 16d 18h 58m 41s  |
