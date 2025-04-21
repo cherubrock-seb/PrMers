@@ -424,6 +424,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
 - `-l3 <value>`: Force local size for the mixed radix kernel (radix-4 + radix-2 + square + inverse)
 - `--noask`: Automatically submit results to PrimeNet without prompting
 - `-user <username>`: PrimeNet account username to use for automatic result submission
+- `password <password>` : PrimeNet account password (used only when -no-ask is set, used to automatically put the result in primenet without prompt).
 - `-worktodo [path]`: Use a `worktodo.txt` file to load an exponent automatically.
   - If no path is given, the default `./worktodo.txt` is used.
   - Only the first valid `PRP=` line is processed.
