@@ -84,7 +84,8 @@ static std::vector<std::string> log_messages;
 static int enqueued_kernels = 0;
 //const size_t FINISH_THRESHOLD = 16384;  // ≃16 K kernels avant finish
 int FINISH_THRESHOLD = -1;
-double estimatedFlushDuration = -1.0;
+double estimatedFlushDuration = 0.0;
+bool isFirstFlush = true;
 std::chrono::time_point<std::chrono::high_resolution_clock> lastDisplayFlush;
 // Déclaration globale
 uint32_t current_iter(0);
@@ -548,7 +549,6 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     if (FINISH_THRESHOLD != -1 && (++enqueued_kernels >= FINISH_THRESHOLD)) {
         enqueued_kernels = 0;
         
-        bool isFirstFlush = (estimatedFlushDuration < 0);
         std::atomic<bool> waiting(true);
         std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration, isFirstFlush);
 
@@ -565,7 +565,7 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
             estimatedFlushDuration = duration;
         else
             estimatedFlushDuration = 0.7 * estimatedFlushDuration + 0.3 * duration;
-
+        isFirstFlush = false;
         lastDisplayFlush = std::chrono::high_resolution_clock::now();
     }
 
@@ -728,7 +728,7 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 
-        if (isFirst || ii == 0) {
+        if (isFirst) {
             std::cout << "\r🕒 GPU is flushing the command queue "
                       << symbols[i++ % 4]
                       << " (" << elapsed << "s elapsed";
@@ -737,7 +737,7 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
             std::cout << ")..." << std::flush;
         }
 
-        if (!isFirst && estimatedSeconds > 0 && elapsed > 0) {
+        if (!isFirst) {
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 1) {
              uint32_t fake_iter =  static_cast<uint32_t>(
                 elapsed * iters_per_sec
