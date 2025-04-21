@@ -60,7 +60,9 @@
 #include <cstdarg> 
 #include <set>
 #include <map>
+#ifndef NO_CURL
 #include <curl/curl.h>
+#endif
 #ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
@@ -1133,6 +1135,7 @@ std::string extractUID(const std::string& html) {
     return html.substr(pos, end - pos);
 }
 
+#ifndef NO_CURL
 bool sendManualResultWithLogin(const std::string& jsonResult, const std::string& username, const std::string& password) {
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -1366,6 +1369,7 @@ void promptToSendResult(const std::string& jsonPath, std::string& user) {
         }
     }
 }
+#endif
 
 struct Task {
   enum Kind { PRP, LL, CERT } kind;
@@ -2632,7 +2636,11 @@ int main(int argc, char** argv) {
                     std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
                 }
             } else if (!noAsk) {
-                promptToSendResult(jsonFile, user);
+                #ifndef NO_CURL
+                    promptToSendResult(jsonFile, user);
+                #else
+                    std::cerr << "⚠️ This binary was compiled without libcurl support. Result sending is disabled.\n";
+                #endif
                 std::cout << "\nPress Enter to exit...";
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
@@ -2693,7 +2701,11 @@ int main(int argc, char** argv) {
                     std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
                 }
             } else {
-                promptToSendResult(jsonFile, user);
+                #ifndef NO_CURL
+                    promptToSendResult(jsonFile, user);
+                 #else
+                    std::cerr << "⚠️ This binary was compiled without libcurl support. Result sending is disabled.\n";
+                #endif
                 std::cout << "\nPress Enter to exit...";
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
