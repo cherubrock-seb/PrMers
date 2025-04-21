@@ -2478,7 +2478,8 @@ int main(int argc, char** argv) {
                 std::cout << "❌ RESULT: PROBABLY COMPOSITE (residue is not 9)\n";
             }
             std::cout << "=============================================\n";
-
+            std::cout << "📦 res64 = 0x" << res64 << "\n";
+            std::cout << "=============================================\n";
             std::ostringstream oss;
             oss << "PRP=" << p << ","
                 << (proof ? "1" : "0") << ","
