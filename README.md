@@ -9,6 +9,11 @@ Key features:
 - 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
 - 📊 Benchmark output for performance comparison across devices
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
+https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
+
+👆 Click the badge to run **PrMers** in Google Colab with GPU support.
+
 
 ### 📈 Sample Performance Results
 
@@ -52,6 +57,7 @@ Key features:
 ```
 
 For a full table of benchmark results, see the section below 👇
+
 
 
 ## Features
