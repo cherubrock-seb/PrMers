@@ -64,10 +64,9 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <limits.h>
-#include <atomic>
-#include <thread>
-
 #endif
+#include <thread>
+#include <atomic>
 #include "proof/proof.h"
 #ifdef max
 #undef max
