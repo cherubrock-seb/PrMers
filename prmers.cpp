@@ -728,7 +728,7 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 
-        if (isFirst) {
+        if (isFirst || ii == 0) {
             std::cout << "\r🕒 GPU is flushing the command queue "
                       << symbols[i++ % 4]
                       << " (" << elapsed << "s elapsed";
