@@ -35,6 +35,7 @@ if (USE_CURL)
     target_compile_definitions(prmers PRIVATE HAS_CURL=1)
 else()
     message(STATUS "libcurl support is disabled by option.")
+    target_compile_definitions(prmers PRIVATE NO_CURL=1)
 endif()
 
 # Link OpenCL last
