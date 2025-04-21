@@ -1452,7 +1452,7 @@ static std::optional<Task> bestTask(const std::filesystem::path& fn) {
   std::ifstream in(fn);
   if (!in) {
     std::cerr << "❌ Cannot open file: " << fn << "\n";
-    std::exit(EXIT_FAILURE);
+    //std::exit(EXIT_FAILURE);
   }
 
   std::string line;
@@ -1495,7 +1495,7 @@ static std::optional<Task> bestTask(const std::filesystem::path& fn) {
 
   if (!found) {
     std::cout << "✅ No valid task found in " << fn << ".\n";
-    std::exit(EXIT_FAILURE);
+    //std::exit(EXIT_FAILURE);
   }
 
   return best;
