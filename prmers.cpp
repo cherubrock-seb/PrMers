@@ -93,6 +93,8 @@ std::atomic<double> elapsedTimez(0.0);
 std::atomic<double> startTimez(0.0);
 uint32_t current_expo = 0;
 double iters_per_sec = 0;
+std::string aid_value = "AID-PRMERS-1234";
+std::string uid_value = "UID-PRMERS-5678";
 void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds = -1, bool isFirst = true);
 
 #define COLOR_GREEN "\033[32m"
@@ -1351,19 +1353,102 @@ void promptToSendResult(const std::string& jsonPath, std::string& user) {
     }
 }
 
-int extractExponentFromWorktodo(const std::string& path = "worktodo.txt") {
-    std::ifstream infile(path);
-    if (!infile) return -1;
+struct Task {
+  enum Kind { PRP, LL, CERT } kind;
+  uint32_t exponent;
+  std::string aid;
+  std::string line;
+  uint32_t squarings;        // égal à 0 sauf pour CERT
+};
 
-    std::string line;
-    std::regex prp_pattern(R"(PRP=.*?,.*?,.*?,(\d+),.*)");
-    std::smatch match;
-    while (std::getline(infile, line)) {
-        if (std::regex_match(line, match, prp_pattern)) {
-            return std::stoi(match[1].str());
-        }
+static std::vector<std::string> split(const std::string& s, char sep) {
+  std::vector<std::string> out;
+  size_t i = 0, j;
+  while ((j = s.find(sep, i)) != std::string::npos) {
+    out.push_back(s.substr(i, j-i));
+    i = j+1;
+  }
+  out.push_back(s.substr(i));
+  return out;
+}
+
+static bool isHex(const std::string& s) {
+  if (s.size() != 32) return false;
+  for (char c : s) {
+    if (!std::isxdigit((unsigned char)c)) return false;
+  }
+  return true;
+}
+
+static std::optional<Task> parseWorktodoLine(const std::string& line) {
+  if (line.empty() || line[0] == '#') return {};
+
+  // split "PRP=..." en ["PRP","..."]
+  auto top = split(line, '=');
+  bool isPRP  = top[0] == "PRP"  || top[0] == "PRPDC";
+  bool isLL   = top[0] == "Test" || top[0] == "DoubleCheck";
+  bool isCERT = top[0] == "Cert";
+
+  if (! (isPRP || isLL || isCERT) ) return {};
+
+  // split le reste sur ','
+  auto parts = split(top[1], ',');
+  // si premier champ vide ou "N/A", on l'enlève
+  if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
+    parts.erase(parts.begin());
+
+  // extraire AID (32 hex) si présent en tête
+  std::string AID;
+  if (!parts.empty() && isHex(parts[0])) {
+    AID = parts[0];
+    parts.erase(parts.begin());
+  }
+
+  // on suppose que pour PRP/LL la ligne est:
+  // [ "1", "2", EXP, "-1", ... ]
+  if (isPRP || isLL) {
+    if (parts.size() >= 4 && parts[0]=="1" && parts[1]=="2" && parts[3]=="-1") {
+      // exponent = parts[2]
+      uint32_t exp = 0;
+      auto [ptr, ec] = std::from_chars(parts[2].c_str(), parts[2].c_str()+parts[2].size(), exp);
+      if (ec==std::errc() && exp > 1000) {
+        Task t{ isPRP ? Task::PRP : Task::LL, exp, AID, line, 0 };
+        return t;
+      }
     }
-    return -1;
+    return {};
+  }
+
+  // Cert case: [ "1", "2", EXP, "-1", SQUARINGS ]
+  if (isCERT && parts.size() == 5 && parts[0]=="1" && parts[1]=="2" && parts[3]=="-1") {
+    uint32_t exp=0, sq=0;
+    std::from_chars(parts[2].c_str(), parts[2].c_str()+parts[2].size(), exp);
+    std::from_chars(parts[4].c_str(), parts[4].c_str()+parts[4].size(), sq);
+    if (exp>1000 && sq>100) {
+      Task t{ Task::CERT, exp, AID, line, sq };
+      return t;
+    }
+  }
+  return {};
+}
+
+static std::optional<Task> bestTask(const std::filesystem::path& fn) {
+  std::optional<Task> best;
+  std::ifstream in(fn);
+  if (!in) return {};
+  std::string line;
+  while (std::getline(in, line)) {
+    auto t = parseWorktodoLine(line);
+    if (!t) continue;
+    // on choisit CERT avant tout, ou plus petit exponent
+    if (!best
+        || (best->kind != Task::CERT && t->kind == Task::CERT)
+        || ((best->kind == t->kind || t->kind == Task::CERT) && t->exponent < best->exponent))
+    {
+      best = t;
+    }
+  }
+  return best;
 }
 
 // -----------------------------------------------------------------------------
@@ -1503,13 +1588,16 @@ int main(int argc, char** argv) {
             break;
         }
     }
+    
+    auto task = bestTask(worktodo_path);
 
-    bool has_explicit_exponent = (all_args.size() >= 2 && all_args[1][0] != '-');
-    if (!has_explicit_exponent) {
-        int exp = extractExponentFromWorktodo(worktodo_path);
-        if (exp <= 0) exp = askExponentInteractively();
-        staticExponentStr = std::to_string(exp);
-        all_args.insert(all_args.begin() + 1, staticExponentStr);
+    bool hasExplicit = (all_args.size() >= 2 && all_args[1][0] != '-');
+    if (!hasExplicit && task) {
+        std::string expStr = std::to_string(task->exponent);
+        all_args.insert(all_args.begin()+1, expStr);
+        // stocker AID et UID pour le JSON
+        aid_value = task->aid;
+        uid_value = task->aid.empty() ? "" : task->line.substr(0,32);
     }
 
     for (const auto& s : all_args) final_argv.push_back(s.c_str());
@@ -2307,6 +2395,12 @@ int main(int argc, char** argv) {
         char timestampBuf[32];
         std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
 
+
+        if (task && !task->aid.empty()) {
+            aid_value = task->aid;
+            uid_value = task->aid;
+        }
+
         std::string jsonResult = generatePrimeNetJson(
             (mode == "ll") ? (std::all_of(x.begin(), x.end(), [](uint64_t v) { return v == 0; }) ? "P" : "C")
                         : ((x[0] == 9 && std::all_of(x.begin() + 1, x.end(), [](uint64_t v) { return v == 0; })) ? "P" : "C"),
@@ -2340,8 +2434,8 @@ int main(int argc, char** argv) {
             "unknown",
     #endif
             user.empty() ? "cherubrock":user,
-            "AID-PRMERS-1234",
-            "UID-PRMERS-5678",
+            aid_value,
+            uid_value,
             timestampBuf
         );
 
