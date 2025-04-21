@@ -99,8 +99,8 @@ std::atomic<double> elapsedTimez(0.0);
 std::atomic<double> startTimez(0.0);
 uint32_t current_expo = 0;
 double iters_per_sec = 0;
-std::string aid_value = "AID-PRMERS-1234";
-std::string uid_value = "UID-PRMERS-5678";
+std::string aid_value = "";
+std::string uid_value = "";
 void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, std::atomic<bool>& isFirst);
 
 #define COLOR_GREEN "\033[32m"
@@ -278,12 +278,12 @@ std::string generatePrimeNetJson(
     oss << "\"name\":" << jsonEscape(programName) << ", ";
     oss << "\"version\":" << jsonEscape(programVersion) << ", ";
     oss << "\"port\":" << programPort << ", ";
-    oss << "\"os\": {";
-    oss << "\"os\":" << jsonEscape(osName) << ", ";
-    oss << "\"version\":" << jsonEscape(osVersion) << ", ";
-    oss << "\"architecture\":" << jsonEscape(osArchitecture);
-    oss << "}";
-    oss << "}, ";
+    //oss << "\"os\": {";
+    //oss << "\"os\":" << jsonEscape(osName) << ", ";
+    //oss << "\"version\":" << jsonEscape(osVersion) << ", ";
+    //oss << "\"architecture\":" << jsonEscape(osArchitecture);
+    //oss << "}";
+    //oss << "}, ";
     
     // User information and timestamp.
     oss << "\"user\":" << jsonEscape(user) << ", ";
