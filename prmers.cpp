@@ -436,6 +436,7 @@ void printUsage(const char* progName) {
     std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    std::cout << "  -password <username> : (Optional) PrimeNet username to autosubmit the result without prompt" << std::endl;
     std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
@@ -1137,41 +1138,94 @@ std::string extractUID(const std::string& html) {
 
 #ifndef NO_CURL
 bool sendManualResultWithLogin(const std::string& jsonResult, const std::string& username, const std::string& password) {
+
+
     CURL* curl = curl_easy_init();
     if (!curl) {
-        std::cerr << "❌ Failed to initialize libcurl.\n";
+        std::cerr << "❌ Failed to initialize CURL.\n";
         return false;
     }
 
     FILE* trace = fopen("curl_trace.txt", "w");
+
+    // Headers simulant un navigateur réel
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+    headers = curl_slist_append(headers, "Accept-Language: fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7");
+    headers = curl_slist_append(headers, "Origin: https://www.mersenne.org");
+    headers = curl_slist_append(headers, "Referer: https://www.mersenne.org/login.php");
+    headers = curl_slist_append(headers, "Upgrade-Insecure-Requests: 1");
+    headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
+
+
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl, CURLOPT_STDERR, trace);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "cookies.txt");
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, ""); 
     curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies.txt");
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
     std::string loginResponse;
-    curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/");
+    curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/login.php");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &loginResponse);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
 
+    // Construction des données POST
     std::ostringstream loginData;
-    char* escapedUser = curl_easy_escape(curl, username.c_str(), 0);
-    char* escapedPass = curl_easy_escape(curl, password.c_str(), 0);
-    loginData << "user_login=" << escapedUser << "&user_password=" << escapedPass;
-    curl_free(escapedUser);
-    curl_free(escapedPass);
+    loginData << "user_login=" << username
+            << "&user_password=" << password;
+    std::string postFields = loginData.str();
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postFields.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, loginData.str().c_str());
-
+    // Exécution de la requête de login
     std::cerr << "[TRACE] Sending login with user: " << username << std::endl;
     CURLcode loginRes = curl_easy_perform(curl);
-    std::cerr << "[TRACE] Login response size: " << loginResponse.size() << " bytes\n";
 
-    if (loginRes != CURLE_OK || loginResponse.find("logged in") == std::string::npos) {
+    // Sauvegarde de la réponse HTML pour vérification
+    std::ofstream htmlOut("login_response_debug.html");
+    htmlOut << loginResponse;
+    htmlOut.close();
+
+    if (loginRes != CURLE_OK) {
+        std::cerr << "❌ Login failed: " << curl_easy_strerror(loginRes) << "\n";
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        fclose(trace);
+        return false;
+    }
+
+    // Vérification du cookie GIMPSWWW
+    struct curl_slist* cookies = nullptr;
+    curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &cookies);
+    bool hasSession = false;
+    for (auto c = cookies; c; c = c->next) {
+        if (strstr(c->data, "GIMPSWWW")) {
+            hasSession = true;
+            break;
+        }
+    }
+    curl_slist_free_all(cookies);
+
+    if (!hasSession) {
+        std::cerr << "❌ Login failed: no session cookie received.\n";
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        fclose(trace);
+        return false;
+    }
+
+    std::cerr << "✅ Login successful, session cookie received.\n";
+
+    if (loginRes != CURLE_OK) {
         std::cerr << "❌ Login failed or session not recognized.\n";
+        //std::cerr << loginData.str().c_str() << "\n";
+        std::ofstream htmlOut("login_response_debug.html");
+        htmlOut << loginResponse;
+        htmlOut.close();
+        std::cerr << "💡 Login HTML saved to login_response_debug.html\n";
         curl_easy_cleanup(curl);
         fclose(trace);
         return false;
@@ -1184,7 +1238,6 @@ bool sendManualResultWithLogin(const std::string& jsonResult, const std::string&
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &htmlFormPage);
 
-
     CURLcode pageRes = curl_easy_perform(curl);
     if (pageRes != CURLE_OK) {
         std::cerr << "❌ Failed to get manual_result page: " << curl_easy_strerror(pageRes) << "\n";
@@ -1196,6 +1249,11 @@ bool sendManualResultWithLogin(const std::string& jsonResult, const std::string&
     std::string uid = extractUID(htmlFormPage);
     std::cerr << "[TRACE] Extracted was_logged_in_as UID: " << uid << "\n";
     if (uid.empty()) {
+        std::ofstream htmlOut("login_response_manual_debug.html");
+        htmlOut << htmlFormPage;
+        htmlOut.close();
+        std::cerr << "💡 Login HTML saved to login_response_manual_debug.html\n";
+        
         std::cerr << "❌ Could not find was_logged_in_as value in form page.\n";
         curl_easy_cleanup(curl);
         fclose(trace);
@@ -1735,6 +1793,7 @@ int main(int argc, char** argv) {
     bool noAsk = false;
 
     std::string user;
+    std::string password;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -1828,6 +1887,15 @@ int main(int argc, char** argv) {
                 i++;
             } else {
                 std::cerr << "Error: Missing value for -user <name>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-password") == 0) {
+            if (i + 1 < argc) {
+                password = argv[i + 1];
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -password <password>." << std::endl;
                 return 1;
             }
         }
@@ -2612,6 +2680,18 @@ int main(int argc, char** argv) {
                     resOut << jsonResult << "\n";
                     resOut.close();
                     std::cout << "→ Result added to: " << resultPath << std::endl;
+                    #ifndef NO_CURL
+                        if (!user.empty() && !password.empty()) {
+                            bool success = sendManualResultWithLogin(jsonFile, user, password);
+                            if (!success) {
+                                std::cerr << "❌ Automatic result sending failed.\n";
+                            }
+                        } else {
+                            std::cerr << "⚠️ 'noAsk' is true but no username or password was provided.\n";
+                        }
+                    #else
+                        std::cerr << "⚠️ This binary was compiled without libcurl support. Cannot send result.\n";
+                    #endif
                     // Remove the first line of worktodo.txt and append it to worktodo_save.txt 
                     std::ifstream inFile(worktodo_path);
                     std::ofstream tempFile(worktodo_path + ".tmp");
@@ -2640,7 +2720,7 @@ int main(int argc, char** argv) {
                     std::remove(worktodo_path.c_str());
                     std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
 
-                    std::cout << "→ 2Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
                     restart_self(argc, argv);
 
                 } else {
@@ -2654,6 +2734,21 @@ int main(int argc, char** argv) {
                 #endif
                 std::cout << "\nPress Enter to exit...";
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            }
+            else if (noAsk) {
+                #ifndef NO_CURL
+                    // Vérifie si l'utilisateur et mot de passe ont été fournis
+                    if (!user.empty() && !password.empty()) {
+                        bool success = sendManualResultWithLogin(jsonFile, user, password);
+                        if (!success) {
+                            std::cerr << "❌ Automatic result sending failed.\n";
+                        }
+                    } else {
+                        std::cerr << "⚠️ 'noAsk' is true but no username or password was provided.\n";
+                    }
+                #else
+                    std::cerr << "⚠️ This binary was compiled without libcurl support. Cannot send result.\n";
+                #endif
             }
 
             return resultIs9 ? 0 : 1;
@@ -2676,6 +2771,18 @@ int main(int argc, char** argv) {
                     resOut << jsonResult << "\n";
                     resOut.close();
                     std::cout << "→ Result added to: " << resultPath << std::endl;
+                    #ifndef NO_CURL
+                        if (!user.empty() && !password.empty()) {
+                            bool success = sendManualResultWithLogin(jsonFile, user, password);
+                            if (!success) {
+                                std::cerr << "❌ Automatic result sending failed.\n";
+                            }
+                        } else {
+                            std::cerr << "⚠️ 'noAsk' is true but no username or password was provided.\n";
+                        }
+                    #else
+                        std::cerr << "⚠️ This binary was compiled without libcurl support. Cannot send result.\n";
+                    #endif
                     // Remove the first line of worktodo.txt and append it to worktodo_save.txt 
                     std::ifstream inFile(worktodo_path);
                     std::ofstream tempFile(worktodo_path + ".tmp");
@@ -2704,7 +2811,7 @@ int main(int argc, char** argv) {
                     std::remove(worktodo_path.c_str());
                     std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
 
-                    std::cout << "→ 1Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
                     restart_self(argc, argv);
 
 
@@ -2712,13 +2819,31 @@ int main(int argc, char** argv) {
                     std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
                 }
             } else {
-                #ifndef NO_CURL
-                    promptToSendResult(jsonFile, user);
-                 #else
-                    std::cerr << "⚠️ This binary was compiled without libcurl support. Result sending is disabled.\n";
-                #endif
-                std::cout << "\nPress Enter to exit...";
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                if(!noAsk){
+                    #ifndef NO_CURL
+                        promptToSendResult(jsonFile, user);
+                    #else
+                        std::cerr << "⚠️ This binary was compiled without libcurl support. Result sending is disabled.\n";
+                    #endif
+                    std::cout << "\nPress Enter to exit...";
+                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                }
+                else{
+                    #ifndef NO_CURL
+                        // Vérifie si l'utilisateur et mot de passe ont été fournis
+                        if (!user.empty() && !password.empty()) {
+                            bool success = sendManualResultWithLogin(jsonFile, user, password);
+                            if (!success) {
+                                std::cerr << "❌ Automatic result sending failed.\n";
+                            }
+                        } else {
+                            std::cerr << "⚠️ 'noAsk' is true but no username or password was provided.\n";
+                        }
+                    #else
+                        std::cerr << "⚠️ This binary was compiled without libcurl support. Cannot send result.\n";
+                    #endif
+}
+
             }
 
             return isPrime ? 0 : 1;
