@@ -74,6 +74,9 @@
 #ifdef min
 #undef min
 #endif
+static std::thread postFlushSpinner;
+static std::atomic<bool> keepSpinning(false);
+static bool postSpinnerActive = false;
 
 // Global variables for backup functionality
 volatile std::sig_atomic_t g_interrupt_flag = 0; // Flag to indicate SIGINT received
@@ -85,7 +88,7 @@ static int enqueued_kernels = 0;
 //const size_t FINISH_THRESHOLD = 16384;  // ≃16 K kernels avant finish
 int FINISH_THRESHOLD = -1;
 double estimatedFlushDuration = 0.0;
-bool isFirstFlush = true;
+std::atomic<bool>  isFirstFlush = true;
 std::chrono::time_point<std::chrono::high_resolution_clock> lastDisplayFlush;
 // Déclaration globale
 uint32_t current_iter(0);
@@ -96,14 +99,14 @@ uint32_t current_expo = 0;
 double iters_per_sec = 0;
 std::string aid_value = "AID-PRMERS-1234";
 std::string uid_value = "UID-PRMERS-5678";
-void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds = -1, bool isFirst = true);
+void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, std::atomic<bool>& isFirst);
 
 #define COLOR_GREEN "\033[32m"
 #define COLOR_YELLOW "\033[33m"
 #define COLOR_RED "\033[31m"
 #define COLOR_RESET "\033[0m"
 #define COLOR_MAGENTA "\033[35m"
-
+#define COLOR_GRAY "\033[90m"
 
 using namespace std::chrono;
 
@@ -548,18 +551,24 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
     }
     if (FINISH_THRESHOLD != -1 && (++enqueued_kernels >= FINISH_THRESHOLD)) {
         enqueued_kernels = 0;
-        
+        if (postSpinnerActive) {
+        keepSpinning = false;
+        if (postFlushSpinner.joinable())
+            postFlushSpinner.join();
+        postSpinnerActive = false;
+        }
         std::atomic<bool> waiting(true);
-        std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration, isFirstFlush);
+        
+        std::thread spinner(displaySpinner, std::ref(waiting), estimatedFlushDuration,std::ref(isFirstFlush));
 
 
         auto flushStart = std::chrono::high_resolution_clock::now();
         clFinish(queue);
+        
         auto flushEnd = std::chrono::high_resolution_clock::now();
 
         waiting = false;
         spinner.join();
-
         double duration = std::chrono::duration<double>(flushEnd - flushStart).count();
         if (estimatedFlushDuration < 0)
             estimatedFlushDuration = duration;
@@ -567,6 +576,18 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
             estimatedFlushDuration = 0.7 * estimatedFlushDuration + 0.3 * duration;
         isFirstFlush = false;
         lastDisplayFlush = std::chrono::high_resolution_clock::now();
+        keepSpinning = true;
+        postFlushSpinner = std::thread([] {
+            const char* spin = "|/-\\";
+            int i = 0;
+            std::cout << "\r" COLOR_MAGENTA "⏳ GPU queue full — awaiting next flush... " COLOR_RESET << std::flush;
+            while (keepSpinning) {
+                std::cout << "\r" COLOR_MAGENTA "⏳ Waiting " << spin[i++ % 4] << COLOR_RESET << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            std::cout << "\r" << std::string(60, ' ') << "\r" << std::flush; // Clear line
+        });
+        postSpinnerActive = true;
     }
 
 
@@ -623,12 +644,7 @@ void displayProgressEstimated(uint32_t iter, uint32_t total_iters, double elapse
     //double iters_per_sec = (elapsedTime > 0) ? iter / elapsedTime : 0.0;
     double remaining_time = (iters_per_sec > 0) ? (total_iters - iter) / iters_per_sec : 0.0;
     std::string color;
-    if (progress < 50.0)
-        color = COLOR_RED;
-    else if (progress < 90.0)
-        color = COLOR_YELLOW;
-    else
-        color = COLOR_GREEN;
+    color = COLOR_GRAY;
     uint32_t seconds = static_cast<uint32_t>(remaining_time);
     uint32_t days = seconds / (24 * 3600);
     seconds %= (24 * 3600);
@@ -713,7 +729,8 @@ cl_kernel createKernel(cl_program program, const std::string& kernelName) {
     return kernel;
 }
 
-void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool isFirst) {
+void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, std::atomic<bool>& isFirst) {
+    //std::cout << "SPINNER CALLED \n";
     const char symbols[] = {'|', '/', '-', '\\'};
     size_t ii = 0;
     size_t i = 0;
@@ -729,30 +746,28 @@ void displaySpinner(std::atomic<bool>& waiting, double estimatedSeconds, bool is
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start).count();
 
         if (isFirst) {
-            std::cout << "\r🕒 GPU is flushing the command queue "
+            std::cout << "\r🕒 First GPU queue flush "
                       << symbols[i++ % 4]
                       << " (" << elapsed << "s elapsed";
             if (estimatedSeconds > 0)
                 std::cout << " / ~" << (int)estimatedSeconds << "s estimated";
             std::cout << ")..." << std::flush;
+        }else{
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 1) {
+                uint32_t fake_iter =  static_cast<uint32_t>(
+                    elapsed * iters_per_sec
+                );
+                if (fake_iter >= total_itersz)
+                    fake_iter = total_itersz - 1;
+
+
+                double fake_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - start).count();
+                if(ii > 0)
+                    displayProgressEstimated(fake_iter, total_itersz, fake_elapsed, current_expo);
+                
+                lastDisplay = now;
+            }
         }
-
-        if (!isFirst) {
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 1) {
-             uint32_t fake_iter =  static_cast<uint32_t>(
-                elapsed * iters_per_sec
-            );
-            if (fake_iter >= total_itersz)
-                fake_iter = total_itersz - 1;
-
-
-            double fake_elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - start).count();
-            if(ii > 0)
-                displayProgressEstimated(fake_iter, total_itersz, fake_elapsed, current_expo);
-            
-            lastDisplay = now;
-        }
-    }
 
 
         std::this_thread::sleep_for(std::chrono::milliseconds(5000));
