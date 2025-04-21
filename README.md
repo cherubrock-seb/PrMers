@@ -9,10 +9,12 @@ Key features:
 - 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
 - 📊 Benchmark output for performance comparison across devices
 
+## 🚀 Try the PrMers Demo on Google Colab
+
+You can test **PrMers** directly in your browser with GPU acceleration by opening the interactive notebook below:
+
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
 https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
-
-👆 Click the badge to run **PrMers** in Google Colab with GPU support.
 
 
 ### 📈 Sample Performance Results
