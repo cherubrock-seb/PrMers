@@ -414,7 +414,7 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
     std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-proof]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -433,13 +433,12 @@ void printUsage(const char* progName) {
     std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
+    std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
-              << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg" << std::endl;
+              << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg -proof" << std::endl;
 }
-
-
 
 
 // -----------------------------------------------------------------------------
@@ -1550,6 +1549,50 @@ static void doDiv9(uint32_t E, std::vector<uint32_t>& W) {
     doDiv3(E, W);
 }
 
+
+
+void restart_self(int argc, char* argv[]) {
+    std::vector<std::string> args(argv, argv + argc);
+
+    if (args.size() > 1 && args[1].find_first_not_of("0123456789") == std::string::npos) {
+        args.erase(args.begin() + 1); 
+    }
+
+#ifdef _WIN32
+    std::string command = "\"" + args[0] + "\"";
+    for (size_t i = 1; i < args.size(); ++i) {
+        command += " \"" + args[i] + "\"";
+    }
+    STARTUPINFO si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    if (CreateProcessA(
+            NULL,
+            const_cast<char*>(command.c_str()),
+            NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        exit(0);
+    } else {
+        std::cerr << "❌ Failed to restart program (CreateProcess failed)" << std::endl;
+    }
+
+#else
+    std::cout << "\n🔁 Restarting program without exponent:\n";
+    for (const auto& arg : args) {
+        std::cout << "   " << arg << std::endl;
+    }
+
+    std::vector<char*> exec_args;
+    for (auto& s : args) exec_args.push_back(const_cast<char*>(s.c_str()));
+    exec_args.push_back(nullptr);
+
+    execv(exec_args[0], exec_args.data());
+
+    std::cerr << "❌ Failed to restart program (execv failed)" << std::endl;
+#endif
+}
+
+
 // -----------------------------------------------------------------------------
 // Main function
 // -----------------------------------------------------------------------------
@@ -1617,7 +1660,7 @@ int main(int argc, char** argv) {
     int device_id = 0;  // Default device ID
     cl_uint localCarryPropagationDepth = 4;
     std::string mode = "prp"; 
-    bool proof = false;
+    bool proof = true;
     bool profiling = false;
     bool force_carry = false;
     int max_local_size1 = 0;
@@ -1632,7 +1675,7 @@ int main(int argc, char** argv) {
             debug = true;
         }
         else if (std::strcmp(argv[i], "-proof") == 0) {
-            proof = true;
+            proof = false;
         }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             profiling = true;
@@ -2495,6 +2538,37 @@ int main(int argc, char** argv) {
                     resOut << jsonResult << "\n";
                     resOut.close();
                     std::cout << "→ Result added to: " << resultPath << std::endl;
+                    // Remove the first line of worktodo.txt and append it to worktodo_save.txt 
+                    std::ifstream inFile(worktodo_path);
+                    std::ofstream tempFile(worktodo_path + ".tmp");
+                    std::ofstream saveFile("worktodo_save.txt", std::ios::app);  // Append mode
+
+                    std::string line;
+                    bool skipped = false;
+
+                    while (std::getline(inFile, line)) {
+                        if (!skipped && !line.empty()) {
+                            skipped = true;
+                            if (saveFile) {
+                                saveFile << line << "\n";  // Save the processed line
+                            } else {
+                                std::cerr << "❌ Failed to open worktodo_save.txt for appending." << std::endl;
+                            }
+                            continue;  // Skip writing to temp file
+                        }
+                        tempFile << line << "\n";  // Write remaining lines
+                    }
+
+                    inFile.close();
+                    tempFile.close();
+                    saveFile.close();
+
+                    std::remove(worktodo_path.c_str());
+                    std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
+
+                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    restart_self(argc, argv);
+
                 } else {
                     std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
                 }
@@ -2524,6 +2598,38 @@ int main(int argc, char** argv) {
                     resOut << jsonResult << "\n";
                     resOut.close();
                     std::cout << "→ Result added to: " << resultPath << std::endl;
+                    // Remove the first line of worktodo.txt and append it to worktodo_save.txt 
+                    std::ifstream inFile(worktodo_path);
+                    std::ofstream tempFile(worktodo_path + ".tmp");
+                    std::ofstream saveFile("worktodo_save.txt", std::ios::app);  // Append mode
+
+                    std::string line;
+                    bool skipped = false;
+
+                    while (std::getline(inFile, line)) {
+                        if (!skipped && !line.empty()) {
+                            skipped = true;
+                            if (saveFile) {
+                                saveFile << line << "\n";  // Save the processed line
+                            } else {
+                                std::cerr << "❌ Failed to open worktodo_save.txt for appending." << std::endl;
+                            }
+                            continue;  // Skip writing to temp file
+                        }
+                        tempFile << line << "\n";  // Write remaining lines
+                    }
+
+                    inFile.close();
+                    tempFile.close();
+                    saveFile.close();
+
+                    std::remove(worktodo_path.c_str());
+                    std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
+
+                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    restart_self(argc, argv);
+
+
                 } else {
                     std::cerr << "❌ Failed to open " << resultPath << " for writing." << std::endl;
                 }
