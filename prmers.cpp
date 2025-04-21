@@ -42,6 +42,7 @@
 #include <vector>
 #include <stdexcept>
 #include <filesystem>
+#include <optional>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
