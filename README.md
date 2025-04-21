@@ -76,6 +76,7 @@ PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 ### ✅ Common Requirements
 - A GPU supporting **OpenCL 1.2** or higher (**OpenCL 2.0** recommended)
 - OpenCL-compatible drivers installed
+- Libcurl
 
 ### 🐧 On Linux
 - `g++` with C++20 support (e.g., GNU g++ 10+)
@@ -83,19 +84,24 @@ PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
   - `ocl-icd-opencl-dev`
   - `opencl-headers`
 - Git (to clone the repository)
+- libcurl4-openssl-dev
+
+Example on ubuntu : 
+sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
 
 ### 🪟 On Windows
 - A compiler supporting C++20 (e.g., MSVC or MinGW64)
 - OpenCL SDK (e.g., [Khronos OpenCL SDK](https://github.com/KhronosGroup/OpenCL-SDK))
 - CMake (if building via CMake)
 - Git for Windows (optional, if cloning directly)
+- Libcurl
 
 ### 🍎 On macOS
 - Xcode (Command Line Tools)
 - OpenCL is **preinstalled** (no setup required)
 - `g++` or `clang++` with C++20 support
 - Compatible with macOS Big Sur or later
-
+- libcurl
 
 > ✅ macOS builds are supported and automatically generated in each release.
 
