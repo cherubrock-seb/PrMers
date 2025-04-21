@@ -1688,10 +1688,14 @@ int main(int argc, char** argv) {
         }
     }
     
-    auto task = bestTask(worktodo_path);
+    std::optional<Task> task;
+
 
     bool hasExplicit = (all_args.size() >= 2 && all_args[1][0] != '-');
-    if (!hasExplicit && task) {
+    if (!hasExplicit) {
+        task = bestTask(worktodo_path);
+    }
+    if (!hasExplicit && task.has_value()) {
         std::string expStr = std::to_string(task->exponent);
         all_args.insert(all_args.begin()+1, expStr);
         // stocker AID et UID pour le JSON
@@ -2507,7 +2511,7 @@ int main(int argc, char** argv) {
         std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
 
 
-        if (task && !task->aid.empty()) {
+        if (task.has_value() && !task->aid.empty()) {
             aid_value = task->aid;
             uid_value = task->aid;
         }
@@ -2574,6 +2578,8 @@ int main(int argc, char** argv) {
         jsonOut << jsonResult;
         jsonOut.close();
         std::cout << "\n✅ JSON result written to: " << jsonFile << std::endl;
+        std::cout << "\n📋 If using the manual results submission form at mersenne.org, paste the following JSON-formatted results line:\n";
+        std::cout << jsonResult << std::endl;
 
         std::string resultLine;
 
@@ -2599,7 +2605,7 @@ int main(int argc, char** argv) {
                 << std::hex << std::setw(16) << std::setfill('0') << x[0];
             resultLine = oss.str();
 
-            if (task) {
+            if (task.has_value()) {
                 std::string resultPath = save_path + "/result.txt";
                 std::ofstream resOut(resultPath, std::ios::app);
                 if (resOut) {
@@ -2634,7 +2640,7 @@ int main(int argc, char** argv) {
                     std::remove(worktodo_path.c_str());
                     std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
 
-                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    std::cout << "→ 2Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
                     restart_self(argc, argv);
 
                 } else {
@@ -2663,7 +2669,7 @@ int main(int argc, char** argv) {
                 << std::hex << std::setw(16) << std::setfill('0') << x[0];
             resultLine = oss.str();
 
-            if (task) {
+            if (task.has_value()) {
                 std::string resultPath = save_path + "/result.txt";
                 std::ofstream resOut(resultPath, std::ios::app);
                 if (resOut) {
@@ -2698,7 +2704,7 @@ int main(int argc, char** argv) {
                     std::remove(worktodo_path.c_str());
                     std::rename((worktodo_path + ".tmp").c_str(), worktodo_path.c_str());
 
-                    std::cout << "→ Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
+                    std::cout << "→ 1Processed entry removed from worktodo.txt and saved to worktodo_save.txt" << std::endl;
                     restart_self(argc, argv);
 
 
