@@ -1403,7 +1403,7 @@ static std::optional<Task> parseWorktodoLine(const std::string& line) {
   bool isLL   = top[0] == "Test" || top[0] == "DoubleCheck";
   bool isCERT = top[0] == "Cert";
 
-  if (! (isPRP || isLL || isCERT) ) return {};
+  if (!(isPRP || isLL || isCERT)) return {};
 
   auto parts = split(top[1], ',');
   if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
@@ -1416,29 +1416,36 @@ static std::optional<Task> parseWorktodoLine(const std::string& line) {
   }
 
   if (isPRP || isLL) {
-    if (parts.size() >= 4 && parts[0]=="1" && parts[1]=="2" && parts[3]=="-1") {
-
-      uint32_t exp = 0;
-      auto [ptr, ec] = std::from_chars(parts[2].c_str(), parts[2].c_str()+parts[2].size(), exp);
-      if (ec==std::errc() && exp >= 0) {
-        Task t{ isPRP ? Task::PRP : Task::LL, exp, AID, line, 0 };
-        return t;
+    if (parts.size() >= 4 && parts[0] == "1" && parts[1] == "2" && parts[3] == "-1") {
+      try {
+        uint32_t exp = std::stoul(parts[2]);
+        if (exp >= 0) {
+          Task t{ isPRP ? Task::PRP : Task::LL, exp, AID, line, 0 };
+          return t;
+        }
+      } catch (...) {
+        return {};
       }
     }
     return {};
   }
 
-  if (isCERT && parts.size() == 5 && parts[0]=="1" && parts[1]=="2" && parts[3]=="-1") {
-    uint32_t exp=0, sq=0;
-    std::from_chars(parts[2].c_str(), parts[2].c_str()+parts[2].size(), exp);
-    std::from_chars(parts[4].c_str(), parts[4].c_str()+parts[4].size(), sq);
-    if (exp>=1 && sq>1) {
-      Task t{ Task::CERT, exp, AID, line, sq };
-      return t;
+  if (isCERT && parts.size() == 5 && parts[0] == "1" && parts[1] == "2" && parts[3] == "-1") {
+    try {
+      uint32_t exp = std::stoul(parts[2]);
+      uint32_t sq = std::stoul(parts[4]);
+      if (exp >= 1 && sq > 1) {
+        Task t{ Task::CERT, exp, AID, line, sq };
+        return t;
+      }
+    } catch (...) {
+      return {};
     }
   }
+
   return {};
 }
+
 
 static std::optional<Task> bestTask(const std::filesystem::path& fn) {
   std::optional<Task> best;
