@@ -1778,6 +1778,7 @@ int main(int argc, char** argv) {
                         nullptr);
         std::string vendor(vendorBuf);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
+        #if defined(CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) && defined(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE)
 
         if (vendor.find("NVIDIA") == std::string::npos) {
             size_t preferredSize = 0, maxSize = 0;
@@ -1796,6 +1797,7 @@ int main(int argc, char** argv) {
             << "  max=" << maxSize << "\n";
             FINISH_THRESHOLD = preferredSize;
         }
+        #endif
         
     }
     if(FINISH_THRESHOLD == 0){
