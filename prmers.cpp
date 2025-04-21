@@ -1980,6 +1980,8 @@ int main(int argc, char** argv) {
             << "  max=" << maxSize << "\n";
             FINISH_THRESHOLD = preferredSize;
         }
+        #else
+            FINISH_THRESHOLD = 16 * 1024;
         #endif
         
     }
