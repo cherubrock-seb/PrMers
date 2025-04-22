@@ -2680,7 +2680,7 @@ int main(int argc, char** argv) {
             proof ? 64 : 0,
             proof ? proof_util::fileMD5(proofFile) : "",
             "prmers",
-            "0.1",
+            "0.1.0",
             portCode,
     #ifdef _WIN32
             "Windows",
