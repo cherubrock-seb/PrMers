@@ -2784,7 +2784,7 @@ int main(int argc, char** argv) {
                     std::cout << "→ Result added to: " << resultPath << std::endl;
                     #ifndef NO_CURL
                         if (!user.empty() && !password.empty()) {
-                            bool success = sendManualResultWithLogin(jsonFile, user, password);
+                            bool success = sendManualResultWithLogin(jsonResult, user, password);
                             if (!success) {
                                 std::cerr << "❌ Automatic result sending failed.\n";
                             }
@@ -2841,7 +2841,7 @@ int main(int argc, char** argv) {
                 #ifndef NO_CURL
                     // Vérifie si l'utilisateur et mot de passe ont été fournis
                     if (!user.empty() && !password.empty()) {
-                        bool success = sendManualResultWithLogin(jsonFile, user, password);
+                        bool success = sendManualResultWithLogin(jsonResult, user, password);
                         if (!success) {
                             std::cerr << "❌ Automatic result sending failed.\n";
                         }
