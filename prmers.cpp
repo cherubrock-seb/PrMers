@@ -336,9 +336,9 @@ std::string generatePrimeNetJson(
     canon << exponent << ";" << worktype << ";";
     canon << "" << ";";
     canon << "" << ";";
-    if (worktype == "LL" || worktype == "PRP") canon << toLower(res64);
+    if (worktype == "LL" || worktype == "PRP-3") canon << toLower(res64);
     canon << ";";
-    if (worktype == "PRP") canon << toLower(res2048);
+    if (worktype == "PRP-3") canon << toLower(res2048);
     canon << ";" << fftLength << ";";
     canon << "gerbicz:" << gerbiczError << ";";
     canon << programName << ";" << programVersion << ";";
