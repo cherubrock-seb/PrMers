@@ -2042,28 +2042,29 @@ int main(int argc, char** argv) {
                         nullptr);
         std::string vendor(vendorBuf);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
-        #if defined(CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) && defined(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE)
-
+        
         if (vendor.find("NVIDIA") == std::string::npos) {
-            size_t preferredSize = 0, maxSize = 0;
-            clGetDeviceInfo(device,
-                            CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
-                            sizeof(preferredSize),
-                            &preferredSize,
-                            nullptr);
-            clGetDeviceInfo(device,
-                            CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE,
-                            sizeof(maxSize),
-                            &maxSize,
-                            nullptr);
-            std::cout  
-            << "Device on‐device queue preferred=" << preferredSize
-            << "  max=" << maxSize << "\n";
-            FINISH_THRESHOLD = preferredSize;
+            #if defined(CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) && defined(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE)
+                size_t preferredSize = 0, maxSize = 0;
+                clGetDeviceInfo(device,
+                                CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
+                                sizeof(preferredSize),
+                                &preferredSize,
+                                nullptr);
+                clGetDeviceInfo(device,
+                                CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE,
+                                sizeof(maxSize),
+                                &maxSize,
+                                nullptr);
+                std::cout  
+                << "Device on‐device queue preferred=" << preferredSize
+                << "  max=" << maxSize << "\n";
+                FINISH_THRESHOLD = preferredSize;
+            #else
+                FINISH_THRESHOLD = 16 * 1024;
+            #endif
         }
-        #else
-            FINISH_THRESHOLD = 16 * 1024;
-        #endif
+        
         
     }
     if(FINISH_THRESHOLD == 0){
