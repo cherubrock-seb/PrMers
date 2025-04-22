@@ -2663,7 +2663,7 @@ int main(int argc, char** argv) {
                 std::cout << "✅ RESULT: PROBABLY PRIME (residue is 9)\n";
             } else {
                 std::cout << "🔴 M" << p << " PRP TEST FAILED\n";
-                std::cout << "❌ RESULT: PROBABLY COMPOSITE (residue is not 9)\n";
+                std::cout << "❌ RESULT: COMPOSITE (residue is not 9)\n";
             }
             std::cout << "=============================================\n";
             std::cout << "📦 res64 = 0x" << res64 << "\n";
