@@ -2058,7 +2058,7 @@ int main(int argc, char** argv) {
     }
     if(mode == "ll"){
         proof = false;
-        noAsk = true;
+        //noAsk = true;
     }
    
     if (profiling)
