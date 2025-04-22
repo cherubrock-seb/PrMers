@@ -331,7 +331,8 @@ std::string generatePrimeNetJson(
     const std::string &user,
     const std::string &aid,
     const std::string &uid,
-    const std::string &timestamp)
+    const std::string &timestamp,
+    const std::string &computer)
 {
     std::ostringstream oss;
     bool isPRP = (worktype.rfind("PRP", 0) == 0);
@@ -366,6 +367,7 @@ std::string generatePrimeNetJson(
         << "\"architecture\":" << jsonEscape(osArchitecture)
         << "},";
     oss << "\"user\":" << jsonEscape(user);
+    if (!computer.empty()) oss << ",\"computer\":" << jsonEscape(computer);
     if (!aid.empty()) oss << ",\"aid\":" << jsonEscape(aid);
     if (!uid.empty()) oss << ",\"uid\":" << jsonEscape(uid);
     oss << ",\"timestamp\":" << jsonEscape(timestamp);
@@ -526,7 +528,7 @@ std::string readFile(const std::string &filename) {
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
-    std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>]" << std::endl;
+    std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
     std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
     std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-proof]" << std::endl;
     std::cout << std::endl;
@@ -544,7 +546,8 @@ void printUsage(const char* progName) {
     std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
-    std::cout << "  -password <username> : (Optional) PrimeNet username to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
+    std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
+    std::cout << "  -computer <name>     : (Optional) PrimeNet computer name to auto-fill the result submission" << std::endl;
     std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
@@ -1902,6 +1905,7 @@ int main(int argc, char** argv) {
 
     std::string user;
     std::string password;
+    std::string computer_name;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-debug") == 0) {
             debug = true;
@@ -2004,6 +2008,15 @@ int main(int argc, char** argv) {
                 i++;
             } else {
                 std::cerr << "Error: Missing value for -password <password>." << std::endl;
+                return 1;
+            }
+        }
+        else if (std::strcmp(argv[i], "-computer") == 0) {
+            if (i + 1 < argc) {
+                computer_name = argv[i + 1];
+                i++;
+            } else {
+                std::cerr << "Error: Missing value for -computer <name>." << std::endl;
                 return 1;
             }
         }
@@ -2748,7 +2761,8 @@ int main(int argc, char** argv) {
             user.empty() ? "cherubrock":user,
             aid_value,
             uid_value,
-            timestampBuf
+            timestampBuf,
+            computer_name
         );
         std::string jsonFile = save_path + "/" + std::to_string(p) + "_" + mode + "_result.json";
         std::ofstream jsonOut(jsonFile);
