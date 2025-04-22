@@ -388,13 +388,6 @@ std::string generatePrimeNetJson(
     canon << osArchitecture << ";";
     canon << timestamp;
 
-    std::string data = canon.str();
-
-    // 2) Afficher dans la sortie standard (console)
-    std::cout << "DEBUG — donnée avant CRC32 : \"" 
-              << data 
-              << "\"" 
-              << std::endl;
     unsigned int crc = computeCRC32(canon.str());
     std::ostringstream hex;
     hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
