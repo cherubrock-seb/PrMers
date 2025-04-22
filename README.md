@@ -42,7 +42,7 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 | 57885161  | 51.00   | 13d 3h 16m 30s   |
 ```
 
-#### 🧊 NVIDIA Geforce 840M (OpenCL 1.2, legacy GPU - Windows) 
+#### 🧊 INTEL(R) HD Graphics Family Integrated (113 MB) (OpenCL 1.2, legacy GPU - Windows) 
 
 
 ```
