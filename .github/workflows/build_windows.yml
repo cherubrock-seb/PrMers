@@ -106,7 +106,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Prmers – Mersenne Primality Tool ${{ github.ref_name }}"
+          name: Release ${{ github.ref_name }}
           files: |
             prmers-windows.zip
             prmers-windows.zip.sha256
