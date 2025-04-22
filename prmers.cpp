@@ -264,7 +264,7 @@ std::string generatePrimeNetJson(
     oss << "\"errors\": {\"gerbicz\":" << gerbiczError << "}, ";
     
     oss << "\"fft-length\":" << fftLength << ", ";
-    
+    oss << "\"shift-count\": 0, ";
     // Proof information object.
     oss << "\"proof\": {";
     oss << "\"version\":" << proofVersion << ", ";
