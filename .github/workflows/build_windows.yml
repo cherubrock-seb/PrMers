@@ -14,6 +14,8 @@ env:
 
 jobs:
   build-windows:
+    # affiché dans l’UI des runs
+    name: prmers mersenne primality tester
     runs-on: windows-latest
 
     steps:
@@ -38,10 +40,34 @@ jobs:
         run: .\vcpkg\vcpkg install curl:x64-windows
 
       - name: Configure CMake with vcpkg toolchain
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH="${{ github.workspace }}/vcpkg/installed/x64-windows"
+        run: cmake -S . -B build \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" \
+             -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" \
+             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake \
+             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/vcpkg/installed/x64-windows"
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Generate self‑signed code signing certificate
+        shell: powershell
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=DevCert Prmers" -CertStoreLocation Cert:\CurrentUser\My
+          $pwd  = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath prmerscert.pfx -Password $pwd
+
+      - name: Sign the binary with the self‑signed certificate
+        shell: powershell
+        run: |
+          $pwd = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
+          & "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" sign `
+            /f prmerscert.pfx `
+            /p prmers123 `
+            /fd sha256 `
+            /tr http://timestamp.digicert.com `
+            /td sha256 `
+            /v build\Release\prmers.exe
 
       - name: Package
         run: |
@@ -66,7 +92,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          name: "Prmers – Trusted Mersenne Primality Tool ${{ github.ref_name }}"
           files: |
             prmers-windows.zip
             prmers-windows.zip.sha256
