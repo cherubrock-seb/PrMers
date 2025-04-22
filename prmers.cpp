@@ -335,7 +335,7 @@ std::string generatePrimeNetJson(
 {
     std::ostringstream oss;
     bool isPRP = (worktype.rfind("PRP", 0) == 0);
-    bool isLL  = (worktype.rfind("LL", 0)  == 0);
+    //bool isLL  = (worktype.rfind("LL", 0)  == 0);
 
     oss << "{";
     oss << "\"status\":" << jsonEscape(status) << ",";
