@@ -60,14 +60,14 @@ jobs:
         id: signtool
         shell: powershell
         run: |
-          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
-          if (-not $signtool) {
-            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Select-Object -First 1
-          }
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                     Where-Object { $_.FullName -match 'x64\\signtool.exe$' } |
+                     Sort-Object LastWriteTime -Descending |
+                     Select-Object -First 1
           if ($signtool) {
             echo "SIGNSRC=$($signtool.FullName)" >> $env:GITHUB_ENV
           } else {
-            Write-Error "signtool.exe not found!"
+            Write-Error "signtool.exe x64 not found!"
             exit 1
           }
 
