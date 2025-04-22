@@ -278,17 +278,19 @@ std::string generatePrimeNetJson(
     oss << "\"name\":" << jsonEscape(programName) << ", ";
     oss << "\"version\":" << jsonEscape(programVersion) << ", ";
     oss << "\"port\":" << programPort << ", ";
-    //oss << "\"os\": {";
-    //oss << "\"os\":" << jsonEscape(osName) << ", ";
+    oss << "\"os\": {";
+    oss << "\"os\":" << jsonEscape(osName) << ", ";
     //oss << "\"version\":" << jsonEscape(osVersion) << ", ";
-    //oss << "\"architecture\":" << jsonEscape(osArchitecture);
-    //oss << "}";
-    //oss << "}, ";
+    oss << "\"architecture\":" << jsonEscape(osArchitecture);
+    oss << "}";
+    oss << "}, ";
     
     // User information and timestamp.
     oss << "\"user\":" << jsonEscape(user) << ", ";
-    oss << "\"aid\":" << jsonEscape(aid) << ", ";
-    oss << "\"uid\":" << jsonEscape(uid) << ", ";
+    if (!aid.empty()) {
+        oss << "\"aid\":" << jsonEscape(aid) << ", ";
+    }
+    // oss << "\"uid\":" << jsonEscape(uid) << ", ";
     oss << "\"timestamp\":" << jsonEscape(timestamp);
     
     oss << "}"; // End of JSON object
