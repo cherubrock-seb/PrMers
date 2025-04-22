@@ -204,7 +204,7 @@ static std::string toLower(const std::string &s) {
     return out;
 }
 
-static const unsigned int crcTable[256] = {
+static const unsigned int crcTableMSB[256] = {
     			0x00000000, 0x04c11db7, 0x09823b6e, 0x0d4326d9,
     			0x130476dc, 0x17c56b6b, 0x1a864db2, 0x1e475005,
     			0x2608edb8, 0x22c9f00f, 0x2f8ad6d6, 0x2b4bcb61,
@@ -273,11 +273,13 @@ static const unsigned int crcTable[256] = {
 };
 
 static unsigned int computeCRC32(const std::string &data) {
-    unsigned int crc = 0xFFFFFFFF;
+    uint32_t crc = 0x00000000;  // pas d’initial XOR pour MSB‑first
     for (unsigned char c : data) {
-        crc = (crc >> 8) ^ crcTable[(crc ^ c) & 0xFF];
+        // on aligne le nouvel octet sur les bits de poids fort
+        uint32_t idx = ((crc >> 24) ^ c) & 0xFF;
+        crc = (crc << 8) ^ crcTableMSB[idx];
     }
-    return crc ^ 0xFFFFFFFF;
+    return crc;  // pas de XOR final non plus
 }
 //------------------------------------------------------------------------------
 // Function: generatePrimeNetJson
