@@ -334,22 +334,29 @@ std::string generatePrimeNetJson(
     const std::string &timestamp)
 {
     std::ostringstream oss;
+    bool isPRP = (worktype.rfind("PRP", 0) == 0);
+    bool isLL  = (worktype.rfind("LL", 0)  == 0);
+
     oss << "{";
     oss << "\"status\":" << jsonEscape(status) << ",";
     oss << "\"exponent\":" << exponent << ",";
     oss << "\"worktype\":" << jsonEscape(worktype) << ",";
     oss << "\"res64\":" << jsonEscape(res64) << ",";
-    oss << "\"res2048\":" << jsonEscape(res2048) << ",";
+    if (isPRP) {
+        oss << "\"res2048\":" << jsonEscape(res2048) << ",";
+    }
     oss << "\"residue-type\":" << residueType << ",";
     oss << "\"errors\":{\"gerbicz\":" << gerbiczError << "},";
     oss << "\"fft-length\":" << fftLength << ",";
     oss << "\"shift-count\":0,";
-    oss << "\"proof\":{"
-        << "\"version\":" << proofVersion << ","
-        << "\"power\":" << proofPower << ","
-        << "\"hashsize\":" << proofHashSize << ","
-        << "\"md5\":" << jsonEscape(proofMd5)
-        << "},";
+    if (isPRP) {
+        oss << "\"proof\":{"
+            << "\"version\":" << proofVersion << ","
+            << "\"power\":" << proofPower << ","
+            << "\"hashsize\":" << proofHashSize << ","
+            << "\"md5\":" << jsonEscape(proofMd5)
+            << "},";
+    }
     oss << "\"program\":{"
         << "\"name\":" << jsonEscape(programName) << ","
         << "\"version\":" << jsonEscape(programVersion) << ","
