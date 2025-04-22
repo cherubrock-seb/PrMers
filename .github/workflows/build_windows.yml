@@ -14,7 +14,6 @@ env:
 
 jobs:
   build-windows:
-    # affiché dans l’UI des runs
     name: prmers mersenne primality tester
     runs-on: windows-latest
 
@@ -40,11 +39,11 @@ jobs:
         run: .\vcpkg\vcpkg install curl:x64-windows
 
       - name: Configure CMake with vcpkg toolchain
-        run: cmake -S . -B build \
-             -DCMAKE_BUILD_TYPE=Release \
-             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" \
-             -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" \
-             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake \
+        run: cmake -S . -B build `
+             -DCMAKE_BUILD_TYPE=Release `
+             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" `
+             -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" `
+             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake `
              -DCMAKE_PREFIX_PATH="${{ github.workspace }}/vcpkg/installed/x64-windows"
 
       - name: Build
@@ -57,11 +56,26 @@ jobs:
           $pwd  = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath prmerscert.pfx -Password $pwd
 
+      - name: Find signtool.exe dynamically
+        id: signtool
+        shell: powershell
+        run: |
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          if (-not $signtool) {
+            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Select-Object -First 1
+          }
+          if ($signtool) {
+            echo "SIGNSRC=$($signtool.FullName)" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "signtool.exe not found!"
+            exit 1
+          }
+
       - name: Sign the binary with the self‑signed certificate
         shell: powershell
         run: |
           $pwd = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
-          & "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" sign `
+          & "${env:SIGNSRC}" sign `
             /f prmerscert.pfx `
             /p prmers123 `
             /fd sha256 `
@@ -92,7 +106,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Prmers – Trusted Mersenne Primality Tool ${{ github.ref_name }}"
+          name: "Prmers – Mersenne Primality Tool ${{ github.ref_name }}"
           files: |
             prmers-windows.zip
             prmers-windows.zip.sha256
