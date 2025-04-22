@@ -2042,7 +2042,7 @@ int main(int argc, char** argv) {
                         nullptr);
         std::string vendor(vendorBuf);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
-        
+        std::cout << "GPU Vendor: " << vendor << std::endl;
         if (vendor.find("NVIDIA") == std::string::npos) {
             #if defined(CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) && defined(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE)
                 size_t preferredSize = 0, maxSize = 0;
