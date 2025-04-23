@@ -1894,7 +1894,7 @@ int main(int argc, char** argv) {
     int device_id = 0;  // Default device ID
     cl_uint localCarryPropagationDepth = 4;
     std::string mode = "prp"; 
-    bool proof = true;
+    bool proof = false;
     bool profiling = false;
     bool force_carry = false;
     int max_local_size1 = 0;
