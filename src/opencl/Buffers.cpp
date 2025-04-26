@@ -1,0 +1,43 @@
+#include "opencl/Buffers.hpp"
+#include "opencl/Context.hpp"
+#include <iostream>
+#include <stdexcept>
+
+namespace opencl {
+
+Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
+  : input(nullptr)
+  , digitWeightBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*sizeof(uint64_t),
+        pre.digitWeight().data(), "digitWeight"))
+  , digitInvWeightBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*sizeof(uint64_t),
+        pre.digitInvWeight().data(), "digitInvWeight"))
+  , twiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.twiddles().data(), "twiddles"))
+  , invTwiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.invTwiddles().data(), "invTwiddles"))
+  , wiBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.invTwiddles().data(), "wi"))
+  ,blockCarryBuf(createBuffer(ctx, CL_MEM_READ_WRITE,
+        ctx.getWorkersCarry()*sizeof(uint64_t),
+        nullptr, "blockCarry"))
+{}
+
+cl_mem Buffers::createBuffer(const opencl::Context&  ctx, cl_mem_flags flags,
+                             size_t size, const void* ptr,
+                             const std::string& name)
+{
+    cl_int err;
+    cl_mem buf = clCreateBuffer(ctx.getContext(), flags, size, const_cast<void*>(ptr), &err);
+    if (err != CL_SUCCESS) {
+        std::cerr << "Failed to create buffer " << name << ": " << err << std::endl;
+        throw std::runtime_error("createBuffer " + name);
+    }
+    return buf;
+}
+
+} // namespace opencl

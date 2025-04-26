@@ -1,0 +1,40 @@
+Queue size = 16384
+Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
+Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 256, 256, 256
+Max CL_DEVICE_LOCAL_MEM_SIZE = 32768 bytes
+Transform Size = 32
+Building OpenCL program with options:  -DWG_SIZE=16 -DLOCAL_PROPAGATION_DEPTH=4 -DCARRY_WORKER=8 -DLOCAL_PROPAGATION_DEPTH_DIV4=1 -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=1 -DLOCAL_PROPAGATION_DEPTH_DIV2=1 -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=1 -DWORKER_NTT=8 -DWORKER_NTT_2_STEPS=2 -DMODULUS_P=500 -DTRANSFORM_SIZE_N=32 -DLOCAL_SIZE=2 -DLOCAL_SIZE2=2 -DLOCAL_SIZE3=2
+OpenCL program built successfully from: /Users/fricadev/PrMers/kernels/prmers.cl
+Compiled Kernels (16):
+  - kernel_sub2
+  - kernel_carry
+  - kernel_carry_2
+  - kernel_inverse_ntt_radix4_mm
+  - kernel_ntt_radix4_last_m1_n4
+  - kernel_inverse_ntt_radix4_mm_last
+  - kernel_ntt_radix4_last_m1
+  - kernel_ntt_radix4_mm_first
+  - kernel_ntt_radix4_mm
+  - kernel_inverse_ntt_radix4_m1
+  - kernel_inverse_ntt_radix4_m1_n4
+  - kernel_ntt_radix4_inverse_mm_2steps
+  - kernel_ntt_radix4_mm_2steps
+  - kernel_ntt_radix4_mm_3steps
+  - kernel_ntt_radix2_square_radix2
+  - kernel_ntt_radix4_radix2_square_radix2_radix4
+PrMers : GPU‐accelerated Mersenne primality test (OpenCL, NTT, Lucas‐Lehmer)
+Testing exponent : 500
+Device OpenCL ID : 0
+Mode : Lucas‐Lehmer
+Backup interval : 120 s
+Save/Load path: .
+Initial x[0] set to 4 (LL mode)
+[31mProgress: 0.00% | Exp: 500 | Iter: 0 | Elapsed: 0.00s | IPS: 0.00 | ETA: 0d 0h 0m 0s[0m
+M500 is composite.
+
+Manual submission JSON:
+{"status":"P","exponent":500,"worktype":"ll","res64":"0000000000000000","residue-type":1,"errors":{"gerbicz":0},"fft-length":500,"shift-count":0,"program":{"name":"prmers","version":"0.15","port":8},"os":{"os":"Linux","architecture":"x86_64"},"user":"","timestamp":"2025-04-26 22:24:13","checksum":{"version":1,"checksum":"FFFFFFFF"}}
+
+Short result line: LL=500,cherubrock,F,0x0000000000006960
+
+Total elapsed time: 0.11 seconds.
