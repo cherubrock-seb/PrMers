@@ -659,6 +659,14 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
                              const std::string& kernelName, cl_uint nmax,
                              bool profiling) {
     cl_event event;
+    if (debug) {
+        std::cout << "BEFORE  " << kernelName << std::endl;
+        std::vector<uint64_t> locx(8, 0ULL);
+        clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, 8 * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
+        std::cout << "BEFORE " << kernelName << " : x = [ ";
+        for (cl_uint i = 0; i < 8; i++) std::cout << locx[i] << " ";
+        std::cout << "...]" << std::endl;
+    }
     cl_int err = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, &localSize, 0, nullptr, profiling ? &event : nullptr);
     if (err != CL_SUCCESS) {
         std::cerr << "Error executing kernel '" << kernelName << "': " << getCLErrorString(err) << " (" << err << ")" << std::endl;
@@ -714,10 +722,11 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
         clReleaseEvent(event);
     }
     if (debug) {
+        std::cout << "Launching kernel: " << kernelName << ", workers=" << workers << ", localSize=" << localSize << std::endl;
         std::vector<uint64_t> locx(nmax, 0ULL);
         clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0, nmax * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
         std::cout << "After " << kernelName << " : x = [ ";
-        for (cl_uint i = 0; i < 10; i++) std::cout << locx[i] << " ";
+        for (cl_uint i = 0; i < 8; i++) std::cout << locx[i] << " ";
         std::cout << "...]" << std::endl;
     }
 }
@@ -910,7 +919,18 @@ void executeFusionneNTT_Forward(cl_command_queue queue,cl_kernel kernel_ntt_mm_3
     }
     else{
         cl_uint m = n / 4;
-
+        std::cout << "Before kernel_ntt_radix4_mm_first " << "kernel_ntt_radix4_mm_first" << std::endl;
+        std::vector<uint64_t> locx(8, 0ULL);
+        clEnqueueReadBuffer(queue, buf_digit_weight, CL_TRUE, 0, 8 * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
+        std::cout << "Before kernel_ntt_radix4_mm_first " << "kernel_ntt_radix4_mm_first" << " : buf_digit_weight = [ ";
+        for (cl_uint i = 0; i < 8; i++) std::cout << locx[i] << " ";
+        std::cout << "...]" << std::endl;
+        std::cout << "Before kernel_ntt_radix4_mm_first " << "kernel_ntt_radix4_mm_first" << std::endl;
+       // std::vector<uint64_t> locx(8, 0ULL);
+        clEnqueueReadBuffer(queue, buf_w, CL_TRUE, 0, 8 * sizeof(uint64_t), locx.data(), 0, nullptr, nullptr);
+        std::cout << "Before kernel_ntt_radix4_mm_first " << "kernel_ntt_radix4_mm_first" << " : buf_w = [ ";
+        for (cl_uint i = 0; i < 8; i++) std::cout << locx[i] << " ";
+        std::cout << "...]" << std::endl;
         clSetKernelArg(kernel_ntt_mm_first, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_ntt_mm_first, 1, sizeof(cl_mem), &buf_w);
         clSetKernelArg(kernel_ntt_mm_first, 2, sizeof(cl_mem), &buf_digit_weight);

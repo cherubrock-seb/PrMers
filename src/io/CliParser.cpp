@@ -1,0 +1,157 @@
+// CliParser.cpp
+#include "io/CliParser.hpp"
+#include <iostream>
+#include <cstdlib>
+#include <cstring>
+#include "util/PathUtils.hpp"
+#include <filesystem>
+
+// Forward-declare the usage function (defined elsewhere, e.g. in your main host file)
+extern void printUsage(const char* progName);
+
+namespace io {
+// -----------------------------------------------------------------------------
+// Usage printing helper (updated with new backup and path options)
+// -----------------------------------------------------------------------------
+void printUsage(const char* progName) {
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
+    std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
+    std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-proof]" << std::endl;
+    std::cout << std::endl;
+    std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
+    std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
+    std::cout << "  -O <options>         : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
+    std::cout << "  -c <depth>           : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
+    std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
+    std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
+    std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
+    std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
+    std::cout << "  -l1 <value>          : (Optional) Force local size for classic NTT kernel" << std::endl;
+    std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
+    std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
+    std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
+    std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
+    std::cout << "  -computer <name>     : (Optional) PrimeNet computer name to auto-fill the result submission" << std::endl;
+    std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
+    std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
+    std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
+    std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
+              << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
+              << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg -proof" << std::endl;
+}
+
+CliOptions CliParser::parse(int argc, char** argv) {
+    // Early check for -h, --help or -help
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-h") == 0
+         || std::strcmp(argv[i], "--help") == 0
+         || std::strcmp(argv[i], "-help") == 0)
+        {
+            printUsage(argv[0]);
+            std::exit(EXIT_SUCCESS);
+        }
+    }
+
+    CliOptions opts;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
+            opts.device_id = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-prp") == 0) {
+            opts.mode = "prp";
+        }
+        else if (std::strcmp(argv[i], "-ll") == 0) {
+            opts.mode = "ll";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-profile") == 0) {
+            opts.profiling = true;
+        }
+        else if (std::strcmp(argv[i], "-debug") == 0) {
+            opts.debug = true;
+        }
+        else if (std::strcmp(argv[i], "-proof") == 0) {
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+            opts.localCarryPropagationDepth = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
+            opts.backup_interval = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
+            opts.save_path = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
+            opts.max_local_size1 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
+            opts.max_local_size2 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-l3") == 0 && i + 1 < argc) {
+            opts.max_local_size3 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-enqueue_max") == 0 && i + 1 < argc) {
+            opts.enqueue_max = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-user") == 0 && i + 1 < argc) {
+            opts.user = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-password") == 0 && i + 1 < argc) {
+            opts.password = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-computer") == 0 && i + 1 < argc) {
+            opts.computer_name = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "--noask") == 0 || std::strcmp(argv[i], "-noask") == 0) {
+            opts.noAsk = true;
+        }
+        else if (std::strcmp(argv[i], "-worktodo") == 0 && i + 1 < argc) {
+            opts.worktodo_path = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-config") == 0 && i + 1 < argc) {
+            opts.config_path = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-kernelpath") == 0 && i + 1 < argc) {
+            opts.kernel_path = argv[++i];
+        }
+        else if (argv[i][0] != '-') {
+            opts.exponent = static_cast<uint32_t>(std::atoi(argv[i]));
+        }
+        else {
+            std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";
+        }
+    }
+
+    if (opts.exponent == 0) {
+        std::cerr << "Error: No exponent provided.\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (opts.kernel_path.empty()) {
+        try {
+            std::string execDir = util::getExecutableDir();
+            std::string kernelFile = execDir + "/prmers.cl";
+            if (!std::filesystem::exists(kernelFile)) {
+                kernelFile = execDir + "/kernels/prmers.cl";
+                if (!std::filesystem::exists(kernelFile)) {
+                    throw std::runtime_error("Kernel file 'prmers.cl' not found");
+                }
+            }
+            opts.kernel_path = kernelFile;
+        } catch (const std::exception& e) {
+            std::cerr << "❌ Error locating OpenCL kernel: " << e.what() << "\n";
+            std::exit(1);
+        }
+    }
+
+    return opts;
+}
+
+} // namespace io

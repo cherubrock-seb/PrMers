@@ -1,53 +1,68 @@
-# Installation path
-PREFIX ?= /usr/local
-TARGET = prmers
+# Makefile pour prmers
+
+PREFIX      ?= /usr/local
+TARGET      := prmers
 KERNEL_PATH ?= $(PREFIX)/share/$(TARGET)/
 
-# Source and kernel files
-SRC = prmers.cpp proof/common.cpp proof/proof.cpp proof/md5.cpp proof/sha3.cpp
-KERNELS = prmers.cl
+SRC_DIR     := src
+INC_DIR     := include
 
-# Compiler
-CXX = g++
+# On collecte tous les .cpp sous src/
+SRCS        := $(shell find $(SRC_DIR) -type f -name '*.cpp')
+# On déduit les .o correspondants
+OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 
-# Default flags
-CXXFLAGS = -std=c++20 -O3 -Wall
+CXX         := g++
+CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR)
+LDFLAGS     := 
 
-# Platform-specific OpenCL flags
+# Plateforme OpenCL
 UNAME_S := $(shell uname -s)
-
-ifeq ($(UNAME_S),Darwin)  # macOS
-    OPENCL_CFLAGS  = -I/System/Library/Frameworks/OpenCL.framework/Headers
-    OPENCL_LDFLAGS = -framework OpenCL
+ifeq ($(UNAME_S),Darwin)
+  CXXFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
+  LDFLAGS  += -framework OpenCL
 else
-    OPENCL_CFLAGS  =
-    OPENCL_LDFLAGS = -lOpenCL
+  LDFLAGS  += -lOpenCL
 endif
 
-# Additional libraries
-LIBS = -lcurl
+# Curl (optionnel)
+USE_CURL ?= 1
+ifeq ($(USE_CURL),1)
+  CXXFLAGS += -DHAS_CURL=1
+  LDFLAGS  += -lcurl
+else
+  CXXFLAGS += -DNO_CURL=1
+endif
+
+# Macro pour le chemin des kernels
+CPPFLAGS   := -DKERNEL_PATH=\"$(KERNEL_PATH)\"
+
+.PHONY: all clean install uninstall
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) $(OPENCL_CFLAGS) -DKERNEL_PATH="\"$(KERNEL_PATH)\"" -o $(TARGET) $(SRC) $(OPENCL_LDFLAGS) $(LIBS)
+# Linker
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Compilation d'un .cpp en .o
+$(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 install: $(TARGET)
-	@echo "Installing $(TARGET)..."
+	@echo "Installation de $(TARGET) dans $(PREFIX)/bin"
 	install -d $(DESTDIR)$(PREFIX)/bin
-	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin
+	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/
+	@echo "Installation des kernels dans $(KERNEL_PATH)"
 	install -d $(DESTDIR)$(KERNEL_PATH)
-	install -m 644 $(KERNELS) $(DESTDIR)$(KERNEL_PATH)
-	@echo "$(TARGET) installed in $(PREFIX)/bin"
-	@echo "Kernels installed in $(KERNEL_PATH)"
+	install -m 644 kernels/*.cl $(DESTDIR)$(KERNEL_PATH)
 
 uninstall:
-	@echo "Uninstalling $(TARGET)..."
+	@echo "Désinstallation de $(TARGET)"
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -rf $(DESTDIR)$(KERNEL_PATH)
-	@echo "$(TARGET) has been uninstalled."
 
 clean:
-	rm -f $(TARGET)
-
-.PHONY: all install uninstall clean
+	@echo "Nettoyage des objets et de l'exécutable"
+	rm -f $(OBJS) $(TARGET)
