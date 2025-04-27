@@ -19,6 +19,7 @@
 #include "util/Timer.hpp"
 #include "io/JsonBuilder.hpp"
 #include "io/CurlClient.hpp"
+#include <memory>
 #include <optional>
 #include <atomic>
 #ifdef __APPLE__
