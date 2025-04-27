@@ -97,7 +97,7 @@ void Context::createQueue(std::size_t enqueueMax) {
     if (err != CL_SUCCESS)
         throw std::runtime_error("Failed to create command queue");
 
-    if (enqueueMax > 0) {
+    if (enqueueMax >= 0) {
         queueSize_ = enqueueMax;
     } else {
         auto vendor = queryDeviceString(CL_DEVICE_VENDOR);
