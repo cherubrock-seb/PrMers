@@ -125,7 +125,7 @@ int App::run() {
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, p);
+    spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter);
     uint32_t lastIter = resumeIter;
 
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
@@ -155,7 +155,8 @@ int App::run() {
                     iter,
                     totalIters,
                     timer.elapsed(),
-                    p
+                    p,
+                    resumeIter
                 );
                 lastDisplay = now;
             }
