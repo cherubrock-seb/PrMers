@@ -36,6 +36,8 @@ public:
     int run();
 
 private:
+  int    argc_;
+  char** argv_;
   std::unique_ptr<io::WorktodoParser> worktodoParser_;
   bool hasWorktodoEntry_{false};
   io::CliOptions                     options;
