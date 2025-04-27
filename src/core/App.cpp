@@ -75,6 +75,36 @@ void restart_self(int argc, char* argv[]) {
 #endif
 }
 
+static int askExponentInteractively() {
+  #ifdef _WIN32
+    char buffer[32];
+    MessageBoxA(
+      nullptr,
+      "PrMers: GPU-accelerated Mersenne primality tester\n\n"
+      "You'll now be asked which exponent you'd like to test.",
+      "PrMers - Select Exponent",
+      MB_OK | MB_ICONINFORMATION
+    );
+    std::cout << "Enter the exponent to test (e.g. 21701): ";
+    std::cin.getline(buffer, sizeof(buffer));
+    return std::atoi(buffer);
+  #else
+    std::cout << "============================================\n"
+              << " PrMers: GPU-accelerated Mersenne primality test\n"
+              << " Powered by OpenCL | NTT | LL | PRP | IBDWT\n"
+              << "============================================\n\n";
+    std::string input;
+    std::cout << "Enter the exponent to test (e.g. 21701): ";
+    std::getline(std::cin, input);
+    try {
+      return std::stoi(input);
+    } catch (...) {
+      std::cerr << "Invalid input. Aborting.\n";
+      std::exit(1);
+    }
+  #endif
+}
+
 
 App::App(int argc, char** argv)
   : argc_(argc)
@@ -92,7 +122,9 @@ App::App(int argc, char** argv)
         std::cerr << "Error: no valid entry in " 
                   << options.worktodo_path 
                   << " and no exponent provided on the command line\n";
-        std::exit(-1);
+        o.exponent = askExponentInteractively();
+        o.mode = "prp";
+        //std::exit(-1);
       }
       return o;
   }())
