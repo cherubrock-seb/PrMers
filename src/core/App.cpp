@@ -1,4 +1,25 @@
 // src/core/App.cpp
+/*
+ * Mersenne OpenCL Primality Test Host Code
+ *
+ * This code is inspired by:
+ *   - "mersenne.cpp" by Yves Gallot (Copyright 2020, Yves Gallot) based on
+ *     Nick Craig-Wood's IOCCC 2012 entry (https://github.com/ncw/ioccc2012).
+ *   - The Armprime project, explained at:
+ *         https://www.craig-wood.com/nick/armprime/
+ *     and available on GitHub at:
+ *         https://github.com/ncw/
+ *   - Yves Gallot (https://github.com/galloty), author of Genefer 
+ *     (https://github.com/galloty/genefer22), who helped clarify the NTT and IDBWT concepts.
+ *   - The GPUOwl project (https://github.com/preda/gpuowl), which performs Mersenne
+ *     searches using FFT and double-precision arithmetic.
+ * This code performs a Mersenne prime search using integer arithmetic and an IDBWT via an NTT,
+ * executed on the GPU through OpenCL.
+ *
+ * Author: Cherubrock
+ *
+ * This code is released as free software.
+ */
 #define CL_TARGET_OPENCL_VERSION 200
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
@@ -113,7 +134,7 @@ static int askExponentInteractively() {
     char buffer[32];
     MessageBoxA(
       nullptr,
-      "PrMers: GPU-accelerated Mersenne primality tester\n\n"
+      "PrMers: GPU accelerated Mersenne primality tester\n\n"
       "You'll now be asked which exponent you'd like to test.",
       "PrMers - Select Exponent",
       MB_OK | MB_ICONINFORMATION
