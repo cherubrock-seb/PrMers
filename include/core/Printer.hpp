@@ -11,8 +11,7 @@ public:
     static void banner(const io::CliOptions& opts);
     static bool finalReport(const io::CliOptions& opts,
                           const std::vector<uint64_t>& resultVec,
-                          uint64_t res64,
-                          const std::string& res2048,
+                          std::string res64,                          
                           uint64_t n,
                           const std::string& timestampBuf,
                           double elapsed, std::string jsonResult);

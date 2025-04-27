@@ -22,8 +22,7 @@ void Printer::banner(const io::CliOptions& o) {
 
 bool Printer::finalReport(const io::CliOptions& opts,
                           const std::vector<uint64_t>& resultVec,
-                          uint64_t res64,
-                          const std::string& res2048,
+                          std::string res64,
                           uint64_t n,
                           const std::string& timestampBuf,
                           double elapsed, std::string jsonResult) {
@@ -46,23 +45,6 @@ bool Printer::finalReport(const io::CliOptions& opts,
     }
 
     std::cout << "\nManual submission JSON:\n" << jsonResult << std::endl;
-    std::cout << "\nShort result line: ";
-
-    if (mode == "prp") {
-        std::ostringstream oss;
-        oss << "PRP=" << p << "," << (proof ? "1" : "0") << ","
-            << (opts.user.empty() ? "cherubrock" : opts.user) << ","
-            << (isPrime ? "P" : "F") << ",0x"
-            << std::hex << std::setw(16) << std::setfill('0') << resultVec[0];
-        std::cout << oss.str() << std::endl;
-    } else {
-        std::ostringstream oss;
-        oss << "LL=" << p << ","
-            << (opts.user.empty() ? "cherubrock" : opts.user) << ","
-            << (isPrime ? "P" : "F") << ",0x"
-            << std::hex << std::setw(16) << std::setfill('0') << resultVec[0];
-        std::cout << oss.str() << std::endl;
-    }
     std::cout << "\nTotal elapsed time: " << elapsed << " seconds.\n";
 
     return isPrime;
