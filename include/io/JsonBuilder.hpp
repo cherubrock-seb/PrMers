@@ -27,6 +27,20 @@ public:
     // Write JSON string to a file.
     static void write(const std::string& json,
                       const std::string& path);
+
+    static std::string computeRes2048(
+    std::vector<unsigned long> x,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width,
+    double /*elapsed*/,
+    int /*transform_size*/);
+
+    static std::string computeRes64(
+        std::vector<unsigned long> x,
+        const CliOptions& opts,
+        const std::vector<int>& digit_width,
+        double /*elapsed*/,
+        int /*transform_size*/);
 };
 
 } // namespace io
