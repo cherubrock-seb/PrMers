@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <cstring>
 #include <sstream>
 #include <atomic>
 #include <fstream>
@@ -31,6 +32,38 @@ namespace core {
 
 static std::atomic<bool> interrupted{false};
 static void handle_sigint(int) { interrupted = true; }
+
+static std::vector<std::string> parseConfigFile(const std::string& config_path) {
+    std::ifstream config(config_path);
+    std::vector<std::string> args;
+    std::string line;
+
+    if (!config.is_open()) {
+        std::cerr << "Warning: no config file: " << config_path << std::endl;
+        return args;
+    }
+
+    std::cout << "Loading options from config file: " << config_path << std::endl;
+
+    while (std::getline(config, line)) {
+        std::istringstream iss(line);
+        std::string token;
+        while (iss >> token) {
+            args.push_back(token);
+        }
+    }
+
+    if (!args.empty()) {
+        std::cout << "Options from config file:" << std::endl;
+        for (const auto& arg : args) {
+            std::cout << "  " << arg << std::endl;
+        }
+    } else {
+        std::cout << "No options found in config file." << std::endl;
+    }
+
+    return args;
+}
 
 
 
@@ -110,7 +143,24 @@ App::App(int argc, char** argv)
   : argc_(argc)
   , argv_(argv)
   ,options([&]{
-      auto o = io::CliParser::parse(argc, argv);
+     std::vector<std::string> merged;
+      merged.push_back(argv[0]);
+      for (int i = 1; i < argc; ++i) {
+          if (std::strcmp(argv[i], "-config") == 0 && i+1 < argc) {
+              auto cfg_args = parseConfigFile(argv[i+1]);
+              merged.insert(merged.end(), cfg_args.begin(), cfg_args.end());
+              i++;
+          } else {
+              merged.emplace_back(argv[i]);
+          }
+      }
+
+      std::vector<char*> c_argv;
+      for (auto& s : merged)
+          c_argv.push_back(const_cast<char*>(s.c_str()));
+      c_argv.push_back(nullptr);
+      auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
+
       io::WorktodoParser wp{o.worktodo_path};
       if (auto e = wp.parse()) {
           o.exponent = e->exponent;
