@@ -191,8 +191,9 @@ int App::run() {
     if (queued > 0) {
         clFinish(queue);
     }
+    std::vector<unsigned long> hostData(precompute.getN());
+        
     {
-        std::vector<unsigned long> hostData(precompute.getN());
         clEnqueueReadBuffer(
             context.getQueue(),
             buffers->input,
@@ -218,8 +219,7 @@ int App::run() {
     double finalElapsed = timer.elapsed();
 
     std::string json = io::JsonBuilder::generate(
-        buffers->input,
-        context.getQueue(),
+        hostData,
         options,
         precompute.getDigitWidth(),
         finalElapsed

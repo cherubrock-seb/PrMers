@@ -227,24 +227,18 @@ static std::string generatePrimeNetJson(
 
 
 
-std::string JsonBuilder::generate(cl_mem buffer,
-                                  cl_command_queue queue,
+std::string JsonBuilder::generate(std::vector<unsigned long> x,
                                   const CliOptions& opts,
                                   const std::vector<int>& digit_width,
                                   double /*elapsed*/) 
 {
-    size_t n = size_t(opts.exponent);
-    std::vector<uint64_t> x(n);
-    clEnqueueReadBuffer(queue, buffer, CL_TRUE, 0,
-                        n * sizeof(uint64_t), x.data(),
-                        0, nullptr, nullptr);
-
-    // 2) compactBits and doDiv9 (as in prmers.cpp) …
+    
+    
     auto words = compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
 
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
-
+    std::cout << "\finalRes64=" <<finalRes64 <<"\n";
     std::ostringstream oss64;
     oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
         << finalRes64;

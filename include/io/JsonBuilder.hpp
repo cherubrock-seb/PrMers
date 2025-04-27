@@ -18,8 +18,7 @@ public:
     // queue  : command queue (needed to clEnqueueReadBuffer).
     // opts   : parsed command-line options (CliOptions).
     // elapsed: total run time in seconds (for logging, if desired).
-    static std::string generate(cl_mem buffer,
-                                cl_command_queue queue,
+    static std::string generate(std::vector<unsigned long> x,
                                 const CliOptions& opts,
                                 const std::vector<int>& digit_width,
                                 double elapsed);
