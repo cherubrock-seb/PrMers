@@ -101,7 +101,12 @@ App::App(int argc, char** argv)
 }
 
 int App::run() {
-    
+    if (!hasWorktodoEntry_ && options.exponent == 0) {
+        std::cerr << "Error: no valid entry in " 
+                  << options.worktodo_path 
+                  << " and no exponent provided on the command line\n";
+        return -1;
+    }
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
@@ -349,6 +354,7 @@ int App::run() {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
         }
     }
+
 
     return isPrime ? 0 : 1;
 }
