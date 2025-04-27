@@ -6,7 +6,7 @@
 #include "math/Carry.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "core/WorktodoManager.hpp"
+#include "io/WorktodoManager.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -396,8 +396,8 @@ int App::run() {
                                  [](uint64_t v){ return v == 0; });
     backupManager.clearState();
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, jsonResult);
-    wm.appendToResultsTxt(jsonResult);
+    wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.appendToResultsTxt(json);
 
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
