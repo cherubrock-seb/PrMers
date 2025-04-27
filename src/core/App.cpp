@@ -5,6 +5,8 @@
 #include "core/Printer.hpp"
 #include "math/Carry.hpp"
 #include "io/WorktodoParser.hpp"
+#include "io/WorktodoManager.hpp"
+#include "core/WorktodoManager.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -282,7 +284,7 @@ int App::run() {
             if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; }
         }
 
-        proofManager.checkpoint(buffers->input, iter);
+        //proofManager.checkpoint(buffers->input, iter);
 
         
     }
@@ -393,6 +395,9 @@ int App::run() {
                                  hostResult.end(),
                                  [](uint64_t v){ return v == 0; });
     backupManager.clearState();
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, options.mode, jsonResult);
+    wm.appendToResultsTxt(jsonResult);
 
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
