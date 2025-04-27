@@ -107,6 +107,7 @@ void Context::createQueue(std::size_t enqueueMax) {
             if (queueSize_ == 0)
                 queueSize_ = 16 * 1024;
         }
+        queueSize_ = 16 * 1024; //temporary
     }
     std::cout << "Queue size = " << queueSize_ << std::endl;
 }

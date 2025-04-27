@@ -5,11 +5,21 @@
 #include <thread>
 #include <chrono>
 
-#define COLOR_RED     "\033[31m"
-#define COLOR_YELLOW  "\033[33m"
-#define COLOR_GREEN   "\033[32m"
-#define COLOR_MAGENTA "\033[35m"
-#define COLOR_RESET   "\033[0m"
+#ifdef _WIN32
+  // Sur Windows (avant Win10 ou si ANSI non activé), on neutralise les couleurs
+  #define COLOR_RED     ""
+  #define COLOR_YELLOW  ""
+  #define COLOR_GREEN   ""
+  #define COLOR_MAGENTA ""
+  #define COLOR_RESET   ""
+#else
+  // Sur les terminaux Unix/Linux et Windows 10+ en mode VTP
+  #define COLOR_RED     "\033[31m"
+  #define COLOR_YELLOW  "\033[33m"
+  #define COLOR_GREEN   "\033[32m"
+  #define COLOR_MAGENTA "\033[35m"
+  #define COLOR_RESET   "\033[0m"
+#endif
 
 using namespace std::chrono;
 
@@ -20,7 +30,7 @@ void Spinner::displayProgress(uint32_t iter,
                               double elapsedTime,
                               uint32_t expo,
                               uint32_t resumeIter,
-                                std::string res64)
+                              std::string res64)
 {
     double pct = totalIters
                ? (100.0 * iter) / totalIters
@@ -86,7 +96,7 @@ void Spinner::displayBackupInfo(uint32_t iter,
       << "Elapsed: " << elapsedTime << "s | "
       << "IPS: "     << std::fixed << ips << " | "
       << "ETA: "     << remaining << "s" << " | "
-      << "RES64: "     << res64
+      << "RES64: "   << res64
       << COLOR_RESET
       << std::endl;
 }
@@ -112,13 +122,12 @@ void Spinner::displaySpinner(std::atomic<bool>& waiting,
                 std::cout << " / ~" << (int)estimatedSeconds << "s";
             std::cout << ")..." << std::flush;
         } else if (duration_cast<seconds>(now - lastDraw).count() >= 1) {
-            // could print a gray “waiting” line here
             lastDraw = now;
         }
         std::this_thread::sleep_for(milliseconds(200));
     }
 
-    std::cout << "\r✅ GPU queue flushed.                   \n"
+    std::cout << "\rGPU queue flushed.                   \n"
               << std::flush;
 }
 
