@@ -2,6 +2,7 @@
 #define CORE_APP_HPP
 
 #include "io/CliParser.hpp"
+#include "io/WorktodoParser.hpp"
 #include "opencl/Context.hpp"
 #include "opencl/Program.hpp"
 #include "math/Precompute.hpp"
@@ -35,6 +36,8 @@ public:
     int run();
 
 private:
+  std::unique_ptr<io::WorktodoParser> worktodoParser_;
+  bool hasWorktodoEntry_{false};
   io::CliOptions                     options;
   opencl::Context                    context;
   math::Precompute                   precompute;
