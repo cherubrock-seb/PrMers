@@ -228,8 +228,6 @@ static std::string generatePrimeNetJson(
     return oss.str();
 }
 
-
-
 std::string JsonBuilder::generate(std::vector<unsigned long> x,
                                   const CliOptions& opts,
                                   const std::vector<int>& digit_width,
@@ -242,7 +240,6 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
 
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
-    std::cout << "\finalRes64=" <<finalRes64 <<"\n";
     std::ostringstream oss64;
     oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
         << finalRes64;
@@ -254,8 +251,6 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
                 << words[i];
     }
     std::string res2048 = oss2048.str();
-    std::cout << "\nres2048=" << res2048 << "\n";
-    std::cout << "\nres64=" << res64 << "\n";
     // ---------------------------------------------
     // 4) timestamp
     char timestampBuf[32];
@@ -294,6 +289,40 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         opts.computer_name         // computer
     );
 
+}
+
+
+std::string JsonBuilder::computeRes64(
+    std::vector<unsigned long> x,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width,
+    double /*elapsed*/,
+    int /*transform_size*/)
+{
+    auto words = compactBits(x, digit_width, opts.exponent);
+    if (opts.mode == "prp") doDiv9(opts.exponent, words);
+    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+        << finalRes64;
+    return oss.str();
+}
+
+std::string JsonBuilder::computeRes2048(
+    std::vector<unsigned long> x,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width,
+    double /*elapsed*/,
+    int /*transform_size*/)
+{
+    auto words = compactBits(x, digit_width, opts.exponent);
+    if (opts.mode == "prp") doDiv9(opts.exponent, words);
+    std::ostringstream oss;
+    for (int i = 63; i >= 0; --i) {
+        oss << std::hex << std::nouppercase << std::setw(8) << std::setfill('0')
+            << words[i];
+    }
+    return oss.str();
 }
 
 void JsonBuilder::write(const std::string& json,

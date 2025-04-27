@@ -1,4 +1,5 @@
 // src/core/App.cpp
+#define CL_TARGET_OPENCL_VERSION 200
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
@@ -15,6 +16,7 @@
 #include <vector>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <sstream>
 #include <atomic>
 
@@ -125,7 +127,7 @@ int App::run() {
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter);
+    spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter,"");
     uint32_t lastIter = resumeIter;
 
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
@@ -150,13 +152,32 @@ int App::run() {
             //std::cout << "Flush\n";
             clFinish(queue); queued = 0;
             auto now = high_resolution_clock::now();
+            
+            
             if (now - lastDisplay >= seconds(2)) {
+                std::vector<unsigned long> hostData(precompute.getN());
+                clEnqueueReadBuffer(
+                    context.getQueue(),
+                    buffers->input,
+                    CL_TRUE, 0,
+                    hostData.size() * sizeof(unsigned long),
+                    hostData.data(),
+                    0, nullptr, nullptr
+                );
+                std::string res64 = io::JsonBuilder::computeRes64(
+                hostData,
+                options,
+                precompute.getDigitWidth(),
+                timer.elapsed(),
+                static_cast<int>(context.getTransformSize())
+                );
                 spinner.displayProgress(
                     iter,
                     totalIters,
                     timer.elapsed(),
                     p,
-                    resumeIter
+                    resumeIter,
+                    res64
                 );
                 lastDisplay = now;
             }
@@ -164,10 +185,27 @@ int App::run() {
                 backupManager.saveState(buffers->input, iter);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
+                std::vector<unsigned long> hostData(precompute.getN());
+                clEnqueueReadBuffer(
+                    context.getQueue(),
+                    buffers->input,
+                    CL_TRUE, 0,
+                    hostData.size() * sizeof(unsigned long),
+                    hostData.data(),
+                    0, nullptr, nullptr
+                );
+                std::string res64 = io::JsonBuilder::computeRes64(
+                    hostData,
+                    options,
+                    precompute.getDigitWidth(),
+                    backupElapsed,
+                    static_cast<int>(context.getTransformSize())
+                );
                 spinner.displayBackupInfo(
                     iter,
                     totalIters,
-                    backupElapsed
+                    backupElapsed,
+                    res64
                 );
             }    
         }
@@ -194,7 +232,8 @@ int App::run() {
         clFinish(queue);
     }
     std::vector<unsigned long> hostData(precompute.getN());
-        
+       
+
     {
         clEnqueueReadBuffer(
             context.getQueue(),
@@ -204,6 +243,22 @@ int App::run() {
             hostData.data(),
             0, nullptr, nullptr
         );
+        std::string res64_x = io::JsonBuilder::computeRes64(
+        hostData,
+        options,
+        precompute.getDigitWidth(),
+        timer.elapsed(),
+        static_cast<int>(context.getTransformSize())
+        );
+        spinner.displayProgress(
+                        lastIter+1,
+                        totalIters,
+                        timer.elapsed(),
+                        p,
+                        resumeIter,
+                        res64_x
+                    );
+         
         carry.handleFinalCarry(hostData,
                                precompute.getDigitWidth());
 

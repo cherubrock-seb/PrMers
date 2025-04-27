@@ -19,7 +19,8 @@ void Spinner::displayProgress(uint32_t iter,
                               uint32_t totalIters,
                               double elapsedTime,
                               uint32_t expo,
-                              uint32_t resumeIter)
+                              uint32_t resumeIter,
+                                std::string res64)
 {
     double pct = totalIters
                ? (100.0 * iter) / totalIters
@@ -62,15 +63,17 @@ void Spinner::displayProgress(uint32_t iter,
       << "IPS: "       << std::fixed << std::setprecision(2)
                       << smoothedIPS                        << " | "
       << "ETA: "       << days << "d " << hrs << "h "
-                      << min  << "m " << sec << "s"
+                      << min  << "m " << sec << "s" << " | "
+      << "RES64: "     << res64
       << COLOR_RESET
-      << std::flush;
+      << std::endl;
 }
 
 
 void Spinner::displayBackupInfo(uint32_t iter,
                                 uint32_t totalIters,
-                                double elapsedTime)
+                                double elapsedTime,
+                                std::string res64)
 {
     double pct       = totalIters ? (100.0 * iter) / totalIters : 100.0;
     double ips       = elapsedTime > 0 ? iter / elapsedTime : 0.0;
@@ -82,9 +85,10 @@ void Spinner::displayBackupInfo(uint32_t iter,
       << std::fixed << std::setprecision(2) << pct << "% | "
       << "Elapsed: " << elapsedTime << "s | "
       << "IPS: "     << std::fixed << ips << " | "
-      << "ETA: "     << remaining << "s"
+      << "ETA: "     << remaining << "s" << " | "
+      << "RES64: "     << res64
       << COLOR_RESET
-      << std::flush;
+      << std::endl;
 }
 
 void Spinner::displaySpinner(std::atomic<bool>& waiting,
