@@ -128,14 +128,6 @@ static std::string jsonEscape(const std::string& s) {
     return "\"" + o.str() + "\"";
 }
 
-// CRC32 helper (fill in your table)
-static unsigned int computeCRC32(const std::string &data) {
-    static const uint32_t crctable[256] = { /* … 256 values … */ };
-    uint32_t crc = 0xffffffffUL;
-    for (unsigned char c : data)
-        crc = crctable[(crc ^ c) & 0xFF] ^ (crc >> 8);
-    return crc ^ 0xffffffffUL;
-}
 
 // Full JSON generator (copy/paste from prmers.cpp) …
 static std::string generatePrimeNetJson(
@@ -206,13 +198,24 @@ static std::string generatePrimeNetJson(
     if      (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
     else if (canonWT.rfind("LL",  0) == 0) canonWT = "LL";
 
-    canon << exponent << ";" << canonWT << ";;";
-    if (canonWT == "LL"|| canonWT == "PRP") canon << std::nouppercase << res64;
+
+    canon << exponent << ";" << canonWT << ";";
+    canon << "" << ";";  // factor list
+    canon << "" << ";";  // known factors
+    if (canonWT == "LL" || canonWT == "PRP") canon << toLower(res64);
     canon << ";";
-    if (canonWT == "PRP") canon << std::nouppercase << res2048;
-    canon << ";0_3_1;" << fftLength << ";gerbicz:" << gerbiczError
-          << ";" << programName << ";" << programVersion << ";;"
-          << osName << ";" << osArchitecture << ";" << timestamp;
+    if (canonWT == "PRP") canon << toLower(res2048);
+    canon << ";";
+    canon << "0_3_1;";                               // shift-count
+    canon << fftLength << ";";
+    canon << "gerbicz:" << gerbiczError << ";";
+    canon << programName << ";";
+    canon << programVersion << ";";
+    canon << "" << ";";  // program.subversion
+    canon << "" << ";";  // program.details
+    canon << osName << ";";
+    canon << osArchitecture << ";";
+    canon << timestamp;
 
     unsigned int crc = computeCRC32(canon.str());
     std::ostringstream hex;
@@ -267,7 +270,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         : ((words[0] == 9 && std::all_of(words.begin() + 1, words.end(),
                                         [](uint32_t v){ return v == 0; })) ? std::string("P") : std::string("C"))),
         opts.exponent,
-        "PRP-3",
+        opts.mode == "prp" ? "PRP-3" : "LL",
         res64,
         res2048,
         1,  // residueType
