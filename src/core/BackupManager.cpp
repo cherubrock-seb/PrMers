@@ -18,7 +18,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 #include "core/BackupManager.hpp"
 #include <fstream>

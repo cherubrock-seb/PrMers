@@ -18,7 +18,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 #include "core/ProofManager.hpp"
 #include <vector>

@@ -22,7 +22,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 #include <cstdlib>
 #define NOMINMAX

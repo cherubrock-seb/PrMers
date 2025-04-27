@@ -13,7 +13,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 typedef uint  uint32_t;
 typedef ulong uint64_t;
