@@ -232,7 +232,7 @@ int App::run() {
         clFinish(queue);
     }
     std::vector<unsigned long> hostData(precompute.getN());
-       
+    std::string res64_x;  
 
     {
         clEnqueueReadBuffer(
@@ -243,7 +243,7 @@ int App::run() {
             hostData.data(),
             0, nullptr, nullptr
         );
-        std::string res64_x = io::JsonBuilder::computeRes64(
+        res64_x = io::JsonBuilder::computeRes64(
         hostData,
         options,
         precompute.getDigitWidth(),
@@ -299,16 +299,6 @@ int App::run() {
         0, nullptr, nullptr
     );
 
-    uint64_t res64 = hostResult[0];
-    std::ostringstream oss;
-    for (auto it = hostResult.rbegin();
-         it != hostResult.rend(); ++it)
-    {
-        oss << std::hex << std::setw(16)
-            << std::setfill('0') << *it;
-    }
-    std::string res2048 = oss.str();
-
     auto now2 = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now2);
     char timestampBuf[100];
@@ -320,8 +310,7 @@ int App::run() {
     Printer::finalReport(
         options,
         hostResult,
-        res64,
-        res2048,
+        res64_x,
         precompute.getN(),
         timestampBuf,
         finalElapsed,
