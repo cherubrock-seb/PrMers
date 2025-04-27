@@ -103,6 +103,8 @@ sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
 Alternatively, **precompiled binaries** are available from the [Releases](https://github.com/cherubrock-seb/PrMers/releases) page.
 
 
+
+
 ## ⚙️ Example Execution and Submission
 
 Below is a typical run of `PrMers`.
@@ -387,6 +389,150 @@ for example
 prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   ```
 
+# 🛠️ Building PrMers on Windows (Manual Instructions)
+
+This guide explains how to **build PrMers manually on Windows**, with different options.
+
+---
+
+## ⚙️ Option 1: **CMake + vcpkg + Visual Studio (RECOMMENDED)**
+
+### 1. Install prerequisites:
+- [CMake](https://cmake.org/download/)
+- [Visual Studio](https://visualstudio.microsoft.com/downloads/) (with **C++ Desktop Development** and **OpenCL** support)
+- [vcpkg](https://github.com/microsoft/vcpkg)
+
+---
+
+### 2. Clone the repository:
+```sh
+git clone https://github.com/cherubrock-seb/PrMers.git
+cd PrMers
+```
+
+---
+
+### 3. Install libcurl via vcpkg:
+```sh
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+.\vcpkg install curl:x64-windows
+cd ..
+```
+
+---
+
+### 4. Configure CMake:
+```sh
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+```
+
+---
+
+### 5. Build the project:
+```sh
+cmake --build build --config Release
+```
+
+---
+
+### 6. Fix missing DLLs:
+- Copy the DLLs from `vcpkg\installed\x64-windows\bin\` into the folder with `prmers.exe`
+  - OR add this path to your system `PATH` environment variable.
+
+Typical required DLLs:
+- `libcurl-4.dll`
+- `libssh2-1.dll`
+- `libnghttp2-14.dll`
+- `libbrotlicommon.dll`
+- `libwinpthread-1.dll`
+- `libstdc++-6.dll`
+- `libgcc_s_seh-1.dll`
+- `libidn2-0.dll`
+
+---
+
+## ⚙️ Option 2: **MinGW / MSYS2 + Makefile**
+
+### 1. Install MSYS2: [https://www.msys2.org/](https://www.msys2.org/)
+
+### 2. Update MSYS2:
+```sh
+pacman -Syu
+```
+
+---
+
+### 3. Install required packages:
+```sh
+pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-opencl-icd-loader mingw-w64-x86_64-curl
+```
+
+---
+
+### 4. Build using Makefile:
+```sh
+make
+```
+
+### 5. Run from the MSYS2 shell (it uses the proper environment for DLLs).
+
+---
+
+## ⚙️ Option 3: **Visual Studio IDE (CMake Project)**
+
+1. Open **Visual Studio**.
+2. Create a **new CMake Project**.
+3. Point it to the PrMers directory.
+4. In `CMakeSettings.json`, add:
+```json
+{
+  "variables": [
+    {
+      "name": "CMAKE_TOOLCHAIN_FILE",
+      "value": "C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    }
+  ]
+}
+```
+5. Install libcurl with vcpkg.
+6. Build directly from Visual Studio.
+
+---
+
+## 📝 Notes:
+- If you get **libcurl-4.dll not found**, make sure the DLLs from vcpkg are accessible.
+- You can **add** the path to DLLs to **`PATH`** or **copy** them next to `prmers.exe`.
+
+---
+
+## 🔧 Optional: Provide this batch file to automate:
+Create `build_windows.bat`:
+```bat
+@echo off
+echo Setting up vcpkg and building prmers...
+
+if not exist "vcpkg" (
+    git clone https://github.com/microsoft/vcpkg.git
+    cd vcpkg
+    call bootstrap-vcpkg.bat
+    cd ..
+)
+
+.\vcpkg\vcpkg install curl:x64-windows
+
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+echo Build complete! Check the build\Release folder.
+pause
+```
+
+---
+
+## 🎉 DONE!
+You should now have `prmers.exe` ready to run!
 
 ## Command-Line Options
 
