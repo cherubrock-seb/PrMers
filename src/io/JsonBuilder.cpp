@@ -282,7 +282,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         opts.proof ? 64 : 0,
         opts.proof ? fileMD5(opts.proofFile) : "",
         "prmers",                  // programName
-        "0.15",                    // programVersion
+        "0.1.0",                    // programVersion
         opts.portCode,             // portCode
         opts.osName,               // osName
         opts.osVersion,            // osVersion
