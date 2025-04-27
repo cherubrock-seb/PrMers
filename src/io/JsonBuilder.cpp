@@ -269,31 +269,34 @@ std::string JsonBuilder::generate(cl_mem buffer,
 
     // 5) assemble JSON
     return generatePrimeNetJson(
-        /*status*/       status,
-        /*exponent*/     opts.exponent,
-        /*worktype*/     worktypeStr,
-        /*res64*/        res64,
-        /*res2048*/      res2048,
-        /*residueType*/  1,
-        /*gerbiczError*/ 0,
-        /*fftLength*/    unsigned(opts.exponent),
-        /*proofVersion*/ opts.proof ? 1 : 0,
-        /*proofPower*/   opts.proof ? opts.proofPower : 0,
-        /*proofHashSize*/opts.proof ? 64 : 0,
-        /*proofMd5*/     opts.proof ? fileMD5(opts.proofFile) : "",
-        /*programName*/  "prmers",
-        /*programVersion*/programVersion,
-        /*portCode*/     opts.portCode,
-        /*osName*/       opts.osName,
-        /*osVersion*/    opts.osVersion,
-        /*osArch*/       opts.osArch,
-        /*user*/         userStr,
-        /*aid*/          opts.aid,
-        /*uid*/          opts.uid,
-        /*timestamp*/    timestampBuf,
-        /*computer*/     opts.computer_name
+        // status: P or C
+        (opts.mode == "ll"
+        ? (std::all_of(words.begin(), words.end(), [](uint32_t v){ return v == 0; }) ? std::string("P") : std::string("C"))
+        : ((words[0] == 9 && std::all_of(words.begin() + 1, words.end(),
+                                        [](uint32_t v){ return v == 0; })) ? std::string("P") : std::string("C"))),
+        opts.exponent,
+        opts.mode,
+        res64,
+        res2048,
+        1,  // residueType
+        0,  // gerbiczError
+        unsigned(opts.exponent),
+        opts.proof ? 1 : 0,
+        opts.proof ? opts.proofPower : 0,
+        opts.proof ? 64 : 0,
+        opts.proof ? fileMD5(opts.proofFile) : "",
+        "prmers",                  // programName
+        "0.15",                    // programVersion
+        opts.portCode,             // portCode
+        opts.osName,               // osName
+        opts.osVersion,            // osVersion
+        opts.osArch,               // osArchitecture
+        opts.user,                 // user
+        opts.aid,                  // aid
+        opts.uid,                  // uid
+        timestampBuf,              // timestamp
+        opts.computer_name         // computer
     );
-
 
 }
 
