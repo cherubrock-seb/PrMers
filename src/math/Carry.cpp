@@ -76,7 +76,7 @@ uint64_t Carry::digit_adc(const uint64_t lhs, const int digit_width, uint64_t & 
     return s & ((uint64_t(1) << digit_width) - 1);
 }
 
-void Carry::handleFinalCarry(std::vector<unsigned long>& x, const std::vector<int>& digit_width_cpu)
+void Carry::handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_width_cpu)
 {
     int n = x.size();
     x[0] += 1;

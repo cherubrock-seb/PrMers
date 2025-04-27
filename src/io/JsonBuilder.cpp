@@ -15,6 +15,9 @@
 #include <filesystem>
 #include "io/MD5.h"
 #include "util/Crc32.hpp" 
+#include <cstdint>
+#include <vector>
+
 
 namespace io{
     //-----------------------------------------------------------------------------
@@ -128,19 +131,6 @@ static std::string jsonEscape(const std::string& s) {
     return "\"" + o.str() + "\"";
 }
 
-#ifdef __APPLE__
-static std::vector<uint32_t> compactBits(
-    const std::vector<unsigned long>& x_ul,
-    const std::vector<int>& digit_width,
-    uint32_t E
-) {
-    std::vector<uint64_t> x64;
-    x64.reserve(x_ul.size());
-    for (auto v : x_ul) 
-        x64.push_back(static_cast<uint64_t>(v));
-    return compactBits(x64, digit_width, E);
-}
-#endif
 
 // Full JSON generator (copy/paste from prmers.cpp) …
 static std::string generatePrimeNetJson(
@@ -241,7 +231,7 @@ static std::string generatePrimeNetJson(
     return oss.str();
 }
 
-std::string JsonBuilder::generate(std::vector<unsigned long> x,
+std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
                                   const CliOptions& opts,
                                   const std::vector<int>& digit_width,
                                   double /*elapsed*/,
@@ -249,7 +239,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
 {
     
     
-    auto words = compactBits(x, digit_width, opts.exponent);
+   auto words = compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
 
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
@@ -306,7 +296,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
 
 
 std::string JsonBuilder::computeRes64(
-    std::vector<unsigned long> x,
+    const std::vector<uint64_t>& x,
     const CliOptions& opts,
     const std::vector<int>& digit_width,
     double /*elapsed*/,
@@ -322,7 +312,7 @@ std::string JsonBuilder::computeRes64(
 }
 
 std::string JsonBuilder::computeRes2048(
-    std::vector<unsigned long> x,
+    const std::vector<uint64_t>& x,
     const CliOptions& opts,
     const std::vector<int>& digit_width,
     double /*elapsed*/,
