@@ -14,19 +14,17 @@ env:
 
 jobs:
   build-windows:
-    name: prmers mersenne primality tester
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install zip utility
         run: choco install zip --no-progress
 
       - name: Download OpenCL SDK from Khronos
         run: |
-          curl.exe -o $env:RUNNER_TEMP/opencl.zip -L "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
+          curl.exe -o $env:RUNNER_TEMP\opencl.zip -L "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
           mkdir $env:RUNNER_TEMP\opencl
           tar.exe -xf $env:RUNNER_TEMP\opencl.zip --strip-components=1 -C $env:RUNNER_TEMP\opencl
 
@@ -41,29 +39,29 @@ jobs:
       - name: Configure CMake with vcpkg toolchain
         run: cmake -S . -B build `
              -DCMAKE_BUILD_TYPE=Release `
-             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP/opencl/include" `
-             -DOpenCL_LIBRARY="$env:RUNNER_TEMP/opencl/lib/OpenCL.lib" `
-             -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake `
-             -DCMAKE_PREFIX_PATH="${{ github.workspace }}/vcpkg/installed/x64-windows"
+             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
+             -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
+             -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
+             -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows"
 
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Generate self‑signed code signing certificate
+      - name: Generate code signing certificate
         shell: powershell
         run: |
           $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=DevCert Prmers" -CertStoreLocation Cert:\CurrentUser\My
           $pwd  = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath prmerscert.pfx -Password $pwd
 
-      - name: Find signtool.exe dynamically
+      - name: Find signtool.exe
         id: signtool
         shell: powershell
         run: |
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-                     Where-Object { $_.FullName -match 'x64\\signtool.exe$' } |
-                     Sort-Object LastWriteTime -Descending |
-                     Select-Object -First 1
+                      Where-Object { $_.FullName -match 'x64\\signtool.exe$' } |
+                      Sort-Object LastWriteTime -Descending |
+                      Select-Object -First 1
           if ($signtool) {
             echo "SIGNSRC=$($signtool.FullName)" >> $env:GITHUB_ENV
           } else {
@@ -71,7 +69,7 @@ jobs:
             exit 1
           }
 
-      - name: Sign the binary with the self‑signed certificate
+      - name: Sign the binary
         shell: powershell
         run: |
           $pwd = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
@@ -84,13 +82,14 @@ jobs:
             /v build\Release\prmers.exe
 
       - name: Package
+        shell: powershell
         run: |
           mkdir prmers_package
           mkdir prmers_package\kernels
-          copy build\Release\prmers.exe prmers_package\
-          copy prmers.cl prmers_package\kernels\
-          copy vcpkg\installed\x64-windows\bin\*.dll prmers_package\
-          powershell Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
+          Copy-Item build\Release\prmers.exe prmers_package\
+          Copy-Item kernels\prmers.cl prmers_package\kernels\
+          Copy-Item vcpkg\installed\x64-windows\bin\*.dll prmers_package\
+          Compress-Archive -Path prmers_package\* -DestinationPath prmers-windows.zip
 
       - name: Calculate SHA256 checksum
         shell: powershell
@@ -98,8 +97,9 @@ jobs:
           $hash = Get-FileHash -Algorithm SHA256 -Path prmers-windows.zip
           $hash.Hash | Out-File -Encoding ASCII -NoNewline prmers-windows.zip.sha256
 
-      - name: Read SHA256 for release body
+      - name: Read SHA256 for release
         id: read-sha
+        shell: powershell
         run: echo "SHA_SUM=$(Get-Content prmers-windows.zip.sha256)" >> $env:GITHUB_ENV
 
       - name: Upload release to GitHub
