@@ -27,7 +27,7 @@ static void handle_sigint(int) { interrupted = true; }
 
 App::App(int argc, char** argv)
   : options(io::CliParser::parse(argc, argv))
-  , context(options.device_id)
+  , context(options.device_id,options.enqueue_max)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),
@@ -148,9 +148,29 @@ int App::run() {
         queued += 2;
         if (queueCap > 0 && queued >= queueCap) { 
             //std::cout << "Flush\n";
-            clFinish(queue); queued = 0;}
-        if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; }
-
+            clFinish(queue); queued = 0;
+            auto now = high_resolution_clock::now();
+            if (now - lastDisplay >= seconds(2)) {
+                spinner.displayProgress(
+                    iter,
+                    totalIters,
+                    timer.elapsed(),
+                    p
+                );
+                lastDisplay = now;
+            }
+            if (now - lastBackup >= seconds(options.backup_interval)) {
+                backupManager.saveState(buffers->input, iter);
+                lastBackup = now;
+                double backupElapsed = timer.elapsed();
+                spinner.displayBackupInfo(
+                    iter,
+                    totalIters,
+                    backupElapsed
+                );
+            }    
+        }
+        
         if (options.mode == "ll") {
             kernels->runSub2(buffers->input);
             if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; }
@@ -158,26 +178,7 @@ int App::run() {
 
         proofManager.checkpoint(buffers->input, iter);
 
-        auto now = high_resolution_clock::now();
-        if (now - lastDisplay >= seconds(2)) {
-            spinner.displayProgress(
-                iter,
-                totalIters,
-                timer.elapsed(),
-                p
-            );
-            lastDisplay = now;
-        }
-        if (now - lastBackup >= seconds(options.backup_interval)) {
-            backupManager.saveState(buffers->input, iter);
-            lastBackup = now;
-            double backupElapsed = timer.elapsed();
-            spinner.displayBackupInfo(
-                iter,
-                totalIters,
-                backupElapsed
-            );
-        }
+        
     }
 
     if (interrupted) {
