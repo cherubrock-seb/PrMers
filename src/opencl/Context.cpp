@@ -97,9 +97,13 @@ void Context::createQueue(std::size_t enqueueMax) {
     if (err != CL_SUCCESS)
         throw std::runtime_error("Failed to create command queue");
 
-    if (enqueueMax >= 0) {
+    if (enqueueMax > 0) {
         queueSize_ = enqueueMax;
-    } else {
+    }
+    else if(enqueueMax == -1) {
+        queueSize_ = 0;
+    }
+    else {
         auto vendor = queryDeviceString(CL_DEVICE_VENDOR);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
         std::cout << "GPU Vendor: " << vendor << std::endl;
