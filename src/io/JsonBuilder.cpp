@@ -234,7 +234,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
                                   const CliOptions& opts,
                                   const std::vector<int>& digit_width,
                                   double /*elapsed*/,
-                                  int transformSize_) 
+                                  int transform_size) 
 {
     
     
@@ -276,7 +276,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         res2048,
         1,  // residueType
         0,  // gerbiczError
-        transformSize_,
+        transform_size,
         opts.proof ? 1 : 0,
         opts.proof ? opts.proofPower : 0,
         opts.proof ? 64 : 0,
