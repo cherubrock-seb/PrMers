@@ -21,7 +21,8 @@ public:
     static std::string generate(std::vector<unsigned long> x,
                                 const CliOptions& opts,
                                 const std::vector<int>& digit_width,
-                                double elapsed);
+                                double elapsed,
+                                int transform_size);
 
     // Write JSON string to a file.
     static void write(const std::string& json,
