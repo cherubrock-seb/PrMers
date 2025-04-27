@@ -19,6 +19,7 @@
 #include <string>
 #include <sstream>
 #include <atomic>
+#include <fstream>
 
 using namespace std::chrono;
 
@@ -51,11 +52,11 @@ void restart_self(int argc, char* argv[]) {
         CloseHandle(pi.hThread);
         exit(0);
     } else {
-        std::cerr << "❌ Failed to restart program (CreateProcess failed)" << std::endl;
+        std::cerr << "Failed to restart program (CreateProcess failed)" << std::endl;
     }
 
 #else
-    std::cout << "\n🔁 Restarting program without exponent:\n";
+    std::cout << "\nRestarting program without exponent:\n";
     for (const auto& arg : args) {
         std::cout << "   " << arg << std::endl;
     }
@@ -66,7 +67,7 @@ void restart_self(int argc, char* argv[]) {
 
     execv(exec_args[0], exec_args.data());
 
-    std::cerr << "❌ Failed to restart program (execv failed)" << std::endl;
+    std::cerr << "Failed to restart program (execv failed)" << std::endl;
 #endif
 }
 
@@ -392,12 +393,12 @@ int App::run() {
                                  hostResult.end(),
                                  [](uint64_t v){ return v == 0; });
     backupManager.clearState();
+
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
 
-            // --- on regarde s’il reste au moins une ligne non vide/commentée ---
             std::ifstream f(options.worktodo_path);
             std::string    l;
             bool           more = false;
@@ -412,11 +413,13 @@ int App::run() {
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
                 restart_self(argc_, argv_);
-                // note : restart_self fait un execv ou exit(0)
+            } else {
+                std::cout << "No more entries in worktodo.txt, exiting.\n";
+                std::exit(0);
             }
-        }
-        else {
+        } else {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
+            std::exit(-1);
         }
     }
 
