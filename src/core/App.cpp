@@ -27,7 +27,7 @@
 #include "math/Carry.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/WorktodoManager.hpp"
+#include "io/CurlClient.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -46,6 +46,10 @@
 #include <sstream>
 #include <atomic>
 #include <fstream>
+#include <memory>
+#include <optional>
+
+
 
 using namespace std::chrono;
 
