@@ -226,7 +226,7 @@ int App::run() {
             
             
             if (now - lastDisplay >= seconds(2)) {
-                std::vector<unsigned long> hostData(precompute.getN());
+                std::vector<uint64_t>  hostData(precompute.getN());
                 clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
@@ -256,7 +256,7 @@ int App::run() {
                 backupManager.saveState(buffers->input, iter);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
-                std::vector<unsigned long> hostData(precompute.getN());
+                std::vector<uint64_t> hostData(precompute.getN());
                 clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
@@ -302,7 +302,7 @@ int App::run() {
     if (queued > 0) {
         clFinish(queue);
     }
-    std::vector<unsigned long> hostData(precompute.getN());
+    std::vector<uint64_t> hostData(precompute.getN());
     std::string res64_x;  
 
     {
