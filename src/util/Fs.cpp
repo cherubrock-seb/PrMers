@@ -15,16 +15,16 @@ std::string getExecutableDir() {
 #ifdef __APPLE__
     uint32_t size = sizeof(buffer);
     if (_NSGetExecutablePath(buffer, &size) != 0)
-        throw std::runtime_error("❌ Cannot get executable path (macOS).");
+        throw std::runtime_error("Cannot get executable path (macOS).");
 
 #elif defined(_WIN32)
     if (!GetModuleFileNameA(NULL, buffer, sizeof(buffer)))
-        throw std::runtime_error("❌ Cannot get executable path (Windows).");
+        throw std::runtime_error("Cannot get executable path (Windows).");
 
 #else
     ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer)-1);
     if (len == -1)
-        throw std::runtime_error("❌ Cannot get executable path (Linux).");
+        throw std::runtime_error("Cannot get executable path (Linux).");
     buffer[len] = '\0';
 #endif
 
