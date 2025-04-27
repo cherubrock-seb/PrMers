@@ -1,5 +1,9 @@
 #include "util/Crc32.hpp"
 #include <cstdint>
+#include <iostream>
+#include <string>
+#include <algorithm>
+#include <cctype>
 
 static const uint32_t crctable[256] = {
 	0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL,
@@ -77,4 +81,10 @@ unsigned int computeCRC32(const std::string &data) {
         crc = crctable[(crc ^ c) & 0xFF] ^ (crc >> 8);
     }
     return static_cast<unsigned int>(crc ^ CRC32_XOR_VALUE);
+}
+
+std::string toLower(const std::string &s) {
+    std::string out = s;
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c){ return std::tolower(c); });
+    return out;
 }
