@@ -169,14 +169,14 @@ static std::string generatePrimeNetJson(
         << "\"errors\":{\"gerbicz\":" << gerbiczError << "},"
         << "\"fft-length\":"  << fftLength            << ","
         << "\"shift-count\":0,";
-    if (isPRP) {
+   /* if (isPRP) {
         oss << "\"proof\":{"
             << "\"version\":"   << proofVersion         << ","
             << "\"power\":"     << proofPower           << ","
             << "\"hashsize\":"  << proofHashSize        << ","
             << "\"md5\":"       << jsonEscape(proofMd5)
             << "},";
-    }
+    }*/
     oss << "\"program\":{"
         << "\"name\":"      << jsonEscape(programName)
         << ",\"version\":"  << jsonEscape(programVersion)
