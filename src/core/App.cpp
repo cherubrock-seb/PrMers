@@ -421,6 +421,19 @@ int App::run() {
             hostData.data(),
             0, nullptr, nullptr
         );
+
+         
+        carry.handleFinalCarry(hostData,
+                               precompute.getDigitWidth());
+
+        clEnqueueWriteBuffer(
+            context.getQueue(),
+            buffers->input,
+            CL_TRUE, 0,
+            hostData.size() * sizeof(unsigned long),
+            hostData.data(),
+            0, nullptr, nullptr
+        );
         res64_x = io::JsonBuilder::computeRes64(
         hostData,
         options,
@@ -436,18 +449,6 @@ int App::run() {
                         resumeIter,
                         res64_x
                     );
-         
-        carry.handleFinalCarry(hostData,
-                               precompute.getDigitWidth());
-
-        clEnqueueWriteBuffer(
-            context.getQueue(),
-            buffers->input,
-            CL_TRUE, 0,
-            hostData.size() * sizeof(unsigned long),
-            hostData.data(),
-            0, nullptr, nullptr
-        );
     }
 
     
