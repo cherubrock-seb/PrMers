@@ -17,7 +17,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 #include "io/JsonBuilder.hpp"
 #include "io/CliParser.hpp"          // for CliOptions

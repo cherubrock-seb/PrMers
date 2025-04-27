@@ -17,7 +17,7 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software.
+ * This code is released as free software. 
  */
 #include "opencl/Kernels.hpp"
 #include <stdexcept>
