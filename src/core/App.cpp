@@ -12,7 +12,9 @@
 #else
 # include <CL/cl.h>
 #endif
-
+#ifdef _WIN32
+# include <windows.h>
+#endif
 #include <csignal>
 #include <chrono>
 #include <vector>

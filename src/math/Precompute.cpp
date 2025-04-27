@@ -26,12 +26,19 @@ void precalc_for_p(uint32_t p,
     
     if (n < 4) n = 4;
 
-    __uint128_t bigPminus1 = ( (__uint128_t)MOD_P - 1 );
-    __uint128_t tmp        = bigPminus1 / 192;
-    tmp                   /= n;
-    uint64_t exponent      = (uint64_t)(tmp * 5ULL);
-    uint64_t nr2           = powModP(7ULL, exponent);
+    #ifdef _MSC_VER
+        uint64_t high = 0, low = MOD_P - 1ULL;
+        uint64_t tmp1 = _udiv128(high, low, 192ULL, &low);
+        uint64_t tmp2 = tmp1 / n;
+        uint64_t exponent = tmp2 * 5ULL;
+    #else
+        __uint128_t bigPminus1 = (__uint128_t)MOD_P - 1ULL;
+        __uint128_t tmp = bigPminus1 / 192ULL;
+        tmp /= n;
+        uint64_t exponent = (uint64_t)(tmp * 5ULL);
+    #endif
 
+    uint64_t nr2 = powModP(7ULL, exponent);
     uint64_t inv_n = invModP(n);
     digitWeight[0]    = 1ULL;
     digitInvWeight[0] = inv_n;
