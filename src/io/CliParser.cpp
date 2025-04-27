@@ -146,7 +146,7 @@ CliOptions CliParser::parse(int argc, char** argv) {
             }
             opts.kernel_path = kernelFile;
         } catch (const std::exception& e) {
-            std::cerr << "❌ Error locating OpenCL kernel: " << e.what() << "\n";
+            std::cerr << "Error locating OpenCL kernel: " << e.what() << "\n";
             std::exit(1);
         }
     }
