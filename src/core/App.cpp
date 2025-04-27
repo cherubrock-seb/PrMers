@@ -27,8 +27,54 @@ namespace core {
 static std::atomic<bool> interrupted{false};
 static void handle_sigint(int) { interrupted = true; }
 
+
+
+void restart_self(int argc, char* argv[]) {
+    std::vector<std::string> args(argv, argv + argc);
+
+    if (args.size() > 1 && args[1].find_first_not_of("0123456789") == std::string::npos) {
+        args.erase(args.begin() + 1); 
+    }
+
+#ifdef _WIN32
+    std::string command = "\"" + args[0] + "\"";
+    for (size_t i = 1; i < args.size(); ++i) {
+        command += " \"" + args[i] + "\"";
+    }
+    STARTUPINFO si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    if (CreateProcessA(
+            NULL,
+            const_cast<char*>(command.c_str()),
+            NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        exit(0);
+    } else {
+        std::cerr << "❌ Failed to restart program (CreateProcess failed)" << std::endl;
+    }
+
+#else
+    std::cout << "\n🔁 Restarting program without exponent:\n";
+    for (const auto& arg : args) {
+        std::cout << "   " << arg << std::endl;
+    }
+
+    std::vector<char*> exec_args;
+    for (auto& s : args) exec_args.push_back(const_cast<char*>(s.c_str()));
+    exec_args.push_back(nullptr);
+
+    execv(exec_args[0], exec_args.data());
+
+    std::cerr << "❌ Failed to restart program (execv failed)" << std::endl;
+#endif
+}
+
+
 App::App(int argc, char** argv)
-  : options([&]{
+  : argc_(argc)
+  , argv_(argv)
+  ,options([&]{
       auto o = io::CliParser::parse(argc, argv);
       io::WorktodoParser wp{o.worktodo_path};
       if (auto e = wp.parse()) {
@@ -349,8 +395,27 @@ int App::run() {
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
-                    << " and saved to worktodo_save.txt\n";
-        } else {
+                      << " and saved to worktodo_save.txt\n";
+
+            // --- on regarde s’il reste au moins une ligne non vide/commentée ---
+            std::ifstream f(options.worktodo_path);
+            std::string    l;
+            bool           more = false;
+            while (std::getline(f, l)) {
+                if (!l.empty() && l[0] != '#') {
+                    more = true;
+                    break;
+                }
+            }
+            f.close();
+
+            if (more) {
+                std::cout << "Restarting for next entry in worktodo.txt\n";
+                restart_self(argc_, argv_);
+                // note : restart_self fait un execv ou exit(0)
+            }
+        }
+        else {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
         }
     }
