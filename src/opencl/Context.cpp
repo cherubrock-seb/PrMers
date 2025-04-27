@@ -100,7 +100,7 @@ void Context::createQueue(std::size_t enqueueMax) {
     if (enqueueMax > 0) {
         queueSize_ = enqueueMax;
     }
-    else if(enqueueMax == -1) {
+    else if(enqueueMax == 18446744073709551615) {
         queueSize_ = 0;
     }
     else {
