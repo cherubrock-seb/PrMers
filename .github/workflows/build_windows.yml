@@ -17,16 +17,21 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Rename CMakeList.txt to CMakeLists.txt
+        shell: bash
+        run: mv CMakeList.txt CMakeLists.txt
 
       - name: Install zip utility
         run: choco install zip --no-progress
 
-      - name: Download OpenCL SDK from Khronos
+      - name: Download OpenCL SDK
         run: |
-          curl.exe -o $env:RUNNER_TEMP\opencl.zip -L "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
-          mkdir $env:RUNNER_TEMP\opencl
-          tar.exe -xf $env:RUNNER_TEMP\opencl.zip --strip-components=1 -C $env:RUNNER_TEMP\opencl
+          curl.exe -L -o $env:RUNNER_TEMP/opencl.zip "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
+          mkdir $env:RUNNER_TEMP/opencl
+          tar.exe -xf $env:RUNNER_TEMP/opencl.zip --strip-components=1 -C $env:RUNNER_TEMP/opencl
 
       - name: Clone and bootstrap vcpkg
         run: |
@@ -36,13 +41,15 @@ jobs:
       - name: Install libcurl via vcpkg
         run: .\vcpkg\vcpkg install curl:x64-windows
 
-      - name: Configure CMake with vcpkg toolchain
-        run: cmake -S . -B build `
-             -DCMAKE_BUILD_TYPE=Release `
-             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
-             -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
-             -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
-             -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows"
+      - name: Configure CMake
+        shell: powershell
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
+            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
+            -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows"
 
       - name: Build
         run: cmake --build build --config Release
@@ -58,34 +65,21 @@ jobs:
         id: signtool
         shell: powershell
         run: |
-          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-                      Where-Object { $_.FullName -match 'x64\\signtool.exe$' } |
-                      Sort-Object LastWriteTime -Descending |
-                      Select-Object -First 1
-          if ($signtool) {
-            echo "SIGNSRC=$($signtool.FullName)" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "signtool.exe x64 not found!"
-            exit 1
-          }
+          $sig = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                 Where-Object { $_.FullName -match 'x64\\signtool.exe$' } |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($sig) { echo "SIGNSRC=$($sig.FullName)" >> $env:GITHUB_ENV } else { exit 1 }
 
       - name: Sign the binary
         shell: powershell
         run: |
           $pwd = ConvertTo-SecureString -String "prmers123" -Force -AsPlainText
-          & "${env:SIGNSRC}" sign `
-            /f prmerscert.pfx `
-            /p prmers123 `
-            /fd sha256 `
-            /tr http://timestamp.digicert.com `
-            /td sha256 `
-            /v build\Release\prmers.exe
+          & "${env:SIGNSRC}" sign /f prmerscert.pfx /p prmers123 /fd sha256 /tr http://timestamp.digicert.com /td sha256 /v build\Release\prmers.exe
 
       - name: Package
         shell: powershell
         run: |
-          mkdir prmers_package
-          mkdir prmers_package\kernels
+          mkdir prmers_package; mkdir prmers_package\kernels
           Copy-Item build\Release\prmers.exe prmers_package\
           Copy-Item kernels\prmers.cl prmers_package\kernels\
           Copy-Item vcpkg\installed\x64-windows\bin\*.dll prmers_package\
@@ -94,13 +88,8 @@ jobs:
       - name: Calculate SHA256 checksum
         shell: powershell
         run: |
-          $hash = Get-FileHash -Algorithm SHA256 -Path prmers-windows.zip
-          $hash.Hash | Out-File -Encoding ASCII -NoNewline prmers-windows.zip.sha256
-
-      - name: Read SHA256 for release
-        id: read-sha
-        shell: powershell
-        run: echo "SHA_SUM=$(Get-Content prmers-windows.zip.sha256)" >> $env:GITHUB_ENV
+          $h = Get-FileHash -Algorithm SHA256 -Path prmers-windows.zip
+          $h.Hash | Out-File -Encoding ASCII -NoNewline prmers-windows.zip.sha256
 
       - name: Upload release to GitHub
         uses: softprops/action-gh-release@v2
