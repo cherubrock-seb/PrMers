@@ -278,12 +278,7 @@ int App::run() {
                    : std::all_of(hostResult.begin(),
                                  hostResult.end(),
                                  [](uint64_t v){ return v == 0; });
-    if(isPrime){
-        backupManager.clearState();
-    }
-    else{
-        backupManager.saveState(buffers->input, lastIter);
-    }
+    backupManager.clearState();
     return isPrime ? 0 : 1;
 }
 
