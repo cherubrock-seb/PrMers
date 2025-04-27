@@ -243,23 +243,21 @@ std::string JsonBuilder::generate(cl_mem buffer,
     auto words = compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
 
-    // --- New: build res64 and res2048 strings ---
-    // 64-bit residue: combine words[0]..words[1]
-    uint64_t low64 = (uint64_t(words[1]) << 32) | words[0];
+    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+
     std::ostringstream oss64;
-    oss64 << std::hex << std::uppercase
-         << std::setw(16) << std::setfill('0')
-         << low64;
+    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+        << finalRes64;
     std::string res64 = oss64.str();
 
-    // Full 2048-bit (assuming words.size() ≥ 64):
     std::ostringstream oss2048;
-    for (int i = int(words.size()) - 1; i >= 0; --i) {
-        oss2048 << std::hex << std::nouppercase
-                << std::setw(8) << std::setfill('0')
+    for (int i = 63; i >= 0; --i) {
+        oss2048 << std::hex << std::nouppercase << std::setw(8) << std::setfill('0')
                 << words[i];
     }
     std::string res2048 = oss2048.str();
+    std::cout << "\nres2048=" << res2048 << "\n";
+    std::cout << "\nres64=" << res64 << "\n";
     // ---------------------------------------------
     // 4) timestamp
     char timestampBuf[32];
@@ -275,7 +273,7 @@ std::string JsonBuilder::generate(cl_mem buffer,
         : ((words[0] == 9 && std::all_of(words.begin() + 1, words.end(),
                                         [](uint32_t v){ return v == 0; })) ? std::string("P") : std::string("C"))),
         opts.exponent,
-        opts.mode,
+        "PRP-3",
         res64,
         res2048,
         1,  // residueType
