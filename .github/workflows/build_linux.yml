@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p prmers_package/kernels
           cp prmers prmers_package/
-          cp prmers.cl prmers_package/kernels/
+          cp kernels/prmers.cl prmers_package/kernels/
           tar -czvf prmers-linux.tar.gz -C prmers_package .
 
       - name: Upload release to GitHub
@@ -53,8 +53,7 @@ jobs:
             🔒 Each binary is accompanied by a `.sha256` checksum file for verification.
             💡 You can verify the integrity of the downloaded files using:
                 sha256sum -c <filename>.sha256
-            💡 You can view the exact build process and logs by visiting:
-              👉 [GitHub Actions for PrMers](https://github.com/cherubrock-seb/PrMers/actions)
+            💡 You can view the build logs under the Actions tab.
           files: prmers-linux.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
