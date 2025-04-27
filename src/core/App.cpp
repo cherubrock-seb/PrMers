@@ -37,6 +37,12 @@ App::App(int argc, char** argv)
           o.aid      = e->aid;
           hasWorktodoEntry_ = true;
       }
+      if (!hasWorktodoEntry_ && o.exponent == 0) {
+        std::cerr << "Error: no valid entry in " 
+                  << options.worktodo_path 
+                  << " and no exponent provided on the command line\n";
+        std::exit(-1);
+      }
       return o;
   }())
   , context(options.device_id,options.enqueue_max)
@@ -101,12 +107,6 @@ App::App(int argc, char** argv)
 }
 
 int App::run() {
-    if (!hasWorktodoEntry_ && options.exponent == 0) {
-        std::cerr << "Error: no valid entry in " 
-                  << options.worktodo_path 
-                  << " and no exponent provided on the command line\n";
-        return -1;
-    }
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
