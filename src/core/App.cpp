@@ -4,7 +4,7 @@
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "math/Carry.hpp"
-
+#include "io/WorktodoParser.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -28,7 +28,17 @@ static std::atomic<bool> interrupted{false};
 static void handle_sigint(int) { interrupted = true; }
 
 App::App(int argc, char** argv)
-  : options(io::CliParser::parse(argc, argv))
+  : options([&]{
+      auto o = io::CliParser::parse(argc, argv);
+      io::WorktodoParser wp{o.worktodo_path};
+      if (auto e = wp.parse()) {
+          o.exponent = e->exponent;
+          o.mode     = e->prpTest ? "prp" : "ll";
+          o.aid      = e->aid;
+          hasWorktodoEntry_ = true;
+      }
+      return o;
+  }())
   , context(options.device_id,options.enqueue_max)
   , precompute(options.exponent)
   , backupManager(
@@ -49,6 +59,10 @@ App::App(int argc, char** argv)
   , logger(options.output_path)
   , timer()
 {
+    worktodoParser_ = std::make_unique<io::WorktodoParser>(options.worktodo_path);
+    if (auto e = worktodoParser_->parse()) {
+        hasWorktodoEntry_ = true;
+    }
     context.computeOptimalSizes(
         precompute.getN(),
         precompute.getDigitWidth(),
@@ -87,6 +101,7 @@ App::App(int argc, char** argv)
 }
 
 int App::run() {
+    
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
@@ -326,6 +341,15 @@ int App::run() {
                                  hostResult.end(),
                                  [](uint64_t v){ return v == 0; });
     backupManager.clearState();
+    if (hasWorktodoEntry_) {
+        if (worktodoParser_->removeFirstProcessed()) {
+            std::cout << "Entry removed from " << options.worktodo_path
+                    << " and saved to worktodo_save.txt\n";
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";
+        }
+    }
+
     return isPrime ? 0 : 1;
 }
 

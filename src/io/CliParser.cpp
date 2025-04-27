@@ -129,10 +129,10 @@ CliOptions CliParser::parse(int argc, char** argv) {
         }
     }
 
-    if (opts.exponent == 0) {
+/*    if (opts.exponent == 0) {
         std::cerr << "Error: No exponent provided.\n";
         std::exit(EXIT_FAILURE);
-    }
+    }*/
 
     if (opts.kernel_path.empty()) {
         try {
