@@ -18,33 +18,55 @@ namespace core {
 void Spinner::displayProgress(uint32_t iter,
                               uint32_t totalIters,
                               double elapsedTime,
-                              uint32_t expo)
+                              uint32_t expo,
+                              uint32_t resumeIter)
 {
-    double pct       = totalIters ? (100.0 * iter) / totalIters : 100.0;
-    double ips       = elapsedTime > 0 ? iter / elapsedTime : 0.0;
-    double remaining = ips > 0 ? (totalIters - iter) / ips : 0.0;
+    double pct = totalIters
+               ? (100.0 * iter) / totalIters
+               : 100.0;
+
+    uint32_t deltaIter = (iter > resumeIter) ? (iter - resumeIter) : iter;
+
+    double currentIPS = (elapsedTime > 0)
+                      ? deltaIter / elapsedTime
+                      : 0.0;
+
+    static double smoothedIPS = 0.0;
+    constexpr double alpha    = 0.1;
+    if (smoothedIPS == 0.0) {
+        smoothedIPS = currentIPS;
+    } else {
+        smoothedIPS = alpha * currentIPS
+                    + (1.0 - alpha) * smoothedIPS;
+    }
+
+    double remaining = smoothedIPS > 0
+                     ? (totalIters - iter) / smoothedIPS
+                     : 0.0;
 
     const char* color = (pct < 50.0) ? COLOR_RED
                         : (pct < 90.0) ? COLOR_YELLOW
                                        : COLOR_GREEN;
 
-    uint32_t sec = static_cast<uint32_t>(remaining);
+    uint32_t sec  = static_cast<uint32_t>(remaining);
     uint32_t days = sec / 86400; sec %= 86400;
     uint32_t hrs  = sec / 3600;  sec %= 3600;
     uint32_t min  = sec / 60;    sec %= 60;
 
     std::cout
       << "\r" << color
-      << "Progress: " << std::fixed << std::setprecision(2) << pct << "% | "
-      << "Exp: "      << expo                       << " | "
-      << "Iter: "     << iter                       << " | "
-      << "Elapsed: "  << std::fixed << elapsedTime   << "s | "
-      << "IPS: "      << std::fixed << ips           << " | "
-      << "ETA: "      << days << "d " << hrs << "h "
+      << "Progress: "  << std::fixed << std::setprecision(2) << pct << "% | "
+      << "Exp: "       << expo                                << " | "
+      << "Iter: "      << iter                                << " | "
+      << "Elapsed: "   << std::fixed << elapsedTime          << "s | "
+      << "IPS: "       << std::fixed << std::setprecision(2)
+                      << smoothedIPS                        << " | "
+      << "ETA: "       << days << "d " << hrs << "h "
                       << min  << "m " << sec << "s"
       << COLOR_RESET
       << std::flush;
 }
+
 
 void Spinner::displayBackupInfo(uint32_t iter,
                                 uint32_t totalIters,
