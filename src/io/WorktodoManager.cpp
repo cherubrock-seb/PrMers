@@ -7,7 +7,7 @@
 
 namespace io {
 
-WorktodoManager::WorktodoManager(const io::CliOptions&)
+WorktodoManager::WorktodoManager(const io::CliOptions& opts)
   : options_(opts)
 {}
 

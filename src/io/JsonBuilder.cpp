@@ -128,6 +128,19 @@ static std::string jsonEscape(const std::string& s) {
     return "\"" + o.str() + "\"";
 }
 
+#ifdef __APPLE__
+static std::vector<uint32_t> compactBits(
+    const std::vector<unsigned long>& x_ul,
+    const std::vector<int>& digit_width,
+    uint32_t E
+) {
+    std::vector<uint64_t> x64;
+    x64.reserve(x_ul.size());
+    for (auto v : x_ul) 
+        x64.push_back(static_cast<uint64_t>(v));
+    return compactBits(x64, digit_width, E);
+}
+#endif
 
 // Full JSON generator (copy/paste from prmers.cpp) …
 static std::string generatePrimeNetJson(
