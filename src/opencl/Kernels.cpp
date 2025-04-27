@@ -35,7 +35,7 @@ void Kernels::runSquaring(cl_mem buf, size_t n) {
     size_t global = n;
     size_t local  = std::min<size_t>(n, 256);
     clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
-    clFinish(queue_);
+    //clFinish(queue_);
 }
 
 void Kernels::runSub2(cl_mem buf) {
@@ -43,7 +43,7 @@ void Kernels::runSub2(cl_mem buf) {
     clSetKernelArg(k, 0, sizeof(buf), &buf);
     size_t global = 1, local = 1;
     clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
-    clFinish(queue_);
+    //clFinish(queue_);
 }
 
 } // namespace opencl

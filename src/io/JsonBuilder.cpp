@@ -233,7 +233,8 @@ static std::string generatePrimeNetJson(
 std::string JsonBuilder::generate(std::vector<unsigned long> x,
                                   const CliOptions& opts,
                                   const std::vector<int>& digit_width,
-                                  double /*elapsed*/) 
+                                  double /*elapsed*/,
+                                  int transformSize_) 
 {
     
     
@@ -275,7 +276,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         res2048,
         1,  // residueType
         0,  // gerbiczError
-        unsigned(opts.exponent),
+        transformSize_,
         opts.proof ? 1 : 0,
         opts.proof ? opts.proofPower : 0,
         opts.proof ? 64 : 0,

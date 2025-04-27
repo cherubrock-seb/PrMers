@@ -222,7 +222,8 @@ int App::run() {
         hostData,
         options,
         precompute.getDigitWidth(),
-        finalElapsed
+        finalElapsed,
+        static_cast<int>(context.getTransformSize())
     );
     if (options.submit)
         io::CurlClient::submit(json,
