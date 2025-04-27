@@ -18,8 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up OpenCL
-        run: |
-          echo "OpenCL is preinstalled on macOS. No action needed."
+        run: echo "OpenCL is preinstalled on macOS. No action needed."
 
       - name: Build with Makefile
         run: make KERNEL_PATH=./kernels/
@@ -28,7 +27,7 @@ jobs:
         run: |
           mkdir -p prmers_package/kernels
           cp prmers prmers_package/
-          cp prmers.cl prmers_package/kernels/
+          cp kernels/prmers.cl prmers_package/kernels/
           tar -czvf prmers-macos.tar.gz -C prmers_package .
 
       - name: Calculate SHA256 checksum
