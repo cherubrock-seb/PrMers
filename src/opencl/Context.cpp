@@ -99,6 +99,7 @@ void Context::createQueue(std::size_t enqueueMax) {
                 << "Device on‐device queue preferred=" << preferredSize
                 << "  max=" << maxSize << "\n";
                 queueSize_ = preferredSize;
+                queueSize_ = 16 * 1024;
                 
             #else
                 queueSize_ = 16 * 1024;
