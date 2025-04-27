@@ -287,7 +287,7 @@ std::string JsonBuilder::generate(std::vector<unsigned long> x,
         opts.osName,               // osName
         opts.osVersion,            // osVersion
         opts.osArch,               // osArchitecture
-        opts.user,                 // user
+        opts.user.empty() ? "cherubrock" : opts.user,                 // user
         opts.aid,                  // aid
         opts.uid,                  // uid
         timestampBuf,              // timestamp
