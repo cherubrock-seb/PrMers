@@ -28,6 +28,7 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
+#include "math/GerbiczLiChecker.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -238,6 +239,14 @@ App::App(int argc, char** argv)
     program.emplace(context, context.getDevice(), options.kernel_path);
     kernels.emplace(program->getProgram(), context.getQueue());
     nttEngine.emplace(context, *kernels, *buffers, precompute);
+    {
+        uint32_t tmp = options.exponent;
+        int L = 0;
+        while (tmp) { tmp >>= 1; ++L; }
+        size_t B_GL = static_cast<size_t>(std::sqrt(L));
+        checker = std::make_unique<math::GerbiczLiChecker>(3ULL, 1ULL, B_GL);
+
+    }
 
     std::vector<std::string> kernelNames = {
         "kernel_sub2",
@@ -255,7 +264,10 @@ App::App(int argc, char** argv)
         "kernel_ntt_radix4_mm_2steps",
         "kernel_ntt_radix4_mm_3steps",
         "kernel_ntt_radix2_square_radix2",
-        "kernel_ntt_radix4_radix2_square_radix2_radix4"
+        "kernel_ntt_radix4_radix2_square_radix2_radix4",
+        "kernel_pointwise_mul",
+        "kernel_ntt_radix2",
+        "kernel_carry_mul_base"
     };
     for (auto& name : kernelNames) {
         kernels->createKernel(name);
@@ -291,6 +303,28 @@ int App::run() {
         x.data(), nullptr
     );
 
+    cl_mem dBuf = clCreateBuffer(
+        context.getContext(),
+        CL_MEM_READ_WRITE,
+        precompute.getN() * sizeof(uint64_t), nullptr, nullptr
+    );
+    {
+        std::vector<uint64_t> initD(precompute.getN(), 0ULL);
+        initD[0] = 1;
+        clEnqueueWriteBuffer(queue, dBuf, CL_TRUE, 0,
+                             initD.size() * sizeof(uint64_t),
+                             initD.data(), 0, nullptr, nullptr);
+    }
+
+    std::vector<uint64_t> xPrev(precompute.getN()), dPrev(precompute.getN());
+    clEnqueueReadBuffer(queue, buffers->input, CL_TRUE, 0,
+                        xPrev.size()*sizeof(uint64_t), xPrev.data(),
+                        0, nullptr, nullptr);
+    clEnqueueReadBuffer(queue, dBuf, CL_TRUE, 0,
+                        dPrev.size()*sizeof(uint64_t), dPrev.data(),
+                        0, nullptr, nullptr);
+    const size_t B = checker->getBlockSize();
+
     math::Carry carry(
         context,
         queue,
@@ -298,6 +332,39 @@ int App::run() {
         precompute.getN(),
         precompute.getDigitWidth()
     );
+
+    auto mulNTT = [&](cl_mem A, cl_mem B_mem) {
+        queued += nttEngine->forward_simple(A, 0);
+        queued += nttEngine->forward_simple(B_mem, 0);
+        queued += nttEngine->pointwiseMul(A, B_mem);
+        queued += nttEngine->inverse_simple(A, 0);
+        carry.carryGPU(A, buffers->blockCarryBuf,
+                       precompute.getN() * sizeof(uint64_t));
+        queued += 2;
+    };
+    size_t N = precompute.getN();
+    auto expModNTT = [&](cl_mem baseBuf, uint64_t exp, cl_mem resultBuf){
+        std::vector<uint64_t> one(N,0);
+        one[0] = 1;
+        clEnqueueWriteBuffer(queue, resultBuf, CL_TRUE, 0,
+                            N * sizeof(uint64_t), one.data(),
+                            0, nullptr, nullptr);
+        cl_mem tmpBuf = clCreateBuffer(context.getContext(),
+                                    CL_MEM_READ_WRITE,
+                                    N * sizeof(uint64_t),
+                                    nullptr, nullptr);
+        clEnqueueCopyBuffer(queue, baseBuf, tmpBuf, 0, 0,
+                            N * sizeof(uint64_t),
+                            0, nullptr, nullptr);
+        while (exp) {
+            if (exp & 1) {
+                mulNTT(resultBuf, tmpBuf);
+            }
+            mulNTT(tmpBuf, tmpBuf);
+            exp >>= 1;
+        }
+        clReleaseMemObject(tmpBuf);
+    };
 
     logger.logStart(options);
     timer.start();
@@ -319,12 +386,20 @@ int App::run() {
 
         queued += nttEngine->inverse(buffers->input, iter);
         
-
-        carry.carryGPU(
-            buffers->input,
-            buffers->blockCarryBuf,
-            precompute.getN() * sizeof(uint64_t)
-        );
+       /* if(options.gerbiczli){
+            carry.carryGPU_mul_base(
+                buffers->input,
+                buffers->blockCarryBuf,
+                precompute.getN() * sizeof(uint64_t)
+            );
+        }
+        else{*/
+            carry.carryGPU(
+                buffers->input,
+                buffers->blockCarryBuf,
+                precompute.getN() * sizeof(uint64_t)
+            );
+        //}
         queued += 2;
         if (queueCap > 0 && queued >= queueCap) { 
             //std::cout << "Flush\n";
@@ -393,9 +468,103 @@ int App::run() {
             if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; }
         }
 
+
+        if (options.gerbiczli && ((iter+1) % B) == 0) {
+            // partial checkpoint d ← d * x
+            mulNTT(dBuf, buffers->input);
+
+            // r1 = d * x
+            cl_mem r1Buf = clCreateBuffer(context.getContext(),
+                                        CL_MEM_READ_WRITE,
+                                        N * sizeof(uint64_t),
+                                        nullptr, nullptr);
+            clEnqueueCopyBuffer(queue, dBuf, r1Buf, 0, 0,
+                                N * sizeof(uint64_t), 0, nullptr, nullptr);
+            mulNTT(r1Buf, buffers->input);
+
+            // aPow = a^B
+            uint64_t aVal = (options.mode == "prp" ? 3ULL : 4ULL);
+            cl_mem aBaseBuf = clCreateBuffer(context.getContext(),
+                                            CL_MEM_READ_WRITE,
+                                            N * sizeof(uint64_t),
+                                            nullptr, nullptr);
+            {
+                std::vector<uint64_t> tmp(N,0);
+                tmp[0] = aVal;
+                clEnqueueWriteBuffer(queue, aBaseBuf, CL_TRUE, 0,
+                                    N * sizeof(uint64_t), tmp.data(),
+                                    0, nullptr, nullptr);
+            }
+            cl_mem aPowBuf = clCreateBuffer(context.getContext(),
+                                            CL_MEM_READ_WRITE,
+                                            N * sizeof(uint64_t),
+                                            nullptr, nullptr);
+            expModNTT(aBaseBuf, B, aPowBuf);
+
+            // dPrevPow = dPrev^(2^B)
+            cl_mem dPrevBuf = clCreateBuffer(context.getContext(),
+                                            CL_MEM_READ_WRITE,
+                                            N * sizeof(uint64_t),
+                                            nullptr, nullptr);
+            clEnqueueWriteBuffer(queue, dPrevBuf, CL_TRUE, 0,
+                                N * sizeof(uint64_t), dPrev.data(),
+                                0, nullptr, nullptr);
+            cl_mem dPrevPowBuf = clCreateBuffer(context.getContext(),
+                                                CL_MEM_READ_WRITE,
+                                                N * sizeof(uint64_t),
+                                                nullptr, nullptr);
+            expModNTT(dPrevBuf, uint64_t(1) << B, dPrevPowBuf);
+
+            // r2 = aPow * dPrevPow
+            mulNTT(aPowBuf, dPrevPowBuf);
+            cl_mem r2Buf = aPowBuf;
+
+            clFinish(queue);
+
+            std::vector<uint64_t> hostR1(N), hostR2(N);
+            clEnqueueReadBuffer(queue, r1Buf, CL_TRUE, 0,
+                                N * sizeof(uint64_t), hostR1.data(),
+                                0, nullptr, nullptr);
+            clEnqueueReadBuffer(queue, r2Buf, CL_TRUE, 0,
+                                N * sizeof(uint64_t), hostR2.data(),
+                                0, nullptr, nullptr);
+
+            if (hostR1 != hostR2) {
+                clEnqueueWriteBuffer(queue, buffers->input, CL_TRUE, 0,
+                                    N * sizeof(uint64_t), xPrev.data(),
+                                    0, nullptr, nullptr);
+                clEnqueueWriteBuffer(queue, dBuf, CL_TRUE, 0,
+                                    N * sizeof(uint64_t), dPrev.data(),
+                                    0, nullptr, nullptr);
+                clFinish(queue);
+                std::cerr << "Gerbicz–Li failed at iter=" << (iter+1) << "\n";
+                clReleaseMemObject(r1Buf);
+                clReleaseMemObject(r2Buf);
+                clReleaseMemObject(dPrevBuf);
+                clReleaseMemObject(dPrevPowBuf);
+                break;
+            }
+
+            // update snapshots
+            std::vector<uint64_t> hostX(N), hostD(N);
+            clEnqueueReadBuffer(queue, buffers->input, CL_TRUE, 0,
+                                N * sizeof(uint64_t), hostX.data(),
+                                0, nullptr, nullptr);
+            clEnqueueReadBuffer(queue, dBuf, CL_TRUE, 0,
+                                N * sizeof(uint64_t), hostD.data(),
+                                0, nullptr, nullptr);
+            xPrev = hostX;
+            dPrev = hostD;
+
+            clReleaseMemObject(r1Buf);
+            clReleaseMemObject(r2Buf);
+            clReleaseMemObject(dPrevBuf);
+            clReleaseMemObject(dPrevPowBuf);
+        }
+
+
         //proofManager.checkpoint(buffers->input, iter);
 
-        
     }
 
     if (interrupted) {

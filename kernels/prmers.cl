@@ -1010,6 +1010,19 @@ __kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
     vstore2((ulong2)(r0, r1), 0, x + idx);
 }
 
+
+__kernel void kernel_ntt_radix2(__global ulong* restrict x)
+{
+    const uint idx = get_global_id(0) << 1; // équivalent à get_global_id(0) * 2
+
+    ulong2 u = vload2(0, x + idx);
+
+    ulong s = modAdd(u.x, u.y);
+    ulong d = modSub(u.x, u.y);
+
+    vstore2((ulong2)(s, d), 0, x + idx);
+}
+
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     __global ulong* restrict x,
     __global ulong* restrict w,
@@ -1102,4 +1115,40 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     for (int i = 0; i < 8; i++) {
         x[global_base_idx + i] = localX[local_base_idx + i];
     }
+}
+
+__kernel void kernel_pointwise_mul(__global ulong* a,
+                                   __global const ulong* b) {
+  size_t i = get_global_id(0);
+  a[i] = modMul(a[i], b[i]);
+}
+
+
+__kernel void kernel_carry_mul_base(
+    __global ulong* restrict x,
+    __global ulong* restrict carry_array,
+    const ulong        base        
+) {
+    const ulong gid   = get_global_id(0);
+    const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
+    const ulong end   = start + LOCAL_PROPAGATION_DEPTH;
+    ulong carry = 0UL;
+
+    for (ulong i = start; i < end; i += 4) {
+        ulong4 x_vec = vload4(0, x + i);
+        int4 digit_width_vec = (int4)(
+            get_digit_width(i),
+            get_digit_width(i + 1),
+            get_digit_width(i + 2),
+            get_digit_width(i + 3)
+        );
+
+        ulong4 b4 = (ulong4)(base, base, base, base);
+        x_vec = x_vec * b4;
+
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+
+        vstore4(x_vec, 0, x + i);
+    }
+    carry_array[gid] = carry;
 }

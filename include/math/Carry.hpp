@@ -15,6 +15,7 @@ class Carry {
 public:
     Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth);
     void carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize);
+    void carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize);
     void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digitWidth);
     uint64_t digit_adc(const uint64_t lhs, const int digit_width, uint64_t & carry);
 
@@ -23,9 +24,9 @@ private:
     cl_command_queue  queue_;
     cl_kernel         carryKernel_;
     cl_kernel         carryKernel2_;
+    cl_kernel         carryKernel3_;
     size_t            vectorSize_;
     std::vector<int>  digitWidth_;
-
 };
 
 } // namespace math
