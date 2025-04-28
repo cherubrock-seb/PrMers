@@ -49,6 +49,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <cmath>
 
 
 
@@ -386,20 +387,20 @@ int App::run() {
 
         queued += nttEngine->inverse(buffers->input, iter);
         
-       /* if(options.gerbiczli){
+       if(options.gerbiczli){
             carry.carryGPU_mul_base(
                 buffers->input,
                 buffers->blockCarryBuf,
                 precompute.getN() * sizeof(uint64_t)
             );
         }
-        else{*/
+        else{
             carry.carryGPU(
                 buffers->input,
                 buffers->blockCarryBuf,
                 precompute.getN() * sizeof(uint64_t)
             );
-        //}
+        }
         queued += 2;
         if (queueCap > 0 && queued >= queueCap) { 
             //std::cout << "Flush\n";
