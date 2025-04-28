@@ -281,14 +281,23 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
     std::time_t now = std::time(nullptr);
     std::strftime(timestampBuf, sizeof(timestampBuf),
                   "%Y-%m-%d %H:%M:%S", std::localtime(&now));
-
+    std::string status;
+    if (opts.mode == "prp") {
+        // PRP mode → “0000...0001” means prime
+        status = (res64 == "0000000000000001") ? "P" : "C";
+    }
+    else if (opts.mode == "ll") {
+        // LL mode  → “0000...0000” means prime
+        status = (res64 == "0000000000000000") ? "P" : "C";
+    }
+    else {
+        // any other mode always composite
+        status = "C";
+    }
     // 5) assemble JSON
     return generatePrimeNetJson(
         // status: P or C
-        (opts.mode == "ll"
-        ? (std::all_of(words.begin(), words.end(), [](uint32_t v){ return v == 0; }) ? std::string("P") : std::string("C"))
-        : ((words[0] == 9 && std::all_of(words.begin() + 1, words.end(),
-                                        [](uint32_t v){ return v == 0; })) ? std::string("P") : std::string("C"))),
+        status,
         opts.exponent,
         opts.mode == "prp" ? "PRP-3" : "LL",
         res64,
