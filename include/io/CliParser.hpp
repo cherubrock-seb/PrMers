@@ -14,6 +14,7 @@ struct CliOptions {
     std::string mode = "prp";                // "prp" ou "ll"
     bool profiling = false;
     bool debug = false;
+    bool gerbiczli = false;
     bool proof = true;
     bool submit = true;
     int localCarryPropagationDepth = 8;

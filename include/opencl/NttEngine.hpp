@@ -22,6 +22,9 @@ public:
 
     int forward(cl_mem buf_x, uint64_t iter);
     int inverse(cl_mem buf_x, uint64_t iter);
+    int forward_simple(cl_mem buf_x, uint64_t iter);
+    int inverse_simple(cl_mem buf_x, uint64_t iter);
+    int pointwiseMul(cl_mem a, cl_mem b);
 
 private:
     const Context& ctx_;

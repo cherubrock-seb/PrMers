@@ -142,6 +142,9 @@ CliOptions CliParser::parse(int argc, char** argv) {
         else if (std::strcmp(argv[i], "-kernelpath") == 0 && i + 1 < argc) {
             opts.kernel_path = argv[++i];
         }
+        else if (std::strcmp(argv[i], "-gerbiczli") == 0 || std::strcmp(argv[i], "-gerbiczli") == 0) {
+            opts.gerbiczli = true;
+        }
         else if (argv[i][0] != '-') {
             opts.exponent = static_cast<uint32_t>(std::atoi(argv[i]));
         }
