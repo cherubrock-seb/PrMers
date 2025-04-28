@@ -461,10 +461,7 @@ int App::run() {
         finalElapsed,
         static_cast<int>(context.getTransformSize())
     );
-    if (options.submit)
-        io::CurlClient::submit(json,
-                              options.user,
-                              options.password);
+
 
     logger.logEnd(finalElapsed);
 
@@ -495,6 +492,41 @@ int App::run() {
         finalElapsed,
         json
     );
+    bool skippedSubmission = false;
+
+    if (options.submit) {
+        bool noAsk = options.noAsk || hasWorktodoEntry_;
+
+        if (noAsk && options.password.empty()) {
+            std::cerr << "No password provided with --noask; skipping submission.\n";
+        }
+        else {
+            if (options.user.empty()) {
+                std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
+                std::getline(std::cin, options.user);
+            }
+            if (options.user.empty()) {
+                std::cerr << "No username entered; skipping submission.\n";
+                skippedSubmission = true;
+            }
+
+            if (!skippedSubmission) {
+                if (!noAsk && options.password.empty()) {
+                    options.password = io::CurlClient::promptHiddenPassword();
+                }
+
+                bool success = io::CurlClient::sendManualResultWithLogin(
+                    json,
+                    options.user,
+                    options.password
+                );
+                if (!success) {
+                    std::cerr << "Submission to PrimeNet failed\n";
+                }
+            }
+        }
+    }
+
 
     bool isPrime = (options.mode == "prp")
                    ? (hostResult[0] == 9

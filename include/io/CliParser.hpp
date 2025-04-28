@@ -15,7 +15,7 @@ struct CliOptions {
     bool profiling = false;
     bool debug = false;
     bool proof = true;
-    bool submit = false;
+    bool submit = true;
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
     int backup_interval = 30;

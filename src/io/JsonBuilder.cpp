@@ -240,7 +240,7 @@ static std::string generatePrimeNetJson(
     canon << osName << ";";
     canon << osArchitecture << ";";
     canon << timestamp;
-
+    //std::cout << "\n\n CRC32 to hash ==> " << canon.str() << "\n";
     unsigned int crc = computeCRC32(canon.str());
     std::ostringstream hex;
     hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
