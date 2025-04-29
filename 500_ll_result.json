@@ -1,1 +1,0 @@
-{"status":"C","exponent":500,"worktype":"LL","res64":"E1EDAC6EB0566960","residue-type":1,"errors":{"gerbicz":0},"fft-length":32,"shift-count":0,"program":{"name":"prmers","version":"0.1.0","port":8},"os":{"os":"Linux","architecture":"x86_64"},"user":"cherubrock","timestamp":"2025-04-29 06:58:31","checksum":{"version":1,"checksum":"803A30A7"}}
