@@ -671,11 +671,19 @@ int App::run() {
             std::cerr << "No password provided with --noask; skipping submission.\n";
         }
         else {
-            if (options.user.empty()) {
+            std::string response;
+            std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
+            std::getline(std::cin, response);
+            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+                std::cout << "Result not sent." << std::endl;
+                skippedSubmission = true;
+            }
+
+            if (!skippedSubmission && options.user.empty()) {
                 std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
                 std::getline(std::cin, options.user);
             }
-            if (options.user.empty()) {
+            if (!skippedSubmission && options.user.empty()) {
                 std::cerr << "No username entered; skipping submission.\n";
                 skippedSubmission = true;
             }
