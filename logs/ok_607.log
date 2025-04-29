@@ -1,0 +1,33 @@
+Cannot open worktodo.txt
+GPU Vendor: APPLE
+Queue size = 16384
+Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
+Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 256, 256, 256
+Max CL_DEVICE_LOCAL_MEM_SIZE = 32768 bytes
+Transform Size = 32
+Cannot open worktodo.txt
+Building OpenCL program with options:  -DWG_SIZE=16 -DLOCAL_PROPAGATION_DEPTH=4 -DCARRY_WORKER=8 -DLOCAL_PROPAGATION_DEPTH_DIV4=1 -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=1 -DLOCAL_PROPAGATION_DEPTH_DIV2=1 -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=1 -DWORKER_NTT=8 -DWORKER_NTT_2_STEPS=2 -DMODULUS_P=607 -DTRANSFORM_SIZE_N=32 -DLOCAL_SIZE=2 -DLOCAL_SIZE2=2 -DLOCAL_SIZE3=2
+OpenCL program built successfully from: /Users/fricadev/PrMers/kernels/prmers.cl
+PrMers : GPU‐accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)
+Testing exponent : 607
+Device OpenCL ID : 0
+Mode : PRP
+Backup interval : 30 s
+Save/Load path: .
+Looking for loop file at "/Users/fricadev/PrMers/./607prp.loop"
+No valid loop file, initializing fresh state
+Initial x[0] set to 3 (PRP mode)
+[31mProgress: 0.00% | Exp: 607 | Iter: 0 | Elapsed: 0.00s | IPS: 0.00 | ETA: 0d 0h 0m 0s | RES64: [0m
+[32mProgress: 100.00% | Exp: 607 | Iter: 607 | Elapsed: 0.04s | IPS: 16833.85 | ETA: 0d 0h 0m 0s | RES64: 0000000000000001[0m
+
+Warning: Cannot open file for MD5: 
+
+M607 PRP test: probably prime (residue is 9).
+
+Manual submission JSON:
+{"status":"P","exponent":607,"worktype":"PRP-3","res64":"0000000000000001","res2048":"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001298a380100000000000009d00000000000054940000000010000000000000001298a39b000000001298a3998000060000126d44000000001298a380000000001298a38000000600003f75ea00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001","residue-type":1,"errors":{"gerbicz":0},"fft-length":32,"shift-count":0,"program":{"name":"prmers","version":"0.1.0","port":8},"os":{"os":"Linux","architecture":"x86_64"},"user":"cherubrock","timestamp":"2025-04-29 07:43:43","checksum":{"version":1,"checksum":"F8EEE199"}}
+
+Total elapsed time: 0.04 seconds.
+No password provided with --noask; skipping submission.
+JSON result written to: ./607_prp_result.json
+Result appended to: ./results.txt

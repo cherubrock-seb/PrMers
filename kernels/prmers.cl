@@ -27,7 +27,8 @@ __constant ulong  mod_p_const         = MOD_P;
 __constant uint   mod_p_comp_const    = MOD_P_COMP;
 __constant ulong4 mod_p4_const        = (ulong4)(MOD_P, MOD_P, MOD_P, MOD_P);
 __constant ulong4 mod_p_comp4_const   = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
-
+__constant ulong2 mod_p2_const       = (ulong2)(MOD_P,      MOD_P);
+__constant ulong2 mod_p_comp2_const  = (ulong2)(MOD_P_COMP, MOD_P_COMP);
 // Modular addition for vectors of 4 ulong
 inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
     // 'select' avoids branching (if-else) on GPU
@@ -99,6 +100,55 @@ inline ulong modMul(const ulong lhs, const ulong rhs) {
     return Reduce(lo, hi);
 }
 
+
+// Modular addition for vectors of 2 ulong
+inline ulong2 modAdd2(ulong2 lhs, ulong2 rhs) {
+    ulong2 c = select((ulong2)0,
+                      mod_p_comp2_const,
+                      lhs >= (mod_p2_const - rhs));
+    return lhs + rhs + c;
+}
+
+// Modular subtraction for vectors of 2 ulong
+inline ulong2 modSub2(ulong2 lhs, ulong2 rhs) {
+    ulong2 c = select((ulong2)0,
+                      mod_p_comp2_const,
+                      lhs < rhs);
+    return lhs - rhs - c;
+}
+
+inline ulong2 Reduce2(ulong2 lo, ulong2 hi) {
+    ulong2 c = select((ulong2)0, mod_p_comp2_const, lo >= mod_p2_const);
+    ulong2 r = lo + c;
+
+    ulong2 hi_shifted = hi << 32;
+    ulong2 hi_high    = hi >> 32;
+    ulong2 hi_low     = convert_ulong2(convert_uint2(hi));
+    ulong2 hi_reduced = hi_high + hi_low;
+
+    r = modAdd2(r, hi_shifted);
+    r = modSub2(r, hi_reduced);
+    return r;
+}
+
+inline ulong2 modMul2(ulong2 lhs, ulong2 rhs) {
+    ulong2 lo = lhs * rhs;
+    ulong2 hi = mul_hi(lhs, rhs);
+    return Reduce2(lo, hi);
+}
+
+
+inline ulong4 modMul3_2(const ulong4 lhs,
+                        const ulong2 w02,    // vload2 non-swappé
+                        const ulong  w3)
+{
+    ulong2 m12 = modMul2(
+        (ulong2)(lhs.s1, lhs.s2),
+        (ulong2)(w02.s1, w02.s0)
+    );
+    ulong m3 = modMul(lhs.s3, w3);
+    return (ulong4)(lhs.s0, m12.s0, m12.s1, m3);
+}
 
 inline ulong4 modMul3(const ulong4 lhs,
                       const ulong w1,
@@ -426,9 +476,9 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong* restrict x,
     const ulong d = x[base + 3 * m];
     const ulong4 coeff = (ulong4)(a, b, c, d);
     
-    const ulong4 tmp = vload4(0, wi + twiddle_offset);
     
-    ulong4 u = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+    ulong4 u = modMul3_2(coeff, vload2(0, wi + twiddle_offset), wi[twiddle_offset + 2]);
+
     const ulong4 r = butterfly(u);
     
     x[base]         = modAdd(r.s0, r.s2);
@@ -471,9 +521,9 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
     const ulong j = k & (m - 1);
     const ulong base = 4 * (k - j) + j;
     const ulong twiddle_offset = 6 * m + 3 * j;
-    const ulong4 tmp = vload4(0, wi + twiddle_offset);
     ulong4 coeff = (ulong4)(x[base], x[base + m], x[base + 2*m], x[base + 3*m]);
-    ulong4 u = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+    ulong4 u = modMul3_2(coeff, vload2(0, wi + twiddle_offset), wi[twiddle_offset + 2]);
+
     ulong4 v = (ulong4)(modAdd(u.s0, u.s1),
                          modSub(u.s0, u.s1),
                          modAdd(u.s2, u.s3),
@@ -499,7 +549,6 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
 {
     const ulong k = get_global_id(0);
     ulong4 coeff = vload4(0, x + 4 * k);
-    ulong4 wvec = vload4(0, w + 6);
     
     ulong a = modAdd(coeff.s0, coeff.s2);
     ulong b = modAdd(coeff.s1, coeff.s3);
@@ -511,7 +560,8 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
     coeff.s2 = modAdd(c, d);
     coeff.s3 = modSub(c, d);
     
-    coeff = modMul3(coeff,wvec.s1, wvec.s0, wvec.s2);
+    coeff = modMul3_2(coeff, vload2(0, w + 6), w[8 + 2]);
+
     coeff = modMul4(coeff, coeff); 
     
     vstore4(coeff, 0, x + 4 * k);
@@ -528,7 +578,6 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
     const ulong j = k & (m - 1);
     const ulong i = 4 * (k - j) + j;
     const ulong twiddle_offset = 6 * m + 3 * j;
-    ulong4 tmp = vload4(0, w + twiddle_offset);
 
     const ulong i0 = i, i1 = i + m, i2 = i + (m << 1), i3 = i + 3 * m;
     ulong4 c = (ulong4)(x[i0], x[i1], x[i2], x[i3]);
@@ -543,7 +592,8 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
     c.s1 = modSub(a, b);
     c.s2 = modAdd(d, e);
     c.s3 = modSub(d, e);
-    c = modMul3(c,tmp.s1, tmp.s0, tmp.s2);
+
+    c = modMul3_2(c, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
     
     x[i0] = c.s0;
     x[i1] = c.s1;
@@ -559,8 +609,6 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
     const ulong j = k & (m - 1);
     const ulong i = 4 * (k - j) + j;
     const ulong twiddle_offset = 6 * m + 3 * j;
-    ulong4 tmp = vload4(0, w + twiddle_offset);
-
     const ulong i0 = i, i1 = i + m, i2 = i + (m << 1), i3 = i + 3 * m;
     ulong4 c = (ulong4)(x[i0], x[i1], x[i2], x[i3]);
     const ulong a = modAdd(c.s0, c.s2);
@@ -571,7 +619,9 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
     c.s1 = modSub(a, b);
     c.s2 = modAdd(d, e);
     c.s3 = modSub(d, e);
-    c= modMul3(c,tmp.s1, tmp.s0, tmp.s2);
+    
+    c = modMul3_2(c, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
+    
     x[i0] = c.s0;
     x[i1] = c.s1;
     x[i2] = c.s2;
@@ -582,10 +632,10 @@ __kernel void kernel_ntt_radix4_mm(__global ulong* restrict x,
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                __global ulong* restrict wi) {
     const ulong k = get_global_id(0);
-    const ulong twiddle_offset = 6;
-    const ulong4 tmp = vload4(0, wi + twiddle_offset);
     ulong4 coeff = vload4(0, x + 4 * k);
-    ulong4 u = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+
+    ulong4 u = modMul3_2(coeff, vload2(0, wi + 6), wi[8]);
+    
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
@@ -604,8 +654,8 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     const ulong twiddle_offset = 6;
     ulong4 coeff = vload4(0, x + 4 * k);
     ulong4 div = vload4(0, digit_invweight + 4 * k);
-    const ulong4 tmp = vload4(0, wi + twiddle_offset);
-    ulong4 u = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+    ulong4 u = modMul3_2(coeff, vload2(0, wi + twiddle_offset), wi[twiddle_offset + 2]);
+
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
@@ -843,7 +893,6 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             const ulong j = k & (m - 1);
             const ulong i = 4 * (k - j) + j;
             const ulong twiddle_offset = 6 * m + 3 * j;
-            ulong4 tmp = vload4(0, w + twiddle_offset);
                 
             ulong4 coeff = (ulong4)( x[i + 0 * m], x[i + 1 * m], x[i + 2 * m], x[i + 3 * m] );
             ulong v0 = modAdd(coeff.s0, coeff.s2);
@@ -854,7 +903,8 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             coeff.s1 = modSub(v0, v1);
             coeff.s2 = modAdd(v2, v3);
             coeff.s3 = modSub(v2, v3);
-            ulong4 result = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+            ulong4 result = modMul3_2(coeff, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
+
             local_x[write_index] = result.s0;
             local_x[write_index+1] = result.s1;
             local_x[write_index+2] = result.s2;
@@ -900,7 +950,6 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             const ulong j = k & (m - 1);
             const ulong i = 4 * (k - j) + j;
             const ulong twiddle_offset = 6 * m + 3 * j;
-            ulong4 tmp = vload4(0, w + twiddle_offset);
             
             ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
                                     local_x[indice1[write_index + 1]],
@@ -914,8 +963,8 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             coeff.s1 = modSub(v0, v1);
             coeff.s2 = modAdd(v2, v3);
             coeff.s3 = modSub(v2, v3);
-            ulong4 result = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
-            
+            ulong4 result = modMul3_2(coeff, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
+
             local_x[indice1[write_index]] = result.s0;
             local_x[indice1[write_index + 1]] = result.s1;
             local_x[indice1[write_index + 2]] = result.s2;
@@ -969,7 +1018,6 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             const ulong j = k & (m - 1);
             const ulong i = 4 * (k - j) + j;
             const ulong twiddle_offset = 6 * m + 3 * j;
-            ulong4 tmp = vload4(0, w + twiddle_offset);
             
             ulong4 coeff = (ulong4)( local_x[indice2[write_index]],
                                     local_x[indice2[write_index + 1]],
@@ -984,7 +1032,8 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
             coeff.s1 = modSub(v0, v1);
             coeff.s2 = modAdd(v2, v3);
             coeff.s3 = modSub(v2, v3);
-            ulong4 result = modMul3(coeff,tmp.s1, tmp.s0, tmp.s2);
+
+            ulong4 result = modMul3_2(coeff, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
             
             x[i + 0 * m] = result.s0;
             x[i + 1 * m] = result.s1;
@@ -1047,13 +1096,22 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
         localX[local_base_idx + i] = x[global_base_idx + i];
     }
 
-    ulong4 twiddles_w12 = vload4(0, w + 12);
-    ulong4 twiddles_w15 = vload4(0, w + 15);
-    
+    ulong2 _w12_01    = vload2(0, w  + 12);
+    ulong  _w12_2     = w[14];
+    ulong4 twiddles_w12  = (ulong4)(_w12_01.s0, _w12_01.s1, _w12_2, 0);
 
-    ulong4 twiddles_wi12 = vload4(0, wi + 12);
-    ulong4 twiddles_wi15 = vload4(0, wi + 15);
-    
+    ulong2 _w15_01    = vload2(0, w  + 15);
+    ulong  _w15_2     = w[17];
+    ulong4 twiddles_w15  = (ulong4)(_w15_01.s0, _w15_01.s1, _w15_2, 0);
+
+    ulong2 _wi12_01   = vload2(0, wi + 12);
+    ulong  _wi12_2    = wi[14];
+    ulong4 twiddles_wi12 = (ulong4)(_wi12_01.s0, _wi12_01.s1, _wi12_2, 0);
+
+    ulong2 _wi15_01   = vload2(0, wi + 15);
+    ulong  _wi15_2    = wi[17];
+    ulong4 twiddles_wi15 = (ulong4)(_wi15_01.s0, _wi15_01.s1, _wi15_2, 0);
+        
     {
         ulong a = modAdd(localX[local_base_idx + 0], localX[local_base_idx + 4]);
         ulong b = modAdd(localX[local_base_idx + 2], localX[local_base_idx + 6]);
@@ -1093,6 +1151,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     {
         ulong4 coeff = (ulong4)(localX[local_base_idx + 0], localX[local_base_idx + 2], localX[local_base_idx + 4], localX[local_base_idx + 6]);
         coeff = modMul3(coeff,twiddles_wi12.s1, twiddles_wi12.s0, twiddles_wi12.s2);
+        
         ulong4 r = butterfly(coeff);
         localX[local_base_idx + 0] = modAdd(r.s0, r.s2);
         localX[local_base_idx + 2] = modAdd(r.s1, r.s3);
