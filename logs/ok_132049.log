@@ -1,0 +1,38 @@
+Cannot open worktodo.txt
+GPU Vendor: APPLE
+Queue size = 16384
+Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
+Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 256, 256, 256
+Max CL_DEVICE_LOCAL_MEM_SIZE = 32768 bytes
+Transform Size = 8192
+Cannot open worktodo.txt
+Building OpenCL program with options:  -DWG_SIZE=32 -DLOCAL_PROPAGATION_DEPTH=8 -DCARRY_WORKER=1024 -DLOCAL_PROPAGATION_DEPTH_DIV4=2 -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=1 -DLOCAL_PROPAGATION_DEPTH_DIV2=2 -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=3 -DWORKER_NTT=2048 -DWORKER_NTT_2_STEPS=512 -DMODULUS_P=132049 -DTRANSFORM_SIZE_N=8192 -DLOCAL_SIZE=256 -DLOCAL_SIZE2=256 -DLOCAL_SIZE3=256
+OpenCL program built successfully from: /Users/fricadev/PrMers/kernels/prmers.cl
+PrMers : GPU‐accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)
+Testing exponent : 132049
+Device OpenCL ID : 0
+Mode : PRP
+Backup interval : 30 s
+Save/Load path: .
+Looking for loop file at "/Users/fricadev/PrMers/./132049prp.loop"
+No valid loop file, initializing fresh state
+Initial x[0] set to 3 (PRP mode)
+[31mProgress: 0.00% | Exp: 132049 | Iter: 0 | Elapsed: 0.00s | IPS: 0.00 | ETA: 0d 0h 0m 0s | RES64: [0m
+[31mProgress: 17.93% | Exp: 132049 | Iter: 23672 | Elapsed: 2.05s | IPS: 11569.78 | ETA: 0d 0h 0m 9s | RES64: 0D419B23FE9496D4[0m
+[31mProgress: 37.23% | Exp: 132049 | Iter: 49166 | Elapsed: 4.18s | IPS: 11590.13 | ETA: 0d 0h 0m 7s | RES64: 08CF6BD1325721BB[0m
+[33mProgress: 56.54% | Exp: 132049 | Iter: 74660 | Elapsed: 6.32s | IPS: 11611.96 | ETA: 0d 0h 0m 4s | RES64: 9E1CD06F8AEF94D0[0m
+[33mProgress: 74.47% | Exp: 132049 | Iter: 98333 | Elapsed: 8.35s | IPS: 11628.40 | ETA: 0d 0h 0m 2s | RES64: 77668CE6D17C3900[0m
+[32mProgress: 92.39% | Exp: 132049 | Iter: 122006 | Elapsed: 10.38s | IPS: 11641.29 | ETA: 0d 0h 0m 0s | RES64: 881A57AF089C8406[0m
+[32mProgress: 100.00% | Exp: 132049 | Iter: 132049 | Elapsed: 11.24s | IPS: 11652.07 | ETA: 0d 0h 0m 0s | RES64: 0000000000000001[0m
+
+Warning: Cannot open file for MD5: 
+
+M132049 PRP test: probably prime (residue is 9).
+
+Manual submission JSON:
+{"status":"P","exponent":132049,"worktype":"PRP-3","res64":"0000000000000001","res2048":"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001","residue-type":1,"errors":{"gerbicz":0},"fft-length":8192,"shift-count":0,"program":{"name":"prmers","version":"0.1.0","port":8},"os":{"os":"Linux","architecture":"x86_64"},"user":"cherubrock","timestamp":"2025-04-29 07:44:32","checksum":{"version":1,"checksum":"002CE96B"}}
+
+Total elapsed time: 11.24 seconds.
+No password provided with --noask; skipping submission.
+JSON result written to: ./132049_prp_result.json
+Result appended to: ./results.txt
