@@ -402,7 +402,7 @@ int App::run() {
             );
         }
         queued += 2;
-        if ((queueCap > 0 && queued >= queueCap) || iter%100000==0) { 
+        if ((queueCap > 0 && queued >= queueCap)) { 
             //std::cout << "Flush\n";
             clFinish(queue);
         }
@@ -411,7 +411,7 @@ int App::run() {
             
             auto now = high_resolution_clock::now();
             
-            if ((queueCap==0 && iter%10000==0) || ((queueCap>0 && (now - lastDisplay >= seconds(2))) )) {
+            if ((((now - lastDisplay >= seconds(10))) )) {
             //if (now - lastDisplay >= seconds(2) ) {
                 std::string res64;
                 if(queueCap > 0){
