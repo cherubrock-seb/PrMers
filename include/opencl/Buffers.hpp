@@ -14,7 +14,8 @@ namespace opencl {
 class Buffers {
 public:
     Buffers(const opencl::Context& ctx, const math::Precompute& pre);
-
+    ~Buffers();
+    
     cl_mem input;             // main data buffer
     cl_mem digitWeightBuf;    // digit weights
     cl_mem digitInvWeightBuf; // inverse digit weights

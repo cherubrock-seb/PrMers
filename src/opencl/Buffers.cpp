@@ -48,6 +48,16 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
         nullptr, "blockCarry"))
 {}
 
+Buffers::~Buffers() {
+    if (input)              clReleaseMemObject(input);
+    if (digitWeightBuf)     clReleaseMemObject(digitWeightBuf);
+    if (digitInvWeightBuf)  clReleaseMemObject(digitInvWeightBuf);
+    if (twiddleBuf)         clReleaseMemObject(twiddleBuf);
+    if (invTwiddleBuf)      clReleaseMemObject(invTwiddleBuf);
+    if (wiBuf)              clReleaseMemObject(wiBuf);
+    if (blockCarryBuf)      clReleaseMemObject(blockCarryBuf);
+}
+
 cl_mem Buffers::createBuffer(const opencl::Context&  ctx, cl_mem_flags flags,
                              size_t size, const void* ptr,
                              const std::string& name)
