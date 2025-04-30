@@ -430,6 +430,7 @@ prmers 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /your/backup/path
   - If no path is given, the default `./worktodo.txt` is used.
   - Only the first valid `PRP=` line is processed.
 - `-config <path>`: Load configuration from a specified `.cfg` file instead of passing options manually
+- `-iterforce <iter>    : (Optional) force a display with a residue 64 bits every <iter>
 
 
 📌 Typical Usage Scenarios

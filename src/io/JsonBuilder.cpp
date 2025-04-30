@@ -341,6 +341,23 @@ std::string JsonBuilder::computeRes64(
     return oss.str();
 }
 
+std::string JsonBuilder::computeRes64Iter(
+    const std::vector<uint64_t>& x,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width,
+    double /*elapsed*/,
+    int /*transform_size*/)
+{
+    auto words = compactBits(x, digit_width, opts.exponent);
+    //if (opts.mode == "prp") doDiv9(opts.exponent, words);
+    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
+        << finalRes64;
+    return oss.str();
+}
+
+
 std::string JsonBuilder::computeRes2048(
     const std::vector<uint64_t>& x,
     const CliOptions& opts,

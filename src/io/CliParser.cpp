@@ -60,6 +60,7 @@ void printUsage(const char* progName) {
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
+    std::cout << "  -iterforce <iter>    : (Optional) force a display with a residue 64 bits every <iter>" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
@@ -111,6 +112,9 @@ CliOptions CliParser::parse(int argc, char** argv) {
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-iterforce") == 0 && i + 1 < argc) {
+            opts.iterforce = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
             opts.max_local_size2 = std::atoi(argv[++i]);

@@ -38,6 +38,12 @@ public:
          const std::vector<int>& digit_width,
          double /*elapsed*/,
          int /*transform_size*/);
+     static std::string computeRes64Iter(
+         const std::vector<uint64_t>& x,
+         const CliOptions& opts,
+         const std::vector<int>& digit_width,
+         double /*elapsed*/,
+         int /*transform_size*/);
 };
 
 } // namespace io
