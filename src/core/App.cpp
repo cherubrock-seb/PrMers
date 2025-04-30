@@ -412,6 +412,8 @@ int App::run() {
             
             
             if (now - lastDisplay >= seconds(2)) {
+                std::string res64;
+                if(queueCap > 0){
                 std::vector<uint64_t>  hostData(precompute.getN());
                 clEnqueueReadBuffer(
                     context.getQueue(),
@@ -421,8 +423,7 @@ int App::run() {
                     hostData.data(),
                     0, nullptr, nullptr
                 );
-                std::string res64;
-                if(queueCap > 0){
+                
                     res64 = io::JsonBuilder::computeRes64(
                     hostData,
                     options,

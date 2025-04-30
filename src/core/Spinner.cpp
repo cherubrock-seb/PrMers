@@ -86,18 +86,22 @@ void Spinner::displayProgress(uint32_t iter,
     uint32_t min  = sec / 60;    sec %= 60;
 
     std::cout
-      << "\r" << color
-      << "Progress: "  << std::fixed << std::setprecision(2) << pct << "% | "
-      << "Exp: "       << expo                                << " | "
-      << "Iter: "      << iter                                << " | "
-      << "Elapsed: "   << std::fixed << elapsedTime          << "s | "
-      << "IPS: "       << std::fixed << std::setprecision(2)
-                      << smoothedIPS                        << " | "
-      << "ETA: "       << days << "d " << hrs << "h "
-                      << min  << "m " << sec << "s" << " | "
-      << "RES64: "     << res64
-      << COLOR_RESET
-      << std::endl;
+    << "\r" << color
+    << "Progress: "  << std::fixed << std::setprecision(2) << pct << "% | "
+    << "Exp: "       << expo                                << " | "
+    << "Iter: "      << iter                                << " | "
+    << "Elapsed: "   << std::fixed << elapsedTime           << "s | "
+    << "IPS: "       << std::fixed << std::setprecision(2)
+                    << smoothedIPS                          << " | "
+    << "ETA: "       << days << "d " << hrs << "h "
+                    << min  << "m " << sec << "s";
+    
+    if (!res64.empty()) {
+    std::cout << " | RES64: " << res64;
+    }
+
+    std::cout << COLOR_RESET << std::endl;
+
 }
 
 

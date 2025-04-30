@@ -121,7 +121,7 @@ void Context::createQueue(std::size_t enqueueMax) {
                 << "Device on‐device queue preferred=" << preferredSize
                 << "  max=" << maxSize << "\n";
                 queueSize_ = preferredSize;
-                queueSize_ = 16 * 1024;
+                //queueSize_ = 16 * 1024;
                 
             #else
                 queueSize_ = 16 * 1024;
@@ -129,7 +129,7 @@ void Context::createQueue(std::size_t enqueueMax) {
             if (queueSize_ == 0)
                 queueSize_ = 16 * 1024;
         }
-        queueSize_ = 16 * 1024; //temporary
+        //queueSize_ = 16 * 1024; //temporary
     }
     if(queueSize_ == 18446744073709551615){
         queueSize_=0;
