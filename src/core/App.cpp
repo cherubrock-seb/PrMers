@@ -414,15 +414,15 @@ int App::run() {
             if (now - lastDisplay >= seconds(2)) {
                 std::string res64;
                 if(queueCap > 0){
-                std::vector<uint64_t>  hostData(precompute.getN());
-                clEnqueueReadBuffer(
-                    context.getQueue(),
-                    buffers->input,
-                    CL_TRUE, 0,
-                    hostData.size() * sizeof(unsigned long),
-                    hostData.data(),
-                    0, nullptr, nullptr
-                );
+                    std::vector<uint64_t>  hostData(precompute.getN());
+                    clEnqueueReadBuffer(
+                        context.getQueue(),
+                        buffers->input,
+                        CL_TRUE, 0,
+                        hostData.size() * sizeof(unsigned long),
+                        hostData.data(),
+                        0, nullptr, nullptr
+                    );
                 
                     res64 = io::JsonBuilder::computeRes64(
                     hostData,
@@ -619,6 +619,7 @@ int App::run() {
         timer.elapsed(),
         static_cast<int>(context.getTransformSize())
         );
+        
         spinner.displayProgress(
                         lastIter+1,
                         totalIters,
@@ -627,6 +628,8 @@ int App::run() {
                         resumeIter,
                         res64_x
                     );
+        backupManager.saveState(buffers->input, lastIter);
+                
     }
 
     
