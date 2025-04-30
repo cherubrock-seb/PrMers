@@ -100,9 +100,6 @@ void Context::createQueue(std::size_t enqueueMax) {
     if (enqueueMax > 0) {
         queueSize_ = enqueueMax;
     }
-    else if(enqueueMax == 18446744073709551615) {
-        queueSize_ = 0;
-    }
     else {
         auto vendor = queryDeviceString(CL_DEVICE_VENDOR);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
@@ -133,6 +130,9 @@ void Context::createQueue(std::size_t enqueueMax) {
                 queueSize_ = 16 * 1024;
         }
         queueSize_ = 16 * 1024; //temporary
+    }
+    if(queueSize_ == 18446744073709551615){
+        queueSize_=0;
     }
     std::cout << "Queue size = " << queueSize_ << std::endl;
 }
