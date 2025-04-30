@@ -19,7 +19,7 @@ struct CliOptions {
     bool submit = true;
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
-    int backup_interval = 30;
+    int backup_interval = 3000;
     std::string save_path = ".";
     std::string user;
     std::string password;
