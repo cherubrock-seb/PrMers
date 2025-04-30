@@ -948,7 +948,7 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
         #pragma unroll 4
         for (ii = 0; ii < 4; ii++) {
             const ulong j = k & (m - 1);
-            const ulong i = 4 * (k - j) + j;
+            //const ulong i = 4 * (k - j) + j;
             const ulong twiddle_offset = 6 * m + 3 * j;
             
             ulong4 coeff = (ulong4)( local_x[indice1[write_index]],
@@ -1083,7 +1083,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     __global ulong* restrict w,
     __global ulong* restrict wi)
 {
-    const int m = 2;
+    //const int m = 2;
     uint gid = get_global_id(0);
     uint lid = get_local_id(0);
     uint global_base_idx = gid * 8;
