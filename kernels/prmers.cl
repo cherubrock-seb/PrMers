@@ -829,18 +829,17 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     write_index = 0;
 
     gid_t k_second = group * m + local_id;
-
+    
+    
     const gid_t j = local_id;
     const gid_t twiddle_offset = 6 * new_m + 3 * j;
+    gid_t i = 4 * (k_second - j) + j;
     twiddle1 = w[twiddle_offset];
     twiddle2 = w[twiddle_offset + 1];
     twiddle3 = w[twiddle_offset + 2];
 
     #pragma unroll 4
     for (uint pass = 0; pass < 4; pass++) {
-        const gid_t i = 4 * (k_second - j) + j;
-
-
         ulong r = modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]);
         ulong r2  = modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]);
         local_x[((write_index) % 4) * 4 + (write_index) / 4] = r;
@@ -864,7 +863,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
         x[i + (new_m << 1)] = modMul(r,twiddle1);
         x[i + ((new_m << 1) + new_m)] = modMul(r2,twiddle3);
         write_index += 4;
-        k_second += m / 4;
+        i += m;
     }
 
 }
