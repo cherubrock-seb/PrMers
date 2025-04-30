@@ -421,13 +421,17 @@ int App::run() {
                     hostData.data(),
                     0, nullptr, nullptr
                 );
-                std::string res64 = io::JsonBuilder::computeRes64(
-                hostData,
-                options,
-                precompute.getDigitWidth(),
-                timer.elapsed(),
-                static_cast<int>(context.getTransformSize())
-                );
+                std::string res64;
+                if(queueCap > 0){
+                    res64 = io::JsonBuilder::computeRes64(
+                    hostData,
+                    options,
+                    precompute.getDigitWidth(),
+                    timer.elapsed(),
+                    static_cast<int>(context.getTransformSize())
+                    );
+                }
+
                 spinner.displayProgress(
                     iter,
                     totalIters,
