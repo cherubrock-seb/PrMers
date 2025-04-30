@@ -291,7 +291,7 @@ int App::run() {
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint32_t resumeIter = backupManager.loadState(x);
-    if (resumeIter == 0) {
+    if (resumeIter == 1) {
         x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
         std::cout << "Initial x[0] set to " << x[0]
                   << " (" << (options.mode == "prp" ? "PRP" : "LL")
@@ -376,7 +376,7 @@ int App::run() {
     spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter,"");
     uint32_t lastIter = resumeIter;
 
-    for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
+    for (uint32_t iter = resumeIter; iter <= totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
         queued += nttEngine->forward(buffers->input, iter);
@@ -402,19 +402,20 @@ int App::run() {
             );
         }
         queued += 2;
-        if ((queueCap > 0 && queued >= queueCap)) { 
+        if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
             //std::cout << "Flush\n";
             clFinish(queue);
         }
-        if (queueCap==0 || (queueCap > 0 && queued >= queueCap)) { 
+        if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
             queued = 0;
             
             auto now = high_resolution_clock::now();
             
-            if ((((now - lastDisplay >= seconds(10))) )) {
+            if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
             //if (now - lastDisplay >= seconds(2) ) {
                 std::string res64;
-                if(queueCap > 0){
+                if((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
+                    clFinish(queue);
                     std::vector<uint64_t>  hostData(precompute.getN());
                     clEnqueueReadBuffer(
                         context.getQueue(),
@@ -425,7 +426,7 @@ int App::run() {
                         0, nullptr, nullptr
                     );
                 
-                    res64 = io::JsonBuilder::computeRes64(
+                    res64 = io::JsonBuilder::computeRes64Iter(
                     hostData,
                     options,
                     precompute.getDigitWidth(),
@@ -457,7 +458,7 @@ int App::run() {
                     hostData.data(),
                     0, nullptr, nullptr
                 );
-                std::string res64 = io::JsonBuilder::computeRes64(
+                std::string res64 = io::JsonBuilder::computeRes64Iter(
                     hostData,
                     options,
                     precompute.getDigitWidth(),
