@@ -404,7 +404,10 @@ int App::run() {
         queued += 2;
         if (queueCap > 0 && queued >= queueCap) { 
             //std::cout << "Flush\n";
-            clFinish(queue); queued = 0;
+            clFinish(queue);
+        }
+        if (queueCap==0 || (queueCap > 0 && queued >= queueCap)) { 
+            queued = 0;
             auto now = high_resolution_clock::now();
             
             
