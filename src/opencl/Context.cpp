@@ -25,7 +25,18 @@
 #include <vector>
 #include <cmath>
 #include <cstring>
-
+#if defined(__APPLE__)
+#  include <OpenCL/cl_ext.h>
+#else
+#  ifdef __has_include
+#    if __has_include(<CL/cl_ext.h>)
+#      include <CL/cl_ext.h>
+#    endif
+#  endif
+#endif
+#ifndef CL_DEVICE_UUID_KHR
+#  define CL_DEVICE_UUID_KHR 0x106A
+#endif
 namespace opencl {
 
 Context::Context(int deviceIndex, std::size_t enqueueMax)
@@ -83,41 +94,78 @@ void Context::pickPlatformAndDevice(int globalIndex) {
 void Context::listAllOpenCLDevices() {
     std::cout << "\nUsage: prmers [options] -d <device_index>\n\n";
     std::cout << "Select a GPU device by index from the list below:\n\n";
-    std::cout << "Idx | Driver Version           | Device\n";
-    std::cout << "----+--------------------------+-----------------------------------------\n";
-
-    cl_uint numPlat = 0;
+     cl_uint numPlat = 0;
     clGetPlatformIDs(0, nullptr, &numPlat);
     std::vector<cl_platform_id> plats(numPlat);
     clGetPlatformIDs(numPlat, plats.data(), nullptr);
 
+    std::printf(
+        "Idx | Platform            | Vendor           | Device Name                      | Driver Version         | Device Version        | CU  | Clock(MHz) | Mem(MiB) | UUID\n"
+        "----+---------------------+------------------+----------------------------------+------------------------+-----------------------+-----+------------+----------+--------------------------------\n"
+    );
+
     int globalIdx = 0;
-    for (int pi = 0; pi < int(numPlat); ++pi) {
-        std::string platName;
-        {
-            size_t sz = 0;
-            clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, 0, nullptr, &sz);
-            platName.resize(sz);
-            clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, sz, &platName[0], nullptr);
-            if (!platName.empty() && platName.back()=='\0') platName.pop_back();
-        }
+    for (cl_uint pi = 0; pi < numPlat; ++pi) {
+        size_t sz = 0;
+        std::string platName, platVendor;
+        clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, 0, nullptr, &sz);
+        platName.resize(sz);
+        clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, sz, &platName[0], nullptr);
+        if (!platName.empty() && platName.back()=='\0') platName.pop_back();
+
+        clGetPlatformInfo(plats[pi], CL_PLATFORM_VENDOR, 0, nullptr, &sz);
+        platVendor.resize(sz);
+        clGetPlatformInfo(plats[pi], CL_PLATFORM_VENDOR, sz, &platVendor[0], nullptr);
+        if (!platVendor.empty() && platVendor.back()=='\0') platVendor.pop_back();
 
         cl_uint ndev = 0;
-        if (clGetDeviceIDs(plats[pi], CL_DEVICE_TYPE_GPU, 0, nullptr, &ndev) != CL_SUCCESS)
+        if (clGetDeviceIDs(plats[pi], CL_DEVICE_TYPE_GPU, 0, nullptr, &ndev) != CL_SUCCESS || ndev == 0)
             continue;
         std::vector<cl_device_id> devs(ndev);
         clGetDeviceIDs(plats[pi], CL_DEVICE_TYPE_GPU, ndev, devs.data(), nullptr);
 
-        for (int di = 0; di < int(ndev); ++di) {
-            char name[256] = {0};
-            clGetDeviceInfo(devs[di], CL_DEVICE_NAME, sizeof(name), name, nullptr);
-            char drv[128] = {0};
-            clGetDeviceInfo(devs[di], CL_DRIVER_VERSION, sizeof(drv), drv, nullptr);
+        for (cl_uint di = 0; di < ndev; ++di) {
+            cl_device_id dev = devs[di];
 
-            std::printf(" %2d | %-24s | %s\n",
-                        globalIdx,
-                        drv,
-                        name);
+            char name[256]={0}, vendor[128]={0}, drvVer[128]={0}, devVer[128]={0}, extStr[1024]={0};
+            cl_uint cu=0, clock=0;
+            cl_ulong gmem=0;
+
+            clGetDeviceInfo(dev, CL_DEVICE_NAME,                sizeof(name),    name,    nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_VENDOR,              sizeof(vendor),  vendor,  nullptr);
+            clGetDeviceInfo(dev, CL_DRIVER_VERSION,             sizeof(drvVer),  drvVer,  nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_VERSION,             sizeof(devVer),  devVer,  nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_MAX_COMPUTE_UNITS,   sizeof(cu),      &cu,     nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clock),   &clock,  nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_SIZE,     sizeof(gmem),    &gmem,   nullptr);
+            clGetDeviceInfo(dev, CL_DEVICE_EXTENSIONS,          sizeof(extStr),  extStr,  nullptr);
+
+            bool hasUUID = false;
+            cl_uchar uuid[16] = {0};
+            std::string exts(extStr);
+            if (exts.find("cl_khr_device_uuid") != std::string::npos) {
+                if (clGetDeviceInfo(dev, CL_DEVICE_UUID_KHR, sizeof(uuid), uuid, nullptr) == CL_SUCCESS)
+                    hasUUID = true;
+            }
+
+            std::printf(
+                " %2d | %-19s | %-16s | %-32s | %-22s | %-21s | %3u | %10u | %8llu | ",
+                globalIdx,
+                platName.c_str(),
+                vendor,
+                name,
+                drvVer,
+                devVer,
+                cu,
+                clock,
+                (unsigned long long)(gmem / (1024 * 1024))
+            );
+            if (hasUUID) {
+                for (int b = 0; b < 16; ++b) std::printf("%02X", uuid[b]);
+            } else {
+                std::printf("N/A");
+            }
+            std::printf("\n");
 
             ++globalIdx;
         }
