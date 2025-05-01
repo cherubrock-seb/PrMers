@@ -623,7 +623,7 @@ int App::run() {
         );
         
         spinner.displayProgress(
-                        lastIter,
+                        lastIter+1,
                         totalIters,
                         timer.elapsed(),
                         p,
