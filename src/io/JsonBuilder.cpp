@@ -262,7 +262,11 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
     
    auto words = compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
-
+    if (words.size() < 64) {
+        words.resize(64, 0);
+    } else if (words.size() > 64) {
+        words.resize(64);
+    }
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
     std::ostringstream oss64;
     oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
@@ -270,9 +274,9 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
     std::string res64 = oss64.str();
 
     std::ostringstream oss2048;
+    oss2048 << std::hex << std::nouppercase << std::setfill('0');
     for (int i = 63; i >= 0; --i) {
-        oss2048 << std::hex << std::nouppercase << std::setw(8) << std::setfill('0')
-                << words[i];
+        oss2048 << std::setw(8) << words[i];
     }
     std::string res2048 = oss2048.str();
     // ---------------------------------------------
