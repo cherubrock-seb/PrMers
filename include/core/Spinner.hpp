@@ -16,6 +16,7 @@ public:
     void displayProgress(uint32_t iter,
                         uint32_t totalIters,
                         double elapsedTime,
+                        double elapsedTime2,
                         uint32_t expo,
                         uint32_t resumeIter = 0,
                         std::string res64 = "");

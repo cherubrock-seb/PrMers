@@ -39,7 +39,7 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
     std::cout << "              [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -61,7 +61,8 @@ void printUsage(const char* progName) {
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     //std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
-    std::cout << "  -iterforce <iter>    : (Optional) force a display with a residue 64 bits every <iter>" << std::endl;
+    std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
+    std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled, >= 1000, default = 100000)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
@@ -127,6 +128,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-enqueue_max") == 0 && i + 1 < argc) {
             opts.enqueue_max = std::atoi(argv[++i]);
         }
+        else if (std::strcmp(argv[i], "-res64_display_interval") == 0 && i + 1 < argc) {
+            int v = std::atoi(argv[++i]);
+            if (v < 0 || (v > 0 && v < 1000)) {
+                std::cerr << "Error: -res64_display_interval must be 0 (to disable) or >= 1000\n";
+                std::exit(EXIT_FAILURE);
+            }
+            opts.res64_display_interval = v;
+        }
         else if (std::strcmp(argv[i], "-user") == 0 && i + 1 < argc) {
             opts.user = argv[++i];
         }
@@ -152,7 +161,12 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.gerbiczli = true;
         }
         else if (argv[i][0] != '-') {
-            opts.exponent = static_cast<uint32_t>(std::atoi(argv[i]));
+            if (opts.exponent == 0) {
+                opts.exponent = static_cast<uint32_t>(std::atoi(argv[i]));
+            } else {
+                std::cerr << "Warning: ignoring extra positional argument '"
+                        << argv[i] << "'\n";
+            }
         }
         else {
             std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";

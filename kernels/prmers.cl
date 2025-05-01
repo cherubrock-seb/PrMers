@@ -1204,3 +1204,93 @@ __kernel void kernel_carry_mul_base(
     }
     carry_array[gid] = carry;
 }
+
+
+static inline uint mod3(__global uint* W, uint wordCount) {
+    uint r = 0;
+    for (uint i = 0; i < wordCount; ++i)
+        r = (r + (W[i] % 3)) % 3;
+    return r;
+}
+
+static void doDiv3(uint E, __global uint* W, uint wordCount) {
+    uint r = (3 - mod3(W, wordCount)) % 3;
+    int topBits = E % 32;
+    {
+        ulong t = ((ulong)r << topBits) + (ulong)W[wordCount-1];
+        W[wordCount-1] = (uint)(t / 3);
+        r = (uint)(t % 3);
+    }
+    for (int i = wordCount - 2; i >= 0; --i) {
+        ulong t = ((ulong)r << 32) + (ulong)W[i];
+        W[i] = (uint)(t / 3);
+        r    = (uint)(t % 3);
+    }
+}
+
+static inline void doDiv9(uint E, __global uint* W, uint wordCount) {
+    doDiv3(E, W, wordCount);
+    doDiv3(E, W, wordCount);
+}
+
+
+static void compactBits(
+    __global const ulong* x,
+    uint                  digitCount,
+    uint                  E,
+    __global uint*        out,
+    uint*                 outCount)
+{
+    int carry = 0;
+    uint outWord = 0;
+    int haveBits = 0;
+    uint p = 0, o = 0;
+    uint totalWords = (E - 1) / 32 + 1;
+
+    for (uint i = 0; i < totalWords; ++i) out[i] = 0;
+
+    for (p = 0; p < digitCount; ++p) {
+        int w = get_digit_width(p);
+        ulong v64 = (ulong)carry + x[p];
+        carry = (int)(v64 >> w);
+        uint v = (uint)(v64 & (((ulong)1 << w) - 1));
+
+        int topBits = 32 - haveBits;
+        outWord |= v << haveBits;
+        if (w >= topBits) {
+            out[o++] = outWord;
+            outWord = (w > topBits) ? (v >> topBits) : 0;
+            haveBits = w - topBits;
+        } else {
+            haveBits += w;
+        }
+    }
+    if (haveBits > 0 || carry) {
+        out[o++] = outWord;
+        for (uint i = 1; carry && i < o; ++i) {
+            ulong sum = (ulong)out[i] + (ulong)carry;
+            out[i] = (uint)(sum & 0xFFFFFFFFUL);
+            carry = (int)(sum >> 32);
+        }
+    }
+    *outCount = o;
+}
+
+
+__kernel void kernel_res64_display(
+    __global const ulong* x,             
+    uint                  exponent,   
+    uint                  digitCount,
+    uint                  mode,
+    uint                  iter,
+    __global uint*        out
+) {
+    if (get_global_id(0) != 0) return;
+    uint wordCount;
+    compactBits(x, digitCount, exponent, out, &wordCount);
+    printf("Iter: %u | Res64: %08X%08X\n",
+           iter,        // itération courante
+           out[1],      // haut 32 bits
+           out[0]       // bas 32 bits
+    );
+}
