@@ -49,6 +49,7 @@ namespace core {
 void Spinner::displayProgress(uint32_t iter,
                               uint32_t totalIters,
                               double elapsedTime,
+                              double elapsedTime2,
                               uint32_t expo,
                               uint32_t resumeIter,
                               std::string res64)
@@ -59,8 +60,8 @@ void Spinner::displayProgress(uint32_t iter,
 
     uint32_t deltaIter = (iter > resumeIter) ? (iter - resumeIter) : iter;
 
-    double currentIPS = (elapsedTime > 0)
-                      ? deltaIter / elapsedTime
+    double currentIPS = (elapsedTime2 > 0)
+                      ? deltaIter / elapsedTime2
                       : 0.0;
 
     static double smoothedIPS = 0.0;

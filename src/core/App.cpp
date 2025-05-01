@@ -28,7 +28,6 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
-#include "math/GerbiczLiChecker.hpp"
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else
@@ -224,6 +223,7 @@ App::App(int argc, char** argv)
   , spinner()
   , logger(options.output_path)
   , timer()
+  , timer2()
 {
     worktodoParser_ = std::make_unique<io::WorktodoParser>(options.worktodo_path);
     if (auto e = worktodoParser_->parse()) {
@@ -240,14 +240,7 @@ App::App(int argc, char** argv)
     program.emplace(context, context.getDevice(), options.kernel_path);
     kernels.emplace(program->getProgram(), context.getQueue());
     nttEngine.emplace(context, *kernels, *buffers, precompute);
-    {
-        uint32_t tmp = options.exponent;
-        int L = 0;
-        while (tmp) { tmp >>= 1; ++L; }
-        size_t B_GL = static_cast<size_t>(std::sqrt(L));
-        checker = std::make_unique<math::GerbiczLiChecker>(3ULL, 1ULL, B_GL);
-
-    }
+    
 
     std::vector<std::string> kernelNames = {
         "kernel_sub2",
@@ -268,7 +261,7 @@ App::App(int argc, char** argv)
         "kernel_ntt_radix4_radix2_square_radix2_radix4",
         "kernel_pointwise_mul",
         "kernel_ntt_radix2",
-        "kernel_carry_mul_base"
+        "kernel_res64_display"
     };
     for (auto& name : kernelNames) {
         kernels->createKernel(name);
@@ -276,6 +269,8 @@ App::App(int argc, char** argv)
 
     std::signal(SIGINT, handle_sigint);
 }
+
+
 
 int App::run() {
     Printer::banner(options);
@@ -297,35 +292,30 @@ int App::run() {
                   << " (" << (options.mode == "prp" ? "PRP" : "LL")
                   << " mode)" << std::endl;
     }
+    
     buffers->input = clCreateBuffer(
         context.getContext(),
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
-
-    cl_mem dBuf = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        precompute.getN() * sizeof(uint64_t), nullptr, nullptr
-    );
-    {
-        std::vector<uint64_t> initD(precompute.getN(), 0ULL);
-        initD[0] = 1;
-        clEnqueueWriteBuffer(queue, dBuf, CL_TRUE, 0,
-                             initD.size() * sizeof(uint64_t),
-                             initD.data(), 0, nullptr, nullptr);
+    cl_mem outBuf;
+    if (options.res64_display_interval != 0){
+        cl_uint totalWords = (options.exponent - 1u) / 32u + 1u;
+        size_t  outBytes   = size_t(totalWords) * sizeof(cl_uint);
+        cl_int err;
+        outBuf = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_WRITE_ONLY,
+            outBytes,
+            nullptr,
+            &err
+        );
+        if (err != CL_SUCCESS) {
+            std::cerr << "Erreur clCreateBuffer(outBuf): " << err << std::endl;
+            std::exit(1);
+        }
     }
-
-    std::vector<uint64_t> xPrev(precompute.getN()), dPrev(precompute.getN());
-    clEnqueueReadBuffer(queue, buffers->input, CL_TRUE, 0,
-                        xPrev.size()*sizeof(uint64_t), xPrev.data(),
-                        0, nullptr, nullptr);
-    clEnqueueReadBuffer(queue, dBuf, CL_TRUE, 0,
-                        dPrev.size()*sizeof(uint64_t), dPrev.data(),
-                        0, nullptr, nullptr);
-    const size_t B = checker->getBlockSize();
-
     math::Carry carry(
         context,
         queue,
@@ -334,46 +324,14 @@ int App::run() {
         precompute.getDigitWidth()
     );
 
-    auto mulNTT = [&](cl_mem A, cl_mem B_mem) {
-        queued += nttEngine->forward_simple(A, 0);
-        queued += nttEngine->forward_simple(B_mem, 0);
-        queued += nttEngine->pointwiseMul(A, B_mem);
-        queued += nttEngine->inverse_simple(A, 0);
-        carry.carryGPU(A, buffers->blockCarryBuf,
-                       precompute.getN() * sizeof(uint64_t));
-        queued += 2;
-    };
-    size_t N = precompute.getN();
-    auto expModNTT = [&](cl_mem baseBuf, uint64_t exp, cl_mem resultBuf){
-        std::vector<uint64_t> one(N,0);
-        one[0] = 1;
-        clEnqueueWriteBuffer(queue, resultBuf, CL_TRUE, 0,
-                            N * sizeof(uint64_t), one.data(),
-                            0, nullptr, nullptr);
-        cl_mem tmpBuf = clCreateBuffer(context.getContext(),
-                                    CL_MEM_READ_WRITE,
-                                    N * sizeof(uint64_t),
-                                    nullptr, nullptr);
-        clEnqueueCopyBuffer(queue, baseBuf, tmpBuf, 0, 0,
-                            N * sizeof(uint64_t),
-                            0, nullptr, nullptr);
-        while (exp) {
-            if (exp & 1) {
-                mulNTT(resultBuf, tmpBuf);
-            }
-            mulNTT(tmpBuf, tmpBuf);
-            exp >>= 1;
-        }
-        clReleaseMemObject(tmpBuf);
-    };
 
     logger.logStart(options);
     timer.start();
-
+    timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter,"");
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter,"");
     uint32_t lastIter = resumeIter;
 
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
@@ -387,26 +345,47 @@ int App::run() {
 
         queued += nttEngine->inverse(buffers->input, iter);
         
-       if(options.gerbiczli){
-            carry.carryGPU_mul_base(
-                buffers->input,
-                buffers->blockCarryBuf,
-                precompute.getN() * sizeof(uint64_t)
-            );
-        }
-        else{
-            carry.carryGPU(
-                buffers->input,
-                buffers->blockCarryBuf,
-                precompute.getN() * sizeof(uint64_t)
-            );
-        }
+
+        carry.carryGPU(
+            buffers->input,
+            buffers->blockCarryBuf,
+            precompute.getN() * sizeof(uint64_t)
+        );
         queued += 2;
+
+        if ((options.res64_display_interval != 0)&& ( ((iter+1) % options.res64_display_interval) == 0 )) {
+            cl_kernel dispK = kernels->getKernel("kernel_res64_display");
+            cl_uint modeInt = (options.mode=="prp") ? 1u : 0u;
+            cl_uint nWords    = static_cast<cl_uint>(precompute.getN());
+            cl_uint iterdisp    = static_cast<cl_uint>(iter+1);
+            clSetKernelArg(dispK, 0, sizeof(cl_mem), &buffers->input);
+            clSetKernelArg(dispK, 1, sizeof(cl_uint), &options.exponent);
+            clSetKernelArg(dispK, 2, sizeof(cl_uint), &nWords);
+            clSetKernelArg(dispK, 3, sizeof(cl_uint), &modeInt);
+            clSetKernelArg(dispK, 4, sizeof(cl_uint), &iterdisp);
+            clSetKernelArg(dispK, 5, sizeof(cl_mem), &outBuf);
+
+
+
+            size_t global = 1, local = 1;
+            clEnqueueNDRangeKernel(
+                queue,
+                dispK,
+                1,
+                nullptr,
+                &global,
+                &local,
+                0, nullptr, nullptr
+            );
+            queued += 1;
+        }
+
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
             //std::cout << "Flush\n";
             clFinish(queue);
         }
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
+            
             queued = 0;
             
             auto now = high_resolution_clock::now();
@@ -414,8 +393,8 @@ int App::run() {
             if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
             //if (now - lastDisplay >= seconds(2) ) {
                 std::string res64;
-                if((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
-                    clFinish(queue);
+                /*if((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
+                    //clFinish(queue);
                     std::vector<uint64_t>  hostData(precompute.getN());
                     clEnqueueReadBuffer(
                         context.getQueue(),
@@ -433,17 +412,20 @@ int App::run() {
                     timer.elapsed(),
                     static_cast<int>(context.getTransformSize())
                     );
-                }
+                }*/
 
                 spinner.displayProgress(
                     iter+1,
                     totalIters,
                     timer.elapsed(),
+                    timer2.elapsed(),
                     p,
                     resumeIter,
                     res64
                 );
+                timer2.start();
                 lastDisplay = now;
+                resumeIter = iter+1;
             }
             if (now - lastBackup >= seconds(options.backup_interval)) {
                 backupManager.saveState(buffers->input, iter);
@@ -480,98 +462,6 @@ int App::run() {
         }
 
 
-        if (options.gerbiczli && ((iter+1) % B) == 0) {
-            // partial checkpoint d ← d * x
-            mulNTT(dBuf, buffers->input);
-
-            // r1 = d * x
-            cl_mem r1Buf = clCreateBuffer(context.getContext(),
-                                        CL_MEM_READ_WRITE,
-                                        N * sizeof(uint64_t),
-                                        nullptr, nullptr);
-            clEnqueueCopyBuffer(queue, dBuf, r1Buf, 0, 0,
-                                N * sizeof(uint64_t), 0, nullptr, nullptr);
-            mulNTT(r1Buf, buffers->input);
-
-            // aPow = a^B
-            uint64_t aVal = (options.mode == "prp" ? 3ULL : 4ULL);
-            cl_mem aBaseBuf = clCreateBuffer(context.getContext(),
-                                            CL_MEM_READ_WRITE,
-                                            N * sizeof(uint64_t),
-                                            nullptr, nullptr);
-            {
-                std::vector<uint64_t> tmp(N,0);
-                tmp[0] = aVal;
-                clEnqueueWriteBuffer(queue, aBaseBuf, CL_TRUE, 0,
-                                    N * sizeof(uint64_t), tmp.data(),
-                                    0, nullptr, nullptr);
-            }
-            cl_mem aPowBuf = clCreateBuffer(context.getContext(),
-                                            CL_MEM_READ_WRITE,
-                                            N * sizeof(uint64_t),
-                                            nullptr, nullptr);
-            expModNTT(aBaseBuf, B, aPowBuf);
-
-            // dPrevPow = dPrev^(2^B)
-            cl_mem dPrevBuf = clCreateBuffer(context.getContext(),
-                                            CL_MEM_READ_WRITE,
-                                            N * sizeof(uint64_t),
-                                            nullptr, nullptr);
-            clEnqueueWriteBuffer(queue, dPrevBuf, CL_TRUE, 0,
-                                N * sizeof(uint64_t), dPrev.data(),
-                                0, nullptr, nullptr);
-            cl_mem dPrevPowBuf = clCreateBuffer(context.getContext(),
-                                                CL_MEM_READ_WRITE,
-                                                N * sizeof(uint64_t),
-                                                nullptr, nullptr);
-            expModNTT(dPrevBuf, uint64_t(1) << B, dPrevPowBuf);
-
-            // r2 = aPow * dPrevPow
-            mulNTT(aPowBuf, dPrevPowBuf);
-            cl_mem r2Buf = aPowBuf;
-
-            clFinish(queue);
-
-            std::vector<uint64_t> hostR1(N), hostR2(N);
-            clEnqueueReadBuffer(queue, r1Buf, CL_TRUE, 0,
-                                N * sizeof(uint64_t), hostR1.data(),
-                                0, nullptr, nullptr);
-            clEnqueueReadBuffer(queue, r2Buf, CL_TRUE, 0,
-                                N * sizeof(uint64_t), hostR2.data(),
-                                0, nullptr, nullptr);
-
-            if (hostR1 != hostR2) {
-                clEnqueueWriteBuffer(queue, buffers->input, CL_TRUE, 0,
-                                    N * sizeof(uint64_t), xPrev.data(),
-                                    0, nullptr, nullptr);
-                clEnqueueWriteBuffer(queue, dBuf, CL_TRUE, 0,
-                                    N * sizeof(uint64_t), dPrev.data(),
-                                    0, nullptr, nullptr);
-                clFinish(queue);
-                std::cerr << "Gerbicz–Li failed at iter=" << (iter+1) << "\n";
-                clReleaseMemObject(r1Buf);
-                clReleaseMemObject(r2Buf);
-                clReleaseMemObject(dPrevBuf);
-                clReleaseMemObject(dPrevPowBuf);
-                break;
-            }
-
-            // update snapshots
-            std::vector<uint64_t> hostX(N), hostD(N);
-            clEnqueueReadBuffer(queue, buffers->input, CL_TRUE, 0,
-                                N * sizeof(uint64_t), hostX.data(),
-                                0, nullptr, nullptr);
-            clEnqueueReadBuffer(queue, dBuf, CL_TRUE, 0,
-                                N * sizeof(uint64_t), hostD.data(),
-                                0, nullptr, nullptr);
-            xPrev = hostX;
-            dPrev = hostD;
-
-            clReleaseMemObject(r1Buf);
-            clReleaseMemObject(r2Buf);
-            clReleaseMemObject(dPrevBuf);
-            clReleaseMemObject(dPrevPowBuf);
-        }
 
 
         //proofManager.checkpoint(buffers->input, iter);
@@ -626,11 +516,16 @@ int App::run() {
                         lastIter+1,
                         totalIters,
                         timer.elapsed(),
+                        timer2.elapsed(),
                         p,
                         resumeIter,
                         res64_x
                     );
         backupManager.saveState(buffers->input, lastIter);
+         if (options.res64_display_interval != 0){
+            clReleaseMemObject(outBuf);
+         }
+        
                 
     }
 
