@@ -38,8 +38,8 @@ namespace io {
 void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
-    std::cout << "              [-l1 <value>] [-l2 <value>] [-l3 <value>] [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-proof]" << std::endl;
+    std::cout << "              [--noask] [-user <username>]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -50,9 +50,9 @@ void printUsage(const char* progName) {
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
-    std::cout << "  -l1 <value>          : (Optional) Force local size for classic NTT kernel" << std::endl;
-    std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
-    std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
+    //std::cout << "  -l1 <value>          : (Optional) Force local size for classic NTT kernel" << std::endl;
+    //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
+    //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
     std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
@@ -60,7 +60,7 @@ void printUsage(const char* progName) {
     std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
-    std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
+    //std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) force a display with a residue 64 bits every <iter>" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
