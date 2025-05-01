@@ -50,29 +50,81 @@ Context::~Context() {
     if (context_) clReleaseContext(context_);
 }
 
-void Context::pickPlatformAndDevice(int deviceIndex) {
+void Context::pickPlatformAndDevice(int globalIndex) {
     cl_uint numPlat = 0;
     if (clGetPlatformIDs(0, nullptr, &numPlat) != CL_SUCCESS || numPlat == 0)
         throw std::runtime_error("No OpenCL platform found");
+    std::vector<cl_platform_id> platforms(numPlat);
+    clGetPlatformIDs(numPlat, platforms.data(), nullptr);
+
+    struct DevInfo { cl_platform_id plat; cl_device_id dev; };
+    std::vector<DevInfo> allDevices;
+    for (auto &plat : platforms) {
+        cl_uint ndev = 0;
+        if (clGetDeviceIDs(plat, CL_DEVICE_TYPE_GPU, 0, nullptr, &ndev) != CL_SUCCESS) 
+            continue;
+        std::vector<cl_device_id> devs(ndev);
+        clGetDeviceIDs(plat, CL_DEVICE_TYPE_GPU, ndev, devs.data(), nullptr);
+        for (auto &d : devs)
+            allDevices.push_back({plat, d});
+    }
+    if (allDevices.empty())
+        throw std::runtime_error("No OpenCL GPU device found");
+
+    if (globalIndex < 0 || size_t(globalIndex) >= allDevices.size()) {
+        std::cerr << "Warning: invalid device index " 
+                  << globalIndex << ", using device 0\n";
+        globalIndex = 0;
+    }
+    platform_ = allDevices[globalIndex].plat;
+    device_   = allDevices[globalIndex].dev;
+}
+
+void Context::listAllOpenCLDevices() {
+    std::cout << "\nUsage: prmers [options] -d <device_index>\n\n";
+    std::cout << "Select a GPU device by index from the list below:\n\n";
+    std::cout << "Idx | Driver Version           | Device\n";
+    std::cout << "----+--------------------------+-----------------------------------------\n";
+
+    cl_uint numPlat = 0;
+    clGetPlatformIDs(0, nullptr, &numPlat);
     std::vector<cl_platform_id> plats(numPlat);
     clGetPlatformIDs(numPlat, plats.data(), nullptr);
-    platform_ = plats.front();
 
-    cl_uint numDev = 0;
-    if (clGetDeviceIDs(platform_, CL_DEVICE_TYPE_GPU, 0, nullptr, &numDev) != CL_SUCCESS
-        || numDev == 0)
-        throw std::runtime_error("No OpenCL GPU device found");
-    std::vector<cl_device_id> devs(numDev);
-    clGetDeviceIDs(platform_, CL_DEVICE_TYPE_GPU, numDev, devs.data(), nullptr);
+    int globalIdx = 0;
+    for (int pi = 0; pi < int(numPlat); ++pi) {
+        std::string platName;
+        {
+            size_t sz = 0;
+            clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, 0, nullptr, &sz);
+            platName.resize(sz);
+            clGetPlatformInfo(plats[pi], CL_PLATFORM_NAME, sz, &platName[0], nullptr);
+            if (!platName.empty() && platName.back()=='\0') platName.pop_back();
+        }
 
-    if (deviceIndex < 0 || std::size_t(deviceIndex) >= devs.size()) {
-        std::cerr << "Warning: invalid device index " << deviceIndex
-                  << ", using device 0\n";
-        device_ = devs[0];
-    } else {
-        device_ = devs[deviceIndex];
+        cl_uint ndev = 0;
+        if (clGetDeviceIDs(plats[pi], CL_DEVICE_TYPE_GPU, 0, nullptr, &ndev) != CL_SUCCESS)
+            continue;
+        std::vector<cl_device_id> devs(ndev);
+        clGetDeviceIDs(plats[pi], CL_DEVICE_TYPE_GPU, ndev, devs.data(), nullptr);
+
+        for (int di = 0; di < int(ndev); ++di) {
+            char name[256] = {0};
+            clGetDeviceInfo(devs[di], CL_DEVICE_NAME, sizeof(name), name, nullptr);
+            char drv[128] = {0};
+            clGetDeviceInfo(devs[di], CL_DRIVER_VERSION, sizeof(drv), drv, nullptr);
+
+            std::printf(" %2d | %-24s | %s\n",
+                        globalIdx,
+                        drv,
+                        name);
+
+            ++globalIdx;
+        }
     }
 }
+
+
 
 void Context::createContext() {
     cl_int err = CL_SUCCESS;

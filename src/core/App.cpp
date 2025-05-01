@@ -291,7 +291,7 @@ int App::run() {
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint32_t resumeIter = backupManager.loadState(x);
-    if (resumeIter == 1) {
+    if (resumeIter == 0) {
         x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
         std::cout << "Initial x[0] set to " << x[0]
                   << " (" << (options.mode == "prp" ? "PRP" : "LL")
@@ -376,7 +376,7 @@ int App::run() {
     spinner.displayProgress(resumeIter, totalIters, 0.0, p,resumeIter,"");
     uint32_t lastIter = resumeIter;
 
-    for (uint32_t iter = resumeIter; iter <= totalIters && !interrupted; ++iter) {
+    for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
         queued += nttEngine->forward(buffers->input, iter);
@@ -402,19 +402,19 @@ int App::run() {
             );
         }
         queued += 2;
-        if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
             //std::cout << "Flush\n";
             clFinish(queue);
         }
-        if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
             queued = 0;
             
             auto now = high_resolution_clock::now();
             
-            if ((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
+            if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
             //if (now - lastDisplay >= seconds(2) ) {
                 std::string res64;
-                if((options.iterforce > 0 && iter%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
+                if((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
                     clFinish(queue);
                     std::vector<uint64_t>  hostData(precompute.getN());
                     clEnqueueReadBuffer(

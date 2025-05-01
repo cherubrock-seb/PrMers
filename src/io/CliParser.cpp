@@ -26,6 +26,7 @@
 #include <cstring>
 #include "util/PathUtils.hpp"
 #include <filesystem>
+#include "opencl/Context.hpp"
 
 // Forward-declare the usage function (defined elsewhere, e.g. in your main host file)
 extern void printUsage(const char* progName);
@@ -65,9 +66,10 @@ void printUsage(const char* progName) {
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
               << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg -proof" << std::endl;
+    opencl::Context::listAllOpenCLDevices();
 }
 
-CliOptions CliParser::parse(int argc, char** argv) {
+CliOptions CliParser::parse(int argc, char** argv ) {
     // Early check for -h, --help or -help
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-h") == 0
