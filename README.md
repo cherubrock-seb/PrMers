@@ -181,7 +181,7 @@ Where:
 - Other fields are optional and currently ignored.
 
 ### 📌 Example
-PRP=984550E64F2B4D4A05D7307E31090EF9,1,2,197493337,-1,76,0
+PRP=DEADBEEFCAFEBABEDEADBEEFCAFEBABE,1,2,197493337,-1,76,0;
 
 This line instructs the program to test the Mersenne number \( 2^{197493337} - 1 \).
 
