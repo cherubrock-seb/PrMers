@@ -52,7 +52,7 @@ BackupManager::BackupManager(cl_command_queue queue,
 }
 
 uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
-    uint32_t resume = 1;
+    uint32_t resume = 0;
 
     // 1) Debug : afficher le chemin absolu du .loop
     auto absLoop = std::filesystem::absolute(loopFilename_);
@@ -60,7 +60,7 @@ uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
 
     // 2) Essayer de lire resume, puis valider resume > 0
     std::ifstream loopIn(loopFilename_);
-    if (loopIn >> resume && resume > 1) {
+    if (loopIn >> resume && resume > 0) {
         std::cout << "Resuming from iteration " << resume
                   << " based on " << absLoop << std::endl;
 
@@ -81,7 +81,7 @@ uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
     else {
         // 4) Pas de fichier valide → nouvelle session
         std::cout << "No valid loop file, initializing fresh state\n";
-        resume = 1;
+        resume = 0;
         x.assign(x.size(), 0ULL);
         x[0] = (mode_ == "prp") ? 3ULL : 4ULL;
     }
