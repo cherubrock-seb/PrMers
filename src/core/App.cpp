@@ -436,7 +436,7 @@ int App::run() {
                 }
 
                 spinner.displayProgress(
-                    iter,
+                    iter+1,
                     totalIters,
                     timer.elapsed(),
                     p,
@@ -466,7 +466,7 @@ int App::run() {
                     static_cast<int>(context.getTransformSize())
                 );
                 spinner.displayBackupInfo(
-                    iter,
+                    iter+1,
                     totalIters,
                     backupElapsed,
                     res64
@@ -623,7 +623,7 @@ int App::run() {
         );
         
         spinner.displayProgress(
-                        lastIter+1,
+                        lastIter,
                         totalIters,
                         timer.elapsed(),
                         p,
