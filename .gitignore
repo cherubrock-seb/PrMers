@@ -3,7 +3,7 @@ gitpush.sh
 tag.sh
 curl_trace.txt
 cookies.txt
-*prp_result.json
+*result.json
 login_response_debug.html
 manual_form_debug.html
 results.txt
