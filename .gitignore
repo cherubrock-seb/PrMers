@@ -10,3 +10,7 @@ results.txt
 *.mers
 *.loop
 logs/
+.DS_Store
+*~
+*.o
+*.swp
