@@ -194,7 +194,46 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             std::exit(1);
         }
     }
+    unsigned int detectedPort = 0;
+    #if defined(__APPLE__)
+        #if defined(__x86_64__)
+            detectedPort = 10; // macOS 64-bit
+        #else
+            detectedPort = 9;  // macOS 32-bit
+        #endif
+    #elif defined(__linux__)
+        #if defined(__x86_64__)
+            detectedPort = 8;  // Linux 64-bit
+        #else
+            detectedPort = 2;  // Linux 32-bit
+        #endif
+    #elif defined(_WIN64)
+        detectedPort = 4;      // Windows 64-bit
+    #elif defined(_WIN32)
+        detectedPort = 1;      // Windows 32-bit
+    #else
+        detectedPort = 14;     // Unix 64-bit (fallback)
+    #endif
+    opts.portCode = static_cast<int>(detectedPort);
 
+    #ifdef _WIN32
+        opts.osName = "Windows";
+        opts.osVersion = "";
+    #elif __APPLE__
+        opts.osName = "macOS";
+        opts.osVersion = "";
+    #else
+        opts.osName = "Linux";
+        opts.osVersion = "";
+    #endif
+
+    #if defined(__x86_64__)
+        opts.osArch = "x86_64";
+    #elif defined(__aarch64__)
+        opts.osArch = "arm64";
+    #else
+        opts.osArch = "unknown";
+    #endif
     return opts;
 }
 
