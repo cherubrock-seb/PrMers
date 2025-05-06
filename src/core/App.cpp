@@ -400,7 +400,7 @@ int App::run() {
                         context.getQueue(),
                         buffers->input,
                         CL_TRUE, 0,
-                        hostData.size() * sizeof(unsigned long),
+                        hostData.size() * sizeof(uint64_t),
                         hostData.data(),
                         0, nullptr, nullptr
                     );
@@ -436,7 +436,7 @@ int App::run() {
                     context.getQueue(),
                     buffers->input,
                     CL_TRUE, 0,
-                    hostData.size() * sizeof(unsigned long),
+                    hostData.size() * sizeof(uint64_t),
                     hostData.data(),
                     0, nullptr, nullptr
                 );
@@ -487,7 +487,7 @@ int App::run() {
             context.getQueue(),
             buffers->input,
             CL_TRUE, 0,
-            hostData.size() * sizeof(unsigned long),
+            hostData.size() * sizeof(uint64_t),
             hostData.data(),
             0, nullptr, nullptr
         );
@@ -500,7 +500,7 @@ int App::run() {
             context.getQueue(),
             buffers->input,
             CL_TRUE, 0,
-            hostData.size() * sizeof(unsigned long),
+            hostData.size() * sizeof(uint64_t),
             hostData.data(),
             0, nullptr, nullptr
         );
