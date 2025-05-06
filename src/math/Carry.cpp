@@ -147,7 +147,7 @@ uint64_t Carry::digit_adc(const uint64_t lhs, const int digit_width, uint64_t & 
 
 void Carry::handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digit_width_cpu)
 {
-    int n = x.size();
+    cl_uint n = static_cast<cl_uint>(x.size());
     x[0] += 1;
     uint64_t c = 0;
     
