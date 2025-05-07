@@ -366,8 +366,6 @@ int App::run() {
             clSetKernelArg(dispK, 4, sizeof(cl_uint), &iterdisp);
             clSetKernelArg(dispK, 5, sizeof(cl_mem), &outBuf);
 
-
-
             size_t global = 1, local = 1;
             clEnqueueNDRangeKernel(
                 queue,
@@ -392,28 +390,8 @@ int App::run() {
             auto now = high_resolution_clock::now();
             
             if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
-            //if (now - lastDisplay >= seconds(2) ) {
                 std::string res64;
-                /*if((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && queueCap > 0)){
-                    //clFinish(queue);
-                    std::vector<uint64_t>  hostData(precompute.getN());
-                    clEnqueueReadBuffer(
-                        context.getQueue(),
-                        buffers->input,
-                        CL_TRUE, 0,
-                        hostData.size() * sizeof(uint64_t),
-                        hostData.data(),
-                        0, nullptr, nullptr
-                    );
-                
-                    res64 = io::JsonBuilder::computeRes64Iter(
-                    hostData,
-                    options,
-                    precompute.getDigitWidth(),
-                    timer.elapsed(),
-                    static_cast<int>(context.getTransformSize())
-                    );
-                }*/
+
 
                 spinner.displayProgress(
                     iter+1,

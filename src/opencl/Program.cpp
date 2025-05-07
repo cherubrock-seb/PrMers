@@ -97,6 +97,7 @@ Program::Program(const opencl::Context& context, cl_device_id device,
       << " -DLOCAL_SIZE2="                 << ls2
       << " -DLOCAL_SIZE3="                 << ls3;
     size_t idx6 = 6*2, idx7 = 7*2, idx8 = 8*2;
+    
 
     try {
         const auto& tw   = pre.twiddles();
@@ -122,7 +123,12 @@ Program::Program(const opencl::Context& context, cl_device_id device,
         << " -DWI15_01_X=" << i_tw[idx7]
         << " -DWI15_01_Y=" << i_tw[idx7+1]
         << " -DWI15_2_X="  << i_tw[idx8]
-        << " -DWI15_2_Y="  << i_tw[idx8+1];
+        << " -DWI15_2_Y="  << i_tw[idx8+1]
+        << " -DW6="  << i_tw[6]
+        << " -DW7="  << i_tw[7]
+        << " -DW10="  << i_tw[10];
+
+
     }
     catch (const std::out_of_range& e) {
         std::cerr << "[WARNING] Indice hors‐limites pour les twiddles : "
