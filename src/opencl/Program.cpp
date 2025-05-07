@@ -45,8 +45,9 @@
 namespace opencl {
 
 Program::Program(const opencl::Context& context, cl_device_id device,
-                 const std::string& filePath,
-                 const std::string& buildOptions)
+                 const std::string& filePath,const math::Precompute& pre,
+                 const std::string& buildOptions
+                 )
     : context_(context), 
     program_(nullptr)
 {
@@ -95,7 +96,44 @@ Program::Program(const opencl::Context& context, cl_device_id device,
       << " -DLOCAL_SIZE="                  << ls
       << " -DLOCAL_SIZE2="                 << ls2
       << " -DLOCAL_SIZE3="                 << ls3;
+    size_t idx6 = 6*2, idx7 = 7*2, idx8 = 8*2;
 
+    try {
+        const auto& tw   = pre.twiddles();
+        const auto& i_tw = pre.invTwiddles();
+
+        if (tw.size()  <= idx8+1 || 
+            i_tw.size() <= idx8+1) 
+        {
+            throw std::out_of_range(
+                "pre.twiddles()/pre.invTwiddles() trop court pour idx 6,7,8");
+        }
+
+        ss 
+        << " -DW12_01_X=" << tw[idx6] 
+        << " -DW12_01_Y=" << tw[idx6+1]
+        << " -DW15_01_X=" << tw[idx7]
+        << " -DW15_01_Y=" << tw[idx7+1]
+        << " -DW15_2_X="  << tw[idx8]
+        << " -DW15_2_Y="  << tw[idx8+1]
+
+        << " -DWI12_01_X=" << i_tw[idx6] 
+        << " -DWI12_01_Y=" << i_tw[idx6+1]
+        << " -DWI15_01_X=" << i_tw[idx7]
+        << " -DWI15_01_Y=" << i_tw[idx7+1]
+        << " -DWI15_2_X="  << i_tw[idx8]
+        << " -DWI15_2_Y="  << i_tw[idx8+1];
+    }
+    catch (const std::out_of_range& e) {
+        std::cerr << "[WARNING] Indice hors‐limites pour les twiddles : "
+                << e.what() << std::endl;
+        //throw;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[WARNING] Problème lors de la récupération des twiddles : "
+                << e.what() << std::endl;
+        //throw;
+    }
     std::string buildOptions2 = ss.str();
     std::cout << "Building OpenCL program with options: " << buildOptions2 << std::endl;
 

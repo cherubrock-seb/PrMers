@@ -8,13 +8,14 @@
 
 #include <string>
 #include "opencl/Context.hpp"
+#include "math/Precompute.hpp"
 
 namespace opencl {
 
 class Program {
 public:
     Program(const opencl::Context& context, cl_device_id device,
-            const std::string& filePath,
+            const std::string& filePath, const math::Precompute& pre,
             const std::string& buildOptions = "");
 
     ~Program();
