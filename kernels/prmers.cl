@@ -547,11 +547,22 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong* restrict x,
 }
 
 
-__kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
-                                        __global ulong* restrict w)
+#ifndef W6
+  #define W6 0
+#endif
+#ifndef W7
+  #define W7 0
+#endif
+#ifndef W10
+  #define W10 0
+#endif
+
+
+
+__kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x)
 {
-    const ulong k = get_global_id(0);
-    ulong4 coeff = vload4(0, x + 4 * k);
+    const uint k = get_global_id(0) * 4;
+    ulong4 coeff = vload4(0, x + k);
     
     ulong a = modAdd(coeff.s0, coeff.s2);
     ulong b = modAdd(coeff.s1, coeff.s3);
@@ -562,12 +573,10 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
     coeff.s1 = modSub(a, b);
     coeff.s2 = modAdd(c, d);
     coeff.s3 = modSub(c, d);
-    
-    coeff = modMul3_2(coeff, vload2(0, w + 6), w[8 + 2]);
-
+    coeff = modMul3_2(coeff, (ulong2)(W6,W7), W10);
     coeff = modMul4(coeff, coeff); 
     
-    vstore4(coeff, 0, x + 4 * k);
+    vstore4(coeff, 0, x + k);
 }
 
 
