@@ -1071,102 +1071,135 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
     vstore2((ulong2)(s, d), 0, x + idx);
 }
 
+#define ELEMENTS_PER_WORKITEM 8
+#define VECTORS_PER_WORKITEM 4
+#ifndef W12_01_X
+  #define W12_01_X 0
+#endif
+#ifndef W12_01_Y
+  #define W12_01_Y 0
+#endif
+
+#ifndef W15_01_X
+  #define W15_01_X 0
+#endif
+#ifndef W15_01_Y
+  #define W15_01_Y 0
+#endif
+
+#ifndef W15_2_X
+  #define W15_2_X 0
+#endif
+#ifndef W15_2_Y
+  #define W15_2_Y 0
+#endif
+
+#ifndef WI12_01_X
+  #define WI12_01_X 0
+#endif
+#ifndef WI12_01_Y
+  #define WI12_01_Y 0
+#endif
+
+#ifndef WI15_01_X
+  #define WI15_01_X 0
+#endif
+#ifndef WI15_01_Y
+  #define WI15_01_Y 0
+#endif
+
+#ifndef WI15_2_X
+  #define WI15_2_X 0
+#endif
+#ifndef WI15_2_Y
+  #define WI15_2_Y 0
+#endif
+
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
-    __global ulong* restrict x,
-    __global ulong* restrict w,
-    __global ulong* restrict wi)
+    __global ulong2* restrict x)
 {
     //const int m = 2;
     uint gid = get_global_id(0);
     uint lid = get_local_id(0);
-    uint global_base_idx = gid * 8;
-    uint local_base_idx  = lid * 8;
+    uint global_base_vec = gid * VECTORS_PER_WORKITEM;
+    uint  local_base_vec = lid * VECTORS_PER_WORKITEM;
     
-    __local ulong localX[LOCAL_SIZE3 * 8];
+    __local ulong2 localX[LOCAL_SIZE3 * VECTORS_PER_WORKITEM];
 
-    #pragma unroll 8
-    for (int i = 0; i < 8; i++) {
-        localX[local_base_idx + i] = x[global_base_idx + i];
+    #pragma unroll
+    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
+        localX[local_base_vec + v] = x[global_base_vec + v];
     }
 
-    ulong2 _w12_01    = vload2(0, w  + 12);
-    ulong  _w12_2     = w[14];
-    ulong4 twiddles_w12  = (ulong4)(_w12_01.s0, _w12_01.s1, _w12_2, 0);
 
-    ulong2 _w15_01    = vload2(0, w  + 15);
-    ulong  _w15_2     = w[17];
-    ulong4 twiddles_w15  = (ulong4)(_w15_01.s0, _w15_01.s1, _w15_2, 0);
-
-    ulong2 _wi12_01   = vload2(0, wi + 12);
-    ulong  _wi12_2    = wi[14];
-    ulong4 twiddles_wi12 = (ulong4)(_wi12_01.s0, _wi12_01.s1, _wi12_2, 0);
-
-    ulong2 _wi15_01   = vload2(0, wi + 15);
-    ulong  _wi15_2    = wi[17];
-    ulong4 twiddles_wi15 = (ulong4)(_wi15_01.s0, _wi15_01.s1, _wi15_2, 0);
         
-    {
-        ulong a = modAdd(localX[local_base_idx + 0], localX[local_base_idx + 4]);
-        ulong b = modAdd(localX[local_base_idx + 2], localX[local_base_idx + 6]);
-        ulong d = modSub(localX[local_base_idx + 0], localX[local_base_idx + 4]);
-        ulong e = modMuli(modSub(localX[local_base_idx + 2], localX[local_base_idx + 6]));
+    ulong a = modAdd(localX[local_base_vec + 0].s0, localX[local_base_vec + 2].s0);
+    ulong b = modAdd(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0);
+    ulong d = modSub(localX[local_base_vec + 0].s0, localX[local_base_vec + 2].s0);
+    ulong e = modMuli(modSub(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0));
 
-        localX[local_base_idx + 0] = modAdd(a, b);
-        localX[local_base_idx + 2] = modMul(modSub(a, b), twiddles_w12.s1);
-        localX[local_base_idx + 4] = modMul(modAdd(d, e), twiddles_w12.s0);
-        localX[local_base_idx + 6] = modMul(modSub(d, e), twiddles_w12.s2);
+    localX[local_base_vec + 0].s0 = modAdd(a, b);
+    localX[local_base_vec + 1].s0 = modMul(modSub(a, b), W12_01_Y);
+    localX[local_base_vec + 2].s0 = modMul(modAdd(d, e), W12_01_X);
+    localX[local_base_vec + 3].s0 = modMul(modSub(d, e), W15_01_X);
+
+
+    a = modAdd(localX[local_base_vec + 0].s1, localX[local_base_vec + 2].s1);
+    b = modAdd(localX[local_base_vec + 1].s1, localX[local_base_vec + 3].s1);
+    d = modSub(localX[local_base_vec + 0].s1, localX[local_base_vec + 2].s1);
+    e = modMuli(modSub(localX[local_base_vec + 1].s1, localX[local_base_vec + 3].s1));
+
+
+    localX[local_base_vec + 0].s1 = modAdd(a, b);
+    localX[local_base_vec + 1].s1 = modMul(modSub(a, b), W15_2_X);
+    localX[local_base_vec + 2].s1 = modMul(modAdd(d, e), W15_01_Y);
+    localX[local_base_vec + 3].s1 = modMul(modSub(d, e), W15_2_Y);
+
+    #pragma unroll 4
+    for (int i = 0; i < 4; i += 1) {
+        ulong s = modAdd(localX[local_base_vec + i].s0, localX[local_base_vec + i].s1);
+        ulong d = modSub(localX[local_base_vec + i].s0, localX[local_base_vec + i].s1);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        localX[local_base_vec + i].s0     = modAdd(s, d);
+        localX[local_base_vec + i].s1 = modSub(s, d);
+    }
+    
+
+    ulong r =  modMul(localX[local_base_vec + 1].s0, WI12_01_Y); 
+    ulong rs0 = modAdd(localX[local_base_vec + 0].s0, r);
+    ulong rs1 = modSub(localX[local_base_vec + 0].s0, r);
+    r =  modMul(localX[local_base_vec + 2].s0, WI12_01_X);
+    ulong rr = modMul(localX[local_base_vec + 3].s0, WI15_01_X);
+    ulong rs2 = modAdd(r, rr);
+    ulong rs3 = modMuli(modSub(rr, r));
+
+    localX[local_base_vec + 0].s0 = modAdd(rs0, rs2);
+    localX[local_base_vec + 1].s0 = modAdd(rs1, rs3);
+    localX[local_base_vec + 2].s0 = modSub(rs0, rs2);
+    localX[local_base_vec + 3].s0 = modSub(rs1, rs3);
+
+
+
+    r =  modMul(localX[local_base_vec + 1].s1, WI15_2_X); 
+    rs0 = modAdd(localX[local_base_vec + 0].s1, r);
+    rs1 = modSub(localX[local_base_vec + 0].s1, r);
+    r =  modMul(localX[local_base_vec + 2].s1, WI15_01_Y);
+    rr = modMul(localX[local_base_vec + 3].s1, WI15_2_Y);
+    rs2 = modAdd(r, rr);
+    rs3 = modMuli(modSub(rr, r));
+
+    localX[local_base_vec + 0].s1 = modAdd(rs0, rs2);
+    localX[local_base_vec + 1].s1 = modAdd(rs1, rs3);
+    localX[local_base_vec + 2].s1 = modSub(rs0, rs2);
+    localX[local_base_vec + 3].s1 = modSub(rs1, rs3);
+    
+
+    #pragma unroll
+    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
+        x[global_base_vec + v] = localX[local_base_vec + v];
     }
 
-    {
-        ulong a = modAdd(localX[local_base_idx + 1], localX[local_base_idx + 5]);
-        ulong b = modAdd(localX[local_base_idx + 3], localX[local_base_idx + 7]);
-        ulong d = modSub(localX[local_base_idx + 1], localX[local_base_idx + 5]);
-        ulong e = modMuli(modSub(localX[local_base_idx + 3], localX[local_base_idx + 7]));
-
-        localX[local_base_idx + 1] = modAdd(a, b);
-        localX[local_base_idx + 3] = modMul(modSub(a, b), twiddles_w15.s1);
-        localX[local_base_idx + 5] = modMul(modAdd(d, e), twiddles_w15.s0);
-        localX[local_base_idx + 7] = modMul(modSub(d, e), twiddles_w15.s2);
-    }
-
-    {
-        #pragma unroll 4
-        for (int i = 0; i < 8; i += 2) {
-            ulong s = modAdd(localX[local_base_idx + i], localX[local_base_idx + i + 1]);
-            ulong d = modSub(localX[local_base_idx + i], localX[local_base_idx + i + 1]);
-            s = modMul(s, s);
-            d = modMul(d, d);
-            localX[local_base_idx + i]     = modAdd(s, d);
-            localX[local_base_idx + i + 1] = modSub(s, d);
-        }
-    }
-
-    {
-        ulong4 coeff = (ulong4)(localX[local_base_idx + 0], localX[local_base_idx + 2], localX[local_base_idx + 4], localX[local_base_idx + 6]);
-        coeff = modMul3(coeff,twiddles_wi12.s1, twiddles_wi12.s0, twiddles_wi12.s2);
-        
-        ulong4 r = butterfly(coeff);
-        localX[local_base_idx + 0] = modAdd(r.s0, r.s2);
-        localX[local_base_idx + 2] = modAdd(r.s1, r.s3);
-        localX[local_base_idx + 4] = modSub(r.s0, r.s2);
-        localX[local_base_idx + 6] = modSub(r.s1, r.s3);
-    }
-
-    {
-        ulong4 coeff = (ulong4)(localX[local_base_idx + 1], localX[local_base_idx + 3], localX[local_base_idx + 5], localX[local_base_idx + 7]);
-        coeff = modMul3(coeff,twiddles_wi15.s1, twiddles_wi15.s0, twiddles_wi15.s2);
-        
-        ulong4 r = butterfly(coeff);
-        localX[local_base_idx + 1] = modAdd(r.s0, r.s2);
-        localX[local_base_idx + 3] = modAdd(r.s1, r.s3);
-        localX[local_base_idx + 5] = modSub(r.s0, r.s2);
-        localX[local_base_idx + 7] = modSub(r.s1, r.s3);
-    }
-
-    #pragma unroll 8
-    for (int i = 0; i < 8; i++) {
-        x[global_base_idx + i] = localX[local_base_idx + i];
-    }
 }
 
 __kernel void kernel_pointwise_mul(__global ulong* a,

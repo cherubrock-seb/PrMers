@@ -237,7 +237,7 @@ App::App(int argc, char** argv)
     );
 
     buffers.emplace(context, precompute);
-    program.emplace(context, context.getDevice(), options.kernel_path);
+    program.emplace(context, context.getDevice(), options.kernel_path, precompute);
     kernels.emplace(program->getProgram(), context.getQueue());
     nttEngine.emplace(context, *kernels, *buffers, precompute);
     
