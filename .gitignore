@@ -1,5 +1,6 @@
 .DS_Store
 gitpush.sh
+rsync.sh
 tag.sh
 curl_trace.txt
 cookies.txt
