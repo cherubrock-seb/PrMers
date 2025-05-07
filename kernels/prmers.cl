@@ -339,8 +339,11 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 #define LOCAL_SIZE3 128
 #endif
 #ifndef TRANSFORM_SIZE_N
-#define TRANSFORM_SIZE_N 1
+#define TRANSFORM_SIZE_N 8
 #endif
+
+#define TRANSFORM_SIZE_N_DIV4  (TRANSFORM_SIZE_N / 4)
+#define TRANSFORM_SIZE_N_DIV8  (TRANSFORM_SIZE_N / 8)
 
 inline int get_digit_width(uint i) {
     uint j = i + 1;
@@ -569,46 +572,14 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong* restrict x,
 
 
 
-__kernel void kernel_ntt_radix4_mm_first(__global ulong* restrict x,
-                                         __global ulong* restrict w,
-                                         __global ulong* restrict digit_weight,
-                                         const uint m)
-{
-    const ulong k = get_global_id(0);
-    const ulong j = k & (m - 1);
-    const ulong i = 4 * (k - j) + j;
-    const ulong twiddle_offset = 6 * m + 3 * j;
-
-    const ulong i0 = i, i1 = i + m, i2 = i + (m << 1), i3 = i + 3 * m;
-    ulong4 c = (ulong4)(x[i0], x[i1], x[i2], x[i3]);
-    ulong4 wt = (ulong4)(digit_weight[i0], digit_weight[i1], digit_weight[i2], digit_weight[i3]);
-    c = modMul4(c, wt);
-
-    const ulong a = modAdd(c.s0, c.s2);
-    const ulong b = modAdd(c.s1, c.s3);
-    const ulong d = modSub(c.s0, c.s2);
-    const ulong e = modMuli(modSub(c.s1, c.s3));
-    c.s0 = modAdd(a, b);
-    c.s1 = modSub(a, b);
-    c.s2 = modAdd(d, e);
-    c.s3 = modSub(d, e);
-
-    c = modMul3_2(c, vload2(0, w + twiddle_offset), w[twiddle_offset + 2]);
-    
-    x[i0] = c.s0;
-    x[i1] = c.s1;
-    x[i2] = c.s2;
-    x[i3] = c.s3;
-}
-
-__kernel void kernel_ntt_radix4_mm(__global ulong2* restrict x,
-                                   __global ulong2* restrict w,
-                                   const uint m)
+__kernel void kernel_ntt_radix4_mm_first(__global ulong2* restrict x,
+                                         __global ulong2* restrict w,
+                                         __global ulong2* restrict digit_weight)
 {
     uint k = get_global_id(0)*2;
-    const uint j = k & (m - 1);
+    const uint j = k & (TRANSFORM_SIZE_N_DIV4 - 1);
     const uint i = 4 * (k - j) + j;
-    k = (6*m + 3*j) >> 1;
+    k = (6*TRANSFORM_SIZE_N_DIV4 + 3*j) >> 1;
 
     const ulong2 tw1_a  = w[k    ];
     ulong2 tw1_bb = w[k + 1];
@@ -618,11 +589,70 @@ __kernel void kernel_ntt_radix4_mm(__global ulong2* restrict x,
     tw1_bb = (ulong2)(tw1_bb.s1,tw1_cc.s0);
 
 
-    k = m >> 1;
     const uint i0 = i >> 1;
-    const uint i1 = i0 + k;
-    const uint i2 = i1 + k;
-    k = i2 + k;
+    const uint i1 = i0 + TRANSFORM_SIZE_N_DIV8;
+    const uint i2 = i1 + TRANSFORM_SIZE_N_DIV8;
+    k = i2 + TRANSFORM_SIZE_N_DIV8;
+
+    ulong2 v0 = modMul2(x[i0],digit_weight[i0]);
+    ulong2 v1 = modMul2(x[i1],digit_weight[i1]);
+    const ulong2 v2 = modMul2(x[i2],digit_weight[i2]);
+    const ulong2 v3 = modMul2(x[k],digit_weight[k]);
+
+    ulong4 c = (ulong4)(v0.s0, v1.s0, v2.s0, v3.s0);
+    ulong4 c2 = (ulong4)(v0.s1, v1.s1, v2.s1, v3.s1);
+
+    v0.s0 = modAdd(c.s0, c.s2);
+    v0.s1  = modAdd(c.s1, c.s3);
+    v1.s0 = modSub(c.s0, c.s2);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
+    c.s0 = modAdd(v0.s0, v0.s1);
+    c.s1 = modSub(v0.s0, v0.s1);
+    c.s2 = modAdd(v1.s0, v1.s1);
+    c.s3 = modSub(v1.s0, v1.s1);
+    
+    c = modMul3_2(c, tw1_a, tw2_a);
+    
+
+    v0.s0 = modAdd(c2.s0, c2.s2);
+    v0.s1 = modAdd(c2.s1, c2.s3);
+    v1.s0 = modSub(c2.s0, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
+    c2.s0 = modAdd(v0.s0, v0.s1);
+    c2.s1 = modSub(v0.s0, v0.s1);
+    c2.s2 = modAdd(v1.s0, v1.s1);
+    c2.s3 = modSub(v1.s0, v1.s1);
+    
+    c2 = modMul3_2(c2, tw1_bb, tw1_cc.s1);
+
+    x[i0] = (ulong2)(c.s0, c2.s0);
+    x[i1] = (ulong2)(c.s1, c2.s1);
+    x[i2] = (ulong2)(c.s2, c2.s2);
+    x[k] = (ulong2)(c.s3, c2.s3);
+}
+
+
+__kernel void kernel_ntt_radix4_mm_m4(__global ulong2* restrict x,
+                                   __global ulong2* restrict w)
+{
+    uint k = get_global_id(0)*2;
+    const uint j = k & (3);
+    const uint i = 4 * (k - j) + j;
+    k = (24 + 3*j) >> 1;
+
+    const ulong2 tw1_a  = w[k    ];
+    ulong2 tw1_bb = w[k + 1];
+    const ulong2 tw1_cc = w[k + 2];
+
+    ulong tw2_a = tw1_bb.s0;
+    tw1_bb = (ulong2)(tw1_bb.s1,tw1_cc.s0);
+
+
+   
+    const uint i0 = i >> 1;
+    const uint i1 = i0 + 2;
+    const uint i2 = i1 + 2;
+    k = i2 + 2;
 
     ulong2 v0 = x[i0];
     ulong2 v1 = x[i1];
@@ -661,6 +691,65 @@ __kernel void kernel_ntt_radix4_mm(__global ulong2* restrict x,
     x[k] = (ulong2)(c.s3, c2.s3);
 }
 
+
+__kernel void kernel_ntt_radix4_mm_m8(__global ulong2* restrict x,
+                                   __global ulong2* restrict w)
+{
+    uint k = get_global_id(0)*2;
+    const uint j = k & (7);
+    const uint i = 4 * (k - j) + j;
+    k = (48 + 3*j) >> 1;
+
+    const ulong2 tw1_a  = w[k    ];
+    ulong2 tw1_bb = w[k + 1];
+    const ulong2 tw1_cc = w[k + 2];
+
+    ulong tw2_a = tw1_bb.s0;
+    tw1_bb = (ulong2)(tw1_bb.s1,tw1_cc.s0);
+
+
+    
+    const uint i0 = i >> 1;
+    const uint i1 = i0 + 4;
+    const uint i2 = i1 + 4;
+    k = i2 + 4;
+
+    ulong2 v0 = x[i0];
+    ulong2 v1 = x[i1];
+    const ulong2 v2 = x[i2];
+    const ulong2 v3 = x[k];
+
+    ulong4 c = (ulong4)(v0.s0, v1.s0, v2.s0, v3.s0);
+    ulong4 c2 = (ulong4)(v0.s1, v1.s1, v2.s1, v3.s1);
+
+    v0.s0 = modAdd(c.s0, c.s2);
+    v0.s1  = modAdd(c.s1, c.s3);
+    v1.s0 = modSub(c.s0, c.s2);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
+    c.s0 = modAdd(v0.s0, v0.s1);
+    c.s1 = modSub(v0.s0, v0.s1);
+    c.s2 = modAdd(v1.s0, v1.s1);
+    c.s3 = modSub(v1.s0, v1.s1);
+    
+    c = modMul3_2(c, tw1_a, tw2_a);
+    
+
+    v0.s0 = modAdd(c2.s0, c2.s2);
+    v0.s1 = modAdd(c2.s1, c2.s3);
+    v1.s0 = modSub(c2.s0, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
+    c2.s0 = modAdd(v0.s0, v0.s1);
+    c2.s1 = modSub(v0.s0, v0.s1);
+    c2.s2 = modAdd(v1.s0, v1.s1);
+    c2.s3 = modSub(v1.s0, v1.s1);
+    
+    c2 = modMul3_2(c2, tw1_bb, tw1_cc.s1);
+
+    x[i0] = (ulong2)(c.s0, c2.s0);
+    x[i1] = (ulong2)(c.s1, c2.s1);
+    x[i2] = (ulong2)(c.s2, c2.s2);
+    x[k] = (ulong2)(c.s3, c2.s3);
+}
 
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                __global ulong* restrict wi) {

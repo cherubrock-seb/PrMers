@@ -92,7 +92,8 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
     cl_kernel kernel_ntt_mm_3_steps = kernels_.getKernel("kernel_ntt_radix4_mm_3steps");
     cl_kernel kernel_ntt_mm_2_steps = kernels_.getKernel("kernel_ntt_radix4_mm_2steps");
     cl_kernel kernel_radix2_square_radix2 = kernels_.getKernel("kernel_ntt_radix2_square_radix2");
-    cl_kernel kernel_ntt_mm = kernels_.getKernel("kernel_ntt_radix4_mm");
+    cl_kernel kernel_ntt_mm_m4 = kernels_.getKernel("kernel_ntt_radix4_mm_m4");
+    cl_kernel kernel_ntt_mm_m8 = kernels_.getKernel("kernel_ntt_radix4_mm_m8");
     cl_kernel kernel_ntt_mm_first = kernels_.getKernel("kernel_ntt_radix4_mm_first");
     cl_kernel kernel_ntt_last_m1 = kernels_.getKernel("kernel_ntt_radix4_last_m1");
     cl_kernel kernel_ntt_last_m1_n4 = kernels_.getKernel("kernel_ntt_radix4_last_m1_n4");
@@ -125,9 +126,8 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
         clSetKernelArg(kernel_ntt_mm_first, 0, sizeof(cl_mem), &buf_x);
         clSetKernelArg(kernel_ntt_mm_first, 1, sizeof(cl_mem), &buf_w);
         clSetKernelArg(kernel_ntt_mm_first, 2, sizeof(cl_mem), &buf_digit_weight);
-        clSetKernelArg(kernel_ntt_mm_first, 3, sizeof(cl_uint), &m);
         kernelsExecuted++;
-        executeKernelAndDisplay(queue_, kernel_ntt_mm_first, buf_x, workers, localSize,
+        executeKernelAndDisplay(queue_, kernel_ntt_mm_first, buf_x, workers/2, localSize,
             "kernel_ntt_radix4_mm_first (m=" + std::to_string(m) + ") workers=" + std::to_string(workers), n, profiling,true);
         
         clSetKernelArg(kernel_ntt_mm_2_steps, 0, sizeof(cl_mem), &buf_x);
@@ -162,11 +162,10 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
          if(mm==32){
             mm = 8;
             m = 8;
-            clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-            clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-            clSetKernelArg(kernel_ntt_mm, 2, sizeof(cl_uint), &mm);
+            clSetKernelArg(kernel_ntt_mm_m8, 0, sizeof(cl_mem), &buf_x);
+            clSetKernelArg(kernel_ntt_mm_m8, 1, sizeof(cl_mem), &buf_w);
             kernelsExecuted++;
-            executeKernelAndDisplay(queue_, kernel_ntt_mm, buf_x, workers/2, localSize,
+            executeKernelAndDisplay(queue_, kernel_ntt_mm_m8, buf_x, workers/2, localSize,
             "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling,true);
             
             mm = 2;
@@ -211,11 +210,10 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
             m = 4;
             mm=4;
 
-            clSetKernelArg(kernel_ntt_mm, 0, sizeof(cl_mem), &buf_x);
-            clSetKernelArg(kernel_ntt_mm, 1, sizeof(cl_mem), &buf_w);
-            clSetKernelArg(kernel_ntt_mm, 2, sizeof(cl_uint), &mm);
+            clSetKernelArg(kernel_ntt_mm_m4, 0, sizeof(cl_mem), &buf_x);
+            clSetKernelArg(kernel_ntt_mm_m4, 1, sizeof(cl_mem), &buf_w);
             kernelsExecuted++;
-            executeKernelAndDisplay(queue_, kernel_ntt_mm, buf_x, workers/2, localSize,
+            executeKernelAndDisplay(queue_, kernel_ntt_mm_m4, buf_x, workers/2, localSize,
             "kernel_ntt_mm (m=" + std::to_string(m) + ")", n, profiling,true);
 
 
