@@ -1040,11 +1040,10 @@ __kernel void kernel_ntt_radix4_mm_3steps(__global ulong* restrict x,
 
 }
 
-__kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
+__kernel void kernel_ntt_radix2_square_radix2(__global ulong2* restrict x)
 {
-    const uint idx = get_global_id(0) << 1; // équivalent à get_global_id(0) * 2
-
-    ulong2 u = vload2(0, x + idx);
+    const uint gid = get_global_id(0);
+    ulong2 u = x[gid];
 
     ulong s = modAdd(u.x, u.y);
     ulong d = modSub(u.x, u.y);
@@ -1052,10 +1051,8 @@ __kernel void kernel_ntt_radix2_square_radix2(__global ulong* restrict x)
     s = modMul(s, s);
     d = modMul(d, d);
 
-    ulong r0 = modAdd(s, d);
-    ulong r1 = modSub(s, d);
 
-    vstore2((ulong2)(r0, r1), 0, x + idx);
+    x[gid] = (ulong2)(modAdd(s, d), modSub(s, d));
 }
 
 
