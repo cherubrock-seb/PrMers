@@ -182,11 +182,18 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
 inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict carry) {
     ulong4 res;
     ulong c = *carry;
+    ulong d01 = digit_width.s0 ^ digit_width.s1;
+    ulong d12 = digit_width.s1 ^ digit_width.s2;
+    ulong d23 = digit_width.s2 ^ digit_width.s3;
+    ulong d02 = digit_width.s0 ^ digit_width.s2;
+    ulong d13 = digit_width.s1 ^ digit_width.s3;
 
-    if (digit_width.s0 == digit_width.s1 &&
-        digit_width.s1 == digit_width.s2 &&
-        digit_width.s2 == digit_width.s3) {
+    bool all4  = !(d01 | d12 | d23);     // s0==s1==s2==s3
+    bool eq3   = !(d01 | d12);           // s0==s1==s2
+    bool pair01_23 = !d01 && !d23;       // s0==s1 && s2==s3
+    bool cross = !d02 && !d13;           // s0==s2 && s1==s3
 
+    if (all4) {
         ulong mask = (1UL << (digit_width.s0)) - 1UL;
 
         ulong s = lhs.s0 + c;
@@ -207,8 +214,7 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
 
         *carry = c;
     }
-    else if (digit_width.s0 == digit_width.s1 &&
-             digit_width.s1 == digit_width.s2) {
+    else if (eq3) {
 
         ulong mask = (1UL << ( digit_width.s0)) - 1UL;
 
@@ -224,15 +230,14 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
         res.s2 = s & mask;
         c = s >>  digit_width.s0;
 
-        ulong mask3 = (1UL << (digit_width.s3)) - 1UL;
+        mask = (1UL << (digit_width.s3)) - 1UL;
         s = lhs.s3 + c;
-        res.s3 = s & mask3;
+        res.s3 = s & mask;
         c = s >> (digit_width.s3);
 
         *carry = c;
     }
-    else if (digit_width.s0 == digit_width.s1 &&
-             digit_width.s2 == digit_width.s3) {
+     else if (pair01_23) {
 
         ulong mask01 = (1UL << (digit_width.s0)) - 1UL;
         ulong s = lhs.s0 + c;
@@ -241,18 +246,17 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
         s = lhs.s1 + c;
         res.s1 = s & mask01;
         c = s >> digit_width.s0;
-        ulong mask23 = (1UL << (digit_width.s2)) - 1UL;
+        mask01 = (1UL << (digit_width.s2)) - 1UL;
         s = lhs.s2 + c;
-        res.s2 = s & mask23;
+        res.s2 = s & mask01;
         c = s >> digit_width.s2;
         s = lhs.s3 + c;
-        res.s3 = s & mask23;
+        res.s3 = s & mask01;
         c = s >> digit_width.s2;
 
         *carry = c;
     }
-    else if (digit_width.s0 == digit_width.s2 &&
-             digit_width.s1 == digit_width.s3) {
+    else if (cross) {
 
         ulong mask0 = (1UL << (digit_width.s0)) - 1UL;
         ulong s = lhs.s0 + c;
@@ -358,6 +362,18 @@ inline int get_digit_width(uint i) {
 }
 
 
+inline int4 get_digit_width4(uint i){
+    uint64_t P = (uint64_t)MODULUS_P, N = (uint64_t)TRANSFORM_SIZE_N;
+    uint64_t u = (uint64_t)i * P - 1, v;
+    int4 r;
+    v = u + P;    r.s0 = (int)(v/N - u/N);
+    u = v;        v = u + P;    r.s1 = (int)(v/N - u/N);
+    u = v;        v = u + P;    r.s2 = (int)(v/N - u/N);
+    u = v;        v = u + P;    r.s3 = (int)(v/N - u/N);
+    return r;
+}
+
+
 __kernel void kernel_sub2(__global ulong* restrict x)
 {
     if (get_global_id(0) == 0) {
@@ -386,20 +402,15 @@ __kernel void kernel_carry(__global ulong* restrict x,
                            __global ulong* restrict carry_array
                            )
 {
-    const ulong gid = get_global_id(0);
-    const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
-    const ulong end = start + LOCAL_PROPAGATION_DEPTH; 
+    const uint gid = get_global_id(0);
+    const uint start = gid * LOCAL_PROPAGATION_DEPTH;
+    const uint end = start + LOCAL_PROPAGATION_DEPTH; 
     ulong carry = 0UL; 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
-    for (ulong i = start; i < end; i += 4) {
+    for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = (int4)(
-            get_digit_width(i),
-            get_digit_width(i + 1),
-            get_digit_width(i + 2),
-            get_digit_width(i + 3)
-        );
+        int4 digit_width_vec = get_digit_width4(i);
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
@@ -411,29 +422,24 @@ __kernel void kernel_carry(__global ulong* restrict x,
 }
 
 
-
+#define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array) 
 {
-    const ulong gid = get_global_id(0);
-    const ulong start = gid * LOCAL_PROPAGATION_DEPTH;
-    const ulong end = start + LOCAL_PROPAGATION_DEPTH - 4;  
-
-    const ulong prev_gid = (gid == 0) ? (CARRY_WORKER - 1) : (gid - 1);
+    const uint gid = get_global_id(0);
+    const uint prev_gid = (gid == 0) ? (CARRY_WORKER_MIN_1) : (gid - 1);
     ulong carry = carry_array[prev_gid];
-
     if (carry == 0) return;
+    const uint start = gid * LOCAL_PROPAGATION_DEPTH;
+    const uint end = start + LOCAL_PROPAGATION_DEPTH - 4;  
+
+
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
-    for (ulong i = start; i < end; i += 4) {
+    for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = (int4)(
-            get_digit_width(i),
-            get_digit_width(i + 1),
-            get_digit_width(i + 2),
-            get_digit_width(i + 3)
-        );
+        int4 digit_width_vec = get_digit_width4(i);
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
 
         vstore4(x_vec, 0, x + i);
@@ -441,19 +447,14 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
         if (carry == 0) return;
     }
 
-    if (carry != 0) {
-        ulong4 x_vec = vload4(0, x + end);
 
-        int4 digit_width_vec = (int4)(
-            get_digit_width(end),
-            get_digit_width(end + 1),
-            get_digit_width(end + 2),
-            get_digit_width(end + 3)
-        );
+    ulong4 x_vec = vload4(0, x + end);
 
-        x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
-        vstore4(x_vec, 0, x + end);
-    }
+    int4 digit_width_vec = get_digit_width4(end);
+
+    x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
+    vstore4(x_vec, 0, x + end);
+
 }
 
 static inline ulong4 butterfly(const ulong4 u) {
