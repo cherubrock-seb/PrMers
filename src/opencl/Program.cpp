@@ -81,6 +81,7 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     cl_uint nTrans     = n;
 
     std::ostringstream ss;
+    ss << buildOptions;
     ss 
       << " -DWG_SIZE="                     << wg
       << " -DLOCAL_PROPAGATION_DEPTH="     << lpd
