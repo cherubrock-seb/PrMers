@@ -328,7 +328,7 @@ int NttEngine::inverse(cl_mem buf_x, uint64_t /*iter*/) {
         clSetKernelArg(kernel_inverse_ntt_mm_last, 2, sizeof(cl_mem), &buf_digit_invweight);
         clSetKernelArg(kernel_inverse_ntt_mm_last, 3, sizeof(cl_uint), &m);
         kernelsExecuted++;
-        executeKernelAndDisplay(queue_, kernel_inverse_ntt_mm_last, buf_x, workers, localSize,
+        executeKernelAndDisplay(queue_, kernel_inverse_ntt_mm_last, buf_x, workers/2, localSize,
             "kernel_inverse_ntt_radix4_mm_last (m=" + std::to_string(m) + ")", n, profiling,true);
     }
     return kernelsExecuted;
