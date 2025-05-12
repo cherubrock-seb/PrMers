@@ -91,6 +91,21 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-prp") == 0) {
             opts.mode = "prp";
         }
+        else if (std::strcmp(argv[i], "-O") == 0 && i + 1 < argc) {
+            opts.build_options.clear();
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                std::string opt = argv[++i];
+                if (opt == "fastmath")     opts.build_options += " -cl-fast-relaxed-math";
+                else if (opt == "mad")     opts.build_options += " -cl-mad-enable";
+                else if (opt == "unsafe")  opts.build_options += " -cl-unsafe-math-optimizations";
+                else if (opt == "nans")    opts.build_options += " -cl-no-signed-zeros";
+                else if (opt == "optdisable") opts.build_options += " -cl-opt-disable";
+                else {
+                    std::cerr << "Warning: unrecognized optimization flag '" << opt << "'\n";
+                 }
+
+            }
+        }
         else if (std::strcmp(argv[i], "-ll") == 0) {
             opts.mode = "ll";
             opts.proof = false;
