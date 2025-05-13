@@ -83,6 +83,8 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     std::ostringstream ss;
     ss << buildOptions;
     ss 
+      << " -DDIGIT_WIDTH_VALUE_1=" << pre.getDigitWidthValue1()
+      << " -DDIGIT_WIDTH_VALUE_2=" << pre.getDigitWidthValue2()
       << " -DWG_SIZE="                     << wg
       << " -DLOCAL_PROPAGATION_DEPTH="     << lpd
       << " -DCARRY_WORKER="                << wCarry

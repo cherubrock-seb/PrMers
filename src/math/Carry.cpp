@@ -28,11 +28,12 @@
 
 namespace math {
 
-Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth)
+Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf)
     : context_(ctx)
     , queue_(queue)
     , vectorSize_(vectorSize)
     , digitWidth_(digitWidth)
+    , digitWidthMaskBuf_(digitWidthMaskBuf)
 {
     cl_int err;
     carryKernel_ = clCreateKernel(program, "kernel_carry", &err);
@@ -60,6 +61,8 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     // kernel_carry
     err  = clSetKernelArg(carryKernel_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel_, 1, sizeof(cl_mem), &blockCarryBuffer);
+    err |= clSetKernelArg(carryKernel_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
+     
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
@@ -81,6 +84,8 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     // kernel_carry_2
     err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel2_, 1, sizeof(cl_mem), &blockCarryBuffer);
+    err |= clSetKernelArg(carryKernel2_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
+    
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry_2 args");
     }

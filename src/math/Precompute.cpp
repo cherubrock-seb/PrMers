@@ -40,7 +40,12 @@ void precalc_for_p(uint32_t p,
                    std::vector<uint64_t>& digitInvWeight,
                    std::vector<int>&      digitWidth,
                    std::vector<uint64_t>& twiddles,
-                   std::vector<uint64_t>& invTwiddles)
+                   std::vector<uint64_t>& invTwiddles,
+                   uint64_t& digitWidthValue1,
+                   uint64_t& digitWidthValue2,
+                   std::vector<bool>& digitWidthMask
+
+                   )
 {
     uint32_t n = transformsize(p);
     std::cout << "Transform Size = " << n << std::endl;
@@ -112,6 +117,21 @@ void precalc_for_p(uint32_t p,
             invw = mulModP(invw, ir_s);
         }
     }
+    uint64_t w1 = static_cast<uint64_t>(digitWidth[0]);
+    uint64_t w2 = 0;
+    for (int w : digitWidth) {
+        if (uint64_t(w) != w1) {
+            w2 = uint64_t(w);
+            break;
+        }
+    }
+    digitWidthValue1 = w1;
+    digitWidthValue2 = w2;
+
+    digitWidthMask.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        digitWidthMask[i] = (uint64_t(digitWidth[i]) == w2);
+    }
 }
 
 
@@ -127,6 +147,7 @@ Precompute::Precompute(uint32_t exponent)
     digitWeight_.resize(n_);
     digitInvWeight_.resize(n_);
     digitWidth_   .resize(n_);
+    digitWidthMask_   .resize(n_);
     twiddles_     .resize(3 * n_);
     invTwiddles_  .resize(3 * n_);
     precalc_for_p(exponent,
@@ -134,7 +155,11 @@ Precompute::Precompute(uint32_t exponent)
                   digitInvWeight_,
                   digitWidth_,
                   twiddles_,
-                  invTwiddles_);
+                  invTwiddles_,
+                  digitWidthValue1_,
+                  digitWidthValue2_,
+                  digitWidthMask_
+                  );
 }
 
 uint32_t Precompute::getN() const { return n_; }
@@ -143,5 +168,7 @@ const std::vector<uint64_t>& Precompute::digitInvWeight() const { return digitIn
 const std::vector<int>& Precompute::getDigitWidth() const { return digitWidth_; }
 const std::vector<uint64_t>& Precompute::twiddles() const { return twiddles_; }
 const std::vector<uint64_t>& Precompute::invTwiddles() const { return invTwiddles_; }
-
+uint64_t Precompute::getDigitWidthValue1() const {return digitWidthValue1_;}
+uint64_t Precompute::getDigitWidthValue2() const {return digitWidthValue2_;}
+const std::vector<bool>& Precompute::getDigitWidthMask() const {return digitWidthMask_;}
 } // namespace math

@@ -398,33 +398,63 @@ __kernel void kernel_sub2(__global ulong* restrict x)
     }
 }
 
-__kernel void kernel_carry(__global ulong* restrict x,
-                           __global ulong* restrict carry_array
-                           )
-{
-    const uint gid = get_global_id(0);
+
+#ifndef DIGIT_WIDTH_VALUE_1
+#define DIGIT_WIDTH_VALUE_1 1
+#endif
+
+#ifndef DIGIT_WIDTH_VALUE_2
+#define DIGIT_WIDTH_VALUE_2 1
+#endif
+__kernel void kernel_carry(
+    __global ulong*        restrict x,
+    __global ulong*        restrict carry_array,
+    __global const ulong4* restrict digitWidthMaskPacked
+) {
+    const uint gid   = get_global_id(0);
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
-    const uint end = start + LOCAL_PROPAGATION_DEPTH; 
-    ulong carry = 0UL; 
+    const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+    ulong carry = 0UL;
+
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        int4 digit_width_vec = get_digit_width4(i);
+        uint blk    = i >> 6;      // i/64
+        uint group4 = blk >> 2;    // (i/64)/4
+
+        ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+        ulong  chunk = chunk4[ blk & 3 ];
+
+        uchar4 m = (uchar4)(
+            (chunk >> ((i & 63) + 0)) & 1,
+            (chunk >> ((i & 63) + 1)) & 1,
+            (chunk >> ((i & 63) + 2)) & 1,
+            (chunk >> ((i & 63) + 3)) & 1
+        );
+
+        int4 digit_width_vec = (int4)(
+            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+        );
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+
         vstore4(x_vec, 0, x + i);
     }
-    
+
     if (carry != 0) {
         carry_array[gid] = carry;
     }
 }
 
-
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
-                             __global ulong* restrict carry_array) 
+                             __global ulong* restrict carry_array,
+                             __global const ulong4* restrict digitWidthMaskPacked)
 {
     const uint gid = get_global_id(0);
     const uint prev_gid = (gid == 0) ? (CARRY_WORKER_MIN_1) : (gid - 1);
@@ -433,13 +463,29 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end = start + LOCAL_PROPAGATION_DEPTH - 4;  
 
-
-
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
+        uint blk    = i >> 6;      // i/64
+        uint group4 = blk >> 2;    // (i/64)/4
 
-        int4 digit_width_vec = get_digit_width4(i);
+        ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+        ulong  chunk = chunk4[ blk & 3 ];
+
+        uchar4 m = (uchar4)(
+            (chunk >> ((i & 63) + 0)) & 1,
+            (chunk >> ((i & 63) + 1)) & 1,
+            (chunk >> ((i & 63) + 2)) & 1,
+            (chunk >> ((i & 63) + 3)) & 1
+        );
+
+        int4 digit_width_vec = (int4)(
+            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+        );
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
 
         vstore4(x_vec, 0, x + i);
@@ -449,9 +495,26 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
 
     ulong4 x_vec = vload4(0, x + end);
+    uint blk    = end >> 6;      // end/64
+    uint group4 = blk >> 2;    // (end/64)/4
 
-    int4 digit_width_vec = get_digit_width4(end);
+    ulong4 chunk4 = digitWidthMaskPacked[group4];
 
+    ulong  chunk = chunk4[ blk & 3 ];
+
+    uchar4 m = (uchar4)(
+        (chunk >> ((end & 63) + 0)) & 1,
+        (chunk >> ((end & 63) + 1)) & 1,
+        (chunk >> ((end & 63) + 2)) & 1,
+        (chunk >> ((end & 63) + 3)) & 1
+    );
+
+    int4 digit_width_vec = (int4)(
+        m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+    );
     x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
     vstore4(x_vec, 0, x + end);
 
