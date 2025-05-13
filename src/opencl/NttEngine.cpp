@@ -49,7 +49,7 @@ NttEngine::NttEngine(const Context& ctx,
 // Helper function to execute a kernel and (optionally) display its execution time.
 // -----------------------------------------------------------------------------
 void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
-                             cl_mem buf_x, size_t workers, size_t localSize,
+                             cl_mem buf_x, size_t workers, const size_t*    localSize,
                              const std::string& kernelName, cl_uint nmax,
                              bool profiling,bool debug) {
     cl_event event;
@@ -62,7 +62,7 @@ void executeKernelAndDisplay(cl_command_queue queue, cl_kernel kernel,
         for (cl_uint i = 0; i < 8; i++) std::cout << locx[i] << " ";
         std::cout << "...]" << std::endl;
     }*/
-    cl_int err = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, &localSize, 0, nullptr, profiling ? &event : nullptr);
+    cl_int err = clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &workers, localSize, 0, nullptr, profiling ? &event : nullptr);
     if (err != CL_SUCCESS) {
         std::cerr << "Error executing kernel '" << kernelName << "': " << util::getCLErrorString(err) << " (" << err << ")" << std::endl;
     }
@@ -102,9 +102,12 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
     cl_mem buf_wi = buffers_.invTwiddleBuf;
     cl_mem buf_digit_weight = buffers_.digitWeightBuf;
     size_t workers = n/4;
-    size_t localSize = ctx_.getLocalSize();
-    size_t localSize2 = ctx_.getLocalSize2();;
-    size_t localSize3 = ctx_.getLocalSize3();;
+    //size_t localSize = ctx_.getLocalSize();
+    size_t* localSize = nullptr;
+    size_t ls2_val = ctx_.getLocalSize2();
+    size_t ls3_val = ctx_.getLocalSize3();
+    const size_t* localSize2 = &ls2_val;
+    const size_t* localSize3 = &ls3_val;
     bool profiling = false;
     cl_uint maxLocalMem=ctx_.getLocalMemSize();
     bool _even_exponent=ctx_.isEvenExponent();
@@ -245,9 +248,12 @@ int NttEngine::inverse(cl_mem buf_x, uint64_t /*iter*/) {
     cl_mem buf_wi = buffers_.invTwiddleBuf;
     cl_mem buf_digit_invweight = buffers_.digitInvWeightBuf;
     size_t workers = n/4;
-    size_t localSize = ctx_.getLocalSize();
-    size_t localSize2 = ctx_.getLocalSize2();;
-    size_t localSize3 = ctx_.getLocalSize3();;
+    //size_t localSize = ctx_.getLocalSize();
+    size_t* localSize = nullptr;
+    size_t ls2_val = ctx_.getLocalSize2();
+    size_t ls3_val = ctx_.getLocalSize3();
+    const size_t* localSize2 = &ls2_val;
+    const size_t* localSize3 = &ls3_val;
     bool profiling = false;
     cl_uint maxLocalMem=ctx_.getLocalMemSize();
     bool _even_exponent=ctx_.isEvenExponent();
@@ -343,7 +349,8 @@ int NttEngine::pointwiseMul(cl_mem a, cl_mem b) {
   clSetKernelArg(k, 0, sizeof(cl_mem), &a);
   clSetKernelArg(k, 1, sizeof(cl_mem), &b);
   size_t n = pre_.getN();
-  size_t wg = ctx_.getLocalSize();
+  size_t wgl = ctx_.getLocalSize();
+  const size_t* wg = &wgl;
   executeKernelAndDisplay(queue_, k, a, n, wg, "kernel_pointwise_mul", n, false, false);
   return 1;
 }
