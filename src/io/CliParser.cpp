@@ -237,7 +237,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     #endif
     opts.portCode = static_cast<int>(detectedPort);
 
-    #ifdef _WIN32
+    #if defined(_WIN32)    \
+    || defined(__MINGW32__)  \
+    || defined(__MINGW64__)  \
+    || defined(__CYGWIN__)
         opts.osName = "Windows";
         opts.osVersion = "";
     #elif __APPLE__
