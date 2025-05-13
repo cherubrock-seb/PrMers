@@ -322,7 +322,8 @@ int App::run() {
         queue,
         program->getProgram(),
         precompute.getN(),
-        precompute.getDigitWidth()
+        precompute.getDigitWidth(),
+        buffers->digitWidthMaskBuf
     );
 
 

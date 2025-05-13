@@ -23,6 +23,7 @@ public:
     cl_mem invTwiddleBuf;     // inverse twiddles
     cl_mem wiBuf;             // inverse‐NTT root powers
     cl_mem blockCarryBuf;
+    cl_mem digitWidthMaskBuf;
     
     static cl_mem createBuffer(const opencl::Context& ctx, cl_mem_flags flags,
                                size_t size, const void* ptr,

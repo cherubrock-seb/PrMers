@@ -46,7 +46,28 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
   ,blockCarryBuf(createBuffer(ctx, CL_MEM_READ_WRITE,
         ctx.getWorkersCarry()*sizeof(uint64_t),
         nullptr, "blockCarry"))
-{}
+  , digitWidthMaskBuf(nullptr)   
+{
+    const auto& maskBits = pre.getDigitWidthMask();  // std::vector<bool>
+    size_t n = maskBits.size();
+
+    size_t chunks = (n + 63) / 64;
+    std::vector<uint64_t> maskPacked(chunks, 0ULL);
+
+    for (size_t i = 0; i < n; ++i) {
+        if (maskBits[i]) {
+            size_t blk = i >> 6;      // i / 64
+            size_t bit = i & 63;      // i % 64
+            maskPacked[blk] |= (1ULL << bit);
+        }
+    }
+
+    digitWidthMaskBuf = createBuffer(ctx,
+        CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        maskPacked.size() * sizeof(uint64_t),
+        maskPacked.data(),
+        "digitWidthMaskPacked");
+}
 
 Buffers::~Buffers() {
     if (input)              clReleaseMemObject(input);
