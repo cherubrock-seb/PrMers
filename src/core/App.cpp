@@ -239,8 +239,11 @@ App::App(int argc, char** argv)
     buffers.emplace(context, precompute);
     program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
     kernels.emplace(program->getProgram(), context.getQueue());
-    nttEngine.emplace(context, *kernels, *buffers, precompute);
     
+    sync_ = std::make_unique<opencl::EventSynchronizer>();
+
+    nttEngine.emplace(context, *kernels, *buffers, precompute,*sync_);
+
 
     std::vector<std::string> kernelNames = {
         "kernel_sub2",
@@ -281,7 +284,7 @@ int App::run() {
     cl_command_queue queue   = context.getQueue();
     size_t          queueCap = context.getQueueSize();
     size_t          queued   = 0;
-
+    
     uint32_t p = options.exponent;
     uint32_t totalIters = options.mode == "prp" ? p : p - 2;
 
@@ -293,7 +296,6 @@ int App::run() {
                   << " (" << (options.mode == "prp" ? "PRP" : "LL")
                   << " mode)" << std::endl;
     }
-    
     buffers->input = clCreateBuffer(
         context.getContext(),
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
@@ -323,7 +325,8 @@ int App::run() {
         program->getProgram(),
         precompute.getN(),
         precompute.getDigitWidth(),
-        buffers->digitWidthMaskBuf
+        buffers->digitWidthMaskBuf,
+        *sync_
     );
 
 
@@ -366,7 +369,8 @@ int App::run() {
             clSetKernelArg(dispK, 3, sizeof(cl_uint), &modeInt);
             clSetKernelArg(dispK, 4, sizeof(cl_uint), &iterdisp);
             clSetKernelArg(dispK, 5, sizeof(cl_mem), &outBuf);
-
+            
+            cl_event evt1;
             size_t global = 1, local = 1;
             clEnqueueNDRangeKernel(
                 queue,
@@ -375,14 +379,16 @@ int App::run() {
                 nullptr,
                 &global,
                 &local,
-                0, nullptr, nullptr
+                0, nullptr, &evt1
             );
+            sync_->addEvent(evt1); 
             queued += 1;
         }
 
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
             //std::cout << "Flush\n";
             clFinish(queue);
+            sync_->waitAll();
         }
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
             
@@ -390,7 +396,7 @@ int App::run() {
             
             auto now = high_resolution_clock::now();
             
-            if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 &&(((now - lastDisplay >= seconds(10)))) )) {
+            if (/*(options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || */(/*options.iterforce==0 &&*/(((now - lastDisplay >= seconds(10)))) )) {
                 std::string res64;
 
 
@@ -438,7 +444,11 @@ int App::run() {
         
         if (options.mode == "ll") {
             kernels->runSub2(buffers->input);
-            if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; }
+            if (queueCap > 0 && ++queued >= queueCap) { 
+                //clFlush(queue); 
+                sync_->waitAll();
+                queued = 0; 
+            }
         }
 
 
@@ -451,6 +461,9 @@ int App::run() {
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
+        //clFlush(queue);
+        sync_->waitAll();
+        queued = 0;
         backupManager.saveState(buffers->input, lastIter);
         std::cout << "\nInterrupted by user, state saved at iteration "
                   << lastIter << std::endl;
@@ -458,6 +471,9 @@ int App::run() {
     }
     if (queued > 0) {
         clFinish(queue);
+        //clFlush(queue);
+        sync_->waitAll();
+        queued = 0;
     }
     std::vector<uint64_t> hostData(precompute.getN());
     std::string res64_x;  

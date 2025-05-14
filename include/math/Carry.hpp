@@ -8,12 +8,13 @@
 #endif
 #include <vector>
 #include "opencl/Context.hpp"
+#include "opencl/EventSynchronizer.hpp" 
 
 namespace math {
 
 class Carry {
 public:
-    Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf);
+    Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf,  opencl::EventSynchronizer& sync);
     void carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize);
     void carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize);
     void handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& digitWidth);
@@ -28,6 +29,7 @@ private:
     size_t            vectorSize_;
     std::vector<int>  digitWidth_;
     cl_mem                 digitWidthMaskBuf_;
+    opencl::EventSynchronizer& sync_;
 };
 
 } // namespace math
