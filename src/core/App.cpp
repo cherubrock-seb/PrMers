@@ -403,9 +403,9 @@ int App::run() {
                 lastDisplay = now;
                 resumeIter = iter+1;
         }  
-        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && ((iter+1)%400 == 0))) { 
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%400 == 0))) { 
             bool backup = false;
-            bool update = false;
+            bool update = (options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0);
             
             if (now - lastUpdate >= seconds(5*60)) {
                 update = true;
