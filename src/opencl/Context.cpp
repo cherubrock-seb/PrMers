@@ -232,7 +232,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         queue_ = clCreateCommandQueue(context_, device_, 0, &err);
     }
 #endif
-    if (useThrottle) {
+    if (useThrottle && cl_queue_throttle_active) {
         std::printf(">>> OpenCL queue created **WITH** throttle hint (LOW)\n");
     } else {
         std::printf(">>> OpenCL queue created **WITHOUT** throttle hint\n");
