@@ -15,7 +15,6 @@
 #include <cassert>
 #include <cstdint>
 #include <algorithm>
-#include <unistd.h>
 
 namespace opencl {
 
@@ -44,10 +43,8 @@ public:
             while (!events_.empty()) {
                 clearCompleted();
             }
-
             lastTotalUs_ = totalUs_;
             profiled_    = true;
-
             auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(lastTotalUs_).count();
             std::cout
                 << "[EventSynchronizer] profiled: "
@@ -55,20 +52,18 @@ public:
                 << " (" << ms << " ms)\n";
         }
         else {
-//            usleep(lastTotalUs_.count());
-            usleep(static_cast<useconds_t>(lastTotalUs_.count() * waitPercentageFactor/100));
-
+            int64_t waitCount = lastTotalUs_.count() * waitPercentageFactor / 100;
+            std::this_thread::sleep_for(std::chrono::microseconds(waitCount));
             clearAllEvents();    
         }
-
         assert(events_.empty());
     }
 
 private:
     std::vector<cl_event>       events_;
     bool                        profiled_    = false;
-    std::chrono::microseconds   totalUs_{0};    // accumulé pendant profiling
-    std::chrono::microseconds   lastTotalUs_{0}; // durée mesurée à la première passe
+    std::chrono::microseconds   totalUs_{0};
+    std::chrono::microseconds   lastTotalUs_{0};
     size_t                      count_{0};
 
     void clearAllEvents() {
@@ -77,17 +72,16 @@ private:
         }
         events_.clear();
     }
+
     void clearCompleted() {
         auto it = events_.begin();
         while (it != events_.end()) {
             cl_int status = 0;
-            clGetEventInfo(*it,
-                           CL_EVENT_COMMAND_EXECUTION_STATUS,
-                           sizeof(status), &status,
-                           nullptr);
+            clGetEventInfo(*it, CL_EVENT_COMMAND_EXECUTION_STATUS,
+                           sizeof(status), &status, nullptr);
             if (status == CL_COMPLETE) {
                 auto arr = getEventNanos(*it);
-                uint64_t execNs = arr[2]; 
+                uint64_t execNs = arr[2];
                 totalUs_ += std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::nanoseconds(execNs)
                 );
