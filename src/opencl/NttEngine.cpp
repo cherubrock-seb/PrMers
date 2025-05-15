@@ -73,7 +73,7 @@ static void executeKernelAndDisplay(EventSynchronizer& sync,
                   << " (" << err << ")\n";
     }
     sync.addEvent(event);
-
+/*
     if (profiling) {
         cl_ulong t0, t1;
         clGetEventProfilingInfo(event,
@@ -85,7 +85,7 @@ static void executeKernelAndDisplay(EventSynchronizer& sync,
         std::cout << "[Profile] " << kernelName
                   << " : " << double(t1 - t0)/1e3
                   << " µs\n";
-    }
+    }*/
 }
 
 int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
