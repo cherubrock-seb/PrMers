@@ -39,7 +39,7 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
     std::cout << "              [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval] [-throttle_low]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -63,6 +63,7 @@ void printUsage(const char* progName) {
     //std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled, >= 1000, default = 100000)" << std::endl;
+    std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
@@ -115,6 +116,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-debug") == 0) {
             opts.debug = true;
+        }
+        else if (std::strcmp(argv[i], "-throttle_low") == 0) {
+            opts.cl_queue_throttle_active = true;
         }
         else if (std::strcmp(argv[i], "-proof") == 0) {
             opts.proof = false;

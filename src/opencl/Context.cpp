@@ -39,7 +39,7 @@
 #endif
 namespace opencl {
 
-Context::Context(int deviceIndex, std::size_t enqueueMax)
+Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active)
     : platform_(nullptr), device_(nullptr),
       context_(nullptr), queue_(nullptr),
       queueSize_(0),
@@ -51,7 +51,7 @@ Context::Context(int deviceIndex, std::size_t enqueueMax)
 {
     pickPlatformAndDevice(deviceIndex);
     createContext();
-    createQueue(enqueueMax);
+    createQueue(enqueueMax, cl_queue_throttle_active);
     queryDeviceCapabilities(); 
 }
 
@@ -181,7 +181,7 @@ void Context::createContext() {
         throw std::runtime_error("Failed to create OpenCL context");
 }
 
-void Context::createQueue(std::size_t enqueueMax) {
+void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active) {
     cl_int err = CL_SUCCESS;
     unsigned ver = queryCLVersion();
     bool useThrottle = false;
@@ -199,15 +199,26 @@ void Context::createQueue(std::size_t enqueueMax) {
 #if defined(__APPLE__)
     queue_ = clCreateCommandQueue(context_, device_, 0, &err);
 #else
-    if (ver >= 200)
+    if (ver >= 200){
         if (useThrottle) {
-            const cl_queue_properties props[] = {
-                CL_QUEUE_PROPERTIES,            CL_QUEUE_PROFILING_ENABLE,
-                CL_QUEUE_THROTTLE_KHR,          CL_QUEUE_THROTTLE_LOW_KHR,
-                0
-            };
-            queue_ = clCreateCommandQueueWithProperties(context_, device_,
-                                                        props, &err);
+            if(cl_queue_throttle_active){
+                const cl_queue_properties props[] = {
+                    CL_QUEUE_PROPERTIES,            CL_QUEUE_PROFILING_ENABLE,
+                    CL_QUEUE_THROTTLE_KHR,          CL_QUEUE_THROTTLE_LOW_KHR,
+                    0
+                };
+                queue_ = clCreateCommandQueueWithProperties(context_, device_,
+                                                            props, &err);
+            
+            }
+            else{
+                const cl_queue_properties props[] = {
+                    CL_QUEUE_PROPERTIES,            CL_QUEUE_PROFILING_ENABLE,
+                    0
+                };
+                queue_ = clCreateCommandQueueWithProperties(context_, device_,
+                                                            props, &err);
+            }
         } else {
             const cl_queue_properties props[] = {
                 CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE,
@@ -216,8 +227,10 @@ void Context::createQueue(std::size_t enqueueMax) {
             queue_ = clCreateCommandQueueWithProperties(context_, device_,
                                                         props, &err);
         }
-    else
+    }
+    else{
         queue_ = clCreateCommandQueue(context_, device_, 0, &err);
+    }
 #endif
     if (useThrottle) {
         std::printf(">>> OpenCL queue created **WITH** throttle hint (LOW)\n");
