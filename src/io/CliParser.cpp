@@ -39,7 +39,8 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
     std::cout << "              [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval] [-throttle_low]" << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval] " << std::endl;
+    std::cout << "              [-throttle_low] [-waitfactor <N>]" << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
@@ -64,6 +65,7 @@ void printUsage(const char* progName) {
     std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled, >= 1000, default = 100000)" << std::endl;
     std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
+    std::cout << "  -waitfactor <N>      : (Optional) Percentage factor to wait (e.g., 80 means 80% of last wait duration, default: 100)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
@@ -117,6 +119,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-debug") == 0) {
             opts.debug = true;
         }
+        
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
             opts.cl_queue_throttle_active = true;
         }
@@ -146,6 +149,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-enqueue_max") == 0 && i + 1 < argc) {
             opts.enqueue_max = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-waitfactor") == 0 && i + 1 < argc) {
+            opts.waitPercentageFactor = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-res64_display_interval") == 0 && i + 1 < argc) {
             int v = std::atoi(argv[++i]);

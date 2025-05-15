@@ -204,7 +204,7 @@ App::App(int argc, char** argv)
       }
       return o;
   }())
-  , context(options.device_id,options.enqueue_max)
+  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),
@@ -422,11 +422,11 @@ int App::run() {
                 firstIter = false;
             }
             if(!backup && !update){
-                sync_->waitAll(false);
+                sync_->waitAll(false,options.waitPercentageFactor);
             }
             if(update){
                 clFinish(queue);
-                sync_->waitAll(true);
+                sync_->waitAll(true,options.waitPercentageFactor);
             }
 
 
@@ -434,7 +434,7 @@ int App::run() {
             
             if (backup) {
                 backupManager.saveState(buffers->input, iter);
-                sync_->waitAll(true);
+                sync_->waitAll(true,options.waitPercentageFactor);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
@@ -478,7 +478,7 @@ int App::run() {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
         //clFlush(queue);
-        sync_->waitAll(true);
+        sync_->waitAll(true,options.waitPercentageFactor);
         queued = 0;
         backupManager.saveState(buffers->input, lastIter);
         std::cout << "\nInterrupted by user, state saved at iteration "
@@ -488,7 +488,7 @@ int App::run() {
     if (queued > 0) {
         clFinish(queue);
         //clFlush(queue);
-        sync_->waitAll(true);
+        sync_->waitAll(true,options.waitPercentageFactor);
         queued = 0;
     }
     std::vector<uint64_t> hostData(precompute.getN());

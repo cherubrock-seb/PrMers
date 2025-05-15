@@ -36,7 +36,7 @@ public:
         events_.push_back(evt);
     }
 
-    void waitAll(bool update) {
+    void waitAll(bool update, int waitPercentageFactor) {
         if (update || !profiled_) {
             totalUs_ = std::chrono::microseconds{0};
             lastTotalUs_ = std::chrono::microseconds{0};
@@ -55,7 +55,9 @@ public:
                 << " (" << ms << " ms)\n";
         }
         else {
-            usleep(lastTotalUs_.count());
+//            usleep(lastTotalUs_.count());
+            usleep(static_cast<useconds_t>(lastTotalUs_.count() * waitPercentageFactor/100));
+
             clearAllEvents();    
         }
 
