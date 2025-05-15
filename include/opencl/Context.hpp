@@ -14,7 +14,7 @@ namespace opencl {
 
 class Context {
 public:
-    Context(int deviceIndex = 0, std::size_t enqueueMax = 0);
+    Context(int deviceIndex = 0, std::size_t enqueueMax = 0, bool cl_queue_throttle_active = false);
     ~Context();
 
     cl_context        getContext()  const noexcept;
@@ -62,7 +62,7 @@ private:
 
     void pickPlatformAndDevice(int deviceIndex);
     void createContext();
-    void createQueue(std::size_t enqueueMax);
+    void createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active);
     void queryDeviceCapabilities();
     unsigned queryCLVersion() const;
     std::string queryDeviceString(cl_device_info) const;

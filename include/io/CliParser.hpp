@@ -43,6 +43,7 @@ struct CliOptions {
     std::string aid = "";
     std::string uid = "";
     int res64_display_interval = 100000;
+    bool cl_queue_throttle_active = false;
 };
 
 class CliParser {
