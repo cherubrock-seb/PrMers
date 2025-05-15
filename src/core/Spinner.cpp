@@ -65,8 +65,8 @@ void Spinner::displayProgress(uint32_t iter,
                       : 0.0;
 
     static double smoothedIPS = 0.0;
-//    constexpr double alpha    = 0.1;
-    constexpr double alpha = 1;
+    constexpr double alpha    = 0.05;
+//    constexpr double alpha = 1;
     if (smoothedIPS == 0.0) {
         smoothedIPS = currentIPS;
     } else {
@@ -94,7 +94,7 @@ void Spinner::displayProgress(uint32_t iter,
     << "Iter: "      << iter                                << " | "
     << "Elapsed: "   << std::fixed << elapsedTime           << "s | "
     << "IPS: "       << std::fixed << std::setprecision(2)
-                    << smoothedIPS                          << " | "
+                    << currentIPS                          << " | "
     << "ETA: "       << days << "d " << hrs << "h "
                     << min  << "m " << sec << "s";
     
