@@ -209,8 +209,12 @@ void Context::createQueue(std::size_t enqueueMax) {
             queue_ = clCreateCommandQueueWithProperties(context_, device_,
                                                         props, &err);
         } else {
+            const cl_queue_properties props[] = {
+                CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE,
+                0
+            };
             queue_ = clCreateCommandQueueWithProperties(context_, device_,
-                                                        nullptr, &err);
+                                                        props, &err);
         }
     else
         queue_ = clCreateCommandQueue(context_, device_, 0, &err);

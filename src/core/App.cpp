@@ -335,10 +335,11 @@ int App::run() {
     timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
+    auto lastUpdate = startTime;
     auto lastDisplay = startTime;
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter,"");
     uint32_t lastIter = resumeIter;
-
+    bool firstIter = true;
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
@@ -384,19 +385,8 @@ int App::run() {
             sync_->addEvent(evt1); 
             queued += 1;
         }
-
-        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && (queueCap > 0 && queued >= queueCap))) { 
-            //std::cout << "Flush\n";
-            clFinish(queue);
-            sync_->waitAll();
-        }
-        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || queueCap==0 || (options.iterforce==0 &&(queueCap > 0 && queued >= queueCap))) { 
-            
-            queued = 0;
-            
-            auto now = high_resolution_clock::now();
-            
-            if (/*(options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || */(/*options.iterforce==0 &&*/(((now - lastDisplay >= seconds(10)))) )) {
+        auto now = high_resolution_clock::now();
+        if (/*(options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || */(/*options.iterforce==0 &&*/(((now - lastDisplay >= seconds(10)))) )) {
                 std::string res64;
 
 
@@ -412,9 +402,39 @@ int App::run() {
                 timer2.start();
                 lastDisplay = now;
                 resumeIter = iter+1;
+        }  
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (options.iterforce==0 && ((iter+1)%400 == 0))) { 
+            bool backup = false;
+            bool update = false;
+            
+            if (now - lastUpdate >= seconds(5*60)) {
+                update = true;
+                lastUpdate = now;
             }
             if (now - lastBackup >= seconds(options.backup_interval)) {
+                backup = true;
+                lastUpdate = now;
+                update = false;
+            }
+           
+            if(firstIter){
+                clFinish(queue);
+                firstIter = false;
+            }
+            if(!backup && !update){
+                sync_->waitAll(false);
+            }
+            if(update){
+                clFinish(queue);
+                sync_->waitAll(true);
+            }
+
+
+            queued = 0;
+            
+            if (backup) {
                 backupManager.saveState(buffers->input, iter);
+                sync_->waitAll(true);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
@@ -442,13 +462,9 @@ int App::run() {
             }    
         }
         
+        
         if (options.mode == "ll") {
             kernels->runSub2(buffers->input);
-            if (queueCap > 0 && ++queued >= queueCap) { 
-                //clFlush(queue); 
-                sync_->waitAll();
-                queued = 0; 
-            }
         }
 
 
@@ -462,7 +478,7 @@ int App::run() {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
         //clFlush(queue);
-        sync_->waitAll();
+        sync_->waitAll(true);
         queued = 0;
         backupManager.saveState(buffers->input, lastIter);
         std::cout << "\nInterrupted by user, state saved at iteration "
@@ -472,7 +488,7 @@ int App::run() {
     if (queued > 0) {
         clFinish(queue);
         //clFlush(queue);
-        sync_->waitAll();
+        sync_->waitAll(true);
         queued = 0;
     }
     std::vector<uint64_t> hostData(precompute.getN());
