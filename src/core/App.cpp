@@ -240,9 +240,8 @@ App::App(int argc, char** argv)
     program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
     kernels.emplace(program->getProgram(), context.getQueue());
     
-    sync_ = std::make_unique<opencl::EventSynchronizer>();
 
-    nttEngine.emplace(context, *kernels, *buffers, precompute,*sync_);
+    nttEngine.emplace(context, *kernels, *buffers, precompute);
 
 
     std::vector<std::string> kernelNames = {
@@ -325,8 +324,7 @@ int App::run() {
         program->getProgram(),
         precompute.getN(),
         precompute.getDigitWidth(),
-        buffers->digitWidthMaskBuf,
-        *sync_
+        buffers->digitWidthMaskBuf
     );
 
 
@@ -337,11 +335,16 @@ int App::run() {
     auto lastBackup = startTime;
     auto lastUpdate = startTime;
     auto lastDisplay = startTime;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter,"");
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
     uint32_t lastIter = resumeIter;
+    uint32_t startIter = resumeIter;
     bool firstIter = true;
+    if(options.iterforce == 0){
+        options.iterforce = 400;
+    }
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
+
 
         queued += nttEngine->forward(buffers->input, iter);
         /*if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; spinner.displayProgress(iter - resumeIter,
@@ -371,7 +374,6 @@ int App::run() {
             clSetKernelArg(dispK, 4, sizeof(cl_uint), &iterdisp);
             clSetKernelArg(dispK, 5, sizeof(cl_mem), &outBuf);
             
-            cl_event evt1;
             size_t global = 1, local = 1;
             clEnqueueNDRangeKernel(
                 queue,
@@ -380,9 +382,8 @@ int App::run() {
                 nullptr,
                 &global,
                 &local,
-                0, nullptr, &evt1
+                0, nullptr, nullptr
             );
-            sync_->addEvent(evt1); 
             queued += 1;
         }
         auto now = high_resolution_clock::now();
@@ -397,44 +398,18 @@ int App::run() {
                     timer2.elapsed(),
                     p,
                     resumeIter,
+                    startIter,
                     res64
                 );
                 timer2.start();
                 lastDisplay = now;
                 resumeIter = iter+1;
         }  
-        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%400 == 0))) { 
-            bool backup = false;
-            bool update = (options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0);
-            
-            if (now - lastUpdate >= seconds(5*60)) {
-                update = true;
-                lastUpdate = now;
-            }
-            if (now - lastBackup >= seconds(options.backup_interval)) {
-                backup = true;
-                lastUpdate = now;
-                update = false;
-            }
-           
-            if(firstIter){
-                clFinish(queue);
-                firstIter = false;
-            }
-            if(!backup && !update){
-                sync_->waitAll(false,options.waitPercentageFactor);
-            }
-            if(update){
-                clFinish(queue);
-                sync_->waitAll(true,options.waitPercentageFactor);
-            }
-
-
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
+            clFinish(queue);
             queued = 0;
-            
-            if (backup) {
+            if ((now - lastBackup >= seconds(options.backup_interval))) {
                 backupManager.saveState(buffers->input, iter);
-                sync_->waitAll(true,options.waitPercentageFactor);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
@@ -473,12 +448,10 @@ int App::run() {
         //proofManager.checkpoint(buffers->input, iter);
 
     }
-
+    double finalElapsed = timer.elapsed();
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
-        //clFlush(queue);
-        sync_->waitAll(true,options.waitPercentageFactor);
         queued = 0;
         backupManager.saveState(buffers->input, lastIter);
         std::cout << "\nInterrupted by user, state saved at iteration "
@@ -487,8 +460,6 @@ int App::run() {
     }
     if (queued > 0) {
         clFinish(queue);
-        //clFlush(queue);
-        sync_->waitAll(true,options.waitPercentageFactor);
         queued = 0;
     }
     std::vector<uint64_t> hostData(precompute.getN());
@@ -531,6 +502,7 @@ int App::run() {
                         timer2.elapsed(),
                         p,
                         resumeIter,
+                        startIter,
                         res64_x
                     );
         backupManager.saveState(buffers->input, lastIter);
@@ -540,9 +512,9 @@ int App::run() {
         
                 
     }
+    
 
     
-    double finalElapsed = timer.elapsed();
 
     std::string json = io::JsonBuilder::generate(
         hostData,

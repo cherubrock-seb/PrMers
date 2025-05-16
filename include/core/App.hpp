@@ -23,7 +23,6 @@
 #include <memory>
 #include <optional>
 #include <atomic>
-#include "opencl/EventSynchronizer.hpp"
 #ifdef __APPLE__
 #  include <OpenCL/opencl.h>
 #else
@@ -39,7 +38,6 @@ public:
     int run();
 
 private:
-  std::unique_ptr<opencl::EventSynchronizer> sync_;
   int    argc_;
   char** argv_;
   std::unique_ptr<io::WorktodoParser> worktodoParser_;

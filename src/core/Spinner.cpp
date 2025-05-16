@@ -52,6 +52,7 @@ void Spinner::displayProgress(uint32_t iter,
                               double elapsedTime2,
                               uint32_t expo,
                               uint32_t resumeIter,
+                              uint32_t startIter,
                               std::string res64)
 {
     double pct = totalIters
@@ -73,7 +74,9 @@ void Spinner::displayProgress(uint32_t iter,
         smoothedIPS = alpha * currentIPS
                     + (1.0 - alpha) * smoothedIPS;
     }
-
+    double averageIPS = (elapsedTime > 0)
+                      ? deltaIter / elapsedTime
+                      : 0.0;
     double remaining = smoothedIPS > 0
                      ? (totalIters - iter) / smoothedIPS
                      : 0.0;
