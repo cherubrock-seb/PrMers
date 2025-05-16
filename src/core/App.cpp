@@ -187,12 +187,12 @@ void App::tuneIterforce() {
     while (low < high) {
         uint32_t mid = low + (high - low) / 2;
         double ipsMid = measureIps(mid, testIters);
-        double ipsNext = measureIps(mid + 1, testIters);
+        double ipsNext = measureIps(mid + 50, testIters);
         std::cout << "iterforce=" << mid << " IPS=" << ipsMid
                   << " | " << (mid+1) << " IPS=" << ipsNext << "\n";
         if (ipsMid < ipsNext) {
-            low = mid + 1;
-            if (ipsNext > bestIps) { bestIps = ipsNext; best = mid + 1; }
+            low = mid + 50;
+            if (ipsNext > bestIps) { bestIps = ipsNext; best = mid + 50; }
         } else {
             high = mid;
             if (ipsMid > bestIps) { bestIps = ipsMid; best = mid; }
