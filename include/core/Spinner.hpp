@@ -19,6 +19,7 @@ public:
                         double elapsedTime2,
                         uint32_t expo,
                         uint32_t resumeIter = 0,
+                        uint32_t startIter = 0,
                         std::string res64 = "");
 
     void displayBackupInfo(uint32_t iter,

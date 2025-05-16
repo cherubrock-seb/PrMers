@@ -28,13 +28,12 @@
 
 namespace math {
 
-Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf, opencl::EventSynchronizer& sync)
+Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf)
     : context_(ctx)
     , queue_(queue)
     , vectorSize_(vectorSize)
     , digitWidth_(digitWidth)
     , digitWidthMaskBuf_(digitWidthMaskBuf)
-    , sync_(sync)
 {
     cl_int err;
     carryKernel_ = clCreateKernel(program, "kernel_carry", &err);
@@ -57,9 +56,7 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 {
     cl_int err;
     size_t workersCarry = context_.getWorkersCarry();
-    //std::cout << "Launching kernel CARRY workers=" << workersCarry << std::endl;
-    //workersCarry = 2;
-    // kernel_carry
+
     err  = clSetKernelArg(carryKernel_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel_, 1, sizeof(cl_mem), &blockCarryBuffer);
     err |= clSetKernelArg(carryKernel_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
@@ -67,26 +64,17 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
-    cl_event evt1;
     if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
     
-    //size_t globalWorkSize = bufferSize / sizeof(cl_ulong4);
-    err = clEnqueueNDRangeKernel(queue_, carryKernel_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, &evt1);
+    err = clEnqueueNDRangeKernel(queue_, carryKernel_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
         oss << "Failed to enqueue kernel_carry, error code: " << err;
         throw std::runtime_error(oss.str());
     }
-    sync_.addEvent(evt1);
-    
 
 
 
-
-
-   // clFinish(queue_);
-
-    // kernel_carry_2
     err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel2_, 1, sizeof(cl_mem), &blockCarryBuffer);
     err |= clSetKernelArg(carryKernel2_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
@@ -94,13 +82,11 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry_2 args");
     }
-    cl_event evt2;
-    err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, &evt2);
+    err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to enqueue kernel_carry_2");
     }
-    sync_.addEvent(evt2);
-    //clFinish(queue_);
+
 }
 
 
@@ -120,31 +106,24 @@ void Carry::carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t buf
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry_mul_base args");
     }
-    cl_event evt1;
+    //cl_event evt1;
     //size_t globalWorkSize = bufferSize / sizeof(cl_ulong4);
-    err = clEnqueueNDRangeKernel(queue_, carryKernel3_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, &evt1);
+    err = clEnqueueNDRangeKernel(queue_, carryKernel3_, 1, nullptr, &workersCarry, nullptr, 0, nullptr,nullptr/* &evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
         oss << "Failed to enqueue kernel_carry, error code: " << err;
         throw std::runtime_error(oss.str());
     }
-    sync_.addEvent(evt1);
-   // clFinish(queue_);
-
-    // kernel_carry_2
     err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel2_, 1, sizeof(cl_mem), &blockCarryBuffer);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry_2 args");
     }
-    cl_event evt2;
-    err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, &evt2);
+    err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt2*/);
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to enqueue kernel_carry_2");
     }
-    sync_.addEvent(evt2);
 
-    //clFinish(queue_);
 }
 
 

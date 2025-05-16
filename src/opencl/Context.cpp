@@ -197,7 +197,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         }
     }
 #if defined(__APPLE__)
-    queue_ = clCreateCommandQueue(context_, device_, 0, &err);
+    queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
 #else
     if (ver >= 200){
         if (useThrottle) {
@@ -229,7 +229,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         }
     }
     else{
-        queue_ = clCreateCommandQueue(context_, device_, 0, &err);
+        queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
     }
 #endif
     if (useThrottle && cl_queue_throttle_active) {
@@ -277,7 +277,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
     if(queueSize_ == 18446744073709551615){
         queueSize_=0;
     }
-    std::cout << "Queue size = " << queueSize_ << std::endl;
+    std::cout << "Queue preferred size = " << queueSize_ << std::endl;
 }
 
 void Context::queryDeviceCapabilities() {
