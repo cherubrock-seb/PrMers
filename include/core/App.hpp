@@ -36,6 +36,8 @@ class App {
 public:
     App(int argc, char** argv);
     int run();
+    void tuneIterforce();
+    double measureIps(uint32_t testIterforce, uint32_t testIters);
 
 private:
   int    argc_;
