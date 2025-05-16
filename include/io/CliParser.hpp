@@ -12,6 +12,7 @@ struct CliOptions {
     uint32_t exponent = 0;
     uint32_t iterforce = 0;
     int device_id = 0;
+    bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"
     bool profiling = false;
     bool debug = false;

@@ -164,6 +164,96 @@ static int askExponentInteractively() {
   #endif
 }
 
+void App::tuneIterforce() {
+    const uint32_t testIters = 2048;
+    const uint32_t initial = (options.iterforce > 0 ? options.iterforce : 2048);
+    uint32_t low = 1, high = initial;
+    uint32_t best = initial;
+    double bestIps = 0.0;
+
+    std::cout << "Starting iterforce tuning (2048 iterations per test)\n";
+    std::cout << "Searching between 1 and " << initial << "...\n";
+
+    while (low < high) {
+        uint32_t mid = (low + high) / 2;
+        double ipsMid = measureIps(mid, testIters);
+        double ipsNext = 0.0;
+        if (mid + 1 <= initial)
+            ipsNext = measureIps(mid + 1, testIters);
+
+        std::cout << "Test iterforce=" << mid << ": IPS=" << ipsMid << "\n";
+        if (mid + 1 <= initial)
+            std::cout << "Test iterforce=" << (mid+1) << ": IPS=" << ipsNext << "\n";
+
+        if (ipsMid < ipsNext) {
+            low = mid + 1;
+            if (ipsNext > bestIps) {
+                bestIps = ipsNext;
+                best = mid + 1;
+            }
+        } else {
+            high = mid;
+            if (ipsMid > bestIps) {
+                bestIps = ipsMid;
+                best = mid;
+            }
+        }
+        std::cout << "Progress: range now [" << low << ", " << high << "]\n";
+    }
+
+    std::cout << "Optimal iterforce parameter: " << best
+              << "  (IPS = " << bestIps << ")\n";
+}
+
+double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
+    uint32_t oldIterforce = options.iterforce;
+    options.iterforce = testIterforce;
+
+    uint32_t p = options.exponent;
+    std::vector<uint64_t> x(precompute.getN(), 0ULL);
+    x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
+
+    cl_mem inputBuf = clCreateBuffer(
+        context.getContext(),
+        CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+        x.size() * sizeof(uint64_t),
+        x.data(), nullptr
+    );
+
+
+    math::Carry carry(
+        context,
+        context.getQueue(),
+        program->getProgram(),
+        precompute.getN(),
+        precompute.getDigitWidth(),
+        buffers->digitWidthMaskBuf
+    );
+    
+    auto start = high_resolution_clock::now();
+    for (uint32_t iter = 0; iter < testIters; ++iter) {
+        nttEngine->forward(inputBuf, iter);
+        nttEngine->inverse(inputBuf, iter);
+        carry.carryGPU(
+            inputBuf,
+            buffers->blockCarryBuf,
+            precompute.getN() * sizeof(uint64_t)
+        );
+
+        if ((iter + 1) % options.iterforce == 0) {
+            clFinish(context.getQueue());
+        }
+    }
+    clFinish(context.getQueue());
+    auto end = high_resolution_clock::now();
+
+    clReleaseMemObject(inputBuf);
+    options.iterforce = oldIterforce;
+
+    double seconds = duration_cast<duration<double>>(end - start).count();
+    return testIters / seconds;
+}
+
 
 App::App(int argc, char** argv)
   : argc_(argc)
@@ -276,6 +366,10 @@ App::App(int argc, char** argv)
 
 
 int App::run() {
+    if (options.tune ) {
+        tuneIterforce();
+        return 0;
+    }
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
@@ -387,9 +481,29 @@ int App::run() {
             queued += 1;
         }
         auto now = high_resolution_clock::now();
-        if (/*(options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || */(/*options.iterforce==0 &&*/(((now - lastDisplay >= seconds(10)))) )) {
-                std::string res64;
+          
+        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
+            clFinish(queue);
+            
+            if ((((now - lastDisplay >= seconds(10)))) ) {
+                std::string res64_x;
+                /*std::vector<uint64_t> hostData(precompute.getN());
+                clEnqueueReadBuffer(
+                    context.getQueue(),
+                    buffers->input,
+                    CL_TRUE, 0,
+                    hostData.size() * sizeof(uint64_t),
+                    hostData.data(),
+                    0, nullptr, nullptr
+                );
 
+                res64_x = io::JsonBuilder::computeRes64(
+                        hostData,
+                        options,
+                        precompute.getDigitWidth(),
+                        timer.elapsed(),
+                        static_cast<int>(context.getTransformSize())
+                        );*/
 
                 spinner.displayProgress(
                     iter+1,
@@ -399,14 +513,12 @@ int App::run() {
                     p,
                     resumeIter,
                     startIter,
-                    res64
+                    res64_x
                 );
                 timer2.start();
                 lastDisplay = now;
                 resumeIter = iter+1;
-        }  
-        if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
-            clFinish(queue);
+            }
             queued = 0;
             if ((now - lastBackup >= seconds(options.backup_interval))) {
                 backupManager.saveState(buffers->input, iter);

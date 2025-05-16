@@ -58,13 +58,13 @@ void printUsage(const char* progName) {
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
     std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
     std::cout << "  -computer <name>     : (Optional) PrimeNet computer name to auto-fill the result submission" << std::endl;
-    std::cout << "  -enqueue_max <value> : (Optional) Manually set max number of enqueued kernels before clFinish (default: autodetect)" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     //std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled, >= 1000, default = 100000)" << std::endl;
     std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
+    std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
     std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
@@ -83,7 +83,15 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             std::exit(EXIT_SUCCESS);
         }
     }
-
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-v") == 0
+        || std::strcmp(argv[i], "--version") == 0
+        || std::strcmp(argv[i], "-version") == 0)
+        {
+            std::cout << "prmers Release v3.40.0-alpha\n";
+            std::exit(EXIT_SUCCESS);
+        }
+    }
     CliOptions opts;
 
     for (int i = 1; i < argc; ++i) {
@@ -168,6 +176,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "--noask") == 0 || std::strcmp(argv[i], "-noask") == 0) {
             opts.noAsk = true;
+        }
+        else if (std::strcmp(argv[i], "-tune") == 0) {
+            opts.tune = true;
         }
         else if (std::strcmp(argv[i], "-worktodo") == 0 && i + 1 < argc) {
             opts.worktodo_path = argv[++i];
