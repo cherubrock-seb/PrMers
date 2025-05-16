@@ -163,16 +163,33 @@ static int askExponentInteractively() {
     }
   #endif
 }
-
 void App::tuneIterforce() {
-    const uint32_t testIters = 2048;
-    const uint32_t initial = (options.iterforce > 0 ? options.iterforce : 2048);
+    const uint32_t defaultTestIters = 1024;
+    uint32_t testIters = defaultTestIters;
+    const uint32_t initial = (options.iterforce > 0 ? options.iterforce : defaultTestIters);
     uint32_t low = 1, high = initial;
     uint32_t best = initial;
     double bestIps = 0.0;
+    const double maxTestSeconds = 60.0;
 
-    std::cout << "Starting iterforce tuning (2048 iterations per test)\n";
-    std::cout << "Searching between 1 and " << initial << "...\n";
+    std::cout << "Starting iterforce tuning\n";
+    uint32_t sampleIterforce = std::min<uint32_t>(10, initial);
+    uint32_t sampleIters     = std::min<uint32_t>(64, defaultTestIters);
+    std::cout << "Sampling with iterforce=" << sampleIterforce
+              << " for " << sampleIters << " iterations to estimate IPS...\n";
+    double sampleIps = measureIps(sampleIterforce, sampleIters);
+    std::cout << "Estimated IPS: " << sampleIps << "\n";
+    uint32_t maxItersForDeadline = static_cast<uint32_t>(maxTestSeconds * sampleIps);
+    if (maxItersForDeadline < defaultTestIters && maxItersForDeadline > 0) {
+        testIters = maxItersForDeadline;
+        std::cout << "Adjusting test iteration count to " << testIters
+                  << " to limit each test under " << maxTestSeconds << "s\n";
+    } else {
+        std::cout << "Using default test iteration count: " << testIters << "\n";
+    }
+
+    std::cout << "Searching iterforce in range [1, " << initial << "] with "
+              << testIters << " iterations per test\n";
 
     while (low < high) {
         uint32_t mid = (low + high) / 2;
@@ -183,7 +200,8 @@ void App::tuneIterforce() {
 
         std::cout << "Test iterforce=" << mid << ": IPS=" << ipsMid << "\n";
         if (mid + 1 <= initial)
-            std::cout << "Test iterforce=" << (mid+1) << ": IPS=" << ipsNext << "\n";
+            std::cout << "Test iterforce=" << (mid + 1)
+                      << ": IPS=" << ipsNext << "\n";
 
         if (ipsMid < ipsNext) {
             low = mid + 1;
@@ -202,8 +220,9 @@ void App::tuneIterforce() {
     }
 
     std::cout << "Optimal iterforce parameter: " << best
-              << "  (IPS = " << bestIps << ")\n";
+              << " (IPS = " << bestIps << ")\n";
 }
+
 
 double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
     uint32_t oldIterforce = options.iterforce;
@@ -219,7 +238,6 @@ double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
-
 
     math::Carry carry(
         context,
