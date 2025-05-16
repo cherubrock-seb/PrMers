@@ -49,6 +49,7 @@
 #include <memory>
 #include <optional>
 #include <cmath>
+#include <thread>
 
 
 
@@ -164,74 +165,50 @@ static int askExponentInteractively() {
   #endif
 }
 void App::tuneIterforce() {
-    const uint32_t defaultTestIters = 1024;
-    uint32_t testIters = defaultTestIters;
-    const uint32_t initial = (options.iterforce > 0 ? options.iterforce : defaultTestIters);
-    uint32_t low = 1, high = initial;
-    uint32_t best = initial;
-    double bestIps = 0.0;
-    const double maxTestSeconds = 60.0;
-
-    std::cout << "Starting iterforce tuning\n";
-    uint32_t sampleIterforce = std::min<uint32_t>(10, initial);
-    uint32_t sampleIters     = std::min<uint32_t>(64, defaultTestIters);
-    std::cout << "Sampling with iterforce=" << sampleIterforce
-              << " for " << sampleIters << " iterations to estimate IPS...\n";
-    double sampleIps = measureIps(sampleIterforce, sampleIters);
+    double maxTestSeconds = 60.0;
+    uint32_t defaultTestIters = 1024;
+    uint32_t sampleIters = std::min<uint32_t>(64, defaultTestIters);
+    std::cout << "Sampling " << sampleIters << " iterations at iterforce=10\n";
+    double sampleIps = measureIps(10, sampleIters);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
-    uint32_t maxItersForDeadline = static_cast<uint32_t>(maxTestSeconds * sampleIps);
-    if (maxItersForDeadline < defaultTestIters && maxItersForDeadline > 0) {
-        testIters = maxItersForDeadline;
-        std::cout << "Adjusting test iteration count to " << testIters
-                  << " to limit each test under " << maxTestSeconds << "s\n";
-    } else {
-        std::cout << "Using default test iteration count: " << testIters << "\n";
-    }
 
-    std::cout << "Searching iterforce in range [1, " << initial << "] with "
-              << testIters << " iterations per test\n";
+    uint32_t testIters = static_cast<uint32_t>(sampleIps * maxTestSeconds);
+    if (testIters == 0) testIters = defaultTestIters;
+    std::cout << "Test iterations: " << testIters << " (~" << maxTestSeconds << "s)\n";
+
+    uint32_t boundHigh = static_cast<uint32_t>(sampleIps * maxTestSeconds);
+    if (boundHigh < 1) boundHigh = 1;
+    std::cout << "Range: [1, " << boundHigh << "]\n";
+
+    uint32_t low = 1, high = boundHigh;
+    uint32_t best = low;
+    double bestIps = 0.0;
 
     while (low < high) {
-        uint32_t mid = (low + high) / 2;
+        uint32_t mid = low + (high - low) / 2;
         double ipsMid = measureIps(mid, testIters);
-        double ipsNext = 0.0;
-        if (mid + 1 <= initial)
-            ipsNext = measureIps(mid + 1, testIters);
-
-        std::cout << "Test iterforce=" << mid << ": IPS=" << ipsMid << "\n";
-        if (mid + 1 <= initial)
-            std::cout << "Test iterforce=" << (mid + 1)
-                      << ": IPS=" << ipsNext << "\n";
-
+        double ipsNext = measureIps(mid + 1, testIters);
+        std::cout << "iterforce=" << mid << " IPS=" << ipsMid
+                  << " | " << (mid+1) << " IPS=" << ipsNext << "\n";
         if (ipsMid < ipsNext) {
             low = mid + 1;
-            if (ipsNext > bestIps) {
-                bestIps = ipsNext;
-                best = mid + 1;
-            }
+            if (ipsNext > bestIps) { bestIps = ipsNext; best = mid + 1; }
         } else {
             high = mid;
-            if (ipsMid > bestIps) {
-                bestIps = ipsMid;
-                best = mid;
-            }
+            if (ipsMid > bestIps) { bestIps = ipsMid; best = mid; }
         }
-        std::cout << "Progress: range now [" << low << ", " << high << "]\n";
     }
-
-    std::cout << "Optimal iterforce parameter: " << best
-              << " (IPS = " << bestIps << ")\n";
+    std::cout << "Optimal iterforce=" << best << " IPS=" << bestIps << "\n";
 }
+
 
 
 double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
     uint32_t oldIterforce = options.iterforce;
     options.iterforce = testIterforce;
 
-    uint32_t p = options.exponent;
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
-
     cl_mem inputBuf = clCreateBuffer(
         context.getContext(),
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
@@ -247,23 +224,58 @@ double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
         precompute.getDigitWidth(),
         buffers->digitWidthMaskBuf
     );
-    
+
+    const int barWidth = 40;
+    uint32_t markInterval = std::max<uint32_t>(1, testIters / barWidth);
+    std::cout << "    Running iterforce=" << testIterforce << ": [";
+
     auto start = high_resolution_clock::now();
-    for (uint32_t iter = 0; iter < testIters; ++iter) {
-        nttEngine->forward(inputBuf, iter);
-        nttEngine->inverse(inputBuf, iter);
+    for (uint32_t iter = 1; iter <= testIters; ++iter) {
+        nttEngine->forward(inputBuf, iter - 1);
+        nttEngine->inverse(inputBuf, iter - 1);
         carry.carryGPU(
             inputBuf,
             buffers->blockCarryBuf,
             precompute.getN() * sizeof(uint64_t)
         );
 
-        if ((iter + 1) % options.iterforce == 0) {
+        if (iter % options.iterforce == 0) {
+            std::atomic<bool> finished(false);
+            std::thread spinner([&finished]() {
+                const char sp[4] = {'.','.', '.', '.'};
+                int idx = 0;
+                while (!finished.load()) {
+                    std::cout << "" << sp[idx++] << std::flush;
+                    idx %= 4;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            });
             clFinish(context.getQueue());
+            finished = true;
+            spinner.join();
+            std::cout << "";
+        }
+        if (iter % markInterval == 0) {
+            std::cout << "." << std::flush;
         }
     }
+    std::atomic<bool> finished(false);
+            std::thread spinner([&finished]() {
+                const char sp[4] = {'.','.', '.', '.'};
+                int idx = 0;
+                while (!finished.load()) {
+                    std::cout << "" << sp[idx++] << std::flush;
+                    idx %= 4;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            });
     clFinish(context.getQueue());
+            finished = true;
+            spinner.join();
+            std::cout << "";
     auto end = high_resolution_clock::now();
+
+    std::cout << "]\n";
 
     clReleaseMemObject(inputBuf);
     options.iterforce = oldIterforce;
@@ -271,6 +283,7 @@ double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
     double seconds = duration_cast<duration<double>>(end - start).count();
     return testIters / seconds;
 }
+
 
 
 App::App(int argc, char** argv)
