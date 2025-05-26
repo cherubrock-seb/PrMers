@@ -62,7 +62,7 @@ void printUsage(const char* progName) {
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     //std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
-    std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled, >= 1000, default = 100000)" << std::endl;
+    std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
@@ -159,8 +159,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-res64_display_interval") == 0 && i + 1 < argc) {
             int v = std::atoi(argv[++i]);
-            if (v < 0 || (v > 0 && v < 1000)) {
-                std::cerr << "Error: -res64_display_interval must be 0 (to disable) or >= 1000\n";
+            if (v < 0) {
+                std::cerr << "Error: -res64_display_interval must be 0 (to disable) or > 0\n";
                 std::exit(EXIT_FAILURE);
             }
             opts.res64_display_interval = v;
