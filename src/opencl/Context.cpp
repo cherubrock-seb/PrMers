@@ -184,59 +184,16 @@ void Context::createContext() {
 void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active) {
     cl_int err = CL_SUCCESS;
     unsigned ver = queryCLVersion();
-    bool useThrottle = false;
-    if (ver >= 220) {
-        useThrottle = true;
-    } else {
-        size_t sz = 0;
-        clGetDeviceInfo(device_, CL_DEVICE_EXTENSIONS, 0, nullptr, &sz);
-        std::string exts(sz, '\0');
-        clGetDeviceInfo(device_, CL_DEVICE_EXTENSIONS, sz, &exts[0], nullptr);
-        if (exts.find("cl_khr_throttle_hints") != std::string::npos) {
-            useThrottle = true;
-        }
-    }
+
 #if defined(__APPLE__)
-    queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
+    queue_ = clCreateCommandQueue(context_, device_, 0, &err);
 #else
-    if (ver >= 200){
-        if (useThrottle) {
-            if(cl_queue_throttle_active){
-                const cl_queue_properties props[] = {
-                    CL_QUEUE_PROPERTIES,            CL_QUEUE_PROFILING_ENABLE,
-                    CL_QUEUE_THROTTLE_KHR,          CL_QUEUE_THROTTLE_LOW_KHR,
-                    0
-                };
-                queue_ = clCreateCommandQueueWithProperties(context_, device_,
-                                                            props, &err);
-            
-            }
-            else{
-                const cl_queue_properties props[] = {
-                    CL_QUEUE_PROPERTIES,            CL_QUEUE_PROFILING_ENABLE,
-                    0
-                };
-                queue_ = clCreateCommandQueueWithProperties(context_, device_,
-                                                            props, &err);
-            }
-        } else {
-            const cl_queue_properties props[] = {
-                CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE,
-                0
-            };
-            queue_ = clCreateCommandQueueWithProperties(context_, device_,
-                                                        props, &err);
-        }
-    }
-    else{
-        queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
-    }
+    if (ver >= 200)
+        queue_ = clCreateCommandQueueWithProperties(context_, device_, nullptr, &err);
+    else
+        queue_ = clCreateCommandQueue(context_, device_, 0, &err);
 #endif
-    if (useThrottle && cl_queue_throttle_active) {
-        std::printf(">>> OpenCL queue created **WITH** throttle hint (LOW)\n");
-    } else {
-        std::printf(">>> OpenCL queue created **WITHOUT** throttle hint\n");
-    }
+
     if (err != CL_SUCCESS)
         throw std::runtime_error("Failed to create command queue");
 
@@ -277,7 +234,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
     if(queueSize_ == 18446744073709551615){
         queueSize_=0;
     }
-    std::cout << "Queue preferred size = " << queueSize_ << std::endl;
+    std::cout << "Queue size = " << queueSize_ << std::endl;
 }
 
 void Context::queryDeviceCapabilities() {
