@@ -1569,18 +1569,6 @@ static void compactBits(
 }
 
 
-
-
-#pragma OPENCL EXTENSION cl_khr_printf : warn
-
-#if defined(cl_khr_printf) || (defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ >= 120)
-  #define HAS_PRINTF 1
-#else
-  #define HAS_PRINTF 0
-#endif
-
-
-
 __kernel void kernel_res64_display(
     __global const ulong* x,             
     uint                  exponent,   
@@ -1589,7 +1577,6 @@ __kernel void kernel_res64_display(
     uint                  iter,
     __global uint*        out
 ) {
-#if HAS_PRINTF
     if (get_global_id(0) != 0) return;
     uint wordCount;
     compactBits(x, digitCount, exponent, out, &wordCount);
@@ -1598,8 +1585,4 @@ __kernel void kernel_res64_display(
            out[1],      // haut 32 bits
            out[0]       // bas 32 bits
     );
-#else
-    (void)x; (void)exponent; (void)digitCount;
-    (void)mode; (void)iter; (void)out;
-#endif
 }
