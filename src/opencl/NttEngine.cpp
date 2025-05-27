@@ -194,7 +194,7 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
             m = 2;
             clSetKernelArg(kernel_radix4_radix2_square_radix2_radix4, 0, sizeof(cl_mem), &buf_x);
             kernelsExecuted++;
-            executeKernelAndDisplay(queue_, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize,
+            executeKernelAndDisplay(queue_, kernel_radix4_radix2_square_radix2_radix4, buf_x, (workers*4)/8, localSize3,
                 "kernel_radix4_radix2_square_radix2_radix4 (m=" + std::to_string(m) + ")",  profiling,true);
        }
        else if(mm==4){
