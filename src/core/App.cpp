@@ -240,39 +240,20 @@ double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
         );
 
         if (iter % options.iterforce == 0) {
-            std::atomic<bool> finished(false);
-            std::thread spinner([&finished]() {
-                const char sp[4] = {'.','.', '.', '.'};
-                int idx = 0;
-                while (!finished.load()) {
-                    std::cout << "" << sp[idx++] << std::flush;
-                    idx %= 4;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            });
+            
             clFinish(context.getQueue());
-            finished = true;
-            spinner.join();
+            //usleep(10000);
+            //clFlush(context.getQueue());
+
             std::cout << "";
         }
         if (iter % markInterval == 0) {
             std::cout << "." << std::flush;
         }
     }
-    std::atomic<bool> finished(false);
-            std::thread spinner([&finished]() {
-                const char sp[4] = {'.','.', '.', '.'};
-                int idx = 0;
-                while (!finished.load()) {
-                    std::cout << "" << sp[idx++] << std::flush;
-                    idx %= 4;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            });
+
     clFinish(context.getQueue());
-            finished = true;
-            spinner.join();
-            std::cout << "";
+    //usleep(10000);
     auto end = high_resolution_clock::now();
 
     std::cout << "]\n";
@@ -464,29 +445,30 @@ int App::run() {
     uint32_t lastIter = resumeIter;
     uint32_t startIter = resumeIter;
     bool firstIter = true;
-    if(options.iterforce == 0){
-        options.iterforce = 400;
-    }
+    
+    std::chrono::microseconds   totalUs_{0};
+    auto t0 = std::chrono::high_resolution_clock::now();
+    int unitWait = 0;
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
-
+        
         queued += nttEngine->forward(buffers->input, iter);
         /*if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; spinner.displayProgress(iter - resumeIter,
                                    totalIters,
                                    timer.elapsed(),
                                    p);}*/
-
+        //usleep(1500);
         queued += nttEngine->inverse(buffers->input, iter);
-        
-
+        //usleep(1500);
+       
         carry.carryGPU(
             buffers->input,
             buffers->blockCarryBuf,
             precompute.getN() * sizeof(uint64_t)
         );
         queued += 2;
-
+        
         if ((options.res64_display_interval != 0)&& ( ((iter+1) % options.res64_display_interval) == 0 )) {
             cl_kernel dispK = kernels->getKernel("kernel_res64_display");
             cl_uint modeInt = (options.mode=="prp") ? 1u : 0u;
@@ -514,7 +496,29 @@ int App::run() {
         auto now = high_resolution_clock::now();
           
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
-            clFinish(queue);
+            clFinish(context.getQueue());
+            //std::cout << "800 usleep(1500) are done"<< std::endl;
+
+            //if (totalUs_.count() == 0) {
+            /*    auto t3 = std::chrono::high_resolution_clock::now();
+                clFinish(context.getQueue());
+                auto t4 = std::chrono::high_resolution_clock::now();
+                
+                auto t1 = std::chrono::high_resolution_clock::now();
+                totalUs_ = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+                std::chrono::microseconds totalClfinish_ = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3);
+                
+                unitWait = totalUs_.count()/(4*(options.iterforce+1));
+                std::cout << "totalUs_.count() us " << totalUs_.count() << std::endl;
+                std::cout << "totalClfinish_.count() us " << totalClfinish_.count() << std::endl;
+                
+                t0 = std::chrono::high_resolution_clock::now();*/
+                //std::cout << "WAIT IS " << unitWait << std::endl;
+                //clReleaseEvent(markerEvent);
+            //}
+            /*else{
+                usleep(1123765);
+            }*/
             
             if ((((now - lastDisplay >= seconds(10)))) ) {
                 std::string res64_x;
