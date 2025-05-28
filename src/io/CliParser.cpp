@@ -204,6 +204,12 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";
         }
     }
+    if(opts.iterforce == 0){
+        opts.iterforce = 400;
+    }
+    if(opts.enqueue_max == 0){
+        opts.enqueue_max = opts.iterforce*64;
+    }
 
 /*    if (opts.exponent == 0) {
         std::cerr << "Error: No exponent provided.\n";
