@@ -212,14 +212,36 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
                                                             props, &err);
             }
         } else {
-            std::cout << "Setting CL_QUEUE_SIZE=" << enqueueMax << std::endl;
-            const cl_queue_properties props[] = {
-                CL_QUEUE_PROPERTIES, 0,
-                CL_QUEUE_SIZE,       enqueueMax,
-                0
-            };
-            queue_ = clCreateCommandQueueWithProperties(context_, device_,
+            size_t preferredSize = 0, maxSize = 0;
+                clGetDeviceInfo(device_,
+                                CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE,
+                                sizeof(preferredSize),
+                                &preferredSize,
+                                nullptr);
+                clGetDeviceInfo(device_,
+                                CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE,
+                                sizeof(maxSize),
+                                &maxSize,
+                                nullptr);
+            
+            if(enqueueMax<maxSize){
+                std::cout << "Setting CL_QUEUE_SIZE=" << enqueueMax << std::endl;
+                const cl_queue_properties props[] = {
+                    CL_QUEUE_PROPERTIES, 0,
+                    CL_QUEUE_SIZE,       enqueueMax,
+                    0
+                };
+                queue_ = clCreateCommandQueueWithProperties(context_, device_,
                                                         props, &err);
+            }
+            else{
+                const cl_queue_properties props[] = {
+                    CL_QUEUE_PROPERTIES, 0,
+                    0
+                };
+                queue_ = clCreateCommandQueueWithProperties(context_, device_,
+                                                        props, &err);
+            }
         }
     }
     else{
