@@ -496,7 +496,16 @@ int App::run() {
         auto now = high_resolution_clock::now();
           
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
-            clFinish(context.getQueue());
+            char dummy;
+            clEnqueueReadBuffer(
+                    context.getQueue(),
+                    buffers->input,
+                    CL_TRUE, 0,
+                    sizeof(dummy),
+                    &dummy,
+                    0, nullptr, nullptr
+                );
+            //clFinish(context.getQueue());
             //std::cout << "800 usleep(1500) are done"<< std::endl;
 
             //if (totalUs_.count() == 0) {
