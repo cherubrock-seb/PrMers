@@ -2172,7 +2172,7 @@ int main(int argc, char** argv) {
     if(enqueue_max>0){//line command parameteur 
         FINISH_THRESHOLD = enqueue_max;
         std::cout  
-            << "Device on‐device queue set to enqueue_max = " << enqueue_max << "\n";
+            << "Device on-device queue set to enqueue_max = " << enqueue_max << "\n";
     }
     else{
         char vendorBuf[256] = {0};
@@ -2198,7 +2198,7 @@ int main(int argc, char** argv) {
                                 &maxSize,
                                 nullptr);
                 std::cout  
-                << "Device on‐device queue preferred=" << preferredSize
+                << "Device on-device queue preferred=" << preferredSize
                 << "  max=" << maxSize << "\n";
                 FINISH_THRESHOLD = preferredSize;
             #else

@@ -21,7 +21,7 @@ public:
     cl_mem digitInvWeightBuf; // inverse digit weights
     cl_mem twiddleBuf;        // forward twiddles
     cl_mem invTwiddleBuf;     // inverse twiddles
-    cl_mem wiBuf;             // inverse‐NTT root powers
+    cl_mem wiBuf;             // inverse-NTT root powers
     cl_mem blockCarryBuf;
     cl_mem digitWidthMaskBuf;
     

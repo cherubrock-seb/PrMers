@@ -113,7 +113,7 @@ Below is a typical run of `PrMers`.
 sebastien@cherubrock:~/prmers$ ./prmers 100003
 No valid entry found in worktodo.txt
 GPU Vendor: ADVANCED MICRO DEVICES, INC.
-Device on‐device queue preferred=262144  max=8388608
+Device on-device queue preferred=262144  max=8388608
 Queue size = 16384
 Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
 Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024, 1024, 1024
@@ -122,7 +122,7 @@ Transform Size = 4096
 No valid entry found in worktodo.txt
 Building OpenCL program with options:  -DWG_SIZE=16 -DLOCAL_PROPAGATION_DEPTH=8 -DCARRY_WORKER=512 -DLOCAL_PROPAGATION_DEPTH_DIV4=2 -DLOCAL_PROPAGATION_DEPTH_DIV4_MIN=1 -DLOCAL_PROPAGATION_DEPTH_DIV2=2 -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN=3 -DWORKER_NTT=1024 -DWORKER_NTT_2_STEPS=256 -DMODULUS_P=100003 -DTRANSFORM_SIZE_N=4096 -DLOCAL_SIZE=256 -DLOCAL_SIZE2=256 -DLOCAL_SIZE3=256
 OpenCL program built successfully from: /home/sebastien/prmers/kernels/prmers.cl
-PrMers : GPU‐accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)
+PrMers : GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)
 Testing exponent : 100003
 Device OpenCL ID : 0
 Mode : PRP
