@@ -134,7 +134,7 @@ Program::Program(const opencl::Context& context, cl_device_id device,
 
     }
     catch (const std::out_of_range& e) {
-        std::cerr << "[WARNING] Indice hors‐limites pour les twiddles : "
+        std::cerr << "[WARNING] Indice hors-limites pour les twiddles : "
                 << e.what() << std::endl;
         //throw;
     }
