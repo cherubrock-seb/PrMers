@@ -28,8 +28,8 @@ public:
 
 private:
     const Context& ctx_;
-    std::vector<Stage> forwardPipeline_;
-    std::vector<Stage> inversePipeline_;
+    //std::vector<Stage> forwardPipeline_;
+    //std::vector<Stage> inversePipeline_;
     cl_command_queue      queue_;
     Kernels&              kernels_;
     Buffers&              buffers_;

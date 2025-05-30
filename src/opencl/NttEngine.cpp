@@ -22,7 +22,9 @@ NttEngine::NttEngine(const Context& ctx,
     , kernels_(kernels)
     , buffers_(buffers)
     , pre_(precompute)
-{}
+{
+    
+}
 
 static void executeKernelAndDisplay(cl_command_queue queue,
                                     cl_kernel kernel,
