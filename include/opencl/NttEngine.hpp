@@ -10,7 +10,7 @@
 #include "opencl/Context.hpp"
 #include "opencl/Buffers.hpp"
 #include "opencl/Kernels.hpp"
-
+#include "opencl/NttPipeline.hpp"
 namespace opencl {
 
 class NttEngine {
@@ -28,6 +28,8 @@ public:
 
 private:
     const Context& ctx_;
+    std::vector<Stage> forwardPipeline_;
+    std::vector<Stage> inversePipeline_;
     cl_command_queue      queue_;
     Kernels&              kernels_;
     Buffers&              buffers_;
