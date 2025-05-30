@@ -355,6 +355,7 @@ App::App(int argc, char** argv)
         "kernel_inverse_ntt_radix4_mm_last",
         "kernel_ntt_radix4_last_m1",
         "kernel_ntt_radix4_mm_first",
+        "kernel_ntt_radix5_mm_first",
         "kernel_ntt_radix4_mm_m8",
         "kernel_ntt_radix4_mm_m4",
         "kernel_inverse_ntt_radix4_m1",
