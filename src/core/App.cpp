@@ -343,8 +343,6 @@ App::App(int argc, char** argv)
     kernels.emplace(program->getProgram(), context.getQueue());
     
 
-    nttEngine.emplace(context, *kernels, *buffers, precompute);
-
 
     std::vector<std::string> kernelNames = {
         "kernel_sub2",
@@ -371,6 +369,8 @@ App::App(int argc, char** argv)
     for (auto& name : kernelNames) {
         kernels->createKernel(name);
     }
+    nttEngine.emplace(context, *kernels, *buffers, precompute);
+
 
     std::signal(SIGINT, handle_sigint);
 }
