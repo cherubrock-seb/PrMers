@@ -22,11 +22,18 @@ struct NttStage {
     std::string              name;
 };
 
-inline void setStageArgs(const NttStage& s) {
+inline void setStageArgs(NttStage& s, cl_mem buf_x) {
     for (cl_uint i = 0; i < s.args.size(); ++i) {
-        const auto& A = s.args[i];
-        if (!A.data.empty())
+        auto& A = s.args[i];
+        if (!A.data.empty()) {
+            if (A.size == sizeof(cl_mem)) {
+                cl_mem* candidate = reinterpret_cast<cl_mem*>(A.data.data());
+                if (*candidate == nullptr) {
+                    std::memcpy(A.data.data(), &buf_x, sizeof(cl_mem));
+                }
+            }
             clSetKernelArg(s.kernel, i, A.size, A.data.data());
+        }
     }
 }
 
