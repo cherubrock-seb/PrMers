@@ -37,7 +37,7 @@ static std::vector<uint8_t> toBytes(const T& x) {
     return b;
 }
 
-std::vector<NttStage> buildForwardPipeline(
+inline std::vector<NttStage> buildForwardPipeline(
     cl_uint n,
     cl_command_queue queue,
     cl_mem buf_x,
@@ -206,7 +206,7 @@ std::vector<NttStage> buildForwardPipeline(
     return v;
 }
 
-std::vector<NttStage> buildInversePipeline(
+inline std::vector<NttStage> buildInversePipeline(
     cl_uint n,
     cl_command_queue queue,
     cl_mem buf_x,
