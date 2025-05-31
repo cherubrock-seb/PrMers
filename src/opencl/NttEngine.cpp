@@ -64,7 +64,7 @@ NttEngine::NttEngine(const Context& ctx,
 
         cl_mem buf_wi  = buffers_.invTwiddleBuf;
         cl_mem buf_diw = buffers_.digitInvWeightBuf;
-
+        int lastOutputInv = forward_pipeline.back().outputInverse;
         inverse_pipeline = buildInversePipeline(
             n,
             queue_,
@@ -77,7 +77,8 @@ NttEngine::NttEngine(const Context& ctx,
             buf_wi,
             buf_diw,
             ls0,
-            ls2
+            ls2,
+            lastOutputInv
         );
     }
 
@@ -95,8 +96,9 @@ static void executeKernelAndDisplay(cl_command_queue queue,
     cl_int err = clEnqueueNDRangeKernel(
         queue, kernel, 1, nullptr, &workers, localSize,
         0, nullptr, nullptr);
+    //std::cerr << "Kernel " << kernelName << std::endl;
     if (err != CL_SUCCESS) {
-        std::cerr << util::getCLErrorString(err)
+        std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
                   << " (" << err << ")\n";
     }
 }
@@ -106,12 +108,12 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
     int executed = 0;
     for (auto& stage : forward_pipeline) {
         setStageArgs(stage, buf_x);
+        int scale = stage.globalScale;
+        size_t base = n;
         size_t workers;
-        if (stage.globalDiv == 0) {
-            workers = (n/4) * 2;
-        } else {
-            workers = (n/4) / stage.globalDiv;
-        }
+        
+        workers = base / static_cast<size_t>(scale);
+        
         executeKernelAndDisplay(
             queue_,
             stage.kernel,
@@ -132,8 +134,12 @@ int NttEngine::inverse(cl_mem buf_x, uint64_t /*iter*/) {
     int executed = 0;
     for (auto& stage : inverse_pipeline) {
         setStageArgs(stage, buf_x);
-        size_t workers = (n/4) / stage.globalDiv;
-
+        int scale = stage.globalScale;
+        size_t base = n;
+        size_t workers;
+        
+        workers = base / static_cast<size_t>(scale);
+        
         executeKernelAndDisplay(
             queue_,
             stage.kernel,
