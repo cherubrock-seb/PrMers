@@ -105,6 +105,7 @@ inline std::vector<NttStage> buildForwardPipeline(
     cl_kernel k_last_m1_n4,
     cl_kernel k_r2_s_r2_r4,
     cl_kernel k_radix2_square_radix2,
+    cl_kernel k_mm_2_first,
     cl_mem buf_w,
     cl_mem buf_dw,
     const size_t* ls0,
@@ -113,11 +114,16 @@ inline std::vector<NttStage> buildForwardPipeline(
 ) {
 
     std::vector<RadixOp> all = {
+     { RadixOp::First,   16, 16,
+        k_mm_2_first,        ls2, "kernel_ntt_radix4_mm_2steps_first",
+         [](auto m0, auto nn){ return m0>32; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
+      
       { RadixOp::First,   4, 8,
         k_first,        ls0, "kernel_ntt_radix4_mm_first",
         /*cond*/ [](auto m0, auto){ return m0>=2; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
-
+        
       { RadixOp::Any,     16, 16,
         k_mm_2,         ls2, "kernel_ntt_radix4_mm_2steps",
         [](auto m0, auto){ return m0>32 && m0%4==0; },
@@ -176,18 +182,23 @@ inline std::vector<NttStage> buildForwardPipeline(
     else{
         cl_uint m0 = n;
 
-        for (auto& op : all) {
-        if (
-            op.position==RadixOp::First
-            && op.condition(m0,n)
-            && m0 % op.localFactor == 0)
-            {
-                m0 /= op.localFactor;
-                v.push_back(makeStage(op,m0,buf_x,buf_w,buf_dw));
-               // m0 /= op.localFactor;
-                break;
+        auto it = std::find_if(all.begin(), all.end(), [&](auto& op){
+                return op.position==RadixOp::First
+                    && op.condition(m0,n)
+                    && m0 % op.localFactor==0;
+            });
+            if (it!=all.end()) {
+                if(it->name=="kernel_ntt_radix4_mm_2steps_first"){
+                        m0 /= 4;
+                }
+                else{
+                    m0 /= it->localFactor;
+                }
+                v.push_back(makeStage(*it,m0,buf_x,buf_w,buf_dw));
+                if(it->name=="kernel_ntt_radix4_mm_2steps_first"){
+                        m0 /= 4;
+                }
             }
-        }
         
         while (m0 > 8) {
             auto it = std::find_if(all.begin(), all.end(), [&](auto& op){
