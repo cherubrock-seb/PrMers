@@ -163,11 +163,11 @@ inline std::vector<NttStage> buildForwardPipeline(
         k_radix2_square_radix2, ls0, "kernel_ntt_radix2_square_radix2",
         [](auto m0, auto){ return m0==2;},
         { ArgKind::BufX } ,2},
-/*
-        { RadixOp::Last,    4, 8,
-        k_r4_s_r4,      ls3, "kernel_ntt_radix4_square_radix4",
+
+        { RadixOp::Last,    4, 4,
+        k_r4_s_r4,      ls0, "kernel_ntt_radix4_square_radix4",
         [](auto m0, auto){ return m0==4; },
-        { ArgKind::BufX} ,4},*/
+        { ArgKind::BufX} ,4},
 
       { RadixOp::Last,    4, 4,
         k_last_m1,      ls0, "kernel_ntt_radix4_last_m1",
