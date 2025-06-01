@@ -99,8 +99,14 @@ Program::Program(const opencl::Context& context, cl_device_id device,
       << " -DLOCAL_SIZE="                  << ls
       << " -DLOCAL_SIZE2="                 << ls2
       << " -DLOCAL_SIZE3="                 << ls3;
-    size_t idx6 = 6*2, idx7 = 7*2, idx8 = 8*2;
-    
+    size_t idx1 = 1 * 2;
+    size_t idx2 = 2 * 2;
+    size_t idx3 = 3 * 2;
+    size_t idx4 = 4 * 2;
+    size_t idx5 = 5 * 2;
+    size_t idx6 = 6 * 2;
+    size_t idx7 = 7 * 2;
+    size_t idx8 = 8 * 2;
 
     try {
         const auto& tw   = pre.twiddles();
@@ -129,8 +135,20 @@ Program::Program(const opencl::Context& context, cl_device_id device,
         << " -DWI15_2_Y="  << i_tw[idx8+1]
         << " -DW6="  << i_tw[6]
         << " -DW7="  << i_tw[7]
-        << " -DW10="  << i_tw[10];
+        << " -DW10="  << i_tw[10]
+        << " -DW1_01_Y="    << tw[idx1]
+        << " -DW1_01_X="    << tw[idx2]
+        << " -DW1_02_X="    << tw[idx3]
+        << " -DW1_2_X="     << tw[idx3]
+        << " -DW1_01_Y_2="  << tw[idx2]
+        << " -DW1_2_Y="     << tw[idx3]
 
+        << " -DWI4_01_Y="   << i_tw[idx4]
+        << " -DWI4_01_X="   << i_tw[idx5]
+        << " -DWI4_02_X="   << i_tw[idx6]
+        << " -DWI4_2_X="    << i_tw[idx6]
+        << " -DWI4_01_Y_2=" << i_tw[idx5]
+        << " -DWI4_2_Y="    << i_tw[idx6];
 
     }
     catch (const std::out_of_range& e) {

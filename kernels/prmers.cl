@@ -890,6 +890,121 @@ __kernel void kernel_ntt_radix4_mm_m8(__global ulong2* restrict x,
     x[k] = (ulong2)(c.s3, c2.s3);
 }
 
+
+__kernel void kernel_ntt_radix4_mm_m16(__global ulong2* restrict x,
+                                       __global ulong2* restrict w)
+{
+    uint k = get_global_id(0) * 2;
+    const uint j = k & 15;
+    const uint i = 4 * (k - j) + j;
+    k = (96 + 3 * j) >> 1;
+
+    const ulong2 tw1_a  = w[k];
+    ulong2 tw1_bb = w[k + 1];
+    const ulong2 tw1_cc = w[k + 2];
+
+    ulong tw2_a = tw1_bb.s0;
+    tw1_bb = (ulong2)(tw1_bb.s1, tw1_cc.s0);
+
+    const uint i0 = i >> 1;
+    const uint i1 = i0 + 8;
+    const uint i2 = i1 + 8;
+    k = i2 + 8;
+
+    ulong2 v0 = x[i0];
+    ulong2 v1 = x[i1];
+    const ulong2 v2 = x[i2];
+    const ulong2 v3 = x[k];
+
+    ulong4 c  = (ulong4)(v0.s0, v1.s0, v2.s0, v3.s0);
+    ulong4 c2 = (ulong4)(v0.s1, v1.s1, v2.s1, v3.s1);
+
+    v0.s0 = modAdd(c.s0, c.s2);
+    v0.s1 = modAdd(c.s1, c.s3);
+    v1.s0 = modSub(c.s0, c.s2);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
+    c.s0  = modAdd(v0.s0, v0.s1);
+    c.s1  = modSub(v0.s0, v0.s1);
+    c.s2  = modAdd(v1.s0, v1.s1);
+    c.s3  = modSub(v1.s0, v1.s1);
+
+    c = modMul3_2(c, tw1_a, tw2_a);
+
+    v0.s0 = modAdd(c2.s0, c2.s2);
+    v0.s1 = modAdd(c2.s1, c2.s3);
+    v1.s0 = modSub(c2.s0, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
+    c2.s0  = modAdd(v0.s0, v0.s1);
+    c2.s1  = modSub(v0.s0, v0.s1);
+    c2.s2  = modAdd(v1.s0, v1.s1);
+    c2.s3  = modSub(v1.s0, v1.s1);
+
+    c2 = modMul3_2(c2, tw1_bb, tw1_cc.s1);
+
+    x[i0] = (ulong2)(c.s0, c2.s0);
+    x[i1] = (ulong2)(c.s1, c2.s1);
+    x[i2] = (ulong2)(c.s2, c2.s2);
+    x[k]   = (ulong2)(c.s3, c2.s3);
+}
+
+__kernel void kernel_ntt_radix4_mm_m32(__global ulong2* restrict x,
+                                       __global ulong2* restrict w)
+{
+    uint k = get_global_id(0) * 2;
+    const uint j = k & 31;
+    const uint i = 4 * (k - j) + j;
+    k = (192 + 3 * j) >> 1;
+
+    const ulong2 tw1_a  = w[k];
+    ulong2 tw1_bb = w[k + 1];
+    const ulong2 tw1_cc = w[k + 2];
+
+    ulong tw2_a = tw1_bb.s0;
+    tw1_bb = (ulong2)(tw1_bb.s1, tw1_cc.s0);
+
+    const uint i0 = i >> 1;
+    const uint i1 = i0 + 16;
+    const uint i2 = i1 + 16;
+    k = i2 + 16;
+
+    ulong2 v0 = x[i0];
+    ulong2 v1 = x[i1];
+    const ulong2 v2 = x[i2];
+    const ulong2 v3 = x[k];
+
+    ulong4 c  = (ulong4)(v0.s0, v1.s0, v2.s0, v3.s0);
+    ulong4 c2 = (ulong4)(v0.s1, v1.s1, v2.s1, v3.s1);
+
+    v0.s0 = modAdd(c.s0, c.s2);
+    v0.s1 = modAdd(c.s1, c.s3);
+    v1.s0 = modSub(c.s0, c.s2);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
+    c.s0  = modAdd(v0.s0, v0.s1);
+    c.s1  = modSub(v0.s0, v0.s1);
+    c.s2  = modAdd(v1.s0, v1.s1);
+    c.s3  = modSub(v1.s0, v1.s1);
+
+    c = modMul3_2(c, tw1_a, tw2_a);
+
+    v0.s0 = modAdd(c2.s0, c2.s2);
+    v0.s1 = modAdd(c2.s1, c2.s3);
+    v1.s0 = modSub(c2.s0, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
+    c2.s0  = modAdd(v0.s0, v0.s1);
+    c2.s1  = modSub(v0.s0, v0.s1);
+    c2.s2  = modAdd(v1.s0, v1.s1);
+    c2.s3  = modSub(v1.s0, v1.s1);
+
+    c2 = modMul3_2(c2, tw1_bb, tw1_cc.s1);
+
+    x[i0] = (ulong2)(c.s0, c2.s0);
+    x[i1] = (ulong2)(c.s1, c2.s1);
+    x[i2] = (ulong2)(c.s2, c2.s2);
+    x[k]   = (ulong2)(c.s3, c2.s3);
+}
+
+
+
 __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                                                __global ulong* restrict wi) {
     const ulong k = get_global_id(0);
@@ -1156,7 +1271,7 @@ __kernel void kernel_ntt_radix4_mm_2steps_first(__global ulong* restrict x,
         local_x[write_index+1]  = x[i + m];
         local_x[write_index+2]  = x[i + (m << 1)];
         local_x[write_index+3]  = x[i + ((m << 1) + m)];*/
-        
+
         local_x[write_index]      =  modMul(x[i],digit_weight[i]);
         local_x[write_index+1]    =  modMul(x[i+m],digit_weight[i+m]);
         local_x[write_index+2]    =  modMul(x[i + (m << 1)],digit_weight[i + (m << 1)]);
@@ -1475,6 +1590,7 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
   #define WI15_2_Y 0
 #endif
 
+
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     __global ulong2* restrict x)
 {
@@ -1561,6 +1677,125 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     }
 
 }
+#ifndef W1_01_Y
+#define W1_01_Y 0
+#endif
+#ifndef W1_01_X
+#define W1_01_X 0
+#endif
+#ifndef W1_02_X
+#define W1_02_X 0
+#endif
+#ifndef W1_2_X
+#define W1_2_X 0
+#endif
+#ifndef W1_01_Y_2
+#define W1_01_Y_2 0
+#endif
+#ifndef W1_2_Y
+#define W1_2_Y 0
+#endif
+#ifndef WI4_01_Y
+#define WI4_01_Y 0
+#endif
+#ifndef WI4_01_X
+#define WI4_01_X 0
+#endif
+#ifndef WI4_02_X
+#define WI4_02_X 0
+#endif
+#ifndef WI4_2_X
+#define WI4_2_X 0
+#endif
+#ifndef WI4_01_Y_2
+#define WI4_01_Y_2 0
+#endif
+#ifndef WI4_2_Y
+#define WI4_2_Y 0
+#endif
+
+__kernel void kernel_ntt_radix4_square_radix4(__global ulong2* restrict x)
+{
+    const uint gid = get_global_id(0);
+    const uint lid = get_local_id(0);
+    const uint global_base = gid * VECTORS_PER_WORKITEM;
+    const uint local_base  = lid * VECTORS_PER_WORKITEM;
+    __local ulong2 localX[LOCAL_SIZE3 * VECTORS_PER_WORKITEM];
+    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
+        localX[local_base + v] = x[global_base + v];
+    }
+    {
+        ulong u0 = localX[local_base + 0].s0;
+        ulong u1 = localX[local_base + 1].s0;
+        ulong u2 = localX[local_base + 2].s0;
+        ulong u3 = localX[local_base + 3].s0;
+        ulong a = modAdd(u0, u2);
+        ulong b = modAdd(u1, u3);
+        ulong c = modSub(u0, u2);
+        ulong d = modMuli(modSub(u1, u3));
+        localX[local_base + 0].s0 = modAdd(a, b);
+        localX[local_base + 1].s0 = modMul(modSub(a, b), W1_01_Y);
+        localX[local_base + 2].s0 = modMul(modAdd(c, d), W1_01_X);
+        localX[local_base + 3].s0 = modMul(modSub(c, d), W1_02_X);
+    }
+    {
+        ulong u0 = localX[local_base + 0].s1;
+        ulong u1 = localX[local_base + 1].s1;
+        ulong u2 = localX[local_base + 2].s1;
+        ulong u3 = localX[local_base + 3].s1;
+        ulong a = modAdd(u0, u2);
+        ulong b = modAdd(u1, u3);
+        ulong c = modSub(u0, u2);
+        ulong d = modMuli(modSub(u1, u3));
+        localX[local_base + 0].s1 = modAdd(a, b);
+        localX[local_base + 1].s1 = modMul(modSub(a, b), W1_2_X);
+        localX[local_base + 2].s1 = modMul(modAdd(c, d), W1_01_Y_2);
+        localX[local_base + 3].s1 = modMul(modSub(c, d), W1_2_Y);
+    }
+    for (int i = 0; i < 4; ++i) {
+        ulong s = modAdd(localX[local_base + i].s0, localX[local_base + i].s1);
+        ulong d = modSub(localX[local_base + i].s0, localX[local_base + i].s1);
+        s = modMul(s, s);
+        d = modMul(d, d);
+        localX[local_base + i].s0 = modAdd(s, d);
+        localX[local_base + i].s1 = modSub(s, d);
+    }
+    {
+        ulong u0 = localX[local_base + 0].s0;
+        ulong u1 = localX[local_base + 1].s0;
+        ulong u2 = localX[local_base + 2].s0;
+        ulong u3 = localX[local_base + 3].s0;
+        ulong a = modAdd(u0, u2);
+        ulong b = modAdd(u1, u3);
+        ulong c = modSub(u0, u2);
+        ulong d = modMuli(modSub(u1, u3));
+        localX[local_base + 0].s0 = modAdd(a, b);
+        localX[local_base + 1].s0 = modMul(modSub(a, b), WI4_01_Y);
+        localX[local_base + 2].s0 = modMul(modAdd(c, d), WI4_01_X);
+        localX[local_base + 3].s0 = modMul(modSub(c, d), WI4_02_X);
+    }
+    {
+        ulong u0 = localX[local_base + 0].s1;
+        ulong u1 = localX[local_base + 1].s1;
+        ulong u2 = localX[local_base + 2].s1;
+        ulong u3 = localX[local_base + 3].s1;
+        ulong a = modAdd(u0, u2);
+        ulong b = modAdd(u1, u3);
+        ulong c = modSub(u0, u2);
+        ulong d = modMuli(modSub(u1, u3));
+        localX[local_base + 0].s1 = modAdd(a, b);
+        localX[local_base + 1].s1 = modMul(modSub(a, b), WI4_2_X);
+        localX[local_base + 2].s1 = modMul(modAdd(c, d), WI4_01_Y_2);
+        localX[local_base + 3].s1 = modMul(modSub(c, d), WI4_2_Y);
+    }
+    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
+        x[global_base + v] = localX[local_base + v];
+    }
+}
+
+
+
+
 
 __kernel void kernel_pointwise_mul(__global ulong* a,
                                    __global const ulong* b) {
