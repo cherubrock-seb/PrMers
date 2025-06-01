@@ -44,11 +44,14 @@ NttEngine::NttEngine(const Context& ctx,
             kernels_.getKernel("kernel_ntt_radix4_mm_3steps"),
             kernels_.getKernel("kernel_ntt_radix4_mm_m4"),
             kernels_.getKernel("kernel_ntt_radix4_mm_m8"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m16"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m32"),
             kernels_.getKernel("kernel_ntt_radix4_last_m1"),
             kernels_.getKernel("kernel_ntt_radix4_last_m1_n4"),
             kernels_.getKernel("kernel_ntt_radix4_radix2_square_radix2_radix4"),
             kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
             kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
+            kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
             buf_w,
             buf_dw,
             ls0,
@@ -97,7 +100,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
     cl_int err = clEnqueueNDRangeKernel(
         queue, kernel, 1, nullptr, &workers, localSize,
         0, nullptr, nullptr);
-   // std::cerr << "Kernel " << kernelName << std::endl;
+    //std::cerr << "Kernel " << kernelName << std::endl;
     if (err != CL_SUCCESS) {
         std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
                   << " (" << err << ")\n";
