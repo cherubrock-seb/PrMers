@@ -1004,13 +1004,21 @@ __kernel void kernel_ntt_radix4_mm_m32(__global ulong2* restrict x,
 }
 
 
+#ifndef WI6
+  #define WI6 0
+#endif
+#ifndef WI7
+  #define WI7 0
+#endif
+#ifndef WI8
+  #define WI8 0
+#endif
 
-__kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
-                                               __global ulong* restrict wi) {
+__kernel void kernel_inverse_ntt_radix4_m1(__global ulong4* restrict x) {
     const ulong k = get_global_id(0);
-    ulong4 coeff = vload4(0, x + 4 * k);
+    ulong4 coeff = x[k];
 
-    ulong4 u = modMul3_2(coeff, vload2(0, wi + 6), wi[8]);
+    ulong4 u = modMul3_2(coeff,(ulong2)(WI6,WI7), WI8);
     
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
@@ -1020,7 +1028,7 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong* restrict x,
                               modAdd(v1, v3),
                               modSub(v0, v2),
                               modSub(v1, v3) );
-    vstore4(result, 0, x + 4 * k);
+    x[k] = result;
 }
 
 __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
