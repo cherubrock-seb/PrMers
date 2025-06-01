@@ -262,6 +262,7 @@ inline std::vector<NttStage> buildInversePipeline(
     cl_kernel k_i_mm_2,
     cl_kernel k_i_mm,
     cl_kernel k_i_mm_last,
+    cl_kernel k_i_mm_2_last,
     cl_mem buf_wi,
     cl_mem buf_diw,
     const size_t* ls0,
@@ -289,6 +290,12 @@ inline std::vector<NttStage> buildInversePipeline(
         k_i_mm,        ls0, "kernel_inverse_ntt_radix4_mm",
         [](auto m0, auto nn){ return m0 < nn/4 && m0%2==0; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   16,  16,
+        k_i_mm_2_last,    ls2, "kernel_ntt_radix4_inverse_mm_2steps_last",
+        [](auto m0, auto nn){ return m0 == nn/16; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW,ArgKind::ParamM },
         /*outputInverse*/ 0
       },
       { RadixOp::Last,   4,  8,
@@ -332,7 +339,7 @@ inline std::vector<NttStage> buildInversePipeline(
         }
         
         
-        while (m0 <= (unsigned)(n/16)) {
+        while (m0 < (unsigned)(n/16)) {
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
@@ -343,7 +350,7 @@ inline std::vector<NttStage> buildInversePipeline(
             m0 *= it->localFactor;
                 
         }
-        if (m0 == n/4 || n == 8)  {
+        if (m0 >= n/16 || n == 8)  {
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Last
                     && op.condition(m0,n);
