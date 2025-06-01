@@ -1722,83 +1722,34 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
 #define WI4_2_Y 0
 #endif
 
-__kernel void kernel_ntt_radix4_square_radix4(__global ulong2* restrict x)
+__kernel void kernel_ntt_radix4_square_radix4(__global ulong4* restrict x)
 {
-    const uint gid = get_global_id(0);
-    const uint lid = get_local_id(0);
-    const uint global_base = gid * VECTORS_PER_WORKITEM;
-    const uint local_base  = lid * VECTORS_PER_WORKITEM;
-    __local ulong2 localX[LOCAL_SIZE3 * VECTORS_PER_WORKITEM];
-    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
-        localX[local_base + v] = x[global_base + v];
-    }
-    {
-        ulong u0 = localX[local_base + 0].s0;
-        ulong u1 = localX[local_base + 1].s0;
-        ulong u2 = localX[local_base + 2].s0;
-        ulong u3 = localX[local_base + 3].s0;
-        ulong a = modAdd(u0, u2);
-        ulong b = modAdd(u1, u3);
-        ulong c = modSub(u0, u2);
-        ulong d = modMuli(modSub(u1, u3));
-        localX[local_base + 0].s0 = modAdd(a, b);
-        localX[local_base + 1].s0 = modMul(modSub(a, b), W1_01_Y);
-        localX[local_base + 2].s0 = modMul(modAdd(c, d), W1_01_X);
-        localX[local_base + 3].s0 = modMul(modSub(c, d), W1_02_X);
-    }
-    {
-        ulong u0 = localX[local_base + 0].s1;
-        ulong u1 = localX[local_base + 1].s1;
-        ulong u2 = localX[local_base + 2].s1;
-        ulong u3 = localX[local_base + 3].s1;
-        ulong a = modAdd(u0, u2);
-        ulong b = modAdd(u1, u3);
-        ulong c = modSub(u0, u2);
-        ulong d = modMuli(modSub(u1, u3));
-        localX[local_base + 0].s1 = modAdd(a, b);
-        localX[local_base + 1].s1 = modMul(modSub(a, b), W1_2_X);
-        localX[local_base + 2].s1 = modMul(modAdd(c, d), W1_01_Y_2);
-        localX[local_base + 3].s1 = modMul(modSub(c, d), W1_2_Y);
-    }
-    for (int i = 0; i < 4; ++i) {
-        ulong s = modAdd(localX[local_base + i].s0, localX[local_base + i].s1);
-        ulong d = modSub(localX[local_base + i].s0, localX[local_base + i].s1);
-        s = modMul(s, s);
-        d = modMul(d, d);
-        localX[local_base + i].s0 = modAdd(s, d);
-        localX[local_base + i].s1 = modSub(s, d);
-    }
-    {
-        ulong u0 = localX[local_base + 0].s0;
-        ulong u1 = localX[local_base + 1].s0;
-        ulong u2 = localX[local_base + 2].s0;
-        ulong u3 = localX[local_base + 3].s0;
-        ulong a = modAdd(u0, u2);
-        ulong b = modAdd(u1, u3);
-        ulong c = modSub(u0, u2);
-        ulong d = modMuli(modSub(u1, u3));
-        localX[local_base + 0].s0 = modAdd(a, b);
-        localX[local_base + 1].s0 = modMul(modSub(a, b), WI4_01_Y);
-        localX[local_base + 2].s0 = modMul(modAdd(c, d), WI4_01_X);
-        localX[local_base + 3].s0 = modMul(modSub(c, d), WI4_02_X);
-    }
-    {
-        ulong u0 = localX[local_base + 0].s1;
-        ulong u1 = localX[local_base + 1].s1;
-        ulong u2 = localX[local_base + 2].s1;
-        ulong u3 = localX[local_base + 3].s1;
-        ulong a = modAdd(u0, u2);
-        ulong b = modAdd(u1, u3);
-        ulong c = modSub(u0, u2);
-        ulong d = modMuli(modSub(u1, u3));
-        localX[local_base + 0].s1 = modAdd(a, b);
-        localX[local_base + 1].s1 = modMul(modSub(a, b), WI4_2_X);
-        localX[local_base + 2].s1 = modMul(modAdd(c, d), WI4_01_Y_2);
-        localX[local_base + 3].s1 = modMul(modSub(c, d), WI4_2_Y);
-    }
-    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
-        x[global_base + v] = localX[local_base + v];
-    }
+    const uint k = get_global_id(0);
+    ulong4 coeff = x[k];
+    
+    ulong a = modAdd(coeff.s0, coeff.s2);
+    ulong b = modAdd(coeff.s1, coeff.s3);
+    ulong c = modSub(coeff.s0, coeff.s2);
+    ulong d = modMuli(modSub(coeff.s1, coeff.s3));
+    
+    coeff.s0 = modAdd(a, b);
+    coeff.s1 = modSub(a, b);
+    coeff.s2 = modAdd(c, d);
+    coeff.s3 = modSub(c, d);
+    coeff = modMul3_2(coeff, (ulong2)(W6,W7), W10);
+    coeff = modMul4(coeff, coeff);
+    
+    ulong4 u = modMul3_2(coeff,(ulong2)(WI6,WI7), WI8);
+    
+    ulong v0 = modAdd(u.s0, u.s1);
+    ulong v1 = modSub(u.s0, u.s1);
+    ulong v2 = modAdd(u.s2, u.s3);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
+    ulong4 result = (ulong4)( modAdd(v0, v2),
+                              modAdd(v1, v3),
+                              modSub(v0, v2),
+                              modSub(v1, v3) );
+    x[k] = result;
 }
 
 
