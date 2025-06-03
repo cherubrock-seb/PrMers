@@ -188,7 +188,7 @@ inline std::vector<NttStage> buildForwardPipeline(
             { { sizeof(cl_mem), toBytes(buf_x) },
               { sizeof(cl_mem), toBytes(buf_w) },
               { sizeof(cl_mem), toBytes(buf_dw) } },
-            1,
+            4,
             ls0,
             "kernel_ntt_last_m1_n4(m=1)"
         });
@@ -282,13 +282,13 @@ inline std::vector<NttStage> buildInversePipeline(
       },*/
       { RadixOp::Any,    16, 16,
         k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",
-        [](auto m0, auto nn){ return m0 < nn/16 && m0%4==0; },
+        [](auto m0, auto nn){ return m0 < nn/16; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
         /*outputInverse*/ 0
       },
       { RadixOp::Any,    4, 8,
         k_i_mm,        ls0, "kernel_inverse_ntt_radix4_mm",
-        [](auto m0, auto nn){ return m0 < nn/4 && m0%2==0; },
+        [](auto m0, auto nn){ return m0 < nn/4; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
         /*outputInverse*/ 0
       },
@@ -319,7 +319,7 @@ inline std::vector<NttStage> buildInversePipeline(
             { { sizeof(cl_mem), toBytes(buf_x) },
               { sizeof(cl_mem), toBytes(buf_wi) },
               { sizeof(cl_mem), toBytes(buf_diw) } },
-            1,
+            4,
             ls0,
             "kernel_inverse_ntt_m1_n4(m=1)"
         });
