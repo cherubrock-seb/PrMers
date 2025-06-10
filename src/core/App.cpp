@@ -369,9 +369,7 @@ App::App(int argc, char** argv)
         "kernel_ntt_radix4_square_radix4",
         "kernel_pointwise_mul",
         "kernel_ntt_radix2",
-        "kernel_res64_display",
-        "kernel_ntt_radix5_mm_first",
-        "kernel_inverse_ntt_radix5_mm_last"
+        "kernel_res64_display"
     };
     for (auto& name : kernelNames) {
         kernels->createKernel(name);
