@@ -27,8 +27,8 @@ NttEngine::NttEngine(const Context& ctx,
         ls0_val_ = ctx_.getLocalSize();
         ls2_val_ = ctx_.getLocalSize2();
         ls3_val_ = ctx_.getLocalSize3();
-        
-        const size_t* ls0 = &ls0_val_;
+        std::cout << "ls0_val_" << ls0_val_ << std::endl;
+        const size_t* ls0 = nullptr;
         const size_t* ls2 = &ls2_val_;
         const size_t* ls3 = &ls3_val_;
 
@@ -101,7 +101,8 @@ static void executeKernelAndDisplay(cl_command_queue queue,
     cl_int err = clEnqueueNDRangeKernel(
         queue, kernel, 1, nullptr, &workers, localSize,
         0, nullptr, nullptr);
-    //std::cerr << "Kernel " << kernelName << std::endl;
+//    std::cerr << "Kernel " << kernelName << std::endl;
+
     if (err != CL_SUCCESS) {
         std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
                   << " (" << err << ")\n";
