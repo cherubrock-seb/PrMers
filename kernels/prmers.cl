@@ -29,6 +29,8 @@ __constant ulong4 mod_p4_const        = (ulong4)(MOD_P, MOD_P, MOD_P, MOD_P);
 __constant ulong4 mod_p_comp4_const   = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
 __constant ulong2 mod_p2_const       = (ulong2)(MOD_P,      MOD_P);
 __constant ulong2 mod_p_comp2_const  = (ulong2)(MOD_P_COMP, MOD_P_COMP);
+__constant ulong4 zero4 = (ulong4)(0);
+
 // Modular addition for vectors of 4 ulong
 inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
     // 'select' avoids branching (if-else) on GPU
@@ -37,7 +39,7 @@ inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
 }
 
 // Modular subtraction for vectors of 4 ulong
-inline ulong4 modSub4(ulong4 lhs, ulong4 rhs) {
+inline ulong4 modSub4(const ulong4 lhs, const ulong4 rhs) {
     ulong4 c = select((ulong4)0, mod_p_comp4_const, lhs < rhs);
     return lhs - rhs - c;
 }
@@ -56,32 +58,29 @@ inline ulong modSub(const ulong lhs, const ulong rhs) {
 
 // Modular reduction of a 128-bit product (lo, hi) to a 64-bit result mod p
 inline ulong Reduce(const ulong lo, const ulong hi) {
-    const uint c = (lo >= mod_p_const) ? mod_p_comp_const : 0;
-    ulong r = lo + c;
-    r = modAdd(r, hi << 32);                           // Add hi * 2^32
-    r = modSub(r, (hi >> 32) + (uint)hi);              // Subtract hi_high + hi_low
-    return r;
+    ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
+    c += lo;
+    c = modAdd(c, hi << 32);                           // Add hi * 2^32
+    c = modSub(c, (hi >> 32) + (uint)hi);              // Subtract hi_high + hi_low
+    return c;
 }
 
 // Vectorized version of Reduce: reduces four (lo, hi) pairs simultaneously
-inline ulong4 Reduce4(ulong4 lo, ulong4 hi) {
-    ulong4 c = select((ulong4)0, mod_p_comp4_const, lo >= mod_p4_const);
-    ulong4 r = lo + c;
-
+inline ulong4 Reduce4(const ulong4 lo, const ulong4 hi) {
+    ulong4 c = select(zero4, mod_p_comp4_const, lo >= mod_p4_const);
+    c += lo;
     ulong4 hi_shifted = hi << 32;
-    ulong4 hi_high = hi >> 32;
-    ulong4 hi_low  = convert_ulong4(convert_uint4(hi));
-    ulong4 hi_reduced = hi_high + hi_low;
-
-    r = modAdd4(r, hi_shifted);
-    r = modSub4(r, hi_reduced);
-    return r;
+    ulong4 hi_reduced = (hi >> 32) + convert_ulong4(convert_uint4(hi));
+    c = modAdd4(c, hi_shifted);   // c devient r
+    c = modSub4(c, hi_reduced);
+    return c;
 }
 
+
 // Modular multiplication of 4 ulong vectors
-inline ulong4 modMul4(ulong4 lhs, ulong4 rhs) {
-    ulong4 lo = lhs * rhs;
-    ulong4 hi = mul_hi(lhs, rhs);
+inline ulong4 modMul4(const ulong4 lhs, const ulong4 rhs) {
+    const ulong4 lo = lhs * rhs;
+    const ulong4 hi = mul_hi(lhs, rhs);
     return Reduce4(lo, hi);
 }
 
@@ -117,21 +116,21 @@ inline ulong2 modSub2(ulong2 lhs, ulong2 rhs) {
     return lhs - rhs - c;
 }
 
-inline ulong2 Reduce2(ulong2 lo, ulong2 hi) {
+inline ulong2 Reduce2(const ulong2 lo, const ulong2 hi) {
     ulong2 c = select((ulong2)0, mod_p_comp2_const, lo >= mod_p2_const);
-    ulong2 r = lo + c;
+    c += lo;
 
     ulong2 hi_shifted = hi << 32;
-    ulong2 hi_high    = hi >> 32;
-    ulong2 hi_low     = convert_ulong2(convert_uint2(hi));
-    ulong2 hi_reduced = hi_high + hi_low;
+    ulong2 hi_reduced    = (hi >> 32) + convert_ulong2(convert_uint2(hi));
+    
 
-    r = modAdd2(r, hi_shifted);
-    r = modSub2(r, hi_reduced);
-    return r;
+    c = modAdd2(c, hi_shifted);
+    c = modSub2(c, hi_reduced);
+    return c;
 }
 
-inline ulong2 modMul2(ulong2 lhs, ulong2 rhs) {
+
+inline ulong2 modMul2(const ulong2 lhs, const ulong2 rhs) {
     ulong2 lo = lhs * rhs;
     ulong2 hi = mul_hi(lhs, rhs);
     return Reduce2(lo, hi);
@@ -406,6 +405,7 @@ __kernel void kernel_sub2(__global ulong* restrict x)
 #ifndef DIGIT_WIDTH_VALUE_2
 #define DIGIT_WIDTH_VALUE_2 1
 #endif
+
 __kernel void kernel_carry(
     __global ulong*        restrict x,
     __global ulong*        restrict carry_array,
