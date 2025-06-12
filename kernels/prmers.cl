@@ -87,7 +87,7 @@ inline ulong4 modMul4(const ulong4 lhs, const ulong4 rhs) {
 
 
 // Computes the full 128-bit product of two 64-bit integers
-inline void mul128(ulong a, ulong b, __private ulong *hi, __private ulong *lo) {
+inline void mul128(const ulong a, const ulong b, __private ulong *restrict hi, __private ulong *restrict lo) {
     *lo = a * b;
     *hi = mul_hi(a, b);
 }
@@ -138,32 +138,34 @@ inline ulong2 modMul2(const ulong2 lhs, const ulong2 rhs) {
 
 
 inline ulong4 modMul3_2(const ulong4 lhs,
-                        const ulong2 w02,    // vload2 non-swappé
-                        const ulong  w3)
+                        const ulong2 w02,
+                        const ulong w3)
 {
-    ulong2 m12 = modMul2(
-        (ulong2)(lhs.s1, lhs.s2),
-        (ulong2)(w02.s1, w02.s0)
-    );
-    ulong m3 = modMul(lhs.s3, w3);
-    return (ulong4)(lhs.s0, m12.s0, m12.s1, m3);
+    ulong2 x = (ulong2)(lhs.s1, lhs.s2);
+    x = modMul2(x, (ulong2)(w02.s1, w02.s0));
+    ulong m = modMul(lhs.s3, w3);
+    return (ulong4)(lhs.s0, x.s0, x.s1, m);
 }
+
 
 inline ulong4 modMul3(const ulong4 lhs,
                       const ulong w1,
                       const ulong w2,
-                      const ulong w3) {
-    ulong4 r;
-    r.s0 = lhs.s0;
-    r.s1 = modMul(lhs.s1, w1);
-    r.s2 = modMul(lhs.s2, w2);
-    r.s3 = modMul(lhs.s3, w3);
-    return r;
+                      const ulong w3)
+{
+    return (ulong4)(
+        lhs.s0,
+        modMul(lhs.s1, w1),
+        modMul(lhs.s2, w2),
+        modMul(lhs.s3, w3)
+    );
 }
 
+#define CONST_W48 281474976710656UL
+
 // Multiply x by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p
-inline ulong modMuli(ulong x) {
-    return modMul(x, (1UL << 48));
+inline ulong modMuli(const ulong x) {
+    return modMul(x, CONST_W48);
 }
 
 // Add-with-carry for a digit of specified width.
