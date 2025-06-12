@@ -363,7 +363,6 @@ App::App(int argc, char** argv)
         "kernel_ntt_radix4_inverse_mm_2steps_last",
         "kernel_ntt_radix4_mm_2steps",
         "kernel_ntt_radix4_mm_2steps_first",
-        "kernel_ntt_radix4_mm_3steps",
         "kernel_ntt_radix2_square_radix2",
         "kernel_ntt_radix4_radix2_square_radix2_radix4",
         "kernel_ntt_radix4_square_radix4",
