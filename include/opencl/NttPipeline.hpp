@@ -98,7 +98,6 @@ inline std::vector<NttStage> buildForwardPipeline(
     cl_mem buf_x,
     cl_kernel k_first,
     cl_kernel k_mm_2,
-    cl_kernel k_mm_3,
     cl_kernel k_m4,
     cl_kernel k_m8,
     cl_kernel k_m16,
@@ -132,10 +131,7 @@ inline std::vector<NttStage> buildForwardPipeline(
         [](auto m0, auto){ return m0>=64 && m0%4==0; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM } ,0},
 
-      /* { RadixOp::Any,    16, -16,
-        k_mm_3,         ls2, "kernel_ntt_radix4_mm_3steps",
-        [](auto m0, auto){ return m0>=64 && m0%16==0; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM } },*/
+
 
       { RadixOp::Any,     4, 8,
         k_m4,           ls0, "kernel_ntt_radix4_mm_m4",
