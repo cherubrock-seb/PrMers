@@ -223,19 +223,24 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     }
 
     if (opts.kernel_path.empty()) {
-        try {
+        std::string kernelFile = KERNEL_PATH "prmers.cl";
+        if (std::filesystem::exists(kernelFile)) {
+            opts.kernel_path = kernelFile;
+        } else {
             std::string execDir = util::getExecutableDir();
-            std::string kernelFile = execDir + "/prmers.cl";
-            if (!std::filesystem::exists(kernelFile)) {
+            kernelFile = execDir + "/prmers.cl";
+            if (std::filesystem::exists(kernelFile)) {
+                opts.kernel_path = kernelFile;
+            } else {
                 kernelFile = execDir + "/kernels/prmers.cl";
-                if (!std::filesystem::exists(kernelFile)) {
-                    throw std::runtime_error("Kernel file 'prmers.cl' not found");
+                if (std::filesystem::exists(kernelFile)) {
+                    opts.kernel_path = kernelFile;
+                } else {
+                    std::cerr << "Error: Cannot find kernel file 'prmers.cl'"
+                              << std::endl;
+                    std::exit(1);
                 }
             }
-            opts.kernel_path = kernelFile;
-        } catch (const std::exception& e) {
-            std::cerr << "Error locating OpenCL kernel: " << e.what() << "\n";
-            std::exit(1);
         }
     }
     unsigned int detectedPort = 0;
