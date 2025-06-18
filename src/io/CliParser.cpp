@@ -88,7 +88,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         || std::strcmp(argv[i], "--version") == 0
         || std::strcmp(argv[i], "-version") == 0)
         {
-            std::cout << "prmers Release v4.0.5-alpha\n";
+            std::cout << "prmers Release v4.0.6-alpha\n";
             std::exit(EXIT_SUCCESS);
         }
     }
@@ -223,26 +223,27 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     }
 
     if (opts.kernel_path.empty()) {
-        std::string kernelFile = KERNEL_PATH "prmers.cl";
+        std::string execDir = util::getExecutableDir();
+        std::string kernelFile = execDir + "/prmers.cl";
+
         if (std::filesystem::exists(kernelFile)) {
             opts.kernel_path = kernelFile;
         } else {
-            std::string execDir = util::getExecutableDir();
-            kernelFile = execDir + "/prmers.cl";
+            kernelFile = execDir + "/kernels/prmers.cl";
             if (std::filesystem::exists(kernelFile)) {
                 opts.kernel_path = kernelFile;
             } else {
-                kernelFile = execDir + "/kernels/prmers.cl";
+                kernelFile = std::string(KERNEL_PATH) + "prmers.cl";
                 if (std::filesystem::exists(kernelFile)) {
                     opts.kernel_path = kernelFile;
                 } else {
-                    std::cerr << "Error: Cannot find kernel file 'prmers.cl'"
-                              << std::endl;
+                    std::cerr << "Error: Cannot find kernel file 'prmers.cl'\n";
                     std::exit(1);
                 }
             }
         }
     }
+
     unsigned int detectedPort = 0;
     #if defined(__APPLE__)
         #if defined(__x86_64__)
