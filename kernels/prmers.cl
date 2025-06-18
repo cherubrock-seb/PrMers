@@ -58,8 +58,8 @@ inline ulong modSub(const ulong lhs, const ulong rhs) {
 
 // Modular reduction of a 128-bit product (lo, hi) to a 64-bit result mod p
 inline ulong Reduce(const ulong lo, const ulong hi) {
-    ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
-    c += lo;
+    //ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
+    ulong c = lo;
     c = modAdd(c, hi << 32);                           // Add hi * 2^32
     c = modSub(c, (hi >> 32) + (uint)hi);              // Subtract hi_high + hi_low
     return c;
@@ -67,13 +67,11 @@ inline ulong Reduce(const ulong lo, const ulong hi) {
 
 // Vectorized version of Reduce: reduces four (lo, hi) pairs simultaneously
 inline ulong4 Reduce4(const ulong4 lo, const ulong4 hi) {
-    ulong4 c = select(zero4, mod_p_comp4_const, lo >= mod_p4_const);
-    c += lo;
     ulong4 hi_shifted = hi << 32;
-    ulong4 hi_reduced = (hi >> 32) + convert_ulong4(convert_uint4(hi));
-    c = modAdd4(c, hi_shifted);   // c devient r
-    c = modSub4(c, hi_reduced);
-    return c;
+    const ulong4 hi_reduced = (hi >> 32) + convert_ulong4(convert_uint4(hi));
+    hi_shifted = modAdd4(lo, hi_shifted);
+    hi_shifted = modSub4(hi_shifted, hi_reduced);
+    return hi_shifted;
 }
 
 
