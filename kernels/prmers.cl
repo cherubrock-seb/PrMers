@@ -400,7 +400,7 @@ __kernel void kernel_sub2(__global ulong* restrict x)
 __kernel void kernel_carry(
     __global ulong*        restrict x,
     __global ulong*        restrict carry_array,
-    __global const ulong4* restrict digitWidthMaskPacked
+    __global const ulong*  restrict digitWidthMaskPacked
 ) {
     const uint gid   = get_global_id(0);
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
@@ -411,18 +411,15 @@ __kernel void kernel_carry(
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        uint blk    = i >> 6;      // i/64
-        uint group4 = blk >> 2;    // (i/64)/4
+        uint blk    = i >> 6;
+        ulong chunk = digitWidthMaskPacked[blk];
 
-        ulong4 chunk4 = digitWidthMaskPacked[group4];
-
-        ulong  chunk = chunk4[ blk & 3 ];
-
+        uint bit = i & 63;
         uchar4 m = (uchar4)(
-            (chunk >> ((i & 63) + 0)) & 1,
-            (chunk >> ((i & 63) + 1)) & 1,
-            (chunk >> ((i & 63) + 2)) & 1,
-            (chunk >> ((i & 63) + 3)) & 1
+            (chunk >> (bit + 0)) & 1,
+            (chunk >> (bit + 1)) & 1,
+            (chunk >> (bit + 2)) & 1,
+            (chunk >> (bit + 3)) & 1
         );
 
         int4 digit_width_vec = (int4)(
@@ -433,14 +430,14 @@ __kernel void kernel_carry(
         );
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
-
         vstore4(x_vec, 0, x + i);
     }
 
-    if (carry != 0) {
+    if (carry) {
         carry_array[gid] = carry;
     }
 }
+
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
