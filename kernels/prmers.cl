@@ -396,53 +396,57 @@ __kernel void kernel_sub2(__global ulong* restrict x)
 #ifndef DIGIT_WIDTH_VALUE_2
 #define DIGIT_WIDTH_VALUE_2 1
 #endif
-
+#define DW1 DIGIT_WIDTH_VALUE_1
+#define DW2 DIGIT_WIDTH_VALUE_2
 __kernel void kernel_carry(
-    __global ulong*        restrict x,
-    __global ulong*        restrict carry_array,
-    __global const ulong*  restrict digitWidthMaskPacked
+    __global ulong4* restrict x,
+    __global ulong*  restrict carry_array,
+    __global const ulong* restrict digitWidthMaskPacked
 ) {
     const uint gid   = get_global_id(0);
-    const uint start = gid * LOCAL_PROPAGATION_DEPTH;
-    const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+    const uint start = gid * (LOCAL_PROPAGATION_DEPTH / 4); // index en ulong4
+    const uint end   = start + (LOCAL_PROPAGATION_DEPTH / 4);
+
+    const uint blk   = (gid * LOCAL_PROPAGATION_DEPTH) >> 6;
+    ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
+    uint bit         = (gid * LOCAL_PROPAGATION_DEPTH) & 63;
+
+    ulong low  = mask128.s0 >> bit;
+    ulong high = (mask128.s1 & ((1UL << bit) - 1)) << (64 - bit);
+    ulong mask64 = low | high;
+
     ulong carry = 0UL;
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
-    for (uint i = start; i < end; i += 4) {
-        ulong4 x_vec = vload4(0, x + i);
-
-        uint blk    = i >> 6;
-        ulong chunk = digitWidthMaskPacked[blk];
-
-        uint bit = i & 63;
-        uchar4 m = (uchar4)(
-            (chunk >> (bit + 0)) & 1,
-            (chunk >> (bit + 1)) & 1,
-            (chunk >> (bit + 2)) & 1,
-            (chunk >> (bit + 3)) & 1
-        );
+    for (uint i = start; i < end; ++i) {
+        uchar bits = mask64 & 0xF;
 
         int4 digit_width_vec = (int4)(
-            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+            DW1 + ((bits >> 0) & 1) * (DW2 - DW1),
+            DW1 + ((bits >> 1) & 1) * (DW2 - DW1),
+            DW1 + ((bits >> 2) & 1) * (DW2 - DW1),
+            DW1 + ((bits >> 3) & 1) * (DW2 - DW1)
         );
 
+        ulong4 x_vec = x[i];
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
-        vstore4(x_vec, 0, x + i);
+        x[i] = x_vec;
+
+        mask64 >>= 4;
     }
 
-    if (carry) {
+    if (carry)
         carry_array[gid] = carry;
-    }
 }
+
+
+
 
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global const ulong4* restrict digitWidthMaskPacked)
+                             __global const ulong* restrict digitWidthMaskPacked)
 {
     const uint gid = get_global_id(0);
     const uint prev_gid = (gid == 0) ? (CARRY_WORKER_MIN_1) : (gid - 1);
@@ -451,58 +455,52 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end = start + LOCAL_PROPAGATION_DEPTH - 4;  
 
+    const uint blk   = start >> 6;
+    ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
+    uint bit         = start & 63;
+    ulong low = mask128.s0 >> bit;
+    ulong high = (mask128.s1 & ((1UL << bit) - 1)) << (64 - bit);
+    ulong mask64 = low | high;
+
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
+        uchar4 bits = (uchar4)(
+            (uchar)(mask64        & 1UL),
+            (uchar)((mask64 >> 1) & 1UL),
+            (uchar)((mask64 >> 2) & 1UL),
+            (uchar)((mask64 >> 3) & 1UL)
+        );
+
+        int4 mask4 = convert_int4(bits) * (int4)(-1);
+        int4 digit_width_vec = select(
+            (int4)DIGIT_WIDTH_VALUE_1,
+            (int4)DIGIT_WIDTH_VALUE_2,
+            mask4
+        );
+
         ulong4 x_vec = vload4(0, x + i);
-        uint blk    = i >> 6;      // i/64
-        uint group4 = blk >> 2;    // (i/64)/4
-
-        ulong4 chunk4 = digitWidthMaskPacked[group4];
-
-        ulong  chunk = chunk4[ blk & 3 ];
-
-        uchar4 m = (uchar4)(
-            (chunk >> ((i & 63) + 0)) & 1,
-            (chunk >> ((i & 63) + 1)) & 1,
-            (chunk >> ((i & 63) + 2)) & 1,
-            (chunk >> ((i & 63) + 3)) & 1
-        );
-
-        int4 digit_width_vec = (int4)(
-            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
-        );
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
-
         vstore4(x_vec, 0, x + i);
-
         if (carry == 0) return;
+        mask64 >>= 4;
+
     }
 
 
+    uchar4 bits = (uchar4)(
+        (uchar)(mask64        & 1UL),
+        (uchar)((mask64 >> 1) & 1UL),
+        (uchar)((mask64 >> 2) & 1UL),
+        (uchar)((mask64 >> 3) & 1UL)
+    );
+
+    int4 mask4 = convert_int4(bits) * (int4)(-1);
+    int4 digit_width_vec = select(
+        (int4)DIGIT_WIDTH_VALUE_1,
+        (int4)DIGIT_WIDTH_VALUE_2,
+        mask4
+    );
     ulong4 x_vec = vload4(0, x + end);
-    uint blk    = end >> 6;      // end/64
-    uint group4 = blk >> 2;    // (end/64)/4
-
-    ulong4 chunk4 = digitWidthMaskPacked[group4];
-
-    ulong  chunk = chunk4[ blk & 3 ];
-
-    uchar4 m = (uchar4)(
-        (chunk >> ((end & 63) + 0)) & 1,
-        (chunk >> ((end & 63) + 1)) & 1,
-        (chunk >> ((end & 63) + 2)) & 1,
-        (chunk >> ((end & 63) + 3)) & 1
-    );
-
-    int4 digit_width_vec = (int4)(
-        m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-        m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-        m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
-        m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
-    );
     x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
     vstore4(x_vec, 0, x + end);
 
