@@ -41,9 +41,7 @@
 #include "util/Crc32.hpp" 
 #include <cstdint>
 #include <vector>
-#ifdef _MSC_VER
-#define _CRT_SECURE_NO_WARNINGS
-#endif
+#include <cstdio>
 
 
 namespace io{
@@ -125,7 +123,12 @@ static std::vector<uint32_t> compactBits(
 }
 static std::string fileMD5(const std::string& filePath) {
     namespace fs = std::filesystem;
-    FILE *f = fopen(filePath.c_str(), "rb");
+    FILE* f = nullptr;
+#ifdef _WIN32
+    fopen_s(&f, filePath.c_str(), "rb");
+#else
+    f = fopen(filePath.c_str(), "rb");
+#endif
     if (!f) {
         std::cerr << "\nWarning: Cannot open file for MD5: " << filePath << std::endl;
         return "";
