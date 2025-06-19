@@ -188,6 +188,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
 #if defined(__APPLE__)
     queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
 #else
+    unsigned ver = queryCLVersion();
     if (ver >= 200){
         if (useThrottle) {
             if(cl_queue_throttle_active){
