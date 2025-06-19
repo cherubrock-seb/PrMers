@@ -25,7 +25,6 @@ private:
     cl_kernel         carryKernel_;
     cl_kernel         carryKernel2_;
     cl_kernel         carryKernel3_;
-    size_t            vectorSize_;
     std::vector<int>  digitWidth_;
     cl_mem                 digitWidthMaskBuf_;
 };

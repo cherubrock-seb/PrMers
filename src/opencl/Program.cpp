@@ -48,8 +48,9 @@ Program::Program(const opencl::Context& context, cl_device_id device,
                  const std::string& filePath,const math::Precompute& pre,
                  const std::string& buildOptions
                  )
-    : context_(context), 
-    program_(nullptr)
+    : program_(nullptr),
+    context_(context)
+    
 {
     std::string source = loadKernelSource(filePath);
     const char* src = source.c_str();

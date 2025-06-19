@@ -5,9 +5,7 @@ namespace math {
 GerbiczLiChecker::GerbiczLiChecker(uint64_t a,
                                    uint64_t d0,
                                    size_t blockSize)
-  : a_(a)
-  , d0_(d0)
-  , B_(blockSize)
+  : B_(blockSize)
 {}
 
 size_t GerbiczLiChecker::getBlockSize() const {

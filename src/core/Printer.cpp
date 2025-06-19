@@ -49,8 +49,6 @@ bool Printer::finalReport(const io::CliOptions& opts,
                           double elapsed, std::string jsonResult) {
     const uint32_t p = opts.exponent;
     const std::string& mode = opts.mode;
-    const bool proof = opts.proof;
-    const std::string& proofFile = opts.proofFile;
 
     bool isPrime = false;
     std::string statusCode;
