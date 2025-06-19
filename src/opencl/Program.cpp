@@ -68,20 +68,20 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     cl_uint n          = context.getTransformSize();
     cl_uint wg         = context.getWorkGroupCount();
     int     lpd        = context.getLocalCarryPropagationDepth();
-    cl_uint wCarry     = context.getWorkersCarry();
-    cl_uint wNtt       = n / 4;
-    cl_uint w2step     = n / 16;
+    cl_uint wCarry     = static_cast<cl_uint>(context.getWorkersCarry());
+    cl_uint wNtt       = static_cast<cl_uint>(n / 4);
+    cl_uint w2step     = static_cast<cl_uint>(n / 16);
     cl_uint ls         = static_cast<cl_uint>(context.getLocalSize());
     cl_uint ls2        = static_cast<cl_uint>(context.getLocalSize2());
     cl_uint ls3        = static_cast<cl_uint>(context.getLocalSize3());
 
-    cl_uint div4       = lpd / 4;
+    cl_uint div4       = static_cast<cl_uint>(lpd / 4);
     cl_uint div4_min = std::max<cl_uint>(1, (lpd - 4) / 4);
-    cl_uint div2       = lpd / 4;
+    cl_uint div2       = static_cast<cl_uint>(lpd / 4);
     cl_uint div2_min = std::max<cl_uint>(1, (lpd - 2) / 2);
     
     int     modP       = context.getExponent();
-    cl_uint nTrans     = n;
+    cl_uint nTrans     = static_cast<cl_uint>(n);
 
     std::ostringstream ss;
     ss << buildOptions;
