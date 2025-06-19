@@ -37,9 +37,13 @@ std::string CurlClient::promptHiddenPassword() {
     std::cout << std::endl;
 #else
     std::cout << "Enter your PrimeNet password: ";
-    (void) system("stty -echo");
+    if (system("stty -echo") != 0) {
+        std::cerr << "Warning: failed to disable echo\n";
+    }
     std::getline(std::cin, pwd);
-    (void) system("stty echo");
+    if (system("stty echo") != 0) {
+        std::cerr << "Warning: failed to restore echo\n";
+    }
     std::cout << std::endl;
 #endif
     return pwd;
