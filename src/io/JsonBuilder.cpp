@@ -290,11 +290,20 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
     std::string res2048 = oss2048.str();
     // ---------------------------------------------
     // 4) timestamp
-    char timestampBuf[32];
     std::time_t now = std::time(nullptr);
-    std::strftime(timestampBuf, sizeof(timestampBuf),
-                  "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+    std::tm timeinfo;
+
+    #ifdef _WIN32
+        localtime_s(&timeinfo, &now);
+    #else
+        localtime_r(&now, &timeinfo);
+    #endif
+
+    char timestampBuf[32];
+    std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
     std::string status;
+
     if (opts.mode == "prp") {
         // PRP mode → “0000...0001” means prime
         status = (res64 == "0000000000000001") ? "P" : "C";
