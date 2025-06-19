@@ -1,7 +1,7 @@
 #ifndef UTIL_OPENCLERROR_HPP
 #define UTIL_OPENCLERROR_HPP
 #ifndef CL_TARGET_OPENCL_VERSION
-#define CL_TARGET_OPENCL_VERSION 120
+#define CL_TARGET_OPENCL_VERSION 300
 #endif
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
