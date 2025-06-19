@@ -381,7 +381,7 @@ void Context::computeOptimalSizes(std::size_t n,
         }
         workersCarry_ = static_cast<cl_uint>((wc > 1 ? wc : 1));
         if (workersCarry_ == 1)
-            localCarryPropagationDepth_ = n;
+            localCarryPropagationDepth_ = static_cast<cl_uint>(n);
     }
 
     localSizeCarry_ = std::min(workersCarry_, localSize_);

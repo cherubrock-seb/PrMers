@@ -415,7 +415,7 @@ __kernel void kernel_carry(
     __global const ulong* restrict digitWidthMaskPacked
 ) {
     const uint gid   = get_global_id(0);
-    const uint start = gid * (LOCAL_PROPAGATION_DEPTH_DIV4); // index en ulong4
+    const uint start = gid * (LOCAL_PROPAGATION_DEPTH_DIV4);
     const uint end   = start + (LOCAL_PROPAGATION_DEPTH_DIV4);
 
     const uint offset = gid * LOCAL_PROPAGATION_DEPTH;

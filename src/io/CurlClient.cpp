@@ -5,6 +5,9 @@
 #include <fstream>
 #include <regex>
 #include <cstring>
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 
 namespace io {
 
