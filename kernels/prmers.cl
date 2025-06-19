@@ -421,12 +421,12 @@ __kernel void kernel_carry(
     const uint offset = gid * LOCAL_PROPAGATION_DEPTH;
     const uint blk    = offset >> 6;
     const uint bit    = offset & 63;
-
-    ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
-
-    ulong low  = mask128.s0 >> bit;
-    ulong high = (mask128.s1 & ((1UL << bit) - 1)) << (64 - bit);
-    ulong mask64 = low | high;
+    ulong mask64;
+    ulong mask0 = digitWidthMaskPacked[blk];
+    ulong mask1 = digitWidthMaskPacked[blk + 1];
+    ulong merged = (mask0 >> bit) | ((mask1 & ((1UL << bit) - 1)) << (64 - bit));
+    ulong cond = (ulong)-(bit == 0);  // 0xFFFFFFFFFFFFFFFF if bit==0, 0 otherwise
+    mask64 = (mask0 & cond) | (merged & ~cond);
 
     ulong carry = 0UL;
 
@@ -465,9 +465,12 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint blk   = start >> 6;
     ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
     uint bit         = start & 63;
-    ulong low = mask128.s0 >> bit;
-    ulong high = (mask128.s1 & ((1UL << bit) - 1)) << (64 - bit);
-    ulong mask64 = low | high;
+    ulong mask64;
+    ulong mask0 = digitWidthMaskPacked[blk];
+    ulong mask1 = digitWidthMaskPacked[blk + 1];
+    ulong merged = (mask0 >> bit) | ((mask1 & ((1UL << bit) - 1)) << (64 - bit));
+    ulong cond = (ulong)-(bit == 0);  // 0xFFFFFFFFFFFFFFFF if bit==0, 0 otherwise
+    mask64 = (mask0 & cond) | (merged & ~cond);
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {

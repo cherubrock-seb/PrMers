@@ -5,9 +5,8 @@
 #include <fstream>
 #include <regex>
 #include <cstring>
-#ifdef _MSC_VER
-#define _CRT_SECURE_NO_WARNINGS
-#endif
+#include <cstdio>
+
 
 namespace io {
 
@@ -64,8 +63,12 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
         return false;
     }
 
-    FILE* trace = fopen("curl_trace.txt", "w");
-
+    FILE* trace = nullptr;
+    #ifdef _WIN32
+        fopen_s(&trace, "curl_trace.txt", "w");
+    #else
+        trace = fopen("curl_trace.txt", "w");
+    #endif
     // Headers simulant un navigateur réel
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
