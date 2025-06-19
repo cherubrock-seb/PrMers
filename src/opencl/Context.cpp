@@ -336,8 +336,8 @@ void Context::computeOptimalSizes(std::size_t n,
     transformSize_ = static_cast<cl_uint>(n);
     if (n < 4) n = 4;
 
-    cl_uint mm = n / 4;
-    for (cl_uint m = n / 16; m >= 32; m /= 16)
+    cl_uint mm =  static_cast<cl_uint>(n / 4);
+    for (cl_uint m =  static_cast<cl_uint>(n / 16); m >= 32; m /= 16)
         mm = m / 16;
 
     evenExponent_ = !(mm == 8 || mm == 2 || mm == 32) || (n == 4);
@@ -355,7 +355,8 @@ void Context::computeOptimalSizes(std::size_t n,
 
     localSize_ = maxWork;
 
-    cl_uint constraint = std::max<cl_uint>(n / 16, 1u);
+    cl_uint constraint = std::max(static_cast<cl_uint>(n / 16), 1u);
+
     while (workers % localSize_ != 0 || constraint % localSize_ != 0) {
         localSize_ /= 2;
         if (localSize_ < 1) { localSize_ = 1; break; }
@@ -378,7 +379,7 @@ void Context::computeOptimalSizes(std::size_t n,
             wc = workers / trial;
             trial *= 2;
         }
-        workersCarry_ = (wc > 1 ? wc : 1);
+        workersCarry_ = static_cast<cl_uint>((wc > 1 ? wc : 1));
         if (workersCarry_ == 1)
             localCarryPropagationDepth_ = n;
     }
@@ -427,16 +428,19 @@ cl_uint Context::getWorkGroupCount() const noexcept {
     return workGroupCount_;
 }
 
-
 unsigned Context::queryCLVersion() const {
     char buf[128] = {0};
     if (clGetDeviceInfo(device_, CL_DEVICE_VERSION, sizeof(buf), buf, nullptr) != CL_SUCCESS)
         return 110;
     unsigned major = 1, minor = 1;
-    if (std::sscanf(buf, "OpenCL %u.%u", &major, &minor) == 2)
-        return major * 100 + minor;
+#if defined(_MSC_VER)
+    sscanf_s(buf, "OpenCL %u.%u", &major, &minor);
+#else
+    std::sscanf(buf, "OpenCL %u.%u", &major, &minor);
+#endif
     return major * 100 + minor;
 }
+
 
 std::string Context::queryDeviceString(cl_device_info info) const {
     size_t sz = 0;
