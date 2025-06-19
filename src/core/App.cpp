@@ -695,7 +695,6 @@ int App::run() {
         0, nullptr, nullptr
     );
 
-    auto now2 = std::chrono::system_clock::now();
     //std::time_t t = std::chrono::system_clock::to_time_t(now2);
     char timestampBuf[32];
     std::time_t t = std::time(nullptr);
