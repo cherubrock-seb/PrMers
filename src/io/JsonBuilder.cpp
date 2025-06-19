@@ -21,6 +21,9 @@
  */
 #include "io/JsonBuilder.hpp"
 #include "io/CliParser.hpp"          // for CliOptions
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 120
+#endif
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else

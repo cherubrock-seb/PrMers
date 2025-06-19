@@ -245,7 +245,19 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         }
     }
     else{
+        #if defined(_MSC_VER)
+        #pragma warning(push)
+        #pragma warning(disable: 4996)
+        #elif defined(__GNUC__) || defined(__clang__)
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        #endif
         queue_ = clCreateCommandQueue(context_, device_, CL_QUEUE_PROFILING_ENABLE, &err);
+        #if defined(_MSC_VER)
+        #pragma warning(pop)
+        #elif defined(__GNUC__) || defined(__clang__)
+        #pragma GCC diagnostic pop
+        #endif
     }
 #endif
     if (useThrottle && cl_queue_throttle_active) {
