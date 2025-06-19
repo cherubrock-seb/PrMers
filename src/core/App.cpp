@@ -696,12 +696,20 @@ int App::run() {
     );
 
     auto now2 = std::chrono::system_clock::now();
-    std::time_t t = std::chrono::system_clock::to_time_t(now2);
-    char timestampBuf[100];
-    std::strftime(timestampBuf,
-                  sizeof(timestampBuf),
-                  "%Y-%m-%dT%H:%M:%SZ",
-                  std::gmtime(&t));
+    //std::time_t t = std::chrono::system_clock::to_time_t(now2);
+    char timestampBuf[32];
+    std::time_t t = std::time(nullptr);
+    std::tm timeinfo;
+
+    #ifdef _WIN32
+        gmtime_s(&timeinfo, &t);
+    #else
+        std::tm* tmp = std::gmtime(&t);
+        if (tmp != nullptr)
+            timeinfo = *tmp;
+    #endif
+
+    std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 
     Printer::finalReport(
         options,
