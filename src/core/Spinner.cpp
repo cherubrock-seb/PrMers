@@ -74,9 +74,7 @@ void Spinner::displayProgress(uint32_t iter,
         smoothedIPS = alpha * currentIPS
                     + (1.0 - alpha) * smoothedIPS;
     }
-    double averageIPS = (elapsedTime > 0)
-                      ? deltaIter / elapsedTime
-                      : 0.0;
+
     double remaining = smoothedIPS > 0
                      ? (totalIters - iter) / smoothedIPS
                      : 0.0;

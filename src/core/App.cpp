@@ -391,7 +391,6 @@ int App::run() {
         return *code;
 
     cl_command_queue queue   = context.getQueue();
-    size_t          queueCap = context.getQueueSize();
     size_t          queued   = 0;
     
     uint32_t p = options.exponent;
@@ -443,16 +442,12 @@ int App::run() {
     timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
-    auto lastUpdate = startTime;
     auto lastDisplay = startTime;
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
     uint32_t lastIter = resumeIter;
     uint32_t startIter = resumeIter;
-    bool firstIter = true;
     
-    std::chrono::microseconds   totalUs_{0};
-    auto t0 = std::chrono::high_resolution_clock::now();
-    int unitWait = 0;
+    
     for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 

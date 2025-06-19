@@ -183,7 +183,6 @@ void Context::createContext() {
 
 void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active) {
     cl_int err = CL_SUCCESS;
-    unsigned ver = queryCLVersion();
     bool useThrottle = false;
     
 #if defined(__APPLE__)
@@ -290,8 +289,8 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         }
         //queueSize_ = 16 * 1024; //temporary
     }
-    if(queueSize_ == 18446744073709551615){
-        queueSize_=0;
+    if (queueSize_ == std::numeric_limits<cl_ulong>::max()) {
+        queueSize_ = 0;
     }
     std::cout << "Queue preferred size = " << queueSize_ << std::endl;
 }

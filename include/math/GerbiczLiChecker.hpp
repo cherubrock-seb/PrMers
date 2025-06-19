@@ -19,8 +19,6 @@ public:
                const std::vector<uint64_t>& dPrev) const;
 
 private:
-    uint64_t a_;  
-    uint64_t d0_;
     size_t   B_;
 };
 
