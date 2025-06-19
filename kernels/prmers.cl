@@ -411,43 +411,44 @@ __constant int4 base_dw = (int4)(DW1, DW1, DW1, DW1);
 
 __kernel void kernel_carry(
     __global ulong4* restrict x,
-    __global ulong*  restrict carry_array,
+    __global ulong* restrict carry_array,
     __global const ulong* restrict digitWidthMaskPacked
 ) {
     const uint gid   = get_global_id(0);
-    const uint start = gid * (LOCAL_PROPAGATION_DEPTH_DIV4);
-    const uint end   = start + (LOCAL_PROPAGATION_DEPTH_DIV4);
-
+    const uint start = gid * LOCAL_PROPAGATION_DEPTH_DIV4;
+    const uint end   = start + LOCAL_PROPAGATION_DEPTH_DIV4;
     const uint offset = gid * LOCAL_PROPAGATION_DEPTH;
-    const uint blk    = offset >> 6;
-    const uint bit    = offset & 63;
-    ulong mask64;
-    ulong mask0 = digitWidthMaskPacked[blk];
-    ulong mask1 = digitWidthMaskPacked[blk + 1];
-    ulong merged = (mask0 >> bit) | ((mask1 & ((1UL << bit) - 1)) << (64 - bit));
-    ulong cond = (ulong)-(bit == 0);  // 0xFFFFFFFFFFFFFFFF if bit==0, 0 otherwise
-    mask64 = (mask0 & cond) | (merged & ~cond);
 
-    ulong carry = 0UL;
+    const uint blk = offset >> 6;
+    const uint bit = offset & 63;
+
+    ulong mask64;
+    if (bit == 0) {
+        mask64 = digitWidthMaskPacked[blk];
+    } else {
+        ulong2 m = vload2(0, digitWidthMaskPacked + blk);
+        ulong lo = m.x >> bit;
+        ulong hi = (m.y & ((1UL << bit) - 1)) << (64 - bit);
+        mask64 = lo | hi;
+    }
+
+    ulong carry = 0;
+    ulong4 x_vec;
+    uchar bits;
+    int4 dw_vec;
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
-    for (uint i = start; i < end; ++i) {
-        uchar bits = mask64 & 0xF;
-        int4 digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
-
-        ulong4 x_vec = x[i];
-        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+    for (uint i = start, shift = 0; i < end; ++i, shift += 4) {
+        bits = (mask64 >> shift) & 0xF;
+        dw_vec = base_dw + DW_DIFF * mask_lookup[bits];
+        x_vec = x[i];
+        x_vec = digit_adc4(x_vec, dw_vec, &carry);
         x[i] = x_vec;
-
-        mask64 >>= 4;
     }
 
     if (carry)
         carry_array[gid] = carry;
 }
-
-
-
 
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
@@ -465,20 +466,25 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint blk   = start >> 6;
     ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
     uint bit         = start & 63;
+    
     ulong mask64;
-    ulong mask0 = digitWidthMaskPacked[blk];
-    ulong mask1 = digitWidthMaskPacked[blk + 1];
-    ulong merged = (mask0 >> bit) | ((mask1 & ((1UL << bit) - 1)) << (64 - bit));
-    ulong cond = (ulong)-(bit == 0);  // 0xFFFFFFFFFFFFFFFF if bit==0, 0 otherwise
-    mask64 = (mask0 & cond) | (merged & ~cond);
+    if (bit == 0) {
+        mask64 = digitWidthMaskPacked[blk];
+    } else {
+        ulong2 m = vload2(0, digitWidthMaskPacked + blk);
+        ulong lo = m.x >> bit;
+        ulong hi = (m.y & ((1UL << bit) - 1)) << (64 - bit);
+        mask64 = lo | hi;
+    }
+    ulong4 x_vec;
+    uchar bits;
+    int4 digit_width_vec;
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
-        uchar bits = mask64 & 0xF;
-        int4 digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
-
-
-        ulong4 x_vec = vload4(0, x + i);
+        bits = mask64 & 0xF;
+        digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
+        x_vec = vload4(0, x + i);
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
         if (carry == 0) return;
@@ -487,10 +493,10 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     }
 
 
-    uchar bits = mask64 & 0xF;
-    int4 digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
+    bits = mask64 & 0xF;
+    digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
 
-    ulong4 x_vec = vload4(0, x + end);
+    x_vec = vload4(0, x + end);
     x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
     vstore4(x_vec, 0, x + end);
 
