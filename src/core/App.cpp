@@ -28,6 +28,9 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 120
+#endif
 #ifdef __APPLE__
 # include <OpenCL/opencl.h>
 #else

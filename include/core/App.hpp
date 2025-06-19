@@ -23,6 +23,9 @@
 #include <memory>
 #include <optional>
 #include <atomic>
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 120
+#endif
 #ifdef __APPLE__
 #  include <OpenCL/opencl.h>
 #else
