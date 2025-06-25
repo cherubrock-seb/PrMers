@@ -110,6 +110,34 @@ static void executeKernelAndDisplay(cl_command_queue queue,
                                     bool debug,
                                     cl_uint n)
 {
+
+    debug = false;
+    if (debug) {
+        clFinish(queue);
+        size_t numElems = n; 
+        std::vector<uint64_t> host_x(numElems);
+
+        cl_int err = clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0,
+                                  numElems * sizeof(uint64_t),
+                                  host_x.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            std::cerr << "Error reading buf_x: " << n  << util::getCLErrorString(err)
+                      << " (" << err << ")\n";
+            return;
+        }
+
+        std::cout << "=== Contenu de `buf_x` Avant kernel `" << kernelName
+        << " workers = " << workers 
+                  << "` ===\n";
+            std::cout << "[";
+            for (int j = 0; j < numElems; ++j) {
+                std::cout << host_x[j] << ",";
+            }
+            std::cout << "]\n";
+        
+        std::cout << "============================================\n";
+    }
+
     const size_t* actualLocalSize = (localSize && localSize[0] != 0) ? localSize : nullptr;
 
     cl_int err = clEnqueueNDRangeKernel(
@@ -120,6 +148,29 @@ static void executeKernelAndDisplay(cl_command_queue queue,
     if (err != CL_SUCCESS) {
         std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
                   << " (" << err << ")\n";
+    }
+    if (debug) {
+        clFinish(queue);
+        size_t numElems = n;
+        std::vector<uint64_t> host_x(numElems);
+
+        err = clEnqueueReadBuffer(queue, buf_x, CL_TRUE, 0,
+                                  numElems * sizeof(uint64_t),
+                                  host_x.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            std::cerr << "Error reading buf_x: " << n  << util::getCLErrorString(err)
+                      << " (" << err << ")\n";
+            return;
+        }
+
+        std::cout << "=== Contenu de `buf_x` après kernel `" << kernelName
+                  << " workers = " << workers << "` ===\n";
+        std::cout << "[";
+            for (int j = 0; j < numElems; ++j) {
+                std::cout << host_x[j] << ",";
+            }
+            std::cout << "]\n";
+        std::cout << "============================================\n";
     }
 }
 
