@@ -112,8 +112,8 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     size_t idx8 = 8 * 2;
 
     try {
-        const auto& tw   = pre.twiddles();
-        const auto& i_tw = pre.invTwiddles();
+        const auto& tw   = pre.twiddlesRadix4();
+        const auto& i_tw = pre.invTwiddlesRadix4();
 
         if (tw.size()  <= idx8+1 || 
             i_tw.size() <= idx8+1) 

@@ -36,13 +36,25 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
         pre.digitInvWeight().data(), "digitInvWeight"))
   , twiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
         pre.getN()*3*sizeof(uint64_t),
-        pre.twiddles().data(), "twiddles"))
+        pre.twiddlesRadix4().data(), "twiddles"))
   , invTwiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
         pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddles().data(), "invTwiddles"))
+        pre.invTwiddlesRadix4().data(), "invTwiddles"))
+  , twiddle4Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.twiddles().data(), "twiddles4"))
+  , invTwiddle4Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.invTwiddles().data(), "invTwiddles4"))
+  , twiddle5Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.twiddles().data(), "twiddles5"))
+  , invTwiddle5Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
+        pre.getN()*3*sizeof(uint64_t),
+        pre.invTwiddles().data(), "invTwiddles5"))
   , wiBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
         pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddles().data(), "wi"))
+        pre.invTwiddlesRadix4().data(), "wi"))
   ,blockCarryBuf(createBuffer(ctx, CL_MEM_READ_WRITE,
         ctx.getWorkersCarry()*sizeof(uint64_t),
         nullptr, "blockCarry"))

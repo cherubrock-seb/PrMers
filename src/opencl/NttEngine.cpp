@@ -37,7 +37,8 @@ NttEngine::NttEngine(const Context& ctx,
 
         cl_mem buf_w  = buffers_.twiddleBuf;
         cl_mem buf_dw = buffers_.digitWeightBuf;
-
+        cl_mem buf_w4 = buffers_.twiddle4Buf;
+        cl_mem buf_w5 = buffers_.twiddle5Buf;
         forward_pipeline = buildForwardPipeline(
             n,
             queue_,
@@ -54,8 +55,11 @@ NttEngine::NttEngine(const Context& ctx,
             kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
             kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
             kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
+            kernels_.getKernel("kernel_ntt_radix5_mm_first"),
             buf_w,
             buf_dw,
+            buf_w4,
+            buf_w5,
             ls0,
             ls2,
             ls3
@@ -70,6 +74,8 @@ NttEngine::NttEngine(const Context& ctx,
 
         cl_mem buf_wi  = buffers_.invTwiddleBuf;
         cl_mem buf_diw = buffers_.digitInvWeightBuf;
+        cl_mem buf_wi4  = buffers_.invTwiddle4Buf;
+        cl_mem buf_wi5  = buffers_.invTwiddle5Buf;
         int lastOutputInv = forward_pipeline.back().outputInverse;
         inverse_pipeline = buildInversePipeline(
             n,
@@ -81,7 +87,10 @@ NttEngine::NttEngine(const Context& ctx,
             kernels_.getKernel("kernel_inverse_ntt_radix4_mm"),
             kernels_.getKernel("kernel_inverse_ntt_radix4_mm_last"),
             kernels_.getKernel("kernel_ntt_radix4_inverse_mm_2steps_last"),
+            kernels_.getKernel("kernel_ntt_inverse_radix5_mm_last"),
             buf_wi,
+            buf_wi4,
+            buf_wi5,
             buf_diw,
             ls0,
             ls2,
@@ -98,12 +107,15 @@ static void executeKernelAndDisplay(cl_command_queue queue,
                                     const size_t* localSize,
                                     const std::string& kernelName,
                                     bool profiling,
-                                    bool debug)
+                                    bool debug,
+                                    cl_uint n)
 {
+    const size_t* actualLocalSize = (localSize && localSize[0] != 0) ? localSize : nullptr;
+
     cl_int err = clEnqueueNDRangeKernel(
-        queue, kernel, 1, nullptr, &workers, localSize,
+        queue, kernel, 1, nullptr, &workers, actualLocalSize,
         0, nullptr, nullptr);
-//    std::cerr << "Kernel " << kernelName << std::endl;
+    //std::cerr << "Kernel " << kernelName << std::endl;
 
     if (err != CL_SUCCESS) {
         std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
@@ -130,7 +142,8 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
             stage.localSize,
             stage.name,
             false,
-            true
+            true,
+            n
         );
         ++executed;
     }
@@ -156,7 +169,8 @@ int NttEngine::inverse(cl_mem buf_x, uint64_t /*iter*/) {
             stage.localSize,
             stage.name,
             false,
-            true
+            true,
+            n
         );
         ++executed;
     }
@@ -180,7 +194,8 @@ int NttEngine::pointwiseMul(cl_mem a, cl_mem b)
         ls0,
         "kernel_pointwise_mul",
         false,
-        false);
+        false,
+        n);
     return 1;
 }
 
