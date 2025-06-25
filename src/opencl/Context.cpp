@@ -402,7 +402,7 @@ void Context::computeOptimalSizes(std::size_t n,
     localSize_ = 0;
     
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
-    debug = true;
+    debug = false;
     if (debug) {
         std::cout << "final localSize=" << localSize_
                   << "final localSize3_=" << localSize3_

@@ -28,45 +28,57 @@ namespace opencl {
 
 Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
   : input(nullptr)
-  , digitWeightBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*sizeof(uint64_t),
-        pre.digitWeight().data(), "digitWeight"))
-  , digitInvWeightBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*sizeof(uint64_t),
-        pre.digitInvWeight().data(), "digitInvWeight"))
-  , twiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.twiddlesRadix4().data(), "twiddles"))
-  , invTwiddleBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddlesRadix4().data(), "invTwiddles"))
-  , twiddle4Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.twiddles().data(), "twiddles4"))
-  , invTwiddle4Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddles().data(), "invTwiddles4"))
-  , twiddle5Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.twiddles().data(), "twiddles5"))
-  , invTwiddle5Buf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddles().data(), "invTwiddles5"))
-  , wiBuf(createBuffer(ctx, CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR,
-        pre.getN()*3*sizeof(uint64_t),
-        pre.invTwiddlesRadix4().data(), "wi"))
-  ,blockCarryBuf(createBuffer(ctx, CL_MEM_READ_WRITE,
-        ctx.getWorkersCarry()*sizeof(uint64_t),
-        nullptr, "blockCarry"))
-  , digitWidthMaskBuf(nullptr)   
 {
-    const auto& maskBits = pre.getDigitWidthMask();  // std::vector<bool>
-    size_t n = maskBits.size();
+    const size_t n = pre.getN();
+    const size_t twiddle4Size = (n % 5 == 0) ? 3 * n / 5 : 3 * n;
+    const size_t twiddle5Size = 4 * n / 5;
 
-    size_t chunks = (n + 63) / 64;
+    digitWeightBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        n * sizeof(uint64_t),
+        pre.digitWeight().data(), "digitWeight");
+
+    digitInvWeightBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        n * sizeof(uint64_t),
+        pre.digitInvWeight().data(), "digitInvWeight");
+
+    twiddleBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle4Size * sizeof(uint64_t),
+        pre.twiddlesRadix4().data(), "twiddles");
+
+    invTwiddleBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle4Size * sizeof(uint64_t),
+        pre.invTwiddlesRadix4().data(), "invTwiddles");
+
+    twiddle4Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle4Size * sizeof(uint64_t),
+        pre.twiddlesRadix4().data(), "twiddles4");
+
+    invTwiddle4Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle4Size * sizeof(uint64_t),
+        pre.invTwiddlesRadix4().data(), "invTwiddles4");
+
+    twiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle5Size * sizeof(uint64_t),
+        pre.twiddlesRadix5().data(), "twiddles5");
+
+    invTwiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle5Size * sizeof(uint64_t),
+        pre.invTwiddlesRadix5().data(), "invTwiddles5");
+
+    wiBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        twiddle4Size * sizeof(uint64_t),
+        pre.invTwiddlesRadix4().data(), "wi");
+
+    blockCarryBuf = createBuffer(ctx, CL_MEM_READ_WRITE,
+        ctx.getWorkersCarry() * sizeof(uint64_t),
+        nullptr, "blockCarry");
+
+    const auto& maskBits = pre.getDigitWidthMask();
+    size_t maskN = maskBits.size();
+    size_t chunks = (maskN + 63) / 64;
+
     std::vector<uint64_t> maskPacked(chunks, 0ULL);
-
-    for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0; i < maskN; ++i) {
         if (maskBits[i]) {
             size_t blk = i >> 6;      // i / 64
             size_t bit = i & 63;      // i % 64
@@ -80,6 +92,7 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
         maskPacked.data(),
         "digitWidthMaskPacked");
 }
+
 
 Buffers::~Buffers() {
     if (input)              clReleaseMemObject(input);
