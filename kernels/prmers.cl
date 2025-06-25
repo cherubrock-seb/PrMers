@@ -342,6 +342,7 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 
 #define TRANSFORM_SIZE_N_DIV4  (TRANSFORM_SIZE_N / 4)
 #define TRANSFORM_SIZE_N_DIV8  (TRANSFORM_SIZE_N / 8)
+#define TRANSFORM_SIZE_N_DIV5  (TRANSFORM_SIZE_N / 5)
 
 inline int get_digit_width(uint i) {
     uint j = i + 1;
@@ -1760,3 +1761,151 @@ __kernel void kernel_res64_display(
     );
 }
 
+
+#define PRIMROOT5_1   1373043270956696022
+#define PRIMROOT5_2   211587555138949697
+#define PRIMROOT5_3   15820824984080659046
+#define PRIMROOT5_4   1041288259238279555
+
+__kernel void kernel_ntt_radix5_mm_first(
+    __global ulong * restrict x,
+    __global ulong * restrict w4,
+    __global ulong * restrict w5,
+    __global ulong * restrict digit_weight,
+    const uint m)
+{
+    const uint k         = get_global_id(0);
+
+    ulong t0 = modMul(x[k],digit_weight[k]);
+    ulong t1 = modMul(x[k + TRANSFORM_SIZE_N_DIV5],digit_weight[k + TRANSFORM_SIZE_N_DIV5]);
+    ulong t2 = modMul(x[k + 2*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 2*TRANSFORM_SIZE_N_DIV5]);
+    ulong t3 = modMul(x[k + 3*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 3*TRANSFORM_SIZE_N_DIV5]);
+    ulong t4 = modMul(x[k + 4*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 4*TRANSFORM_SIZE_N_DIV5]);
+    
+    x[k + 0 * TRANSFORM_SIZE_N_DIV5] =
+        modAdd( modAdd( modAdd( modAdd(t0, t1), t2), t3), t4 );
+
+    x[k + 1 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd( t0,
+                                modMul(PRIMROOT5_1, t1) ),
+                        modMul(PRIMROOT5_2, t2) ),
+                    modMul(PRIMROOT5_3, t3) ),
+                modMul(PRIMROOT5_4, t4) ),
+            w5[4 * k + 0] );
+
+    x[k + 2 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd( t0,
+                                modMul(PRIMROOT5_2, t1) ),
+                        modMul(PRIMROOT5_4, t2) ),
+                    modMul(PRIMROOT5_1, t3) ),
+                modMul(PRIMROOT5_3, t4) ),
+            w5[4 * k + 1] );
+
+    x[k + 3 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd( t0,
+                                modMul(PRIMROOT5_3, t1) ),
+                        modMul(PRIMROOT5_1, t2) ),
+                    modMul(PRIMROOT5_4, t3) ),
+                modMul(PRIMROOT5_2, t4) ),
+            w5[4 * k + 2] );
+
+    x[k + 4 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd( t0,
+                                modMul(PRIMROOT5_4, t1) ),
+                        modMul(PRIMROOT5_3, t2) ),
+                    modMul(PRIMROOT5_2, t3) ),
+                modMul(PRIMROOT5_1, t4) ),
+            w5[4 * k + 3] );
+}
+
+__kernel void kernel_ntt_inverse_radix5_mm_last(
+    __global ulong * restrict x,
+    __global ulong * restrict wi4,
+    __global ulong * restrict invw5,
+    __global ulong * restrict digit_inv_weight,
+    const uint m4
+) {
+    const uint k         = get_global_id(0);
+    ulong t0 = x[k];
+    ulong t1 = modMul(x[k + TRANSFORM_SIZE_N_DIV5],invw5[4 * k]);
+    ulong t2 = modMul(x[k + 2*TRANSFORM_SIZE_N_DIV5],invw5[4 * k + 1]);
+    ulong t3 = modMul(x[k + 3*TRANSFORM_SIZE_N_DIV5],invw5[4 * k + 2]);
+    ulong t4 = modMul(x[k + 4*TRANSFORM_SIZE_N_DIV5],invw5[4 * k + 3]);
+    			
+
+    x[k] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd(t0, t1),
+                        t2),
+                    t3),
+                t4),
+            digit_inv_weight[k]);
+
+    x[k + TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd(t0,
+                            modMul(PRIMROOT5_4, t1)),
+                        modMul(PRIMROOT5_3, t2)),
+                    modMul(PRIMROOT5_2, t3)),
+                modMul(PRIMROOT5_1, t4)),
+            digit_inv_weight[k + TRANSFORM_SIZE_N_DIV5]);
+
+    x[k + 2 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd(t0,
+                            modMul(PRIMROOT5_3, t1)),
+                        modMul(PRIMROOT5_1, t2)),
+                    modMul(PRIMROOT5_4, t3)),
+                modMul(PRIMROOT5_2, t4)),
+            digit_inv_weight[k + 2 * TRANSFORM_SIZE_N_DIV5]);
+
+    x[k + 3 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd(t0,
+                            modMul(PRIMROOT5_2, t1)),
+                        modMul(PRIMROOT5_4, t2)),
+                    modMul(PRIMROOT5_1, t3)),
+                modMul(PRIMROOT5_3, t4)),
+            digit_inv_weight[k + 3 * TRANSFORM_SIZE_N_DIV5]);
+
+    x[k + 4 * TRANSFORM_SIZE_N_DIV5] =
+        modMul(
+            modAdd(
+                modAdd(
+                    modAdd(
+                        modAdd(t0,
+                            modMul(PRIMROOT5_1, t1)),
+                        modMul(PRIMROOT5_2, t2)),
+                    modMul(PRIMROOT5_3, t3)),
+                modMul(PRIMROOT5_4, t4)),
+            digit_inv_weight[k + 4 * TRANSFORM_SIZE_N_DIV5]);
+
+}

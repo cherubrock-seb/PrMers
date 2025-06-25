@@ -25,6 +25,10 @@ public:
     uint64_t getDigitWidthValue1() const;
     uint64_t getDigitWidthValue2() const;
     const std::vector<bool>& getDigitWidthMask() const;
+    const std::vector<uint64_t>& twiddlesRadix4() const;
+    const std::vector<uint64_t>& invTwiddlesRadix4() const;
+    const std::vector<uint64_t>& twiddlesRadix5() const;
+    const std::vector<uint64_t>& invTwiddlesRadix5() const;
 
 private:
     uint32_t            n_;
@@ -36,6 +40,7 @@ private:
     uint64_t                  digitWidthValue1_;
     uint64_t                  digitWidthValue2_;
     std::vector<bool>         digitWidthMask_;
+    std::vector<uint64_t> w4_, iw4_, w5_, iw5_;
 };
 
 } // namespace math

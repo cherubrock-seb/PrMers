@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <string>
 #include <functional>
 #ifndef CL_TARGET_OPENCL_VERSION
@@ -20,7 +21,9 @@ enum class ArgKind {
   BufX,
   BufW,
   BufDW,  
-  ParamM 
+  ParamM,
+  BufW4,
+  BufW5,
 };
 struct RadixOp {
     enum Position { First, Any, Last } position;
@@ -68,6 +71,8 @@ inline NttStage makeStage(const RadixOp& op,
                           cl_uint m,
                           cl_mem buf_x,
                           cl_mem buf_w,
+                          cl_mem buf_w4,
+                          cl_mem buf_w5,
                           cl_mem buf_dw = nullptr)
 {
     NttStage s;
@@ -76,6 +81,7 @@ inline NttStage makeStage(const RadixOp& op,
     s.localSize   = op.localSize;
     s.name      = op.name + "(m=" + std::to_string(m) + ")";
     s.outputInverse = op.outputInverse;
+    std::cout << s.name << std::endl;
     for (auto kind : op.argKinds) {
         switch (kind) {
             case ArgKind::BufX:
@@ -89,6 +95,12 @@ inline NttStage makeStage(const RadixOp& op,
                 break;
             case ArgKind::ParamM:
                 s.args.push_back({ sizeof(cl_uint), toBytes((cl_uint)m) });
+                break;            
+            case ArgKind::BufW5:
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w4) });
+                break;
+            case ArgKind::BufW4:
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w5) });
                 break;
         }
     }
@@ -111,14 +123,22 @@ inline std::vector<NttStage> buildForwardPipeline(
     cl_kernel k_radix2_square_radix2,
     cl_kernel k_mm_2_first,
     cl_kernel k_r4_s_r4,
+    cl_kernel k_r5_first,
     cl_mem buf_w,
     cl_mem buf_dw,
+    cl_mem buf_w4,
+    cl_mem buf_w5,
     const size_t* ls0,
     const size_t* ls2,
     const size_t* ls3
 ) {
 
     std::vector<RadixOp> all = {
+    { RadixOp::First,   5, 5,
+        k_r5_first,        ls0, "kernel_ntt_radix5_mm_first",
+         [](auto m0, auto nn){ return nn%5==0; },
+        { ArgKind::BufX, ArgKind::BufW4,ArgKind::BufW5, ArgKind::BufDW,ArgKind::ParamM } , 0},
+      
      { RadixOp::First,   16, 16,
         k_mm_2_first,        ls2, "kernel_ntt_radix4_mm_2steps_first",
          [](auto m0, auto nn){ return m0>32; },
@@ -208,7 +228,7 @@ inline std::vector<NttStage> buildForwardPipeline(
                 else{
                     m0 /= it->localFactor;
                 }
-                v.push_back(makeStage(*it,m0,buf_x,buf_w,buf_dw));
+                v.push_back(makeStage(*it,m0,buf_x,buf_w, buf_w4, buf_w5, buf_dw));
                 if(it->name=="kernel_ntt_radix4_mm_2steps_first"){
                         m0 /= 4;
                 }
@@ -227,7 +247,7 @@ inline std::vector<NttStage> buildForwardPipeline(
             else{
                 m0 /= it->localFactor;
             }
-            v.push_back(makeStage(*it,m0,buf_x,buf_w,buf_dw));
+            v.push_back(makeStage(*it,m0,buf_x,buf_w,buf_w4, buf_w5,buf_dw));
             if(it->name=="kernel_ntt_radix4_mm_2steps"){
                     m0 /= 4;
             }
@@ -241,7 +261,7 @@ inline std::vector<NttStage> buildForwardPipeline(
             
             if (it != all.end()) {
                 m0 /= it->localFactor;
-                v.push_back(makeStage(*it, m0, buf_x, buf_w, buf_dw));
+                v.push_back(makeStage(*it, m0, buf_x, buf_w,buf_w4, buf_w5, buf_dw));
             } /*else {
                 throw std::runtime_error("Pas de RadixOp::Last pour m0=" + std::to_string(m0));
             }*/
@@ -262,7 +282,10 @@ inline std::vector<NttStage> buildInversePipeline(
     cl_kernel k_i_mm,
     cl_kernel k_i_mm_last,
     cl_kernel k_i_mm_2_last,
+    cl_kernel k_i_r5_last,
     cl_mem buf_wi,
+    cl_mem buf_wi4,
+    cl_mem buf_wi5,
     cl_mem buf_diw,
     const size_t* ls0,
     const size_t* ls2,
@@ -289,6 +312,12 @@ inline std::vector<NttStage> buildInversePipeline(
         k_i_mm,        ls0, "kernel_inverse_ntt_radix4_mm",
         [](auto m0, auto nn){ return m0 < nn/4; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   5,  5,
+        k_i_r5_last,    ls0, "kernel_ntt_inverse_radix5_mm_last",
+        [](auto m0, auto nn){ return m0 == nn/5; },
+        { ArgKind::BufX, ArgKind::BufW4,ArgKind::BufW5, ArgKind::BufDW,ArgKind::ParamM },
         /*outputInverse*/ 0
       },
       { RadixOp::Last,   16,  16,
@@ -333,23 +362,23 @@ inline std::vector<NttStage> buildInversePipeline(
                             && op.condition(m0,n);
                     });
         if (it != allInv.end()){
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_wi4, buf_wi5, buf_diw));
             m0 *= it->localFactor;    
         }
         
         
-        while (m0 < (unsigned)(n/16)) {
+        while (m0 < (unsigned)(n/10)) {
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
                     && (m0 * op.localFactor) <= (unsigned)(n/4);
             });
             if (it == allInv.end()) break;
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_wi4, buf_wi5, buf_diw));
             m0 *= it->localFactor;
                 
         }
-        if (m0 >= n/16 || n == 8)  {
+        if (m0 >= n/10 || n == 8 || m0 == n/5)  {
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Last
                     && op.condition(m0,n);
@@ -357,7 +386,7 @@ inline std::vector<NttStage> buildInversePipeline(
 
             if (it != allInv.end()) {
                 
-                v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_diw));
+                v.push_back(makeStage(*it, m0, buf_x, buf_wi, buf_wi4, buf_wi5, buf_diw));
                 m0 *= it->localFactor;
             }
         }

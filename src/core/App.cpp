@@ -334,13 +334,13 @@ App::App(int argc, char** argv)
     if (auto e = worktodoParser_->parse()) {
         hasWorktodoEntry_ = true;
     }
+    
     context.computeOptimalSizes(
         precompute.getN(),
         precompute.getDigitWidth(),
         options.exponent,
         options.debug
     );
-
     buffers.emplace(context, precompute);
     program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
     kernels.emplace(program->getProgram(), context.getQueue());
@@ -371,7 +371,9 @@ App::App(int argc, char** argv)
         "kernel_ntt_radix4_square_radix4",
         "kernel_pointwise_mul",
         "kernel_ntt_radix2",
-        "kernel_res64_display"
+        "kernel_res64_display",
+        "kernel_ntt_radix5_mm_first",
+        "kernel_ntt_inverse_radix5_mm_last"
     };
     for (auto& name : kernelNames) {
         kernels->createKernel(name);

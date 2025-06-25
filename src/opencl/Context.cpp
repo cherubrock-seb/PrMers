@@ -335,8 +335,11 @@ void Context::computeOptimalSizes(std::size_t n,
 {
     transformSize_ = static_cast<cl_uint>(n);
     if (n < 4) n = 4;
-
     cl_uint mm =  static_cast<cl_uint>(n / 4);
+    
+    if(n%20==0){
+        mm =  static_cast<cl_uint>(n / 20);
+    }
     for (cl_uint m =  static_cast<cl_uint>(n / 16); m >= 32; m /= 16)
         mm = m / 16;
 
@@ -355,21 +358,30 @@ void Context::computeOptimalSizes(std::size_t n,
 
     localSize_ = maxWork;
 
+    
     cl_uint constraint = std::max(static_cast<cl_uint>(n / 16), 1u);
+    if(n%5==0){
+        localSize_ = n;
+        
+        while (localSize_ > maxWork){
+            localSize_ /= 2;
+        }
+        constraint = std::max(static_cast<cl_uint>(n / 16), 1u);
+    }
 
     while (workers % localSize_ != 0 || constraint % localSize_ != 0) {
         localSize_ /= 2;
         if (localSize_ < 1) { localSize_ = 1; break; }
     }
-
     // Calcul dynamique de localCarryPropagationDepth_
-    localCarryPropagationDepth_ = 1;
+    localCarryPropagationDepth_ = 4;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
-    if (debug) std::cout << "max digit width = " << maxdw << std::endl;
-    while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
-        localCarryPropagationDepth_ *= 2;
+    std::cout << "max digit width = " << maxdw << std::endl;
+    if(maxdw>1){
+        while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
+            localCarryPropagationDepth_ *= 2;
+        }
     }
-
     if (workers % localCarryPropagationDepth_ == 0) {
         workersCarry_ = workers / localCarryPropagationDepth_;
     } else {
@@ -387,10 +399,13 @@ void Context::computeOptimalSizes(std::size_t n,
     localSizeCarry_ = std::min(workersCarry_, localSize_);
     localSize2_ = localSize_;
     localSize3_ = localSize_;
+    localSize_ = 0;
+    
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
-
+    debug = true;
     if (debug) {
         std::cout << "final localSize=" << localSize_
+                  << "final localSize3_=" << localSize3_
                   << " carryDepth=" << localCarryPropagationDepth_
                   << " workersCarry=" << workersCarry_
                   << " localSizeCarry=" << localSizeCarry_
