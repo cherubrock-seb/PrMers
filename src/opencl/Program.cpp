@@ -80,6 +80,13 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     cl_uint div2       = static_cast<cl_uint>(lpd / 4);
     cl_uint div2_min = std::max<cl_uint>(1, (lpd - 2) / 2);
     
+
+    if(div4==0){
+        div4 = 1;
+    }
+    if(div2==0){
+        div2 = 1;
+    }
     int     modP       = context.getExponent();
     cl_uint nTrans     = static_cast<cl_uint>(n);
 

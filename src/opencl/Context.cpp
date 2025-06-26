@@ -374,7 +374,7 @@ void Context::computeOptimalSizes(std::size_t n,
         if (localSize_ < 1) { localSize_ = 1; break; }
     }
     // Calcul dynamique de localCarryPropagationDepth_
-    localCarryPropagationDepth_ = 4;
+    localCarryPropagationDepth_ = 1;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
     std::cout << "max digit width = " << maxdw << std::endl;
     if (maxdw > 1) {
@@ -388,6 +388,7 @@ void Context::computeOptimalSizes(std::size_t n,
             if (rhs == 0) break;
         }
     }
+
 std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
     if (workers % localCarryPropagationDepth_ == 0) {
         workersCarry_ = workers / localCarryPropagationDepth_;
