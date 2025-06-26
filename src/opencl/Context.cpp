@@ -377,11 +377,18 @@ void Context::computeOptimalSizes(std::size_t n,
     localCarryPropagationDepth_ = 4;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
     std::cout << "max digit width = " << maxdw << std::endl;
-    if(maxdw>1){
-        while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
+    if (maxdw > 1) {
+        cl_ulong lhs = maxdw * maxdw * n;
+        cl_ulong rhs = 1;
+        while (rhs < lhs) {
             localCarryPropagationDepth_ *= 2;
+            rhs = 1;
+            for (cl_uint i = 0; i < localCarryPropagationDepth_; ++i)
+                rhs *= maxdw;
+            if (rhs == 0) break;
         }
     }
+std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
     if (workers % localCarryPropagationDepth_ == 0) {
         workersCarry_ = workers / localCarryPropagationDepth_;
     } else {
@@ -399,9 +406,10 @@ void Context::computeOptimalSizes(std::size_t n,
     localSizeCarry_ = std::min(workersCarry_, localSize_);
     localSize2_ = localSize_;
     localSize3_ = localSize_;
-    localSize_ = 0;
+    
     
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
+    localSize_ = 0;
     debug = false;
     if (debug) {
         std::cout << "final localSize=" << localSize_
