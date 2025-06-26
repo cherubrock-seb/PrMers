@@ -1781,12 +1781,12 @@ __kernel void kernel_ntt_radix5_mm_first(
     ulong t2 = modMul(x[k + 2*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 2*TRANSFORM_SIZE_N_DIV5]);
     ulong t3 = modMul(x[k + 3*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 3*TRANSFORM_SIZE_N_DIV5]);
     ulong t4 = modMul(x[k + 4*TRANSFORM_SIZE_N_DIV5],digit_weight[k + 4*TRANSFORM_SIZE_N_DIV5]);
-    printf("k = %u, t0 = %lu, t1 = %lu, t2 = %lu, t3 = %lu, t4 = %lu\n k = %u, w5 = [%lu, %lu, %lu, %lu]\n",
-        k, t0, t1, t2, t3, t4,k,
-       w5[4 * k + 0],
-       w5[4 * k + 1],
-       w5[4 * k + 2],
-       w5[4 * k + 3]);
+    //printf("k = %u, t0 = %lu, t1 = %lu, t2 = %lu, t3 = %lu, t4 = %lu\n k = %u, w5 = [%lu, %lu, %lu, %lu]\n",
+    //    k, t0, t1, t2, t3, t4,k,
+    //   w5[4 * k + 0],
+    //   w5[4 * k + 1],
+    //   w5[4 * k + 2],
+    //   w5[4 * k + 3]);
     x[k + 0 * TRANSFORM_SIZE_N_DIV5] =
         modAdd( modAdd( modAdd( modAdd(t0, t1), t2), t3), t4 );
 
@@ -1853,12 +1853,12 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     ulong t3 = modMul(x[k + 3*TRANSFORM_SIZE_N_DIV5],invw5[4 * k + 2]);
     ulong t4 = modMul(x[k + 4*TRANSFORM_SIZE_N_DIV5],invw5[4 * k + 3]);
     
-    printf("k = %u, t0 = %lu, t1 = %lu, t2 = %lu, t3 = %lu, t4 = %lu\n k = %u, invw5 = [%lu, %lu, %lu, %lu]\n",
-        k, t0, t1, t2, t3, t4, k,
-       invw5[4 * k + 0],
-       invw5[4 * k + 1],
-       invw5[4 * k + 2],
-       invw5[4 * k + 3]);
+    //printf("k = %u, t0 = %lu, t1 = %lu, t2 = %lu, t3 = %lu, t4 = %lu\n k = %u, invw5 = [%lu, %lu, %lu, %lu]\n",
+    //    k, t0, t1, t2, t3, t4, k,
+    //   invw5[4 * k + 0],
+    //   invw5[4 * k + 1],
+    //   invw5[4 * k + 2],
+    //   invw5[4 * k + 3]);
     x[k] =
         modMul(
             modAdd(
