@@ -43,7 +43,9 @@ static void prepare_radix_twiddles(uint32_t n,
     uint64_t root = powModP(7ULL, (MOD_P - 1) / n);
     uint64_t invroot = invModP(root);
     uint32_t m  = n / 5;
-
+    if(m==0){
+        m=1;
+    }
     w5.resize(4 * m);
     iw5.resize(4 * m);
     if(n%5==0){
