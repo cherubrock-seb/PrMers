@@ -364,7 +364,7 @@ inline std::vector<NttStage> buildInversePipeline(
         }
         
         
-        while (m0 < (unsigned)(n/16)) {
+        while(((n%5!=0) && (m0 < (unsigned)(n/16)))||((n%5!=0)&&(m0 < (unsigned)(n/10)) ) ){
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
@@ -375,7 +375,7 @@ inline std::vector<NttStage> buildInversePipeline(
             m0 *= it->localFactor;
                 
         }
-        if (m0 >= n/16 || n == 8 || m0 == n/5)  {
+        if (((n%5!=0)&&(m0 >= n/16 || n == 8)) || m0 == n/5)  {
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Last
                     && op.condition(m0,n);
