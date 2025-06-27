@@ -364,7 +364,7 @@ inline std::vector<NttStage> buildInversePipeline(
         }
         
         
-        while(((n%5!=0) && (m0 < (unsigned)(n/16)))||((n%5!=0)&&(m0 < (unsigned)(n/10)) ) ){
+        while(((n%5!=0) && (m0 < (unsigned)(n/16)))||((n%5==0)&&(m0 < (unsigned)(n/10)) ) ){
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
