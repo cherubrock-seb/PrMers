@@ -21,8 +21,6 @@ public:
     cl_mem input;             // main data buffer
     cl_mem digitWeightBuf;    // digit weights
     cl_mem digitInvWeightBuf; // inverse digit weights
-    cl_mem twiddleBuf;        // forward twiddles
-    cl_mem invTwiddleBuf;     // inverse twiddles
     cl_mem twiddle4Buf;        // forward twiddles
     cl_mem invTwiddle4Buf;     // inverse twiddles
     cl_mem twiddle5Buf;        // forward twiddles

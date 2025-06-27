@@ -62,7 +62,12 @@ static void prepare_radix_twiddles(uint32_t n,
             iw5[4*j]     = iw1; iw5[4*j+1] = iw2; iw5[4*j+2] = iw3; iw5[4*j+3] = iw4v;
         }
     }
-
+    /*std::cout << "w5:\n";
+    for (uint32_t j = 0; j < m; ++j) {
+        std::cout << "j = " << j << " : ";
+        std::cout << w5[4 * j] << ", " << w5[4 * j + 1] << ", "
+                << w5[4 * j + 2] << ", " << w5[4 * j + 3] << '\n';
+    }*/
     uint32_t n5 = n;
 
     
@@ -129,8 +134,8 @@ void precalc_for_p(uint32_t p,
     uint32_t prev = 0;
     for (uint32_t j = 1; j <= n; ++j) {
         uint64_t qj = uint64_t(p) * j;
-        uint64_t qq = qj - 1;
-        uint32_t ceil_qj_n = uint32_t(qq / n + 1);
+        //uint64_t qq = qj - 1;
+        uint32_t ceil_qj_n = (qj == 0) ? 0 : uint32_t((qj - 1) / n + 1);
         digitWidth[j - 1]  = int(ceil_qj_n - prev);
         prev               = ceil_qj_n;
 
