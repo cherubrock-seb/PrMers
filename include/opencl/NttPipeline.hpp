@@ -171,7 +171,7 @@ inline std::vector<NttStage> buildForwardPipeline(
         k_m32,           ls0, "kernel_ntt_radix4_mm_m32",
         [](auto m0, auto){ return m0==128; },
         { ArgKind::BufX, ArgKind::BufW } ,0},
-      { RadixOp::Last,     4, 8,
+      { RadixOp::Last,     8, 8,
         k_r2_s_r2_r4,   ls3, "kernel_radix4_radix2_square_radix2_radix4",
         [](auto m0, auto){ return m0==8;},
         { ArgKind::BufX } ,8},
@@ -301,13 +301,13 @@ inline std::vector<NttStage> buildInversePipeline(
       },*/
       { RadixOp::Any,    16, 16,
         k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",
-        [](auto m0, auto nn){ return m0 < nn/16; },
+        [](auto m0, auto nn){ return (m0 < nn/16); },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
         /*outputInverse*/ 0
       },
       { RadixOp::Any,    4, 8,
         k_i_mm,        ls0, "kernel_inverse_ntt_radix4_mm",
-        [](auto m0, auto nn){ return m0 < nn/4; },
+        [](auto m0, auto nn){ return m0 < nn/4 ; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
         /*outputInverse*/ 0
       },
@@ -368,7 +368,7 @@ inline std::vector<NttStage> buildInversePipeline(
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
-                    && (m0 * op.localFactor) <= (unsigned)(n/4);
+                    && ((n%5 != 0 && (m0 * op.localFactor) <= (unsigned)(n/4)) || (n%5 == 0 && (m0 * op.localFactor) <= (unsigned)(n/4))) ;
             });
             if (it == allInv.end()) break;
             v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
