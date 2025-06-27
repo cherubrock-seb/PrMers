@@ -368,7 +368,7 @@ inline std::vector<NttStage> buildInversePipeline(
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
-                    && ((n%5 != 0 && (m0 * op.localFactor) <= (unsigned)(n/4)) || (n%5 == 0 && (m0 * op.localFactor) <= (unsigned)(n/4))) ;
+                    && (m0 * op.localFactor) <= (unsigned)(n/4);
             });
             if (it == allInv.end()) break;
             v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
