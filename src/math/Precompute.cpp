@@ -28,6 +28,7 @@
 
 namespace math {
 
+
 uint32_t transformsize(uint32_t exponent) {
     int log_n = 0;
     uint32_t w = 0;
@@ -38,15 +39,18 @@ uint32_t transformsize(uint32_t exponent) {
 
     uint32_t n2 = uint32_t(1) << log_n;
 
-    if (n2 >= 8) {
-        uint32_t n5 = (n2 >> 3) * 5u;          // n2 * 5 / 8
-        uint32_t w5 = exponent / n5;
-        long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
-        if (cost5 < 64.0L)
-            return n5;
+    if (n2 >= 128) {
+        uint32_t n5 = (n2 >> 3) * 5u; // n2 * 5 / 8
+        if (n5 >= 80) {               // sécurité : n5 doit être ≥ 80
+            uint32_t w5 = exponent / n5;
+            long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
+            if (cost5 < 64.0L)
+                return n5;
+        }
     }
     return n2;
 }
+
 static void prepare_radix_twiddles(uint32_t n,
                                    std::vector<uint64_t>& w4,
                                    std::vector<uint64_t>& iw4,
