@@ -25,7 +25,6 @@ public:
     cl_mem invTwiddle4Buf;     // inverse twiddles
     cl_mem twiddle5Buf;        // forward twiddles
     cl_mem invTwiddle5Buf;     // inverse twiddles
-    cl_mem wiBuf;             // inverse-NTT root powers
     cl_mem blockCarryBuf;
     cl_mem digitWidthMaskBuf;
     
