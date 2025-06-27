@@ -41,14 +41,6 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
         n * sizeof(uint64_t),
         pre.digitInvWeight().data(), "digitInvWeight");
 
-    twiddleBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        twiddle4Size * sizeof(uint64_t),
-        pre.twiddlesRadix4().data(), "twiddles");
-
-    invTwiddleBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        twiddle4Size * sizeof(uint64_t),
-        pre.invTwiddlesRadix4().data(), "invTwiddles");
-
     twiddle4Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
         twiddle4Size * sizeof(uint64_t),
         pre.twiddlesRadix4().data(), "twiddles4");
@@ -98,8 +90,10 @@ Buffers::~Buffers() {
     if (input)              clReleaseMemObject(input);
     if (digitWeightBuf)     clReleaseMemObject(digitWeightBuf);
     if (digitInvWeightBuf)  clReleaseMemObject(digitInvWeightBuf);
-    if (twiddleBuf)         clReleaseMemObject(twiddleBuf);
-    if (invTwiddleBuf)      clReleaseMemObject(invTwiddleBuf);
+    if (twiddle4Buf)         clReleaseMemObject(twiddle4Buf);
+    if (invTwiddle4Buf)      clReleaseMemObject(invTwiddle4Buf);
+    if (twiddle5Buf)         clReleaseMemObject(twiddle5Buf);
+    if (invTwiddle5Buf)      clReleaseMemObject(invTwiddle5Buf);
     if (wiBuf)              clReleaseMemObject(wiBuf);
     if (blockCarryBuf)      clReleaseMemObject(blockCarryBuf);
 }

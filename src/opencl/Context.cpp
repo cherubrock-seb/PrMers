@@ -383,7 +383,7 @@ void Context::computeOptimalSizes(std::size_t n,
         while (rhs < lhs) {
             localCarryPropagationDepth_ *= 2;
             rhs = 1;
-            for (cl_uint i = 0; i < localCarryPropagationDepth_; ++i)
+            for (int i = 0; i < localCarryPropagationDepth_; ++i)
                 rhs *= maxdw;
             if (rhs == 0) break;
         }

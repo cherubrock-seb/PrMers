@@ -35,7 +35,6 @@ NttEngine::NttEngine(const Context& ctx,
         const size_t* ls2 = &ls2_val_;
         const size_t* ls3 = &ls3_val_;
 
-        cl_mem buf_w  = buffers_.twiddleBuf;
         cl_mem buf_dw = buffers_.digitWeightBuf;
         cl_mem buf_w4 = buffers_.twiddle4Buf;
         cl_mem buf_w5 = buffers_.twiddle5Buf;
@@ -56,7 +55,6 @@ NttEngine::NttEngine(const Context& ctx,
             kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
             kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
             kernels_.getKernel("kernel_ntt_radix5_mm_first"),
-            buf_w,
             buf_dw,
             buf_w4,
             buf_w5,
@@ -72,7 +70,6 @@ NttEngine::NttEngine(const Context& ctx,
         const size_t* ls0 = &ls0_vali_;
         const size_t* ls2 = &ls2_vali_;
 
-        cl_mem buf_wi  = buffers_.invTwiddleBuf;
         cl_mem buf_diw = buffers_.digitInvWeightBuf;
         cl_mem buf_wi4  = buffers_.invTwiddle4Buf;
         cl_mem buf_wi5  = buffers_.invTwiddle5Buf;
@@ -88,7 +85,6 @@ NttEngine::NttEngine(const Context& ctx,
             kernels_.getKernel("kernel_inverse_ntt_radix4_mm_last"),
             kernels_.getKernel("kernel_ntt_radix4_inverse_mm_2steps_last"),
             kernels_.getKernel("kernel_ntt_inverse_radix5_mm_last"),
-            buf_wi,
             buf_wi4,
             buf_wi5,
             buf_diw,
@@ -130,7 +126,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
         << " workers = " << workers 
                   << "` ===\n";
             std::cout << "[";
-            for (int j = 0; j < numElems; ++j) {
+            for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
                 std::cout << host_x[j] << ",";
             }
             std::cout << "]\n";
@@ -166,7 +162,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
         std::cout << "=== Contenu de `buf_x` après kernel `" << kernelName
                   << " workers = " << workers << "` ===\n";
         std::cout << "[";
-            for (int j = 0; j < numElems; ++j) {
+            for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
                 std::cout << host_x[j] << ",";
             }
             std::cout << "]\n";
