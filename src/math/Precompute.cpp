@@ -23,16 +23,29 @@
 #include "math/Precompute.hpp"
 #include "math/Mod64.hpp"
 #include <iostream>
+#include <cstdint>
+#include <cmath>
+
 namespace math {
 
 uint32_t transformsize(uint32_t exponent) {
-    int    log_n = 0;
-    uint32_t w   = 0;
+    int log_n = 0;
+    uint32_t w = 0;
     do {
         ++log_n;
         w = exponent >> log_n;
     } while ((w + 1) * 2 + log_n >= 63);
-    return (uint32_t(1) << log_n)*1;
+
+    uint32_t n2 = uint32_t(1) << log_n;
+
+    if (n2 >= 8) {
+        uint32_t n5 = (n2 >> 3) * 5u;          // n2 * 5 / 8
+        uint32_t w5 = exponent / n5;
+        long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
+        if (cost5 < 64.0L)
+            return n5;
+    }
+    return n2;
 }
 static void prepare_radix_twiddles(uint32_t n,
                                    std::vector<uint64_t>& w4,
