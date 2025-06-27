@@ -48,18 +48,20 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
     invTwiddle4Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
         twiddle4Size * sizeof(uint64_t),
         pre.invTwiddlesRadix4().data(), "invTwiddles4");
+    if(n%5==0){
+        twiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+            twiddle5Size * sizeof(uint64_t),
+            pre.twiddlesRadix5().data(), "twiddles5");
 
-    twiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        twiddle5Size * sizeof(uint64_t),
-        pre.twiddlesRadix5().data(), "twiddles5");
+        invTwiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+            twiddle5Size * sizeof(uint64_t),
+            pre.invTwiddlesRadix5().data(), "invTwiddles5");
+    }
+    else{
+        clReleaseMemObject(invTwiddle5Buf);
+        clReleaseMemObject(twiddle5Buf);
 
-    invTwiddle5Buf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        twiddle5Size * sizeof(uint64_t),
-        pre.invTwiddlesRadix5().data(), "invTwiddles5");
-
-    wiBuf = createBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        twiddle4Size * sizeof(uint64_t),
-        pre.invTwiddlesRadix4().data(), "wi");
+    }
 
     blockCarryBuf = createBuffer(ctx, CL_MEM_READ_WRITE,
         ctx.getWorkersCarry() * sizeof(uint64_t),
@@ -94,7 +96,6 @@ Buffers::~Buffers() {
     if (invTwiddle4Buf)      clReleaseMemObject(invTwiddle4Buf);
     if (twiddle5Buf)         clReleaseMemObject(twiddle5Buf);
     if (invTwiddle5Buf)      clReleaseMemObject(invTwiddle5Buf);
-    if (wiBuf)              clReleaseMemObject(wiBuf);
     if (blockCarryBuf)      clReleaseMemObject(blockCarryBuf);
 }
 

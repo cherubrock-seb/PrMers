@@ -58,7 +58,6 @@ inline ulong modSub(const ulong lhs, const ulong rhs) {
 
 // Modular reduction of a 128-bit product (lo, hi) to a 64-bit result mod p
 inline ulong Reduce(const ulong lo, const ulong hi) {
-    //ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
     ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
     c += lo;
     c = modAdd(c, hi << 32);                           // Add hi * 2^32
@@ -76,7 +75,6 @@ inline ulong4 Reduce4(const ulong4 lo, const ulong4 hi) {
     c = modSub4(c, hi_reduced);
     return c;
 }
-
 
 
 // Modular multiplication of 4 ulong vectors
@@ -119,13 +117,16 @@ inline ulong2 modSub2(ulong2 lhs, ulong2 rhs) {
 }
 
 inline ulong2 Reduce2(const ulong2 lo, const ulong2 hi) {
-    
+    ulong2 c = select((ulong2)0, mod_p_comp2_const, lo >= mod_p2_const);
+    c += lo;
 
     ulong2 hi_shifted = hi << 32;
-    const ulong2 hi_reduced    = (hi >> 32) + convert_ulong2(convert_uint2(hi));
-    hi_shifted = modAdd2(lo, hi_shifted);
-    hi_shifted = modSub2(hi_shifted, hi_reduced);
-    return hi_shifted;
+    ulong2 hi_reduced    = (hi >> 32) + convert_ulong2(convert_uint2(hi));
+    
+
+    c = modAdd2(c, hi_shifted);
+    c = modSub2(c, hi_reduced);
+    return c;
 }
 
 
@@ -138,28 +139,34 @@ inline ulong2 modMul2(const ulong2 lhs, const ulong2 rhs) {
 
 inline ulong4 modMul3_2(const ulong4 lhs,
                         const ulong2 w02,
-                        const ulong  w3)
+                        const ulong w3)
 {
-    ulong4 out = lhs;
-    out.yz = modMul2(lhs.yz, w02.yx);
-    out.w  = modMul(lhs.w, w3);
-    return out;
+    ulong2 x = (ulong2)(lhs.s1, lhs.s2);
+    x = modMul2(x, (ulong2)(w02.s1, w02.s0));
+    ulong m = modMul(lhs.s3, w3);
+    return (ulong4)(lhs.s0, x.s0, x.s1, m);
 }
 
-#define CONST_W48_SHIFT 48
-#define CONST_W48_INV   16
 
-inline ulong modSubMuli(const ulong lhs, const ulong rhs) {
-    ulong d  = lhs - rhs;
-    d        -= (ulong)((lhs < rhs) * MOD_P_COMP);
-    ulong lo = d << CONST_W48_SHIFT;
-    ulong hi = d >> CONST_W48_INV;
-    d        = lo + (hi << 32);
-    d       += (ulong)(((d < lo) | (d >= MOD_P)) * MOD_P_COMP);
-    hi       = (hi >> 32) + (uint)hi;
-    return d - hi + (ulong)((d < hi) * MOD_P_COMP);
+inline ulong4 modMul3(const ulong4 lhs,
+                      const ulong w1,
+                      const ulong w2,
+                      const ulong w3)
+{
+    return (ulong4)(
+        lhs.s0,
+        modMul(lhs.s1, w1),
+        modMul(lhs.s2, w2),
+        modMul(lhs.s3, w3)
+    );
 }
 
+#define CONST_W48 281474976710656UL
+
+// Multiply x by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p
+inline ulong modMuli(const ulong x) {
+    return modMul(x, CONST_W48);
+}
 
 // Add-with-carry for a digit of specified width.
 inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
@@ -342,7 +349,6 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 
 #define TRANSFORM_SIZE_N_DIV4  (TRANSFORM_SIZE_N / 4)
 #define TRANSFORM_SIZE_N_DIV8  (TRANSFORM_SIZE_N / 8)
-#define TRANSFORM_SIZE_N_DIV5  (TRANSFORM_SIZE_N / 5)
 
 inline int get_digit_width(uint i) {
     uint j = i + 1;
@@ -401,65 +407,56 @@ __kernel void kernel_sub2(__global ulong* restrict x)
 #ifndef DIGIT_WIDTH_VALUE_2
 #define DIGIT_WIDTH_VALUE_2 1
 #endif
-#define DW1 DIGIT_WIDTH_VALUE_1
-#define DW2 DIGIT_WIDTH_VALUE_2
-#define DW_DIFF (DW2 - DW1)
-
-__constant int4 mask_lookup[16] = {
-    (int4)(0,0,0,0), (int4)(1,0,0,0), (int4)(0,1,0,0), (int4)(1,1,0,0),
-    (int4)(0,0,1,0), (int4)(1,0,1,0), (int4)(0,1,1,0), (int4)(1,1,1,0),
-    (int4)(0,0,0,1), (int4)(1,0,0,1), (int4)(0,1,0,1), (int4)(1,1,0,1),
-    (int4)(0,0,1,1), (int4)(1,0,1,1), (int4)(0,1,1,1), (int4)(1,1,1,1)
-};
-
-__constant int4 base_dw = (int4)(DW1, DW1, DW1, DW1);
 
 __kernel void kernel_carry(
-    __global ulong4* restrict x,
-    __global ulong* restrict carry_array,
-    __global const ulong* restrict digitWidthMaskPacked
+    __global ulong*        restrict x,
+    __global ulong*        restrict carry_array,
+    __global const ulong4* restrict digitWidthMaskPacked
 ) {
     const uint gid   = get_global_id(0);
-    const uint start = gid * LOCAL_PROPAGATION_DEPTH_DIV4;
-    const uint end   = start + LOCAL_PROPAGATION_DEPTH_DIV4;
-    const uint offset = gid * LOCAL_PROPAGATION_DEPTH;
-
-    const uint blk = offset >> 6;
-    const uint bit = offset & 63;
-
-    ulong mask64;
-    if (bit == 0) {
-        mask64 = digitWidthMaskPacked[blk];
-    } else {
-        ulong2 m = vload2(0, digitWidthMaskPacked + blk);
-        ulong lo = m.x >> bit;
-        ulong hi = (m.y & ((1UL << bit) - 1)) << (64 - bit);
-        mask64 = lo | hi;
-    }
-
-    ulong carry = 0;
-    ulong4 x_vec;
-    uchar bits;
-    int4 dw_vec;
+    const uint start = gid * LOCAL_PROPAGATION_DEPTH;
+    const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+    ulong carry = 0UL;
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
-    for (uint i = start, shift = 0; i < end; ++i, shift += 4) {
-        bits = (mask64 >> shift) & 0xF;
-        dw_vec = base_dw + DW_DIFF * mask_lookup[bits];
-        x_vec = x[i];
-        x_vec = digit_adc4(x_vec, dw_vec, &carry);
-        x[i] = x_vec;
+    for (uint i = start; i < end; i += 4) {
+        ulong4 x_vec = vload4(0, x + i);
+
+        uint blk    = i >> 6;      // i/64
+        uint group4 = blk >> 2;    // (i/64)/4
+
+        ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+        ulong  chunk = chunk4[ blk & 3 ];
+
+        uchar4 m = (uchar4)(
+            (chunk >> ((i & 63) + 0)) & 1,
+            (chunk >> ((i & 63) + 1)) & 1,
+            (chunk >> ((i & 63) + 2)) & 1,
+            (chunk >> ((i & 63) + 3)) & 1
+        );
+
+        int4 digit_width_vec = (int4)(
+            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+        );
+
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+
+        vstore4(x_vec, 0, x + i);
     }
 
-    if (carry)
+    if (carry != 0) {
         carry_array[gid] = carry;
+    }
 }
-
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
                              __global ulong* restrict carry_array,
-                             __global const ulong* restrict digitWidthMaskPacked)
+                             __global const ulong4* restrict digitWidthMaskPacked)
 {
     const uint gid = get_global_id(0);
     const uint prev_gid = (gid == 0) ? (CARRY_WORKER_MIN_1) : (gid - 1);
@@ -468,40 +465,58 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end = start + LOCAL_PROPAGATION_DEPTH - 4;  
 
-    const uint blk   = start >> 6;
-    ulong2 mask128   = vload2(0, digitWidthMaskPacked + blk);
-    uint bit         = start & 63;
-    
-    ulong mask64;
-    if (bit == 0) {
-        mask64 = digitWidthMaskPacked[blk];
-    } else {
-        ulong2 m = vload2(0, digitWidthMaskPacked + blk);
-        ulong lo = m.x >> bit;
-        ulong hi = (m.y & ((1UL << bit) - 1)) << (64 - bit);
-        mask64 = lo | hi;
-    }
-    ulong4 x_vec;
-    uchar bits;
-    int4 digit_width_vec;
-
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
-        bits = mask64 & 0xF;
-        digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
-        x_vec = vload4(0, x + i);
-        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
-        vstore4(x_vec, 0, x + i);
-        if (carry == 0) return;
-        mask64 >>= 4;
+        ulong4 x_vec = vload4(0, x + i);
+        uint blk    = i >> 6;      // i/64
+        uint group4 = blk >> 2;    // (i/64)/4
 
+        ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+        ulong  chunk = chunk4[ blk & 3 ];
+
+        uchar4 m = (uchar4)(
+            (chunk >> ((i & 63) + 0)) & 1,
+            (chunk >> ((i & 63) + 1)) & 1,
+            (chunk >> ((i & 63) + 2)) & 1,
+            (chunk >> ((i & 63) + 3)) & 1
+        );
+
+        int4 digit_width_vec = (int4)(
+            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+        );
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+
+        vstore4(x_vec, 0, x + i);
+
+        if (carry == 0) return;
     }
 
 
-    bits = mask64 & 0xF;
-    digit_width_vec = base_dw + DW_DIFF * mask_lookup[bits];
+    ulong4 x_vec = vload4(0, x + end);
+    uint blk    = end >> 6;      // end/64
+    uint group4 = blk >> 2;    // (end/64)/4
 
-    x_vec = vload4(0, x + end);
+    ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+    ulong  chunk = chunk4[ blk & 3 ];
+
+    uchar4 m = (uchar4)(
+        (chunk >> ((end & 63) + 0)) & 1,
+        (chunk >> ((end & 63) + 1)) & 1,
+        (chunk >> ((end & 63) + 2)) & 1,
+        (chunk >> ((end & 63) + 3)) & 1
+    );
+
+    int4 digit_width_vec = (int4)(
+        m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+        m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+    );
     x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry); 
     vstore4(x_vec, 0, x + end);
 
@@ -541,7 +556,7 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s1);
     v0.s1  = modSub(c.s0, c.s1);
     v1.s0 = modAdd(c.s2, c.s3);
-    v1.s1 = modSubMuli(c.s3, c.s2);
+    v1.s1 = modMuli(modSub(c.s3, c.s2));
     c.s0 = modAdd(v0.s0, v1.s0);
     c.s1 = modAdd(v0.s1, v1.s1);
     c.s2 = modSub(v0.s0, v1.s0);
@@ -552,7 +567,7 @@ __kernel void kernel_inverse_ntt_radix4_mm(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s1);
     v0.s1  = modSub(c2.s0, c2.s1);
     v1.s0 = modAdd(c2.s2, c2.s3);
-    v1.s1 = modSubMuli(c2.s3, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s3, c2.s2));
     c2.s0 = modAdd(v0.s0, v1.s0);
     c2.s1 = modAdd(v0.s1, v1.s1);
     c2.s2 = modSub(v0.s0, v1.s0);
@@ -576,7 +591,8 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
     const ulong t0 = modAdd(u.s0, u.s2);
     const ulong t1 = modAdd(u.s1, u.s3);
     const ulong t2 = modSub(u.s0, u.s2);
-    const ulong t3i = modSubMuli(u.s1, u.s3);
+    const ulong t3 = modSub(u.s1, u.s3);
+    const ulong t3i = modMuli(t3);
     const ulong r0 = modAdd(t0, t1);
     const ulong r1 = modMul(modSub(t0, t1), tw1);
     const ulong r2 = modMul(modAdd(t2, t3i), tw0);
@@ -624,7 +640,7 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s1);
     v0.s1  = modSub(c.s0, c.s1);
     v1.s0 = modAdd(c.s2, c.s3);
-    v1.s1 = modSubMuli(c.s3, c.s2);
+    v1.s1 = modMuli(modSub(c.s3, c.s2));
     c.s0 = modAdd(v0.s0, v1.s0);
     c.s1 = modAdd(v0.s1, v1.s1);
     c.s2 = modSub(v0.s0, v1.s0);
@@ -635,7 +651,7 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s1);
     v0.s1  = modSub(c2.s0, c2.s1);
     v1.s0 = modAdd(c2.s2, c2.s3);
-    v1.s1 = modSubMuli(c2.s3, c2.s2);
+    v1.s1 = modMuli(modSub(c2.s3, c2.s2));
     c2.s0 = modAdd(v0.s0, v1.s0);
     c2.s1 = modAdd(v0.s1, v1.s1);
     c2.s2 = modSub(v0.s0, v1.s0);
@@ -677,7 +693,7 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong4* restrict x)
     ulong a = modAdd(coeff.s0, coeff.s2);
     ulong b = modAdd(coeff.s1, coeff.s3);
     ulong c = modSub(coeff.s0, coeff.s2);
-    ulong d = modSubMuli(coeff.s1, coeff.s3);
+    ulong d = modMuli(modSub(coeff.s1, coeff.s3));
     
     coeff.s0 = modAdd(a, b);
     coeff.s1 = modSub(a, b);
@@ -721,7 +737,7 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s2);
     v0.s1  = modAdd(c.s1, c.s3);
     v1.s0 = modSub(c.s0, c.s2);
-    v1.s1 = modSubMuli(c.s1, c.s3);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
     c.s0 = modAdd(v0.s0, v0.s1);
     c.s1 = modSub(v0.s0, v0.s1);
     c.s2 = modAdd(v1.s0, v1.s1);
@@ -733,7 +749,7 @@ __kernel void kernel_ntt_radix4_mm_first(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s2);
     v0.s1 = modAdd(c2.s1, c2.s3);
     v1.s0 = modSub(c2.s0, c2.s2);
-    v1.s1 = modSubMuli(c2.s1, c2.s3);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
     c2.s0 = modAdd(v0.s0, v0.s1);
     c2.s1 = modSub(v0.s0, v0.s1);
     c2.s2 = modAdd(v1.s0, v1.s1);
@@ -781,7 +797,7 @@ __kernel void kernel_ntt_radix4_mm_m4(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s2);
     v0.s1  = modAdd(c.s1, c.s3);
     v1.s0 = modSub(c.s0, c.s2);
-    v1.s1 = modSubMuli(c.s1, c.s3);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
     c.s0 = modAdd(v0.s0, v0.s1);
     c.s1 = modSub(v0.s0, v0.s1);
     c.s2 = modAdd(v1.s0, v1.s1);
@@ -793,7 +809,7 @@ __kernel void kernel_ntt_radix4_mm_m4(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s2);
     v0.s1 = modAdd(c2.s1, c2.s3);
     v1.s0 = modSub(c2.s0, c2.s2);
-    v1.s1 = modSubMuli(c2.s1, c2.s3);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
     c2.s0 = modAdd(v0.s0, v0.s1);
     c2.s1 = modSub(v0.s0, v0.s1);
     c2.s2 = modAdd(v1.s0, v1.s1);
@@ -841,7 +857,7 @@ __kernel void kernel_ntt_radix4_mm_m8(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s2);
     v0.s1  = modAdd(c.s1, c.s3);
     v1.s0 = modSub(c.s0, c.s2);
-    v1.s1 = modSubMuli(c.s1, c.s3);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
     c.s0 = modAdd(v0.s0, v0.s1);
     c.s1 = modSub(v0.s0, v0.s1);
     c.s2 = modAdd(v1.s0, v1.s1);
@@ -853,7 +869,7 @@ __kernel void kernel_ntt_radix4_mm_m8(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s2);
     v0.s1 = modAdd(c2.s1, c2.s3);
     v1.s0 = modSub(c2.s0, c2.s2);
-    v1.s1 = modSubMuli(c2.s1, c2.s3);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
     c2.s0 = modAdd(v0.s0, v0.s1);
     c2.s1 = modSub(v0.s0, v0.s1);
     c2.s2 = modAdd(v1.s0, v1.s1);
@@ -899,7 +915,7 @@ __kernel void kernel_ntt_radix4_mm_m16(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s2);
     v0.s1 = modAdd(c.s1, c.s3);
     v1.s0 = modSub(c.s0, c.s2);
-    v1.s1 = modSubMuli(c.s1, c.s3);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
     c.s0  = modAdd(v0.s0, v0.s1);
     c.s1  = modSub(v0.s0, v0.s1);
     c.s2  = modAdd(v1.s0, v1.s1);
@@ -910,7 +926,7 @@ __kernel void kernel_ntt_radix4_mm_m16(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s2);
     v0.s1 = modAdd(c2.s1, c2.s3);
     v1.s0 = modSub(c2.s0, c2.s2);
-    v1.s1 = modSubMuli(c2.s1, c2.s3);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
     c2.s0  = modAdd(v0.s0, v0.s1);
     c2.s1  = modSub(v0.s0, v0.s1);
     c2.s2  = modAdd(v1.s0, v1.s1);
@@ -955,7 +971,7 @@ __kernel void kernel_ntt_radix4_mm_m32(__global ulong2* restrict x,
     v0.s0 = modAdd(c.s0, c.s2);
     v0.s1 = modAdd(c.s1, c.s3);
     v1.s0 = modSub(c.s0, c.s2);
-    v1.s1 = modSubMuli(c.s1, c.s3);
+    v1.s1 = modMuli(modSub(c.s1, c.s3));
     c.s0  = modAdd(v0.s0, v0.s1);
     c.s1  = modSub(v0.s0, v0.s1);
     c.s2  = modAdd(v1.s0, v1.s1);
@@ -966,7 +982,7 @@ __kernel void kernel_ntt_radix4_mm_m32(__global ulong2* restrict x,
     v0.s0 = modAdd(c2.s0, c2.s2);
     v0.s1 = modAdd(c2.s1, c2.s3);
     v1.s0 = modSub(c2.s0, c2.s2);
-    v1.s1 = modSubMuli(c2.s1, c2.s3);
+    v1.s1 = modMuli(modSub(c2.s1, c2.s3));
     c2.s0  = modAdd(v0.s0, v0.s1);
     c2.s1  = modSub(v0.s0, v0.s1);
     c2.s2  = modAdd(v1.s0, v1.s1);
@@ -1000,7 +1016,7 @@ __kernel void kernel_inverse_ntt_radix4_m1(__global ulong4* restrict x) {
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
-    ulong v3 = modSubMuli(u.s3, u.s2);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
     ulong4 result = (ulong4)( modAdd(v0, v2),
                               modAdd(v1, v3),
                               modSub(v0, v2),
@@ -1020,7 +1036,7 @@ __kernel void kernel_inverse_ntt_radix4_m1_n4(__global ulong* restrict x,
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
-    ulong v3 = modSubMuli(u.s3, u.s2);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
     coeff.s0 = modAdd(v0, v2);
     coeff.s1 = modAdd(v1, v3);
     coeff.s2 = modSub(v0, v2);
@@ -1069,7 +1085,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
         local_x[write_index + 1] = r2;
 
         r  = modAdd(local_x[write_index + 2], local_x[write_index + 3]);
-        r2 = modSubMuli(local_x[write_index + 3], local_x[write_index + 2]);
+        r2 = modMuli(modSub(local_x[write_index + 3], local_x[write_index + 2]));
         local_x[write_index + 2] = r;
         local_x[write_index + 3] = r2;
 
@@ -1111,8 +1127,8 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
 
         r  = modAdd(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4],
                     local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4]);
-        r2 = modSubMuli(local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4],
-                            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4]);
+        r2 = modMuli(modSub(local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4],
+                            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4]));
 
         x[base2]                            = modAdd(local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4], r);
         x[base2 + (new_m << 1)]            = modSub(local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4], r);
@@ -1155,7 +1171,7 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps_last(__global ulong* restrict 
         local_x[write_index + 1] = r2;
 
         r  = modAdd(local_x[write_index + 2], local_x[write_index + 3]);
-        r2 = modSubMuli(local_x[write_index + 3], local_x[write_index + 2]);
+        r2 = modMuli(modSub(local_x[write_index + 3], local_x[write_index + 2]));
         local_x[write_index + 2] = r;
         local_x[write_index + 3] = r2;
 
@@ -1197,8 +1213,8 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps_last(__global ulong* restrict 
 
         r  = modAdd(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4],
                     local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4]);
-        r2 = modSubMuli(local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4],
-                            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4]);
+        r2 = modMuli(modSub(local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4],
+                            local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4]));
 
         x[base2]                            = modMul(modAdd(local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4], r),digit_invweight[base2]);
         x[base2 + (new_m << 1)]            = modMul(modSub(local_x[((write_index    ) % 4) * 4 + (write_index    ) / 4], r),digit_invweight[base2 + (new_m << 1)]);
@@ -1247,7 +1263,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
 
 
         r = modAdd(local_x[write_index+1], local_x[write_index+3]);
-        r2 = modSubMuli(local_x[write_index+1], local_x[write_index+3]);
+        r2 = modMuli(modSub(local_x[write_index+1], local_x[write_index+3]));
         local_x[write_index + 1] = r;
         local_x[write_index+3] = r2;
 
@@ -1283,7 +1299,7 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
 
 
         r = modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        r2 = modSubMuli(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        r2 = modMuli(modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]));
         local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4] = r;
         local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
 
@@ -1347,7 +1363,7 @@ __kernel void kernel_ntt_radix4_mm_2steps_first(__global ulong* restrict x,
 
 
         r = modAdd(local_x[write_index+1], local_x[write_index+3]);
-        r2 = modSubMuli(local_x[write_index+1], local_x[write_index+3]);
+        r2 = modMuli(modSub(local_x[write_index+1], local_x[write_index+3]));
         local_x[write_index + 1] = r;
         local_x[write_index+3] = r2;
 
@@ -1383,7 +1399,7 @@ __kernel void kernel_ntt_radix4_mm_2steps_first(__global ulong* restrict x,
 
 
         r = modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        r2 = modSubMuli(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        r2 = modMuli(modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]));
         local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4] = r;
         local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
 
@@ -1499,7 +1515,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     ulong a = modAdd(localX[local_base_vec + 0].s0, localX[local_base_vec + 2].s0);
     ulong b = modAdd(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0);
     ulong d = modSub(localX[local_base_vec + 0].s0, localX[local_base_vec + 2].s0);
-    ulong e = modSubMuli(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0);
+    ulong e = modMuli(modSub(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0));
 
     localX[local_base_vec + 0].s0 = modAdd(a, b);
     localX[local_base_vec + 1].s0 = modMul(modSub(a, b), W12_01_Y);
@@ -1510,7 +1526,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     a = modAdd(localX[local_base_vec + 0].s1, localX[local_base_vec + 2].s1);
     b = modAdd(localX[local_base_vec + 1].s1, localX[local_base_vec + 3].s1);
     d = modSub(localX[local_base_vec + 0].s1, localX[local_base_vec + 2].s1);
-    e = modSubMuli(localX[local_base_vec + 1].s1, localX[local_base_vec + 3].s1);
+    e = modMuli(modSub(localX[local_base_vec + 1].s1, localX[local_base_vec + 3].s1));
 
 
     localX[local_base_vec + 0].s1 = modAdd(a, b);
@@ -1535,7 +1551,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     r =  modMul(localX[local_base_vec + 2].s0, WI12_01_X);
     ulong rr = modMul(localX[local_base_vec + 3].s0, WI15_01_X);
     ulong rs2 = modAdd(r, rr);
-    ulong rs3 = modSubMuli(rr, r);
+    ulong rs3 = modMuli(modSub(rr, r));
 
     localX[local_base_vec + 0].s0 = modAdd(rs0, rs2);
     localX[local_base_vec + 1].s0 = modAdd(rs1, rs3);
@@ -1550,7 +1566,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     r =  modMul(localX[local_base_vec + 2].s1, WI15_01_Y);
     rr = modMul(localX[local_base_vec + 3].s1, WI15_2_Y);
     rs2 = modAdd(r, rr);
-    rs3 = modSubMuli(rr, r);
+    rs3 = modMuli(modSub(rr, r));
 
     localX[local_base_vec + 0].s1 = modAdd(rs0, rs2);
     localX[local_base_vec + 1].s1 = modAdd(rs1, rs3);
@@ -1609,7 +1625,7 @@ __kernel void kernel_ntt_radix4_square_radix4(__global ulong4* restrict x)
     ulong a = modAdd(coeff.s0, coeff.s2);
     ulong b = modAdd(coeff.s1, coeff.s3);
     ulong c = modSub(coeff.s0, coeff.s2);
-    ulong d = modSubMuli(coeff.s1, coeff.s3);
+    ulong d = modMuli(modSub(coeff.s1, coeff.s3));
     
     coeff.s0 = modAdd(a, b);
     coeff.s1 = modSub(a, b);
@@ -1623,7 +1639,7 @@ __kernel void kernel_ntt_radix4_square_radix4(__global ulong4* restrict x)
     ulong v0 = modAdd(u.s0, u.s1);
     ulong v1 = modSub(u.s0, u.s1);
     ulong v2 = modAdd(u.s2, u.s3);
-    ulong v3 = modSubMuli(u.s3, u.s2);
+    ulong v3 = modMuli(modSub(u.s3, u.s2));
     ulong4 result = (ulong4)( modAdd(v0, v2),
                               modAdd(v1, v3),
                               modSub(v0, v2),
@@ -1762,6 +1778,7 @@ __kernel void kernel_res64_display(
 }
 
 
+#define TRANSFORM_SIZE_N_DIV5  (TRANSFORM_SIZE_N / 5)
 #define PRIMROOT5_1   1373043270956696022UL
 #define PRIMROOT5_2   211587555138949697UL
 #define PRIMROOT5_3   15820824984080659046UL
