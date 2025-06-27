@@ -86,6 +86,33 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
         throw std::runtime_error("Failed to enqueue kernel_carry_2");
     }
 
+    bool debug = false;
+    if (debug) {
+        clFinish(queue_);
+        size_t numElems = context_.getTransformSize(); 
+        std::vector<uint64_t> host_x(numElems);
+
+        cl_int err = clEnqueueReadBuffer(queue_, buffer, CL_TRUE, 0,
+                                  numElems * sizeof(uint64_t),
+                                  host_x.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            std::cerr << "Error reading buf_x: " << numElems  << err
+                      << " (" << err << ")\n";
+            return;
+        }
+
+        std::cout << "=== Contenu de `buf_x` APRES kernel `" << "CARRY"
+        << " workers = " << workersCarry 
+                  << "` ===\n";
+            std::cout << "[";
+            for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
+                std::cout << host_x[j] << ",";
+            }
+            std::cout << "]\n";
+        
+        std::cout << "============================================\n";
+    }
+
 }
 
 

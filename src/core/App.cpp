@@ -608,6 +608,7 @@ int App::run() {
         //proofManager.checkpoint(buffers->input, iter);
 
     }
+    
     double finalElapsed = timer.elapsed();
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
@@ -647,6 +648,14 @@ int App::run() {
             hostData.data(),
             0, nullptr, nullptr
         );
+        bool debug = false;
+        if(debug){
+            for (size_t i = 0; i < hostData.size(); ++i)
+            {
+                std::cout << hostData[i] << " ";
+            }
+            std::cout << std::endl;
+        }
         res64_x = io::JsonBuilder::computeRes64(
         hostData,
         options,

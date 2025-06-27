@@ -124,7 +124,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.profiling = true;
         }
         else if (std::strcmp(argv[i], "-debug") == 0) {
-            opts.debug = true;
+            opts.debug = false;
         }
         
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
