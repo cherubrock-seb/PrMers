@@ -171,7 +171,7 @@ inline std::vector<NttStage> buildForwardPipeline(
         k_m32,           ls0, "kernel_ntt_radix4_mm_m32",
         [](auto m0, auto){ return m0==128; },
         { ArgKind::BufX, ArgKind::BufW } ,0},
-      { RadixOp::Last,     8, 8,
+      { RadixOp::Last,     4, 8,
         k_r2_s_r2_r4,   ls3, "kernel_radix4_radix2_square_radix2_radix4",
         [](auto m0, auto){ return m0==8;},
         { ArgKind::BufX } ,8},
