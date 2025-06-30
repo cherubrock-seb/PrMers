@@ -6,6 +6,7 @@ prime_exponents=(
     89 107 127 521 607 1279 2203 2281
     3217 4253 4423 9689 9941 11213 19937
     21701 23209 44497 86243 110503 132049
+    216091
 )
 
 composite_exponents=(
@@ -125,17 +126,17 @@ echo "=== Intermediate res64 display verification ==="
 output=$(./prmers 11213 --noask -prp -res64_display_interval 1000 2>&1)
 echo "$output" > logs/res64_interval_11213.log
 expected_lines=(
-  "Iter: 1000 | Res64: FBA631FBCB73A011"
-  "Iter: 2000 | Res64: F01283650C4A1491"
-  "Iter: 3000 | Res64: 7E79193B757010B7"
-  "Iter: 4000 | Res64: 31482E4D80FE99BB"
-  "Iter: 5000 | Res64: 973B76BACF73BBEF"
-  "Iter: 6000 | Res64: 8CFFB332495FC320"
-  "Iter: 7000 | Res64: 98080C76DF068843"
-  "Iter: 8000 | Res64: 8FDA516F885D3FEE"
-  "Iter: 9000 | Res64: 2AADBC4F1E318E92"
-  "Iter: 10000 | Res64: 0A4AAF339C8B290C"
-  "Iter: 11000 | Res64: A1F26F470CFE412D"
+  "Iter: 1000| Res64: FBA631FBCB73A011"
+  "Iter: 2000| Res64: F01283650C4A1491"
+  "Iter: 3000| Res64: 7E79193B757010B7"
+  "Iter: 4000| Res64: 31482E4D80FE99BB"
+  "Iter: 5000| Res64: 973B76BACF73BBEF"
+  "Iter: 6000| Res64: 8CFFB332495FC320"
+  "Iter: 7000| Res64: 98080C76DF068843"
+  "Iter: 8000| Res64: 8FDA516F885D3FEE"
+  "Iter: 9000| Res64: 2AADBC4F1E318E92"
+  "Iter: 10000| Res64: 0A4AAF339C8B290C"
+  "Iter: 11000| Res64: A1F26F470CFE412D"
 )
 
 for line in "${expected_lines[@]}"; do
