@@ -337,8 +337,8 @@ void Context::computeOptimalSizes(std::size_t n,
     if (n < 4) n = 4;
     cl_uint mm =  static_cast<cl_uint>(n / 4);
     
-    if(n%20==0){
-        mm =  static_cast<cl_uint>(n / 20);
+    if(n%5==0){
+        mm =  static_cast<cl_uint>(n / 5);
     }
     for (cl_uint m =  static_cast<cl_uint>(n / 16); m >= 32; m /= 16)
         mm = m / 16;
