@@ -43,7 +43,7 @@ struct CliOptions {
     std::string osArch = "x86_64";
     std::string aid = "";
     std::string uid = "";
-    int res64_display_interval = 100000;
+    int res64_display_interval = 0;
     bool cl_queue_throttle_active = false;
 };
 

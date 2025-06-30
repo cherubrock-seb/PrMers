@@ -415,8 +415,8 @@ int App::run() {
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
-    cl_mem outBuf;
-    if (options.res64_display_interval != 0){
+   /* if (options.res64_display_interval != 0){
+        cl_mem outBuf;
         cl_uint totalWords = (options.exponent - 1u) / 32u + 1u;
         size_t  outBytes   = size_t(totalWords) * sizeof(cl_uint);
         cl_int err;
@@ -431,7 +431,7 @@ int App::run() {
             std::cerr << "Erreur clCreateBuffer(outBuf): " << err << std::endl;
             std::exit(1);
         }
-    }
+    }*/
     math::Carry carry(
         context,
         queue,
@@ -474,6 +474,53 @@ int App::run() {
         queued += 2;
         
         if ((options.res64_display_interval != 0)&& ( ((iter+1) % options.res64_display_interval) == 0 )) {
+
+            std::vector<uint64_t> hostData(precompute.getN());
+            std::string res64_x;  
+
+            {
+                clEnqueueReadBuffer(
+                    context.getQueue(),
+                    buffers->input,
+                    CL_TRUE, 0,
+                    hostData.size() * sizeof(uint64_t),
+                    hostData.data(),
+                    0, nullptr, nullptr
+                );
+
+                
+                bool debug = false;
+                if(debug){
+                    for (size_t i = 0; i < hostData.size(); ++i)
+                    {
+                        std::cout << hostData[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+                {
+                    auto dataCopy       = hostData;
+                    auto elapsed        = timer.elapsed();
+                    auto transformSize  = static_cast<int>(context.getTransformSize());
+                    auto optsCopy       = options;
+                    auto digitWidth     = precompute.getDigitWidth();
+                    auto iterCopy       = iter;
+
+                    std::thread([dataCopy, optsCopy, digitWidth, elapsed, transformSize, iterCopy]() {
+                        auto localRes64 = io::JsonBuilder::computeRes64Iter(
+                            dataCopy,
+                            optsCopy,
+                            digitWidth,
+                            elapsed,
+                            transformSize
+                        );
+                        std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                    }).detach();
+                }
+
+
+            }      
+            /*    
+            GPU display // not used
             cl_kernel dispK = kernels->getKernel("kernel_res64_display");
             cl_uint modeInt = (options.mode=="prp") ? 1u : 0u;
             cl_uint nWords    = static_cast<cl_uint>(precompute.getN());
@@ -495,20 +542,67 @@ int App::run() {
                 &local,
                 0, nullptr, nullptr
             );
-            queued += 1;
+            queued += 1;*/
         }
         auto now = high_resolution_clock::now();
           
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
-            char dummy;
-            clEnqueueReadBuffer(
+            
+            if((iter+1)%100000 != 0){
+                char dummy;
+                clEnqueueReadBuffer(
+                        context.getQueue(),
+                        buffers->input,
+                        CL_TRUE, 0,
+                        sizeof(dummy),
+                        &dummy,
+                        0, nullptr, nullptr
+                    );
+            }
+            else{
+                std::vector<uint64_t> hostData(precompute.getN());
+                std::string res64_x;  
+                clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
                     CL_TRUE, 0,
-                    sizeof(dummy),
-                    &dummy,
+                    hostData.size() * sizeof(uint64_t),
+                    hostData.data(),
                     0, nullptr, nullptr
                 );
+
+                
+                bool debug = false;
+                if(debug){
+                    for (size_t i = 0; i < hostData.size(); ++i)
+                    {
+                        std::cout << hostData[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+                {
+                    auto dataCopy       = hostData;
+                    auto elapsed        = timer.elapsed();
+                    auto transformSize  = static_cast<int>(context.getTransformSize());
+                    auto optsCopy       = options;
+                    auto digitWidth     = precompute.getDigitWidth();
+                    auto iterCopy       = iter;
+
+                    std::thread([dataCopy, optsCopy, digitWidth, elapsed, transformSize, iterCopy]() {
+                        auto localRes64 = io::JsonBuilder::computeRes64Iter(
+                            dataCopy,
+                            optsCopy,
+                            digitWidth,
+                            elapsed,
+                            transformSize
+                        );
+                        std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                    }).detach();
+                }
+
+
+            } 
+            
             //clFinish(context.getQueue());
             //std::cout << "800 usleep(1500) are done"<< std::endl;
 
@@ -569,6 +663,7 @@ int App::run() {
             }
             queued = 0;
             if ((now - lastBackup >= seconds(options.backup_interval))) {
+                std::string res64_x;
                 backupManager.saveState(buffers->input, iter);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
@@ -581,18 +676,30 @@ int App::run() {
                     hostData.data(),
                     0, nullptr, nullptr
                 );
-                std::string res64 = io::JsonBuilder::computeRes64Iter(
-                    hostData,
-                    options,
-                    precompute.getDigitWidth(),
-                    backupElapsed,
-                    static_cast<int>(context.getTransformSize())
-                );
+                {
+                    auto dataCopy       = hostData;
+                    auto elapsed        = timer.elapsed();
+                    auto transformSize  = static_cast<int>(context.getTransformSize());
+                    auto optsCopy       = options;
+                    auto digitWidth     = precompute.getDigitWidth();
+                    auto iterCopy       = iter;
+
+                    std::thread([dataCopy, optsCopy, digitWidth, elapsed, transformSize, iterCopy]() {
+                        auto localRes64 = io::JsonBuilder::computeRes64Iter(
+                            dataCopy,
+                            optsCopy,
+                            digitWidth,
+                            elapsed,
+                            transformSize
+                        );
+                        std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                    }).detach();
+                }
                 spinner.displayBackupInfo(
                     iter+1,
                     totalIters,
                     backupElapsed,
-                    res64
+                    res64_x
                 );
             }    
         }
@@ -675,9 +782,9 @@ int App::run() {
                         res64_x
                     );
         backupManager.saveState(buffers->input, lastIter);
-         if (options.res64_display_interval != 0){
+         /*if (options.res64_display_interval != 0){
             clReleaseMemObject(outBuf);
-         }
+         }*/
         
                 
     }

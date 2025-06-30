@@ -28,7 +28,7 @@
 
 namespace math {
 
-/*
+
 uint32_t transformsize(uint32_t exponent) {
     int log_n = 0;
     uint32_t w = 0;
@@ -49,8 +49,8 @@ uint32_t transformsize(uint32_t exponent) {
         }
     }
     return n2;
-}*/
-
+}
+/*
 uint32_t transformsize(uint32_t exponent) {
     int    log_n = 0;
     uint32_t w   = 0;
@@ -58,8 +58,8 @@ uint32_t transformsize(uint32_t exponent) {
         ++log_n;
         w = exponent >> log_n;
     } while ((w + 1) * 2 + log_n >= 63);
-    return (uint32_t(1) << log_n)*1;
-}
+    return (uint32_t(1) << log_n)*5;
+}*/
 
 static void prepare_radix_twiddles(uint32_t n,
                                    std::vector<uint64_t>& w4,

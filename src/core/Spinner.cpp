@@ -116,6 +116,10 @@ void Spinner::displayBackupInfo(uint32_t iter,
     double pct       = totalIters ? (100.0 * iter) / totalIters : 100.0;
     double ips       = elapsedTime > 0 ? iter / elapsedTime : 0.0;
     double remaining = ips > 0 ? (totalIters - iter) / ips : 0.0;
+    uint32_t sec  = static_cast<uint32_t>(remaining);
+    uint32_t days = sec / 86400; sec %= 86400;
+    uint32_t hrs  = sec / 3600;  sec %= 3600;
+    uint32_t min  = sec / 60;    sec %= 60;
 
     std::cout
       << "\r" << COLOR_MAGENTA
@@ -123,10 +127,12 @@ void Spinner::displayBackupInfo(uint32_t iter,
       << std::fixed << std::setprecision(2) << pct << "% | "
       << "Elapsed: " << elapsedTime << "s | "
       << "IPS: "     << std::fixed << ips << " | "
-      << "ETA: "     << remaining << "s" << " | "
-      << "RES64: "   << res64
-      << COLOR_RESET
-      << std::endl;
+      << "ETA: "       << days << "d " << hrs << "h "
+                       << min  << "m " << sec << "s";
+    if (!res64.empty()) {
+        std::cout << " | RES64: " << res64;
+    }
+    std::cout << COLOR_RESET << std::endl;
 }
 
 void Spinner::displaySpinner(std::atomic<bool>& waiting,

@@ -75,52 +75,50 @@ namespace io{
         doDiv3(E, W);
         doDiv3(E, W);
     }
-//-----------------------------------------------------------------------------
-// compactBits : passe du tableau x[] (mixed‑radix) à un vecteur de mots 32 bits
-//-----------------------------------------------------------------------------
 static std::vector<uint32_t> compactBits(
     const std::vector<uint64_t>& x,
-    const std::vector<int>& digit_width,
-    uint32_t E
+    const std::vector<int>&      digit_width,
+    uint32_t                     E
 ) {
-    std::vector<uint32_t> out;
-    out.reserve((E - 1) / 32 + 1);
+    uint32_t digitCount = static_cast<uint32_t>(x.size());
+    uint32_t totalWords = (E - 1) / 32 + 1;
+    std::vector<uint32_t> out(totalWords, 0u);
 
-    int carry = 0;
-    uint32_t outWord = 0;
-    int haveBits = 0;
+    int      carry    = 0;
+    uint32_t outWord  = 0;
+    int      haveBits = 0;
+    uint32_t o        = 0;
 
-    for (size_t p = 0; p < x.size(); ++p) {
-        int w = digit_width[p];
-        // on combine le carry avec votre digit x[p]
+    for (uint32_t p = 0; p < digitCount; ++p) {
+        int      w   = digit_width[p];
         uint64_t v64 = uint64_t(carry) + x[p];
-        carry = int(v64 >> w);
-        uint32_t v = uint32_t(v64 & ((1ULL << w) - 1));
+        carry        = int(v64 >> w);
+        uint32_t v   = uint32_t(v64 & ((1ULL << w) - 1));
 
-        // on packe dans outWord
         int topBits = 32 - haveBits;
         outWord |= v << haveBits;
         if (w >= topBits) {
-            out.push_back(outWord);
-            outWord = (w > topBits) ? (v >> topBits) : 0;
-            haveBits = w - topBits;
+            out[o++]   = outWord;
+            outWord    = (w > topBits) ? (v >> topBits) : 0;
+            haveBits   = w - topBits;
         } else {
-            haveBits += w;
+            haveBits  += w;
         }
     }
 
-    // dernier mot s’il reste des bits ou un carry
     if (haveBits > 0 || carry) {
-        out.push_back(outWord);
-        for (size_t i = 1; carry && i < out.size(); ++i) {
+        out[o++] = outWord;
+        for (uint32_t i = 1; carry && i < o; ++i) {
             uint64_t sum = uint64_t(out[i]) + carry;
-            out[i]   = uint32_t(sum & 0xFFFFFFFF);
-            carry    = int(sum >> 32);
+            out[i]       = uint32_t(sum & 0xFFFFFFFFu);
+            carry        = int(sum >> 32);
         }
     }
 
     return out;
 }
+
+
 static std::string fileMD5(const std::string& filePath) {
     namespace fs = std::filesystem;
     FILE* f = nullptr;
