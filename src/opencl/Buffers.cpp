@@ -57,11 +57,11 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
             twiddle5Size * sizeof(uint64_t),
             pre.invTwiddlesRadix5().data(), "invTwiddles5");
     }
-    else{
+    /*else{
         clReleaseMemObject(invTwiddle5Buf);
         clReleaseMemObject(twiddle5Buf);
 
-    }
+    }*/
 
     blockCarryBuf = createBuffer(ctx, CL_MEM_READ_WRITE,
         ctx.getWorkersCarry() * sizeof(uint64_t),
