@@ -27,7 +27,7 @@
 namespace opencl {
 
 Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
-  : input(nullptr)
+  : input(nullptr), twiddle5Buf(nullptr), invTwiddle5Buf(nullptr)
 {
     const size_t n = pre.getN();
     const size_t twiddle4Size = (n % 5 == 0) ? 3 * n / 5 : 3 * n;
