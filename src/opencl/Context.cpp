@@ -353,7 +353,7 @@ void Context::computeOptimalSizes(std::size_t n,
     }
 
     size_t maxWork = maxWorkGroupSize_;
-    //if (maxWork > 256) maxWork = 256;
+    if (maxWork > 256) maxWork = 256;
     std::size_t workers = n;
 
     localSize_ = maxWork;
