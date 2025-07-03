@@ -333,6 +333,7 @@ void Context::computeOptimalSizes(std::size_t n,
                                   int p,
                                   bool debug)
 {
+
     transformSize_ = static_cast<cl_uint>(n);
     if (n < 4) n = 4;
     cl_uint mm =  static_cast<cl_uint>(n / 4);
@@ -352,8 +353,10 @@ void Context::computeOptimalSizes(std::size_t n,
                   << std::endl;
     }
 
-    size_t maxWork = maxWorkGroupSize_;
-    if (maxWork > 256) maxWork = 256;
+    //size_t maxWork = maxWorkGroupSize_;
+    size_t maxWork = localMemSize_ / ( 16 * sizeof(cl_ulong) );
+
+    if (maxWork > maxWorkGroupSize_) maxWork = maxWorkGroupSize_;
     std::size_t workers = n;
 
     localSize_ = maxWork;
