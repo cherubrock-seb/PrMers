@@ -353,7 +353,7 @@ void Context::computeOptimalSizes(std::size_t n,
     }
 
     size_t maxWork = maxWorkGroupSize_;
-    if (maxWork > 256) maxWork = 256;
+    //if (maxWork > 256) maxWork = 256;
     std::size_t workers = n;
 
     localSize_ = maxWork;
@@ -395,10 +395,18 @@ std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ <<
         if (workersCarry_ == 1)
             localCarryPropagationDepth_ = static_cast<cl_uint>(n);
     }
-
+    localSize4_ = localSize_;
+    if(n%5==0){
+        localSize4_ = n/20;
+        
+        while (localSize4_ > maxWork){
+            localSize4_ /= 2;
+        }
+    }
     localSizeCarry_ = std::min(workersCarry_, localSize_);
     localSize2_ = localSize_;
     localSize3_ = localSize_;
+    
     
     
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
@@ -425,6 +433,7 @@ cl_ulong Context::getLocalMemSize() const noexcept { return localMemSize_; }
 std::size_t Context::getLocalSize() const noexcept { return localSize_; }
 std::size_t Context::getLocalSize2() const noexcept { return localSize2_; }
 std::size_t Context::getLocalSize3() const noexcept { return localSize3_; }
+std::size_t Context::getLocalSize4() const noexcept { return localSize4_; }
 std::size_t Context::getLocalSizeCarry() const noexcept { return localSizeCarry_; }
 std::size_t Context::getWorkersCarry() const noexcept { return workersCarry_; }
 int Context::getLocalCarryPropagationDepth() const noexcept { return localCarryPropagationDepth_; }

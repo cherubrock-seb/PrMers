@@ -31,6 +31,7 @@ public:
     std::size_t getLocalSize() const noexcept;
     std::size_t getLocalSize2() const noexcept;
     std::size_t getLocalSize3() const noexcept;
+    std::size_t getLocalSize4() const noexcept;
     std::size_t getLocalSizeCarry() const noexcept;
     std::size_t getWorkersCarry() const noexcept;
     cl_uint getTransformSize() const noexcept;
@@ -56,6 +57,7 @@ private:
     std::size_t localSize_;
     std::size_t localSize2_;
     std::size_t localSize3_;
+    std::size_t localSize4_;
     std::size_t localSizeCarry_;
     std::size_t workersCarry_;
     int localCarryPropagationDepth_;
