@@ -163,10 +163,20 @@ inline ulong4 modMul3(const ulong4 lhs,
 
 #define CONST_W48 281474976710656UL
 
-// Multiply x by sqrt(-1) mod p, where sqrt(-1) is defined as 2^48 mod p
-inline ulong modMuli(const ulong x) {
-    return modMul(x, CONST_W48);
+inline ulong Reduce48(const ulong lo, const ulong hi) {
+    ulong r      = lo;
+    ulong rhs    = hi << 32;
+    r           += rhs + ((r >= mod_p_const - rhs) ? mod_p_comp_const : 0);
+    ulong rhs2   = (hi >> 32) + (uint)hi;
+    r           -= rhs2 + ((r < rhs2) ? mod_p_comp_const : 0);
+    return r;
 }
+
+inline ulong modMuli(const ulong x) {
+    return Reduce48(x << 48, x >> 16);
+}
+
+
 
 // Add-with-carry for a digit of specified width.
 inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
