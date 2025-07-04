@@ -31,8 +31,6 @@ __constant ulong2 mod_p2_const       = (ulong2)(MOD_P,      MOD_P);
 __constant ulong2 mod_p_comp2_const  = (ulong2)(MOD_P_COMP, MOD_P_COMP);
 __constant ulong4 zero4 = (ulong4)(0);
 
-
-
 // Modular addition for vectors of 4 ulong
 inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
     // 'select' avoids branching (if-else) on GPU
@@ -163,6 +161,8 @@ inline ulong4 modMul3(const ulong4 lhs,
     );
 }
 
+#define CONST_W48 281474976710656UL
+
 inline ulong Reduce48(const ulong lo, const ulong hi) {
     ulong r      = lo;
     ulong rhs    = hi << 32;
@@ -176,92 +176,6 @@ inline ulong modMuli(const ulong x) {
     return Reduce48(x << 48, x >> 16);
 }
 
-inline ulong mulConst1373_reduce(const ulong x)
-{
-    uint  x0 = (uint)x;
-    uint  x1 = (uint)(x >> 32);
-
-    ulong p0 = (ulong)x0 * 0x8A9D41D6u;
-    ulong p1 = (ulong)x0 * 0x130E0794u;
-    ulong p2 = (ulong)x1 * 0x8A9D41D6u;
-    ulong p3 = (ulong)x1 * 0x130E0794u;
-
-    x0   = (uint)p1 + (uint)p2;
-    x1      = (x0 < (uint)p1);
-    p1  = (p1 >> 32) + (p2 >> 32) + x1;
-
-    p2      = p0 + ((ulong)x0 << 32);
-    x0      = (p2 < p0);
-    p0     = p3 + p1 + x0;
-
-    return Reduce(p2, p0);
-}
-
-inline ulong mulConst5_2_reduce(const ulong x)
-{
-
-    uint  x0 = (uint)x;
-    uint  x1 = (uint)(x >> 32);
-
-    ulong p0 = (ulong)x0 * 0xA6F35241u;
-    ulong p1 = (ulong)x0 * 0x02EFB5C2u;
-    ulong p2 = (ulong)x1 * 0xA6F35241u;
-    ulong p3 = (ulong)x1 * 0x02EFB5C2u;
-
-    x0   = (uint)p1 + (uint)p2;
-    x1      = (x0 < (uint)p1);
-    p1  = (p1 >> 32) + (p2 >> 32) + x1;
-
-    p2      = p0 + ((ulong)x0 << 32);
-    x0      = (p2 < p0);
-    p0     = p3 + p1 + x0;
-
-    return Reduce(p2, p0);
-}
-
-inline ulong mulConst5_3_reduce(const ulong x)
-{
-    uint  x0 = (uint)x;
-    uint  x1 = (uint)(x >> 32);
-
-    ulong p0 = (ulong)x0 * 0x2DC0B266u;
-    ulong p1 = (ulong)x0 * 0xDB8EDC80u;
-    ulong p2 = (ulong)x1 * 0x2DC0B266u;
-    ulong p3 = (ulong)x1 * 0xDB8EDC80u;
-
-
-    x0   = (uint)p1 + (uint)p2;
-    x1      = (x0 < (uint)p1);
-    p1  = (p1 >> 32) + (p2 >> 32) + x1;
-
-    p2      = p0 + ((ulong)x0 << 32);
-    x0      = (p2 < p0);
-    p0     = p3 + p1 + x0;
-
-    return Reduce(p2, p0);
-}
-
-inline ulong mulConst5_4_reduce(const ulong x)
-{
-
-    uint  x0 = (uint)x;
-    uint  x1 = (uint)(x >> 32);
-
-    ulong p0 = (ulong)x0 * 0xA0AEB983u;
-    ulong p1 = (ulong)x0 * 0x0E736627u;
-    ulong p2 = (ulong)x1 * 0xA0AEB983u;
-    ulong p3 = (ulong)x1 * 0x0E736627u;
-
-    x0   = (uint)p1 + (uint)p2;
-    x1      = (x0 < (uint)p1);
-    p1  = (p1 >> 32) + (p2 >> 32) + x1;
-
-    p2      = p0 + ((ulong)x0 << 32);
-    x0      = (p2 < p0);
-    p0     = p3 + p1 + x0;
-
-    return Reduce(p2, p0);
-}
 
 
 // Add-with-carry for a digit of specified width.
@@ -1875,6 +1789,10 @@ __kernel void kernel_res64_display(
 
 
 #define TRANSFORM_SIZE_N_DIV5  (TRANSFORM_SIZE_N / 5)
+#define PRIMROOT5_1   1373043270956696022UL
+#define PRIMROOT5_2   211587555138949697UL
+#define PRIMROOT5_3   15820824984080659046UL
+#define PRIMROOT5_4   1041288259238279555UL
 
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
@@ -1905,10 +1823,10 @@ __kernel void kernel_ntt_radix5_mm_first(
                 modAdd(
                     modAdd(
                         modAdd( t0,
-                                mulConst1373_reduce(t1) ),
-                        mulConst5_2_reduce(t2) ),
-                    mulConst5_3_reduce(t3) ),
-                mulConst5_4_reduce(t4) ),
+                                modMul(PRIMROOT5_1, t1) ),
+                        modMul(PRIMROOT5_2, t2) ),
+                    modMul(PRIMROOT5_3, t3) ),
+                modMul(PRIMROOT5_4, t4) ),
             w5[4 * k + 0] );
 
     x[k + 2 * TRANSFORM_SIZE_N_DIV5] =
@@ -1917,10 +1835,10 @@ __kernel void kernel_ntt_radix5_mm_first(
                 modAdd(
                     modAdd(
                         modAdd( t0,
-                                mulConst5_2_reduce(t1) ),
-                        mulConst5_4_reduce(t2) ),
-                    mulConst1373_reduce(t3) ),
-                mulConst5_3_reduce(t4) ),
+                                modMul(PRIMROOT5_2, t1) ),
+                        modMul(PRIMROOT5_4, t2) ),
+                    modMul(PRIMROOT5_1, t3) ),
+                modMul(PRIMROOT5_3, t4) ),
             w5[4 * k + 1] );
 
     x[k + 3 * TRANSFORM_SIZE_N_DIV5] =
@@ -1929,10 +1847,10 @@ __kernel void kernel_ntt_radix5_mm_first(
                 modAdd(
                     modAdd(
                         modAdd( t0,
-                                mulConst5_3_reduce(t1) ),
-                        mulConst1373_reduce(t2) ),
-                    mulConst5_4_reduce(t3) ),
-                mulConst5_2_reduce(t4) ),
+                                modMul(PRIMROOT5_3, t1) ),
+                        modMul(PRIMROOT5_1, t2) ),
+                    modMul(PRIMROOT5_4, t3) ),
+                modMul(PRIMROOT5_2, t4) ),
             w5[4 * k + 2] );
 
     x[k + 4 * TRANSFORM_SIZE_N_DIV5] =
@@ -1941,10 +1859,10 @@ __kernel void kernel_ntt_radix5_mm_first(
                 modAdd(
                     modAdd(
                         modAdd( t0,
-                                mulConst5_4_reduce(t1) ),
-                        mulConst5_3_reduce(t2) ),
-                    mulConst5_2_reduce(t3) ),
-                mulConst1373_reduce(t4) ),
+                                modMul(PRIMROOT5_4, t1) ),
+                        modMul(PRIMROOT5_3, t2) ),
+                    modMul(PRIMROOT5_2, t3) ),
+                modMul(PRIMROOT5_1, t4) ),
             w5[4 * k + 3] );
 }
 
@@ -1985,10 +1903,10 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
                 modAdd(
                     modAdd(
                         modAdd(t0,
-                            mulConst5_4_reduce(t1)),
-                        mulConst5_3_reduce(t2)),
-                    mulConst5_2_reduce(t3)),
-                mulConst1373_reduce(t4)),
+                            modMul(PRIMROOT5_4, t1)),
+                        modMul(PRIMROOT5_3, t2)),
+                    modMul(PRIMROOT5_2, t3)),
+                modMul(PRIMROOT5_1, t4)),
             digit_inv_weight[k + TRANSFORM_SIZE_N_DIV5]);
 
     x[k + 2 * TRANSFORM_SIZE_N_DIV5] =
@@ -1997,10 +1915,10 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
                 modAdd(
                     modAdd(
                         modAdd(t0,
-                            mulConst5_3_reduce(t1)),
-                        mulConst1373_reduce(t2)),
-                    mulConst5_4_reduce(t3)),
-                mulConst5_2_reduce(t4)),
+                            modMul(PRIMROOT5_3, t1)),
+                        modMul(PRIMROOT5_1, t2)),
+                    modMul(PRIMROOT5_4, t3)),
+                modMul(PRIMROOT5_2, t4)),
             digit_inv_weight[k + 2 * TRANSFORM_SIZE_N_DIV5]);
 
     x[k + 3 * TRANSFORM_SIZE_N_DIV5] =
@@ -2009,10 +1927,10 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
                 modAdd(
                     modAdd(
                         modAdd(t0,
-                            mulConst5_2_reduce(t1)),
-                        mulConst5_4_reduce(t2)),
-                    mulConst1373_reduce(t3)),
-                mulConst5_3_reduce(t4)),
+                            modMul(PRIMROOT5_2, t1)),
+                        modMul(PRIMROOT5_4, t2)),
+                    modMul(PRIMROOT5_1, t3)),
+                modMul(PRIMROOT5_3, t4)),
             digit_inv_weight[k + 3 * TRANSFORM_SIZE_N_DIV5]);
 
     x[k + 4 * TRANSFORM_SIZE_N_DIV5] =
@@ -2021,10 +1939,10 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
                 modAdd(
                     modAdd(
                         modAdd(t0,
-                            mulConst1373_reduce(t1)),
-                        mulConst5_2_reduce(t2)),
-                    mulConst5_3_reduce(t3)),
-                mulConst5_4_reduce(t4)),
+                            modMul(PRIMROOT5_1, t1)),
+                        modMul(PRIMROOT5_2, t2)),
+                    modMul(PRIMROOT5_3, t3)),
+                modMul(PRIMROOT5_4, t4)),
             digit_inv_weight[k + 4 * TRANSFORM_SIZE_N_DIV5]);
 
 }
