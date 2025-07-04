@@ -163,8 +163,6 @@ inline ulong4 modMul3(const ulong4 lhs,
     );
 }
 
-#define CONST_W48 281474976710656UL
-
 inline ulong Reduce48(const ulong lo, const ulong hi) {
     ulong r      = lo;
     ulong rhs    = hi << 32;
@@ -1877,10 +1875,6 @@ __kernel void kernel_res64_display(
 
 
 #define TRANSFORM_SIZE_N_DIV5  (TRANSFORM_SIZE_N / 5)
-#define PRIMROOT5_1   1373043270956696022UL
-#define PRIMROOT5_2   211587555138949697UL
-#define PRIMROOT5_3   15820824984080659046UL
-#define PRIMROOT5_4   1041288259238279555UL
 
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
