@@ -1822,17 +1822,17 @@ __kernel void kernel_ntt_radix5_mm_first(
     ulong  y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
     x[k +     TRANSFORM_SIZE_N_DIV5] = modMul(y1, w5[4 * k]);
 
-    ulong4 m2 = modMul4(primroot5_1302,   tv);
-    ulong  y2 = modAdd(modAdd(modAdd(modAdd(t0, m2.s0), m2.s1), m2.s2), m2.s3);
-    x[k + 2 * TRANSFORM_SIZE_N_DIV5] = modMul(y2, w5[4 * k + 1]);
+    m1 = modMul4(primroot5_1302,   tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 2 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, w5[4 * k + 1]);
 
-    ulong4 m3 = modMul4(primroot5_2031,   tv);
-    ulong  y3 = modAdd(modAdd(modAdd(modAdd(t0, m3.s0), m3.s1), m3.s2), m3.s3);
-    x[k + 3 * TRANSFORM_SIZE_N_DIV5] = modMul(y3, w5[4 * k + 2]);
+    m1 = modMul4(primroot5_2031,   tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 3 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, w5[4 * k + 2]);
 
-    ulong4 m4 = modMul4(primroot5_3210,   tv);
-    ulong  y4 = modAdd(modAdd(modAdd(modAdd(t0, m4.s0), m4.s1), m4.s2), m4.s3);
-    x[k + 4 * TRANSFORM_SIZE_N_DIV5] = modMul(y4, w5[4 * k + 3]);
+    m1 = modMul4(primroot5_3210,   tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 4 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, w5[4 * k + 3]);
 }
 
 __kernel void kernel_ntt_inverse_radix5_mm_last(
@@ -1858,15 +1858,15 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     ulong  y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
     x[k +     TRANSFORM_SIZE_N_DIV5] = modMul(y1, digit_inv_weight[k +     TRANSFORM_SIZE_N_DIV5]);
 
-    ulong4 m2 = modMul4(primroot5_2031,   tv);
-    ulong  y2 = modAdd(modAdd(modAdd(modAdd(t0, m2.s0), m2.s1), m2.s2), m2.s3);
-    x[k + 2 * TRANSFORM_SIZE_N_DIV5] = modMul(y2, digit_inv_weight[k + 2 * TRANSFORM_SIZE_N_DIV5]);
+    m1 = modMul4(primroot5_2031,   tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 2 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, digit_inv_weight[k + 2 * TRANSFORM_SIZE_N_DIV5]);
 
-    ulong4 m3 = modMul4(primroot5_1302,   tv);
-    ulong  y3 = modAdd(modAdd(modAdd(modAdd(t0, m3.s0), m3.s1), m3.s2), m3.s3);
-    x[k + 3 * TRANSFORM_SIZE_N_DIV5] = modMul(y3, digit_inv_weight[k + 3 * TRANSFORM_SIZE_N_DIV5]);
+    m1 = modMul4(primroot5_1302,   tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 3 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, digit_inv_weight[k + 3 * TRANSFORM_SIZE_N_DIV5]);
 
-    ulong4 m4 = modMul4(primroot5,        tv);
-    ulong  y4 = modAdd(modAdd(modAdd(modAdd(t0, m4.s0), m4.s1), m4.s2), m4.s3);
-    x[k + 4 * TRANSFORM_SIZE_N_DIV5] = modMul(y4, digit_inv_weight[k + 4 * TRANSFORM_SIZE_N_DIV5]);
+    m1 = modMul4(primroot5,        tv);
+    y1 = modAdd(modAdd(modAdd(modAdd(t0, m1.s0), m1.s1), m1.s2), m1.s3);
+    x[k + 4 * TRANSFORM_SIZE_N_DIV5] = modMul(y1, digit_inv_weight[k + 4 * TRANSFORM_SIZE_N_DIV5]);
 }
