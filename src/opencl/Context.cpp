@@ -331,7 +331,8 @@ void Context::queryDeviceCapabilities() {
 void Context::computeOptimalSizes(std::size_t n,
                                   const std::vector<int>& digit_width_cpu,
                                   int p,
-                                  bool debug)
+                                  bool debug,
+                                  int localMaxSize)
 {
 
     transformSize_ = static_cast<cl_uint>(n);
@@ -355,7 +356,13 @@ void Context::computeOptimalSizes(std::size_t n,
 
     //size_t maxWork = maxWorkGroupSize_;
     size_t maxWork = localMemSize_ / ( 16 * sizeof(cl_ulong) );
-
+    if(localMaxSize>0){
+        maxWork = localMaxSize;
+    }
+    else if(maxWork > 256){
+        maxWork = 256;
+    }
+    
     if (maxWork > maxWorkGroupSize_) maxWork = maxWorkGroupSize_;
     std::size_t workers = n;
 
@@ -376,7 +383,7 @@ void Context::computeOptimalSizes(std::size_t n,
         if (localSize_ < 1) { localSize_ = 1; break; }
     }
 
-
+    
     localCarryPropagationDepth_ = 1;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
     if (debug) std::cout << "max digit width = " << maxdw << std::endl;

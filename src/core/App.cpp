@@ -339,7 +339,8 @@ App::App(int argc, char** argv)
         precompute.getN(),
         precompute.getDigitWidth(),
         options.exponent,
-        options.debug
+        options.debug,
+        options.max_local_size1
     );
     buffers.emplace(context, precompute);
     program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
