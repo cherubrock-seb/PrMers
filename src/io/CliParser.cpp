@@ -51,7 +51,7 @@ void printUsage(const char* progName) {
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
-    //std::cout << "  -l1 <value>          : (Optional) Force local size for classic NTT kernel" << std::endl;
+    std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
