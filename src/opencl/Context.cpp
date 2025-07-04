@@ -356,7 +356,8 @@ void Context::computeOptimalSizes(std::size_t n,
 
     //size_t maxWork = maxWorkGroupSize_;
     size_t maxWork = localMemSize_ / ( 16 * sizeof(cl_ulong) );
-    if(localMaxSize>0){
+    size_t localMaxSize_temp = localMaxSize;
+    if(localMaxSize>0 && localMaxSize_temp <= maxWork){
         maxWork = localMaxSize;
     }
     else if(maxWork > 256){
