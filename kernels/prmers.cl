@@ -1550,10 +1550,10 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     ulong rs2 = modAdd(r, rr);
     ulong rs3 = modMuli(modSub(rr, r));
 
-    localX[local_base_vec + 0].s0 = modAdd(rs0, rs2);
-    localX[local_base_vec + 1].s0 = modAdd(rs1, rs3);
-    localX[local_base_vec + 2].s0 = modSub(rs0, rs2);
-    localX[local_base_vec + 3].s0 = modSub(rs1, rs3);
+    x[global_base_vec + 0].s0 = modAdd(rs0, rs2);
+    x[global_base_vec + 1].s0 = modAdd(rs1, rs3);
+    x[global_base_vec + 2].s0 = modSub(rs0, rs2);
+    x[global_base_vec + 3].s0 = modSub(rs1, rs3);
 
 
 
@@ -1565,16 +1565,10 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     rs2 = modAdd(r, rr);
     rs3 = modMuli(modSub(rr, r));
 
-    localX[local_base_vec + 0].s1 = modAdd(rs0, rs2);
-    localX[local_base_vec + 1].s1 = modAdd(rs1, rs3);
-    localX[local_base_vec + 2].s1 = modSub(rs0, rs2);
-    localX[local_base_vec + 3].s1 = modSub(rs1, rs3);
-    
-
-    #pragma unroll
-    for (int v = 0; v < VECTORS_PER_WORKITEM; ++v) {
-        x[global_base_vec + v] = localX[local_base_vec + v];
-    }
+    x[global_base_vec  + 0].s1 = modAdd(rs0, rs2);
+    x[global_base_vec  + 1].s1 = modAdd(rs1, rs3);
+    x[global_base_vec  + 2].s1 = modSub(rs0, rs2);
+    x[global_base_vec  + 3].s1 = modSub(rs1, rs3);
 
 }
 
