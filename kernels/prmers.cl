@@ -1386,8 +1386,8 @@ __kernel void kernel_ntt_radix4_mm_2steps_first(__global ulong* restrict x,
         local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]= modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]);
         local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4] = modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
         local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = modMuli(modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]));
-        x[k_first]                    =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
         local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]= modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
+        x[k_first]                    =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
         x[k_first + new_m] = modMul(local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4],twiddle1_2.s1);
         x[k_first + (new_m << 1)] = modMul(modAdd(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]),twiddle1_2.s0);
         x[k_first + ((new_m << 1) + new_m)] = modMul(modSub(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]),twiddle3);
