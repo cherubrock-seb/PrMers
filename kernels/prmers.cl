@@ -147,6 +147,17 @@ inline ulong4 modMul3_2(const ulong4 lhs,
     return (ulong4)(lhs.s0, x.s0, x.s1, m);
 }
 
+inline ulong modMulPminus1(const ulong x) {
+    ulong r = mod_p_const - x;
+    r += (r >= mod_p_const) ? mod_p_comp_const : 0;
+    return r;
+}
+inline ulong4 modMul3_2_w10(const ulong4 lhs)
+{
+    ulong m = modMulPminus1(lhs.s3);
+    return (ulong4)(lhs.s0, lhs.s1, lhs.s2, m);
+}
+
 
 inline ulong4 modMul3(const ulong4 lhs,
                       const ulong w1,
@@ -175,6 +186,22 @@ inline ulong modMuli(const ulong x) {
     return Reduce48(x << 48, x >> 16);
 }
 
+
+inline ulong Reduce24(const ulong lo, const ulong hi) {
+    ulong r    = lo;
+    ulong rhs  = hi << 32;  
+    r           += rhs 
+                   + ((r >= mod_p_const - rhs) ? mod_p_comp_const : 0);
+    ulong rhs2 = (hi >> 32) + (uint32_t)hi;
+    r           -= rhs2 
+                   + ((r < rhs2) ? mod_p_comp_const : 0);
+    return r;
+}
+
+inline ulong modMul2Pow24(const ulong x) {
+    return Reduce24( x << 24,
+                     x >> 40 );
+}
 
 
 // Add-with-carry for a digit of specified width.
@@ -305,10 +332,10 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
 
 inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *carry) {
     ulong4 res;
-    uint64_t c = *carry;
+    ulong c = *carry;
     #pragma unroll 3
     for (int i = 0; i < 3; i++) {
-        uint64_t s = lhs[i] + c;                        
+        ulong s = lhs[i] + c;                        
         res[i] = s & ((1UL << (digit_width[i])) - 1UL);
         c = s >> (digit_width[i]);
 
@@ -362,19 +389,19 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 inline int get_digit_width(uint i) {
     uint j = i + 1;
 
-    uint64_t pj  = (uint64_t)(MODULUS_P) * j;
-    uint64_t pj1 = (uint64_t)(MODULUS_P) * i;
+    ulong pj  = (ulong)(MODULUS_P) * j;
+    ulong pj1 = (ulong)(MODULUS_P) * i;
 
-    uint64_t ceil1 = (pj - 1U) / (uint64_t)(TRANSFORM_SIZE_N);
-    uint64_t ceil2 = (pj1 - 1U) / (uint64_t)(TRANSFORM_SIZE_N);
+    ulong ceil1 = (pj - 1U) / (ulong)(TRANSFORM_SIZE_N);
+    ulong ceil2 = (pj1 - 1U) / (ulong)(TRANSFORM_SIZE_N);
 
     return (int)(ceil1 - ceil2);
 }
 
 
 inline int4 get_digit_width4(uint i){
-    uint64_t P = (uint64_t)MODULUS_P, N = (uint64_t)TRANSFORM_SIZE_N;
-    uint64_t u = (uint64_t)i * P - 1, v;
+    ulong P = (ulong)MODULUS_P, N = (ulong)TRANSFORM_SIZE_N;
+    ulong u = (ulong)i * P - 1, v;
     int4 r;
     v = u + P;    r.s0 = (int)(v/N - u/N);
     u = v;        v = u + P;    r.s1 = (int)(v/N - u/N);
@@ -682,15 +709,7 @@ __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong2* restrict x,
 }
 
 
-#ifndef W6
-  #define W6 0
-#endif
-#ifndef W7
-  #define W7 0
-#endif
-#ifndef W10
-  #define W10 0
-#endif
+
 
 
 
@@ -708,7 +727,7 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong4* restrict x)
     coeff.s1 = modSub(a, b);
     coeff.s2 = modAdd(c, d);
     coeff.s3 = modSub(c, d);
-    coeff = modMul3_2(coeff, (ulong2)(W6,W7), W10);
+    coeff = modMul3_2_w10(coeff);
     x[k] = modMul4(coeff, coeff);
 }
 
@@ -1451,37 +1470,17 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
 
 #define ELEMENTS_PER_WORKITEM 8
 #define VECTORS_PER_WORKITEM 4
-#ifndef W12_01_X
-  #define W12_01_X 0
-#endif
-#ifndef W12_01_Y
-  #define W12_01_Y 0
-#endif
 
-#ifndef W15_01_X
-  #define W15_01_X 0
-#endif
+
 #ifndef W15_01_Y
   #define W15_01_Y 0
 #endif
 
-#ifndef W15_2_X
-  #define W15_2_X 0
-#endif
 #ifndef W15_2_Y
   #define W15_2_Y 0
 #endif
 
-#ifndef WI12_01_X
-  #define WI12_01_X 0
-#endif
-#ifndef WI12_01_Y
-  #define WI12_01_Y 0
-#endif
 
-#ifndef WI15_01_X
-  #define WI15_01_X 0
-#endif
 #ifndef WI15_01_Y
   #define WI15_01_Y 0
 #endif
@@ -1489,9 +1488,7 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
 #ifndef WI15_2_X
   #define WI15_2_X 0
 #endif
-#ifndef WI15_2_Y
-  #define WI15_2_Y 0
-#endif
+
 
 
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
@@ -1518,9 +1515,9 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     ulong e = modMuli(modSub(localX[local_base_vec + 1].s0, localX[local_base_vec + 3].s0));
 
     localX[local_base_vec + 0].s0 = modAdd(a, b);
-    localX[local_base_vec + 1].s0 = modMul(modSub(a, b), W12_01_Y);
-    localX[local_base_vec + 2].s0 = modMul(modAdd(d, e), W12_01_X);
-    localX[local_base_vec + 3].s0 = modMul(modSub(d, e), W15_01_X);
+    localX[local_base_vec + 1].s0 = modSub(a, b);
+    localX[local_base_vec + 2].s0 = modAdd(d, e);
+    localX[local_base_vec + 3].s0 = modSub(d, e);
 
 
     a = modAdd(localX[local_base_vec + 0].s1, localX[local_base_vec + 2].s1);
@@ -1530,7 +1527,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
 
 
     localX[local_base_vec + 0].s1 = modAdd(a, b);
-    localX[local_base_vec + 1].s1 = modMul(modSub(a, b), W15_2_X);
+    localX[local_base_vec + 1].s1 = modMuli(modSub(a, b));
     localX[local_base_vec + 2].s1 = modMul(modAdd(d, e), W15_01_Y);
     localX[local_base_vec + 3].s1 = modMul(modSub(d, e), W15_2_Y);
 
@@ -1545,11 +1542,11 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     }
     
 
-    ulong r =  modMul(localX[local_base_vec + 1].s0, WI12_01_Y); 
+    ulong r =  localX[local_base_vec + 1].s0; 
     ulong rs0 = modAdd(localX[local_base_vec + 0].s0, r);
     ulong rs1 = modSub(localX[local_base_vec + 0].s0, r);
-    r =  modMul(localX[local_base_vec + 2].s0, WI12_01_X);
-    ulong rr = modMul(localX[local_base_vec + 3].s0, WI15_01_X);
+    r =  localX[local_base_vec + 2].s0;
+    ulong rr = localX[local_base_vec + 3].s0;
     ulong rs2 = modAdd(r, rr);
     ulong rs3 = modMuli(modSub(rr, r));
 
@@ -1564,7 +1561,7 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     rs0 = modAdd(localX[local_base_vec + 0].s1, r);
     rs1 = modSub(localX[local_base_vec + 0].s1, r);
     r =  modMul(localX[local_base_vec + 2].s1, WI15_01_Y);
-    rr = modMul(localX[local_base_vec + 3].s1, WI15_2_Y);
+    rr = modMul2Pow24(localX[local_base_vec + 3].s1);
     rs2 = modAdd(r, rr);
     rs3 = modMuli(modSub(rr, r));
 
@@ -1580,42 +1577,6 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
     }
 
 }
-#ifndef W1_01_Y
-#define W1_01_Y 0
-#endif
-#ifndef W1_01_X
-#define W1_01_X 0
-#endif
-#ifndef W1_02_X
-#define W1_02_X 0
-#endif
-#ifndef W1_2_X
-#define W1_2_X 0
-#endif
-#ifndef W1_01_Y_2
-#define W1_01_Y_2 0
-#endif
-#ifndef W1_2_Y
-#define W1_2_Y 0
-#endif
-#ifndef WI4_01_Y
-#define WI4_01_Y 0
-#endif
-#ifndef WI4_01_X
-#define WI4_01_X 0
-#endif
-#ifndef WI4_02_X
-#define WI4_02_X 0
-#endif
-#ifndef WI4_2_X
-#define WI4_2_X 0
-#endif
-#ifndef WI4_01_Y_2
-#define WI4_01_Y_2 0
-#endif
-#ifndef WI4_2_Y
-#define WI4_2_Y 0
-#endif
 
 __kernel void kernel_ntt_radix4_square_radix4(__global ulong4* restrict x)
 {
@@ -1631,7 +1592,7 @@ __kernel void kernel_ntt_radix4_square_radix4(__global ulong4* restrict x)
     coeff.s1 = modSub(a, b);
     coeff.s2 = modAdd(c, d);
     coeff.s3 = modSub(c, d);
-    coeff = modMul3_2(coeff, (ulong2)(W6,W7), W10);
+    coeff = modMul3_2_w10(coeff);
     coeff = modMul4(coeff, coeff);
     
     ulong4 u = modMul3_2(coeff,(ulong2)(WI6,WI7), WI8);
