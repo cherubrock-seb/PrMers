@@ -1743,8 +1743,7 @@ __constant ulong4 primroot5_3210   = (ulong4)(PR5_A3, PR5_A2, PR5_A1, PR5_A0);
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
     __global ulong * restrict w5,
-    __global ulong * restrict digit_weight,
-    const uint m)
+    __global ulong * restrict digit_weight)
 {
     const uint k      = get_global_id(0);
 
@@ -1774,8 +1773,7 @@ __kernel void kernel_ntt_radix5_mm_first(
 __kernel void kernel_ntt_inverse_radix5_mm_last(
     __global ulong * restrict x,
     __global ulong * restrict invw5,
-    __global ulong * restrict digit_inv_weight,
-    const uint m)
+    __global ulong * restrict digit_inv_weight)
 {
     const uint k      = get_global_id(0);
     const ulong t0 = x[k];
