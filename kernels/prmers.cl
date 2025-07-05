@@ -161,7 +161,6 @@ inline ulong4 modMul3(const ulong4 lhs,
     );
 }
 
-#define CONST_W48 281474976710656UL
 
 inline ulong Reduce48(const ulong lo, const ulong hi) {
     ulong r      = lo;
@@ -1245,88 +1244,80 @@ __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
     const gid_t local_id = gid % (m / 4);
     uint k_first = group * m + local_id;
 
-    //ulong local_x[16];
     __local ulong shared_mem[LOCAL_SIZE2 * 16];
     __local ulong* local_x = shared_mem + get_local_id(0) * 16;
-    int write_index = 0;
-    ulong2 twiddle1_2;
-    ulong twiddle3;
 
     #pragma unroll 4
-    for (uint pass = 0; pass < 4; pass++) {
-        const gid_t j = k_first & (m - 1);
-        const gid_t i = 4 * (k_first - j) + j;
-        const gid_t twiddle_offset = 6 * m + 3 * j;
-
-        twiddle1_2 = vload2(0, w + twiddle_offset);
-        twiddle3 = w[twiddle_offset + 2];
-
-        local_x[write_index]    = x[i];
-        local_x[write_index+1]  = x[i + m];
-        local_x[write_index+2]  = x[i + (m << 1)];
-        local_x[write_index+3]  = x[i + ((m << 1) + m)];
-
-        ulong r = modAdd(local_x[write_index], local_x[write_index+2]);
-        ulong r2  = modSub(local_x[write_index], local_x[write_index+2]);
-        local_x[write_index] = r;
-        local_x[write_index + 2] = r2;
-
-
-        r = modAdd(local_x[write_index+1], local_x[write_index+3]);
-        r2 = modMuli(modSub(local_x[write_index+1], local_x[write_index+3]));
-        local_x[write_index + 1] = r;
-        local_x[write_index+3] = r2;
-
-        r                    =   modAdd(local_x[write_index], local_x[write_index + 1]);
-        r2                   =   modSub(local_x[write_index], local_x[write_index + 1]);
-        local_x[write_index] = r;
-        local_x[write_index + 1] = r2;
-        r                          =   modAdd(local_x[write_index + 2], local_x[write_index+3]);
-        r2  =   modSub(local_x[write_index + 2], local_x[write_index+3]);
-        local_x[write_index + 2] = r;
-        local_x[write_index + 3]  = r2;
-        
-        local_x[write_index+1] = modMul(local_x[write_index+1], twiddle1_2.s1);
-        local_x[write_index+2] = modMul(local_x[write_index+2], twiddle1_2.s0);
-        local_x[write_index+3] = modMul(local_x[write_index+3], twiddle3);
-        write_index += 4;
-        k_first += m / 4;
+    for (uint p = 0; p < 4; ++p) {
+        uint k0       = k_first + p * (m >> 2);
+        uint j        = k0 & (m - 1);
+        uint base     = 4 * (k0 - j) + j;
+        ulong2 tw12   = vload2(0, w + 6 * m + 3 * j);
+        ulong  tw3    = w[6 * m + 3 * j + 2];
+        ulong  a0     = x[base];
+        ulong  a1     = x[base + m];
+        ulong  a2     = x[base + (m << 1)];
+        ulong  a3     = x[base + ((m << 1) + m)];
+        ulong  t      = modSub(a0, a2);
+        a0            = modAdd(a0, a2);
+        a2            = t;
+        t             = modMuli(modSub(a1, a3));
+        a1            = modAdd(a1, a3);
+        a3            = t;
+        t             = modSub(a0, a1);
+        a0            = modAdd(a0, a1);
+        a1            = t;
+        t             = modSub(a2, a3);
+        a2            = modAdd(a2, a3);
+        a3            = t;
+        local_x[p*4 + 0] = a0;
+        local_x[p*4 + 1] = modMul(a1, tw12.s1);
+        local_x[p*4 + 2] = modMul(a2, tw12.s0);
+        local_x[p*4 + 3] = modMul(a3, tw3);
     }
+
 
     const uint new_m = m / 4;
-    write_index = 0;
+    
     const uint twiddle_offset = 6 * new_m + 3 * local_id;
     k_first = 4 * (group * m) + local_id;
-    twiddle1_2 = vload2(0, w + twiddle_offset);
-    twiddle3 = w[twiddle_offset + 2];
-
+    ulong2 twiddle1_2 = vload2(0, w + twiddle_offset);
+    ulong twiddle3 = w[twiddle_offset + 2];
+    
+    uint write_index = 0;
     #pragma unroll 4
-    for (uint pass = 0; pass < 4; pass++) {
-        ulong r = modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]);
-        ulong r2  = modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]);
-        local_x[((write_index) % 4) * 4 + (write_index) / 4] = r;
-        local_x[((write_index+2) % 4) * 4 + (write_index+2) / 4]= r2;
+    for (uint pass = 0; pass < 4; ++pass) {
+        uint idx0 = pass;
+        uint idx1 = pass + 4;
+        uint idx2 = pass + 8;
+        uint idx3 = pass + 12;
 
+        ulong a0 = local_x[idx0];
+        ulong a1 = local_x[idx1];
+        ulong a2 = local_x[idx2];
+        ulong a3 = local_x[idx3];
 
-        r = modAdd(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        r2 = modMuli(modSub(local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]));
-        local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4] = r;
-        local_x[((write_index + 3) % 4) * 4 + (write_index + 3) / 4] = r2;
+        ulong t  = modSub(a0, a2);
+        a0 = modAdd(a0, a2);
+        a2 = t;
+        t  = modMuli(modSub(a1, a3));
+        a1 = modAdd(a1, a3);
+        a3 = t;
 
+        ulong s0 = modAdd(a0, a1);
+        ulong s1 = modSub(a0, a1);
+        ulong s2 = modAdd(a2, a3);
+        ulong s3 = modSub(a2, a3);
 
-        x[k_first]                    =   modAdd(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
-        r2                   =   modSub(local_x[((write_index) % 4) * 4 + (write_index) / 4], local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]);
-        local_x[((write_index+1) % 4) * 4 + (write_index+1) / 4]= r2;
-        
-        r                    =   modAdd(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
-        r2                   =   modSub(local_x[((write_index + 2) % 4) * 4 + (write_index + 2) / 4], local_x[((write_index+3) % 4) * 4 + (write_index+3) / 4]);
+        x[k_first]              = s0;
+        x[k_first + new_m]      = modMul(s1, twiddle1_2.s1);
+        x[k_first + (new_m<<1)] = modMul(s2, twiddle1_2.s0);
+        x[k_first + new_m*3]    = modMul(s3, twiddle3);
 
-        x[k_first + new_m] = modMul(local_x[((write_index + 1) % 4) * 4 + (write_index + 1) / 4],twiddle1_2.s1);
-        x[k_first + (new_m << 1)] = modMul(r,twiddle1_2.s0);
-        x[k_first + ((new_m << 1) + new_m)] = modMul(r2,twiddle3);
-        write_index += 4;
         k_first += m;
     }
+
+
 
 }
 
