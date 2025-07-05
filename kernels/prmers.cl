@@ -1468,23 +1468,16 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
     vstore2((ulong2)(s, d), 0, x + idx);
 }
 
-#define ELEMENTS_PER_WORKITEM 8
 #define VECTORS_PER_WORKITEM 4
-
-
 #ifndef W15_01_Y
   #define W15_01_Y 0
 #endif
-
 #ifndef W15_2_Y
   #define W15_2_Y 0
 #endif
-
-
 #ifndef WI15_01_Y
   #define WI15_01_Y 0
 #endif
-
 #ifndef WI15_2_X
   #define WI15_2_X 0
 #endif
@@ -1785,7 +1778,6 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     const uint m)
 {
     const uint k      = get_global_id(0);
-
     const ulong t0 = x[k];
     const ulong4 tv = (ulong4)(
     modMul(x[k +     TRANSFORM_SIZE_N_DIV5], invw5[4 * k])
