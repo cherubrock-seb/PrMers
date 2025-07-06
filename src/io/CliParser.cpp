@@ -88,7 +88,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         || std::strcmp(argv[i], "--version") == 0
         || std::strcmp(argv[i], "-version") == 0)
         {
-            std::cout << "prmers Release v4.0.50-alpha\n";
+            std::cout << "prmers Release v4.0.51-alpha\n";
             std::exit(EXIT_SUCCESS);
         }
     }
