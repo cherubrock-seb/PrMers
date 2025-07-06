@@ -371,7 +371,7 @@ void Context::computeOptimalSizes(std::size_t n,
 
     cl_uint constraint = std::max(static_cast<cl_uint>(n / 16), 1u);
     if(n%5==0){
-        localSize_ = n;
+        localSize_ = n/5;
         
         while (localSize_ > maxWork){
             localSize_ /= 2;
