@@ -24,6 +24,7 @@
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
+#include "core/ProofSet.hpp"
 #include "math/Carry.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -321,9 +322,10 @@ App::App(int argc, char** argv)
     )
   , proofManager(
         options.exponent,
-        options.proof,
+        options.proof ? ProofSet::bestPower(options.exponent) : 0,
         context.getQueue(),
-        precompute.getN()
+        precompute.getN(),
+        precompute.getDigitWidth()
     )
   , spinner()
   , logger(options.output_path)
@@ -442,6 +444,15 @@ int App::run() {
         buffers->digitWidthMaskBuf
     );
 
+    // Display proof disk usage estimate at start of computation
+    if (options.proof) {
+        int proofPower = ProofSet::bestPower(options.exponent);
+        options.proofPower = proofPower;
+        double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
+        std::cout << "Proof of power " << proofPower << " requires about "
+                  << std::fixed << std::setprecision(2) << diskUsageGB
+                  << "GB of disk space" << std::endl;
+    }
 
     logger.logStart(options);
     timer.start();
@@ -711,13 +722,11 @@ int App::run() {
         }
 
 
-
-
-        //proofManager.checkpoint(buffers->input, iter);
-
+        if (options.proof && iter + 1 < totalIters) {
+            proofManager.checkpoint(buffers->input, iter + 1);
+        }
     }
     
-    double finalElapsed = timer.elapsed();
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
@@ -756,6 +765,12 @@ int App::run() {
             hostData.data(),
             0, nullptr, nullptr
         );
+
+        // Checkpoint the final result at iteration totalIters (after all p iterations are complete)
+        if (options.proof) {
+            proofManager.checkpoint(buffers->input, totalIters);
+        }
+
         bool debug = false;
         if(debug){
             for (size_t i = 0; i < hostData.size(); ++i)
@@ -790,8 +805,23 @@ int App::run() {
                 
     }
     
+    double gpuElapsed = timer.elapsed();
+    std::cout << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
 
+    // Generate proof file after successful completion
+    if (options.proof) {
+        try {
+            std::cout << "\nGenerating PRP proof file..." << std::endl;
+            auto proofFilePath = proofManager.proof();
+            options.proofFile = proofFilePath.string();  // Set proof file path
+            std::cout << "Proof file saved: " << proofFilePath << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+        }
+    }
     
+
+    double finalElapsed = timer.elapsed();
 
     std::string json = io::JsonBuilder::generate(
         hostData,
