@@ -200,14 +200,14 @@ static std::string generatePrimeNetJson(
         << "\"errors\":{\"gerbicz\":" << gerbiczError << "},"
         << "\"fft-length\":"  << fftLength            << ","
         << "\"shift-count\":0,";
-   /* if (isPRP) {
+    if (isPRP && !proofMd5.empty()) {
         oss << "\"proof\":{"
             << "\"version\":"   << proofVersion         << ","
             << "\"power\":"     << proofPower           << ","
             << "\"hashsize\":"  << proofHashSize        << ","
             << "\"md5\":"       << jsonEscape(proofMd5)
             << "},";
-    }*/
+    }
     oss << "\"program\":{"
         << "\"name\":"      << jsonEscape(programName)
         << ",\"version\":"  << jsonEscape(programVersion)
@@ -325,7 +325,7 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
         1,  // residueType
         0,  // gerbiczError
         transform_size,
-        opts.proof ? 1 : 0,
+        opts.proof ? 2 : 0,
         opts.proof ? opts.proofPower : 0,
         opts.proof ? 64 : 0,
         opts.proof ? fileMD5(opts.proofFile) : "",
