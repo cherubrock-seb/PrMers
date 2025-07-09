@@ -47,6 +47,11 @@ public:
          const std::vector<int>& digit_width,
          double /*elapsed*/,
          int /*transform_size*/);
+
+    static std::vector<uint32_t> compactBits(
+        const std::vector<uint64_t>& x,
+        const std::vector<int>& digit_width,
+        uint32_t E);
 };
 
 } // namespace io
