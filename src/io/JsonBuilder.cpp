@@ -75,7 +75,7 @@ namespace io{
         doDiv3(E, W);
         doDiv3(E, W);
     }
-static std::vector<uint32_t> compactBits(
+std::vector<uint32_t> JsonBuilder::compactBits(
     const std::vector<uint64_t>& x,
     const std::vector<int>&      digit_width,
     uint32_t                     E
@@ -267,7 +267,7 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
 {
     
     
-   auto words = compactBits(x, digit_width, opts.exponent);
+   auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
     if (words.size() < 64) {
         words.resize(64, 0);
@@ -352,7 +352,7 @@ std::string JsonBuilder::computeRes64(
     double /*elapsed*/,
     int /*transform_size*/)
 {
-    auto words = compactBits(x, digit_width, opts.exponent);
+    auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
     std::ostringstream oss;
@@ -368,7 +368,7 @@ std::string JsonBuilder::computeRes64Iter(
     double /*elapsed*/,
     int /*transform_size*/)
 {
-    auto words = compactBits(x, digit_width, opts.exponent);
+    auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     //if (opts.mode == "prp") doDiv9(opts.exponent, words);
     uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
     std::ostringstream oss;
@@ -385,7 +385,7 @@ std::string JsonBuilder::computeRes2048(
     double /*elapsed*/,
     int /*transform_size*/)
 {
-    auto words = compactBits(x, digit_width, opts.exponent);
+    auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
     std::ostringstream oss;
     for (int i = 63; i >= 0; --i) {
