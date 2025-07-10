@@ -10,6 +10,7 @@
 # include <CL/cl.h>
 #endif
 #include <cstdint>
+#include <filesystem>
 #include "core/ProofSet.hpp"
 
 namespace core {
@@ -17,14 +18,17 @@ namespace core {
 class ProofManager {
 public:
     ProofManager(uint32_t exponent, int proofLevel,
-                 cl_command_queue queue, uint32_t n);
-    void checkpoint(cl_mem buf, uint32_t iter);
+                 cl_command_queue queue, uint32_t n,
+                 const std::vector<int>& digitWidth);
+    void checkpoint(cl_mem buf, uint32_t iter);    
+    std::filesystem::path proof() const;
 
 private:
     ProofSet           proofSet_;
     cl_command_queue   queue_;
     uint32_t           n_;
     uint32_t           exponent_;
+    std::vector<int>   digitWidth_;
 };
 
 }

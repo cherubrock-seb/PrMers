@@ -29,6 +29,7 @@
 #pragma once
 
 #include "io/sha3.h"
+#include "io/Hash.h"
 
 #include <vector>
 #include <array>
@@ -52,6 +53,5 @@ public:
   }
 };
 
-#include "io/Hash.h"
 using SHA3 = Hash<Sha3Hash>;
 } // namespace io

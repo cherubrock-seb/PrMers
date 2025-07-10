@@ -96,12 +96,21 @@ static const uint32_t crctable[256] = {
 #define CRC32_INIT_VALUE 0xffffffffUL
 #define CRC32_XOR_VALUE  0xffffffffUL
 
-unsigned int computeCRC32(const std::string &data) {
+uint32_t computeCRC32(const std::string &data) {
     uint32_t crc = CRC32_INIT_VALUE;
     for (unsigned char c : data) {
         crc = crctable[(crc ^ c) & 0xFF] ^ (crc >> 8);
     }
     return static_cast<unsigned int>(crc ^ CRC32_XOR_VALUE);
+}
+
+uint32_t computeCRC32(const void* data, size_t size) {
+    uint32_t crc = CRC32_INIT_VALUE;
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+        crc = crctable[(crc ^ bytes[i]) & 0xFF] ^ (crc >> 8);
+    }
+    return crc ^ CRC32_XOR_VALUE;
 }
 
 std::string toLower(const std::string &s) {

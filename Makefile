@@ -25,6 +25,9 @@ else
   LDFLAGS  += -lOpenCL
 endif
 
+# GMP library
+LDFLAGS += -lgmp
+
 # Curl (optionnel)
 USE_CURL ?= 1
 ifeq ($(USE_CURL),1)
