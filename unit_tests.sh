@@ -147,6 +147,16 @@ for line in "${expected_lines[@]}"; do
 done
 
 echo "✅ Intermediate res64 values OK"
-
-
+echo ""
+echo "=== Proof generation verification for exponent 9941 ==="
+output=$(./prmers 9941 --noask --proofile 2>&1)
+echo "$output" > logs/proofs_9941.log
+if echo "$output" | grep -q 'proof \[0\] : M 87f3d3eabe4d6049, h 4526397be82cea45' \
+   && echo "$output" | grep -q 'proof \[1\] : M d6a355de518574d7, h 7faf92dd48dc2013' \
+   && echo "$output" | grep -q 'proof \[2\] : M 5aac235405ca84c7, h 934611f5f1192dd0'; then
+    echo "✅ Proofs for M9941 OK"
+else
+    echo "❌ Proofs for M9941: unexpected output (see logs/proofs_9941.log)"
+    exit 1
+fi
 echo -e "\n🎉 All tests passed."
