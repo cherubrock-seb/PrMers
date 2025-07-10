@@ -20,11 +20,13 @@ jobs:
       - name: Install OpenCL and libcurl dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
+          sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev libgmp-dev
 
       - name: Build with Makefile
-        run: make KERNEL_PATH=./kernels/
-
+        run: |
+          export CXXFLAGS="-I/usr/include"
+          export LDFLAGS="-L/usr/lib -lgmpxx -lgmp"
+          make KERNEL_PATH=./kernels/
       - name: Package for release
         run: |
           mkdir -p prmers_package/kernels

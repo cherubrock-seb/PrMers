@@ -19,10 +19,13 @@ jobs:
 
       - name: Set up OpenCL
         run: echo "OpenCL is preinstalled on macOS. No action needed."
-
+      - name: Install GMP via Homebrew
+        run: brew install gmp
       - name: Build with Makefile
-        run: make KERNEL_PATH=./kernels/
-
+        run: |
+          export CXXFLAGS="-I$(brew --prefix gmp)/include"
+          export LDFLAGS="-L$(brew --prefix gmp)/lib -lgmpxx -lgmp"
+          make KERNEL_PATH=./kernels/
       - name: Package for release
         run: |
           mkdir -p prmers_package/kernels

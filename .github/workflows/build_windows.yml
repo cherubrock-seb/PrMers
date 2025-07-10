@@ -39,7 +39,7 @@ jobs:
           .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Install libcurl via vcpkg
-        run: .\vcpkg\vcpkg install curl:x64-windows
+        run: .\vcpkg\vcpkg install curl:x64-windows gmp:x64-windows
 
       - name: Configure CMake
         shell: powershell
