@@ -68,6 +68,22 @@ For a full table of benchmark results, see the section below 👇
 
 PrMers runs on both **Linux** and **Windows** systems with OpenCL support.
 
+To build PrMers with GMP support you must install the GMP library on your system before compiling:
+
+• macOS (Homebrew):  
+  brew install gmp
+
+• Ubuntu/Debian:  
+  sudo apt-get update  
+  sudo apt-get install -y libgmp-dev
+
+• Windows (vcpkg):  
+  git clone https://github.com/microsoft/vcpkg.git  
+  cd vcpkg  
+  .\bootstrap-vcpkg.bat  
+  .\vcpkg install gmp:x64-windows
+
+
 ### ✅ Common Requirements
 - A GPU supporting **OpenCL 1.2** or higher (**OpenCL 2.0** recommended)
 - OpenCL-compatible drivers installed
