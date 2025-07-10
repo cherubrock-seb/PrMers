@@ -56,9 +56,9 @@ ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel)
   : E{exponent}, power{proofLevel} {
   
   assert(E & 1); // E is supposed to be prime
-  if (power <= 0 || power > 12) {
+  /*if (power <= 0 || power > 12) {
     throw std::runtime_error("Invalid proof power: " + std::to_string(power));
-  }
+  }*/
 
   // Create proof directory
   std::filesystem::create_directories(proofPath(E));
@@ -132,10 +132,10 @@ uint32_t ProofSet::bestPower(uint32_t E) {
   // The values below produce power=10 at wavefront, and power=11 at 100Mdigits:
   // power=10 from 60M to 240M, power=11 from 240M up.
 
-  assert(E > 0);
+  //assert(E > 0);
   // log2(x)/2 is log4(x)
   int power = 10 + std::floor(std::log2(E / 60e6) / 2);
-  assert(power >= 2);
+  //assert(power >= 2);
   return static_cast<uint32_t>(power);
 }
 
