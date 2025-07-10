@@ -21,16 +21,20 @@
  * This code is released as free software. 
  */
 #include "core/ProofManager.hpp"
+#include "io/JsonBuilder.hpp"
 #include <vector>
+#include <iostream>
 
 namespace core {
 
 ProofManager::ProofManager(uint32_t exponent, int proofLevel,
-                           cl_command_queue queue, uint32_t n)
+                           cl_command_queue queue, uint32_t n,
+                           const std::vector<int>& digitWidth)
   : proofSet_(exponent, proofLevel)
   , queue_(queue)
   , n_(n)
   , exponent_(exponent)
+  , digitWidth_(digitWidth)
 {}
 
 void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
@@ -42,9 +46,63 @@ void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
                         n_ * sizeof(uint64_t),
                         host.data(), 0, nullptr, nullptr);
 
-    // turn it into your proof word format
-    Words partial = ProofSet::fromUint64(host, exponent_);
-    proofSet_.save(iter, partial);
+    // Get residue from NTT buffer using compactBits
+    auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
+    
+    // Save in PRPLL-compatible format
+    proofSet_.save(iter, words);
+    
+    // Verify the checkpoint by loading it back and comparing
+    try {
+        auto loadedWords = proofSet_.load(iter);
+        
+        // Compare the saved and loaded data
+        if (words.size() != loadedWords.size()) {
+            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
+                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
+            return;
+        }
+        
+        for (size_t i = 0; i < words.size(); ++i) {
+            if (words[i] != loadedWords[i]) {
+                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
+                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
+                return;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
+                  << ": " << e.what() << std::endl;
+    }
+}
+
+std::filesystem::path ProofManager::proof() const {
+    try {
+        // Generate proof from collected checkpoints
+        Proof proof = proofSet_.computeProof();
+        
+        // Create proof file name: {exponent}-{power}.proof
+        std::string filename = std::to_string(exponent_) + "-" + 
+                              std::to_string(proof.middles.size()) + ".proof";
+        std::filesystem::path proofFilePath = std::filesystem::current_path() / filename;
+        
+        
+        // Save the proof file
+        proof.save(proofFilePath);
+        
+        // Check the proof was saved correctly by attempting to load it
+        try {
+            auto loadedProof = Proof::load(proofFilePath);
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Proof file validation failed: " << e.what() << std::endl;
+        }
+        
+        return proofFilePath;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error generating proof file: " << e.what() << std::endl;
+        throw;
+    }
 }
 
 } // namespace core
