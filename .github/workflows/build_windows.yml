@@ -53,13 +53,12 @@ jobs:
       - name: Configure CMake
         shell: powershell
         run: |
-          cmake `
-            -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows" `
-            -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
-            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
+          $toolchain = "${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          cmake -S . -B build `
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
             -DCMAKE_BUILD_TYPE=Release `
-            -S . -B build
+            -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
+            -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib"
 
       - name: Build
         run: cmake --build build --config Release
