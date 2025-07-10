@@ -1,53 +1,48 @@
 cmake_minimum_required(VERSION 3.10)
-project(PrMers)
+project(PrMers LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# == OpenCL ==
+# === OpenCL ===
 find_package(OpenCL REQUIRED)
-include_directories(${OpenCL_INCLUDE_DIRS})
 
-# == GMP ==
-find_package(GMP REQUIRED)
-include_directories(${GMP_INCLUDE_DIR})
-# Needed for linking against gmpxx (C++ API)
-link_libraries(${GMP_LIBRARIES})
+# === GMP (vcpkg config mode) ===
+find_package(GMP CONFIG REQUIRED)
 
-# == libcurl (optional) ==
+# === libcurl (optional) ===
 option(USE_CURL "Enable libcurl support" ON)
-
 if (USE_CURL)
-    find_package(CURL REQUIRED)
-    message(STATUS "libcurl found, enabling CURL support.")
-    set(HAS_CURL_DEFINE HAS_CURL=1)
-else()
-    message(STATUS "libcurl support is disabled by option.")
-    set(HAS_CURL_DEFINE NO_CURL=1)
+  find_package(CURL REQUIRED)
 endif()
 
-# == Source Files ==
+# === Source files & include dir ===
 file(GLOB_RECURSE SOURCES src/*.cpp)
-include_directories(${CMAKE_SOURCE_DIR}/include)
+target_include_directories(prmers PRIVATE
+  ${PROJECT_SOURCE_DIR}/include
+)
 
-# == Executable ==
+# === Executable ===
 add_executable(prmers ${SOURCES})
 
-# == Definitions ==
+# === Compile definitions ===
 if (WIN32)
-    set(DEFAULT_KERNEL_PATH "\"./kernels/\"")
+  target_compile_definitions(prmers PRIVATE KERNEL_PATH="\"./kernels/\"")
 else()
-    set(DEFAULT_KERNEL_PATH "\"/usr/local/share/prmers/\"")
+  target_compile_definitions(prmers PRIVATE KERNEL_PATH="\"/usr/local/share/prmers/\"")
 endif()
-target_compile_definitions(prmers PRIVATE KERNEL_PATH=${DEFAULT_KERNEL_PATH} ${HAS_CURL_DEFINE})
 
-# == Linking ==
-target_link_libraries(prmers
-    PRIVATE
-        ${OpenCL_LIBRARIES}
-        ${GMP_LIBRARIES}
+if (USE_CURL)
+  target_compile_definitions(prmers PRIVATE HAS_CURL=1)
+endif()
+
+# === Link libraries ===
+target_link_libraries(prmers PRIVATE
+  OpenCL::OpenCL
+  GMP::gmp
+  GMP::gmpxx
 )
 
 if (USE_CURL)
-    target_link_libraries(prmers PRIVATE CURL::libcurl)
+  target_link_libraries(prmers PRIVATE CURL::libcurl)
 endif()
