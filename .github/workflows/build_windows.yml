@@ -38,18 +38,28 @@ jobs:
           git clone https://github.com/microsoft/vcpkg.git
           .\vcpkg\bootstrap-vcpkg.bat
 
-      - name: Install libcurl via vcpkg
+      - name: Cache vcpkg packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            vcpkg/installed
+            vcpkg/buildtrees
+            vcpkg/downloads
+          key: ${{ runner.os }}-vcpkg
+
+      - name: Install dependencies via vcpkg
         run: .\vcpkg\vcpkg install curl:x64-windows gmp:x64-windows
 
       - name: Configure CMake
         shell: powershell
         run: |
-          cmake -S . -B build `
-            -DCMAKE_BUILD_TYPE=Release `
+          cmake `
+            -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows" `
             -DOpenCL_INCLUDE_DIR="$env:RUNNER_TEMP\opencl\include" `
             -DOpenCL_LIBRARY="$env:RUNNER_TEMP\opencl\lib\OpenCL.lib" `
-            -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
-            -DCMAKE_PREFIX_PATH="${{ github.workspace }}\vcpkg\installed\x64-windows"
+            -DCMAKE_BUILD_TYPE=Release `
+            -S . -B build
 
       - name: Build
         run: cmake --build build --config Release
@@ -94,7 +104,6 @@ jobs:
       - name: Upload release to GitHub
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
           files: |
             prmers-windows.zip
             prmers-windows.zip.sha256
