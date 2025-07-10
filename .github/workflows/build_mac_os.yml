@@ -23,9 +23,11 @@ jobs:
         run: brew install gmp
       - name: Build with Makefile
         run: |
-          export CXXFLAGS="-I$(brew --prefix gmp)/include"
-          export LDFLAGS="-L$(brew --prefix gmp)/lib -lgmpxx -lgmp"
-          make KERNEL_PATH=./kernels/
+          GMP_PREFIX=$(brew --prefix gmp)
+          make \
+            CXXFLAGS="-I${GMP_PREFIX}/include -Iinclude -I/System/Library/Frameworks/OpenCL.framework/Headers -std=c++20 -O3 -Wall -DHAS_CURL=1 -DKERNEL_PATH=\"./kernels/\"" \
+            LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp" \
+            KERNEL_PATH=./kernels/
       - name: Package for release
         run: |
           mkdir -p prmers_package/kernels
