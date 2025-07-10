@@ -29,11 +29,9 @@ jobs:
 
       - name: Download OpenCL SDK
         run: |
-          curl.exe -L -o $env:RUNNER_TEMP/opencl.zip \
-            "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
+          curl.exe -L -o $env:RUNNER_TEMP/opencl.zip "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
           mkdir $env:RUNNER_TEMP/opencl
-          tar.exe -xf $env:RUNNER_TEMP/opencl.zip \
-            --strip-components=1 -C $env:RUNNER_TEMP/opencl
+          tar.exe -xf $env:RUNNER_TEMP/opencl.zip --strip-components=1 -C $env:RUNNER_TEMP/opencl
 
       - name: Clone and bootstrap vcpkg
         run: |
