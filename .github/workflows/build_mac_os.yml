@@ -28,7 +28,7 @@ jobs:
           GMP_PREFIX=$(brew --prefix gmp)
           make \
             CXXFLAGS="-I${GMP_PREFIX}/include -Iinclude -I/System/Library/Frameworks/OpenCL.framework/Headers -std=c++20 -O3 -Wall -DHAS_CURL=1 -DKERNEL_PATH=\"./kernels/\"" \
-            LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp -lcurl" \
+            LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp -lcurl -framework OpenCL" \
             KERNEL_PATH=./kernels/
 
       - name: Package for release
