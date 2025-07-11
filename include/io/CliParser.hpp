@@ -17,6 +17,7 @@ struct CliOptions {
     bool profiling = false;
     bool debug = false;
     bool gerbiczli = false;
+    int B1 = 10000;
     bool proof = true;
     bool submit = true;
     int localCarryPropagationDepth = 8;

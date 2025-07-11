@@ -23,6 +23,7 @@
 #include <memory>
 #include <optional>
 #include <atomic>
+#include <gmp.h>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -38,6 +39,8 @@ namespace core {
 class App {
 public:
     App(int argc, char** argv);
+    int runPrpOrLl();
+    int runPM1();
     int run();
     void tuneIterforce();
     double measureIps(uint32_t testIterforce, uint32_t testIters);
@@ -64,6 +67,7 @@ private:
   std::unique_ptr<math::GerbiczLiChecker> checker;
 };
 
+mpz_class buildE(uint64_t B1);
 } // namespace core
 
 #endif // CORE_APP_HPP

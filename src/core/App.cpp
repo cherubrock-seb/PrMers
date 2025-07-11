@@ -54,7 +54,7 @@
 #include <optional>
 #include <cmath>
 #include <thread>
-
+#include <gmp.h>
 
 
 using namespace std::chrono;
@@ -389,7 +389,7 @@ App::App(int argc, char** argv)
 
 
 
-int App::run() {
+int App::runPrpOrLl() {
     if (options.tune ) {
         tuneIterforce();
         return 0;
@@ -961,5 +961,161 @@ int App::run() {
 
     return isPrime ? 0 : 1;
 }
+
+
+mpz_class buildE(uint64_t B1) {
+    mpz_class E = 1;
+    std::vector<uint32_t> sieve(B1 + 1, 1);
+    for (uint32_t i = 2; i <= B1; ++i) if (sieve[i]) {
+        for (uint64_t j = uint64_t(i) * i; j <= B1; j += i) sieve[j] = 0;
+        int e = int(std::log(double(B1)) / std::log(double(i)));
+        mpz_class pe = 1;
+        for (int k = 0; k < e; ++k) pe *= i;
+        E *= pe;
+    }
+    return E;
+}
+
+void vectToMpz(mpz_t out,
+               const std::vector<uint64_t>& v,
+               const std::vector<int>& widths)
+{
+    mpz_set_ui(out, 0);
+    for (ssize_t i = v.size() - 1; i >= 0; --i) {
+        mpz_mul_2exp(out, out, widths[i]);
+        mpz_add_ui(out, out, v[i]);
+    }
+}
+
+
+int App::runPM1() {
+
+    uint64_t B1 = options.B1;
+    mpz_class E = buildE(B1);
+    E *= 2 * options.exponent;
+    
+    std::cout << "Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+    
+//    std::cout << "Exponent E = ";
+//    gmp_printf("%Zd\n", E.get_mpz_t());
+
+    std::vector<uint64_t> x(precompute.getN(), 0ULL);
+    x[0] = 1ULL;
+    buffers->input = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, x.size() * sizeof(uint64_t), x.data(), nullptr);
+
+    math::Carry carry(context, context.getQueue(), program->getProgram(), precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
+
+    mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
+    timer.start();
+    timer2.start();
+    auto startTime  = high_resolution_clock::now();
+    auto lastDisplay = startTime;
+    spinner.displayProgress(0, bits, 0.0, 0.0, options.exponent,0, 0,"");
+    uint32_t startIter = 0;
+    //uint32_t resumeIter = backupManager.loadState(x);
+    uint32_t resumeIter = 0;
+    for (mp_bitcnt_t i = bits; i > 0 && !interrupted; --i) {
+        nttEngine->forward(buffers->input, 0);
+        nttEngine->inverse(buffers->input, 0);
+        carry.carryGPU(buffers->input, buffers->blockCarryBuf, precompute.getN() * sizeof(uint64_t));
+
+
+
+        if (mpz_tstbit(E.get_mpz_t(), i - 1)) {
+            carry.carryGPU3(buffers->input, buffers->blockCarryBuf, precompute.getN() * sizeof(uint64_t));
+            
+        }
+        if ((options.iterforce > 0 && (i+1)%options.iterforce == 0 && i>0) || (((i+1)%options.iterforce == 0))) { 
+            
+            if((i+1)%100000 != 0){
+                char dummy;
+                clEnqueueReadBuffer(
+                        context.getQueue(),
+                        buffers->input,
+                        CL_TRUE, 0,
+                        sizeof(dummy),
+                        &dummy,
+                        0, nullptr, nullptr
+                    );
+            }
+
+            
+        }
+        auto now = high_resolution_clock::now();
+          
+        if ((((now - lastDisplay >= seconds(10)))) ) {
+                std::string res64_x;
+                
+
+                spinner.displayProgress(
+                    bits-i+1,
+                    bits,
+                    timer.elapsed(),
+                    timer2.elapsed(),
+                    options.exponent,
+                    resumeIter,
+                    startIter,
+                    res64_x
+                );
+                timer2.start();
+                lastDisplay = now;
+                resumeIter = bits-i+1;
+            }
+        //clFinish(context.getQueue());
+    }
+
+    std::vector<uint64_t> hostData(precompute.getN());
+
+    clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
+                        hostData.size() * sizeof(uint64_t), hostData.data(),
+                        0, nullptr, nullptr);
+
+    carry.handleFinalCarry(hostData, precompute.getDigitWidth());
+
+    mpz_t X; mpz_init(X);
+    vectToMpz(X, hostData, precompute.getDigitWidth());
+    //std::cout << "digitWidths = ";
+    //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
+    //std::cout << "\n";
+    //gmp_printf("X final  = %Zd\n", X);
+
+    mpz_sub_ui(X, X, 1);
+
+
+    mpz_t Mp; mpz_init(Mp);
+    mpz_ui_pow_ui(Mp, 2, options.exponent);
+    mpz_sub_ui(Mp, Mp, 1);
+
+    mpz_t g; mpz_init(g);
+    mpz_gcd(g, X, Mp);
+
+    gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
+
+    bool factorFound = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
+    if (factorFound) {
+        char* fstr = mpz_get_str(nullptr, 10, g);
+        std::cout << "P-1 factor stage 1 found: " << fstr << std::endl;
+        std::free(fstr);
+        return 0;
+    }
+
+    std::cout << "No P-1 (stage 1) factor up to B1=" << B1 << std::endl;
+    return 1;
+}
+
+
+
+
+int App::run() {
+    if(options.mode == "prp" || options.mode == "ll"){
+        return runPrpOrLl();
+    }
+    else if(options.mode == "pm1"){
+        return runPM1();
+    }
+
+    return 1;
+}
+
 
 } // namespace core

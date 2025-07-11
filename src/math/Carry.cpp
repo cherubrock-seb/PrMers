@@ -49,6 +49,11 @@ Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program prog
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to create kernel_carry_mul_base");
     }
+
+    carryKernelMul3_ = clCreateKernel(program, "kernel_carry_mul_3", &err);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create kernel_carry_mul_3");
+    }
 }
 
 void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
@@ -115,6 +120,67 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 
 }
 
+void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
+{
+    cl_int err;
+    size_t workersCarry = context_.getWorkersCarry();
+
+    err  = clSetKernelArg(carryKernelMul3_, 0, sizeof(cl_mem), &buffer);
+    err |= clSetKernelArg(carryKernelMul3_, 1, sizeof(cl_mem), &blockCarryBuffer);
+    err |= clSetKernelArg(carryKernelMul3_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
+     
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to set kernel_carry args");
+    }
+    if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
+    
+    err = clEnqueueNDRangeKernel(queue_, carryKernelMul3_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
+    if (err != CL_SUCCESS) {
+        std::ostringstream oss;
+        oss << "Failed to enqueue kernel_carry, error code: " << err;
+        throw std::runtime_error(oss.str());
+    }
+
+    err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
+    err |= clSetKernelArg(carryKernel2_, 1, sizeof(cl_mem), &blockCarryBuffer);
+    err |= clSetKernelArg(carryKernel2_, 2, sizeof(cl_mem), &digitWidthMaskBuf_);
+    
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to set kernel_carry_2 args");
+    }
+    err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to enqueue kernel_carry_2");
+    }
+
+    bool debug = false;
+    if (debug) {
+        clFinish(queue_);
+        size_t numElems = context_.getTransformSize(); 
+        std::vector<uint64_t> host_x(numElems);
+
+        cl_int err = clEnqueueReadBuffer(queue_, buffer, CL_TRUE, 0,
+                                  numElems * sizeof(uint64_t),
+                                  host_x.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            std::cerr << "Error reading buf_x: " << numElems  << err
+                      << " (" << err << ")\n";
+            return;
+        }
+
+        std::cout << "=== Contenu de `buf_x` APRES kernel `" << "CARRY"
+        << " workers = " << workersCarry 
+                  << "` ===\n";
+            std::cout << "[";
+            for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
+                std::cout << host_x[j] << ",";
+            }
+            std::cout << "]\n";
+        
+        std::cout << "============================================\n";
+    }
+
+}
 
 
 

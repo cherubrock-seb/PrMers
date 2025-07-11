@@ -145,7 +145,6 @@ for line in "${expected_lines[@]}"; do
     exit 1
   fi
 done
-
 echo "✅ Intermediate res64 values OK"
 echo ""
 echo "=== Proof generation verification for exponent 9941 ==="
@@ -159,4 +158,16 @@ else
     echo "❌ Proofs for M9941: unexpected output (see logs/proofs_9941.log)"
     exit 1
 fi
+echo ""
+echo "=== P-1 factoring test for M541 ==="
+output=$(./prmers 541 -pm1 -b1 899 --noask 2>&1)
+echo "$output" > logs/pm1_541.log
+if echo "$output" | grep -q 'GCD(x - 1, 2\^541 - 1) = 4312790327' \
+   && echo "$output" | grep -q 'P-1 factor stage 1 found: 4312790327'; then
+    echo "✅ M541 P-1 factor found"
+else
+    echo "❌ M541 P-1 factor not found or output mismatch (see logs/pm1_541.log)"
+    exit 1
+fi
+
 echo -e "\n🎉 All tests passed."

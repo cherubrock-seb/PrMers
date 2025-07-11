@@ -9,6 +9,32 @@ Key features:
 - 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
 - 📊 Benchmark output for performance comparison across devices
 
+## P-1 Factoring with `prmers`
+
+`prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) in stage 1, an efficient algorithm to find a prime factor \( p \) of a Mersenne number \( 2^n - 1 \) such that \( p - 1 \) is B-smooth (i.e. composed only of small primes). The method computes \( x = 3^E \mod (2^n - 1) \) for an exponent \( E \) divisible by many small primes, and then checks whether `gcd(x - 1, 2^n - 1)` reveals a nontrivial factor.
+
+To run a stage-1 P−1 factoring test on exponent 541 with bound B1 = 8099:
+
+```bash
+./prmers 541 -pm1 -b1 8099
+```
+
+Sample output if a factor is found:
+
+```
+Start a P-1 factoring stage 1 up to B1=8099
+GCD(x - 1, 2^541 - 1) = 4312790327
+P-1 factor stage 1 found: 4312790327
+```
+
+If no factor is found up to the chosen bound, the program reports:
+```
+No P-1 factor up to B1=8099
+```
+
+This stage-1 P−1 test is GPU-accelerated using optimized NTT-based exponentiation modulo \( 2^n - 1 \).
+
+
 ## 🚀 Try the PrMers Demo on Google Colab
 
 You can test **PrMers** directly in your browser with GPU acceleration by opening the interactive notebook below:
