@@ -530,7 +530,7 @@ __kernel void kernel_carry_mul_3(
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry1);
         ulong4 lo = x_vec * CONST_SCALAR_VEC;
-        ulong4 hi = (ulong4)mul_hi(x_vec,CONST_SCALAR_VEC);          
+        //ulong4 hi = (ulong4)mul_hi(x_vec,CONST_SCALAR_VEC);          
         //carry += hi.s0 + hi.s1 + hi.s2 + hi.s3;
         x_vec = digit_adc4(lo, digit_width_vec, &carry);
         carry = carry + 3*carry1;
