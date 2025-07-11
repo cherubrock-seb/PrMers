@@ -1037,7 +1037,7 @@ mpz_class buildE(uint64_t B1) {
             if (w.joinable()) w.join();
 
         for (auto &p : part) E *= p;
-        std::cout << "\n\nE = " << E << "\n\n"<<std::endl;
+        //std::cout << "\n\nE = " << E << "\n\n"<<std::endl;
         
         return E;
     }
