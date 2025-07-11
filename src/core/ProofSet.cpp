@@ -71,7 +71,7 @@ ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel)
 
   points.push_back(0);
   for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
-    for (uint32_t i = 0, end = points.size(); i < end; ++i) {
+    for (uint32_t i = 0, end = static_cast<uint32_t>(points.size()); i < end; ++i) {
       points.push_back(points[i] + span);
     }
   }
