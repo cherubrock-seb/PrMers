@@ -1032,9 +1032,16 @@ mpz_class buildE(uint64_t B1) {
     for (auto &w : workers) w.join();
     for (auto &p : part) E *= p;
     if (interrupted) {
-        std::cout << "\nInterrupted signal received — using partial E computed so far.\n";
+        std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
+        for (auto &w : workers)
+            if (w.joinable()) w.join();
+
+        for (auto &p : part) E *= p;
+        std::cout << "\n\nE = " << E << "\n\n"<<std::endl;
+        
         return E;
     }
+
     std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
 }
