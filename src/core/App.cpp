@@ -998,7 +998,8 @@ mpz_class buildE(uint64_t B1) {
                 if (idx >= total) break;
                 uint32_t p = primes[idx];
                 mpz_class pw = p;
-                while (pw <= B1 / p) pw *= p;
+                mpz_class limit = mpz_class(B1 / p);
+                while (pw <= limit) pw *= p;
                 part[t] *= pw;
                 done.fetch_add(1, std::memory_order_relaxed);
                 if (interrupted) return;
@@ -1007,7 +1008,8 @@ mpz_class buildE(uint64_t B1) {
 
     mpz_class E = 1;
     mpz_class pw2 = 2;
-    while (pw2 <= B1 / 2) pw2 *= 2;
+    mpz_class limit2 = mpz_class(B1 / 2);
+    while (pw2 <= limit2) pw2 *= 2;
     E *= pw2;
 
     std::cout << "Building E:   0%  ETA  --:--:--" << std::flush;
