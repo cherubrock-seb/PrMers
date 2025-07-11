@@ -33,7 +33,9 @@
 #include <CL/cl.h>
 #endif
 #include <gmpxx.h>
-
+#include <atomic>
+#include <thread>
+#include <chrono>
 namespace core {
 
 BackupManager::BackupManager(cl_command_queue queue,
@@ -124,15 +126,32 @@ void BackupManager::saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_p
         std::cerr << "Error saving loop state to " << loopFilename_ << std::endl;
     }
 
-    if (mode_ == "pm1" && E_ptr != nullptr) {
+   if (mode_ == "pm1" && E_ptr != nullptr) {
+        std::atomic<bool> done{false};
+        std::thread spinner([&]{
+            const char seq[] = {'|','/','-','\\'};
+            int i = 0;
+            while (!done) {
+                std::cout << "\rSaving exponent to " << exponentFilename_ << " " 
+                        << seq[i++ % 4] << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
+
         std::ofstream expOut(exponentFilename_);
         if (expOut) {
             expOut << *E_ptr;
-            std::cout << "Exponent value saved to " << exponentFilename_ << std::endl;
+            expOut.close();
+            done = true;
+            spinner.join();
+            std::cout << "\rSaved exponent to " << exponentFilename_ << "    \n";
         } else {
-            std::cerr << "Error saving exponent value to " << exponentFilename_ << std::endl;
+            done = true;
+            spinner.join();
+            std::cerr << "Error saving exponent to " << exponentFilename_ << std::endl;
         }
     }
+
 }
 
 
