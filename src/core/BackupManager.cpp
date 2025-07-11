@@ -32,6 +32,7 @@
 #else
 #include <CL/cl.h>
 #endif
+#include <gmpxx.h>
 
 namespace core {
 
@@ -40,18 +41,25 @@ BackupManager::BackupManager(cl_command_queue queue,
                              size_t vectorSize,
                              const std::string& savePath,
                              unsigned exponent,
-                             const std::string& mode)
+                             const std::string& mode,
+                             const int b1)
   : queue_(queue)
   , backupInterval_(interval)
   , vectorSize_(vectorSize)
   , savePath_(savePath.empty() ? "." : savePath)
   , exponent_(exponent)
   , mode_(mode)
+  , b1_(b1)
 {
     std::filesystem::create_directories(savePath_);
     auto base = std::to_string(exponent_) + mode_;
+    if(b1_>0){
+        base = std::to_string(exponent_) + mode_ + std::to_string(b1_);
+    }
     mersFilename_ = savePath_ + "/" + base + ".mers";
     loopFilename_ = savePath_ + "/" + base + ".loop";
+    exponentFilename_ = savePath_ + "/" + base + ".exponent";
+    
 }
 
 uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
@@ -93,13 +101,12 @@ uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
 }
 
 
-void BackupManager::saveState(cl_mem buffer, uint32_t iter) {
+void BackupManager::saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_ptr) {
     std::vector<uint64_t> x(vectorSize_);
     clEnqueueReadBuffer(queue_, buffer, CL_TRUE,
                         0, vectorSize_ * sizeof(uint64_t),
                         x.data(), 0, nullptr, nullptr);
 
-    // write binary state
     std::ofstream mersOut(mersFilename_, std::ios::binary);
     if (mersOut) {
         mersOut.write(reinterpret_cast<const char*>(x.data()),
@@ -109,7 +116,6 @@ void BackupManager::saveState(cl_mem buffer, uint32_t iter) {
         std::cerr << "Error saving state to " << mersFilename_ << std::endl;
     }
 
-    // write next-iteration
     std::ofstream loopOut(loopFilename_);
     if (loopOut) {
         loopOut << (iter + 1);
@@ -117,7 +123,32 @@ void BackupManager::saveState(cl_mem buffer, uint32_t iter) {
     } else {
         std::cerr << "Error saving loop state to " << loopFilename_ << std::endl;
     }
+
+    if (mode_ == "pm1" && E_ptr != nullptr) {
+        std::ofstream expOut(exponentFilename_);
+        if (expOut) {
+            expOut << *E_ptr;
+            std::cout << "Exponent value saved to " << exponentFilename_ << std::endl;
+        } else {
+            std::cerr << "Error saving exponent value to " << exponentFilename_ << std::endl;
+        }
+    }
 }
+
+
+mpz_class BackupManager::loadExponent() const {
+    mpz_class result{0};
+    std::ifstream expIn(exponentFilename_);
+    if (expIn) {
+        expIn >> result;
+        std::cout << "Loaded exponent value from " << exponentFilename_ << std::endl;
+    } else {
+        std::cout << "No exponent file found at " << exponentFilename_
+                  << " — defaulting to 0" << std::endl;
+    }
+    return result;
+}
+
 
 void BackupManager::clearState() const {
     std::error_code ec;
@@ -128,6 +159,10 @@ void BackupManager::clearState() const {
     if (std::filesystem::exists(loopFilename_, ec)) {
         std::filesystem::remove(loopFilename_, ec);
         std::cout << "Removed loop file: " << loopFilename_ << std::endl;
+    }
+    if (std::filesystem::exists(exponentFilename_, ec)) {
+        std::filesystem::remove(exponentFilename_, ec);
+        std::cout << "Removed exponent file: " << exponentFilename_ << std::endl;
     }
 }
 
