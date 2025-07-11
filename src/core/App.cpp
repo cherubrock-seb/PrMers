@@ -55,7 +55,7 @@
 #include <cmath>
 #include <thread>
 #include <gmp.h>
-
+#include <cstddef>
 
 using namespace std::chrono;
 
@@ -981,7 +981,7 @@ void vectToMpz(mpz_t out,
                const std::vector<int>& widths)
 {
     mpz_set_ui(out, 0);
-    for (ssize_t i = v.size() - 1; i >= 0; --i) {
+    for (ptrdiff_t i = ptrdiff_t(v.size()) - 1; i >= 0; --i) {
         mpz_mul_2exp(out, out, widths[i]);
         mpz_add_ui(out, out, v[i]);
     }
