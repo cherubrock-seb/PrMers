@@ -56,9 +56,6 @@ ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel)
   : E{exponent}, power{proofLevel} {
   
   assert(E & 1); // E is supposed to be prime
-  /*if (power <= 0 || power > 12) {
-    throw std::runtime_error("Invalid proof power: " + std::to_string(power));
-  }*/
 
   // Create proof directory
   std::filesystem::create_directories(proofPath(E));
@@ -134,8 +131,9 @@ uint32_t ProofSet::bestPower(uint32_t E) {
 
   //assert(E > 0);
   // log2(x)/2 is log4(x)
-  int power = 10 + std::floor(std::log2(E / 60e6) / 2);
-  //assert(power >= 2);
+  int32_t power = 10 + static_cast<int32_t>(std::floor(std::log2(E / 60e6) / 2));
+  power = std::max(power, 2);
+  power = std::min(power, 12);
   return static_cast<uint32_t>(power);
 }
 
