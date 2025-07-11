@@ -1069,6 +1069,14 @@ int App::runPM1() {
                 resumeIter = bits-i+1;
             }
         //clFinish(context.getQueue());
+            if (interrupted) {
+                std::cout << "\nInterrupted signal received\n " << std::endl;
+                clFinish(context.getQueue());
+                //backupManager.saveState(buffers->input, lastIter);
+                //std::cout << "\nInterrupted by user, state saved at iteration "
+                //        << lastIter << std::endl;
+                return 0;
+            }
     }
 
     std::vector<uint64_t> hostData(precompute.getN());
