@@ -1111,7 +1111,12 @@ int App::run() {
         return runPrpOrLl();
     }
     else if(options.mode == "pm1"){
-        return runPM1();
+        if(options.exponent > 89){
+            return runPM1();
+        }
+        else{
+            std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
+        }
     }
 
     return 1;
