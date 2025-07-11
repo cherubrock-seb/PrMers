@@ -184,7 +184,7 @@ std::array<uint64_t, 4> Proof::hashWords(uint32_t E,
   // Hash the prefix first, then the words data
   io::SHA3 hasher;
   uint32_t nBytes = (E - 1) / 8 + 1;
-  hasher.update(prefix.data(), prefix.size() * sizeof(uint64_t));
+  hasher.update(prefix.data(), static_cast<uint32_t>(prefix.size()) * sizeof(uint64_t));
   return std::move(hasher.update(words.data(), nBytes)).finish();
 }
 
