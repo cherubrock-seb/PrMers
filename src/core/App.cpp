@@ -966,13 +966,20 @@ int App::runPrpOrLl() {
 mpz_class buildE(uint64_t B1) {
     mpz_class E = 1;
     std::vector<uint32_t> sieve(B1 + 1, 1);
-    for (uint32_t i = 2; i <= B1; ++i) if (sieve[i]) {
-        for (uint64_t j = uint64_t(i) * i; j <= B1; j += i) sieve[j] = 0;
-        int e = int(std::log(double(B1)) / std::log(double(i)));
-        mpz_class pe = 1;
-        for (int k = 0; k < e; ++k) pe *= i;
-        E *= pe;
+    for (uint32_t i = 2; i <= B1; ++i) {
+        int percent = int((i - 2) * 100 / (B1 - 1));
+        std::cout << "\rBuilding E: " << percent << "% completed" << std::flush;
+        if (sieve[i]) {
+            for (uint64_t j = uint64_t(i) * i; j <= B1; j += i)
+                sieve[j] = 0;
+            int e = int(std::log(double(B1)) / std::log(double(i)));
+            mpz_class pe = 1;
+            for (int k = 0; k < e; ++k)
+                pe *= i;
+            E *= pe;
+        }
     }
+    std::cout << "\rBuilding E: 100% completed" << std::endl;
     return E;
 }
 
