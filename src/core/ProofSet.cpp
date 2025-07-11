@@ -131,10 +131,10 @@ uint32_t ProofSet::bestPower(uint32_t E) {
 
   //assert(E > 0);
   // log2(x)/2 is log4(x)
-  uint32_t power = 10 + std::floor(std::log2(E / 60e6) / 2);
-  power = std::max(power, 2u);
-  power = std::min(power, 12u);
-  return power;
+  int32_t power = 10 + static_cast<int32_t>(std::floor(std::log2(E / 60e6) / 2));
+  power = std::max(power, 2);
+  power = std::min(power, 12);
+  return static_cast<uint32_t>(power);
 }
 
 bool ProofSet::isInPoints(uint32_t E, uint32_t power, uint32_t k) {
