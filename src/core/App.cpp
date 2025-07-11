@@ -449,15 +449,11 @@ int App::runPrpOrLl() {
     // Display proof disk usage estimate at start of computation
     if (options.proof) {
         int proofPower = ProofSet::bestPower(options.exponent);
-            if(proofPower>=2 && proofPower < 13){
-            options.proofPower = proofPower;
-            double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
-            std::cout << "Proof of power " << proofPower << " requires about "
-                    << std::fixed << std::setprecision(2) << diskUsageGB
-                    << "GB of disk space" << std::endl;
-            }else{
-                options.proof = false;
-            }
+        options.proofPower = proofPower;
+        double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
+        std::cout << "Proof of power " << proofPower << " requires about "
+                << std::fixed << std::setprecision(2) << diskUsageGB
+                << "GB of disk space" << std::endl;
     }
 
     logger.logStart(options);
