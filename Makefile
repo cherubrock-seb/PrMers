@@ -26,7 +26,7 @@ else
 endif
 
 # GMP library
-LDFLAGS += -lgmp
+LDFLAGS += -lgmpxx -lgmp
 
 # Curl (optionnel)
 USE_CURL ?= 1

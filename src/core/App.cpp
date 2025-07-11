@@ -318,7 +318,8 @@ App::App(int argc, char** argv)
         precompute.getN(),
         options.save_path,
         options.exponent,
-        options.mode
+        options.mode,
+        options.B1
     )
   , proofManager(
         options.exponent,
@@ -977,6 +978,12 @@ mpz_class buildE(uint64_t B1) {
             for (int k = 0; k < e; ++k)
                 pe *= i;
             E *= pe;
+            
+        }
+        if (interrupted) {
+                std::cout << "\nInterrupted signal received\n " << std::endl;
+                std::cout << "\nE compute interrupted E will be set to E=1   " << std::endl;
+                return 1;
         }
     }
     std::cout << "\rBuilding E: 100% completed" << std::endl;
@@ -998,30 +1005,38 @@ void vectToMpz(mpz_t out,
 int App::runPM1() {
 
     uint64_t B1 = options.B1;
-    mpz_class E = buildE(B1);
-    E *= 2 * options.exponent;
+    mpz_class E = backupManager.loadExponent();
+    if(E==0){    
+        E = buildE(B1);
+        E *= 2 * options.exponent;
+    }
     
     std::cout << "Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
     
 //    std::cout << "Exponent E = ";
 //    gmp_printf("%Zd\n", E.get_mpz_t());
-
+    mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
-    x[0] = 1ULL;
+    uint32_t resumeIter = backupManager.loadState(x);
+    if(resumeIter==0){
+        x[0] = 1ULL;
+        resumeIter = bits;
+    }
     buffers->input = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, x.size() * sizeof(uint64_t), x.data(), nullptr);
 
     math::Carry carry(context, context.getQueue(), program->getProgram(), precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
 
-    mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
+
     timer.start();
     timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastDisplay = startTime;
-    spinner.displayProgress(0, bits, 0.0, 0.0, options.exponent,0, 0,"");
-    uint32_t startIter = 0;
-    //uint32_t resumeIter = backupManager.loadState(x);
-    uint32_t resumeIter = 0;
-    for (mp_bitcnt_t i = bits; i > 0 && !interrupted; --i) {
+    
+    spinner.displayProgress(bits-resumeIter, bits, 0.0, 0.0, options.exponent,resumeIter, resumeIter,"");
+    uint32_t startIter = resumeIter;
+    uint32_t lastIter = resumeIter;
+    for (mp_bitcnt_t i = resumeIter; i > 0 && !interrupted; --i) {
+        lastIter = i;
         nttEngine->forward(buffers->input, 0);
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, precompute.getN() * sizeof(uint64_t));
@@ -1035,6 +1050,7 @@ int App::runPM1() {
         if ((options.iterforce > 0 && (i+1)%options.iterforce == 0 && i>0) || (((i+1)%options.iterforce == 0))) { 
             
             if((i+1)%100000 != 0){
+
                 char dummy;
                 clEnqueueReadBuffer(
                         context.getQueue(),
@@ -1055,7 +1071,7 @@ int App::runPM1() {
                 
 
                 spinner.displayProgress(
-                    bits-i+1,
+                    bits-i-1,
                     bits,
                     timer.elapsed(),
                     timer2.elapsed(),
@@ -1066,12 +1082,13 @@ int App::runPM1() {
                 );
                 timer2.start();
                 lastDisplay = now;
-                resumeIter = bits-i+1;
+                resumeIter = bits-i-1;
             }
         //clFinish(context.getQueue());
             if (interrupted) {
                 std::cout << "\nInterrupted signal received\n " << std::endl;
                 clFinish(context.getQueue());
+                backupManager.saveState(buffers->input, lastIter, &E);
                 //backupManager.saveState(buffers->input, lastIter);
                 //std::cout << "\nInterrupted by user, state saved at iteration "
                 //        << lastIter << std::endl;
@@ -1104,7 +1121,7 @@ int App::runPM1() {
     mpz_t g; mpz_init(g);
     mpz_gcd(g, X, Mp);
 
-    gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
+    //gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
 
     bool factorFound = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
     if (factorFound) {
@@ -1115,6 +1132,7 @@ int App::runPM1() {
     }
 
     std::cout << "No P-1 (stage 1) factor up to B1=" << B1 << std::endl;
+    backupManager.clearState();
     return 1;
 }
 

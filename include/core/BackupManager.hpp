@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <gmpxx.h>
 
 namespace core {
 
@@ -21,13 +22,15 @@ public:
                   size_t vectorSize,
                   const std::string& savePath,
                   unsigned exponent,
-                  const std::string& mode);
+                  const std::string& mode,
+                  const int b1);
 
     // read existing .loop/.mers into x; return resume iteration
     uint32_t loadState(std::vector<uint64_t>& x);
 
     // read back from device and write .mers/.loop files at iteration iter
-    void saveState(cl_mem buffer, uint32_t iter);
+    void saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_ptr = nullptr);
+    mpz_class loadExponent() const;
 
     void clearState() const;
 private:
@@ -39,6 +42,9 @@ private:
     std::string      mode_;
     std::string      mersFilename_;
     std::string      loopFilename_;
+    std::string      exponentFilename_;
+    int b1_;
+
 };
 
 } // namespace core
