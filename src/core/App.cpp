@@ -1088,11 +1088,12 @@ int App::runPM1() {
     timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastDisplay = startTime;
-    
+    interrupted.store(false, std::memory_order_relaxed);
+
     spinner.displayProgress(bits-resumeIter, bits, 0.0, 0.0, options.exponent,resumeIter, resumeIter,"");
     uint32_t startIter = resumeIter;
     uint32_t lastIter = resumeIter;
-    for (mp_bitcnt_t i = resumeIter; i > 0 && !interrupted; --i) {
+    for (mp_bitcnt_t i = resumeIter; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
             std::cout << "\nInterrupted signal received\n " << std::endl;
@@ -1153,6 +1154,7 @@ int App::runPM1() {
         //clFinish(context.getQueue());
 
     }
+    
     std::string res64_x;
     spinner.displayProgress(
         bits,
