@@ -56,6 +56,7 @@
 #include <thread>
 #include <gmp.h>
 #include <cstddef>
+#include <deque>
 
 using namespace std::chrono;
 
@@ -964,31 +965,56 @@ int App::runPrpOrLl() {
 }
 
 
+
+
+
 mpz_class buildE(uint64_t B1) {
+    using clock = std::chrono::steady_clock;
+    auto t0 = clock::now(), last = t0;
+    std::deque<std::pair<clock::time_point, uint32_t>> win;
+    std::vector<uint8_t> sieve((B1 >> 1) + 1, 1);
     mpz_class E = 1;
-    std::vector<uint32_t> sieve(B1 + 1, 1);
-    for (uint32_t i = 2; i <= B1; ++i) {
-        int percent = int((i - 2) * 100 / (B1 - 1));
-        std::cout << "\rBuilding E: " << percent << "% completed" << std::flush;
-        if (sieve[i]) {
-            for (uint64_t j = uint64_t(i) * i; j <= B1; j += i)
-                sieve[j] = 0;
-            int e = int(std::log(double(B1)) / std::log(double(i)));
-            mpz_class pe = 1;
-            for (int k = 0; k < e; ++k)
-                pe *= i;
-            E *= pe;
-            
+    std::cout << "Building E:   0%  ETA  --:--:--" << std::flush;
+    for (uint32_t i = 3; i <= B1; i += 2) {
+        if (sieve[i >> 1]) {
+            if (uint64_t ii = uint64_t(i) * i; ii <= B1)
+                for (uint64_t j = ii; j <= B1; j += (i << 1))
+                    sieve[j >> 1] = 0;
+            mpz_class p = i;
+            while (p <= B1 / i) p *= i;
+            E *= p;
+        }
+        auto now = clock::now();
+        win.push_back({now, i});
+        while (win.front().first + std::chrono::seconds(2) < now) win.pop_front();
+        if (now - last >= std::chrono::milliseconds(500)) {
+            double done = double(i) / B1;
+            double eta = 0.0;
+            if (win.size() > 1) {
+                double dt = std::chrono::duration<double>(now - win.front().first).count();
+                double di = double(i - win.front().second);
+                double speed = di / dt;
+                eta = (B1 - i) / speed;
+            }
+            long sec = long(eta + 0.5);
+            int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
+            std::cout << "\rBuilding E: " << std::setw(3) << int(done * 100)
+                      << "%  ETA "
+                      << std::setw(2) << std::setfill('0') << h << ':'
+                      << std::setw(2) << m << ':'
+                      << std::setw(2) << s << std::setfill(' ')
+                      << std::flush;
+            last = now;
         }
         if (interrupted) {
-                std::cout << "\nInterrupted signal received\n " << std::endl;
-                std::cout << "\nE compute interrupted E will be set to E=1   " << std::endl;
-                return 1;
+            std::cout << "\nInterrupted signal received\n";
+            return 1;
         }
     }
-    std::cout << "\rBuilding E: 100% completed" << std::endl;
+    std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
 }
+
 
 void vectToMpz(mpz_t out,
                const std::vector<uint64_t>& v,
