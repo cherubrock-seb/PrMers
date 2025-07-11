@@ -1039,7 +1039,7 @@ mpz_class buildE(uint64_t B1) {
         for (auto &p : part) E *= p;
         mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
         std::cout << "\nlog2(E) ≈ " << bits << " bits" << std::endl;
-
+        interrupted = false; 
         return E;
     }
 
