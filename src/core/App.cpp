@@ -1037,8 +1037,9 @@ mpz_class buildE(uint64_t B1) {
             if (w.joinable()) w.join();
 
         for (auto &p : part) E *= p;
-        //std::cout << "\n\nE = " << E << "\n\n"<<std::endl;
-        
+        mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
+        std::cout << "\nlog2(E) ≈ " << bits << " bits" << std::endl;
+
         return E;
     }
 
@@ -1151,7 +1152,17 @@ int App::runPM1() {
                 return 0;
             }
     }
-
+    std::string res64_x;
+    spinner.displayProgress(
+        bits,
+        bits,
+        timer.elapsed(),
+        timer2.elapsed(),
+        options.exponent,
+        resumeIter,
+        startIter,
+        res64_x
+    );
     std::vector<uint64_t> hostData(precompute.getN());
 
     clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
