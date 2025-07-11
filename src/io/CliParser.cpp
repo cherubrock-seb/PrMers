@@ -49,6 +49,8 @@ void printUsage(const char* progName) {
     std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
+    std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
     std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
@@ -88,7 +90,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         || std::strcmp(argv[i], "--version") == 0
         || std::strcmp(argv[i], "-version") == 0)
         {
-            std::cout << "prmers Release v4.0.77-alpha\n";
+            std::cout << "prmers Release v4.0.78-alpha\n";
             std::exit(EXIT_SUCCESS);
         }
     }
@@ -120,6 +122,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.mode = "ll";
             //opts.proof = false;
         }
+        else if (std::strcmp(argv[i], "-pm1") == 0) {
+            opts.mode = "pm1";
+            opts.proof = false;
+        }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             opts.profiling = true;
         }
@@ -141,6 +147,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             opts.save_path = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-b1") == 0 && i + 1 < argc) {
+            opts.B1 = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);

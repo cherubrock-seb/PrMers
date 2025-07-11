@@ -484,10 +484,62 @@ __kernel void kernel_carry(
         vstore4(x_vec, 0, x + i);
     }
 
-    if (carry != 0) {
-        carry_array[gid] = carry;
-    }
+    carry_array[gid] = carry;
+    
 }
+
+
+#define CONST_SCALAR_MUL 3UL
+__constant ulong4 CONST_SCALAR_VEC = (ulong4)(CONST_SCALAR_MUL, CONST_SCALAR_MUL, CONST_SCALAR_MUL, CONST_SCALAR_MUL);
+
+__kernel void kernel_carry_mul_3(
+    __global ulong*        restrict x,
+    __global ulong*        restrict carry_array,
+    __global const ulong4* restrict digitWidthMaskPacked
+) {
+    const uint gid   = get_global_id(0);
+    const uint start = gid * LOCAL_PROPAGATION_DEPTH;
+    const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+    ulong carry1 = 0UL;
+    ulong carry = 0UL;
+
+    PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
+    for (uint i = start; i < end; i += 4) {
+        ulong4 x_vec = vload4(0, x + i);
+
+        uint blk    = i >> 6;      // i/64
+        uint group4 = blk >> 2;    // (i/64)/4
+
+        ulong4 chunk4 = digitWidthMaskPacked[group4];
+
+        ulong  chunk = chunk4[ blk & 3 ];
+
+        uchar4 m = (uchar4)(
+            (chunk >> ((i & 63) + 0)) & 1,
+            (chunk >> ((i & 63) + 1)) & 1,
+            (chunk >> ((i & 63) + 2)) & 1,
+            (chunk >> ((i & 63) + 3)) & 1
+        );
+
+        int4 digit_width_vec = (int4)(
+            m.s0 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s1 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s2 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1,
+            m.s3 ? DIGIT_WIDTH_VALUE_2 : DIGIT_WIDTH_VALUE_1
+        );
+
+        x_vec = digit_adc4(x_vec, digit_width_vec, &carry1);
+        ulong4 lo = x_vec * CONST_SCALAR_VEC;
+        ulong4 hi = (ulong4)mul_hi(x_vec,CONST_SCALAR_VEC);          
+        //carry += hi.s0 + hi.s1 + hi.s2 + hi.s3;
+        x_vec = digit_adc4(lo, digit_width_vec, &carry);
+        carry = carry + 3*carry1;
+        vstore4(x_vec, 0, x + i);
+    }
+
+    carry_array[gid] = carry;
+}
+
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
