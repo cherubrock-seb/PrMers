@@ -971,34 +971,54 @@ int App::runPrpOrLl() {
 mpz_class buildE(uint64_t B1) {
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now(), last = t0;
-    std::deque<std::pair<clock::time_point, uint32_t>> win;
+
     std::vector<uint8_t> sieve((B1 >> 1) + 1, 1);
-    mpz_class E = 1;
-    std::cout << "Building E:   0%  ETA  --:--:--" << std::flush;
+    std::vector<uint32_t> primes;
+    primes.reserve(B1 ? B1 / std::log(double(B1)) : 1);
     for (uint32_t i = 3; i <= B1; i += 2) {
         if (sieve[i >> 1]) {
+            primes.push_back(i);
             if (uint64_t ii = uint64_t(i) * i; ii <= B1)
                 for (uint64_t j = ii; j <= B1; j += (i << 1))
                     sieve[j >> 1] = 0;
-            mpz_class p = i;
-            while (p <= B1 / i) p *= i;
-            E *= p;
         }
-        auto now = clock::now();
-        win.push_back({now, i});
-        while (win.front().first + std::chrono::seconds(2) < now) win.pop_front();
-        if (now - last >= std::chrono::milliseconds(500)) {
-            double done = double(i) / B1;
-            double eta = 0.0;
-            if (win.size() > 1) {
-                double dt = std::chrono::duration<double>(now - win.front().first).count();
-                double di = double(i - win.front().second);
-                double speed = di / dt;
-                eta = (B1 - i) / speed;
+    }
+
+    size_t total = primes.size();
+    std::atomic<size_t> next{0}, done{0};
+    unsigned th = std::thread::hardware_concurrency();
+    if (!th) th = 4;
+    std::vector<mpz_class> part(th, 1);
+    std::vector<std::thread> workers;
+
+    for (unsigned t = 0; t < th; ++t)
+        workers.emplace_back([&, t] {
+            while (true) {
+                size_t idx = next.fetch_add(1);
+                if (idx >= total) break;
+                uint32_t p = primes[idx];
+                mpz_class pw = p;
+                while (pw <= B1 / p) pw *= p;
+                part[t] *= pw;
+                done.fetch_add(1, std::memory_order_relaxed);
+                if (interrupted) return;
             }
+        });
+
+    mpz_class E = 1;
+    mpz_class pw2 = 2;
+    while (pw2 <= B1 / 2) pw2 *= 2;
+    E *= pw2;
+
+    std::cout << "Building E:   0%  ETA  --:--:--" << std::flush;
+    while (done.load() < total && !interrupted) {
+        auto now = clock::now();
+        if (now - last >= std::chrono::milliseconds(500)) {
+            double prog = double(done.load()) / total;
+            double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
             long sec = long(eta + 0.5);
             int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
-            std::cout << "\rBuilding E: " << std::setw(3) << int(done * 100)
+            std::cout << "\rBuilding E: " << std::setw(3) << int(prog * 100)
                       << "%  ETA "
                       << std::setw(2) << std::setfill('0') << h << ':'
                       << std::setw(2) << m << ':'
@@ -1006,15 +1026,18 @@ mpz_class buildE(uint64_t B1) {
                       << std::flush;
             last = now;
         }
-        if (interrupted) {
-            std::cout << "\nInterrupted signal received\n";
-            return 1;
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+
+    for (auto &w : workers) w.join();
+    if (interrupted) {
+        std::cout << "\nInterrupted signal received\n";
+        return 1;
+    }
+    for (auto &p : part) E *= p;
     std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
 }
-
 
 void vectToMpz(mpz_t out,
                const std::vector<uint64_t>& v,
