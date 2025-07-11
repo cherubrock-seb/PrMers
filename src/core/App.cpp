@@ -1094,6 +1094,15 @@ int App::runPM1() {
     uint32_t lastIter = resumeIter;
     for (mp_bitcnt_t i = resumeIter; i > 0 && !interrupted; --i) {
         lastIter = i;
+        if (interrupted) {
+            std::cout << "\nInterrupted signal received\n " << std::endl;
+            clFinish(context.getQueue());
+            backupManager.saveState(buffers->input, lastIter, &E);
+            //backupManager.saveState(buffers->input, lastIter);
+            //std::cout << "\nInterrupted by user, state saved at iteration "
+            //        << lastIter << std::endl;
+            return 0;
+        }
         nttEngine->forward(buffers->input, 0);
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, precompute.getN() * sizeof(uint64_t));
@@ -1142,15 +1151,7 @@ int App::runPM1() {
                 resumeIter = bits-i-1;
             }
         //clFinish(context.getQueue());
-            if (interrupted) {
-                std::cout << "\nInterrupted signal received\n " << std::endl;
-                clFinish(context.getQueue());
-                backupManager.saveState(buffers->input, lastIter, &E);
-                //backupManager.saveState(buffers->input, lastIter);
-                //std::cout << "\nInterrupted by user, state saved at iteration "
-                //        << lastIter << std::endl;
-                return 0;
-            }
+
     }
     std::string res64_x;
     spinner.displayProgress(
