@@ -998,7 +998,8 @@ mpz_class buildE(uint64_t B1) {
                 if (idx >= total) break;
                 uint32_t p = primes[idx];
                 mpz_class pw = p;
-                mpz_class limit = mpz_class(B1 / p);
+                unsigned long lim1 = static_cast<unsigned long>(B1 / p);
+                mpz_class limit(lim1);
                 while (pw <= limit) pw *= p;
                 part[t] *= pw;
                 done.fetch_add(1, std::memory_order_relaxed);
@@ -1008,7 +1009,8 @@ mpz_class buildE(uint64_t B1) {
 
     mpz_class E = 1;
     mpz_class pw2 = 2;
-    mpz_class limit2 = mpz_class(B1 / 2);
+    unsigned long lim2 = static_cast<unsigned long>(B1 / 2);
+    mpz_class limit2(lim2);
     while (pw2 <= limit2) pw2 *= 2;
     E *= pw2;
 
