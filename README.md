@@ -11,7 +11,19 @@ Key features:
 
 ## P-1 Factoring with `prmers`
 
-`prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) in stage 1, an efficient algorithm to find a prime factor \( p \) of a Mersenne number \( 2^n - 1 \) such that \( p - 1 \) is B-smooth (i.e. composed only of small primes). The method computes \( x = 3^E \mod (2^n - 1) \) for an exponent \( E \) divisible by many small primes, and then checks whether `gcd(x - 1, 2^n - 1)` reveals a nontrivial factor.
+
+`prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) stage 1, a powerful algorithm to find a prime factor \( q \) of a Mersenne number \( 2^p - 1 \), provided that \( q - 1 \) is composed entirely of small prime factors.
+
+A factor \( q \) of \( 2^p - 1 \) must satisfy \( q \equiv 1 \mod 2p \), i.e. \( q = 2kp + 1 \) for some integer \( k \). The P−1 method will find such a factor if \( k \) is B1-smooth — meaning all its prime divisors are less than a chosen bound \( B_1 \).
+
+The algorithm proceeds as follows:
+
+1. Choose a smoothness bound \( B_1 \)
+2. Build an exponent \( E = \text{lcm}(1, 2, \ldots, B_1) \)
+3. Compute \( x = 3^{E \cdot 2p} \mod (2^p - 1) \)
+4. Compute \( \gcd(x - 1, 2^p - 1) \)
+
+If the result is a nontrivial factor, the algorithm succeeds.
 
 To run a stage-1 P−1 factoring test on exponent 541 with bound B1 = 8099:
 
