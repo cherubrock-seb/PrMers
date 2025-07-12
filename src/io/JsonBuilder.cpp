@@ -292,9 +292,11 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
     std::tm timeinfo;
 
     #ifdef _WIN32
-        localtime_s(&timeinfo, &now);
+        gmtime_s(&timeinfo, &now);
     #else
-        localtime_r(&now, &timeinfo);
+        std::tm* tmp = std::gmtime(&now);
+        if (tmp != nullptr)
+            timeinfo = *tmp;
     #endif
 
     char timestampBuf[32];
