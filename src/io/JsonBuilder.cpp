@@ -48,52 +48,52 @@ namespace io{
     //-----------------------------------------------------------------------------
     // mod3, doDiv3 et doDiv9 : pour PRP‑3 on divise deux fois par 3
     //-----------------------------------------------------------------------------
-    static uint64_t mod3(const std::vector<uint64_t>& W) {
-        uint64_t r = 0;
-        for (uint64_t w : W) r = (r + (w % 3)) % 3;
+    static uint32_t mod3(const std::vector<uint32_t>& W) {
+        uint32_t r = 0;
+        for (uint32_t w : W) r = (r + (w % 3)) % 3;
         return r;
     }
 
-    static void doDiv3(uint64_t E, std::vector<uint64_t>& W) {
-        uint64_t r = (3 - mod3(W)) % 3;
+    static void doDiv3(uint32_t E, std::vector<uint32_t>& W) {
+        uint32_t r = (3 - mod3(W)) % 3;
         int topBits = E % 32;
         // mot de poids fort
         {
             uint64_t t = (uint64_t(r) << topBits) + W.back();
-            W.back() = uint64_t(t / 3);
-            r        = uint64_t(t % 3);
+            W.back() = uint32_t(t / 3);
+            r        = uint32_t(t % 3);
         }
         // descente sur les mots inférieurs
         for (auto it = W.rbegin() + 1; it != W.rend(); ++it) {
             uint64_t t = (uint64_t(r) << 32) + *it;
-            *it       = uint64_t(t / 3);
-            r         = uint64_t(t % 3);
+            *it       = uint32_t(t / 3);
+            r         = uint32_t(t % 3);
         }
     }
 
-    static void doDiv9(uint64_t E, std::vector<uint64_t>& W) {
+    static void doDiv9(uint32_t E, std::vector<uint32_t>& W) {
         doDiv3(E, W);
         doDiv3(E, W);
     }
-std::vector<uint64_t> JsonBuilder::compactBits(
+std::vector<uint32_t> JsonBuilder::compactBits(
     const std::vector<uint64_t>& x,
     const std::vector<int>&      digit_width,
-    uint64_t                     E
+    uint32_t                     E
 ) {
-    uint64_t digitCount = static_cast<uint64_t>(x.size());
-    uint64_t totalWords = (E - 1) / 32 + 1;
-    std::vector<uint64_t> out(totalWords, 0u);
+    uint32_t digitCount = static_cast<uint32_t>(x.size());
+    uint32_t totalWords = (E - 1) / 32 + 1;
+    std::vector<uint32_t> out(totalWords, 0u);
 
     int      carry    = 0;
-    uint64_t outWord  = 0;
+    uint32_t outWord  = 0;
     int      haveBits = 0;
-    uint64_t o        = 0;
+    uint32_t o        = 0;
 
-    for (uint64_t p = 0; p < digitCount; ++p) {
+    for (uint32_t p = 0; p < digitCount; ++p) {
         int      w   = digit_width[p];
         uint64_t v64 = uint64_t(carry) + x[p];
         carry        = int(v64 >> w);
-        uint64_t v   = uint64_t(v64 & ((1ULL << w) - 1));
+        uint32_t v   = uint32_t(v64 & ((1ULL << w) - 1));
 
         int topBits = 32 - haveBits;
         outWord |= v << haveBits;
@@ -108,9 +108,9 @@ std::vector<uint64_t> JsonBuilder::compactBits(
 
     if (haveBits > 0 || carry) {
         out[o++] = outWord;
-        for (uint64_t i = 1; carry && i < o; ++i) {
+        for (uint32_t i = 1; carry && i < o; ++i) {
             uint64_t sum = uint64_t(out[i]) + carry;
-            out[i]       = uint64_t(sum & 0xFFFFFFFFu);
+            out[i]       = uint32_t(sum & 0xFFFFFFFFu);
             carry        = int(sum >> 32);
         }
     }

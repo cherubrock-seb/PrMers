@@ -27,8 +27,8 @@
 
 namespace core {
 
-ProofManager::ProofManager(uint64_t exponent, int proofLevel,
-                           cl_command_queue queue, uint64_t n,
+ProofManager::ProofManager(uint32_t exponent, int proofLevel,
+                           cl_command_queue queue, uint32_t n,
                            const std::vector<int>& digitWidth)
   : proofSet_(exponent, proofLevel)
   , queue_(queue)
@@ -37,7 +37,7 @@ ProofManager::ProofManager(uint64_t exponent, int proofLevel,
   , digitWidth_(digitWidth)
 {}
 
-void ProofManager::checkpoint(cl_mem buf, uint64_t iter) {
+void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
     if (! proofSet_.shouldCheckpoint(iter)) return;
 
     // read back the buffer from GPU
