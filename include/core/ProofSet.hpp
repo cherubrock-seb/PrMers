@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
-#include <gmpxx.h>
 
 namespace core {
 
@@ -47,12 +46,6 @@ private:
     
     bool isValidTo(uint32_t limitK) const;
     bool fileExists(uint32_t k) const;
-    
-    // GMP-based modular arithmetic helpers
-    mpz_class convertToGMP(const std::vector<uint32_t>& words) const;
-    std::vector<uint32_t> convertFromGMP(const mpz_class& gmp_val) const;
-    mpz_class mersenneReduce(const mpz_class& x, uint32_t E) const;
-    mpz_class mersennePowMod(const mpz_class& base, uint64_t exp, uint32_t E) const;
 };
 
 } // namespace core
