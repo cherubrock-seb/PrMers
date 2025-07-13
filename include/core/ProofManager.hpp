@@ -17,17 +17,17 @@ namespace core {
 
 class ProofManager {
 public:
-    ProofManager(uint64_t exponent, int proofLevel,
-                 cl_command_queue queue, uint64_t n,
+    ProofManager(uint32_t exponent, int proofLevel,
+                 cl_command_queue queue, uint32_t n,
                  const std::vector<int>& digitWidth);
-    void checkpoint(cl_mem buf, uint64_t iter);    
+    void checkpoint(cl_mem buf, uint32_t iter);    
     std::filesystem::path proof() const;
 
 private:
     ProofSet           proofSet_;
     cl_command_queue   queue_;
-    uint64_t           n_;
-    uint64_t           exponent_;
+    uint32_t           n_;
+    uint32_t           exponent_;
     std::vector<int>   digitWidth_;
 };
 

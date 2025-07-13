@@ -48,13 +48,13 @@ void Proof::save(const std::filesystem::path& filePath) const {
   }
 
   // Helper function to write a residue
-  auto writeResidue = [&](const std::vector<uint64_t>& residue) {
-    uint64_t nBytes = (E - 1) / 8 + 1;
+  auto writeResidue = [&](const std::vector<uint32_t>& residue) {
+    uint32_t nBytes = (E - 1) / 8 + 1;
     
     // Write the residue data as bytes in little-endian format
-    for (uint64_t byteIdx = 0; byteIdx < nBytes; ++byteIdx) {
-      uint64_t wordIdx = byteIdx / 4;
-      uint64_t byteInWord = byteIdx % 4;
+    for (uint32_t byteIdx = 0; byteIdx < nBytes; ++byteIdx) {
+      uint32_t wordIdx = byteIdx / 4;
+      uint32_t byteInWord = byteIdx % 4;
       
       uint8_t byte = 0;
       if (wordIdx < residue.size()) {
@@ -85,7 +85,7 @@ Proof Proof::load(const std::filesystem::path& filePath) {
 
   // Parse ASCII header
   std::string line;
-  uint64_t version = 0, hashsize = 0, power = 0, exponent = 0;
+  uint32_t version = 0, hashsize = 0, power = 0, exponent = 0;
 
   // Read and validate "PRP PROOF"
   if (!std::getline(file, line) || line != "PRP PROOF") {
@@ -135,23 +135,23 @@ Proof Proof::load(const std::filesystem::path& filePath) {
   }
 
   // Helper function to read a residue
-  auto readResidue = [&]() -> std::vector<uint64_t> {
-    uint64_t nBytes = (exponent - 1) / 8 + 1;
-    uint64_t nWords = (exponent + 31) / 32;
-    std::vector<uint64_t> data(nWords, 0);
+  auto readResidue = [&]() -> std::vector<uint32_t> {
+    uint32_t nBytes = (exponent - 1) / 8 + 1;
+    uint32_t nWords = (exponent + 31) / 32;
+    std::vector<uint32_t> data(nWords, 0);
     
-    for (uint64_t byteIdx = 0; byteIdx < nBytes; ++byteIdx) {
+    for (uint32_t byteIdx = 0; byteIdx < nBytes; ++byteIdx) {
       uint8_t byte;
       file.read(reinterpret_cast<char*>(&byte), 1);
       if (!file.good()) {
         throw std::runtime_error("Error reading residue data from proof file");
       }
       
-      uint64_t wordIdx = byteIdx / 4;
-      uint64_t byteInWord = byteIdx % 4;
+      uint32_t wordIdx = byteIdx / 4;
+      uint32_t byteInWord = byteIdx % 4;
       
       if (wordIdx < nWords) {
-        data[wordIdx] |= (static_cast<uint64_t>(byte) << (byteInWord * 8));
+        data[wordIdx] |= (static_cast<uint32_t>(byte) << (byteInWord * 8));
       }
     }
     
@@ -162,8 +162,8 @@ Proof Proof::load(const std::filesystem::path& filePath) {
   auto B = readResidue();
 
   // Read intermediate residues (middles)
-  std::vector<std::vector<uint64_t>> middles;
-  for (uint64_t i = 0; i < power; ++i) {
+  std::vector<std::vector<uint32_t>> middles;
+  for (uint32_t i = 0; i < power; ++i) {
     middles.push_back(readResidue());
   }
 
@@ -171,24 +171,24 @@ Proof Proof::load(const std::filesystem::path& filePath) {
 }
 
 // Hash functions for proof generation
-std::array<uint64_t, 4> Proof::hashWords(uint64_t E, const std::vector<uint64_t>& words) {
+std::array<uint64_t, 4> Proof::hashWords(uint32_t E, const std::vector<uint32_t>& words) {
   // Hash the words data
   io::SHA3 hasher;
-  uint64_t nBytes = (E - 1) / 8 + 1;
+  uint32_t nBytes = (E - 1) / 8 + 1;
   return std::move(hasher.update(words.data(), nBytes)).finish();
 }
 
-std::array<uint64_t, 4> Proof::hashWords(uint64_t E, 
+std::array<uint64_t, 4> Proof::hashWords(uint32_t E, 
                                          const std::array<uint64_t, 4>& prefix,
-                                         const std::vector<uint64_t>& words) {
+                                         const std::vector<uint32_t>& words) {
   // Hash the prefix first, then the words data
   io::SHA3 hasher;
-  uint64_t nBytes = (E - 1) / 8 + 1;
-  hasher.update(prefix.data(), static_cast<uint64_t>(prefix.size()) * sizeof(uint64_t));
+  uint32_t nBytes = (E - 1) / 8 + 1;
+  hasher.update(prefix.data(), static_cast<uint32_t>(prefix.size()) * sizeof(uint64_t));
   return std::move(hasher.update(words.data(), nBytes)).finish();
 }
 
-uint64_t Proof::res64(const std::vector<uint64_t>& words) {
+uint64_t Proof::res64(const std::vector<uint32_t>& words) {
   // Extract lower 64 bits from 32-bit words
   // Combines words[1] << 32 | words[0]
   if (words.empty()) return 0;
