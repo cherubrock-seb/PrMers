@@ -1047,88 +1047,63 @@ mpz_class buildE(uint64_t B1) {
     return E;
 }
 
-void vectToMpz(mpz_t out,
-               const std::vector<uint64_t>& v,
-               const std::vector<int>& widths)
-{
-    mpz_set_ui(out, 0);
-    for (ptrdiff_t i = ptrdiff_t(v.size()) - 1; i >= 0; --i) {
-        mpz_mul_2exp(out, out, widths[i]);
-        mpz_add_ui(out, out, v[i]);
-    }
-}
 
-
-
-static inline void fold(mpz_t x, unsigned p, const mpz_t M)
-{
-    if (mpz_sizeinbase(x, 2) <= p) return;
-    mpz_t hi; mpz_init(hi);
-    mpz_tdiv_q_2exp(hi, x, p);
-    mpz_tdiv_r_2exp(x, x, p);
-    mpz_add(x, x, hi);
-    if (mpz_cmp(x, M) >= 0) mpz_sub(x, x, M);
-    mpz_clear(hi);
-}
-
-void vectToResidue(mpz_t r,
-                   const std::vector<uint64_t>& v,
-                   const std::vector<int>& widths,
-                   const mpz_t Mp)
+void vectToMpz2(mpz_t out,
+                const std::vector<uint64_t>& v,
+                const std::vector<int>& widths,
+                const mpz_t Mp)
 {
     const size_t n = v.size();
-    const unsigned p = mpz_sizeinbase(Mp, 2);
-    unsigned T = std::max<unsigned>(1, std::thread::hardware_concurrency());
-    if ((size_t)T * 2ULL * p / 8 > (size_t)8 << 30) T = 4;
+    const unsigned T = std::thread::hardware_concurrency();
+    std::vector<mpz_t> partial(T);
+    std::vector<unsigned> total_width(T, 0);
+    std::atomic<size_t> global_count{0};
 
-    const size_t chunk = (n + T - 1) / T;
-    std::vector<mpz_t> part(T);
-    for (unsigned t = 0; t < T; ++t) mpz_init_set_ui(part[t], 0);
+    for (unsigned t = 0; t < T; ++t)
+        mpz_init(partial[t]);
 
-    std::atomic<size_t> done{0};
-    auto worker = [&](unsigned tid) {
-        const size_t s = tid * chunk;
-        const size_t e = std::min(n, s + chunk);
+    std::vector<std::thread> threads(T);
+    size_t chunk = (n + T - 1) / T;
 
-        mpz_t pow, tmp; mpz_inits(pow, tmp, nullptr);
-        mpz_set_ui(pow, 1);
+    for (unsigned t = 0; t < T; ++t) {
+        size_t start = t * chunk;
+        size_t end = std::min(start + chunk, n);
+        threads[t] = std::thread([&, start, end, t]() {
+            mpz_t acc;
+            mpz_init_set_ui(acc, 0);
+            for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
+                mpz_mul_2exp(acc, acc, widths[i]);
+                mpz_add_ui(acc, acc, v[i]);
+                if (mpz_cmp(acc, Mp) >= 0)
+                    mpz_sub(acc, acc, Mp);
+                total_width[t] += widths[i];
 
-        unsigned long long shift = 0;
-        for (size_t i = 0; i < s; ++i) shift = (shift + widths[i]) % p;
-        if (shift) { mpz_mul_2exp(pow, pow, shift); fold(pow, p, Mp); }
-
-        for (size_t i = s; i < e; ++i) {
-            if (v[i]) {
-                mpz_addmul_ui(part[tid], pow, v[i]);
-                if (mpz_sizeinbase(part[tid], 2) > p + 64) fold(part[tid], p, Mp);
+                size_t count = ++global_count;
+                if (count % 10000 == 0 || count == n) {
+                    double progress = 100.0 * count / n;
+                    printf("\rProgress: %.2f%%", progress);
+                    fflush(stdout);
+                }
             }
-            if (widths[i]) {
-                mpz_mul_2exp(pow, pow, widths[i]);
-                if (mpz_sizeinbase(pow, 2) > p + 64) fold(pow, p, Mp);
-            }
-            done.fetch_add(1, std::memory_order_relaxed);
-        }
-        mpz_clears(pow, tmp, nullptr);
-    };
-
-    std::vector<std::thread> threads;
-    for (unsigned t = 0; t < T; ++t) threads.emplace_back(worker, t);
-
-    while (done.load() < n) {
-        std::cerr << '\r' << (100 * done.load() / n) << '%';
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            mpz_set(partial[t], acc);
+            mpz_clear(acc);
+        });
     }
-    std::cerr << "\r100%\n";
 
     for (auto& th : threads) th.join();
+    printf("\n");
 
-    mpz_set_ui(r, 0);
-    for (unsigned t = 0; t < T; ++t) {
-        mpz_add(r, r, part[t]);
-        if (mpz_cmp(r, Mp) >= 0) mpz_sub(r, r, Mp);
-        mpz_clear(part[t]);
+    mpz_set_ui(out, 0);
+    for (int t = T - 1; t >= 0; --t) {
+        mpz_mul_2exp(out, out, total_width[t]);
+        mpz_add(out, out, partial[t]);
+        if (mpz_cmp(out, Mp) >= 0)
+            mpz_sub(out, out, Mp);
+        mpz_clear(partial[t]);
     }
 }
+
+
 
 int App::runPM1() {
 
@@ -1161,7 +1136,7 @@ int App::runPM1() {
 
     uint64_t startIter = resumeIter;
     uint64_t lastIter = resumeIter;
-    //backupManager.saveState(buffers->input, resumeIter,&E);
+    backupManager.saveState(buffers->input, resumeIter,&E);
     spinner.displayProgress(
                     bits-resumeIter,
                     bits,
@@ -1264,7 +1239,10 @@ int App::runPM1() {
     std::cout << "vectToResidue start" << std::endl;
 
     mpz_t X; mpz_init(X);
-/*    vectToMpz(X, hostData, precompute.getDigitWidth());
+    mpz_t Mp;  mpz_init(Mp);
+    mpz_ui_pow_ui(Mp, 2, options.exponent);
+    mpz_sub_ui(Mp, Mp, 1);
+    vectToMpz2(X, hostData, precompute.getDigitWidth(), Mp);
     //std::cout << "digitWidths = ";
     //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
     //std::cout << "\n";
@@ -1273,14 +1251,12 @@ int App::runPM1() {
     mpz_sub_ui(X, X, 1);
 
 
-    mpz_t Mp; mpz_init(Mp);
-    mpz_ui_pow_ui(Mp, 2, options.exponent);
-    mpz_sub_ui(Mp, Mp, 1);
-
+    
     mpz_t g; mpz_init(g);
     mpz_gcd(g, X, Mp);
-*/
 
+
+/*
     mpz_t Mp;  mpz_init(Mp);
     mpz_ui_pow_ui(Mp, 2, options.exponent);
     mpz_sub_ui(Mp, Mp, 1);
@@ -1291,20 +1267,22 @@ int App::runPM1() {
 
     mpz_sub_ui(r, r, 1);
     mpz_t g;   mpz_init(g);
-    mpz_gcd(g, r, Mp);
+    mpz_gcd(g, r, Mp);*/
 
     //gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
 
     bool factorFound = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
     if (factorFound) {
         char* fstr = mpz_get_str(nullptr, 10, g);
-        std::cout << "P-1 factor stage 1 found: " << fstr << std::endl;
+        std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
         std::free(fstr);
+        std::cout << "\n";
         backupManager.clearState();
         return 0;
     }
+    
 
-    std::cout << "No P-1 (stage 1) factor up to B1=" << B1 << std::endl;
+    std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
     backupManager.clearState();
     return 1;
 }
