@@ -120,7 +120,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-ll") == 0) {
             opts.mode = "ll";
-            //opts.proof = false;
+            opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-pm1") == 0) {
             opts.mode = "pm1";
@@ -203,7 +203,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (argv[i][0] != '-') {
             if (opts.exponent == 0) {
-                opts.exponent = static_cast<uint32_t>(std::atoi(argv[i]));
+                opts.exponent = std::strtoull(argv[i], nullptr, 10);
             } else {
                 std::cerr << "Warning: ignoring extra positional argument '"
                         << argv[i] << "'\n";
@@ -224,7 +224,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         std::cerr << "Error: No exponent provided.\n";
         std::exit(EXIT_FAILURE);
     }*/
-    constexpr uint32_t MAX_EXPONENT = 1207959503u;
+    if (opts.exponent % 2 == 0) {
+        opts.proof = false;
+    }
+    constexpr uint64_t MAX_EXPONENT = 5650242869UL;
     if (opts.exponent > MAX_EXPONENT) {
         std::cerr << "Error: Exponent must be <= " << MAX_EXPONENT
                   << ". Given: " << opts.exponent << std::endl;

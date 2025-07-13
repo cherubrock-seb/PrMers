@@ -4,9 +4,9 @@
 #include <vector>
 
 namespace math {
-uint32_t transformsize(uint32_t exponent);
+uint32_t transformsize(uint64_t exponent);
 
-void precalc_for_p(uint32_t p,
+void precalc_for_p(uint64_t p,
                    std::vector<uint64_t>& digitWeight,
                    std::vector<uint64_t>& digitInvWeight,
                    std::vector<int>&      digitWidth,
@@ -15,7 +15,7 @@ void precalc_for_p(uint32_t p,
 
 class Precompute {
 public:
-    explicit Precompute(uint32_t exponent);
+    explicit Precompute(uint64_t exponent);
     uint32_t                    getN()           const;
     const std::vector<uint64_t>& digitWeight()    const;
     const std::vector<uint64_t>& digitInvWeight() const;

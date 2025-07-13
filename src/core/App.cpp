@@ -171,26 +171,26 @@ static int askExponentInteractively() {
 }
 void App::tuneIterforce() {
     double maxTestSeconds = 60.0;
-    uint32_t defaultTestIters = 1024;
-    uint32_t sampleIters = std::min<uint32_t>(64, defaultTestIters);
+    uint64_t defaultTestIters = 1024;
+    uint64_t sampleIters = std::min<uint64_t>(64, defaultTestIters);
     std::cout << "Sampling " << sampleIters << " iterations at iterforce=10\n";
     double sampleIps = measureIps(10, sampleIters);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
 
-    uint32_t testIters = static_cast<uint32_t>(sampleIps * maxTestSeconds);
+    uint64_t testIters = static_cast<uint64_t>(sampleIps * maxTestSeconds);
     if (testIters == 0) testIters = defaultTestIters;
     std::cout << "Test iterations: " << testIters << " (~" << maxTestSeconds << "s)\n";
 
-    uint32_t boundHigh = static_cast<uint32_t>(sampleIps * maxTestSeconds);
+    uint64_t boundHigh = static_cast<uint64_t>(sampleIps * maxTestSeconds);
     if (boundHigh < 1) boundHigh = 1;
     std::cout << "Range: [1, " << boundHigh << "]\n";
 
-    uint32_t low = 1, high = boundHigh;
-    uint32_t best = low;
+    uint64_t low = 1, high = boundHigh;
+    uint64_t best = low;
     double bestIps = 0.0;
 
     while (low < high) {
-        uint32_t mid = low + (high - low) / 2;
+        uint64_t mid = low + (high - low) / 2;
         double ipsMid = measureIps(mid, testIters);
         double ipsNext = measureIps(mid + 50, testIters);
         std::cout << "iterforce=" << mid << " IPS=" << ipsMid
@@ -208,8 +208,8 @@ void App::tuneIterforce() {
 
 
 
-double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
-    uint32_t oldIterforce = options.iterforce;
+double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
+    uint64_t oldIterforce = options.iterforce;
     options.iterforce = testIterforce;
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
@@ -231,11 +231,11 @@ double App::measureIps(uint32_t testIterforce, uint32_t testIters) {
     );
 
     const int barWidth = 40;
-    uint32_t markInterval = std::max<uint32_t>(1, testIters / barWidth);
+    uint64_t markInterval = std::max<uint64_t>(1, testIters / barWidth);
     std::cout << "    Running iterforce=" << testIterforce << ": [";
 
     auto start = high_resolution_clock::now();
-    for (uint32_t iter = 1; iter <= testIters; ++iter) {
+    for (uint64_t iter = 1; iter <= testIters; ++iter) {
         nttEngine->forward(inputBuf, iter - 1);
         nttEngine->inverse(inputBuf, iter - 1);
         carry.carryGPU(
@@ -403,11 +403,11 @@ int App::runPrpOrLl() {
     cl_command_queue queue   = context.getQueue();
     size_t          queued   = 0;
     
-    uint32_t p = options.exponent;
-    uint32_t totalIters = options.mode == "prp" ? p : p - 2;
+    uint64_t p = options.exponent;
+    uint64_t totalIters = options.mode == "prp" ? p : p - 2;
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
-    uint32_t resumeIter = backupManager.loadState(x);
+    uint64_t resumeIter = backupManager.loadState(x);
     if (resumeIter == 0) {
         x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
         std::cout << "Initial x[0] set to " << x[0]
@@ -463,11 +463,11 @@ int App::runPrpOrLl() {
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
-    uint32_t lastIter = resumeIter;
-    uint32_t startIter = resumeIter;
+    uint64_t lastIter = resumeIter;
+    uint64_t startIter = resumeIter;
     
     
-    for (uint32_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
+    for (uint64_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
         
@@ -969,9 +969,9 @@ mpz_class buildE(uint64_t B1) {
     auto t0 = clock::now(), last = t0;
 
     std::vector<uint8_t> sieve((B1 >> 1) + 1, 1);
-    std::vector<uint32_t> primes;
+    std::vector<uint64_t> primes;
     primes.reserve(B1 ? B1 / std::log(double(B1)) : 1);
-    for (uint32_t i = 3; i <= B1; i += 2) {
+    for (uint64_t i = 3; i <= B1; i += 2) {
         if (sieve[i >> 1]) {
             primes.push_back(i);
             if (uint64_t ii = uint64_t(i) * i; ii <= B1)
@@ -992,7 +992,7 @@ mpz_class buildE(uint64_t B1) {
             while (true) {
                 size_t idx = next.fetch_add(1);
                 if (idx >= total) break;
-                uint32_t p = primes[idx];
+                uint64_t p = primes[idx];
                 mpz_class pw = p;
                 unsigned long lim1 = static_cast<unsigned long>(B1 / p);
                 mpz_class limit(lim1);
@@ -1059,6 +1059,77 @@ void vectToMpz(mpz_t out,
 }
 
 
+
+static inline void fold(mpz_t x, unsigned p, const mpz_t M)
+{
+    if (mpz_sizeinbase(x, 2) <= p) return;
+    mpz_t hi; mpz_init(hi);
+    mpz_tdiv_q_2exp(hi, x, p);
+    mpz_tdiv_r_2exp(x, x, p);
+    mpz_add(x, x, hi);
+    if (mpz_cmp(x, M) >= 0) mpz_sub(x, x, M);
+    mpz_clear(hi);
+}
+
+void vectToResidue(mpz_t r,
+                   const std::vector<uint64_t>& v,
+                   const std::vector<int>& widths,
+                   const mpz_t Mp)
+{
+    const size_t n = v.size();
+    const unsigned p = mpz_sizeinbase(Mp, 2);
+    unsigned T = std::max<unsigned>(1, std::thread::hardware_concurrency());
+    if ((size_t)T * 2ULL * p / 8 > (size_t)8 << 30) T = 4;
+
+    const size_t chunk = (n + T - 1) / T;
+    std::vector<mpz_t> part(T);
+    for (unsigned t = 0; t < T; ++t) mpz_init_set_ui(part[t], 0);
+
+    std::atomic<size_t> done{0};
+    auto worker = [&](unsigned tid) {
+        const size_t s = tid * chunk;
+        const size_t e = std::min(n, s + chunk);
+
+        mpz_t pow, tmp; mpz_inits(pow, tmp, nullptr);
+        mpz_set_ui(pow, 1);
+
+        unsigned long long shift = 0;
+        for (size_t i = 0; i < s; ++i) shift = (shift + widths[i]) % p;
+        if (shift) { mpz_mul_2exp(pow, pow, shift); fold(pow, p, Mp); }
+
+        for (size_t i = s; i < e; ++i) {
+            if (v[i]) {
+                mpz_addmul_ui(part[tid], pow, v[i]);
+                if (mpz_sizeinbase(part[tid], 2) > p + 64) fold(part[tid], p, Mp);
+            }
+            if (widths[i]) {
+                mpz_mul_2exp(pow, pow, widths[i]);
+                if (mpz_sizeinbase(pow, 2) > p + 64) fold(pow, p, Mp);
+            }
+            done.fetch_add(1, std::memory_order_relaxed);
+        }
+        mpz_clears(pow, tmp, nullptr);
+    };
+
+    std::vector<std::thread> threads;
+    for (unsigned t = 0; t < T; ++t) threads.emplace_back(worker, t);
+
+    while (done.load() < n) {
+        std::cerr << '\r' << (100 * done.load() / n) << '%';
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+    std::cerr << "\r100%\n";
+
+    for (auto& th : threads) th.join();
+
+    mpz_set_ui(r, 0);
+    for (unsigned t = 0; t < T; ++t) {
+        mpz_add(r, r, part[t]);
+        if (mpz_cmp(r, Mp) >= 0) mpz_sub(r, r, Mp);
+        mpz_clear(part[t]);
+    }
+}
+
 int App::runPM1() {
 
     uint64_t B1 = options.B1;
@@ -1070,11 +1141,9 @@ int App::runPM1() {
     
     std::cout << "Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
     
-//    std::cout << "Exponent E = ";
-//    gmp_printf("%Zd\n", E.get_mpz_t());
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
-    uint32_t resumeIter = backupManager.loadState(x);
+    uint64_t resumeIter = backupManager.loadState(x);
     if(resumeIter==0){
         x[0] = 1ULL;
         resumeIter = bits;
@@ -1090,15 +1159,25 @@ int App::runPM1() {
     auto lastDisplay = startTime;
     interrupted.store(false, std::memory_order_relaxed);
 
-    spinner.displayProgress(bits-resumeIter, bits, 0.0, 0.0, options.exponent,resumeIter, resumeIter,"");
-    uint32_t startIter = resumeIter;
-    uint32_t lastIter = resumeIter;
+    uint64_t startIter = resumeIter;
+    uint64_t lastIter = resumeIter;
+    //backupManager.saveState(buffers->input, resumeIter,&E);
+    spinner.displayProgress(
+                    bits-resumeIter,
+                    bits,
+                    timer.elapsed(),
+                    timer2.elapsed(),
+                    options.exponent,
+                    resumeIter,
+                    resumeIter,
+                    ""
+                );
     for (mp_bitcnt_t i = resumeIter; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
             std::cout << "\nInterrupted signal received\n " << std::endl;
             clFinish(context.getQueue());
-            backupManager.saveState(buffers->input, lastIter, &E);
+            backupManager.saveState(buffers->input, lastIter-1, &E);
             //backupManager.saveState(buffers->input, lastIter);
             //std::cout << "\nInterrupted by user, state saved at iteration "
             //        << lastIter << std::endl;
@@ -1116,7 +1195,7 @@ int App::runPM1() {
         }
         if ((options.iterforce > 0 && (i+1)%options.iterforce == 0 && i>0) || (((i+1)%options.iterforce == 0))) { 
             
-            if((i+1)%100000 != 0){
+            //if((i+1)%100000 != 0){
 
                 char dummy;
                 clEnqueueReadBuffer(
@@ -1127,12 +1206,17 @@ int App::runPM1() {
                         &dummy,
                         0, nullptr, nullptr
                     );
-            }
+                
+            
+            //}
 
             
         }
+        
         auto now = high_resolution_clock::now();
-          
+        if ((((now - lastDisplay >= seconds(180)))) ) {
+                    backupManager.saveState(buffers->input, lastIter-1);
+        }
         if ((((now - lastDisplay >= seconds(10)))) ) {
                 std::string res64_x;
                 
@@ -1154,7 +1238,7 @@ int App::runPM1() {
         //clFinish(context.getQueue());
 
     }
-    
+    //return 0;
     std::string res64_x;
     spinner.displayProgress(
         bits,
@@ -1166,16 +1250,21 @@ int App::runPM1() {
         startIter,
         res64_x
     );
+    backupManager.saveState(buffers->input, lastIter, &E);
+    
+    std::cout << "\nStart get result from GPU" << std::endl;
     std::vector<uint64_t> hostData(precompute.getN());
 
     clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
                         hostData.size() * sizeof(uint64_t), hostData.data(),
                         0, nullptr, nullptr);
+    std::cout << "Handle final carry start" << std::endl;
 
     carry.handleFinalCarry(hostData, precompute.getDigitWidth());
+    std::cout << "vectToResidue start" << std::endl;
 
     mpz_t X; mpz_init(X);
-    vectToMpz(X, hostData, precompute.getDigitWidth());
+/*    vectToMpz(X, hostData, precompute.getDigitWidth());
     //std::cout << "digitWidths = ";
     //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
     //std::cout << "\n";
@@ -1190,6 +1279,19 @@ int App::runPM1() {
 
     mpz_t g; mpz_init(g);
     mpz_gcd(g, X, Mp);
+*/
+
+    mpz_t Mp;  mpz_init(Mp);
+    mpz_ui_pow_ui(Mp, 2, options.exponent);
+    mpz_sub_ui(Mp, Mp, 1);
+
+    mpz_t r;   mpz_init(r);
+    vectToResidue(r, hostData, precompute.getDigitWidth(), Mp);
+    std::cout << "\n GCD start\n" << std::endl;
+
+    mpz_sub_ui(r, r, 1);
+    mpz_t g;   mpz_init(g);
+    mpz_gcd(g, r, Mp);
 
     //gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
 
@@ -1198,6 +1300,7 @@ int App::runPM1() {
         char* fstr = mpz_get_str(nullptr, 10, g);
         std::cout << "P-1 factor stage 1 found: " << fstr << std::endl;
         std::free(fstr);
+        backupManager.clearState();
         return 0;
     }
 
