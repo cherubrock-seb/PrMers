@@ -51,7 +51,7 @@ done
 
 echo ""
 echo "=== Out-of-range exponent verification ==="
-p=1300000000
+p=5650242870
 echo -n "Testing M${p} (should be rejected)… "
 ./prmers "$p" --noask -prp > "logs/bad_${p}.log" 2>&1
 exit_code=$?
@@ -59,7 +59,7 @@ if [ $exit_code -eq 0 ]; then
     echo "❌ Unexpected success"
     exit 1
 fi
-if grep -q "Error: Exponent must be <= 1207959503" "logs/bad_${p}.log"; then
+if grep -q "Error: Exponent must be <= 5650242869" "logs/bad_${p}.log"; then
     echo "✅ Correctly rejected (see logs/bad_${p}.log)"
 else
     echo "❌ Missing or wrong error message (see logs/bad_${p}.log)"

@@ -29,37 +29,30 @@
 namespace math {
 
 
-uint32_t transformsize(uint32_t exponent) {
-    int log_n = 0;
-    uint32_t w = 0;
+uint32_t transformsize(uint64_t exponent) {
+    uint64_t log_n = 0;
+    uint64_t w = 0;
     do {
         ++log_n;
         w = exponent >> log_n;
     } while ((w + 1) * 2 + log_n >= 63);
 
-    uint32_t n2 = uint32_t(1) << log_n;
+    uint64_t n2 = uint64_t(1) << log_n;
 
     if (n2 >= 128) {
-        uint32_t n5 = (n2 >> 3) * 5u; // n2 * 5 / 8
+        uint64_t n5 = (n2 >> 3) * 5u; // n2 * 5 / 8
         if (n5 >= 80) {               // sécurité : n5 doit être ≥ 80
-            uint32_t w5 = exponent / n5;
+            uint64_t w5 = exponent / n5;
             long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
             if (cost5 < 64.0L)
                 return n5;
         }
     }
+    if(exponent>1207959503){
+        n2=(n2/4)*5;
+    }
     return n2;
 }
-/*
-uint32_t transformsize(uint32_t exponent) {
-    int    log_n = 0;
-    uint32_t w   = 0;
-    do {
-        ++log_n;
-        w = exponent >> log_n;
-    } while ((w + 1) * 2 + log_n >= 63);
-    return (uint32_t(1) << log_n)*5;
-}*/
 
 static void prepare_radix_twiddles(uint32_t n,
                                    std::vector<uint64_t>& w4,
@@ -89,12 +82,7 @@ static void prepare_radix_twiddles(uint32_t n,
             iw5[4*j]     = iw1; iw5[4*j+1] = iw2; iw5[4*j+2] = iw3; iw5[4*j+3] = iw4v;
         }
     }
-    /*std::cout << "w5:\n";
-    for (uint32_t j = 0; j < m; ++j) {
-        std::cout << "j = " << j << " : ";
-        std::cout << w5[4 * j] << ", " << w5[4 * j + 1] << ", "
-                << w5[4 * j + 2] << ", " << w5[4 * j + 3] << '\n';
-    }*/
+
     uint32_t n5 = n;
 
     
@@ -124,7 +112,7 @@ static void prepare_radix_twiddles(uint32_t n,
 
 
 
-void precalc_for_p(uint32_t p,
+void precalc_for_p(uint64_t p,
                    std::vector<uint64_t>& digitWeight,
                    std::vector<uint64_t>& digitInvWeight,
                    std::vector<int>&      digitWidth,
@@ -158,16 +146,16 @@ void precalc_for_p(uint32_t p,
     digitWeight[0]    = 1ULL;
     digitInvWeight[0] = inv_n;
 
-    uint32_t prev = 0;
-    for (uint32_t j = 1; j <= n; ++j) {
+    uint64_t prev = 0;
+    for (uint64_t j = 1; j <= n; ++j) {
         uint64_t qj = uint64_t(p) * j;
         //uint64_t qq = qj - 1;
-        uint32_t ceil_qj_n = (qj == 0) ? 0 : uint32_t((qj - 1) / n + 1);
+        uint64_t ceil_qj_n = (qj == 0) ? 0 : uint64_t((qj - 1) / n + 1);
         digitWidth[j - 1]  = int(ceil_qj_n - prev);
         prev               = ceil_qj_n;
 
         if (j < n) {
-            uint32_t r = uint32_t(qj % n);
+            uint64_t r = uint64_t(qj % n);
             uint64_t nr2r = r
                 ? powModP(nr2, (uint64_t)(n - r))
                 : 1ULL;
@@ -200,7 +188,7 @@ void precalc_for_p(uint32_t p,
 }
 
 
-Precompute::Precompute(uint32_t exponent)
+Precompute::Precompute(uint64_t exponent)
   : n_{ transformsize(exponent) }
 , digitWeight_()
 , digitInvWeight_()

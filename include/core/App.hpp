@@ -43,7 +43,7 @@ public:
     int runPM1();
     int run();
     void tuneIterforce();
-    double measureIps(uint32_t testIterforce, uint32_t testIters);
+    double measureIps(uint64_t testIterforce, uint64_t testIters);
 
 private:
   int    argc_;
@@ -71,6 +71,11 @@ mpz_class buildE(uint64_t B1);
 void vectToMpz(mpz_t out,
                 const std::vector<uint64_t>& v,
                 const std::vector<int>& widths);
+void readGpuBufferWithProgress(cl_command_queue q,
+                               cl_mem            deviceBuf,
+                               void*             hostPtr,
+                               size_t            bytes,
+                               const char*       msg);
 } // namespace core
 
 #endif // CORE_APP_HPP
