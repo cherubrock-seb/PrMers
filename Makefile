@@ -13,8 +13,10 @@ SRCS        := $(shell find $(SRC_DIR) -type f -name '*.cpp')
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 
 CXX         := g++
-CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR)
-LDFLAGS     := 
+CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto
+LDFLAGS     := -flto
+
+
 
 # Plateforme OpenCL
 UNAME_S := $(shell uname -s)
