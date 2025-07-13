@@ -267,7 +267,7 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
 {
     
     
-   auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
+    auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
     if (words.size() < 64) {
         words.resize(64, 0);
