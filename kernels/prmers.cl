@@ -435,6 +435,30 @@ __kernel void kernel_sub2(__global ulong* restrict x)
     }
 }
 
+__kernel void kernel_sub1(__global ulong* restrict x)
+{
+    if (get_global_id(0) == 0) {
+        uint c = 1U;
+        while(c != 0U) {
+
+            for(uint i = 0; i < TRANSFORM_SIZE_N; i++){
+                const int d = get_digit_width(i);
+                ulong val = x[i];
+                const ulong b = 1UL << d;
+                if (val >= c) {
+                    x[i] = modSub(val, c);
+                    c = 0U;
+                    break;
+                } else {
+                    const ulong temp = modSub(val, c);
+                    x[i] = modAdd(temp, b);
+                    c = 1U;
+                }
+            }
+        }
+    }
+}
+
 
 #ifndef DIGIT_WIDTH_VALUE_1
 #define DIGIT_WIDTH_VALUE_1 1

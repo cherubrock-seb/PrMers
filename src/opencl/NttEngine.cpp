@@ -93,6 +93,43 @@ NttEngine::NttEngine(const Context& ctx,
             lastOutputInv
         );
     }
+    {
+        ls0_val_ = ctx_.getLocalSize();
+        ls2_val_ = ctx_.getLocalSize2();
+        ls3_val_ = ctx_.getLocalSize3();
+        //std::cout << "ls0_val_" << ls0_val_ << std::endl;
+        const size_t* ls0 = nullptr;
+        const size_t* ls2 = &ls2_val_;
+        const size_t* ls3 = &ls3_val_;
+
+        cl_mem buf_dw = buffers_.digitWeightBuf;
+        cl_mem buf_w4 = buffers_.twiddle4Buf;
+        cl_mem buf_w5 = buffers_.twiddle5Buf;
+        forward_simple_pipeline = buildForwardSimplePipeline(
+            n,
+            queue_,
+            nullptr,                                    
+            kernels_.getKernel("kernel_ntt_radix4_mm_first"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_2steps"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m4"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m8"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m16"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_m32"),
+            kernels_.getKernel("kernel_ntt_radix4_last_m1"),
+            kernels_.getKernel("kernel_ntt_radix4_last_m1_n4"),
+            kernels_.getKernel("kernel_ntt_radix4_radix2_square_radix2_radix4"),
+            kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
+            kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
+            kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
+            kernels_.getKernel("kernel_ntt_radix5_mm_first"),
+            buf_dw,
+            buf_w4,
+            buf_w5,
+            ls0,
+            ls2,
+            ls3
+        );
+    }
 
 }
 
@@ -196,6 +233,36 @@ int NttEngine::forward(cl_mem buf_x, uint64_t /*iter*/) {
     }
     return executed;
 }
+
+
+int NttEngine::forward_simple(cl_mem buf_x, uint64_t /*iter*/) {
+    cl_uint n = pre_.getN();
+    int executed = 0;
+    for (auto& stage : forward_simple_pipeline) {
+        setStageArgs(stage, buf_x);
+        int scale = stage.globalScale;
+        size_t base = n;
+        size_t workers;
+        
+        workers = base / static_cast<size_t>(scale);
+        
+        executeKernelAndDisplay(
+            queue_,
+            stage.kernel,
+            buf_x,
+            workers,
+            stage.localSize,
+            stage.name,
+            false,
+            true,
+            n
+        );
+        ++executed;
+    }
+    return executed;
+}
+
+
 int NttEngine::inverse(cl_mem buf_x, uint64_t /*iter*/) {
     cl_uint n = pre_.getN();
     

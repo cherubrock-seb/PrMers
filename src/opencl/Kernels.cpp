@@ -66,5 +66,12 @@ void Kernels::runSub2(cl_mem buf) {
     clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
     //clFinish(queue_);
 }
+void Kernels::runSub1(cl_mem buf) {
+    cl_kernel k = getKernel("kernel_sub1");
+    clSetKernelArg(k, 0, sizeof(buf), &buf);
+    size_t global = 1, local = 1;
+    clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
+    //clFinish(queue_);
+}
 
 } // namespace opencl

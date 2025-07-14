@@ -26,7 +26,6 @@ public:
     int forward(cl_mem buf_x, uint64_t iter);
     int inverse(cl_mem buf_x, uint64_t iter);
     int forward_simple(cl_mem buf_x, uint64_t iter);
-    int inverse_simple(cl_mem buf_x, uint64_t iter);
     int pointwiseMul(cl_mem a, cl_mem b);
 
 private:
@@ -34,7 +33,8 @@ private:
     size_t ls0_vali_, ls2_vali_;
     const Context& ctx_;
     std::vector<NttStage> forward_pipeline;
-    std::vector<NttStage> inverse_pipeline;
+    std::vector<NttStage> inverse_pipeline;    
+    std::vector<NttStage> forward_simple_pipeline;
     cl_command_queue      queue_;
     Kernels&              kernels_;
     Buffers&              buffers_;
