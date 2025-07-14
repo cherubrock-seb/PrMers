@@ -1168,7 +1168,7 @@ static std::vector<mpz_class> primeList(const mpz_class& low, const mpz_class& h
 
 int App::runPM1Stage2() {
     using namespace std::chrono;
-    bool debug = true;
+    bool debug = false;
     mpz_class B1(options.B1), B2(options.B2);
     if (B2 <= B1) { std::cerr << "Stage 2 error B2 < B1.\n"; return -1; }
     if (debug) std::cout << "[DEBUG] Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
@@ -1206,16 +1206,16 @@ int App::runPM1Stage2() {
     
     math::Carry carry(context, context.getQueue(), program->getProgram(),
                       precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
-
-    std::vector<uint64_t> hinit(limbs);
-    clEnqueueReadBuffer(context.getQueue(), Hbuf, CL_TRUE, 0, limbBytes, hinit.data(), 0, nullptr, nullptr);
-    mpz_t hinitval; mpz_init(hinitval);
     mpz_t Mp; mpz_init(Mp);
     mpz_ui_pow_ui(Mp, 2, options.exponent);
     mpz_sub_ui(Mp, Mp, 1);
-    vectToMpz2(hinitval, hinit, precompute.getDigitWidth(), Mp);
-    if (debug) gmp_printf("[DEBUG] Initial H = %Zd\n", hinitval);
-
+    if (debug) {
+        std::vector<uint64_t> hinit(limbs);
+        clEnqueueReadBuffer(context.getQueue(), Hbuf, CL_TRUE, 0, limbBytes, hinit.data(), 0, nullptr, nullptr);
+        mpz_t hinitval; mpz_init(hinitval);
+        vectToMpz2(hinitval, hinit, precompute.getDigitWidth(), Mp);
+        gmp_printf("[DEBUG] Initial H = %Zd\n", hinitval);
+    }
     std::vector<cl_mem> evenPow(nbEven, nullptr);
 
 
@@ -1237,13 +1237,13 @@ int App::runPM1Stage2() {
         &err
     );
     gpuCopy(context.getQueue(), buffers->input, evenPow[0], limbBytes);
-
-    std::vector<uint64_t> h2(limbs);
-    clEnqueueReadBuffer(context.getQueue(), evenPow[0], CL_TRUE, 0, limbBytes, h2.data(), 0, nullptr, nullptr);
-    mpz_t h2val; mpz_init(h2val);
-    vectToMpz2(h2val, h2, precompute.getDigitWidth(), Mp);
-    if (debug) gmp_printf("[DEBUG] Computed H^2 = %Zd\n", h2val);
-
+    if (debug) {
+        std::vector<uint64_t> h2(limbs);
+        clEnqueueReadBuffer(context.getQueue(), evenPow[0], CL_TRUE, 0, limbBytes, h2.data(), 0, nullptr, nullptr);
+        mpz_t h2val; mpz_init(h2val);
+        vectToMpz2(h2val, h2, precompute.getDigitWidth(), Mp);
+        if (debug) gmp_printf("[DEBUG] Computed H^2 = %Zd\n", h2val);
+    }
     for (unsigned long k = 1; k < nbEven; ++k) {
         evenPow[k] = clCreateBuffer(
             context.getContext(),
@@ -1258,13 +1258,15 @@ int App::runPM1Stage2() {
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         
         gpuCopy(context.getQueue(), buffers->input, evenPow[k], limbBytes);
-        std::vector<uint64_t> htmp(limbs);
-        clEnqueueReadBuffer(context.getQueue(), evenPow[k], CL_TRUE, 0, limbBytes, htmp.data(), 0, nullptr, nullptr);
+        if (debug) {
+            std::vector<uint64_t> htmp(limbs);
+            clEnqueueReadBuffer(context.getQueue(), evenPow[k], CL_TRUE, 0, limbBytes, htmp.data(), 0, nullptr, nullptr);
 
-        mpz_t hpowval; mpz_init(hpowval);
-        vectToMpz2(hpowval, htmp, precompute.getDigitWidth(), Mp);
-        if (debug) gmp_printf("[DEBUG] Computed H^%lu = %Zd\n", 2 * (k + 1), hpowval);
-        mpz_clear(hpowval);
+            mpz_t hpowval; mpz_init(hpowval);
+            vectToMpz2(hpowval, htmp, precompute.getDigitWidth(), Mp);
+            if (debug) gmp_printf("[DEBUG] Computed H^%lu = %Zd\n", 2 * (k + 1), hpowval);
+            mpz_clear(hpowval);
+        }
     }
 
     cl_mem Hq = clCreateBuffer(
@@ -1295,13 +1297,13 @@ int App::runPM1Stage2() {
     }
 
     gpuCopy(context.getQueue(),buffers->input, Hq, limbBytes);
-
-    std::vector<uint64_t> hq(limbs);
-    clEnqueueReadBuffer(context.getQueue(), Hq, CL_TRUE, 0, limbBytes, hq.data(), 0, nullptr, nullptr);
-    mpz_t hqval; mpz_init(hqval);
-    vectToMpz2(hqval, hq, precompute.getDigitWidth(), Mp);
-    if (debug) gmp_printf("[DEBUG] Computed H^%lu using left-to-right = %Zd\n", primes.front().get_ui(), hqval);
-
+    if (debug) {
+        std::vector<uint64_t> hq(limbs);
+        clEnqueueReadBuffer(context.getQueue(), Hq, CL_TRUE, 0, limbBytes, hq.data(), 0, nullptr, nullptr);
+        mpz_t hqval; mpz_init(hqval);
+        vectToMpz2(hqval, hq, precompute.getDigitWidth(), Mp);
+        if (debug) gmp_printf("[DEBUG] Computed H^%lu using left-to-right = %Zd\n", primes.front().get_ui(), hqval);
+    }
     cl_mem Qbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, nullptr);
     std::vector<uint64_t> one(limbs, 0ULL); one[0] = 1ULL;
     clEnqueueWriteBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, one.data(), 0, nullptr, nullptr);
@@ -1320,13 +1322,14 @@ int App::runPM1Stage2() {
               carry, limbBytes, buffers->blockCarryBuf);
             carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
             gpuCopy(context.getQueue(),buffers->input,Hq, limbBytes);
-        
-            std::vector<uint64_t> hqstep(limbs);
-            clEnqueueReadBuffer(context.getQueue(), Hq, CL_TRUE, 0, limbBytes, hqstep.data(), 0, nullptr, nullptr);
-            mpz_t hqstepval; mpz_init(hqstepval);
-            vectToMpz2(hqstepval, hqstep, precompute.getDigitWidth(), Mp);
-            if (debug) gmp_printf("[DEBUG] Updated H^%lu (gap %lu) = %Zd\n", primes[idx].get_ui(), dUL, hqstepval);
-            mpz_clear(hqstepval);
+            if (debug) {
+                std::vector<uint64_t> hqstep(limbs);
+                clEnqueueReadBuffer(context.getQueue(), Hq, CL_TRUE, 0, limbBytes, hqstep.data(), 0, nullptr, nullptr);
+                mpz_t hqstepval; mpz_init(hqstepval);
+                vectToMpz2(hqstepval, hqstep, precompute.getDigitWidth(), Mp);
+                if (debug) gmp_printf("[DEBUG] Updated H^%lu (gap %lu) = %Zd\n", primes[idx].get_ui(), dUL, hqstepval);
+                mpz_clear(hqstepval);
+            }
         }
 
         gpuCopy(context.getQueue(), buffers->input, tmp, limbBytes);
@@ -1338,14 +1341,14 @@ int App::runPM1Stage2() {
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         gpuCopy(context.getQueue(), buffers->input, Qbuf, limbBytes);
         
-
-        std::vector<uint64_t> qstep(limbs);
-        clEnqueueReadBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, qstep.data(), 0, nullptr, nullptr);
-        mpz_t qstepval; mpz_init(qstepval);
-        vectToMpz2(qstepval, qstep, precompute.getDigitWidth(), Mp);
-        if (debug) gmp_printf("[DEBUG] Multiplied (H^q - 1) into Q, q = %lu => Q = %Zd\n", primes[idx].get_ui(), qstepval);
-        mpz_clear(qstepval);
-
+        if (debug) {
+            std::vector<uint64_t> qstep(limbs);
+            clEnqueueReadBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, qstep.data(), 0, nullptr, nullptr);
+            mpz_t qstepval; mpz_init(qstepval);
+            vectToMpz2(qstepval, qstep, precompute.getDigitWidth(), Mp);
+            if (debug) gmp_printf("[DEBUG] Multiplied (H^q - 1) into Q, q = %lu => Q = %Zd\n", primes[idx].get_ui(), qstepval);
+            mpz_clear(qstepval);
+        }
         auto now = high_resolution_clock::now();
         if (interrupted.load(std::memory_order_relaxed)) {
             clFinish(context.getQueue());
@@ -1359,6 +1362,7 @@ int App::runPM1Stage2() {
         }
     }
 
+    
     std::vector<uint64_t> hostQ(limbs);
     clEnqueueReadBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, hostQ.data(), 0, nullptr, nullptr);
     carry.handleFinalCarry(hostQ, precompute.getDigitWidth());
