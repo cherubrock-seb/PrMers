@@ -18,6 +18,7 @@ struct CliOptions {
     bool debug = false;
     bool gerbiczli = false;
     uint64_t B1 = 10000;
+    uint64_t B2 = 0;
     bool proof = true;
     bool submit = true;
     int localCarryPropagationDepth = 8;

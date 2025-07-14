@@ -51,6 +51,7 @@ void printUsage(const char* progName) {
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
+    std::cout << "  -b2                  : (Optional) B2 for factoring P-1" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
     std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
@@ -149,7 +150,12 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.save_path = argv[++i];
         }
         else if (std::strcmp(argv[i], "-b1") == 0 && i + 1 < argc) {
-            opts.B1 = std::atoi(argv[++i]);
+            opts.B1 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
+            opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);

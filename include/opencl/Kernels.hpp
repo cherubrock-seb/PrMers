@@ -26,6 +26,7 @@ public:
 
     void runSquaring(cl_mem buf, size_t n);
     void runSub2(cl_mem buf);
+    void runSub1(cl_mem buf);
 
 private:
     cl_program            program_;

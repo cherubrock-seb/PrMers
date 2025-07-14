@@ -41,6 +41,7 @@ public:
     App(int argc, char** argv);
     int runPrpOrLl();
     int runPM1();
+    int runPM1Stage2();
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);
