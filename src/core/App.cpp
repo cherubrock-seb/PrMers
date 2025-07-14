@@ -1153,30 +1153,7 @@ void App::subOneGPU(cl_mem buf)
     kernels->runSub1(buf);
 }
 
-void App::gpuPowLR(math::Carry& carry,
-                            cl_mem dst, cl_mem base, const mpz_class& e,
-                            size_t limbBytes, cl_mem blockCarryBuf)
-{
-     std::cerr << "gpuPowLR e=" << e << std::endl;
-     
-    if (e == 0) return;
-    size_t bitlen = mpz_sizeinbase(e.get_mpz_t(), 2);
-    for (ssize_t i = static_cast<ssize_t>(bitlen) - 2; i >= 0; --i) {
-        std::cerr << "LOOP e=" << e << std::endl;
-        gpuCopy(context.getQueue(), dst, buffers->input, limbBytes);
-        nttEngine->forward(buffers->input, 0);   
-        nttEngine->inverse(buffers->input, 0); 
-        carry.carryGPU(
-                buffers->input,
-                buffers->blockCarryBuf,
-                precompute.getN() * sizeof(uint64_t)
-            );
-        if (mpz_tstbit(e.get_mpz_t(), i)){
-            //gpuMulInPlace(buffers->input, base, carry, limbBytes, blockCarryBuf);
-         //   carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-        }
-    }
-}
+
 
 static std::vector<mpz_class> primeList(const mpz_class& low, const mpz_class& high) {
     std::vector<mpz_class> v;
@@ -1300,7 +1277,6 @@ int App::runPM1Stage2() {
     //gpuCopy(context.getQueue(), Hbuf, Hq, limbBytes);
     gpuCopy(context.getQueue(), Hbuf, buffers->input, limbBytes);
 
-    //gpuPowLR(carry, buffers->input, Hbuf, primes.front(), limbBytes, buffers->blockCarryBuf);
     size_t bitlen = mpz_sizeinbase(primes.front().get_mpz_t(), 2);
     for (ssize_t i = static_cast<ssize_t>(bitlen) - 2; i >= 0; --i) {
         //std::cerr << "LOOP e=" << e << std::endl;
