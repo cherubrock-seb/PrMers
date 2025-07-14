@@ -287,6 +287,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_kernel k_mm_2_first,
     cl_kernel k_r4_s_r4,
     cl_kernel k_r5_first,
+    cl_kernel k_radix2,
     cl_mem buf_dw,
     cl_mem buf_w4,
     cl_mem buf_w5,
@@ -339,7 +340,10 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
         k_last_m1,      ls0, "kernel_ntt_radix4_last_m1",
         [](auto m0, auto){ return m0==4; },
         { ArgKind::BufX, ArgKind::BufW } ,1},
-
+      { RadixOp::Last,    2, 2,
+        k_radix2, ls0, "kernel_ntt_radix2",
+        [](auto m0, auto){ return m0==2;},
+        { ArgKind::BufX } ,1},
       { RadixOp::Last,    4, 4,
         k_last_m1_n4,   ls0, "kernel_ntt_radix4_last_m1_n4",
         [](auto, auto nn){ return nn==4; },
@@ -418,6 +422,138 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     return v;
 }
 
+inline std::vector<NttStage> buildInverseSimplePipeline(
+    cl_uint n,
+    cl_command_queue queue,
+    cl_mem buf_x,
+    cl_kernel k_i_m1_n4,
+    cl_kernel k_i_m1,
+    cl_kernel k_i_mm_2,
+    cl_kernel k_i_mm,
+    cl_kernel k_i_mm_last,
+    cl_kernel k_i_mm_2_last,
+    cl_kernel k_i_r5_last,
+    cl_kernel k_i_r2_m1,
+    cl_mem buf_wi4,
+    cl_mem buf_wi5,
+    cl_mem buf_diw,
+    const size_t* ls0,
+    const size_t* ls2,
+    int lastOutputInv
+) {
+    std::vector<RadixOp> allInv = {
+    { RadixOp::First,  2, 2,
+        k_i_r2_m1,        ls0, "kernel_ntt_radix2",
+        [](auto m0, auto nn){ return m0==1 && nn%2==0; },
+        { ArgKind::BufX },0},
+      { RadixOp::First,  4, 4,
+        k_i_m1,        ls0, "kernel_inverse_ntt_radix4_m1",
+        [](auto m0, auto nn){ return m0==1; },
+        { ArgKind::BufX },0},
+      /*{ RadixOp::First,    16, 16,
+        k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",
+        [](auto m0, auto nn){ return m0=8 && nn>32; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
+        -1
+      },*/
+      { RadixOp::Any,    16, 16,
+        k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",
+        [](auto m0, auto nn){ return m0 < nn/16; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Any,    4, 8,
+        k_i_mm,        ls0, "kernel_inverse_ntt_radix4_mm",
+        [](auto m0, auto nn){ return m0 < nn/4; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   5,  5,
+        k_i_r5_last,    ls0, "kernel_ntt_inverse_radix5_mm_last",
+        [](auto m0, auto nn){ return m0 == nn/5; },
+        { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   16,  16,
+        k_i_mm_2_last,    ls2, "kernel_ntt_radix4_inverse_mm_2steps_last",
+        [](auto m0, auto nn){ return m0 == nn/16; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW,ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   4,  8,
+        k_i_mm_last,   ls0, "kernel_inverse_ntt_radix4_mm_last",
+        [](auto m0, auto nn){ return m0==nn/4; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   2,  2,
+        k_i_mm_last,   ls0, "kernel_inverse_ntt_radix2",
+        [](auto m0, auto nn){ return m0==nn/4; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   4, 4,
+        k_i_m1_n4,     ls0, "kernel_inverse_ntt_m1_n4",
+        [](auto m0, auto nn){ return m0==1 && nn==4; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW },
+        /*outputInverse*/ 0
+      }
+    };
+
+    std::vector<NttStage> v;
+    if (n == 4) {
+        v.push_back(NttStage{
+            k_i_m1_n4,
+            { { sizeof(cl_mem), toBytes(buf_x) },
+              { sizeof(cl_mem), toBytes(buf_wi4) },
+              { sizeof(cl_mem), toBytes(buf_diw) } },
+            4,
+            ls0,
+            "kernel_inverse_ntt_m1_n4(m=1)"
+        });
+        return v;
+    }
+    else{
+
+        unsigned m0 = lastOutputInv;
+        
+        auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
+                        return op.position == RadixOp::First
+                            && op.condition(m0,n);
+                    });
+        if (it != allInv.end()){
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            m0 *= it->localFactor;    
+        }
+        
+        
+        while(((n%5!=0) && (m0 < (unsigned)(n/16)))||((n%5==0)&&(m0 < (unsigned)(n/10)) ) ){
+            auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
+                return op.position == RadixOp::Any
+                    && op.condition(m0,n)
+                    && (m0 * op.localFactor) <= (unsigned)(n/4);
+            });
+            if (it == allInv.end()) break;
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            m0 *= it->localFactor;
+                
+        }
+        if (((n%5!=0)&&(m0 >= n/16 || n == 8)) || m0 == n/5)  {
+            auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
+                return op.position == RadixOp::Last
+                    && op.condition(m0,n);
+            });
+
+            if (it != allInv.end()) {
+                
+                v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+                m0 *= it->localFactor;
+            }
+        }
+    }
+    return v;
+}
+
 inline std::vector<NttStage> buildInversePipeline(
     cl_uint n,
     cl_command_queue queue,
@@ -473,6 +609,12 @@ inline std::vector<NttStage> buildInversePipeline(
       },
       { RadixOp::Last,   4,  8,
         k_i_mm_last,   ls0, "kernel_inverse_ntt_radix4_mm_last",
+        [](auto m0, auto nn){ return m0==nn/4; },
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM },
+        /*outputInverse*/ 0
+      },
+      { RadixOp::Last,   2,  2,
+        k_i_mm_last,   ls0, "kernel_inverse_ntt_radix2",
         [](auto m0, auto nn){ return m0==nn/4; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM },
         /*outputInverse*/ 0
