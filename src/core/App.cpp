@@ -1312,30 +1312,35 @@ int App::runPM1Stage2() {
 
     for (size_t idx = 0; idx < primes.size(); ++idx) {
         if (idx) {
+            gpuCopy(context.getQueue(),Hq,buffers->input, limbBytes);
             mpz_class d = primes[idx] - primes[idx - 1];
             unsigned long dUL = mpz_get_ui(d.get_mpz_t());
             cl_mem Hd = evenPow[dUL / 2 - 1];
-            gpuMulInPlace(Hq, Hd,
+            gpuMulInPlace(buffers->input, Hd,
               carry, limbBytes, buffers->blockCarryBuf);
-            carry.carryGPU(Hq, buffers->blockCarryBuf, limbBytes);
+            carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+            gpuCopy(context.getQueue(),buffers->input,Hq, limbBytes);
+        
             std::vector<uint64_t> hqstep(limbs);
             clEnqueueReadBuffer(context.getQueue(), Hq, CL_TRUE, 0, limbBytes, hqstep.data(), 0, nullptr, nullptr);
-            carry.handleFinalCarry(hqstep, precompute.getDigitWidth());
             mpz_t hqstepval; mpz_init(hqstepval);
             vectToMpz2(hqstepval, hqstep, precompute.getDigitWidth(), Mp);
             if (debug) gmp_printf("[DEBUG] Updated H^%lu (gap %lu) = %Zd\n", primes[idx].get_ui(), dUL, hqstepval);
             mpz_clear(hqstepval);
         }
 
-        gpuCopy(context.getQueue(), Hq, tmp, limbBytes);
+        gpuCopy(context.getQueue(), buffers->input, tmp, limbBytes);
         subOneGPU(tmp);
-        gpuMulInPlace(Qbuf, tmp,
+        gpuCopy(context.getQueue(), Qbuf,buffers->input, limbBytes);
+        
+        gpuMulInPlace(buffers->input, tmp,
               carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(Qbuf, buffers->blockCarryBuf, limbBytes);
+        carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+        gpuCopy(context.getQueue(), buffers->input, Qbuf, limbBytes);
+        
 
         std::vector<uint64_t> qstep(limbs);
         clEnqueueReadBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, qstep.data(), 0, nullptr, nullptr);
-        carry.handleFinalCarry(qstep, precompute.getDigitWidth());
         mpz_t qstepval; mpz_init(qstepval);
         vectToMpz2(qstepval, qstep, precompute.getDigitWidth(), Mp);
         if (debug) gmp_printf("[DEBUG] Multiplied (H^q - 1) into Q, q = %lu => Q = %Zd\n", primes[idx].get_ui(), qstepval);
