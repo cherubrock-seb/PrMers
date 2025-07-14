@@ -56,9 +56,6 @@ public:
                                  size_t limbBytes,
                                  cl_mem blockCarryBuf);
     void subOneGPU(cl_mem buf);
-    void gpuPowLR(math::Carry& carry,
-                                cl_mem dst, cl_mem base, const mpz_class& e,
-                                size_t limbBytes, cl_mem blockCarryBuf);
     void gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes);
 
 private:
