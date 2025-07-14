@@ -716,6 +716,7 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
 
 
 
+
 __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong2* restrict x,
                                                  __global ulong2* restrict wi,
                                                  __global ulong* restrict digit_invweight,
@@ -1530,6 +1531,8 @@ __kernel void kernel_ntt_radix2_square_radix2(__global ulong2* restrict x)
 
     x[gid] = (ulong2)(modAdd(s, d), modSub(s, d));
 }
+
+
 
 
 __kernel void kernel_ntt_radix2(__global ulong* restrict x)

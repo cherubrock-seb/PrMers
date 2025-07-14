@@ -1128,7 +1128,8 @@ void App::gpuMulInPlace(
                                  size_t limbBytes,
                                  cl_mem blockCarryBuf)
 {
-    buffers->input = A;
+    
+    gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
     cl_int err;
     nttEngine->forward_simple(buffers->input, 0);
     cl_mem temp = clCreateBuffer(
@@ -1139,10 +1140,11 @@ void App::gpuMulInPlace(
         &err
     );
     gpuCopy(context.getQueue(), buffers->input, temp, limbBytes);
-    buffers->input = B;
+   
+    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
     nttEngine->forward_simple(buffers->input, 0);
     nttEngine->pointwiseMul(buffers->input, temp);
-    nttEngine->inverse(buffers->input, 0);
+    nttEngine->inverse_simple(buffers->input, 0);
     
 }
 
@@ -1256,11 +1258,6 @@ int App::runPM1Stage2() {
     if (debug) gmp_printf("[DEBUG] Computed H^2 = %Zd\n", h2val);
 
     for (unsigned long k = 1; k < nbEven; ++k) {
-        evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, nullptr);
-        gpuCopy(context.getQueue(), evenPow[k - 1], evenPow[k], limbBytes);
-        gpuMulInPlace(evenPow[k], evenPow[0],
-              carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         evenPow[k] = clCreateBuffer(
             context.getContext(),
             CL_MEM_READ_WRITE,
@@ -1268,6 +1265,11 @@ int App::runPM1Stage2() {
             nullptr,
             &err
         );
+        gpuCopy(context.getQueue(), evenPow[k - 1], evenPow[k], limbBytes);
+        gpuMulInPlace(evenPow[k], evenPow[0],
+              carry, limbBytes, buffers->blockCarryBuf);
+        carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+        
         gpuCopy(context.getQueue(), buffers->input, evenPow[k], limbBytes);
         std::vector<uint64_t> htmp(limbs);
         clEnqueueReadBuffer(context.getQueue(), evenPow[k], CL_TRUE, 0, limbBytes, htmp.data(), 0, nullptr, nullptr);
