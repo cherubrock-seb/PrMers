@@ -163,6 +163,8 @@ This stage-1 P−1 test is GPU-accelerated using optimized NTT-based exponentiat
 
 ### Stage‑2 P‑1 factoring
 
+[Stage 2 P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm#Two-stage_variant)
+
 After a first‑stage bound **B1** has eliminated all small prime factors of _p − 1_, the second stage searches for a single remaining prime factor lying in the interval (B1, B2].  
 `prmers` sets **H = aᴹ mod n** (with the stage‑1 exponent **M**) and forms  
 
