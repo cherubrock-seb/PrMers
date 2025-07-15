@@ -34,7 +34,12 @@ declare -a pm1_tests=(
   "1097 -pm1 -b1 3 -b2 709:>>>  Factor P-1 (stage 2) found : 4576661533441"
   "2151 -pm1 -b1 256 -b2 4073:P-1 factor stage 1 found: 327405968242246366421788399|>>>  Factor P-1 (stage 2) found : 31810015665526476520196715312101168065463218256802641"
   "4133 -pm1 -b1 23 -b2 2099:>>>  Factor P-1 (stage 2) found : 11173615097"
+  "44159 -pm1 -b1 23 -b2 31:No P-1 (stage 1) factor up to B1=23|>>>  Factor P-1 (stage 2) found : 1511297617"
+  "144139 -pm1 -b1 3 -b2 3583:No P-1 (stage 1) factor up to B1=3|>>>  Factor P-1 (stage 2) found : 3098700223"
+  "544139 -pm1 -b1 3 -b2 7:P-1 factor stage 1 found: 22853839|>>>  Factor P-1 (stage 2) found : 22853839"
+  "11544157 -pm1 -b1 19 -b2 101:No P-1 (stage 1) factor up to B1=19|>>>  Factor P-1 (stage 2) found : 44306474567"
 )
+
 
 for test in "${pm1_tests[@]}"; do
   IFS=':' read -r args expected <<< "$test"
