@@ -1396,7 +1396,7 @@ int App::runPM1() {
         E *= 2 * options.exponent;
     }
     
-    std::cout << "[DEBUG] E=" << E << std::endl;
+//    std::cout << "[DEBUG] E=" << E << std::endl;
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint64_t resumeIter = backupManager.loadState(x);
