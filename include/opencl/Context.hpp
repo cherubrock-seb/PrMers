@@ -39,7 +39,7 @@ public:
     int getExponent() const noexcept;
     bool isEvenExponent() const noexcept;
     cl_uint getWorkGroupCount() const noexcept;
-    void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, int p, bool debug = false, int localMaxSize = 0);
+    void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, uint64_t p, bool debug = false, int localMaxSize = 0);
     static void listAllOpenCLDevices();
 private:
     cl_platform_id    platform_;

@@ -46,20 +46,20 @@ using namespace std::chrono;
 
 namespace core {
 
-void Spinner::displayProgress(uint32_t iter,
-                              uint32_t totalIters,
+void Spinner::displayProgress(uint64_t iter,
+                              uint64_t totalIters,
                               double elapsedTime,
                               double elapsedTime2,
-                              uint32_t expo,
-                              uint32_t resumeIter,
-                              uint32_t startIter,
+                              uint64_t expo,
+                              uint64_t resumeIter,
+                              uint64_t startIter,
                               std::string res64)
 {
     double pct = totalIters
                ? (100.0 * iter) / totalIters
                : 100.0;
 
-    uint32_t deltaIter = (iter > resumeIter) ? (iter - resumeIter) : iter;
+    uint64_t deltaIter = (iter > resumeIter) ? (iter - resumeIter) : iter;
 
     double currentIPS = (elapsedTime2 > 0)
                       ? deltaIter / elapsedTime2
@@ -83,10 +83,10 @@ void Spinner::displayProgress(uint32_t iter,
                         : (pct < 90.0) ? COLOR_YELLOW
                                        : COLOR_GREEN;
 
-    uint32_t sec  = static_cast<uint32_t>(remaining);
-    uint32_t days = sec / 86400; sec %= 86400;
-    uint32_t hrs  = sec / 3600;  sec %= 3600;
-    uint32_t min  = sec / 60;    sec %= 60;
+    uint64_t sec  = static_cast<uint64_t>(remaining);
+    uint64_t days = sec / 86400; sec %= 86400;
+    uint64_t hrs  = sec / 3600;  sec %= 3600;
+    uint64_t min  = sec / 60;    sec %= 60;
 
     std::cout
     << "\r" << color
@@ -108,18 +108,18 @@ void Spinner::displayProgress(uint32_t iter,
 }
 
 
-void Spinner::displayBackupInfo(uint32_t iter,
-                                uint32_t totalIters,
+void Spinner::displayBackupInfo(uint64_t iter,
+                                uint64_t totalIters,
                                 double elapsedTime,
                                 std::string res64)
 {
     double pct       = totalIters ? (100.0 * iter) / totalIters : 100.0;
     double ips       = elapsedTime > 0 ? iter / elapsedTime : 0.0;
     double remaining = ips > 0 ? (totalIters - iter) / ips : 0.0;
-    uint32_t sec  = static_cast<uint32_t>(remaining);
-    uint32_t days = sec / 86400; sec %= 86400;
-    uint32_t hrs  = sec / 3600;  sec %= 3600;
-    uint32_t min  = sec / 60;    sec %= 60;
+    uint64_t sec  = static_cast<uint64_t>(remaining);
+    uint64_t days = sec / 86400; sec %= 86400;
+    uint64_t hrs  = sec / 3600;  sec %= 3600;
+    uint64_t min  = sec / 60;    sec %= 60;
 
     std::cout
       << "\r" << COLOR_MAGENTA

@@ -10,7 +10,7 @@ namespace io {
 
 struct CliOptions {
     uint64_t exponent = 0;
-    uint32_t iterforce = 0;
+    uint64_t iterforce = 0;
     int device_id = 0;
     bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"
