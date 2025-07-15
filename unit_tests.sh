@@ -19,6 +19,39 @@ optflags=(
   nans:-cl-no-signed-zeros
   optdisable:-cl-opt-disable
 )
+echo ""
+echo "=== Extended P-1 factoring tests ==="
+
+declare -a pm1_tests=(
+  "139 -pm1 -b1 457:P-1 factor stage 1 found: 5625767248687"
+  "139 -pm1 -b1 192:No P-1 (stage 1) factor up to B1=192"
+  "139 -pm1 -b1 192 -b2 457:No factor P-1 (stage 2) until B2 = 457"
+  "139 -pm1 -b1 193 -b2 457:>>>  Factor P-1 (stage 2) found : 5625767248687"
+  "239 -pm1 -b1 193 -b2 2503:P-1 factor stage 1 found: 927239786567617|>>>  Factor P-1 (stage 2) found : 124250696089090697678753"
+  "263 -pm1 -b1 3527 -b2 16477:P-1 factor stage 1 found: 23671|>>>  Factor P-1 (stage 2) found : 321269073670148767"
+  "367 -pm1 -b1 11981 -b2 38971:P-1 factor stage 1 found: 646300400639|>>>  Factor P-1 (stage 2) found : 50500996776315830904406967"
+  "569 -pm1 -b1 9 -b2 677:>>>  Factor P-1 (stage 2) found : 55470673"
+  "1097 -pm1 -b1 3 -b2 709:>>>  Factor P-1 (stage 2) found : 4576661533441"
+  "2151 -pm1 -b1 256 -b2 4073:P-1 factor stage 1 found: 327405968242246366421788399|>>>  Factor P-1 (stage 2) found : 31810015665526476520196715312101168065463218256802641"
+  "4133 -pm1 -b1 23 -b2 2099:>>>  Factor P-1 (stage 2) found : 11173615097"
+)
+
+for test in "${pm1_tests[@]}"; do
+  IFS=':' read -r args expected <<< "$test"
+  echo -n "Testing ./prmers $args ... "
+  output=$(./prmers $args --noask 2>&1)
+  echo "$output" > "logs/pm1_${args// /_}.log"
+  valid=true
+  IFS='|' read -ra expected_lines <<< "$expected"
+  for expected_line in "${expected_lines[@]}"; do
+    if ! grep -qF "$expected_line" <<< "$output"; then
+      echo "❌ Missing '$expected_line' (see logs/pm1_${args// /_}.log)"
+      valid=false
+      break
+    fi
+  done
+  $valid && echo "✅"
+done
 
 echo ""
 echo "=== Optimization flags tests ==="

@@ -276,6 +276,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_mem buf_x,
     cl_kernel k_first,
     cl_kernel k_mm_2,
+    cl_kernel k_m2,
     cl_kernel k_m4,
     cl_kernel k_m8,
     cl_kernel k_m16,
@@ -314,7 +315,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
         
       { RadixOp::Any,     16, 16,
         k_mm_2,         ls2, "kernel_ntt_radix4_mm_2steps",
-        [](auto m0, auto){ return m0>=32 && m0%4==0; },
+        [](auto m0, auto){ return m0>=32 && m0%16==0; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM } ,1},
 
 
@@ -322,6 +323,10 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
       { RadixOp::Any,     4, 8,
         k_m4,           ls0, "kernel_ntt_radix4_mm_m4",
         [](auto m0, auto){ return m0==16; },
+        { ArgKind::BufX, ArgKind::BufW } ,1},
+      { RadixOp::Any,     4, 8,
+        k_m2,           ls0, "kernel_ntt_radix4_mm_m2",
+        [](auto m0, auto){ return m0==8; },
         { ArgKind::BufX, ArgKind::BufW } ,1},
 
       { RadixOp::Any,     4, 8,
@@ -385,7 +390,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
                 }
             }
         
-        while (m0 > 4) {
+        while (m0 > 2) {
             auto it = std::find_if(all.begin(), all.end(), [&](auto& op){
                 return op.position==RadixOp::Any
                     && op.condition(m0,n)
@@ -413,7 +418,9 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
             if (it != all.end()) {
                 m0 /= it->localFactor;
                 v.push_back(makeStage(*it, m0, buf_x,buf_w4, buf_w5, buf_dw));
-            } /*else {
+            } 
+            
+            /*else {
                 throw std::runtime_error("Pas de RadixOp::Last pour m0=" + std::to_string(m0));
             }*/
         }
