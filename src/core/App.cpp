@@ -1110,7 +1110,7 @@ void vectToMpz2(mpz_t out,
         mpz_add(out, out, partial[t].get());
         if (mpz_cmp(out, Mp) >= 0)
             mpz_sub(out, out, Mp);
-        mpz_clear(partial[t].get());
+        //mpz_clear(partial[t].get());
     }
 }
 
