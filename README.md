@@ -9,7 +9,8 @@ Key features:
 - 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
 - 📊 Benchmark output for performance comparison across devices
 
-`prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) stage 1, a powerful algorithm to find a prime factor \( q \) of a Mersenne number \( 2^p - 1 \), provided that \( q - 1 \) is composed entirely of small prime factors.
+`prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) stage 1 and stage 2, a powerful algorithm to find a prime factor \( q \) of a Mersenne number \( 2^p - 1 \), provided that \( q - 1 \) is composed entirely of small prime factors.
+
 See below
 
 ## 🚀 Try the PrMers Demo on Google Colab
@@ -160,6 +161,19 @@ No P-1 factor up to B1=8099
 
 This stage-1 P−1 test is GPU-accelerated using optimized NTT-based exponentiation modulo \( 2^n - 1 \).
 
+### Stage‑2 P‑1 factoring
+
+After a first‑stage bound **B1** has eliminated all small prime factors of _p − 1_, the second stage searches for a single remaining prime factor lying in the interval (B1, B2].  
+`prmers` sets **H = aᴹ mod n** (with the stage‑1 exponent **M**) and forms  
+
+&nbsp;&nbsp;**Q = ∏_{B1 < q ≤ B2} (Hᵠ − 1) mod n**,  
+
+where _q_ ranges over primes in (B1, B2].  Consecutive primes satisfy _qₙ = qₙ₋₁ + dₙ_ with small even gaps _dₙ_; the program caches powers **H², H⁴, …** so that each **Hᵠ** is obtained via a single modular multiplication **Hᵠₙ = Hᵠₙ₋₁·Hᵈⁿ**.  When the product is complete, **gcd(Q, n)** reveals any non‑trivial factor.
+
+Examples (complete stage 1 + stage 2 run):
+```bash
+./prmers 139  -pm1 -b1 192   -b2 457
+./prmers 367  -pm1 -b1 11981 -b2 38971
 
 
 ## ⚙️ Example Execution and Submission
