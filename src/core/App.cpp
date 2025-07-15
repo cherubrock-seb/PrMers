@@ -1329,7 +1329,7 @@ int App::runPM1Stage2() {
         if (interrupted.load(std::memory_order_relaxed)) {
             std::cout << "\nInterrupted signal received\n" << std::endl;
             clFinish(context.getQueue());
-            backupManager.saveState(buffers->input, idx);
+            //backupManager.saveState(buffers->input, idx);
             return 0;
         }
     }
