@@ -320,7 +320,8 @@ App::App(int argc, char** argv)
         options.save_path,
         options.exponent,
         options.mode,
-        options.B1
+        options.B1,
+        options.B2
     )
   , proofManager(
         options.exponent,
@@ -1192,7 +1193,6 @@ int App::runPM1Stage2() {
 
     auto primes = primeList(B1, B2);
     if (primes.empty()) { std::cout << "No prime between B1 B2\n"; return 1; }
-    if (debug) std::cout << "[DEBUG] Prime count = " << primes.size() << std::endl;
 
     mpz_class maxGap(0);
     for (size_t i = 1; i < primes.size(); ++i)
@@ -1200,14 +1200,12 @@ int App::runPM1Stage2() {
     if (mpz_odd_p(maxGap.get_mpz_t())) maxGap += 1;
     if (!maxGap.fits_ulong_p()) { std::cerr << "Max Gap error\n"; return -2; }
     unsigned long nbEven = mpz_get_ui(maxGap.get_mpz_t()) / 2;
-    if (debug) std::cout << "[DEBUG] Max even gap = " << nbEven * 2 << std::endl;
 
     size_t limbs = precompute.getN();
     size_t limbBytes = limbs * sizeof(uint64_t);
 
     cl_int err;
     cl_mem Hbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-    if (err != CL_SUCCESS) { std::cerr << "Failed to create Hbuf: " << err << std::endl; std::exit(1); }
     clEnqueueCopyBuffer(context.getQueue(), buffers->input, Hbuf, 0, 0, limbBytes, 0, nullptr, nullptr);
 
     math::Carry carry(context, context.getQueue(), program->getProgram(),
@@ -1234,12 +1232,8 @@ int App::runPM1Stage2() {
         gpuMulInPlace(evenPow[k], evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         gpuCopy(context.getQueue(), buffers->input, evenPow[k], limbBytes);
-
         int newPct = int((k + 1) * 100 / nbEven);
-        if (newPct > pct) {
-            pct = newPct;
-            std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush;
-        }
+        if (newPct > pct) { pct = newPct; std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush; }
     }
     std::cout << "\rPrecomputing H powers: 100%" << std::endl;
 
@@ -1256,22 +1250,23 @@ int App::runPM1Stage2() {
             carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         }
     }
-
     gpuCopy(context.getQueue(), buffers->input, Hq, limbBytes);
 
     cl_mem Qbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-    std::vector<uint64_t> one(limbs, 0ULL);
-    one[0] = 1ULL;
+    std::vector<uint64_t> one(limbs, 0ULL); one[0] = 1ULL;
     clEnqueueWriteBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, one.data(), 0, nullptr, nullptr);
 
     cl_mem tmp = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
 
-    timer.start();
-    timer2.start();
+    uint32_t resumeIdx = backupManager.loadStatePM1S2(Hq, Qbuf, limbBytes);
+    size_t startIdx = resumeIdx ? resumeIdx : 0;
+
+    timer.start(); timer2.start();
     auto start = high_resolution_clock::now();
     auto lastDisplay = start;
+    auto lastBackup  = start;
 
-    for (size_t idx = 0; idx < primes.size(); ++idx) {
+    for (size_t idx = startIdx; idx < primes.size(); ++idx) {
         if (idx) {
             gpuCopy(context.getQueue(), Hq, buffers->input, limbBytes);
             mpz_class d = primes[idx] - primes[idx - 1];
@@ -1291,45 +1286,34 @@ int App::runPM1Stage2() {
 
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
-            double done = double(idx + 1);
-            double total = double(primes.size());
+            double done = double(idx + 1); double total = double(primes.size());
             double percent = done / total * 100.0;
             double elapsedSec = duration<double>(now - start).count();
             double ips = done / elapsedSec;
             double remaining = total - done;
             double etaSec = ips > 0 ? remaining / ips : 0;
-            int days = int(etaSec) / 86400;
-            int hours = (int(etaSec) % 86400) / 3600;
-            int minutes = (int(etaSec) % 3600) / 60;
-            int seconds = int(etaSec) % 60;
-            std::cout
-                << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
-                << "prime: " << primes[idx].get_ui() << " | "
-                << "Iter: " << (idx + 1) << " | "
-                << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
-                << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
-                << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
-                << std::flush;
+            int days = int(etaSec) / 86400; int hours = (int(etaSec) % 86400) / 3600;
+            int minutes = (int(etaSec) % 3600) / 60; int seconds = int(etaSec) % 60;
+            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
+                      << "prime: " << primes[idx].get_ui() << " | "
+                      << "Iter: " << (idx + 1) << " | "
+                      << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
+                      << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << std::flush;
             lastDisplay = now;
         }
-
+        if (duration_cast<seconds>(now - lastBackup).count() >= 180) {
+            backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
+            lastBackup = now;
+        }
         if (options.iterforce > 0 && (idx + 1) % options.iterforce == 0) {
             char dummy;
-            clEnqueueReadBuffer(
-                context.getQueue(),
-                buffers->input,
-                CL_TRUE,
-                0,
-                sizeof(dummy),
-                &dummy,
-                0, nullptr, nullptr
-            );
+            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, sizeof(dummy), &dummy, 0, nullptr, nullptr);
         }
-
         if (interrupted.load(std::memory_order_relaxed)) {
-            std::cout << "\nInterrupted signal received\n" << std::endl;
             clFinish(context.getQueue());
-            //backupManager.saveState(buffers->input, idx);
+            backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
             return 0;
         }
     }
@@ -1337,11 +1321,8 @@ int App::runPM1Stage2() {
     std::vector<uint64_t> hostQ(limbs);
     clEnqueueReadBuffer(context.getQueue(), Qbuf, CL_TRUE, 0, limbBytes, hostQ.data(), 0, nullptr, nullptr);
     carry.handleFinalCarry(hostQ, precompute.getDigitWidth());
-    mpz_t Q; mpz_init(Q);
-    vectToMpz2(Q, hostQ, precompute.getDigitWidth(), Mp);
-    if (debug) gmp_printf("[DEBUG] Final Q mod Mp = %Zd\n", Q);
-    mpz_t g; mpz_init(g);
-    mpz_gcd(g, Q, Mp);
+    mpz_t Q; mpz_init(Q); vectToMpz2(Q, hostQ, precompute.getDigitWidth(), Mp);
+    mpz_t g; mpz_init(g); mpz_gcd(g, Q, Mp);
     bool found = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
     if (found) {
         char* s = mpz_get_str(nullptr, 10, g);
@@ -1350,6 +1331,7 @@ int App::runPM1Stage2() {
     } else {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
     }
+    backupManager.clearState();
     return found ? 0 : 1;
 }
 
@@ -1532,7 +1514,9 @@ int App::runPM1() {
         if(options.B2>0){
             runPM1Stage2();
         }
-        backupManager.clearState();
+        else{
+            backupManager.clearState();
+        }
         return 0;
     }
     
@@ -1541,7 +1525,9 @@ int App::runPM1() {
     if(options.B2>0){
         runPM1Stage2();
     }
-    backupManager.clearState();
+    else{
+            backupManager.clearState();
+    }
     return 1;
 }
 
