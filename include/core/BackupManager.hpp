@@ -23,11 +23,15 @@ public:
                   const std::string& savePath,
                   unsigned exponent,
                   const std::string& mode,
-                  const int b1);
+                  const uint64_t b1,
+                  const uint64_t b2
+                  );
 
     // read existing .loop/.mers into x; return resume iteration
     uint32_t loadState(std::vector<uint64_t>& x);
 
+    uint32_t loadStatePM1S2(cl_mem hqBuf, cl_mem qBuf, size_t bytes);
+    void     saveStatePM1S2(cl_mem hqBuf, cl_mem qBuf, uint32_t idx, size_t bytes);
     // read back from device and write .mers/.loop files at iteration iter
     void saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_ptr = nullptr);
     mpz_class loadExponent() const;
@@ -43,7 +47,9 @@ private:
     std::string      mersFilename_;
     std::string      loopFilename_;
     std::string      exponentFilename_;
-    int b1_;
+    uint64_t b1_;
+    uint64_t b2_;
+    std::string hqFilename_, qFilename_, loop2Filename_;
 
 };
 

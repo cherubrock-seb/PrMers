@@ -46,7 +46,7 @@
 
 namespace io{
     //-----------------------------------------------------------------------------
-    // mod3, doDiv3 et doDiv9 : pour PRP‑3 on divise deux fois par 3
+    // mod3, doDiv3 et doDiv9 : pour PRP-3 on divise deux fois par 3
     //-----------------------------------------------------------------------------
     static uint32_t mod3(const std::vector<uint32_t>& W) {
         uint32_t r = 0;
