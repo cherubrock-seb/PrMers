@@ -1049,7 +1049,14 @@ mpz_class buildE(uint64_t B1) {
     std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
 }
+struct MpzWrapper {
+    mpz_t val;
+    MpzWrapper() { mpz_init(val); }
+    ~MpzWrapper() { mpz_clear(val); }
 
+    mpz_t& get() { return val; }
+    const mpz_t& get() const { return val; }
+};
 
 void vectToMpz2(mpz_t out,
                 const std::vector<uint64_t>& v,
@@ -1058,12 +1065,13 @@ void vectToMpz2(mpz_t out,
 {
     const size_t n = v.size();
     const unsigned T = std::thread::hardware_concurrency();
-    std::vector<mpz_t> partial(T);
+    std::vector<MpzWrapper> partial(T);
+
     std::vector<unsigned> total_width(T, 0);
     std::atomic<size_t> global_count{0};
 
     for (unsigned t = 0; t < T; ++t)
-        mpz_init(partial[t]);
+        mpz_init(partial[t].get());
 
     std::vector<std::thread> threads(T);
     size_t chunk = (n + T - 1) / T;
@@ -1088,7 +1096,7 @@ void vectToMpz2(mpz_t out,
                     fflush(stdout);
                 }
             }
-            mpz_set(partial[t], acc);
+            mpz_set(partial[t].get(), acc);
             mpz_clear(acc);
         });
     }
@@ -1099,10 +1107,10 @@ void vectToMpz2(mpz_t out,
     mpz_set_ui(out, 0);
     for (int t = T - 1; t >= 0; --t) {
         mpz_mul_2exp(out, out, total_width[t]);
-        mpz_add(out, out, partial[t]);
+        mpz_add(out, out, partial[t].get());
         if (mpz_cmp(out, Mp) >= 0)
             mpz_sub(out, out, Mp);
-        mpz_clear(partial[t]);
+        mpz_clear(partial[t].get());
     }
 }
 
