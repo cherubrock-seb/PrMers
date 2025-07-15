@@ -1347,7 +1347,8 @@ int App::runPM1() {
     mpz_class E = backupManager.loadExponent();
     if(E==0){    
         E = buildE(B1);
-        E *= mpz_class(2) * mpz_class(options.exponent);
+        E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+
 
     }
     
