@@ -999,7 +999,8 @@ mpz_class buildE(uint64_t B1) {
                 mpz_set_ui(pw.get_mpz_t(), static_cast<unsigned long>(p));
                 unsigned long lim1 = static_cast<unsigned long>(B1 / p);
                 mpz_class limit(lim1);
-                while (pw <= limit) pw *= mpz_class(p);
+                //while (pw <= limit) pw *= mpz_class(p);
+                while (pw <= limit) pw *= mpz_class(static_cast<unsigned long>(p));
                 part[t] *= pw;
                 done.fetch_add(1, std::memory_order_relaxed);
                 if (interrupted) return;
