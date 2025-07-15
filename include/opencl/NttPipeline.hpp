@@ -305,37 +305,37 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
      { RadixOp::First,   16, 16,
         k_mm_2_first,        ls2, "kernel_ntt_radix4_mm_2steps_first",
          [](auto m0, auto nn){ return m0>32; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 1},
       
       { RadixOp::First,   4, 8,
         k_first,        ls0, "kernel_ntt_radix4_mm_first",
         /*cond*/ [](auto m0, auto){ return m0>=2; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 1},
         
       { RadixOp::Any,     16, 16,
         k_mm_2,         ls2, "kernel_ntt_radix4_mm_2steps",
         [](auto m0, auto){ return m0>=64 && m0%4==0; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM } ,0},
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::ParamM } ,1},
 
 
 
       { RadixOp::Any,     4, 8,
         k_m4,           ls0, "kernel_ntt_radix4_mm_m4",
         [](auto m0, auto){ return m0==16; },
-        { ArgKind::BufX, ArgKind::BufW } ,0},
+        { ArgKind::BufX, ArgKind::BufW } ,1},
 
       { RadixOp::Any,     4, 8,
         k_m8,           ls0, "kernel_ntt_radix4_mm_m8",
         [](auto m0, auto){ return m0==32; },
-        { ArgKind::BufX, ArgKind::BufW } ,0},
+        { ArgKind::BufX, ArgKind::BufW } ,1},
       { RadixOp::Any,     4, 8,
         k_m16,           ls0, "kernel_ntt_radix4_mm_m16",
         [](auto m0, auto){ return m0==64; },
-        { ArgKind::BufX, ArgKind::BufW } ,0},
+        { ArgKind::BufX, ArgKind::BufW } ,1},
        { RadixOp::Any,     4, 8,
         k_m32,           ls0, "kernel_ntt_radix4_mm_m32",
         [](auto m0, auto){ return m0==128; },
-        { ArgKind::BufX, ArgKind::BufW } ,0},
+        { ArgKind::BufX, ArgKind::BufW } ,1},
       { RadixOp::Last,    4, 4,
         k_last_m1,      ls0, "kernel_ntt_radix4_last_m1",
         [](auto m0, auto){ return m0==4; },
@@ -385,7 +385,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
                 }
             }
         
-        while (m0 > 8) {
+        while (m0 > 4) {
             auto it = std::find_if(all.begin(), all.end(), [&](auto& op){
                 return op.position==RadixOp::Any
                     && op.condition(m0,n)
