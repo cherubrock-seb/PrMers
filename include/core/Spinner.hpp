@@ -13,17 +13,17 @@ public:
     Spinner() = default;
     ~Spinner() = default;
 
-    void displayProgress(uint32_t iter,
-                        uint32_t totalIters,
+    void displayProgress(uint64_t iter,
+                        uint64_t totalIters,
                         double elapsedTime,
                         double elapsedTime2,
-                        uint32_t expo,
-                        uint32_t resumeIter = 0,
-                        uint32_t startIter = 0,
+                        uint64_t expo,
+                        uint64_t resumeIter = 0,
+                        uint64_t startIter = 0,
                         std::string res64 = "");
 
-    void displayBackupInfo(uint32_t iter,
-                           uint32_t totalIters,
+    void displayBackupInfo(uint64_t iter,
+                           uint64_t totalIters,
                            double elapsedTime,
                            std::string res64);
 

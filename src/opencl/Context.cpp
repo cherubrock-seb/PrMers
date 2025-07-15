@@ -330,7 +330,7 @@ void Context::queryDeviceCapabilities() {
 
 void Context::computeOptimalSizes(std::size_t n,
                                   const std::vector<int>& digit_width_cpu,
-                                  int p,
+                                  uint64_t p,
                                   bool debug,
                                   int localMaxSize)
 {

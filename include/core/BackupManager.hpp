@@ -28,12 +28,12 @@ public:
                   );
 
     // read existing .loop/.mers into x; return resume iteration
-    uint32_t loadState(std::vector<uint64_t>& x);
+    uint64_t loadState(std::vector<uint64_t>& x);
 
-    uint32_t loadStatePM1S2(cl_mem hqBuf, cl_mem qBuf, size_t bytes);
-    void     saveStatePM1S2(cl_mem hqBuf, cl_mem qBuf, uint32_t idx, size_t bytes);
+    uint64_t loadStatePM1S2(cl_mem hqBuf, cl_mem qBuf, size_t bytes);
+    void     saveStatePM1S2(cl_mem hqBuf, cl_mem qBuf, uint64_t idx, size_t bytes);
     // read back from device and write .mers/.loop files at iteration iter
-    void saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_ptr = nullptr);
+    void saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_ptr = nullptr);
     mpz_class loadExponent() const;
 
     void clearState() const;

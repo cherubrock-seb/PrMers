@@ -72,11 +72,11 @@ BackupManager::BackupManager(cl_command_queue queue,
     
 }
 
-uint32_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
+uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
                                        cl_mem qBuf,
                                        size_t bytes)
 {
-    uint32_t resume = 0;
+    uint64_t resume = 0;
     std::ifstream loopIn(loop2Filename_);
     if (loopIn >> resume && resume > 0) {
         std::cout << "Stage-2 resume at iteration " << resume << std::endl;
@@ -100,7 +100,7 @@ uint32_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
 
 void BackupManager::saveStatePM1S2(cl_mem hqBuf,
                                    cl_mem qBuf,
-                                   uint32_t idx,
+                                   uint64_t idx,
                                    size_t bytes)
 {
     std::vector<uint64_t> tmp(bytes / sizeof(uint64_t));
@@ -120,8 +120,8 @@ void BackupManager::saveStatePM1S2(cl_mem hqBuf,
 }
 
 
-uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
-    uint32_t resume = 0;
+uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
+    uint64_t resume = 0;
 
     // 1) Debug : afficher le chemin absolu du .loop
     auto absLoop = std::filesystem::absolute(loopFilename_);
@@ -159,7 +159,7 @@ uint32_t BackupManager::loadState(std::vector<uint64_t>& x) {
 }
 
 
-void BackupManager::saveState(cl_mem buffer, uint32_t iter, const mpz_class* E_ptr) {
+void BackupManager::saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_ptr) {
     std::vector<uint64_t> x(vectorSize_);
     clEnqueueReadBuffer(queue_, buffer, CL_TRUE,
                         0, vectorSize_ * sizeof(uint64_t),
@@ -238,6 +238,18 @@ void BackupManager::clearState() const {
     if (std::filesystem::exists(exponentFilename_, ec)) {
         std::filesystem::remove(exponentFilename_, ec);
         std::cout << "Removed exponent file: " << exponentFilename_ << std::endl;
+    }
+    if (std::filesystem::exists(hqFilename_, ec)) {
+        std::filesystem::remove(hqFilename_, ec);
+        std::cout << "Removed qFilename_ file: " << qFilename_ << std::endl;
+    }
+    if (std::filesystem::exists(qFilename_, ec)) {
+        std::filesystem::remove(qFilename_, ec);
+        std::cout << "Removed qFilename_ file: " << qFilename_ << std::endl;
+    }
+    if (std::filesystem::exists(loop2Filename_, ec)) {
+        std::filesystem::remove(loop2Filename_, ec);
+        std::cout << "Removed loop2Filename_ file: " << loop2Filename_ << std::endl;
     }
 }
 

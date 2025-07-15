@@ -995,10 +995,13 @@ mpz_class buildE(uint64_t B1) {
                 size_t idx = next.fetch_add(1);
                 if (idx >= total) break;
                 uint64_t p = primes[idx];
-                mpz_class pw = p;
+                mpz_class pw;
+                mpz_set_ui(pw.get_mpz_t(), static_cast<unsigned long>(p));
                 unsigned long lim1 = static_cast<unsigned long>(B1 / p);
                 mpz_class limit(lim1);
-                while (pw <= limit) pw *= p;
+                while (pw <= limit) pw *= mpz_class(p);
+
+
                 part[t] *= pw;
                 done.fetch_add(1, std::memory_order_relaxed);
                 if (interrupted) return;
@@ -1186,7 +1189,7 @@ static std::vector<mpz_class> primeList(const mpz_class& low,
 int App::runPM1Stage2() {
     using namespace std::chrono;
     bool debug = false;
-    mpz_class B1(options.B1), B2(options.B2);
+    mpz_class B1((unsigned long)options.B1), B2((unsigned long)options.B2);
     if (B2 <= B1) { std::cerr << "Stage 2 error B2 < B1.\n"; return -1; }
     if (debug) std::cout << "[DEBUG] Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
@@ -1241,7 +1244,7 @@ int App::runPM1Stage2() {
     gpuCopy(context.getQueue(), Hbuf, buffers->input, limbBytes);
 
     size_t bitlen = mpz_sizeinbase(primes.front().get_mpz_t(), 2);
-    for (ssize_t i = ssize_t(bitlen) - 2; i >= 0; --i) {
+    for (int64_t i = int64_t(bitlen) - 2; i >= 0; --i){
         nttEngine->forward(buffers->input, 0);
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);

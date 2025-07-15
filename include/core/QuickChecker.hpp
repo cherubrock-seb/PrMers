@@ -8,7 +8,7 @@
 namespace core {
 class QuickChecker {
 public:
-    static std::optional<int> run(uint32_t p);
+    static std::optional<int> run(uint64_t p);
 };
 
 } // namespace core
