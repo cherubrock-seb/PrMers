@@ -1000,8 +1000,6 @@ mpz_class buildE(uint64_t B1) {
                 unsigned long lim1 = static_cast<unsigned long>(B1 / p);
                 mpz_class limit(lim1);
                 while (pw <= limit) pw *= mpz_class(p);
-
-
                 part[t] *= pw;
                 done.fetch_add(1, std::memory_order_relaxed);
                 if (interrupted) return;
@@ -1349,7 +1347,8 @@ int App::runPM1() {
     mpz_class E = backupManager.loadExponent();
     if(E==0){    
         E = buildE(B1);
-        E *= 2 * options.exponent;
+        E *= mpz_class(2) * mpz_class(options.exponent);
+
     }
     
 //    std::cout << "[DEBUG] E=" << E << std::endl;
