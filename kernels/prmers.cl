@@ -715,7 +715,29 @@ __kernel void kernel_ntt_radix4_last_m1_n4(__global ulong* restrict x,
 }
 
 
-
+__kernel void kernel_ntt_radix4_last_m1_n4_nosquare(__global ulong* restrict x,
+                                           __global ulong* restrict w,
+                                           __global ulong* restrict digit_weight) {
+    const ulong k = get_global_id(0);
+    const ulong base = 4 * k;
+    ulong4 coeff = vload4(0, x + base);
+    ulong4 dw = vload4(0, digit_weight + base);
+    ulong4 u = modMul4(coeff, dw);
+    ulong4 tw = vload4(0, w + 6);
+    const ulong tw1 = tw.s1, tw0 = tw.s0, tw2 = tw.s2;
+    const ulong t0 = modAdd(u.s0, u.s2);
+    const ulong t1 = modAdd(u.s1, u.s3);
+    const ulong t2 = modSub(u.s0, u.s2);
+    const ulong t3 = modSub(u.s1, u.s3);
+    const ulong t3i = modMuli(t3);
+    const ulong r0 = modAdd(t0, t1);
+    const ulong r1 = modMul(modSub(t0, t1), tw1);
+    const ulong r2 = modMul(modAdd(t2, t3i), tw0);
+    const ulong r3 = modMul(modSub(t2, t3i), tw2);
+    ulong4 r = (ulong4)(r0, r1, r2, r3);
+    //r = modMul4(r, r);
+    vstore4(r, 0, x + base);
+}
 
 __kernel void kernel_inverse_ntt_radix4_mm_last(__global ulong2* restrict x,
                                                  __global ulong2* restrict wi,
@@ -808,6 +830,23 @@ __kernel void kernel_ntt_radix4_last_m1(__global ulong4* restrict x)
     x[k] = modMul4(coeff, coeff);
 }
 
+
+__kernel void kernel_ntt_radix4_last_m1_nosquare(__global ulong4* restrict x)
+{
+    const uint k = get_global_id(0);
+    ulong4 coeff = x[k];
+    
+    ulong a = modAdd(coeff.s0, coeff.s2);
+    ulong b = modAdd(coeff.s1, coeff.s3);
+    ulong c = modSub(coeff.s0, coeff.s2);
+    ulong d = modMuli(modSub(coeff.s1, coeff.s3));
+    
+    coeff.s0 = modAdd(a, b);
+    coeff.s1 = modSub(a, b);
+    coeff.s2 = modAdd(c, d);
+    coeff.s3 = modSub(c, d);
+    x[k] = modMul3_2_w10(coeff);
+}
 
 __kernel void kernel_ntt_radix4_mm_first(__global ulong2* restrict x,
                                          __global ulong2* restrict w,

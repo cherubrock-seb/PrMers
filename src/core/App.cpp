@@ -361,8 +361,10 @@ App::App(int argc, char** argv)
         "kernel_carry_2",
         "kernel_inverse_ntt_radix4_mm",
         "kernel_ntt_radix4_last_m1_n4",
+        "kernel_ntt_radix4_last_m1_n4_nosquare",
         "kernel_inverse_ntt_radix4_mm_last",
         "kernel_ntt_radix4_last_m1",
+        "kernel_ntt_radix4_last_m1_nosquare",
         "kernel_ntt_radix4_mm_first",
         "kernel_ntt_radix4_mm_m8",
         "kernel_ntt_radix4_mm_m4",
@@ -1362,7 +1364,7 @@ int App::runPM1() {
 
     }
     
-//    std::cout << "[DEBUG] E=" << E << std::endl;
+    //std::cout << "[DEBUG] E=" << E << std::endl;
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint64_t resumeIter = backupManager.loadState(x);

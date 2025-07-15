@@ -337,7 +337,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
         [](auto m0, auto){ return m0==128; },
         { ArgKind::BufX, ArgKind::BufW } ,1},
       { RadixOp::Last,    4, 4,
-        k_last_m1,      ls0, "kernel_ntt_radix4_last_m1",
+        k_last_m1,      ls0, "kernel_ntt_radix4_last_m1_nosquare",
         [](auto m0, auto){ return m0==4; },
         { ArgKind::BufX, ArgKind::BufW } ,1},
       { RadixOp::Last,    2, 2,
@@ -345,7 +345,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
         [](auto m0, auto){ return m0==2;},
         { ArgKind::BufX } ,1},
       { RadixOp::Last,    4, 4,
-        k_last_m1_n4,   ls0, "kernel_ntt_radix4_last_m1_n4",
+        k_last_m1_n4,   ls0, "kernel_ntt_radix4_last_m1_n4_nosquare",
         [](auto, auto nn){ return nn==4; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW } ,1}
     };
