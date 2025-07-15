@@ -21,6 +21,7 @@
  * This code is released as free software. 
  */
 //#define CL_TARGET_OPENCL_VERSION 200
+#define NOMINMAX
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
