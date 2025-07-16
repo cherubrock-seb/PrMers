@@ -1160,6 +1160,7 @@ void App::gpuMulInPlace(
     nttEngine->forward_simple(buffers->input, 0);
     nttEngine->pointwiseMul(buffers->input, temp);
     nttEngine->inverse_simple(buffers->input, 0);
+    clReleaseMemObject(temp);
     
 }
 
@@ -1187,6 +1188,8 @@ static size_t primeCountApprox(const mpz_class& low, const mpz_class& high) {
     double diff = li(b) - li(a);
     return diff > 0.0 ? static_cast<size_t>(diff) : 0;
 }
+
+
 
 int App::runPM1Stage2() {
     using namespace std::chrono;
@@ -1221,7 +1224,21 @@ int App::runPM1Stage2() {
 
     evenPow[0] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     gpuCopy(context.getQueue(), buffers->input, evenPow[0], limbBytes);
+    auto ensureEvenPow = [&](unsigned long needIdx) {
+        while (evenPow.size() <= needIdx) {
+            size_t kPrev = evenPow.size() - 1;
+            cl_mem buf = clCreateBuffer(context.getContext(),
+                                        CL_MEM_READ_WRITE,
+                                        limbBytes, nullptr, &err);
 
+            gpuCopy(context.getQueue(), evenPow[kPrev], buf, limbBytes);
+            gpuMulInPlace(buf, evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
+            carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+            gpuCopy(context.getQueue(), buffers->input, buf, limbBytes);
+
+            evenPow.push_back(buf);
+        }
+    };
     int pct = -1;
     std::cout << "Precomputing H powers: 0%" << std::flush;
     for (unsigned long k = 1; k < nbEven; ++k) {
@@ -1281,8 +1298,10 @@ int App::runPM1Stage2() {
         if (idx) {
             gpuCopy(context.getQueue(), Hq, buffers->input, limbBytes);
             mpz_class d = p - p_prev;
-            unsigned long dUL = mpz_get_ui(d.get_mpz_t());
-            cl_mem Hd = evenPow[dUL / 2 - 1];
+            unsigned long idxGap = mpz_get_ui(d.get_mpz_t()) / 2 - 1;
+            ensureEvenPow(idxGap);
+            cl_mem Hd = evenPow[idxGap];
+
             gpuMulInPlace(buffers->input, Hd, carry, limbBytes, buffers->blockCarryBuf);
             carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
             gpuCopy(context.getQueue(), buffers->input, Hq, limbBytes);
