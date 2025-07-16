@@ -1170,51 +1170,35 @@ void App::subOneGPU(cl_mem buf)
 
 
 
-static std::vector<mpz_class> primeList(const mpz_class& low,
-                                        const mpz_class& high) {
-    std::vector<mpz_class> v;
-    mpz_class q, range = high - low;
-    mpz_nextprime(q.get_mpz_t(), low.get_mpz_t());
 
-    mpz_class next = low + range / 1000;   // 0,1 %
-    int pct_tenths = 0;                    // 0 → 0,0 %, 1 → 0,1 %, …
-    std::cout << "Searching primes: 0.0%" << std::flush;
-
-    while (q <= high) {
-        v.push_back(q);
-        mpz_nextprime(q.get_mpz_t(), q.get_mpz_t());
-
-        while (pct_tenths < 1000 && q > next) {
-            ++pct_tenths;
-            std::cout << "\rSearching primes: "
-                      << std::fixed << std::setprecision(1)
-                      << pct_tenths / 10.0 << "%" << std::flush;
-            next = low + range * (pct_tenths + 1) / 1000;
-        }
-    }
-    std::cout << "\rSearching primes: 100.0%" << std::endl;
-    return v;
+static unsigned long evenGapBound(const mpz_class& B2) {
+    double ln = std::log(mpz_get_d(B2.get_mpz_t()));
+    double bound = std::ceil((ln * ln) / 2.0);
+    return bound < 2 ? 1 : static_cast<unsigned long>(bound);
 }
 
+static size_t primeCountApprox(const mpz_class& low, const mpz_class& high) {
+    auto li = [](double x) {
+        double l = std::log(x);
+        return x / l + x / (l * l);
+    };
+    double a = mpz_get_d(low.get_mpz_t());
+    double b = mpz_get_d(high.get_mpz_t());
+    double diff = li(b) - li(a);
+    return diff > 0.0 ? static_cast<size_t>(diff) : 0;
+}
 
 int App::runPM1Stage2() {
     using namespace std::chrono;
     bool debug = false;
-    mpz_class B1((unsigned long)options.B1), B2((unsigned long)options.B2);
+    mpz_class B1(static_cast<unsigned long>(options.B1));
+    mpz_class B2(static_cast<unsigned long>(options.B2));
     if (B2 <= B1) { std::cerr << "Stage 2 error B2 < B1.\n"; return -1; }
+
     if (debug) std::cout << "[DEBUG] Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
 
-    auto primes = primeList(B1, B2);
-    if (primes.empty()) { std::cout << "No prime between B1 B2\n"; return 1; }
-
-    mpz_class maxGap(0);
-    for (size_t i = 1; i < primes.size(); ++i)
-        if (primes[i] - primes[i - 1] > maxGap) maxGap = primes[i] - primes[i - 1];
-    if (mpz_odd_p(maxGap.get_mpz_t())) maxGap += 1;
-    if (!maxGap.fits_ulong_p()) { std::cerr << "Max Gap error\n"; return -2; }
-    unsigned long nbEven = mpz_get_ui(maxGap.get_mpz_t()) / 2;
-
+    unsigned long nbEven = evenGapBound(B2);
     size_t limbs = precompute.getN();
     size_t limbBytes = limbs * sizeof(uint64_t);
 
@@ -1254,12 +1238,17 @@ int App::runPM1Stage2() {
     cl_mem Hq = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     gpuCopy(context.getQueue(), Hbuf, buffers->input, limbBytes);
 
-    size_t bitlen = mpz_sizeinbase(primes.front().get_mpz_t(), 2);
-    for (int64_t i = int64_t(bitlen) - 2; i >= 0; --i){
+    mpz_class p_prev;
+    mpz_class p;
+    mpz_nextprime(p_prev.get_mpz_t(), B1.get_mpz_t());
+    p = p_prev;
+
+    size_t bitlen = mpz_sizeinbase(p.get_mpz_t(), 2);
+    for (int64_t i = static_cast<int64_t>(bitlen) - 2; i >= 0; --i) {
         nttEngine->forward(buffers->input, 0);
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-        if (mpz_tstbit(primes.front().get_mpz_t(), i)) {
+        if (mpz_tstbit(p.get_mpz_t(), i)) {
             gpuMulInPlace(buffers->input, Hbuf, carry, limbBytes, buffers->blockCarryBuf);
             carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         }
@@ -1273,17 +1262,25 @@ int App::runPM1Stage2() {
     cl_mem tmp = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
 
     uint32_t resumeIdx = backupManager.loadStatePM1S2(Hq, Qbuf, limbBytes);
-    size_t startIdx = resumeIdx ? resumeIdx : 0;
+    size_t idx = 0;
+
+    while (idx < resumeIdx && p <= B2) {
+        mpz_nextprime(p.get_mpz_t(), p.get_mpz_t());
+        p_prev = p;
+        ++idx;
+    }
+
+    size_t totalPrimes = primeCountApprox(B1, B2);
 
     timer.start(); timer2.start();
     auto start = high_resolution_clock::now();
     auto lastDisplay = start;
     auto lastBackup  = start;
 
-    for (size_t idx = startIdx; idx < primes.size(); ++idx) {
+    for (; p <= B2; ++idx) {
         if (idx) {
             gpuCopy(context.getQueue(), Hq, buffers->input, limbBytes);
-            mpz_class d = primes[idx] - primes[idx - 1];
+            mpz_class d = p - p_prev;
             unsigned long dUL = mpz_get_ui(d.get_mpz_t());
             cl_mem Hd = evenPow[dUL / 2 - 1];
             gpuMulInPlace(buffers->input, Hd, carry, limbBytes, buffers->blockCarryBuf);
@@ -1300,16 +1297,18 @@ int App::runPM1Stage2() {
 
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
-            double done = double(idx + 1); double total = double(primes.size());
-            double percent = done / total * 100.0;
+            double done = static_cast<double>(idx + 1);
+            double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
             double elapsedSec = duration<double>(now - start).count();
             double ips = done / elapsedSec;
-            double remaining = total - done;
-            double etaSec = ips > 0 ? remaining / ips : 0;
-            int days = int(etaSec) / 86400; int hours = (int(etaSec) % 86400) / 3600;
-            int minutes = (int(etaSec) % 3600) / 60; int seconds = int(etaSec) % 60;
+            double remaining = totalPrimes > done ? static_cast<double>(totalPrimes) - done : 0.0;
+            double etaSec = ips > 0.0 ? remaining / ips : 0.0;
+            int days = static_cast<int>(etaSec) / 86400;
+            int hours = (static_cast<int>(etaSec) % 86400) / 3600;
+            int minutes = (static_cast<int>(etaSec) % 3600) / 60;
+            int seconds = static_cast<int>(etaSec) % 60;
             std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
-                      << "prime: " << primes[idx].get_ui() << " | "
+                      << "prime: " << p.get_ui() << " | "
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
@@ -1330,6 +1329,9 @@ int App::runPM1Stage2() {
             backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
             return 0;
         }
+
+        p_prev = p;
+        mpz_nextprime(p.get_mpz_t(), p.get_mpz_t());
     }
 
     std::vector<uint64_t> hostQ(limbs);
@@ -1348,7 +1350,6 @@ int App::runPM1Stage2() {
     backupManager.clearState();
     return found ? 0 : 1;
 }
-
 
 
 
