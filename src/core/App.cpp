@@ -1307,9 +1307,7 @@ int App::runPM1Stage2() {
     std::cout << "\r[DEBUG] p=" << p << std::endl;
     std::cout << "\r[DEBUG] idx=" << idx << std::endl;
     
-    if(idx>0){
-        idx-=1;
-    }
+    
     size_t totalPrimes = primeCountApprox(B1, B2);
 
     timer.start(); timer2.start();
