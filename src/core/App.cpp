@@ -98,7 +98,16 @@ static std::vector<std::string> parseConfigFile(const std::string& config_path) 
     return args;
 }
 
-
+inline void writeStageResult(const std::string& file,
+                             const std::string& message)
+{
+    std::ofstream out(file, std::ios::app);
+    if (!out) {
+        std::cerr << "Cannot open " << file << " for writing\n";
+        return;
+    }
+    out << message << '\n';
+}
 
 void restart_self(int argc, char* argv[]) {
     std::vector<std::string> args(argv, argv + argc);
@@ -1359,13 +1368,29 @@ int App::runPM1Stage2() {
     mpz_t Q; mpz_init(Q); vectToMpz2(Q, hostQ, precompute.getDigitWidth(), Mp);
     mpz_t g; mpz_init(g); mpz_gcd(g, Q, Mp);
     bool found = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
+    std::string filename = "stage2_result_B2_" + B2.get_str() +
+                        "_p_" + std::to_string(options.exponent) + ".txt";
+
+    if (found) {
+        char* s = mpz_get_str(nullptr, 10, g);
+        writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
+        std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
+        std::free(s);
+    } else {
+        writeStageResult(filename, "No factor P-1 up to B2=" + B2.get_str());
+        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+    }
+
+    /*
     if (found) {
         char* s = mpz_get_str(nullptr, 10, g);
         std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
         std::free(s);
     } else {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
-    }
+    }*/
+
+
     backupManager.clearState();
     return found ? 0 : 1;
 }
@@ -1542,6 +1567,19 @@ int App::runPM1() {
     //gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
 
     bool factorFound = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
+
+    std::string filename = "stage1_result_B1_" + std::to_string(B1) +
+                        "_p_" + std::to_string(options.exponent) + ".txt";
+
+    if (factorFound) {
+        char* fstr = mpz_get_str(nullptr, 10, g);
+        writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
+        std::free(fstr);
+    } else {
+        writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
+    }
+
+
     if (factorFound) {
         char* fstr = mpz_get_str(nullptr, 10, g);
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
@@ -1555,8 +1593,6 @@ int App::runPM1() {
         }
         return 0;
     }
-    
-
     std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
     if(options.B2>0){
         runPM1Stage2();
@@ -1564,6 +1600,7 @@ int App::runPM1() {
     else{
             backupManager.clearState();
     }
+    backupManager.clearState();
     return 1;
 }
 
