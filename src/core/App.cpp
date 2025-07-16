@@ -1391,7 +1391,7 @@ int App::runPM1Stage2() {
     }*/
 
 
-    backupManager.clearState();
+    //backupManager.clearState();
     return found ? 0 : 1;
 }
 
@@ -1588,19 +1588,19 @@ int App::runPM1() {
         if(options.B2>0){
             runPM1Stage2();
         }
-        else{
-            backupManager.clearState();
-        }
+//        else{
+            //backupManager.clearState();
+//        }
         return 0;
     }
     std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
     if(options.B2>0){
         runPM1Stage2();
     }
-    else{
+/*    else{
             backupManager.clearState();
     }
-    backupManager.clearState();
+    backupManager.clearState();*/
     return 1;
 }
 
