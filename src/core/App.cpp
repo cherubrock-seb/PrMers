@@ -1287,22 +1287,29 @@ int App::runPM1Stage2() {
 
     cl_mem tmp = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
 
-    uint32_t resumeIdx = backupManager.loadStatePM1S2(Hq, Qbuf, limbBytes);
-    //std::cout << "\r[DEBUG] resumeIdx=" << resumeIdx << std::endl;
-    size_t idx = 0;
 
-    mpz_class prevPrime = p_prev;
-    idx = 0;
-    while (idx < resumeIdx && p <= B2) {
-        mpz_nextprime(p.get_mpz_t(), p_prev.get_mpz_t());
-        prevPrime = p_prev;
-        p_prev    = p;
-        ++idx;
-    }
+
+
+    size_t     idx     = 0;
+    uint64_t resumeIdx = 0;
+    //uint64_t resumeIdx = backupManager.loadStatePM1S2(Hq, Qbuf, limbBytes);
+
+    mpz_nextprime(p_prev.get_mpz_t(), B1.get_mpz_t());
     p = p_prev;
-    p_prev = prevPrime;
+    idx = 0;
+    for (; idx < resumeIdx; ++idx) {
+        p_prev = p;
+        mpz_nextprime(p.get_mpz_t(), p.get_mpz_t());
+    }
 
 
+    std::cout << "\r[DEBUG] p_prev=" << p_prev << std::endl;
+    std::cout << "\r[DEBUG] p=" << p << std::endl;
+    std::cout << "\r[DEBUG] idx=" << idx << std::endl;
+    
+    if(idx>0){
+        idx-=1;
+    }
     size_t totalPrimes = primeCountApprox(B1, B2);
 
     timer.start(); timer2.start();
@@ -1351,22 +1358,32 @@ int App::runPM1Stage2() {
                       << std::endl;
             lastDisplay = now;
         }
-        if (duration_cast<seconds>(now - lastBackup).count() >= 180) {
+        /*if (duration_cast<seconds>(now - lastBackup).count() >= 180) {
             backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
             lastBackup = now;
-        }
+        }*/
         if (options.iterforce > 0 && (idx + 1) % options.iterforce == 0) {
             char dummy;
             clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, sizeof(dummy), &dummy, 0, nullptr, nullptr);
         }
-        if (interrupted) {
-            clFinish(context.getQueue());
-            backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
-            return 0;
-        }
+
 
         p_prev = p;
         mpz_nextprime(p.get_mpz_t(), p.get_mpz_t());
+        /*if (interrupted) {
+            clFinish(context.getQueue());
+            backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
+            std::cout << "\r[DEBUG] p_prev=" << p_prev << std::endl;
+            std::cout << "\r[DEBUG] p=" << p << std::endl;
+             std::cout << "\r[DEBUG] idx=" << idx << std::endl;
+            return 0;
+        }*/
+        if (interrupted) {
+            clFinish(context.getQueue());
+            //backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
+            return 0;
+        }
+
     }
 
     std::vector<uint64_t> hostQ(limbs);
