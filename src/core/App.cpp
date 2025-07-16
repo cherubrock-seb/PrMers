@@ -1313,7 +1313,7 @@ int App::runPM1Stage2() {
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
                       << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
-                      << std::flush;
+                      << std::endl;
             lastDisplay = now;
         }
         if (duration_cast<seconds>(now - lastBackup).count() >= 180) {
