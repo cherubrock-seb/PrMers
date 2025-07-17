@@ -1365,7 +1365,6 @@ int App::runPM1Stage2() {
 
     for (; p <= B2; ++idx) {
         if (idx) {
-            //gpuCopy(context.getQueue(), buffers->Hq, buffers->input, limbBytes);
             mpz_class d = p - p_prev;
             unsigned long idxGap = mpz_get_ui(d.get_mpz_t()) / 2 - 1;
             ensureEvenPow(idxGap);
@@ -1375,14 +1374,16 @@ int App::runPM1Stage2() {
             nttEngine->inverse_simple(buffers->Hq, 0);
             carry.carryGPU(buffers->Hq, buffers->blockCarryBuf, limbBytes);
             
-           // gpuCopy(context.getQueue(), buffers->input, buffers->Hq, limbBytes);
         }
 
         gpuCopy(context.getQueue(), buffers->Hq, buffers->tmp, limbBytes);
         subOneGPU(buffers->tmp);
-        gpuMulInPlace3(buffers->Qbuf, buffers->tmp, carry, limbBytes, buffers->blockCarryBuf);
+        nttEngine->forward_simple(buffers->tmp, 0);
+        nttEngine->forward_simple(buffers->Qbuf, 0);
+        nttEngine->pointwiseMul(buffers->Qbuf, buffers->tmp);
+        nttEngine->inverse_simple(buffers->Qbuf, 0);
+        carry.carryGPU(buffers->Qbuf, buffers->blockCarryBuf, limbBytes);
         
-
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
             double done = static_cast<double>(idx + 1);
