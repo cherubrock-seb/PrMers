@@ -1255,7 +1255,6 @@ int App::runPM1Stage2() {
         gpuCopy(context.getQueue(), evenPow[k - 1], evenPow[k], limbBytes);
         gpuMulInPlace(evenPow[k], evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
         carry.carryGPU(evenPow[k], buffers->blockCarryBuf, limbBytes);
-        //gpuCopy(context.getQueue(), buffers->input, evenPow[k], limbBytes);
         int newPct = int((k + 1) * 100 / nbEven);
         if (newPct > pct) { pct = newPct; std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush; }
     }
