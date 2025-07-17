@@ -1242,9 +1242,7 @@ int App::runPM1Stage2() {
 
             gpuCopy(context.getQueue(), evenPow[kPrev], buf, limbBytes);
             gpuMulInPlace(buf, evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
-            carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-            gpuCopy(context.getQueue(), buffers->input, buf, limbBytes);
-
+            carry.carryGPU(buf, buffers->blockCarryBuf, limbBytes);
             evenPow.push_back(buf);
         }
     };
@@ -1254,8 +1252,7 @@ int App::runPM1Stage2() {
         evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
         gpuCopy(context.getQueue(), evenPow[k - 1], evenPow[k], limbBytes);
         gpuMulInPlace(evenPow[k], evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-        gpuCopy(context.getQueue(), buffers->input, evenPow[k], limbBytes);
+        carry.carryGPU(evenPow[k], buffers->blockCarryBuf, limbBytes);
         int newPct = int((k + 1) * 100 / nbEven);
         if (newPct > pct) { pct = newPct; std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush; }
     }
