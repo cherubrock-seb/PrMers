@@ -1365,16 +1365,20 @@ int App::runPM1Stage2() {
 
     for (; p <= B2; ++idx) {
         if (idx) {
-            gpuCopy(context.getQueue(), buffers->Hq, buffers->input, limbBytes);
+            //gpuCopy(context.getQueue(), buffers->Hq, buffers->input, limbBytes);
             mpz_class d = p - p_prev;
             unsigned long idxGap = mpz_get_ui(d.get_mpz_t()) / 2 - 1;
             ensureEvenPow(idxGap);
             
-            gpuMulInPlace2(buffers->input, buffers->evenPow[idxGap], carry, limbBytes, buffers->blockCarryBuf);
-            gpuCopy(context.getQueue(), buffers->input, buffers->Hq, limbBytes);
+            nttEngine->forward_simple(buffers->Hq, 0);
+            nttEngine->pointwiseMul(buffers->Hq, buffers->evenPow[idxGap]);
+            nttEngine->inverse_simple(buffers->Hq, 0);
+            carry.carryGPU(buffers->Hq, buffers->blockCarryBuf, limbBytes);
+            
+           // gpuCopy(context.getQueue(), buffers->input, buffers->Hq, limbBytes);
         }
 
-        gpuCopy(context.getQueue(), buffers->input, buffers->tmp, limbBytes);
+        gpuCopy(context.getQueue(), buffers->Hq, buffers->tmp, limbBytes);
         subOneGPU(buffers->tmp);
         gpuMulInPlace3(buffers->Qbuf, buffers->tmp, carry, limbBytes, buffers->blockCarryBuf);
         
