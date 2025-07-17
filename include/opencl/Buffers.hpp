@@ -27,7 +27,11 @@ public:
     cl_mem invTwiddle5Buf;     // inverse twiddles
     cl_mem blockCarryBuf;
     cl_mem digitWidthMaskBuf;
-    
+    cl_mem Hbuf;
+    cl_mem Hq;
+    cl_mem Qbuf;
+    cl_mem tmp; 
+    std::vector<cl_mem> evenPow;
     static cl_mem createBuffer(const opencl::Context& ctx, cl_mem_flags flags,
                                size_t size, const void* ptr,
                                const std::string& name);
