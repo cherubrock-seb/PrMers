@@ -1182,25 +1182,10 @@ void App::gpuMulInPlace2(
                                  cl_mem blockCarryBuf)
 {
     
-    gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
-    cl_int err;
+    
     nttEngine->forward_simple(buffers->input, 0);
-    cl_mem temp = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        limbBytes,
-        nullptr,
-        &err
-    );
-    gpuCopy(context.getQueue(), buffers->input, temp, limbBytes);
-   
-    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
-    //nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, temp);
+    nttEngine->pointwiseMul(buffers->input, B);
     nttEngine->inverse_simple(buffers->input, 0);
-     gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-   
-    clReleaseMemObject(temp);
     
 }
 
