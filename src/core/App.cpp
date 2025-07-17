@@ -1339,8 +1339,8 @@ int App::runPM1Stage2() {
     buffers->tmp = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
 
     size_t     idx     = 0;
-    uint64_t resumeIdx = 0;
-    //uint64_t resumeIdx = backupManager.loadStatePM1S2(Hq, Qbuf, limbBytes);
+    //uint64_t resumeIdx = 0;
+    uint64_t resumeIdx = backupManager.loadStatePM1S2(buffers->Hq, buffers->Qbuf, limbBytes);
 
     mpz_nextprime(p_prev.get_mpz_t(), B1.get_mpz_t());
     p = p_prev;
@@ -1427,7 +1427,7 @@ int App::runPM1Stage2() {
         }*/
         if (interrupted) {
             clFinish(context.getQueue());
-            //backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
+            backupManager.saveStatePM1S2(buffers->Hq, buffers->Qbuf, idx, limbBytes);
             return 0;
         }
 
