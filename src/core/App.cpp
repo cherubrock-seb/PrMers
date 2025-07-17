@@ -1352,10 +1352,8 @@ int App::runPM1Stage2() {
 
         gpuCopy(context.getQueue(), buffers->input, tmp, limbBytes);
         subOneGPU(tmp);
-        gpuCopy(context.getQueue(), Qbuf, buffers->input, limbBytes);
-        gpuMulInPlace(buffers->input, tmp, carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-        gpuCopy(context.getQueue(), buffers->input, Qbuf, limbBytes);
+        gpuMulInPlace(Qbuf, tmp, carry, limbBytes, buffers->blockCarryBuf);
+        carry.carryGPU(Qbuf, buffers->blockCarryBuf, limbBytes);
 
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
