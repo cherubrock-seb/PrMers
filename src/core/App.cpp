@@ -1175,6 +1175,36 @@ void App::gpuMulInPlace(
     
 }
 
+void App::gpuMulInPlace3(
+                                 cl_mem A, cl_mem B,
+                                 math::Carry& carry,
+                                 size_t limbBytes,
+                                 cl_mem blockCarryBuf)
+{
+    
+    //gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
+    cl_int err;
+    nttEngine->forward_simple(A, 0);
+    cl_mem temp = clCreateBuffer(
+        context.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    gpuCopy(context.getQueue(), A, temp, limbBytes);
+   
+    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
+    nttEngine->forward_simple(buffers->input, 0);
+    nttEngine->pointwiseMul(buffers->input, temp);
+    nttEngine->inverse_simple(buffers->input, 0);
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
+    clReleaseMemObject(temp);
+    
+}
+
+
 void App::gpuMulInPlace2(
                                  cl_mem A, cl_mem B,
                                  math::Carry& carry,
@@ -1346,7 +1376,7 @@ int App::runPM1Stage2() {
 
         gpuCopy(context.getQueue(), buffers->input, buffers->tmp, limbBytes);
         subOneGPU(buffers->tmp);
-        gpuMulInPlace(buffers->Qbuf, buffers->tmp, carry, limbBytes, buffers->blockCarryBuf);
+        gpuMulInPlace3(buffers->Qbuf, buffers->tmp, carry, limbBytes, buffers->blockCarryBuf);
         
 
         auto now = high_resolution_clock::now();

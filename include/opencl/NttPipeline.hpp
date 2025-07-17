@@ -38,7 +38,11 @@ struct RadixOp {
 };
 struct NttStage {
     cl_kernel                kernel;
-    struct Arg { size_t size; std::vector<uint8_t> data; };
+    struct Arg {
+    size_t size;
+    std::vector<uint8_t> data;
+    bool isBufX = false;
+};
     std::vector<Arg>         args;
     int                      globalScale;
     const size_t*            localSize;
@@ -50,16 +54,14 @@ inline void setStageArgs(NttStage& s, cl_mem buf_x) {
     for (cl_uint i = 0; i < s.args.size(); ++i) {
         auto& A = s.args[i];
         if (!A.data.empty()) {
-            if (A.size == sizeof(cl_mem)) {
-                cl_mem* candidate = reinterpret_cast<cl_mem*>(A.data.data());
-                if (*candidate == nullptr) {
-                    std::memcpy(A.data.data(), &buf_x, sizeof(cl_mem));
-                }
+            if (A.isBufX && A.size == sizeof(cl_mem)) {
+                std::memcpy(A.data.data(), &buf_x, sizeof(cl_mem));
             }
             clSetKernelArg(s.kernel, i, A.size, A.data.data());
         }
     }
 }
+
 
 template<typename T>
 static std::vector<uint8_t> toBytes(const T& x) {
@@ -84,22 +86,22 @@ inline NttStage makeStage(const RadixOp& op,
     for (auto kind : op.argKinds) {
         switch (kind) {
             case ArgKind::BufX:
-                s.args.push_back({ sizeof(cl_mem), toBytes(buf_x) });
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_x), true  });
                 break;
             case ArgKind::BufW:
-                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w4) });
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w4), false  });
                 break;
             case ArgKind::BufDW:
-                s.args.push_back({ sizeof(cl_mem), toBytes(buf_dw) });
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_dw), false });
                 break;
             case ArgKind::ParamM:
-                s.args.push_back({ sizeof(cl_uint), toBytes((cl_uint)m) });
+                s.args.push_back({ sizeof(cl_uint), toBytes((cl_uint)m), false });
                 break;            
             case ArgKind::BufW5:
-                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w5) });
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w5), false });
                 break;
             case ArgKind::BufW4:
-                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w4) });
+                s.args.push_back({ sizeof(cl_mem), toBytes(buf_w4), false });
                 break;
         }
     }
