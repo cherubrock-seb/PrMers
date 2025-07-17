@@ -1169,8 +1169,8 @@ void App::gpuMulInPlace(
     nttEngine->forward_simple(buffers->input, 0);
     nttEngine->pointwiseMul(buffers->input, temp);
     nttEngine->inverse_simple(buffers->input, 0);
-     gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-   
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
     clReleaseMemObject(temp);
     
 }
@@ -1186,6 +1186,7 @@ void App::gpuMulInPlace2(
     nttEngine->forward_simple(buffers->input, 0);
     nttEngine->pointwiseMul(buffers->input, B);
     nttEngine->inverse_simple(buffers->input, 0);
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
     
 }
 
@@ -1258,7 +1259,6 @@ int App::runPM1Stage2() {
 
             gpuCopy(context.getQueue(), evenPow[kPrev], buf, limbBytes);
             gpuMulInPlace(buf, evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
-            carry.carryGPU(buf, buffers->blockCarryBuf, limbBytes);
             evenPow.push_back(buf);
         }
     };
@@ -1268,7 +1268,6 @@ int App::runPM1Stage2() {
         evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
         gpuCopy(context.getQueue(), evenPow[k - 1], evenPow[k], limbBytes);
         gpuMulInPlace(evenPow[k], evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(evenPow[k], buffers->blockCarryBuf, limbBytes);
         
         int newPct = int((k + 1) * 100 / nbEven);
         if (newPct > pct) { pct = newPct; std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush; }
@@ -1299,7 +1298,6 @@ int App::runPM1Stage2() {
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         if (mpz_tstbit(p.get_mpz_t(), i)) {
             gpuMulInPlace(buffers->input, Hbuf, carry, limbBytes, buffers->blockCarryBuf);
-            carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         }
     }
     gpuCopy(context.getQueue(), buffers->input, Hq, limbBytes);
@@ -1346,14 +1344,13 @@ int App::runPM1Stage2() {
             ensureEvenPow(idxGap);
             
             gpuMulInPlace2(buffers->input, evenPow[idxGap], carry, limbBytes, buffers->blockCarryBuf);
-            carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
             gpuCopy(context.getQueue(), buffers->input, Hq, limbBytes);
         }
 
         gpuCopy(context.getQueue(), buffers->input, tmp, limbBytes);
         subOneGPU(tmp);
         gpuMulInPlace(Qbuf, tmp, carry, limbBytes, buffers->blockCarryBuf);
-        carry.carryGPU(Qbuf, buffers->blockCarryBuf, limbBytes);
+        
 
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
