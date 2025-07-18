@@ -2,6 +2,7 @@
 #include "opencl/Buffers.hpp"
 #include "opencl/Kernels.hpp"
 #include "util/OpenCLError.hpp"
+#include "math/Carry.hpp"
 #include <iostream>
 #include <algorithm>
 #ifndef CL_TARGET_OPENCL_VERSION
@@ -388,6 +389,111 @@ int NttEngine::pointwiseMul(cl_mem a, cl_mem b)
         false,
         n);
     return 1;
+}
+
+void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
+    buffers_.input = A;
+    forward(buffers_.input, 0);   
+    //ntt.pointwiseMul(A, A);
+    inverse(buffers_.input, 0); 
+    //carry.carryGPU(A, blockCarryBuf, limbBytes);
+}
+
+void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
+    clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
+}
+
+void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    copy(A, buffers_.input, limbBytes);
+    cl_int err;
+    forward_simple(buffers_.input, 0);
+    cl_mem temp = clCreateBuffer(
+        ctx_.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    copy(buffers_.input, temp, limbBytes);
+   
+    copy(B, buffers_.input, limbBytes);
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, temp);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+    copy(buffers_.input, A, limbBytes);
+    clReleaseMemObject(temp);
+}
+
+void NttEngine::mulInPlace2(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, B);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+}
+
+void NttEngine::mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    //copy(A, buffers_.input, limbBytes);
+    cl_int err;
+    forward_simple(A, 0);
+    cl_mem temp = clCreateBuffer(
+        ctx_.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    copy(A, temp, limbBytes);
+   
+    copy(B, buffers_.input, limbBytes);
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, temp);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+    copy(buffers_.input, A, limbBytes);
+    clReleaseMemObject(temp);
+}
+
+void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    cl_int err;
+
+    cl_mem tmpA = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    cl_mem tmpB = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    clEnqueueCopyBuffer(queue_, A, tmpA,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    clEnqueueCopyBuffer(queue_, B, tmpB,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    forward_simple(tmpA, 0);
+    forward_simple(tmpB, 0);
+    pointwiseMul(tmpA, tmpB);
+    inverse_simple(tmpA, 0);
+    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+
+    clEnqueueCopyBuffer(queue_, tmpA, A,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    clReleaseMemObject(tmpA);
+    clReleaseMemObject(tmpB);
+}
+
+void NttEngine::subOne(cl_mem buf) {
+    kernels_.runSub1(buf);
 }
 
 } // namespace opencl
