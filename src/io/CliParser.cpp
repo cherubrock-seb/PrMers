@@ -64,7 +64,9 @@ void printUsage(const char* progName) {
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
-    std::cout << "  -iterforce <iter>    : (Optional) force a display every <iter>" << std::endl;
+    std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
+    std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
+    
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
@@ -163,6 +165,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-iterforce") == 0 && i + 1 < argc) {
             opts.iterforce = std::atoi(argv[++i]);
         }
+        else if (std::strcmp(argv[i], "-iterforce2") == 0 && i + 1 < argc) {
+            opts.iterforce2 = std::atoi(argv[++i]);
+        }
         else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
             opts.max_local_size2 = std::atoi(argv[++i]);
         }
@@ -221,6 +226,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     }
     if(opts.iterforce == 0){
         opts.iterforce = 500;
+    }
+    if(opts.iterforce2 == 0){
+        opts.iterforce = 10;
     }
     if(opts.enqueue_max == 0){
         opts.enqueue_max = opts.iterforce*64;

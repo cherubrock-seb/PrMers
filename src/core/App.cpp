@@ -1411,7 +1411,7 @@ int App::runPM1Stage2() {
             backupManager.saveStatePM1S2(Hq, Qbuf, idx, limbBytes);
             lastBackup = now;
         }*/
-        if (options.iterforce > 0 && (idx + 1) % options.iterforce == 0) {
+        if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) {
             char dummy;
             clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, sizeof(dummy), &dummy, 0, nullptr, nullptr);
         }
