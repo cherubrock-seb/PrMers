@@ -228,7 +228,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         opts.iterforce = 500;
     }
     if(opts.iterforce2 == 0){
-        opts.iterforce = 10;
+        opts.iterforce2 = 10;
     }
     if(opts.enqueue_max == 0){
         opts.enqueue_max = opts.iterforce*64;
