@@ -44,33 +44,6 @@ public:
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);
-    void gpuSquareInPlace(
-                                    cl_mem A,
-                                    math::Carry& carry,
-                                    size_t limbBytes,
-                                    cl_mem blockCarryBuf);
-    void gpuMulInPlace(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf);
-    void gpuMulInPlace2(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf);
-    void gpuMulInPlace3(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf);
-    void gpuMulInPlace5(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf);
-    void subOneGPU(cl_mem buf);
-    void gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes);
 
 private:
   int    argc_;
