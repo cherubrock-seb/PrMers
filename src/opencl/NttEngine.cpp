@@ -275,7 +275,7 @@ int NttEngine::forward_simple(cl_mem buf_x, uint64_t /*iter*/) {
     cl_uint n = pre_.getN();
     int executed = 0;
     for (auto& stage : forward_simple_pipeline) {
-        setStageArgs(stage, buf_x);
+        setStageArgs2(stage, buf_x);
         int scale = stage.globalScale;
         size_t base = n;
         size_t workers;
@@ -332,7 +332,7 @@ int NttEngine::inverse_simple(cl_mem buf_x, uint64_t /*iter*/) {
     
     int executed = 0;
     for (auto& stage : inverse_simple_pipeline) {
-        setStageArgs(stage, buf_x);
+        setStageArgs2(stage, buf_x);
         int scale = stage.globalScale;
         size_t base = n;
         size_t workers;
