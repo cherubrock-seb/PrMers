@@ -1387,9 +1387,11 @@ int App::runPM1Stage2() {
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
             double done = static_cast<double>(idx + 1);
+            double doneSinceResume = static_cast<double>(idx + 1 - resumeIdx);
             double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
             double elapsedSec = duration<double>(now - start).count();
-            double ips = done / elapsedSec;
+            double ips = doneSinceResume > 0 ? doneSinceResume / elapsedSec : 0.0;
+
             double remaining = totalPrimes > done ? static_cast<double>(totalPrimes) - done : 0.0;
             double etaSec = ips > 0.0 ? remaining / ips : 0.0;
             int days = static_cast<int>(etaSec) / 86400;
