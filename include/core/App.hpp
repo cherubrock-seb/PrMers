@@ -65,6 +65,11 @@ public:
                                  math::Carry& carry,
                                  size_t limbBytes,
                                  cl_mem blockCarryBuf);
+    void gpuMulInPlace5(
+                                 cl_mem A, cl_mem B,
+                                 math::Carry& carry,
+                                 size_t limbBytes,
+                                 cl_mem blockCarryBuf);
     void subOneGPU(cl_mem buf);
     void gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes);
 

@@ -30,6 +30,7 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
+#include "math/GerbiczLiChecker.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -405,6 +406,49 @@ App::App(int argc, char** argv)
 }
 
 
+void App::gpuMulInPlace5(cl_mem A,
+                        cl_mem B,
+                        math::Carry& carry,
+                        size_t limbBytes,
+                        cl_mem blockCarryBuf)
+{
+    cl_int err;
+
+    cl_mem tmpA = clCreateBuffer(context.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    cl_mem tmpB = clCreateBuffer(context.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    clEnqueueCopyBuffer(context.getQueue(), A, tmpA,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    clEnqueueCopyBuffer(context.getQueue(), B, tmpB,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    nttEngine->forward_simple(tmpA, 0);
+    nttEngine->forward_simple(tmpB, 0);
+    nttEngine->pointwiseMul(tmpA, tmpB);
+    nttEngine->inverse_simple(tmpA, 0);
+    carry.carryGPU(tmpA, blockCarryBuf, limbBytes);
+
+    clEnqueueCopyBuffer(context.getQueue(), tmpA, A,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    clReleaseMemObject(tmpA);
+    clReleaseMemObject(tmpB);
+}
+
 
 int App::runPrpOrLl() {
     if (options.tune ) {
@@ -481,7 +525,30 @@ int App::runPrpOrLl() {
     uint64_t lastIter = resumeIter;
     uint64_t startIter = resumeIter;
     
-    
+    uint64_t L = (options.mode == "prp") ? options.exponent : options.exponent - 2;
+    uint64_t B = (uint64_t)std::ceil(std::sqrt((double)L));
+    auto mulGpu = [&](cl_mem dst, cl_mem src) {
+    gpuMulInPlace5(dst, src, carry,
+                  precompute.getN()*sizeof(uint64_t),
+                  buffers->blockCarryBuf);
+};
+
+
+
+
+
+    math::GerbiczLiChecker gchk(
+        L, B,
+        context.getContext(), context.getQueue(),
+        *buffers,
+        precompute.getN()*sizeof(uint64_t),
+        (options.mode=="prp") ? 3ULL : 4ULL,
+        carry,
+        mulGpu,
+        true
+    );
+    //gchk.init(buffers->input, resumeIter);
+
     for (uint64_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
 
@@ -742,6 +809,9 @@ int App::runPrpOrLl() {
         if (options.proof && iter + 1 < totalIters) {
             proofManager.checkpoint(buffers->input, iter + 1);
         }
+        //uint64_t iter1 = iter + 1;
+        //gchk.step(iter1, buffers->input);
+
     }
     
     if (interrupted) {
@@ -759,6 +829,16 @@ int App::runPrpOrLl() {
     }
     std::vector<uint64_t> hostData(precompute.getN());
     std::string res64_x;  
+    mpz_t Mp;
+    mpz_init(Mp);
+    mpz_ui_pow_ui(Mp, 2, options.exponent);
+    mpz_sub_ui(Mp, Mp, 1);
+    /*if (!gchk.finalCheck(buffers->input, precompute.getDigitWidth(), Mp)) {
+        std::cerr << "Gerbicz-Li check failed – recompute!\n";
+        mpz_clear(Mp);
+        //return -2;
+    }*/
+    mpz_clear(Mp);
 
     {
         clEnqueueReadBuffer(
@@ -1174,6 +1254,8 @@ void App::gpuMulInPlace(
     clReleaseMemObject(temp);
     
 }
+
+
 
 void App::gpuMulInPlace3(
                                  cl_mem A, cl_mem B,
