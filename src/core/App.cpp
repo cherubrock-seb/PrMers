@@ -551,7 +551,27 @@ int App::runPrpOrLl() {
 
     for (uint64_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
-
+        if (options.erroriter > 0 && iter + 1 == options.erroriter) {
+            uint64_t limb0;
+            clEnqueueReadBuffer(
+                context.getQueue(),
+                buffers->input,
+                CL_TRUE, 0,
+                sizeof(uint64_t),
+                &limb0,
+                0, nullptr, nullptr
+            );
+            limb0 += 1;
+            clEnqueueWriteBuffer(
+                context.getQueue(),
+                buffers->input,
+                CL_TRUE, 0,
+                sizeof(uint64_t),
+                &limb0,
+                0, nullptr, nullptr
+            );
+            std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+        }
         
         queued += nttEngine->forward(buffers->input, iter);
         /*if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; spinner.displayProgress(iter - resumeIter,
