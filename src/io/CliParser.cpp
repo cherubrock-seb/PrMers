@@ -64,6 +64,7 @@ void printUsage(const char* progName) {
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
+    std::cout << "  -erroriter <iter>    : (Optional) injects an error at iteration <iter> to test Gerbicz-Li error detection mechanism." << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     
@@ -157,6 +158,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
             opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {
+            opts.erroriter = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
