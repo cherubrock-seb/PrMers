@@ -93,14 +93,10 @@ jobs:
             echo "SIGNSRC=$($sig.FullName)" >> $env:GITHUB_ENV
           } else { exit 1 }
 
-      - name: Sign the binary
+      - name: Skip signing
         shell: powershell
         run: |
-          $pwd = ConvertTo-SecureString -String "prmers123" `
-            -Force -AsPlainText
-          & "${env:SIGNSRC}" sign /f prmerscert.pfx /p prmers123 `
-            /fd sha256 /tr http://timestamp.digicert.com /td sha256 `
-            /v build\Release\prmers.exe
+          echo "Skipping signing for now"
 
       - name: Package
         shell: powershell
