@@ -964,7 +964,11 @@ int App::runPrpOrLl() {
                 std::cout << "[Gerbicz] Restore iter=" << itersave << std::endl;
                 options.gerbicz_error_count+=1;
                 gpuCopy(context.getQueue(), save, buffers->input, limbBytes);
-                iter = itersave - 1;
+                
+                iter = itersave;
+                if(iter==0){
+                    iter = -1;
+                }
             }
             gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
 
