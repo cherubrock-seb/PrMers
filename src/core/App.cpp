@@ -959,7 +959,7 @@ int App::runPrpOrLl() {
             );
             
             if (std::equal(hostR2.begin(), hostR2.end(), hostData.begin())) {
-                std::cout << "[Gerbicz] Check passed!" << std::endl;
+                //std::cout << "[Gerbicz] Check passed!" << std::endl;
                 gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
                 itersave = iter;
             } else {
