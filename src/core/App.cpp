@@ -929,12 +929,15 @@ int App::runPrpOrLl() {
         if (options.proof && iter + 1 < totalIters) {
             proofManager.checkpoint(buffers->input, iter + 1);
         }
-        if(options.mode=="prp" && options.gerbiczli && iter>1 && (iter+1)%B==0){
+        if(options.mode=="prp" && options.gerbiczli && iter>1 && ((iter+1)%B==0 || (iter+1 == totalIters)) ){
             gpuCopy(context.getQueue(), buffers->input, r2, limbBytes);
             gpuCopy(context.getQueue(), bufd, buffers->input, limbBytes);
             clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
-            
-            for (uint64_t z = 0; z < B; ++z) {
+            uint64_t nbiter = B;
+            if((iter+1 == totalIters)){
+                nbiter = totalIters - itersave - 1;
+            }
+            for (uint64_t z = 0; z < nbiter; ++z) {
                 nttEngine->forward(buffers->input, iter);
                 nttEngine->inverse(buffers->input, iter);
                 carry.carryGPU(
@@ -971,7 +974,7 @@ int App::runPrpOrLl() {
                 }
             }
             gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
-
+            
 
             
         }
