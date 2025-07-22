@@ -932,7 +932,7 @@ int App::runPrpOrLl() {
         if(options.mode=="prp" && options.gerbiczli && iter>1 && ((iter+1)%B==0 || (iter+1 == totalIters)) ){
             gpuCopy(context.getQueue(), buffers->input, r2, limbBytes);
             gpuCopy(context.getQueue(), bufd, buffers->input, limbBytes);
-            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
+            //clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
             uint64_t nbiter = B;
             if((iter+1 == totalIters)){
                 nbiter = totalIters - itersave - 1;
@@ -959,7 +959,7 @@ int App::runPrpOrLl() {
             );
             
             if (std::equal(hostR2.begin(), hostR2.end(), hostData.begin())) {
-                //std::cout << "[Gerbicz] Check passed!" << std::endl;
+                std::cout << "[Gerbicz] Check passed!" << std::endl;
                 gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
                 itersave = iter;
             } else {
