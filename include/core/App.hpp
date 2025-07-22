@@ -15,7 +15,6 @@
 #include "core/Printer.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/ProofManager.hpp"
-#include "math/GerbiczLiChecker.hpp"
 #include "core/Logger.hpp"
 #include "util/Timer.hpp"
 #include "io/JsonBuilder.hpp"
