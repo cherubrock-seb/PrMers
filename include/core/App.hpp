@@ -91,7 +91,6 @@ private:
   util::Timer                        timer;
   util::Timer                        timer2;
   double                             elapsed;
-  std::unique_ptr<math::GerbiczLiChecker> checker;
 };
 
 mpz_class buildE(uint64_t B1);
