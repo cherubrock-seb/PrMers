@@ -17,7 +17,7 @@ struct CliOptions {
     std::string mode = "prp";                // "prp" ou "ll"
     bool profiling = false;
     bool debug = false;
-    bool gerbiczli = true;
+    bool gerbiczli = false;
     uint64_t B1 = 10000;
     uint64_t B2 = 0;
     uint64_t gerbicz_error_count = 0;
