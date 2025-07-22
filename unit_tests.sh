@@ -19,6 +19,23 @@ optflags=(
   nans:-cl-no-signed-zeros
   optdisable:-cl-opt-disable
 )
+
+echo ""
+echo "=== Gerbicz error injection tests ==="
+for erriter in 55 9940; do
+  echo -n "Testing ./prmers 9941 -erroriter $erriter... "
+  output=$(./prmers 9941 -erroriter "$erriter" --noask -prp 2>&1)
+  echo "$output" > "logs/gerbicz_error_9941_iter${erriter}.log"
+  if echo "$output" | grep -q "Injected error at iteration $erriter" \
+     && echo "$output" | grep -q "\[Gerbicz\] Check FAILED!" \
+     && echo "$output" | grep -q "\[Gerbicz\] Restore iter="; then
+    echo "✅"
+  else
+    echo "❌ Output mismatch (see logs/gerbicz_error_9941_iter${erriter}.log)"
+    exit 1
+  fi
+done
+
 echo ""
 echo "=== Extended P-1 factoring tests ==="
 
