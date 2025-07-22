@@ -30,7 +30,6 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
-#include "math/GerbiczLiChecker.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -449,9 +448,167 @@ void App::gpuMulInPlace5(cl_mem A,
     clReleaseMemObject(tmpB);
 }
 
+void App::gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes)
+{
+    clEnqueueCopyBuffer(context.getQueue(), src, dst, 0, 0, bytes, 0, nullptr, nullptr);
+}
+
+struct MpzWrapper {
+    mpz_t val;
+    MpzWrapper() { mpz_init(val); }
+    ~MpzWrapper() { mpz_clear(val); }
+
+    mpz_t& get() { return val; }
+    const mpz_t& get() const { return val; }
+};
+
+void vectToMpz2(mpz_t out,
+                const std::vector<uint64_t>& v,
+                const std::vector<int>& widths,
+                const mpz_t Mp)
+{
+    const size_t n = v.size();
+    const unsigned T = std::thread::hardware_concurrency();
+    std::vector<MpzWrapper> partial(T);
+
+    std::vector<unsigned> total_width(T, 0);
+    std::atomic<size_t> global_count{0};
+
+    for (unsigned t = 0; t < T; ++t)
+        mpz_init(partial[t].get());
+
+    std::vector<std::thread> threads(T);
+    size_t chunk = (n + T - 1) / T;
+
+    for (unsigned t = 0; t < T; ++t) {
+        size_t start = t * chunk;
+        size_t end = std::min(start + chunk, n);
+        threads[t] = std::thread([&, start, end, t]() {
+            mpz_t acc;
+            mpz_init_set_ui(acc, 0);
+            for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
+                mpz_mul_2exp(acc, acc, widths[i]);
+                mpz_add_ui(acc, acc, v[i]);
+                if (mpz_cmp(acc, Mp) >= 0)
+                    mpz_sub(acc, acc, Mp);
+                total_width[t] += widths[i];
+
+                size_t count = ++global_count;
+                if (count % 10000 == 0 || count == n) {
+                    double progress = 100.0 * count / n;
+                    printf("\rProgress: %.2f%%", progress);
+                    fflush(stdout);
+                }
+            }
+            mpz_set(partial[t].get(), acc);
+            mpz_clear(acc);
+        });
+    }
+
+    for (auto& th : threads) th.join();
+    printf("\n");
+
+    mpz_set_ui(out, 0);
+    for (int t = T - 1; t >= 0; --t) {
+        mpz_mul_2exp(out, out, total_width[t]);
+        mpz_add(out, out, partial[t].get());
+        if (mpz_cmp(out, Mp) >= 0)
+            mpz_sub(out, out, Mp);
+        //mpz_clear(partial[t].get());
+    }
+}
+
+void App::gpuSquareInPlace(
+                                    cl_mem A,
+                                    math::Carry& carry,
+                                    size_t limbBytes,
+                                    cl_mem blockCarryBuf)
+{
+    buffers->input = A;
+    nttEngine->forward(buffers->input, 0);   
+    //ntt.pointwiseMul(A, A);
+    nttEngine->inverse(buffers->input, 0); 
+    //carry.carryGPU(A, blockCarryBuf, limbBytes);
+}
+
+void App::gpuMulInPlace(
+                                 cl_mem A, cl_mem B,
+                                 math::Carry& carry,
+                                 size_t limbBytes,
+                                 cl_mem blockCarryBuf)
+{
+    
+    gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
+    cl_int err;
+    nttEngine->forward_simple(buffers->input, 0);
+    cl_mem temp = clCreateBuffer(
+        context.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    gpuCopy(context.getQueue(), buffers->input, temp, limbBytes);
+   
+    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
+    nttEngine->forward_simple(buffers->input, 0);
+    nttEngine->pointwiseMul(buffers->input, temp);
+    nttEngine->inverse_simple(buffers->input, 0);
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
+    clReleaseMemObject(temp);
+    
+}
+
+
+
+void App::gpuMulInPlace3(
+                                 cl_mem A, cl_mem B,
+                                 math::Carry& carry,
+                                 size_t limbBytes,
+                                 cl_mem blockCarryBuf)
+{
+    
+    //gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
+    cl_int err;
+    nttEngine->forward_simple(A, 0);
+    cl_mem temp = clCreateBuffer(
+        context.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    gpuCopy(context.getQueue(), A, temp, limbBytes);
+   
+    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
+    nttEngine->forward_simple(buffers->input, 0);
+    nttEngine->pointwiseMul(buffers->input, temp);
+    nttEngine->inverse_simple(buffers->input, 0);
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
+    clReleaseMemObject(temp);
+    
+}
+
+
+void App::gpuMulInPlace2(
+                                 cl_mem A, cl_mem B,
+                                 math::Carry& carry,
+                                 size_t limbBytes,
+                                 cl_mem blockCarryBuf)
+{
+    
+    
+    nttEngine->forward_simple(buffers->input, 0);
+    nttEngine->pointwiseMul(buffers->input, B);
+    nttEngine->inverse_simple(buffers->input, 0);
+    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
+    
+}
 
 int App::runPrpOrLl() {
-    if (options.tune ) {
+    if (options.tune) {
         tuneIterforce();
         return 0;
     }
@@ -479,23 +636,7 @@ int App::runPrpOrLl() {
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
-   /* if (options.res64_display_interval != 0){
-        cl_mem outBuf;
-        cl_uint totalWords = (options.exponent - 1u) / 32u + 1u;
-        size_t  outBytes   = size_t(totalWords) * sizeof(cl_uint);
-        cl_int err;
-        outBuf = clCreateBuffer(
-            context.getContext(),
-            CL_MEM_WRITE_ONLY,
-            outBytes,
-            nullptr,
-            &err
-        );
-        if (err != CL_SUCCESS) {
-            std::cerr << "Erreur clCreateBuffer(outBuf): " << err << std::endl;
-            std::exit(1);
-        }
-    }*/
+
     math::Carry carry(
         context,
         queue,
@@ -525,33 +666,63 @@ int App::runPrpOrLl() {
     uint64_t lastIter = resumeIter;
     uint64_t startIter = resumeIter;
     
-    uint64_t L = (options.mode == "prp") ? options.exponent : options.exponent - 2;
+    uint64_t L = options.exponent + 1;
     uint64_t B = (uint64_t)std::ceil(std::sqrt((double)L));
-    auto mulGpu = [&](cl_mem dst, cl_mem src) {
-    gpuMulInPlace5(dst, src, carry,
-                  precompute.getN()*sizeof(uint64_t),
-                  buffers->blockCarryBuf);
-};
 
+    size_t limbs = precompute.getN();
+    size_t limbBytes = limbs * sizeof(uint64_t);
+    cl_int err;
+    cl_mem r2,save,bufd;
 
-
-
-
-    math::GerbiczLiChecker gchk(
-        L, B,
-        context.getContext(), context.getQueue(),
-        *buffers,
-        precompute.getN()*sizeof(uint64_t),
-        (options.mode=="prp") ? 3ULL : 4ULL,
-        carry,
-        mulGpu,
-        true
-    );
+    if(options.mode=="prp" && options.gerbiczli){
+        bufd = clCreateBuffer(
+                context.getContext(),
+                CL_MEM_READ_WRITE,
+                limbBytes,
+                nullptr,
+                &err
+            );
+        if (err != CL_SUCCESS) {
+            std::cerr << "Failed to allocate bufd: " << err << std::endl;
+            exit(1);
+        }
+        
+    
+        r2 = clCreateBuffer(
+                context.getContext(),
+                CL_MEM_READ_WRITE,
+                limbBytes,
+                nullptr,
+                &err
+            );
+            if (err != CL_SUCCESS) {
+            std::cerr << "Failed to allocate r2: " << err << std::endl;
+            exit(1);
+        }
+        save = clCreateBuffer(
+                context.getContext(),
+                CL_MEM_READ_WRITE,
+                limbBytes,
+                nullptr,
+                &err
+            );
+        if (err != CL_SUCCESS) {
+            std::cerr << "Failed to allocate save: " << err << std::endl;
+            exit(1);
+        }
+        gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
+        gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
+    }
+   
+    std::vector<uint64_t> hostR2(precompute.getN());
+   
     //gchk.init(buffers->input, resumeIter);
-
+    bool errordone = false;
+    uint64_t itersave = resumeIter;
     for (uint64_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
         lastIter = iter;
-        if (options.erroriter > 0 && iter + 1 == options.erroriter) {
+        if (options.erroriter > 0 && iter + 1 == options.erroriter && !errordone) {
+            errordone = true;
             uint64_t limb0;
             clEnqueueReadBuffer(
                 context.getQueue(),
@@ -574,14 +745,7 @@ int App::runPrpOrLl() {
         }
         
         queued += nttEngine->forward(buffers->input, iter);
-        /*if (queueCap > 0 && ++queued >= queueCap) { clFlush(queue); queued = 0; spinner.displayProgress(iter - resumeIter,
-                                   totalIters,
-                                   timer.elapsed(),
-                                   p);}*/
-        //usleep(1500);
         queued += nttEngine->inverse(buffers->input, iter);
-        //usleep(1500);
-       
         carry.carryGPU(
             buffers->input,
             buffers->blockCarryBuf,
@@ -634,31 +798,7 @@ int App::runPrpOrLl() {
                 }
 
 
-            }      
-            /*    
-            GPU display // not used
-            cl_kernel dispK = kernels->getKernel("kernel_res64_display");
-            cl_uint modeInt = (options.mode=="prp") ? 1u : 0u;
-            cl_uint nWords    = static_cast<cl_uint>(precompute.getN());
-            cl_uint iterdisp    = static_cast<cl_uint>(iter+1);
-            clSetKernelArg(dispK, 0, sizeof(cl_mem), &buffers->input);
-            clSetKernelArg(dispK, 1, sizeof(cl_uint), &options.exponent);
-            clSetKernelArg(dispK, 2, sizeof(cl_uint), &nWords);
-            clSetKernelArg(dispK, 3, sizeof(cl_uint), &modeInt);
-            clSetKernelArg(dispK, 4, sizeof(cl_uint), &iterdisp);
-            clSetKernelArg(dispK, 5, sizeof(cl_mem), &outBuf);
-            
-            size_t global = 1, local = 1;
-            clEnqueueNDRangeKernel(
-                queue,
-                dispK,
-                1,
-                nullptr,
-                &global,
-                &local,
-                0, nullptr, nullptr
-            );
-            queued += 1;*/
+            }    
         }
         auto now = high_resolution_clock::now();
           
@@ -719,49 +859,9 @@ int App::runPrpOrLl() {
 
             } 
             
-            //clFinish(context.getQueue());
-            //std::cout << "800 usleep(1500) are done"<< std::endl;
-
-            //if (totalUs_.count() == 0) {
-            /*    auto t3 = std::chrono::high_resolution_clock::now();
-                clFinish(context.getQueue());
-                auto t4 = std::chrono::high_resolution_clock::now();
-                
-                auto t1 = std::chrono::high_resolution_clock::now();
-                totalUs_ = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
-                std::chrono::microseconds totalClfinish_ = std::chrono::duration_cast<std::chrono::microseconds>(t4 - t3);
-                
-                unitWait = totalUs_.count()/(4*(options.iterforce+1));
-                std::cout << "totalUs_.count() us " << totalUs_.count() << std::endl;
-                std::cout << "totalClfinish_.count() us " << totalClfinish_.count() << std::endl;
-                
-                t0 = std::chrono::high_resolution_clock::now();*/
-                //std::cout << "WAIT IS " << unitWait << std::endl;
-                //clReleaseEvent(markerEvent);
-            //}
-            /*else{
-                usleep(1123765);
-            }*/
             
             if ((((now - lastDisplay >= seconds(10)))) ) {
                 std::string res64_x;
-                /*std::vector<uint64_t> hostData(precompute.getN());
-                clEnqueueReadBuffer(
-                    context.getQueue(),
-                    buffers->input,
-                    CL_TRUE, 0,
-                    hostData.size() * sizeof(uint64_t),
-                    hostData.data(),
-                    0, nullptr, nullptr
-                );
-
-                res64_x = io::JsonBuilder::computeRes64(
-                        hostData,
-                        options,
-                        precompute.getDigitWidth(),
-                        timer.elapsed(),
-                        static_cast<int>(context.getTransformSize())
-                        );*/
 
                 spinner.displayProgress(
                     iter+1,
@@ -829,8 +929,51 @@ int App::runPrpOrLl() {
         if (options.proof && iter + 1 < totalIters) {
             proofManager.checkpoint(buffers->input, iter + 1);
         }
-        //uint64_t iter1 = iter + 1;
-        //gchk.step(iter1, buffers->input);
+        if(options.mode=="prp" && options.gerbiczli && iter>1 && (iter+1)%B==0){
+            gpuCopy(context.getQueue(), buffers->input, r2, limbBytes);
+            gpuCopy(context.getQueue(), bufd, buffers->input, limbBytes);
+            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
+            
+            for (uint64_t z = 0; z < B; ++z) {
+                nttEngine->forward(buffers->input, iter);
+                nttEngine->inverse(buffers->input, iter);
+                carry.carryGPU(
+                    buffers->input,
+                    buffers->blockCarryBuf,
+                    precompute.getN() * sizeof(uint64_t)
+                );
+            }
+            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
+            std::vector<uint64_t> hostData(precompute.getN());
+            gpuCopy(context.getQueue(),r2,buffers->input, limbBytes);
+            clEnqueueReadBuffer(
+                context.getQueue(),
+                buffers->input,
+                CL_TRUE, 0,
+                hostData.size() * sizeof(uint64_t),
+                hostData.data(),
+                0, nullptr, nullptr
+            );
+            
+            if (std::equal(hostR2.begin(), hostR2.end(), hostData.begin())) {
+                //std::cout << "[Gerbicz] Check passed!" << std::endl;
+                gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
+                itersave = iter;
+            } else {
+                std::cout << "[Gerbicz] Check FAILED!" << std::endl;
+                std::cout << "[Gerbicz] Restore iter=" << itersave << std::endl;
+                options.gerbicz_error_count+=1;
+                gpuCopy(context.getQueue(), save, buffers->input, limbBytes);
+                iter = itersave - 1;
+            }
+            gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
+
+
+            
+        }
+    
+
+        
 
     }
     
@@ -841,6 +984,11 @@ int App::runPrpOrLl() {
         backupManager.saveState(buffers->input, lastIter);
         std::cout << "\nInterrupted by user, state saved at iteration "
                   << lastIter << std::endl;
+        if(options.mode=="prp" && options.gerbiczli){
+            clReleaseMemObject(bufd);
+            clReleaseMemObject(r2);
+            clReleaseMemObject(save);
+        }
         return 0;
     }
     if (queued > 0) {
@@ -849,16 +997,8 @@ int App::runPrpOrLl() {
     }
     std::vector<uint64_t> hostData(precompute.getN());
     std::string res64_x;  
-    mpz_t Mp;
-    mpz_init(Mp);
-    mpz_ui_pow_ui(Mp, 2, options.exponent);
-    mpz_sub_ui(Mp, Mp, 1);
-    /*if (!gchk.finalCheck(buffers->input, precompute.getDigitWidth(), Mp)) {
-        std::cerr << "Gerbicz-Li check failed – recompute!\n";
-        mpz_clear(Mp);
-        //return -2;
-    }*/
-    mpz_clear(Mp);
+    
+
 
     {
         clEnqueueReadBuffer(
@@ -918,7 +1058,11 @@ int App::runPrpOrLl() {
          /*if (options.res64_display_interval != 0){
             clReleaseMemObject(outBuf);
          }*/
-        
+         if(options.mode=="prp" && options.gerbiczli){
+            clReleaseMemObject(bufd);
+            clReleaseMemObject(r2);
+            clReleaseMemObject(save);
+         }
                 
     }
     
@@ -1162,164 +1306,6 @@ mpz_class buildE(uint64_t B1) {
 
     std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
-}
-struct MpzWrapper {
-    mpz_t val;
-    MpzWrapper() { mpz_init(val); }
-    ~MpzWrapper() { mpz_clear(val); }
-
-    mpz_t& get() { return val; }
-    const mpz_t& get() const { return val; }
-};
-
-void vectToMpz2(mpz_t out,
-                const std::vector<uint64_t>& v,
-                const std::vector<int>& widths,
-                const mpz_t Mp)
-{
-    const size_t n = v.size();
-    const unsigned T = std::thread::hardware_concurrency();
-    std::vector<MpzWrapper> partial(T);
-
-    std::vector<unsigned> total_width(T, 0);
-    std::atomic<size_t> global_count{0};
-
-    for (unsigned t = 0; t < T; ++t)
-        mpz_init(partial[t].get());
-
-    std::vector<std::thread> threads(T);
-    size_t chunk = (n + T - 1) / T;
-
-    for (unsigned t = 0; t < T; ++t) {
-        size_t start = t * chunk;
-        size_t end = std::min(start + chunk, n);
-        threads[t] = std::thread([&, start, end, t]() {
-            mpz_t acc;
-            mpz_init_set_ui(acc, 0);
-            for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
-                mpz_mul_2exp(acc, acc, widths[i]);
-                mpz_add_ui(acc, acc, v[i]);
-                if (mpz_cmp(acc, Mp) >= 0)
-                    mpz_sub(acc, acc, Mp);
-                total_width[t] += widths[i];
-
-                size_t count = ++global_count;
-                if (count % 10000 == 0 || count == n) {
-                    double progress = 100.0 * count / n;
-                    printf("\rProgress: %.2f%%", progress);
-                    fflush(stdout);
-                }
-            }
-            mpz_set(partial[t].get(), acc);
-            mpz_clear(acc);
-        });
-    }
-
-    for (auto& th : threads) th.join();
-    printf("\n");
-
-    mpz_set_ui(out, 0);
-    for (int t = T - 1; t >= 0; --t) {
-        mpz_mul_2exp(out, out, total_width[t]);
-        mpz_add(out, out, partial[t].get());
-        if (mpz_cmp(out, Mp) >= 0)
-            mpz_sub(out, out, Mp);
-        //mpz_clear(partial[t].get());
-    }
-}
-
-void App::gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes)
-{
-    clEnqueueCopyBuffer(context.getQueue(), src, dst, 0, 0, bytes, 0, nullptr, nullptr);
-}
-
-void App::gpuSquareInPlace(
-                                    cl_mem A,
-                                    math::Carry& carry,
-                                    size_t limbBytes,
-                                    cl_mem blockCarryBuf)
-{
-    buffers->input = A;
-    nttEngine->forward(buffers->input, 0);   
-    //ntt.pointwiseMul(A, A);
-    nttEngine->inverse(buffers->input, 0); 
-    //carry.carryGPU(A, blockCarryBuf, limbBytes);
-}
-
-void App::gpuMulInPlace(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
-    cl_int err;
-    nttEngine->forward_simple(buffers->input, 0);
-    cl_mem temp = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        limbBytes,
-        nullptr,
-        &err
-    );
-    gpuCopy(context.getQueue(), buffers->input, temp, limbBytes);
-   
-    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, temp);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-    clReleaseMemObject(temp);
-    
-}
-
-
-
-void App::gpuMulInPlace3(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    //gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
-    cl_int err;
-    nttEngine->forward_simple(A, 0);
-    cl_mem temp = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        limbBytes,
-        nullptr,
-        &err
-    );
-    gpuCopy(context.getQueue(), A, temp, limbBytes);
-   
-    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, temp);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-    clReleaseMemObject(temp);
-    
-}
-
-
-void App::gpuMulInPlace2(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, B);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    
 }
 
 void App::subOneGPU(cl_mem buf)

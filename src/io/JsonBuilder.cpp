@@ -325,7 +325,7 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
         res64,
         res2048,
         1,  // residueType
-        0,  // gerbiczError
+        opts.gerbicz_error_count,  // gerbiczError
         transform_size,
         opts.proof ? 2 : 0,
         opts.proof ? opts.proofPower : 0,
