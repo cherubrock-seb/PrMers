@@ -26,9 +26,9 @@ for erriter in 55; do
   echo -n "Testing ./prmers 9941 -erroriter $erriter... "
   output=$(./prmers 9941 -erroriter "$erriter" --noask -prp 2>&1)
   echo "$output" > "logs/gerbicz_error_9941_iter${erriter}.log"
-  if echo "$output" | grep -q "Injected error at iteration $erriter" \
+  if echo "$output" | grep -q "Injected error at iteration 55" \
      && echo "$output" | grep -q "\[Gerbicz Li\] Check FAILED! iter=1030" \
-     && echo "$output" | grep -q "\[Gerbicz Li\] Restore iter=0 (j=0)"; then
+     && echo "$output" | grep -q "\[Gerbicz Li\] Restore iter=0 (j=9940)"; then
     echo "✅"
   else
     echo "❌ Output mismatch (see logs/gerbicz_error_9941_iter${erriter}.log)"

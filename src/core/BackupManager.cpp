@@ -289,7 +289,7 @@ void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_me
     } else {
         std::cerr << "Error saving GerbiczLiBufD to " << GerbiczLiBufDFilename_ << std::endl;
     }
-    clEnqueueReadBuffer(queue_, bufferd, CL_TRUE,
+    clEnqueueReadBuffer(queue_, last_correctbufferd, CL_TRUE,
                         0, vectorSize_ * sizeof(uint64_t),
                         x.data(), 0, nullptr, nullptr);
     std::ofstream mersOut3(GerbiczLiLastBufDFilename_, std::ios::binary);
