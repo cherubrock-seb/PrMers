@@ -456,6 +456,118 @@ Do you want to submit it to PrimeNet now? (y/n)
 
 This ensures **you never lose credit** for a completed computation.
 
+## 🔍 Advanced usage: Gerbicz-Li error checking test
+
+You can simulate silent hardware errors and test the **Gerbicz-Li error checking** mechanism using the `-erroriter` option.
+
+You can also control the frequency of displayed residues using `-res64_display_interval`. For example:
+
+```bash
+./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
+```
+
+This is a test scenario where an error is injected at iteration 19500.
+
+```
+[Gerbicz Li] B=2640
+[Gerbicz Li] Checkpasslevel=51
+[Gerbicz Li] j=6972592
+[Gerbicz Li] iter=0
+[Gerbicz Li] jsave=6972592
+[Gerbicz Li] itersave=0
+Iter: 1000| Res64: **54439D1F5A21BA8F**
+Iter: 2000| Res64: **40ABE45409907381**
+Iter: 3000| Res64: **9C4EB13478E46820**
+Iter: 4000| Res64: **5A1133AE48C5A5E8**
+Iter: 5000| Res64: D009D618EA3E5C19
+Iter: 6000| Res64: 74DBE0AA4E404954
+...
+Iter: 19000| Res64: 9F89498A39F8C638
+**Injected error at iteration 19500**
+Iter: 20000| Res64: BCD4BC7EABDB1897
+...
+Iter: 131000| Res64: C511CA4623D7612B
+Iter: 132000| Res64: 5DCADB0CC6545C44
+**[Gerbicz Li] Mismatch at index 0: r2=1384243, input=1773270**
+**[Gerbicz Li] Check FAILED! iter=132352**
+**[Gerbicz Li] Restore iter=0 (j=6972592)**
+Iter: 1000| Res64: **54439D1F5A21BA8F**
+Iter: 2000| Res64: **40ABE45409907381**
+Iter: 3000| Res64: **9C4EB13478E46820**
+Iter: 4000| Res64: **5A1133AE48C5A5E8**
+...
+Progress: 1.85% | Exp: 6972593 | Iter: 129000 | Elapsed: 110.44s | IPS: 2386.16 | ETA: 0d 0h 48m 52s
+Iter: 129000| Res64: 50338AFE5BAD902D
+Iter: 130000| Res64: 36C28EE4178BC2CC
+Iter: 131000| Res64: 6ED1EA8394D3822D
+Iter: 132000| Res64: FDBAEB669BA921CE
+**[Gerbicz Li] Check passed! iter=132352 ✅**
+Iter: 133000| Res64: 859A264D49A60850
+Iter: 134000| Res64: 86A5A1C5DE66B269
+...
+^C
+**Interrupted signal received**
+Iter: 162000| Res64: A10715EC5A1534C5
+**State saved to ./6972593prp10000.mers**
+Loop iteration saved to ./6972593prp10000.loop
+GerbiczLiBufD saved to ./6972593prp10000.bufd
+GerbiczLiLastBufD saved to ./6972593prp10000.lbufd
+GerbiczLiCorrectBuf saved to ./6972593prp10000.gli
+GerbiczLiIterSave saved to ./6972593prp10000.isav
+GerbiczLiJSave saved to ./6972593prp10000.jsav
+**Interrupted by user, state saved at iteration 161999 last j = 6810593**
+```
+
+✅ The error is triggered and detected. The program correctly **restores from the last checkpoint** and continues.
+
+---
+
+### ▶️ Example 2: Continue and inject another error later
+
+Now that the state has been saved, you can **continue the computation** and inject another fault, e.g., at iteration 180000:
+
+```bash
+./prmers 6972593 -res64_display_interval 1000 -erroriter 180000
+```
+
+```
+[Gerbicz Li] B=2640
+[Gerbicz Li] Checkpasslevel=51
+[Gerbicz Li] j=6810592
+[Gerbicz Li] iter=162000
+[Gerbicz Li] jsave=6840240
+[Gerbicz Li] itersave=132352
+Iter: 163000| Res64: D50AF0C1ABB0BE23
+Iter: 164000| Res64: 253C0528AAE05001
+Iter: 165000| Res64: 05EBF1B5E521FA26
+Iter: 166000| Res64: DFF1C941C9757FFE
+...
+Iter: 179000| Res64: 8DEFF4688CD0127B
+**Injected error at iteration 180000**
+Iter: 180000| Res64: DDE842A65D0DD16A
+...
+Iter: 295000| Res64: D0CFCF5958FB9897
+Iter: 296000| Res64: CE523E94C1BB0752
+**[Gerbicz Li] Mismatch at index 0: r2=3304645, input=2763271**
+**[Gerbicz Li] Check FAILED! iter=296032**
+**[Gerbicz Li] Restore iter=132352 (j=6840240)**
+Iter: 133000| Res64: 859A264D49A60850
+Iter: 134000| Res64: 86A5A1C5DE66B269
+Iter: 135000| Res64: 0E0EF0BA1B88E88C
+Iter: 136000| Res64: 4BDDBF9D784DE9F0
+...
+Iter: 266000| Res64: BD4B08D9E47DAC9E
+**[Gerbicz Li] Check passed! iter=266992 ✅**
+Iter: 267000| Res64: BFA841E1D7E9D7A6
+Iter: 268000| Res64: 568BCDE95B670708
+Iter: 269000| Res64: 67283AD0C7B4C4DF
+...
+```
+
+✅ The second error is also correctly handled and recovery resumes from the last checkpoint.
+
+**It works! 🎉**
+
 
 ## 💾 Download Precompiled Binaries (Linux, Windows & macOS)
 
