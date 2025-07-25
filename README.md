@@ -36,6 +36,32 @@ BackupManager writes:
   - `.isav`, `.jsav`   : iteration indices (i, j)
 A mismatch reloads everything so the run restarts deterministically from the last verified point. 
 
+
+Testing the checker with -erroriter
+-----------------------------------
+You can inject a deliberate fault to see the rollback/restore path:
+
+$ ./prmers 9941 -erroriter 55
+[Gerbicz Li] B=99
+[Gerbicz Li] Checkpasslevel=11
+Injected error at iteration 55
+[Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
+[Gerbicz Li] Check FAILED! iter=1030
+[Gerbicz Li] Restore iter=0 (j=0)
+[Gerbicz Li] Check passed! iter=1030
+...
+[Gerbicz Li] Check passed! iter=9940
+
+$ ./prmers 9941 -erroriter 9940
+[Gerbicz Li] B=99
+[Gerbicz Li] Checkpasslevel=11
+...
+Injected error at iteration 9940
+[Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
+[Gerbicz Li] Check FAILED! iter=9940
+[Gerbicz Li] Restore iter=9742 (j=198)
+[Gerbicz Li] Check passed! iter=9940
+
 ## 🚀 Try the PrMers Demo on Google Colab
 
 You can test **PrMers** directly in your browser with GPU acceleration by opening the interactive notebook below:
