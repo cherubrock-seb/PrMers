@@ -1027,6 +1027,7 @@ int App::runPrpOrLl() {
                         iter = -1;
                         j = totalIters -  resumeIter;
                     }
+                    options.gerbicz_error_count += 1;
                     gpuCopy(context.getQueue(), buffers->last_correct_state, buffers->input, limbBytes);
                     gpuCopy(context.getQueue(), buffers->last_correct_bufd,buffers->bufd, limbBytes);     
                     
