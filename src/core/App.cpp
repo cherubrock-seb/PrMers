@@ -1038,6 +1038,7 @@ int App::runPrpOrLl() {
         if ((now - lastBackup >= seconds(options.backup_interval))) {
                 std::string res64_x;
                 backupManager.saveState(buffers->input, iter);
+                backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
@@ -1156,7 +1157,8 @@ int App::runPrpOrLl() {
                         res64_x
                     );
         backupManager.saveState(buffers->input, lastIter);
-         
+        backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+        
                 
     }
     

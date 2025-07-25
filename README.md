@@ -3,15 +3,38 @@
 PrMers is a high-performance GPU application for testing the primality of Mersenne numbers using the Lucas–Lehmer and PRP (Probable Prime) algorithms. It leverages OpenCL and Number Theoretic Transforms (NTT) for fast large-integer arithmetic, and is optimized for long-running computations.
 
 Key features:
-- ⚡ GPU acceleration using OpenCL (including legacy OpenCL 1.2 devices)
-- 🔁 Automatic checkpointing with resume support
-- 📤 Submit results directly to your [mersenne.org](https://www.mersenne.org/) PrimeNet account
-- 🖥️ Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
-- 📊 Benchmark output for performance comparison across devices
+- GPU acceleration using OpenCL (including legacy OpenCL 1.2 devices)
+- Automatic checkpointing with resume support
+- Submit results directly to your [mersenne.org](https://www.mersenne.org/) PrimeNet account
+- Runs on Linux, macOS, and Windows (build from source or use precompiled binaries)
+-  Benchmark output for performance comparison across devices
 
 `prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) stage 1 and stage 2, a powerful algorithm to find a prime factor \( q \) of a Mersenne number \( 2^p - 1 \), provided that \( q - 1 \) is composed entirely of small prime factors.
 
 See below
+
+
+Gerbicz–Li checkpointing (functional principle)
+-----------------------------------------------
+
+See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
+
+- The long modular exponentiation is split into blocks of size B.
+- We do NOT validate after every block: a full check costs ~B modular ops.
+- Instead, we validate every √B blocks. With p ≈ 192,000,000, B = 13,856 ⇒ √B ≈ 118 checks.
+- Two running products are kept: 
+  • a rolling product for the current progress  
+  • a reference product saved at the last verified boundary
+- After √B blocks, we recompute the expected product for that span and compare.
+- If equal, we advance the “last-correct” marker and continue; if not, we roll back to the last verified state.
+- All state needed to restart (rolling product, last-correct product, indices i/j) is persisted so a crash resumes exactly at the last verified checkpoint.
+
+Disk backup/restore:
+BackupManager writes:
+  - `.bufd`, `.lbufd`  : rolling/last-correct Gerbicz buffers
+  - `.gli`             : last-correct state
+  - `.isav`, `.jsav`   : iteration indices (i, j)
+A mismatch reloads everything so the run restarts deterministically from the last verified point. 
 
 ## 🚀 Try the PrMers Demo on Google Colab
 
@@ -22,6 +45,15 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 
 
 ### 📈 Sample Performance Results
+
+#### ⚡  GeForce RTX 5090 GPU
+
+| Exponent  | Iter/s  | ETA             |
+|-----------|---------|-----------------|
+| 136279841 | 2730.69 | 1d 18h 31m 29s  |
+| 82589933  | 2647.09 | 0d 8h 36m 31s   |
+| 74207281  | 2658.54 | 0d 7h 41m 33s   |
+| 57885161  | 2730.69 | 0d 5h 51m 42s   |
 
 #### 🔥 Radeon VII GPU
 
