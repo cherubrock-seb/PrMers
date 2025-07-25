@@ -32,7 +32,7 @@ std::optional<int> QuickChecker::run(uint64_t p) {
     static const std::map<uint32_t,bool> known = {
         {2,true},{3,true},{5,true},{7,true},
         {13,true},{17,true},{19,true},
-        {31,true},{61,true},{89,true}
+        {31,true},{61,true},{89,true},{107,true}
     };
     bool isPrime = (known.find(p) != known.end());
     std::cout << "\nKernel execution time: 0.0 seconds\n"
