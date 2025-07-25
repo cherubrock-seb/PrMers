@@ -763,8 +763,14 @@ int App::runPrpOrLl() {
 
     std::cout << "[Gerbicz Li] B=" << B << std::endl;
     std::cout << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl;
-    
-    for (uint64_t iter = resumeIter, j= totalIters - 1 - resumeIter; iter < totalIters && !interrupted; ++iter, --j) {
+    std::cout << "[Gerbicz Li] j=" << totalIters-resumeIter-1 << std::endl;
+    std::cout << "[Gerbicz Li] iter=" << resumeIter << std::endl;
+    std::cout << "[Gerbicz Li] jsave=" << jsave << std::endl;
+    std::cout << "[Gerbicz Li] itersave=" << itersave << std::endl;
+    uint64_t lastJ = totalIters-resumeIter-1;
+
+    for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
+        lastJ = j;
         lastIter = iter;
         if (options.erroriter > 0 && iter + 1 == options.erroriter && !errordone) {
             errordone = true;
@@ -1096,7 +1102,7 @@ int App::runPrpOrLl() {
         backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
         
         std::cout << "\nInterrupted by user, state saved at iteration "
-                  << lastIter << std::endl;
+                  << lastIter << " last j = " << lastJ << std::endl;
         
         return 0;
     }
