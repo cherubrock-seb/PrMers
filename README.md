@@ -14,7 +14,7 @@ Key features:
 See below
 
 
-Gerbicz–Li checkpointing (functional principle)
+Gerbicz–Li checkpointing in PRP primality tests only (functional principle)
 -----------------------------------------------
 
 See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
