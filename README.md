@@ -37,8 +37,7 @@ BackupManager writes:
 A mismatch reloads everything so the run restarts deterministically from the last verified point. 
 
 
-Testing the checker with -erroriter
------------------------------------
+Testing the checker with -erroriter :
 You can inject a deliberate fault to see the rollback/restore path:
 
 $ ./prmers 9941 -erroriter 55
