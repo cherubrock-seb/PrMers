@@ -36,30 +36,47 @@ BackupManager writes:
   - `.isav`, `.jsav`   : iteration indices (i, j)
 A mismatch reloads everything so the run restarts deterministically from the last verified point. 
 
+Testing the checker with `-erroriter` :
+You can inject a deliberate fault to test that the Gerbicz–Li mechanism correctly restores to the last verified state.
 
-Testing the checker with -erroriter :
-You can inject a deliberate fault to see the rollback/restore path:
+Example:
 
-$ ./prmers 9941 -erroriter 55
-[Gerbicz Li] B=99
-[Gerbicz Li] Checkpasslevel=11
-Injected error at iteration 55
-[Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
-[Gerbicz Li] Check FAILED! iter=1030
-[Gerbicz Li] Restore iter=0 (j=0)
-[Gerbicz Li] Check passed! iter=1030
-...
-[Gerbicz Li] Check passed! iter=9940
+    $ ./prmers 9941 -erroriter 55
+    [Gerbicz Li] B=99
+    [Gerbicz Li] Checkpasslevel=11
+    Injected error at iteration 55
+    [Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
+    [Gerbicz Li] Check FAILED! iter=1030
+    [Gerbicz Li] Restore iter=0 (j=0)
+    [Gerbicz Li] Check passed! iter=1030
+    ...
+    [Gerbicz Li] Check passed! iter=9940
 
-$ ./prmers 9941 -erroriter 9940
-[Gerbicz Li] B=99
-[Gerbicz Li] Checkpasslevel=11
-...
-Injected error at iteration 9940
-[Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
-[Gerbicz Li] Check FAILED! iter=9940
-[Gerbicz Li] Restore iter=9742 (j=198)
-[Gerbicz Li] Check passed! iter=9940
+    $ ./prmers 9941 -erroriter 9940
+    [Gerbicz Li] B=99
+    [Gerbicz Li] Checkpasslevel=11
+    ...
+    Injected error at iteration 9940
+    [Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
+    [Gerbicz Li] Check FAILED! iter=9940
+    [Gerbicz Li] Restore iter=9742 (j=198)
+    [Gerbicz Li] Check passed! iter=9940
+
+You can deactivate the Gerbicz–Li error-checking mechanism by passing the option `-gerbiczli`, for benchmarking or debugging purposes. Use with care, as this disables protection against silent hardware errors.
+
+Understanding `[Gerbicz Li] B=...` and `Checkpasslevel=...`:
+These messages indicate how the checking is structured during the run.
+
+For example:
+
+    [Gerbicz Li] B=11673
+    [Gerbicz Li] Checkpasslevel=108
+
+This means:
+  - The buffer product (`bufd`) is computed every B = 11673 iterations.
+  - A validation check will occur every B × √B iterations, i.e. every 108 × 11673 = 1,261,684 iterations.
+  - Over the full run, 108 checks will be performed.
+
 
 ## 🚀 Try the PrMers Demo on Google Colab
 
