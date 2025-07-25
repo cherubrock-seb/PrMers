@@ -755,6 +755,9 @@ int App::runPrpOrLl() {
         
     uint64_t checkpass = 0;
     uint64_t jsave = backupManager.loadGerbiczJSave();
+    if(jsave==0){
+        jsave = totalIters - 1;
+    }
     if(checkpasslevel==0)
         checkpasslevel=1;
 
@@ -1023,10 +1026,13 @@ int App::runPrpOrLl() {
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
                     j = jsave;
                     iter = itersave;
+                    lastIter = itersave;
+                    lastIter = iter;
                     if(iter==0){
-                        iter = -1;
-                        j = totalIters -  resumeIter;
+                        iter = iter-1;
+                        j = j+1;
                     }
+                    checkpass = 0;
                     options.gerbicz_error_count += 1;
                     gpuCopy(context.getQueue(), buffers->last_correct_state, buffers->input, limbBytes);
                     gpuCopy(context.getQueue(), buffers->last_correct_bufd,buffers->bufd, limbBytes);     
