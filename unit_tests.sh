@@ -21,7 +21,7 @@ optflags=(
 )
 
 echo ""
-echo "=== Gerbicz error injection tests ==="
+echo "=== Gerbicz Li error injection tests ==="
 for erriter in 55 9940; do
   echo -n "Testing ./prmers 9941 -erroriter $erriter... "
   output=$(./prmers 9941 -erroriter "$erriter" --noask -prp 2>&1)

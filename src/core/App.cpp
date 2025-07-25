@@ -666,60 +666,102 @@ int App::runPrpOrLl() {
     uint64_t lastIter = resumeIter;
     uint64_t startIter = resumeIter;
     
-    uint64_t L = options.exponent + 1;
-    uint64_t B = (uint64_t)std::ceil(std::sqrt((double)L));
-
+    uint64_t L = options.exponent;
+    uint64_t B = (uint64_t)(std::sqrt((double)L));
+   
     size_t limbs = precompute.getN();
     size_t limbBytes = limbs * sizeof(uint64_t);
     cl_int err;
-    cl_mem r2,save,bufd;
+    //cl_mem r2,save,bufd,buf3;
 
     if(options.mode=="prp" && options.gerbiczli){
-        bufd = clCreateBuffer(
-                context.getContext(),
-                CL_MEM_READ_WRITE,
-                limbBytes,
-                nullptr,
-                &err
-            );
+        // See: An Efficient Modular Exponentiation Proof Scheme, 
+        //§2, Darren Li, Yves Gallot, https://arxiv.org/abs/2209.15623
+        std::vector<uint64_t> hotsd(precompute.getN(), 0ULL);
+        hotsd[0] = 1ULL;
+        backupManager.loadGerbiczLiBufDState(hotsd);
+    
+        buffers->bufd = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            hotsd.size() * sizeof(uint64_t),
+            hotsd.data(),  &err
+        );
         if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate bufd: " << err << std::endl;
             exit(1);
         }
         
-    
-        r2 = clCreateBuffer(
-                context.getContext(),
-                CL_MEM_READ_WRITE,
-                limbBytes,
-                nullptr,
-                &err
+        backupManager.loadGerbiczLiCorrectBufDState(hotsd);
+        
+        buffers->last_correct_bufd = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            hotsd.size() * sizeof(uint64_t),
+            hotsd.data(),  &err
+        );
+        if (err != CL_SUCCESS) {
+            std::cerr << "Failed to allocate last_correct_bufd: " << err << std::endl;
+            exit(1);
+        }
+        std::vector<uint64_t> hots3(precompute.getN(), 0ULL);
+        hots3[0] = 3ULL;
+        
+        buffers->r2 = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            hots3.size() * sizeof(uint64_t),
+            hots3.data(),  &err
             );
             if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate r2: " << err << std::endl;
             exit(1);
         }
-        save = clCreateBuffer(
-                context.getContext(),
-                CL_MEM_READ_WRITE,
-                limbBytes,
-                nullptr,
-                &err
+
+
+        buffers->save = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            hots3.size() * sizeof(uint64_t),
+            hots3.data(),  &err
             );
         if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate save: " << err << std::endl;
             exit(1);
         }
-        gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
-        gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
+        
+        backupManager.loadGerbiczLiCorrectState(hots3);
+            
+        buffers->last_correct_state = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            hots3.size() * sizeof(uint64_t),
+            hots3.data(),  &err
+        );
+        if (err != CL_SUCCESS) {
+            std::cerr << "Failed to allocate last_correct_state: " << err << std::endl;
+            exit(1);
+        }
+
+        
     }
    
     std::vector<uint64_t> hostR2(precompute.getN());
    
     //gchk.init(buffers->input, resumeIter);
     bool errordone = false;
-    uint64_t itersave = resumeIter;
-    for (uint64_t iter = resumeIter; iter < totalIters && !interrupted; ++iter) {
+    uint64_t checkpasslevel = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
+    uint64_t itersave =  backupManager.loadGerbiczIterSave();
+        
+    uint64_t checkpass = 0;
+    uint64_t jsave = backupManager.loadGerbiczJSave();
+    if(checkpasslevel==0)
+        checkpasslevel=1;
+
+    std::cout << "[Gerbicz Li] B=" << B << std::endl;
+    std::cout << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl;
+    
+    for (uint64_t iter = resumeIter, j= totalIters - 1 - resumeIter; iter < totalIters && !interrupted; ++iter, --j) {
         lastIter = iter;
         if (options.erroriter > 0 && iter + 1 == options.erroriter && !errordone) {
             errordone = true;
@@ -878,7 +920,122 @@ int App::runPrpOrLl() {
                 resumeIter = iter+1;
             }
             queued = 0;
-            if ((now - lastBackup >= seconds(options.backup_interval))) {
+                
+        }
+        
+        
+        if (options.mode == "ll") {
+            kernels->runSub2(buffers->input);
+        }
+
+
+        if (options.proof && iter + 1 < totalIters) {
+            proofManager.checkpoint(buffers->input, iter + 1);
+        }
+        if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0))|| iter==totalIters-1)) {
+            // See: An Efficient Modular Exponentiation Proof Scheme, 
+            //§2, Darren Li, Yves Gallot, https://arxiv.org/abs/2209.15623
+            auto printLine = [&](cl_mem& bufz, const std::string& name) {
+                std::vector<uint64_t> buf(precompute.getN());
+                clEnqueueReadBuffer(context.getQueue(), bufz, CL_TRUE, 0, limbBytes, buf.data(), 0, nullptr, nullptr);
+                std::ostringstream oss;
+                oss << name << ": ";
+                for (size_t idx = 0; idx < buf.size(); ++idx) {
+                    oss << buf[idx];
+                    if (idx + 1 < buf.size()) oss << ", ";
+                }
+                std::cout << oss.str() << std::endl;
+            };
+            //printLine(buffers->input, "0 Buffer buffers->input");
+            //printLine(buffers->bufd, "0 bufd");
+            
+            gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
+            gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
+            gpuMulInPlace(buffers->bufd, buffers->save, carry, limbBytes, buffers->blockCarryBuf);
+            checkpass+=1;
+            if(checkpass!=checkpasslevel && (iter!=totalIters-1)){
+                gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
+            }
+            else{
+                checkpass = 0;
+                gpuCopy(context.getQueue(), buffers->r2, buffers->input, limbBytes);
+                
+                //printLine(buffers->input, "1 Buffer buffers->input");
+                //printLine(buffers->r2, "1 r2");
+                
+                // Pre-check NTT loops
+                //std::cout << "iter = " << iter << ", j = " << j
+                //        << " | LOOP 1 A = " << (B - (options.exponent % B)) << std::endl;
+                for (uint64_t z = 0; z < B - (options.exponent % B); ++z) {
+                    nttEngine->forward(buffers->input, iter);
+                    nttEngine->inverse(buffers->input, iter);
+                    carry.carryGPU(
+                        buffers->input,
+                        buffers->blockCarryBuf,
+                        precompute.getN() * sizeof(uint64_t)
+                    );
+                }
+                //printLine(buffers->input, "2 Buffer buffers->input before mul3");
+                //gpuMulInPlace(buffers->input, buf3, carry, limbBytes, buffers->blockCarryBuf);
+                carry.carryGPU3(
+                        buffers->input,
+                        buffers->blockCarryBuf,
+                        precompute.getN() * sizeof(uint64_t)
+                    );
+                //printLine(buffers->input, "3 Buffer buffers->input after mul3");
+
+                //std::cout << "LOOP 2 B = " << (options.exponent % B) << std::endl;
+                for (uint64_t z = 0; z < (options.exponent % B); ++z) {
+                    nttEngine->forward(buffers->input, iter);
+                    nttEngine->inverse(buffers->input, iter);
+                    carry.carryGPU(
+                        buffers->input,
+                        buffers->blockCarryBuf,
+                        precompute.getN() * sizeof(uint64_t)
+                    );
+                }
+                //printLine(buffers->input, "4 Buffer buffers->input after all square");
+
+                // Read back results to host
+                clEnqueueReadBuffer(context.getQueue(), buffers->bufd, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
+                std::vector<uint64_t> hostData(precompute.getN());
+                clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE,
+                                    0, hostData.size() * sizeof(uint64_t),
+                                    hostData.data(), 0, nullptr, nullptr);
+
+
+                gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
+                auto [it1, it2] = std::mismatch(hostR2.begin(), hostR2.end(),
+                                                hostData.begin());
+                if (it1 == hostR2.end()) {
+                    std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                    gpuCopy(context.getQueue(), buffers->save, buffers->last_correct_state, limbBytes);
+                    gpuCopy(context.getQueue(), buffers->bufd, buffers->last_correct_bufd, limbBytes);     
+                    itersave = iter;
+                    jsave = j;
+                    
+                } else {
+                    size_t idx = std::distance(hostR2.begin(), it1);
+                    std::cout << "[Gerbicz Li] Mismatch at index " << idx
+                            << ": r2=" << *it1
+                            << ", input=" << *it2 << "\n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                    j = jsave;
+                    iter = itersave;
+                    if(iter==0){
+                        iter = -1;
+                        j = totalIters -  resumeIter;
+                    }
+                    gpuCopy(context.getQueue(), buffers->last_correct_state, buffers->input, limbBytes);
+                    gpuCopy(context.getQueue(), buffers->last_correct_bufd,buffers->bufd, limbBytes);     
+                    
+                }
+            }
+        }
+
+
+        if ((now - lastBackup >= seconds(options.backup_interval))) {
                 std::string res64_x;
                 backupManager.saveState(buffers->input, iter);
                 lastBackup = now;
@@ -917,68 +1074,7 @@ int App::runPrpOrLl() {
                     backupElapsed,
                     res64_x
                 );
-            }    
-        }
-        
-        
-        if (options.mode == "ll") {
-            kernels->runSub2(buffers->input);
-        }
-
-
-        if (options.proof && iter + 1 < totalIters) {
-            proofManager.checkpoint(buffers->input, iter + 1);
-        }
-        if(options.mode=="prp" && options.gerbiczli && iter>1 && ((iter+1)%B==0 || (iter+1 == totalIters)) ){
-            gpuCopy(context.getQueue(), buffers->input, r2, limbBytes);
-            gpuCopy(context.getQueue(), bufd, buffers->input, limbBytes);
-            //clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
-            uint64_t nbiter = B;
-            if((iter+1 == totalIters)){
-                nbiter = totalIters - itersave - 1;
             }
-            for (uint64_t z = 0; z < nbiter; ++z) {
-                nttEngine->forward(buffers->input, iter);
-                nttEngine->inverse(buffers->input, iter);
-                carry.carryGPU(
-                    buffers->input,
-                    buffers->blockCarryBuf,
-                    precompute.getN() * sizeof(uint64_t)
-                );
-            }
-            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
-            std::vector<uint64_t> hostData(precompute.getN());
-            gpuCopy(context.getQueue(),r2,buffers->input, limbBytes);
-            clEnqueueReadBuffer(
-                context.getQueue(),
-                buffers->input,
-                CL_TRUE, 0,
-                hostData.size() * sizeof(uint64_t),
-                hostData.data(),
-                0, nullptr, nullptr
-            );
-            
-            if (std::equal(hostR2.begin(), hostR2.end(), hostData.begin())) {
-                //std::cout << "[Gerbicz] Check passed!" << std::endl;
-                gpuCopy(context.getQueue(), buffers->input, save, limbBytes);
-                itersave = iter;
-            } else {
-                std::cout << "[Gerbicz] Check FAILED!" << std::endl;
-                std::cout << "[Gerbicz] Restore iter=" << itersave << std::endl;
-                options.gerbicz_error_count+=1;
-                gpuCopy(context.getQueue(), save, buffers->input, limbBytes);
-                
-                iter = itersave;
-                if(iter==0){
-                    iter = -1;
-                }
-            }
-            gpuCopy(context.getQueue(), buffers->input, bufd, limbBytes);
-            
-
-            
-        }
-    
 
         
 
@@ -989,13 +1085,11 @@ int App::runPrpOrLl() {
         clFinish(queue);
         queued = 0;
         backupManager.saveState(buffers->input, lastIter);
+        backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+        
         std::cout << "\nInterrupted by user, state saved at iteration "
                   << lastIter << std::endl;
-        if(options.mode=="prp" && options.gerbiczli){
-            clReleaseMemObject(bufd);
-            clReleaseMemObject(r2);
-            clReleaseMemObject(save);
-        }
+        
         return 0;
     }
     if (queued > 0) {
@@ -1062,14 +1156,7 @@ int App::runPrpOrLl() {
                         res64_x
                     );
         backupManager.saveState(buffers->input, lastIter);
-         /*if (options.res64_display_interval != 0){
-            clReleaseMemObject(outBuf);
-         }*/
-         if(options.mode=="prp" && options.gerbiczli){
-            clReleaseMemObject(bufd);
-            clReleaseMemObject(r2);
-            clReleaseMemObject(save);
-         }
+         
                 
     }
     

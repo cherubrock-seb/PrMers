@@ -60,6 +60,11 @@ BackupManager::BackupManager(cl_command_queue queue,
     if(b1_>0){
         base = std::to_string(exponent_) + mode_ + std::to_string(b1_);
     }
+    GerbiczLiBufDFilename_ = savePath_ + "/" + base + ".bufd";
+    GerbiczLiCorrectBufFilename_ = savePath_ + "/" + base + ".gli";
+    GerbiczLiIterSaveFilename_ = savePath_ + "/" + base + ".isav";
+    GerbiczLiJSaveFilename_ = savePath_ + "/" + base + ".jsav";
+    GerbiczLiLastBufDFilename_ = savePath_ + "/" + base + ".lbufd";
     mersFilename_ = savePath_ + "/" + base + ".mers";
     loopFilename_ = savePath_ + "/" + base + ".loop";
     exponentFilename_ = savePath_ + "/" + base + ".exponent";
@@ -96,6 +101,67 @@ uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
         std::cout << "Stage-2 buffers restored" << std::endl;
     }
     return resume;
+}
+
+void BackupManager::loadGerbiczLiBufDState(std::vector<uint64_t>& x) {
+    std::ifstream in(GerbiczLiBufDFilename_, std::ios::binary);
+    if (in) {
+        in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+        std::cout << "Loaded GerbiczLiBufD from " << std::filesystem::absolute(GerbiczLiBufDFilename_) << std::endl;
+    } else {
+        x.assign(x.size(), 0ULL);
+        x[0] = 1ULL;
+        std::cout << "No GerbiczLiBufD file found at " << std::filesystem::absolute(GerbiczLiBufDFilename_) << std::endl;
+    }
+}
+
+
+void BackupManager::loadGerbiczLiCorrectState(std::vector<uint64_t>& x) {
+    std::ifstream in(GerbiczLiCorrectBufFilename_, std::ios::binary);
+    if (in) {
+        in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+        std::cout << "Loaded GerbiczLiCorrectBuf from " << std::filesystem::absolute(GerbiczLiCorrectBufFilename_) << std::endl;
+    } else {
+        x.assign(x.size(), 0ULL);
+        x[0] = 3ULL;
+        std::cout << "No GerbiczLiCorrectBuf file found at " << std::filesystem::absolute(GerbiczLiCorrectBufFilename_) << std::endl;
+    }
+}
+
+void BackupManager::loadGerbiczLiCorrectBufDState(std::vector<uint64_t>& x) {
+    std::ifstream in(GerbiczLiLastBufDFilename_, std::ios::binary);
+    if (in) {
+        in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+        std::cout << "Loaded GerbiczLiLastBufD from " << std::filesystem::absolute(GerbiczLiLastBufDFilename_) << std::endl;
+    } else {
+        x.assign(x.size(), 0ULL);
+        x[0] = 1ULL;
+        std::cout << "No GerbiczLiLastBufD file found at " << std::filesystem::absolute(GerbiczLiLastBufDFilename_) << std::endl;
+    }
+}
+
+uint64_t core::BackupManager::loadGerbiczIterSave() {
+    uint64_t v = 0;
+    std::ifstream in(GerbiczLiIterSaveFilename_);
+    if (in) {
+        in >> v;
+        std::cout << "Loaded GerbiczLiIterSave: " << v << " from " << std::filesystem::absolute(GerbiczLiIterSaveFilename_) << std::endl;
+    } else {
+        std::cout << "No GerbiczLiIterSave file found at " << std::filesystem::absolute(GerbiczLiIterSaveFilename_) << std::endl;
+    }
+    return v;
+}
+
+uint64_t core::BackupManager::loadGerbiczJSave() {
+    uint64_t v = 0;
+    std::ifstream in(GerbiczLiJSaveFilename_);
+    if (in) {
+        in >> v;
+        std::cout << "Loaded GerbiczLiJSave: " << v << " from " << std::filesystem::absolute(GerbiczLiJSaveFilename_) << std::endl;
+    } else {
+        std::cout << "No GerbiczLiJSave file found at " << std::filesystem::absolute(GerbiczLiJSaveFilename_) << std::endl;
+    }
+    return v;
 }
 
 void BackupManager::saveStatePM1S2(cl_mem hqBuf,
@@ -210,6 +276,63 @@ void BackupManager::saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_p
 
 }
 
+void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_mem last_correctbufferd, uint64_t itersave, uint64_t jsave, const mpz_class* E_ptr) {
+    std::vector<uint64_t> x(vectorSize_);
+    clEnqueueReadBuffer(queue_, bufferd, CL_TRUE,
+                        0, vectorSize_ * sizeof(uint64_t),
+                        x.data(), 0, nullptr, nullptr);
+    std::ofstream mersOut(GerbiczLiBufDFilename_, std::ios::binary);
+    if (mersOut) {
+        mersOut.write(reinterpret_cast<const char*>(x.data()),
+                      vectorSize_ * sizeof(uint64_t));
+        std::cout << "\nGerbiczLiBufD saved to " << GerbiczLiBufDFilename_ << std::endl;
+    } else {
+        std::cerr << "Error saving GerbiczLiBufD to " << GerbiczLiBufDFilename_ << std::endl;
+    }
+    clEnqueueReadBuffer(queue_, bufferd, CL_TRUE,
+                        0, vectorSize_ * sizeof(uint64_t),
+                        x.data(), 0, nullptr, nullptr);
+    std::ofstream mersOut3(GerbiczLiLastBufDFilename_, std::ios::binary);
+    if (mersOut3) {
+        mersOut3.write(reinterpret_cast<const char*>(x.data()),
+                      vectorSize_ * sizeof(uint64_t));
+        std::cout << "\nGerbiczLiLastBufD saved to " << GerbiczLiLastBufDFilename_ << std::endl;
+    } else {
+        std::cerr << "Error saving GerbiczLiLastBufD to " << GerbiczLiLastBufDFilename_ << std::endl;
+    }
+
+    clEnqueueReadBuffer(queue_, correctbuffer, CL_TRUE,
+                        0, vectorSize_ * sizeof(uint64_t),
+                        x.data(), 0, nullptr, nullptr);
+    std::ofstream  mersOut2(GerbiczLiCorrectBufFilename_, std::ios::binary);
+    
+    if (mersOut2) {
+        mersOut2.write(reinterpret_cast<const char*>(x.data()),
+                      vectorSize_ * sizeof(uint64_t));
+        std::cout << "\nGerbiczLiCorrectBuf saved to " << GerbiczLiCorrectBufFilename_ << std::endl;
+    } else {
+        std::cerr << "Error saving GerbiczLiCorrectBuf to " << GerbiczLiCorrectBufFilename_ << std::endl;
+    }
+    
+    std::ofstream iterSaveOut(GerbiczLiIterSaveFilename_);
+    if (iterSaveOut) {
+        iterSaveOut << itersave;
+        std::cout << "GerbiczLiIterSave saved to " << GerbiczLiIterSaveFilename_ << std::endl;
+    } else {
+        std::cerr << "Error saving GerbiczLiIterSave to " << GerbiczLiIterSaveFilename_ << std::endl;
+    }
+
+    std::ofstream jSaveOut(GerbiczLiJSaveFilename_);
+    if (jSaveOut) {
+        jSaveOut << jsave;
+        std::cout << "GerbiczLiJSave saved to " << GerbiczLiJSaveFilename_ << std::endl;
+    } else {
+        std::cerr << "Error saving GerbiczLiJSave to " << GerbiczLiJSaveFilename_ << std::endl;
+    }
+
+
+}
+
 
 mpz_class BackupManager::loadExponent() const {
     mpz_class result{0};
@@ -227,30 +350,24 @@ mpz_class BackupManager::loadExponent() const {
 
 void BackupManager::clearState() const {
     std::error_code ec;
-    if (std::filesystem::exists(mersFilename_, ec)) {
-        std::filesystem::remove(mersFilename_, ec);
-        std::cout << "Removed backup file: " << mersFilename_ << std::endl;
-    }
-    if (std::filesystem::exists(loopFilename_, ec)) {
-        std::filesystem::remove(loopFilename_, ec);
-        std::cout << "Removed loop file: " << loopFilename_ << std::endl;
-    }
-    if (std::filesystem::exists(exponentFilename_, ec)) {
-        std::filesystem::remove(exponentFilename_, ec);
-        std::cout << "Removed exponent file: " << exponentFilename_ << std::endl;
-    }
-    if (std::filesystem::exists(hqFilename_, ec)) {
-        std::filesystem::remove(hqFilename_, ec);
-        std::cout << "Removed qFilename_ file: " << qFilename_ << std::endl;
-    }
-    if (std::filesystem::exists(qFilename_, ec)) {
-        std::filesystem::remove(qFilename_, ec);
-        std::cout << "Removed qFilename_ file: " << qFilename_ << std::endl;
-    }
-    if (std::filesystem::exists(loop2Filename_, ec)) {
-        std::filesystem::remove(loop2Filename_, ec);
-        std::cout << "Removed loop2Filename_ file: " << loop2Filename_ << std::endl;
-    }
+    auto rm = [&](const std::string& f) {
+        if (std::filesystem::exists(f, ec)) {
+            std::filesystem::remove(f, ec);
+            std::cout << "Removed file: " << f << std::endl;
+        }
+    };
+    rm(mersFilename_);
+    rm(loopFilename_);
+    rm(exponentFilename_);
+    rm(hqFilename_);
+    rm(qFilename_);
+    rm(loop2Filename_);
+    rm(GerbiczLiBufDFilename_);
+    rm(GerbiczLiCorrectBufFilename_);
+    rm(GerbiczLiIterSaveFilename_);
+    rm(GerbiczLiJSaveFilename_);
+    rm(GerbiczLiLastBufDFilename_);
 }
+
 
 } // namespace core
