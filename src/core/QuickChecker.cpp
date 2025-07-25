@@ -27,7 +27,7 @@
 namespace core {
 
 std::optional<int> QuickChecker::run(uint64_t p) {
-    if (p >= 89) return std::nullopt;
+    if (p >= 127) return std::nullopt;
 
     static const std::map<uint32_t,bool> known = {
         {2,true},{3,true},{5,true},{7,true},
