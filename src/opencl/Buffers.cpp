@@ -27,7 +27,7 @@
 namespace opencl {
 
 Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
-  : input(nullptr), twiddle5Buf(nullptr), invTwiddle5Buf(nullptr),Hbuf(nullptr),Hq(nullptr),Qbuf(nullptr),tmp(nullptr)
+  : input(nullptr), twiddle5Buf(nullptr), invTwiddle5Buf(nullptr),Hbuf(nullptr),Hq(nullptr),Qbuf(nullptr),tmp(nullptr),r2(nullptr),save(nullptr),bufd(nullptr),buf3(nullptr),last_correct_state(nullptr),last_correct_bufd(nullptr)
 {
     const size_t n = pre.getN();
     const size_t twiddle4Size = (n % 5 == 0) ? 3 * n / 5 : 3 * n;
@@ -101,6 +101,12 @@ Buffers::~Buffers() {
     if (Hq)      clReleaseMemObject(Hq);
     if (Qbuf)      clReleaseMemObject(Qbuf);
     if (tmp)      clReleaseMemObject(tmp);
+    if (r2)      clReleaseMemObject(r2);
+    if (save)      clReleaseMemObject(save);
+    if (bufd)      clReleaseMemObject(bufd);
+    if (buf3)      clReleaseMemObject(buf3);
+    if (last_correct_state)      clReleaseMemObject(last_correct_state);
+    if (last_correct_bufd)      clReleaseMemObject(last_correct_bufd);
     if (!evenPow.empty()) {
         for (cl_mem buf : evenPow) {
             if (buf != nullptr) {

@@ -163,7 +163,6 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {
             opts.erroriter = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
-            opts.erroriter = 0;
             ++i;
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
@@ -230,6 +229,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else {
             std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";
         }
+    }
+
+    if(opts.mode == "ll"){
+        opts.erroriter = 0;
     }
     if(opts.iterforce == 0){
         opts.iterforce = 500;

@@ -94,7 +94,7 @@ NttEngine::NttEngine(const Context& ctx,
         );
     }
 
-    if(pm1){
+    //if(pm1){
         std::cout << "\nPipeline simple (PM1 stage2)\n";
         {
             ls0_val_ = ctx_.getLocalSize();
@@ -166,7 +166,7 @@ NttEngine::NttEngine(const Context& ctx,
                 lastOutputInv
             );
         }
-    }
+    //}
 }
 
 static void executeKernelAndDisplay(cl_command_queue queue,
