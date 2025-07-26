@@ -11,71 +11,8 @@ Key features:
 
 `prmers` supports [P−1 factoring](https://en.wikipedia.org/wiki/Pollard%27s_p_%E2%88%92_1_algorithm) stage 1 and stage 2, a powerful algorithm to find a prime factor \( q \) of a Mersenne number \( 2^p - 1 \), provided that \( q - 1 \) is composed entirely of small prime factors.
 
-See below
-
-
-Gerbicz–Li checkpointing in PRP primality tests only (functional principle)
------------------------------------------------
-
-See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
-
-- The long modular exponentiation is split into blocks of size B.
-- We do NOT validate after every block: a full check costs ~B modular ops.
-- Instead, we validate every √B blocks. With p ≈ 192,000,000, B = 13,856 ⇒ √B ≈ 118 checks.
-- Two running products are kept: 
-  • a rolling product for the current progress  
-  • a reference product saved at the last verified boundary
-- After √B blocks, we recompute the expected product for that span and compare.
-- If equal, we advance the “last-correct” marker and continue; if not, we roll back to the last verified state.
-- All state needed to restart (rolling product, last-correct product, indices i/j) is persisted so a crash resumes exactly at the last verified checkpoint.
-
-Disk backup/restore:
-BackupManager writes:
-  - `.bufd`, `.lbufd`  : rolling/last-correct Gerbicz buffers
-  - `.gli`             : last-correct state
-  - `.isav`, `.jsav`   : iteration indices (i, j)
-A mismatch reloads everything so the run restarts deterministically from the last verified point. 
-
-Testing the checker with `-erroriter` :
-You can inject a deliberate fault to test that the Gerbicz–Li mechanism correctly restores to the last verified state.
-
-Example:
-
-    $ ./prmers 9941 -erroriter 55
-    [Gerbicz Li] B=99
-    [Gerbicz Li] Checkpasslevel=11
-    Injected error at iteration 55
-    [Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
-    [Gerbicz Li] Check FAILED! iter=1030
-    [Gerbicz Li] Restore iter=0 (j=0)
-    [Gerbicz Li] Check passed! iter=1030
-    ...
-    [Gerbicz Li] Check passed! iter=9940
-
-    $ ./prmers 9941 -erroriter 9940
-    [Gerbicz Li] B=99
-    [Gerbicz Li] Checkpasslevel=11
-    ...
-    Injected error at iteration 9940
-    [Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
-    [Gerbicz Li] Check FAILED! iter=9940
-    [Gerbicz Li] Restore iter=9742 (j=198)
-    [Gerbicz Li] Check passed! iter=9940
-
-You can deactivate the Gerbicz–Li error-checking mechanism by passing the option `-gerbiczli`, for benchmarking or debugging purposes. Use with care, as this disables protection against silent hardware errors.
-
-Understanding `[Gerbicz Li] B=...` and `Checkpasslevel=...`:
-These messages indicate how the checking is structured during the run.
-
-For example:
-
-    [Gerbicz Li] B=11673
-    [Gerbicz Li] Checkpasslevel=108
-
-This means:
-  - The buffer product (`bufd`) is computed every B = 11673 iterations.
-  - A validation check will occur every B × √B iterations, i.e. every 108 × 11673 = 1,261,684 iterations.
-  - Over the full run, 108 checks will be performed.
+Prmers in PRP mode is doing Gerbicz–Li error checking See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
+see below
 
 
 ## 🚀 Try the PrMers Demo on Google Colab
@@ -250,6 +187,71 @@ Examples (complete stage 1 + stage 2 run):
 ```bash
 ./prmers 139  -pm1 -b1 192   -b2 457
 ./prmers 367  -pm1 -b1 11981 -b2 38971
+
+
+
+Gerbicz–Li checkpointing in PRP primality tests only (functional principle)
+-----------------------------------------------
+
+See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
+
+- The long modular exponentiation is split into blocks of size B.
+- We do NOT validate after every block: a full check costs ~B modular ops.
+- Instead, we validate every √B blocks. With p ≈ 192,000,000, B = 13,856 ⇒ √B ≈ 118 checks.
+- Two running products are kept: 
+  • a rolling product for the current progress  
+  • a reference product saved at the last verified boundary
+- After √B blocks, we recompute the expected product for that span and compare.
+- If equal, we advance the “last-correct” marker and continue; if not, we roll back to the last verified state.
+- All state needed to restart (rolling product, last-correct product, indices i/j) is persisted so a crash resumes exactly at the last verified checkpoint.
+
+Disk backup/restore:
+BackupManager writes:
+  - `.bufd`, `.lbufd`  : rolling/last-correct Gerbicz buffers
+  - `.gli`             : last-correct state
+  - `.isav`, `.jsav`   : iteration indices (i, j)
+A mismatch reloads everything so the run restarts deterministically from the last verified point. 
+
+Testing the checker with `-erroriter` :
+You can inject a deliberate fault to test that the Gerbicz–Li mechanism correctly restores to the last verified state.
+
+Example:
+
+    $ ./prmers 9941 -erroriter 55
+    [Gerbicz Li] B=99
+    [Gerbicz Li] Checkpasslevel=11
+    Injected error at iteration 55
+    [Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
+    [Gerbicz Li] Check FAILED! iter=1030
+    [Gerbicz Li] Restore iter=0 (j=0)
+    [Gerbicz Li] Check passed! iter=1030
+    ...
+    [Gerbicz Li] Check passed! iter=9940
+
+    $ ./prmers 9941 -erroriter 9940
+    [Gerbicz Li] B=99
+    [Gerbicz Li] Checkpasslevel=11
+    ...
+    Injected error at iteration 9940
+    [Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
+    [Gerbicz Li] Check FAILED! iter=9940
+    [Gerbicz Li] Restore iter=9742 (j=198)
+    [Gerbicz Li] Check passed! iter=9940
+
+You can deactivate the Gerbicz–Li error-checking mechanism by passing the option `-gerbiczli`, for benchmarking or debugging purposes. Use with care, as this disables protection against silent hardware errors.
+
+Understanding `[Gerbicz Li] B=...` and `Checkpasslevel=...`:
+These messages indicate how the checking is structured during the run.
+
+For example:
+
+    [Gerbicz Li] B=11673
+    [Gerbicz Li] Checkpasslevel=108
+
+This means:
+  - The buffer product (`bufd`) is computed every B = 11673 iterations.
+  - A validation check will occur every B × √B iterations, i.e. every 108 × 11673 = 1,261,684 iterations.
+  - Over the full run, 108 checks will be performed.
 
 
 ## ⚙️ Example Execution and Submission
