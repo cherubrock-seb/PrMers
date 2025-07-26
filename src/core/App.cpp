@@ -662,7 +662,6 @@ int App::runPrpOrLl() {
     auto startTime  = high_resolution_clock::now();
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
     uint64_t lastIter = resumeIter;
     uint64_t startIter = resumeIter;
     
@@ -768,7 +767,8 @@ int App::runPrpOrLl() {
     std::cout << "[Gerbicz Li] jsave=" << jsave << std::endl;
     std::cout << "[Gerbicz Li] itersave=" << itersave << std::endl;
     uint64_t lastJ = totalIters-resumeIter-1;
-
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
+    
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
