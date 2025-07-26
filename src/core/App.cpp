@@ -955,26 +955,26 @@ int App::runPrpOrLl() {
                 }
                 std::cout << oss.str() << std::endl;
             };
-            //printLine(buffers->input, "0 Buffer buffers->input");
-            //printLine(buffers->bufd, "0 bufd");
+
             
             gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
             gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
-            gpuMulInPlace(buffers->bufd, buffers->save, carry, limbBytes, buffers->blockCarryBuf);
+            //gpuMulInPlace(buffers->bufd, buffers->save, carry, limbBytes, buffers->blockCarryBuf);
+            
+            nttEngine->forward_simple(buffers->bufd, 0);
+            nttEngine->forward_simple(buffers->save, 0);
+            nttEngine->pointwiseMul(buffers->bufd, buffers->save);
+            nttEngine->inverse_simple(buffers->bufd, 0);
+            carry.carryGPU(buffers->bufd, buffers->blockCarryBuf, limbBytes);
             checkpass+=1;
-            if(checkpass!=checkpasslevel && (iter!=totalIters-1)){
-                gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
-            }
-            else{
+            //if(checkpass!=checkpasslevel && (iter!=totalIters-1)){
+                //gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
+            //}
+            if(!(checkpass!=checkpasslevel && (iter!=totalIters-1))){
+                gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
+            
                 checkpass = 0;
                 gpuCopy(context.getQueue(), buffers->r2, buffers->input, limbBytes);
-                
-                //printLine(buffers->input, "1 Buffer buffers->input");
-                //printLine(buffers->r2, "1 r2");
-                
-                // Pre-check NTT loops
-                //std::cout << "iter = " << iter << ", j = " << j
-                //        << " | LOOP 1 A = " << (B - (options.exponent % B)) << std::endl;
                 for (uint64_t z = 0; z < B - (options.exponent % B); ++z) {
                     nttEngine->forward(buffers->input, iter);
                     nttEngine->inverse(buffers->input, iter);
@@ -984,16 +984,11 @@ int App::runPrpOrLl() {
                         precompute.getN() * sizeof(uint64_t)
                     );
                 }
-                //printLine(buffers->input, "2 Buffer buffers->input before mul3");
-                //gpuMulInPlace(buffers->input, buf3, carry, limbBytes, buffers->blockCarryBuf);
                 carry.carryGPU3(
                         buffers->input,
                         buffers->blockCarryBuf,
                         precompute.getN() * sizeof(uint64_t)
                     );
-                //printLine(buffers->input, "3 Buffer buffers->input after mul3");
-
-                //std::cout << "LOOP 2 B = " << (options.exponent % B) << std::endl;
                 for (uint64_t z = 0; z < (options.exponent % B); ++z) {
                     nttEngine->forward(buffers->input, iter);
                     nttEngine->inverse(buffers->input, iter);
@@ -1003,9 +998,6 @@ int App::runPrpOrLl() {
                         precompute.getN() * sizeof(uint64_t)
                     );
                 }
-                //printLine(buffers->input, "4 Buffer buffers->input after all square");
-
-                // Read back results to host
                 clEnqueueReadBuffer(context.getQueue(), buffers->bufd, CL_TRUE, 0, limbBytes, hostR2.data(), 0, nullptr, nullptr);
                 std::vector<uint64_t> hostData(precompute.getN());
                 clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE,
@@ -1013,11 +1005,11 @@ int App::runPrpOrLl() {
                                     hostData.data(), 0, nullptr, nullptr);
 
 
-                gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
                 auto [it1, it2] = std::mismatch(hostR2.begin(), hostR2.end(),
                                                 hostData.begin());
                 if (it1 == hostR2.end()) {
                     std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                    gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
                     gpuCopy(context.getQueue(), buffers->save, buffers->last_correct_state, limbBytes);
                     gpuCopy(context.getQueue(), buffers->bufd, buffers->last_correct_bufd, limbBytes);     
                     itersave = iter;
