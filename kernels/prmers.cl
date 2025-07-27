@@ -587,9 +587,9 @@ __kernel void kernel_carry_mul_3(
         ulong lo_n = select(lo, hi, wrapMask);
         ulong hi_n = select(hi, nextChunk, wrapMask);
 
-        ulong sh_n     = (ulong)((64 - off_next) & 63);
-        ulong nzmask_n = (ulong)0 - (ulong)(off_next != 0);
-        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh_n) & nzmask_n);
+        sh     = (ulong)((64 - off_next) & 63);
+        nzmask = (ulong)0 - (ulong)(off_next != 0);
+        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh) & nzmask);
 
         merged = select(cand0, cand1, wrapMask);
 
@@ -657,9 +657,9 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
         ulong lo_n = select(lo, hi, wrapMask);
         ulong hi_n = select(hi, nextChunk, wrapMask);
 
-        ulong sh_n     = (ulong)((64 - off_next) & 63);
-        ulong nzmask_n = (ulong)0 - (ulong)(off_next != 0);
-        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh_n) & nzmask_n);
+        sh     = (ulong)((64 - off_next) & 63);
+        nzmask = (ulong)0 - (ulong)(off_next != 0);
+        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh) & nzmask);
 
         merged = select(cand0, cand1, wrapMask);
 
@@ -671,12 +671,12 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
 
     ulong4 x_vec = vload4(0, x + end);
 
-    uint nib = (uint)(merged & 0xFULL);
+    base = (uint)(merged & 0xFULL);
     uint4 sel = (uint4)(
-        (nib >> 0) & 1U,
-        (nib >> 1) & 1U,
-        (nib >> 2) & 1U,
-        (nib >> 3) & 1U
+        (base >> 0) & 1U,
+        (base >> 1) & 1U,
+        (base >> 2) & 1U,
+        (base >> 3) & 1U
     ) * (uint)0xFFFFFFFFU;
 
     int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
