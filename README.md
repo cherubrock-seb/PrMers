@@ -189,7 +189,6 @@ Examples (complete stage 1 + stage 2 run):
 ./prmers 367  -pm1 -b1 11981 -b2 38971
 
 
-
 Gerbicz–Li checkpointing in PRP primality tests only (functional principle)
 -----------------------------------------------
 
@@ -197,11 +196,11 @@ See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, 
 
 - The long modular exponentiation is split into blocks of size B.
 - We do NOT validate after every block: a full check costs ~B modular ops.
-- Instead, we validate every √B blocks. With p ≈ 192,000,000, B = 13,856 ⇒ √B ≈ 118 checks.
+- Instead, we validate after approximately T seconds (default: T = 180 s ≈ 3 minutes).
 - Two running products are kept: 
   • a rolling product for the current progress  
   • a reference product saved at the last verified boundary
-- After √B blocks, we recompute the expected product for that span and compare.
+- After T seconds worth of work (~B × checkpasslevel iterations), we recompute the expected product and compare.
 - If equal, we advance the “last-correct” marker and continue; if not, we roll back to the last verified state.
 - All state needed to restart (rolling product, last-correct product, indices i/j) is persisted so a crash resumes exactly at the last verified checkpoint.
 
@@ -211,6 +210,15 @@ BackupManager writes:
   - `.gli`             : last-correct state
   - `.isav`, `.jsav`   : iteration indices (i, j)
 A mismatch reloads everything so the run restarts deterministically from the last verified point. 
+
+Timing-based check scheduling:
+By default, a full validation check is scheduled every ~3 minutes.
+If the current performance is `sampleIps` (iterations per second), and the current `B`, we compute:
+
+    checkpasslevel = (sampleIps × 180) / B
+
+The user can override this by passing the option `-checklevel <value>`:
+    > This forces a validation every B × <value> iterations instead of 3 minutes.
 
 Testing the checker with `-erroriter` :
 You can inject a deliberate fault to test that the Gerbicz–Li mechanism correctly restores to the last verified state.
@@ -238,7 +246,9 @@ Example:
     [Gerbicz Li] Restore iter=9742 (j=198)
     [Gerbicz Li] Check passed! iter=9940
 
-You can deactivate the Gerbicz–Li error-checking mechanism by passing the option `-gerbiczli`, for benchmarking or debugging purposes. Use with care, as this disables protection against silent hardware errors.
+Disabling protection:
+You can deactivate the Gerbicz–Li error-checking mechanism by passing the option `-gerbiczli`, for benchmarking or debugging purposes. 
+⚠️ Use with care — this disables protection against silent hardware errors.
 
 Understanding `[Gerbicz Li] B=...` and `Checkpasslevel=...`:
 These messages indicate how the checking is structured during the run.
@@ -250,8 +260,8 @@ For example:
 
 This means:
   - The buffer product (`bufd`) is computed every B = 11673 iterations.
-  - A validation check will occur every B × √B iterations, i.e. every 108 × 11673 = 1,261,684 iterations.
-  - Over the full run, 108 checks will be performed.
+  - A validation check occurs every B × checkpasslevel = 1,261,684 iterations.
+  - This interval corresponds to ~3 minutes at your current iteration rate.
 
 
 ## ⚙️ Example Execution and Submission
