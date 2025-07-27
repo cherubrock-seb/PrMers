@@ -30,10 +30,12 @@ NttEngine::NttEngine(const Context& ctx,
         ls0_val_ = ctx_.getLocalSize();
         ls2_val_ = ctx_.getLocalSize2();
         ls3_val_ = ctx_.getLocalSize3();
+        ls5_val_ = ctx_.getLocalSize5();
         //std::cout << "ls0_val_" << ls0_val_ << std::endl;
         const size_t* ls0 = nullptr;
         const size_t* ls2 = &ls2_val_;
         const size_t* ls3 = &ls3_val_;
+        const size_t* ls5 = &ls5_val_;
 
         cl_mem buf_dw = buffers_.digitWeightBuf;
         cl_mem buf_w4 = buffers_.twiddle4Buf;
@@ -60,15 +62,19 @@ NttEngine::NttEngine(const Context& ctx,
             buf_w5,
             ls0,
             ls2,
-            ls3
+            ls3,
+            ls5
         );
     }
     
     {
         ls0_vali_ = ctx_.getLocalSize();
         ls2_vali_ = ctx_.getLocalSize2();
+        ls5_vali_ = ctx_.getLocalSize5();
+        
         const size_t* ls0 = nullptr;
         const size_t* ls2 = &ls2_vali_;
+        const size_t* ls5 = &ls5_vali_;
 
         cl_mem buf_diw = buffers_.digitInvWeightBuf;
         cl_mem buf_wi4  = buffers_.invTwiddle4Buf;
@@ -90,7 +96,8 @@ NttEngine::NttEngine(const Context& ctx,
             buf_diw,
             ls0,
             ls2,
-            lastOutputInv
+            lastOutputInv,
+            ls5
         );
     }
 
@@ -100,10 +107,12 @@ NttEngine::NttEngine(const Context& ctx,
             ls0_val_ = ctx_.getLocalSize();
             ls2_val_ = ctx_.getLocalSize2();
             ls3_val_ = ctx_.getLocalSize3();
+            ls5_val_ = ctx_.getLocalSize5();
             //std::cout << "ls0_val_" << ls0_val_ << std::endl;
             const size_t* ls0 = nullptr;
             const size_t* ls2 = &ls2_val_;
             const size_t* ls3 = &ls3_val_;
+            const size_t* ls5 = &ls5_val_;
 
             cl_mem buf_dw = buffers_.digitWeightBuf;
             cl_mem buf_w4 = buffers_.twiddle4Buf;
@@ -132,15 +141,18 @@ NttEngine::NttEngine(const Context& ctx,
                 buf_w5,
                 ls0,
                 ls2,
-                ls3
+                ls3,
+                ls5
             );
         }
 
         {
             ls0_vali_ = ctx_.getLocalSize();
             ls2_vali_ = ctx_.getLocalSize2();
+            ls5_vali_ = ctx_.getLocalSize5();
             const size_t* ls0 = nullptr;
             const size_t* ls2 = &ls2_vali_;
+            const size_t* ls5 = &ls5_vali_;
 
             cl_mem buf_diw = buffers_.digitInvWeightBuf;
             cl_mem buf_wi4  = buffers_.invTwiddle4Buf;
@@ -163,7 +175,8 @@ NttEngine::NttEngine(const Context& ctx,
                 buf_diw,
                 ls0,
                 ls2,
-                lastOutputInv
+                lastOutputInv,
+                ls5
             );
         }
     //}

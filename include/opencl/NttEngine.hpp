@@ -30,8 +30,8 @@ public:
     int pointwiseMul(cl_mem a, cl_mem b);
 
 private:
-    size_t ls0_val_, ls2_val_, ls3_val_;
-    size_t ls0_vali_, ls2_vali_;
+    size_t ls0_val_, ls2_val_, ls3_val_, ls5_val_;
+    size_t ls0_vali_, ls2_vali_, ls5_vali_;
     const Context& ctx_;
     std::vector<NttStage> forward_pipeline;
     std::vector<NttStage> inverse_pipeline;    

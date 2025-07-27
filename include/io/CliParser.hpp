@@ -36,6 +36,7 @@ struct CliOptions {
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;
+    int max_local_size5 = 0;
     bool noAsk = false;
     std::string kernel_path;
     std::string output_path;

@@ -74,6 +74,7 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     cl_uint ls         = static_cast<cl_uint>(context.getLocalSize());
     cl_uint ls2        = static_cast<cl_uint>(context.getLocalSize2());
     cl_uint ls3        = static_cast<cl_uint>(context.getLocalSize3());
+    cl_uint ls5        = static_cast<cl_uint>(context.getLocalSize5());
 
     cl_uint div4       = static_cast<cl_uint>(lpd / 4);
     cl_uint div4_min = std::max<cl_uint>(1, (lpd - 4) / 4);
@@ -108,7 +109,8 @@ Program::Program(const opencl::Context& context, cl_device_id device,
       << " -DTRANSFORM_SIZE_N="            << nTrans
       << " -DLOCAL_SIZE="                  << ls
       << " -DLOCAL_SIZE2="                 << ls2
-      << " -DLOCAL_SIZE3="                 << ls3;
+      << " -DLOCAL_SIZE3="                 << ls3
+      << " -DLOCAL_SIZE5="                 << ls5;
     size_t idx1 = 1 * 2;
     size_t idx2 = 2 * 2;
     size_t idx3 = 3 * 2;

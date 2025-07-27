@@ -355,7 +355,8 @@ App::App(int argc, char** argv)
         precompute.getDigitWidth(),
         options.exponent,
         options.debug,
-        options.max_local_size1
+        options.max_local_size1,
+        options.max_local_size5
     );
     buffers.emplace(context, precompute);
     program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
@@ -866,7 +867,7 @@ int App::runPrpOrLl() {
           
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
             
-            if((iter+1)%10000000 != 0){
+            if((iter+1)%1000000000 != 0){
                 char dummy;
                 clEnqueueReadBuffer(
                         context.getQueue(),

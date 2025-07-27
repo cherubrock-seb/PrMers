@@ -55,6 +55,8 @@ void printUsage(const char* progName) {
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
     std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
+    std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
+    
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
@@ -167,6 +169,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-l5") == 0 && i + 1 < argc) {
+            opts.max_local_size5 = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-iterforce") == 0 && i + 1 < argc) {
             opts.iterforce = std::atoi(argv[++i]);

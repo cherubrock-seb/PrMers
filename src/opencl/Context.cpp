@@ -332,7 +332,8 @@ void Context::computeOptimalSizes(std::size_t n,
                                   const std::vector<int>& digit_width_cpu,
                                   uint64_t p,
                                   bool debug,
-                                  int localMaxSize)
+                                  int localMaxSize,
+                                  int localMaxSize5)
 {
 
     transformSize_ = static_cast<cl_uint>(n);
@@ -417,8 +418,38 @@ std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ <<
     localSizeCarry_ = std::min(workersCarry_, localSize_);
     localSize2_ = localSize_;
     localSize3_ = localSize_;
-    
-    
+
+    size_t maxWork5Temp = localMemSize_ / (16 * sizeof(cl_ulong));
+    size_t localMaxSize5Temp = localMaxSize5;
+
+    if (localMaxSize5 > 0 && localMaxSize5Temp <= maxWork5Temp) {
+        maxWork5Temp = localMaxSize5;
+    } else if (maxWork5Temp > 256) {
+        maxWork5Temp = 256;
+    }
+
+    if (maxWork5Temp > maxWorkGroupSize_) maxWork5Temp = maxWorkGroupSize_;
+
+    std::size_t workers5Temp = n;
+    localSize5_ = maxWork5Temp;
+
+    cl_uint constraint5Temp = std::max(static_cast<cl_uint>(n / 16), 1u);
+
+    if (n % 5 == 0) {
+        localSize5_ = n / 5;
+
+        while (localSize5_ > maxWork5Temp) {
+            localSize5_ /= 2;
+        }
+
+        constraint5Temp = std::max(static_cast<cl_uint>(n / 16), 1u);
+    }
+
+    while (workers5Temp % localSize5_ != 0 || constraint5Temp % localSize5_ != 0) {
+        localSize5_ /= 2;
+        if (localSize5_ < 1) { localSize5_ = 1; break; }
+    }
+
     
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
     //localSize_ = 0;
@@ -445,6 +476,7 @@ std::size_t Context::getLocalSize() const noexcept { return localSize_; }
 std::size_t Context::getLocalSize2() const noexcept { return localSize2_; }
 std::size_t Context::getLocalSize3() const noexcept { return localSize3_; }
 std::size_t Context::getLocalSize4() const noexcept { return localSize4_; }
+std::size_t Context::getLocalSize5() const noexcept { return localSize5_; }
 std::size_t Context::getLocalSizeCarry() const noexcept { return localSizeCarry_; }
 std::size_t Context::getWorkersCarry() const noexcept { return workersCarry_; }
 int Context::getLocalCarryPropagationDepth() const noexcept { return localCarryPropagationDepth_; }
