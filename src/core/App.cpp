@@ -610,7 +610,7 @@ void App::gpuMulInPlace2(
 }
 
 int App::runPrpOrLl() {
-    std::cout << "Sampling " << 100 << " iterations at iterforce=10\n";
+    std::cout << "Sampling " << 100 << " \n";
     double sampleIps = measureIps(options.iterforce, 100);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
     if (options.tune) {
