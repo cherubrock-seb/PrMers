@@ -1033,8 +1033,6 @@ int App::runPrpOrLl() {
                     clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
                     clWaitForEvents(1, &postEvt);
                 } else {
-                    cl_event idxEvt;
-                    clWaitForEvents(1, &idxEvt);
                     std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
