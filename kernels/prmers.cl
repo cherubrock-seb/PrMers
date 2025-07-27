@@ -461,57 +461,71 @@ __kernel void kernel_sub1(__global ulong* restrict x)
         }
     }
 }
-
 #ifndef DIGIT_WIDTH_VALUE_1
 #define DIGIT_WIDTH_VALUE_1 1
 #endif
-
 #ifndef DIGIT_WIDTH_VALUE_2
 #define DIGIT_WIDTH_VALUE_2 1
 #endif
 
 __kernel void kernel_carry(
-    __global ulong*        restrict x,
-    __global ulong*        restrict carry_array,
-    __global const ulong*  restrict maskPacked
-) {
+    __global ulong*       restrict x,
+    __global ulong*       restrict carry_array,
+    __global const ulong* restrict maskPacked
+){
     const uint gid   = get_global_id(0);
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+
+    const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
+    const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
+
     ulong carry = 0UL;
+
+    uint base = start >> 6;
+    uint off  = start & 63;
+
+    ulong lo = maskPacked[base + 0];
+    ulong hi = maskPacked[base + 1];
+
+    ulong sh     = (ulong)((64 - off) & 63);
+    ulong nzmask = (ulong)0 - (ulong)(off != 0);
+    ulong merged = (lo >> off) | ((hi << sh) & nzmask);
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        uint blk = i >> 6;
-        uint off = i & 63;
-        ulong lo = maskPacked[blk];
-        ulong hi = maskPacked[blk + 1];
-        ulong hiShift = (ulong)((64 - off) & 63);
-        ulong hiTerm = hi << hiShift;
-        ulong nzmask = (ulong)0 - (ulong)(off != 0);
-        hiTerm &= nzmask;
-        ulong merged = (lo >> off) | hiTerm;
         uint nib = (uint)(merged & 0xFULL);
 
-        uchar4 m = (uchar4)(
-            (nib >> 0) & 1,
-            (nib >> 1) & 1,
-            (nib >> 2) & 1,
-            (nib >> 3) & 1
-        );
+        uint4 sel = (uint4)(
+            (nib >> 0) & 1U,
+            (nib >> 1) & 1U,
+            (nib >> 2) & 1U,
+            (nib >> 3) & 1U
+        ) * (uint)0xFFFFFFFFU;
 
-        const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
-        const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
-        int4 digit_width_vec = DW1 + convert_int4(m) * (DW2 - DW1);
+        int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
+
+        uint  wrap     = (off == 60);
+        ulong wrapMask = (ulong)0 - (ulong)wrap;
+        ulong nextChunk = maskPacked[base + 2];
+
+        merged = select(merged >> 4, hi, wrapMask);
+        lo     = select(lo, hi, wrapMask);
+        hi     = select(hi, nextChunk, wrapMask);
+
+        off  = (off + 4) & 63;
+        base += wrap;
     }
 
     carry_array[gid] = carry;
 }
+
+
 
 
 #define CONST_SCALAR_MUL 3UL
