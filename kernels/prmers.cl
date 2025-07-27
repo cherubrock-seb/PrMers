@@ -2090,22 +2090,12 @@ inline void atomic_xchg_u(__global volatile uint* p, uint v) {
 __kernel void check_equal(__global const ulong* a,
                           __global const ulong* b,
                           __global volatile uint* out_ok,
-                          __global volatile uint* out_first_idx,
                           uint n) {
     uint gid = get_global_id(0);
-    uint local_mismatch = 0u;
-    uint first_idx = 0xFFFFFFFFu;
 
-    for (uint i = gid; i < n; i += get_global_size(0)) {
-        ulong va = a[i], vb = b[i];
-        if (va != vb) {
-            if (!local_mismatch) first_idx = i;
-            local_mismatch = 1u;
-            break;
-        }
-    }
-    if (local_mismatch) {
-        atomic_min_u(out_first_idx, first_idx);
+    if (a[gid] != b[gid]) {
         atomic_xchg_u(out_ok, 0u);
     }
+
+    
 }
