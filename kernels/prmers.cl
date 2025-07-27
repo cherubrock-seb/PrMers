@@ -505,21 +505,20 @@ __kernel void kernel_carry(
             (nib >> 3) & 1U
         ) * (uint)0xFFFFFFFFU;
 
-        int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
+        const int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
 
-        uint  wrap     = (off == 60);
-        ulong wrapMask = (ulong)0 - (ulong)wrap;
-        ulong nextChunk = maskPacked[base + 2];
+        sh = (ulong)0 - (off == 60);
+        nzmask = maskPacked[base + 2];
 
-        merged = select(merged >> 4, hi, wrapMask);
-        lo     = select(lo, hi, wrapMask);
-        hi     = select(hi, nextChunk, wrapMask);
+        merged = select(merged >> 4, hi, sh);
+        lo     = select(lo, hi, sh);
+        hi     = select(hi, nzmask, sh);
 
         off  = (off + 4) & 63;
-        base += wrap;
+        base += sh;
     }
 
     carry_array[gid] = carry;
