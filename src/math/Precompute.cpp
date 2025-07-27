@@ -41,7 +41,7 @@ uint32_t transformsize(uint64_t exponent) {
 
     if (n2 >= 128) {
         uint64_t n5 = (n2 >> 3) * 5u; // n2 * 5 / 8
-        if (n5 >= 80) {               // sécurité : n5 doit être ≥ 80
+        if (n5 >= 320) {               // sécurité : n5 doit être ≥ 80
             uint64_t w5 = exponent / n5;
             long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
             if (cost5 < 64.0L)
