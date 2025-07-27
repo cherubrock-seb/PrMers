@@ -1107,7 +1107,9 @@ int App::runPrpOrLl() {
         
 
     }
-    
+    if (outOkBuf != nullptr)  clReleaseMemObject(outOkBuf);
+    if (outIdxBuf != nullptr) clReleaseMemObject(outIdxBuf);
+
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
         clFinish(queue);
