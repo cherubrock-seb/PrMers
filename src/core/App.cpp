@@ -866,7 +866,7 @@ int App::runPrpOrLl() {
           
         if ((options.iterforce > 0 && (iter+1)%options.iterforce == 0 && iter>0) || (((iter+1)%options.iterforce == 0))) { 
             
-            if((iter+1)%100000 != 0){
+            if((iter+1)%1000000 != 0){
                 char dummy;
                 clEnqueueReadBuffer(
                         context.getQueue(),
