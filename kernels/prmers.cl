@@ -672,16 +672,17 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     ulong4 x_vec = vload4(0, x + end);
 
     base = (uint)(merged & 0xFULL);
-    uint4 sel = (uint4)(
-        (base >> 0) & 1U,
-        (base >> 1) & 1U,
-        (base >> 2) & 1U,
-        (base >> 3) & 1U
-    ) * (uint)0xFFFFFFFFU;
+    int4 sel = (int4)(
+        (base >> 0) & 1,
+        (base >> 1) & 1,
+        (base >> 2) & 1,
+        (base >> 3) & 1
+    ) * -1;
 
-    int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
-    x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry);
+    sel = bitselect(DW1, DW2, (sel));
+
+    x_vec = digit_adc4_last(x_vec, sel, &carry);
     vstore4(x_vec, 0, x + end);
 }
 
