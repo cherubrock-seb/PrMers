@@ -968,18 +968,15 @@ int App::runPrpOrLl() {
                 std::cout << oss.str() << std::endl;
             };
 
-
-            checkpass+=1;
-            bool condcheck = !(checkpass!=checkpasslevel && (iter!=totalIters-1));
+            checkpass += 1;
+            bool condcheck = !(checkpass != checkpasslevel && (iter != totalIters - 1));
             gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
-            if(condcheck)
-                gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
+            if (condcheck) gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
             nttEngine->forward_simple(buffers->bufd, 0);
             nttEngine->forward_simple(buffers->save, 0);
             nttEngine->pointwiseMul(buffers->bufd, buffers->save);
             nttEngine->inverse_simple(buffers->bufd, 0);
             carry.carryGPU(buffers->bufd, buffers->blockCarryBuf, limbBytes);
-
 
             if (condcheck) {
                 gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
@@ -1022,7 +1019,9 @@ int App::runPrpOrLl() {
                     static_cast<cl_uint>(precompute.getN())
                 );
 
-                clEnqueueReadBuffer(context.getQueue(), outOkBuf, CL_TRUE, 0, sizeof(ok), &ok, 0, nullptr, nullptr);
+                cl_event okEvt;
+                clEnqueueReadBuffer(context.getQueue(), outOkBuf, CL_FALSE, 0, sizeof(ok), &ok, 0, nullptr, &okEvt);
+                clWaitForEvents(1, &okEvt);
 
                 if (ok == 1u) {
                     std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
@@ -1031,8 +1030,13 @@ int App::runPrpOrLl() {
                     gpuCopy(context.getQueue(), buffers->bufd, buffers->last_correct_bufd, limbBytes);
                     itersave = iter;
                     jsave = j;
+                    cl_event postEvt;
+                    clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
+                    clWaitForEvents(1, &postEvt);
                 } else {
-                    clEnqueueReadBuffer(context.getQueue(), outIdxBuf, CL_TRUE, 0, sizeof(idx), &idx, 0, nullptr, nullptr);
+                    cl_event idxEvt;
+                    clEnqueueReadBuffer(context.getQueue(), outIdxBuf, CL_FALSE, 0, sizeof(idx), &idx, 0, nullptr, &idxEvt);
+                    clWaitForEvents(1, &idxEvt);
                     std::cout << "[Gerbicz Li] Mismatch at index " << idx << "\n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
@@ -1048,6 +1052,9 @@ int App::runPrpOrLl() {
                     options.gerbicz_error_count += 1;
                     gpuCopy(context.getQueue(), buffers->last_correct_state, buffers->input, limbBytes);
                     gpuCopy(context.getQueue(), buffers->last_correct_bufd, buffers->bufd, limbBytes);
+                    cl_event postEvt;
+                    clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
+                    clWaitForEvents(1, &postEvt);
                 }
             }
         }
