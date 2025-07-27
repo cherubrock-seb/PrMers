@@ -1928,8 +1928,8 @@ __constant ulong2 F34_2 = (ulong2)(F3, F4);
 
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
-    __global ulong * restrict w5,
-    __global ulong * restrict digit_weight)
+    __global const ulong * restrict w5,
+    __global const ulong * restrict digit_weight)
 {
     const uint k  = get_global_id(0);
 
@@ -1941,48 +1941,40 @@ __kernel void kernel_ntt_radix5_mm_first(
 
     const ulong u0 = modMul(x[i0], digit_weight[i0]);
 
-    const ulong4 xv = (ulong4)(x[i1], x[i2], x[i3], x[i4]);
-    const ulong4 dv = (ulong4)(digit_weight[i1], digit_weight[i2], digit_weight[i3], digit_weight[i4]);
-    const ulong4 tv = modMul4(xv, dv);
+    const ulong t1 = modMul(x[i1], digit_weight[i1]);
+    const ulong t2 = modMul(x[i2], digit_weight[i2]);
+    const ulong t3 = modMul(x[i3], digit_weight[i3]);
+    const ulong t4 = modMul(x[i4], digit_weight[i4]);
 
-    const ulong v1 = modAdd(tv.s0, tv.s3);
-    const ulong v4 = modSub(tv.s0, tv.s3);
-    const ulong v2 = modAdd(tv.s1, tv.s2);
-    const ulong v3 = modSub(tv.s1, tv.s2);
+    const ulong s03p = modAdd(t1, t4);
+    const ulong s03m = modSub(t1, t4);
+    const ulong s12p = modAdd(t2, t3);
+    const ulong s12m = modSub(t2, t3);
 
-    const ulong z0 = modAdd(v1, v2);
+    const ulong z0   = modAdd(s03p, s12p);
 
-    const ulong2 a  = (ulong2)(modSub(v1, v2), modSub(v4, v3));
-    const ulong2 x25 = modMul2(F25_2, a);
+    const ulong2 x25 = modMul2(F25_2, (ulong2)(modSub(s03p, s12p), modSub(s03m, s12m)));
+    const ulong2 x34 = modMul2(F34_2, (ulong2)(s12m, s03m));
+    const ulong  x2  = x25.s0;
+    const ulong  x5  = x25.s1;
+    const ulong  x3  = x34.s0;
+    const ulong  x4  = x34.s1;
 
-    const ulong2 b  = (ulong2)(v3, v4);
-    const ulong2 x34 = modMul2(F34_2, b);
-
-    const ulong x2 = x25.s0;
-    const ulong x5 = x25.s1;
-    const ulong x3 = x34.s0;
-    const ulong x4 = x34.s1;
-
-    const ulong y1 = modAdd(u0, x2);
-    const ulong y2 = modSub(u0, x2);
-    const ulong y3 = modAdd(x3, x5);
-    const ulong y4 = modSub(x4, x5);
-
-    const ulong z1 = modAdd(y1, y4);
-    const ulong z4 = modSub(y1, y4);
-    const ulong z2 = modAdd(y2, y3);
-    const ulong z3 = modSub(y2, y3);
+    const ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
+    const ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
+    const ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
+    const ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
 
     x[i0] = modAdd(z0, u0);
 
-    const ulong4 accv = (ulong4)(
-        modSub(z2, tv.s3),
-        modSub(z4, tv.s1),
-        modSub(z1, tv.s2),
-        modSub(z3, tv.s0)
-    );
-    const ulong4 wv   = (ulong4)(w5[4 * k + 0], w5[4 * k + 1], w5[4 * k + 2], w5[4 * k + 3]);
-    const ulong4 outv = modMul4(accv, wv);
+    const ulong acc1 = modSub(z2, t4);
+    const ulong acc2 = modSub(z4, t2);
+    const ulong acc3 = modSub(z1, t3);
+    const ulong acc4 = modSub(z3, t1);
+
+    const uint   woff = (uint)(k << 2);
+    const ulong4 wv   = vload4(0, w5 + woff);
+    const ulong4 outv = modMul4((ulong4)(acc1, acc2, acc3, acc4), wv);
 
     x[i1] = outv.s0;
     x[i2] = outv.s1;
@@ -1992,8 +1984,8 @@ __kernel void kernel_ntt_radix5_mm_first(
 
 __kernel void kernel_ntt_inverse_radix5_mm_last(
     __global ulong * restrict x,
-    __global ulong * restrict invw5,
-    __global ulong * restrict digit_inv_weight)
+    __global const ulong * restrict invw5,
+    __global const ulong * restrict digit_inv_weight)
 {
     const uint k  = get_global_id(0);
 
@@ -2005,53 +1997,44 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
 
     const ulong u0 = x[i0];
 
-    const ulong4 xv = (ulong4)(x[i1], x[i2], x[i3], x[i4]);
-    const ulong4 wv = (ulong4)(invw5[4 * k + 0], invw5[4 * k + 1], invw5[4 * k + 2], invw5[4 * k + 3]);
-    const ulong4 tv = modMul4(xv, wv);
+    const uint   woff = (uint)(k << 2);
+    const ulong4 wv   = vload4(0, invw5 + woff);
+    const ulong t1 = modMul(x[i1], wv.s0);
+    const ulong t2 = modMul(x[i2], wv.s1);
+    const ulong t3 = modMul(x[i3], wv.s2);
+    const ulong t4 = modMul(x[i4], wv.s3);
 
-    const ulong v1 = modAdd(tv.s3, tv.s0);
-    const ulong v4 = modSub(tv.s3, tv.s0);
-    const ulong v2 = modAdd(tv.s2, tv.s1);
-    const ulong v3 = modSub(tv.s2, tv.s1);
+    const ulong s40p = modAdd(t4, t1);
+    const ulong s40m = modSub(t4, t1);
+    const ulong s32p = modAdd(t3, t2);
+    const ulong s32m = modSub(t3, t2);
 
-    const ulong z0 = modAdd(v1, v2);
+    const ulong z0 = modAdd(s40p, s32p);
 
-    const ulong2 a  = (ulong2)(modSub(v1, v2), modSub(v4, v3));
-    const ulong2 x25 = modMul2(F25_2, a);
+    const ulong2 x25 = modMul2(F25_2, (ulong2)(modSub(s40p, s32p), modSub(s40m, s32m)));
+    const ulong2 x34 = modMul2(F34_2, (ulong2)(s32m, s40m));
+    const ulong  x2  = x25.s0;
+    const ulong  x5  = x25.s1;
+    const ulong  x3  = x34.s0;
+    const ulong  x4  = x34.s1;
 
-    const ulong2 b  = (ulong2)(v3, v4);
-    const ulong2 x34 = modMul2(F34_2, b);
-
-    const ulong x2 = x25.s0;
-    const ulong x5 = x25.s1;
-    const ulong x3 = x34.s0;
-    const ulong x4 = x34.s1;
-
-    const ulong y1 = modAdd(u0, x2);
-    const ulong y2 = modSub(u0, x2);
-    const ulong y3 = modAdd(x3, x5);
-    const ulong y4 = modSub(x4, x5);
-
-    const ulong z1 = modAdd(y1, y4);
-    const ulong z4 = modSub(y1, y4);
-    const ulong z2 = modAdd(y2, y3);
-    const ulong z3 = modSub(y2, y3);
+    const ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
+    const ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
+    const ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
+    const ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
 
     x[i0] = modMul(modAdd(z0, u0), digit_inv_weight[i0]);
 
-    const ulong4 accv = (ulong4)(
-        modSub(z2, tv.s0),
-        modSub(z4, tv.s2),
-        modSub(z1, tv.s1),
-        modSub(z3, tv.s3)
-    );
+    const ulong acc1 = modSub(z2, t1);
+    const ulong acc2 = modSub(z4, t3);
+    const ulong acc3 = modSub(z1, t2);
+    const ulong acc4 = modSub(z3, t4);
+
     const ulong4 dvw  = (ulong4)(digit_inv_weight[i1], digit_inv_weight[i2], digit_inv_weight[i3], digit_inv_weight[i4]);
-    const ulong4 outv = modMul4(accv, dvw);
+    const ulong4 outv = modMul4((ulong4)(acc1, acc2, acc3, acc4), dvw);
 
     x[i1] = outv.s0;
     x[i2] = outv.s1;
     x[i3] = outv.s2;
     x[i4] = outv.s3;
 }
-
-
