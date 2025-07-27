@@ -219,110 +219,109 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
 inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict carry) {
     ulong4 res;
     ulong c = *carry;
+    
+
     ulong d01 = digit_width.s0 ^ digit_width.s1;
     ulong d12 = digit_width.s1 ^ digit_width.s2;
     ulong d23 = digit_width.s2 ^ digit_width.s3;
-    ulong d02 = digit_width.s0 ^ digit_width.s2;
-    ulong d13 = digit_width.s1 ^ digit_width.s3;
 
     bool all4  = !(d01 | d12 | d23);     // s0==s1==s2==s3
     bool eq3   = !(d01 | d12);           // s0==s1==s2
     bool pair01_23 = !d01 && !d23;       // s0==s1 && s2==s3
-    bool cross = !d02 && !d13;           // s0==s2 && s1==s3
+    
+    bool cross = !(digit_width.s0 ^ digit_width.s2) && !(digit_width.s1 ^ digit_width.s3);           // s0==s2 && s1==s3
 
     if (all4) {
-        ulong mask = (1UL << (digit_width.s0)) - 1UL;
+        d01 = (1UL << (digit_width.s0)) - 1UL;
 
-        ulong s = lhs.s0 + c;
-        res.s0 = s & mask;
-        c = s >> digit_width.s0;
+        d12 = lhs.s0 + c;
+        res.s0 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
-        s = lhs.s1 + c;
-        res.s1 = s & mask;
-        c = s >> digit_width.s0;
+        d12 = lhs.s1 + c;
+        res.s1 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
-        s = lhs.s2 + c;
-        res.s2 = s & mask;
-        c = s >> digit_width.s0;
+        d12 = lhs.s2 + c;
+        res.s2 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
-        s = lhs.s3 + c;
-        res.s3 = s & mask;
-        c = s >> digit_width.s0;
+        d12 = lhs.s3 + c;
+        res.s3 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
         *carry = c;
     }
     else if (eq3) {
 
-        ulong mask = (1UL << ( digit_width.s0)) - 1UL;
+        d01 = (1UL << ( digit_width.s0)) - 1UL;
 
-        ulong s = lhs.s0 + c;
-        res.s0 = s & mask;
-        c = s >>  digit_width.s0;
+        d12 = lhs.s0 + c;
+        res.s0 = d12 & d01;
+        c = d12 >>  digit_width.s0;
 
-        s = lhs.s1 + c;
-        res.s1 = s & mask;
-        c = s >>  digit_width.s0;
+        d12 = lhs.s1 + c;
+        res.s1 = d12 & d01;
+        c = d12 >>  digit_width.s0;
 
-        s = lhs.s2 + c;
-        res.s2 = s & mask;
-        c = s >>  digit_width.s0;
+        d12 = lhs.s2 + c;
+        res.s2 = d12 & d01;
+        c = d12 >>  digit_width.s0;
 
-        mask = (1UL << (digit_width.s3)) - 1UL;
-        s = lhs.s3 + c;
-        res.s3 = s & mask;
-        c = s >> (digit_width.s3);
+        d01 = (1UL << (digit_width.s3)) - 1UL;
+        d12 = lhs.s3 + c;
+        res.s3 = d12 & d01;
+        c = d12 >> (digit_width.s3);
 
         *carry = c;
     }
      else if (pair01_23) {
 
-        ulong mask01 = (1UL << (digit_width.s0)) - 1UL;
-        ulong s = lhs.s0 + c;
-        res.s0 = s & mask01;
-        c = s >> digit_width.s0;
-        s = lhs.s1 + c;
-        res.s1 = s & mask01;
-        c = s >> digit_width.s0;
-        mask01 = (1UL << (digit_width.s2)) - 1UL;
-        s = lhs.s2 + c;
-        res.s2 = s & mask01;
-        c = s >> digit_width.s2;
-        s = lhs.s3 + c;
-        res.s3 = s & mask01;
-        c = s >> digit_width.s2;
+        d01 = (1UL << (digit_width.s0)) - 1UL;
+        d12 = lhs.s0 + c;
+        res.s0 = d12 & d01;
+        c = d12 >> digit_width.s0;
+        d12 = lhs.s1 + c;
+        res.s1 = d12 & d01;
+        c = d12 >> digit_width.s0;
+        d01 = (1UL << (digit_width.s2)) - 1UL;
+        d12 = lhs.s2 + c;
+        res.s2 = d12 & d01;
+        c = d12 >> digit_width.s2;
+        d12 = lhs.s3 + c;
+        res.s3 = d12 & d01;
+        c = d12 >> digit_width.s2;
 
         *carry = c;
     }
     else if (cross) {
 
-        ulong mask0 = (1UL << (digit_width.s0)) - 1UL;
-        ulong s = lhs.s0 + c;
-        res.s0 = s & mask0;
-        c = s >> digit_width.s0;
+        ulong d01 = (1UL << (digit_width.s0)) - 1UL;
+        d12 = lhs.s0 + c;
+        res.s0 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
-        ulong mask1 = (1UL << (digit_width.s1)) - 1UL;
-        s = lhs.s1 + c;
-        res.s1 = s & mask1;
-        c = s >> digit_width.s1;
+        d23 = (1UL << (digit_width.s1)) - 1UL;
+        d12 = lhs.s1 + c;
+        res.s1 = d12 & d23;
+        c = d12 >> digit_width.s1;
 
-        // Pour s2, on réutilise la largeur de s0
-        s = lhs.s2 + c;
-        res.s2 = s & mask0;
-        c = s >> digit_width.s0;
+        d12 = lhs.s2 + c;
+        res.s2 = d12 & d01;
+        c = d12 >> digit_width.s0;
 
-        // Pour s3, on réutilise la largeur de s1
-        s = lhs.s3 + c;
-        res.s3 = s & mask1;
-        c = s >> digit_width.s1;
+        d12 = lhs.s3 + c;
+        res.s3 = d12 & d23;
+        c = d12 >> digit_width.s1;
 
         *carry = c;
     }
     else {
         #pragma unroll 4
         for (int i = 0; i < 4; i++) {
-            ulong s = lhs[i] + c;
-            res[i] = s & ((1UL << (digit_width[i])) - 1UL);
-            c = s >> (digit_width[i]);
+            d12 = lhs[i] + c;
+            res[i] = d12 & ((1UL << (digit_width[i])) - 1UL);
+            c = d12 >> (digit_width[i]);
         }
         *carry = c;
     }
@@ -330,20 +329,14 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
     return res;
 }
 
-inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *carry) {
-    ulong4 res;
-    ulong c = *carry;
-    #pragma unroll 3
-    for (int i = 0; i < 3; i++) {
-        ulong s = lhs[i] + c;                        
-        res[i] = s & ((1UL << (digit_width[i])) - 1UL);
-        c = s >> (digit_width[i]);
-
-    }
-    *carry = c;
-    res[3] = lhs[3] + c;
-    return res;
+inline ulong4 digit_adc4_last(ulong4 a,int4 w,__private ulong*restrict k){
+    ulong4 r; ulong c=*k,s; int t;
+    t=w.s0; s=a.s0+c; r.s0=s&((1UL<<t)-1UL); c=s>>t;
+    t=w.s1; s=a.s1+c; r.s1=s&((1UL<<t)-1UL); c=s>>t;
+    t=w.s2; s=a.s2+c; r.s2=s&((1UL<<t)-1UL); c=s>>t;
+    *k=c; r.s3=a.s3+c; return r;
 }
+
 
 
 
