@@ -70,15 +70,19 @@ Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
     const auto& maskBits = pre.getDigitWidthMask();
     size_t maskN = maskBits.size();
     size_t chunks = (maskN + 63) / 64;
+    size_t chunks_padded = ((chunks + 3) & ~size_t(3));
+    bool add_guard = true;
+    if (add_guard) chunks_padded += 1;
 
-    std::vector<uint64_t> maskPacked(chunks, 0ULL);
+    std::vector<uint64_t> maskPacked(chunks_padded, 0ULL);
     for (size_t i = 0; i < maskN; ++i) {
         if (maskBits[i]) {
-            size_t blk = i >> 6;      // i / 64
-            size_t bit = i & 63;      // i % 64
+            size_t blk = i >> 6;
+            size_t bit = i & 63;
             maskPacked[blk] |= (1ULL << bit);
         }
     }
+
 
     digitWidthMaskBuf = createBuffer(ctx,
         CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
