@@ -1944,29 +1944,17 @@ __kernel void kernel_ntt_radix5_mm_first(
 
     ulong d0,d1,d2,d3,d4;
 
-
-    lm[lid]                     = x[k];
-    lm[LOCAL_SIZE5 + lid]       = x[k +     TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES2+lid]  = x[k + C_2_TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES3+lid]  = x[k + C_3_TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES4+lid]  = x[k + C_4_TRANSFORM_SIZE_N_DIV5];
-
     d0 = digit_weight[k];
     d1 = digit_weight[k +     TRANSFORM_SIZE_N_DIV5];
     d2 = digit_weight[k + C_2_TRANSFORM_SIZE_N_DIV5];
     d3 = digit_weight[k + C_3_TRANSFORM_SIZE_N_DIV5];
     d4 = digit_weight[k + C_4_TRANSFORM_SIZE_N_DIV5];
 
-
-
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    ulong u0 = modMul(lm[lid], d0);
-
-    lm[LOCAL_SIZE5+lid]       = modMul(lm[LOCAL_SIZE5+lid], d1);
-    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(lm[LOCAL_SIZE5_TIMES2+lid], d2);
-    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(lm[LOCAL_SIZE5_TIMES3+lid], d3);
-    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(lm[LOCAL_SIZE5_TIMES4+lid], d4);
+    ulong u0 = modMul(x[k], d0);
+    lm[LOCAL_SIZE5+lid]       = modMul(x[k +     TRANSFORM_SIZE_N_DIV5], d1);
+    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(x[k + C_2_TRANSFORM_SIZE_N_DIV5], d2);
+    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(x[k + C_3_TRANSFORM_SIZE_N_DIV5], d3);
+    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(x[k + C_4_TRANSFORM_SIZE_N_DIV5], d4);
 
     d0 = modAdd(lm[LOCAL_SIZE5+lid],        lm[LOCAL_SIZE5_TIMES4+lid]);
     d1 = modSub(lm[LOCAL_SIZE5+lid],        lm[LOCAL_SIZE5_TIMES4+lid]);
@@ -2009,26 +1997,16 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     const uint k = get_global_id(0);
 
     ulong d0,d1,d2,d3,d4;
-    
-
-    lm[lid]                     = x[k];
-    lm[LOCAL_SIZE5 + lid]       = x[k +     TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES2+lid]  = x[k + C_2_TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES3+lid]  = x[k + C_3_TRANSFORM_SIZE_N_DIV5];
-    lm[LOCAL_SIZE5_TIMES4+lid]  = x[k + C_4_TRANSFORM_SIZE_N_DIV5];
-
-
     ulong2 v25 = invw5[(uint)k << 1];
     ulong2 v34 = invw5[((uint)k << 1) + 1];
 
-    barrier(CLK_LOCAL_MEM_FENCE);
 
-    ulong u0 = lm[lid];
+    ulong u0 = x[k];
 
-    lm[LOCAL_SIZE5+lid]       = modMul(lm[LOCAL_SIZE5+lid],       v25.s0);
-    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(lm[LOCAL_SIZE5_TIMES2+lid],v25.s1);
-    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(lm[LOCAL_SIZE5_TIMES3+lid],v34.s0);
-    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(lm[LOCAL_SIZE5_TIMES4+lid],v34.s1);
+    lm[LOCAL_SIZE5+lid]       = modMul(x[k +     TRANSFORM_SIZE_N_DIV5],       v25.s0);
+    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(x[k + C_2_TRANSFORM_SIZE_N_DIV5],v25.s1);
+    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(x[k + C_3_TRANSFORM_SIZE_N_DIV5],v34.s0);
+    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(x[k + C_4_TRANSFORM_SIZE_N_DIV5],v34.s1);
 
     d0 = modAdd(lm[LOCAL_SIZE5_TIMES4+lid], lm[LOCAL_SIZE5+lid]);
     d1 = modSub(lm[LOCAL_SIZE5_TIMES4+lid], lm[LOCAL_SIZE5+lid]);
