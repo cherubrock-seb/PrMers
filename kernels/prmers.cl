@@ -498,16 +498,16 @@ __kernel void kernel_carry(
 
         uint nib = (uint)(merged & 0xFULL);
 
-        uint4 sel = (uint4)(
-            (nib >> 0) & 1U,
-            (nib >> 1) & 1U,
-            (nib >> 2) & 1U,
-            (nib >> 3) & 1U
-        ) * (uint)0xFFFFFFFFU;
+        int4 sel = (int4)(
+            (nib >> 0) & 1,
+            (nib >> 1) & 1,
+            (nib >> 2) & 1,
+            (nib >> 3) & 1
+        ) * -1;
 
-        const int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
+        sel = bitselect(DW1, DW2, (sel));
 
-        x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
+        x_vec = digit_adc4(x_vec, sel, &carry);
         vstore4(x_vec, 0, x + i);
 
         sh = (ulong)0 - (off == 60);
