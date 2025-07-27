@@ -756,7 +756,7 @@ int App::runPrpOrLl() {
     bool errordone = false;
     //uint64_t checkpasslevel = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
 
-    double desiredIntervalSeconds = 180.0;
+    double desiredIntervalSeconds = 600.0;
     uint64_t checkpasslevel_auto = (uint64_t)((sampleIps * desiredIntervalSeconds) / (double)B);
 
     if (checkpasslevel_auto == 0) checkpasslevel_auto = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));

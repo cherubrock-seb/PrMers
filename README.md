@@ -196,7 +196,7 @@ See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, 
 
 - The long modular exponentiation is split into blocks of size B.
 - We do NOT validate after every block: a full check costs ~B modular ops.
-- Instead, we validate after approximately T seconds (default: T = 180 s ≈ 3 minutes).
+- Instead, we validate after approximately T seconds (default: T = 600 s = 10 minutes).
 - Two running products are kept: 
   • a rolling product for the current progress  
   • a reference product saved at the last verified boundary
@@ -212,13 +212,13 @@ BackupManager writes:
 A mismatch reloads everything so the run restarts deterministically from the last verified point. 
 
 Timing-based check scheduling:
-By default, a full validation check is scheduled every ~3 minutes.
+By default, a full validation check is scheduled every 10 minutes.
 If the current performance is `sampleIps` (iterations per second), and the current `B`, we compute:
 
-    checkpasslevel = (sampleIps × 180) / B
+    checkpasslevel = (sampleIps × 600) / B
 
 The user can override this by passing the option `-checklevel <value>`:
-    > This forces a validation every B × <value> iterations instead of 3 minutes.
+    > This forces a validation every B × <value> iterations instead of 10 minutes.
 
 Testing the checker with `-erroriter` :
 You can inject a deliberate fault to test that the Gerbicz–Li mechanism correctly restores to the last verified state.
@@ -261,7 +261,6 @@ For example:
 This means:
   - The buffer product (`bufd`) is computed every B = 11673 iterations.
   - A validation check occurs every B × checkpasslevel = 1,261,684 iterations.
-  - This interval corresponds to ~3 minutes at your current iteration rate.
 
 
 ## ⚙️ Example Execution and Submission
