@@ -956,9 +956,11 @@ int App::runPrpOrLl() {
                 std::cout << oss.str() << std::endl;
             };
 
-            
+            checkpass+=1;
+            bool condcheck = !(checkpass!=checkpasslevel && (iter!=totalIters-1));
             gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
-            gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
+            if(condcheck)
+                gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
             //gpuMulInPlace(buffers->bufd, buffers->save, carry, limbBytes, buffers->blockCarryBuf);
             
             nttEngine->forward_simple(buffers->bufd, 0);
@@ -966,11 +968,11 @@ int App::runPrpOrLl() {
             nttEngine->pointwiseMul(buffers->bufd, buffers->save);
             nttEngine->inverse_simple(buffers->bufd, 0);
             carry.carryGPU(buffers->bufd, buffers->blockCarryBuf, limbBytes);
-            checkpass+=1;
+           
             //if(checkpass!=checkpasslevel && (iter!=totalIters-1)){
                 //gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
             //}
-            if(!(checkpass!=checkpasslevel && (iter!=totalIters-1))){
+            if(condcheck){
                 gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
             
                 checkpass = 0;
