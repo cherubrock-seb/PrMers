@@ -74,4 +74,22 @@ void Kernels::runSub1(cl_mem buf) {
     //clFinish(queue_);
 }
 
+void Kernels::runCheckEqual(cl_mem a, cl_mem b,
+                            cl_mem outOk, cl_mem outFirstIdx,
+                            cl_uint n, size_t wg)
+{
+    cl_kernel k = getKernel("check_equal");
+    clSetKernelArg(k, 0, sizeof(cl_mem), &a);
+    clSetKernelArg(k, 1, sizeof(cl_mem), &b);
+    clSetKernelArg(k, 2, sizeof(cl_mem), &outOk);
+    clSetKernelArg(k, 3, sizeof(cl_mem), &outFirstIdx);
+    clSetKernelArg(k, 4, sizeof(cl_uint), &n);
+
+    size_t local  = std::min(wg, (size_t)std::max<cl_uint>(1, n));
+    size_t global = ((n + local - 1) / local) * local;
+
+    clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
+}
+
+
 } // namespace opencl

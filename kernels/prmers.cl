@@ -2038,3 +2038,45 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     x[i3] = outv.s2;
     x[i4] = outv.s3;
 }
+
+#if __OPENCL_VERSION__ < 200
+#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
+#pragma OPENCL EXTENSION cl_khr_global_int32_extended_atomics : enable
+inline void atomic_min_u(__global volatile uint* p, uint v) {
+    uint old = *p;
+    while (v < old) {
+        uint prev = atomic_cmpxchg((__global volatile int*)p, (int)old, (int)v);
+        if ((uint)prev == old) break;
+        old = (uint)prev;
+    }
+}
+inline void atomic_xchg_u(__global volatile uint* p, uint v) {
+    (void)atomic_xchg((__global volatile int*)p, (int)v);
+}
+#else
+#define atomic_min_u atomic_min
+#define atomic_xchg_u atomic_xchg
+#endif
+
+__kernel void check_equal(__global const ulong* a,
+                          __global const ulong* b,
+                          __global volatile uint* out_ok,
+                          __global volatile uint* out_first_idx,
+                          uint n) {
+    uint gid = get_global_id(0);
+    uint local_mismatch = 0u;
+    uint first_idx = 0xFFFFFFFFu;
+
+    for (uint i = gid; i < n; i += get_global_size(0)) {
+        ulong va = a[i], vb = b[i];
+        if (va != vb) {
+            if (!local_mismatch) first_idx = i;
+            local_mismatch = 1u;
+            break;
+        }
+    }
+    if (local_mismatch) {
+        atomic_min_u(out_first_idx, first_idx);
+        atomic_xchg_u(out_ok, 0u);
+    }
+}

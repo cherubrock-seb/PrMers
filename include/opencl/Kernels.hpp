@@ -24,6 +24,10 @@ public:
     void createKernel(const std::string& name);
     cl_kernel getKernel(const std::string& name) const;
 
+    void runCheckEqual(cl_mem a, cl_mem b,
+                        cl_mem outOk, cl_mem outFirstIdx,
+                        cl_uint n, size_t wg = 256);
+
     void runSquaring(cl_mem buf, size_t n);
     void runSub2(cl_mem buf);
     void runSub1(cl_mem buf);
