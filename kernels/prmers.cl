@@ -1934,7 +1934,7 @@ __constant ulong2 F34_2 = (ulong2)(F3, F4);
 
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
-    __global const ulong * restrict w5,
+    __global const ulong2 * restrict w5,
     __global const ulong * restrict digit_weight)
 {
     __local ulong lm[5*LOCAL_SIZE5];
@@ -1987,9 +1987,8 @@ __kernel void kernel_ntt_radix5_mm_first(
     z0 = modSub(d0, d1);//z4
     d0 = modAdd(d2, d3);//z2
     d1 = modSub(d2, d3);//z3
-
-    v25 = vload2(0, w5 + ((uint)k << 2));
-    v34 = vload2(0, w5 + ((uint)k << 2) + 2);
+    v25 = w5[(uint)k << 1];
+    v34 = w5[((uint)k << 1) + 1];
 
     
     x[k +     TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(d0, lm[LOCAL_SIZE5_TIMES4+lid]), v25.s0);
