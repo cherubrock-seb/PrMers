@@ -532,52 +532,76 @@ __kernel void kernel_carry(
 __constant ulong4 CONST_SCALAR_VEC = (ulong4)(CONST_SCALAR_MUL, CONST_SCALAR_MUL, CONST_SCALAR_MUL, CONST_SCALAR_MUL);
 
 __kernel void kernel_carry_mul_3(
-    __global ulong*        restrict x,
-    __global ulong*        restrict carry_array,
-    __global const ulong*  restrict maskPacked
+    __global ulong*       restrict x,
+    __global ulong*       restrict carry_array,
+    __global const ulong* restrict maskPacked
 ) {
     const uint gid   = get_global_id(0);
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end   = start + LOCAL_PROPAGATION_DEPTH;
+
+    const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
+    const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
+
     ulong carry1 = 0UL;
-    ulong carry = 0UL;
+    ulong carry  = 0UL;
+
+    uint base = start >> 6;
+    uint off  = start & 63;
+
+    ulong lo = maskPacked[base + 0];
+    ulong hi = maskPacked[base + 1];
+
+    ulong sh     = (ulong)((64 - off) & 63);
+    ulong nzmask = (ulong)0 - (ulong)(off != 0);
+    ulong merged = (lo >> off) | ((hi << sh) & nzmask);
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        uint blk = i >> 6;
-        uint off = i & 63;
-        ulong lo = maskPacked[blk];
-        ulong hi = maskPacked[blk + 1];
-        ulong hiShift = (ulong)((64 - off) & 63);
-        ulong hiTerm = hi << hiShift;
-        ulong nzmask = (ulong)0 - (ulong)(off != 0);
-        hiTerm &= nzmask;
-        ulong merged = (lo >> off) | hiTerm;
         uint nib = (uint)(merged & 0xFULL);
+        uint4 sel = (uint4)(
+            (nib >> 0) & 1U,
+            (nib >> 1) & 1U,
+            (nib >> 2) & 1U,
+            (nib >> 3) & 1U
+        ) * (uint)0xFFFFFFFFU;
 
-        uchar4 m = (uchar4)(
-            (nib >> 0) & 1,
-            (nib >> 1) & 1,
-            (nib >> 2) & 1,
-            (nib >> 3) & 1
-        );
-
-        const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
-        const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
-        int4 digit_width_vec = DW1 + convert_int4(m) * (DW2 - DW1);
+        int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry1);
         ulong4 lo_vec = x_vec * CONST_SCALAR_VEC;
         x_vec = digit_adc4(lo_vec, digit_width_vec, &carry);
         carry = carry + 3UL * carry1;
         vstore4(x_vec, 0, x + i);
+
+        uint wrap = (off + 4U) >> 6;
+        ulong wrapMask = (ulong)0 - (ulong)wrap;
+        uint off_next = (off + 4U) & 63U;
+
+        ulong nextChunk = maskPacked[base + 2];
+
+        ulong inject = ((ulong)0 - (ulong)(off == 0)) & (hi << 60);
+        ulong cand0  = (merged >> 4) | inject;
+
+        ulong lo_n = select(lo, hi, wrapMask);
+        ulong hi_n = select(hi, nextChunk, wrapMask);
+
+        ulong sh_n     = (ulong)((64 - off_next) & 63);
+        ulong nzmask_n = (ulong)0 - (ulong)(off_next != 0);
+        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh_n) & nzmask_n);
+
+        merged = select(cand0, cand1, wrapMask);
+
+        off  = off_next;
+        base += wrap;
+        lo   = lo_n;
+        hi   = hi_n;
     }
 
     carry_array[gid] = carry;
 }
-
 
 #define CARRY_WORKER_MIN_1 (CARRY_WORKER - 1)
 __kernel void kernel_carry_2(__global ulong* restrict x,
@@ -588,67 +612,80 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     const uint prev_gid = (gid == 0) ? (CARRY_WORKER_MIN_1) : (gid - 1);
     ulong carry = carry_array[prev_gid];
     if (carry == 0) return;
+
     const uint start = gid * LOCAL_PROPAGATION_DEPTH;
     const uint end = start + LOCAL_PROPAGATION_DEPTH - 4;
+
+    const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
+    const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
+
+    uint base = start >> 6;
+    uint off  = start & 63;
+
+    ulong lo = maskPacked[base + 0];
+    ulong hi = maskPacked[base + 1];
+
+    ulong sh     = (ulong)((64 - off) & 63);
+    ulong nzmask = (ulong)0 - (ulong)(off != 0);
+    ulong merged = (lo >> off) | ((hi << sh) & nzmask);
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
         ulong4 x_vec = vload4(0, x + i);
 
-        uint blk = i >> 6;
-        uint off = i & 63;
-        ulong lo = maskPacked[blk];
-        ulong hi = maskPacked[blk + 1];
-        ulong hiShift = (ulong)((64 - off) & 63);
-        ulong hiTerm = hi << hiShift;
-        ulong nzmask = (ulong)0 - (ulong)(off != 0);
-        hiTerm &= nzmask;
-        ulong merged = (lo >> off) | hiTerm;
         uint nib = (uint)(merged & 0xFULL);
+        uint4 sel = (uint4)(
+            (nib >> 0) & 1U,
+            (nib >> 1) & 1U,
+            (nib >> 2) & 1U,
+            (nib >> 3) & 1U
+        ) * (uint)0xFFFFFFFFU;
 
-        uchar4 m = (uchar4)(
-            (nib >> 0) & 1,
-            (nib >> 1) & 1,
-            (nib >> 2) & 1,
-            (nib >> 3) & 1
-        );
-
-        const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
-        const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
-        int4 digit_width_vec = DW1 + convert_int4(m) * (DW2 - DW1);
+        int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
         x_vec = digit_adc4(x_vec, digit_width_vec, &carry);
         vstore4(x_vec, 0, x + i);
-
         if (carry == 0) return;
+
+        uint wrap = (off + 4U) >> 6;
+        ulong wrapMask = (ulong)0 - (ulong)wrap;
+        uint off_next = (off + 4U) & 63U;
+
+        ulong nextChunk = maskPacked[base + 2];
+        ulong inject = ((ulong)0 - (ulong)(off == 0)) & (hi << 60);
+        ulong cand0  = (merged >> 4) | inject;
+
+        ulong lo_n = select(lo, hi, wrapMask);
+        ulong hi_n = select(hi, nextChunk, wrapMask);
+
+        ulong sh_n     = (ulong)((64 - off_next) & 63);
+        ulong nzmask_n = (ulong)0 - (ulong)(off_next != 0);
+        ulong cand1    = (lo_n >> off_next) | ((hi_n << sh_n) & nzmask_n);
+
+        merged = select(cand0, cand1, wrapMask);
+
+        off  = off_next;
+        base += wrap;
+        lo   = lo_n;
+        hi   = hi_n;
     }
 
     ulong4 x_vec = vload4(0, x + end);
-    uint blk = end >> 6;
-    uint off = end & 63;
-    ulong lo = maskPacked[blk];
-    ulong hi = maskPacked[blk + 1];
-    ulong hiShift = (ulong)((64 - off) & 63);
-    ulong hiTerm = hi << hiShift;
-    ulong nzmask = (ulong)0 - (ulong)(off != 0);
-    hiTerm &= nzmask;
-    ulong merged = (lo >> off) | hiTerm;
+
     uint nib = (uint)(merged & 0xFULL);
+    uint4 sel = (uint4)(
+        (nib >> 0) & 1U,
+        (nib >> 1) & 1U,
+        (nib >> 2) & 1U,
+        (nib >> 3) & 1U
+    ) * (uint)0xFFFFFFFFU;
 
-    uchar4 m = (uchar4)(
-        (nib >> 0) & 1,
-        (nib >> 1) & 1,
-        (nib >> 2) & 1,
-        (nib >> 3) & 1
-    );
-
-    const int4 DW1 = (int4)(DIGIT_WIDTH_VALUE_1);
-    const int4 DW2 = (int4)(DIGIT_WIDTH_VALUE_2);
-    int4 digit_width_vec = DW1 + convert_int4(m) * (DW2 - DW1);
+    int4 digit_width_vec = bitselect(DW1, DW2, as_int4(sel));
 
     x_vec = digit_adc4_last(x_vec, digit_width_vec, &carry);
     vstore4(x_vec, 0, x + end);
 }
+
 
 
 __kernel void kernel_inverse_ntt_radix4_mm(__global ulong2* restrict x,
