@@ -1010,13 +1010,11 @@ int App::runPrpOrLl() {
 
                 cl_uint ok = 1u, idx = 0xFFFFFFFFu;
                 clEnqueueWriteBuffer(context.getQueue(), outOkBuf,  CL_FALSE, 0, sizeof(ok),  &ok,  0, nullptr, nullptr);
-                clEnqueueWriteBuffer(context.getQueue(), outIdxBuf, CL_FALSE, 0, sizeof(idx), &idx, 0, nullptr, nullptr);
-
+                
                 kernels->runCheckEqual(
                     buffers->bufd,
                     buffers->input,
                     outOkBuf,
-                    outIdxBuf,
                     static_cast<cl_uint>(precompute.getN())
                 );
 
@@ -1036,9 +1034,8 @@ int App::runPrpOrLl() {
                     clWaitForEvents(1, &postEvt);
                 } else {
                     cl_event idxEvt;
-                    clEnqueueReadBuffer(context.getQueue(), outIdxBuf, CL_FALSE, 0, sizeof(idx), &idx, 0, nullptr, &idxEvt);
                     clWaitForEvents(1, &idxEvt);
-                    std::cout << "[Gerbicz Li] Mismatch at index " << idx << "\n"
+                    std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
                     j = jsave;

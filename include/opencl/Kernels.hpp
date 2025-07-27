@@ -25,7 +25,7 @@ public:
     cl_kernel getKernel(const std::string& name) const;
 
     void runCheckEqual(cl_mem a, cl_mem b,
-                        cl_mem outOk, cl_mem outFirstIdx,
+                        cl_mem outOk,
                         cl_uint n, size_t wg = 256);
 
     void runSquaring(cl_mem buf, size_t n);
