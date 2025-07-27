@@ -567,7 +567,7 @@ __kernel void kernel_carry_mul_3(
             (nib >> 3) & 1
         ) * -1;
 
-        sel = bitselect(DW1, DW2, as_int4(sel));
+        sel = bitselect(DW1, DW2, (sel));
 
         x_vec = digit_adc4(x_vec, sel, &carry1);
         ulong4 lo_vec = x_vec * CONST_SCALAR_VEC;
