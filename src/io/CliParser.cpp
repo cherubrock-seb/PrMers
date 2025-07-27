@@ -56,7 +56,7 @@ void printUsage(const char* progName) {
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
     std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
     std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
-    
+     
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
@@ -70,7 +70,8 @@ void printUsage(const char* progName) {
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
-    
+    std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 3 min" << std::endl;
+   
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
@@ -169,6 +170,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-checklevel") == 0 && i + 1 < argc) {
+            opts.checklevel = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l5") == 0 && i + 1 < argc) {
             opts.max_local_size5 = std::atoi(argv[++i]);

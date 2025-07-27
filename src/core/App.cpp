@@ -610,6 +610,9 @@ void App::gpuMulInPlace2(
 }
 
 int App::runPrpOrLl() {
+    std::cout << "Sampling " << 100 << " iterations at iterforce=10\n";
+    double sampleIps = measureIps(options.iterforce, 100);
+    std::cout << "Estimated IPS: " << sampleIps << "\n";
     if (options.tune) {
         tuneIterforce();
         return 0;
@@ -669,7 +672,7 @@ int App::runPrpOrLl() {
     
     uint64_t L = options.exponent;
     uint64_t B = (uint64_t)(std::sqrt((double)L));
-   
+
     size_t limbs = precompute.getN();
     size_t limbBytes = limbs * sizeof(uint64_t);
     cl_int err;
@@ -751,7 +754,19 @@ int App::runPrpOrLl() {
    
     //gchk.init(buffers->input, resumeIter);
     bool errordone = false;
-    uint64_t checkpasslevel = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
+    //uint64_t checkpasslevel = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
+
+    double desiredIntervalSeconds = 180.0;
+    uint64_t checkpasslevel_auto = (uint64_t)((sampleIps * desiredIntervalSeconds) / (double)B);
+
+    if (checkpasslevel_auto == 0) checkpasslevel_auto = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
+
+    uint64_t checkpasslevel = (options.checklevel > 0)
+        ? options.checklevel
+        : checkpasslevel_auto;
+
+
+
     uint64_t itersave =  backupManager.loadGerbiczIterSave();
         
     uint64_t checkpass = 0;
@@ -1008,7 +1023,7 @@ int App::runPrpOrLl() {
                     );
                 }
 
-                cl_uint ok = 1u, idx = 0xFFFFFFFFu;
+                cl_uint ok = 1u;
                 clEnqueueWriteBuffer(context.getQueue(), outOkBuf,  CL_FALSE, 0, sizeof(ok),  &ok,  0, nullptr, nullptr);
                 
                 kernels->runCheckEqual(
