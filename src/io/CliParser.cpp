@@ -70,7 +70,7 @@ void printUsage(const char* progName) {
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
-    std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 3 min" << std::endl;
+    std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
    
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
