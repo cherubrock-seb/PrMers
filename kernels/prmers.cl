@@ -379,6 +379,9 @@ inline ulong4 digit_adc4_last(ulong4 lhs, int4 digit_width, __private ulong *car
 #ifndef LOCAL_SIZE3
 #define LOCAL_SIZE3 128
 #endif
+#ifndef LOCAL_SIZE5
+#define LOCAL_SIZE5 64
+#endif
 #ifndef TRANSFORM_SIZE_N
 #define TRANSFORM_SIZE_N 8
 #endif
@@ -1897,7 +1900,6 @@ __kernel void kernel_res64_display(
            out[0]       // bas 32 bits
     );
 }
-
 #define TRANSFORM_SIZE_N_DIV5        (TRANSFORM_SIZE_N / 5)
 #define C_2_TRANSFORM_SIZE_N_DIV5    (2*(TRANSFORM_SIZE_N / 5))
 #define C_3_TRANSFORM_SIZE_N_DIV5    (3*(TRANSFORM_SIZE_N / 5))
@@ -1926,60 +1928,73 @@ __constant ulong4 K2_4 = (ulong4)(PR5_A1, PR5_A1, PR5_A1, PR5_A1);
 __constant ulong2 F25_2 = (ulong2)(F2, F5);
 __constant ulong2 F34_2 = (ulong2)(F3, F4);
 
+#define LOCAL_SIZE5_TIMES2 (2*LOCAL_SIZE5)
+#define LOCAL_SIZE5_TIMES3 (3*LOCAL_SIZE5)
+#define LOCAL_SIZE5_TIMES4 (4*LOCAL_SIZE5)
+
 __kernel void kernel_ntt_radix5_mm_first(
     __global ulong * restrict x,
     __global const ulong * restrict w5,
     __global const ulong * restrict digit_weight)
 {
-    const uint k  = get_global_id(0);
+    __local ulong lm[5*LOCAL_SIZE5];
 
-    const uint i0 = k;
-    const uint i1 = k +     TRANSFORM_SIZE_N_DIV5;
-    const uint i2 = k + C_2_TRANSFORM_SIZE_N_DIV5;
-    const uint i3 = k + C_3_TRANSFORM_SIZE_N_DIV5;
-    const uint i4 = k + C_4_TRANSFORM_SIZE_N_DIV5;
+    const uint lid = get_local_id(0);
+    const uint k = get_global_id(0);
 
-    const ulong u0 = modMul(x[i0], digit_weight[i0]);
+    ulong d0=0,d1=0,d2=0,d3=0,d4=0;
+    ulong4 wv;
 
-    const ulong t1 = modMul(x[i1], digit_weight[i1]);
-    const ulong t2 = modMul(x[i2], digit_weight[i2]);
-    const ulong t3 = modMul(x[i3], digit_weight[i3]);
-    const ulong t4 = modMul(x[i4], digit_weight[i4]);
+    lm[lid]                     = x[k];
+    lm[LOCAL_SIZE5 + lid]       = x[k +     TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES2+lid]  = x[k + C_2_TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES3+lid]  = x[k + C_3_TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES4+lid]  = x[k + C_4_TRANSFORM_SIZE_N_DIV5];
 
-    const ulong s03p = modAdd(t1, t4);
-    const ulong s03m = modSub(t1, t4);
-    const ulong s12p = modAdd(t2, t3);
-    const ulong s12m = modSub(t2, t3);
+    d0 = digit_weight[k];
+    d1 = digit_weight[k +     TRANSFORM_SIZE_N_DIV5];
+    d2 = digit_weight[k + C_2_TRANSFORM_SIZE_N_DIV5];
+    d3 = digit_weight[k + C_3_TRANSFORM_SIZE_N_DIV5];
+    d4 = digit_weight[k + C_4_TRANSFORM_SIZE_N_DIV5];
 
-    const ulong z0   = modAdd(s03p, s12p);
+    wv = vload4(0, w5 + ((uint)k << 2));
+    
 
-    const ulong2 x25 = modMul2(F25_2, (ulong2)(modSub(s03p, s12p), modSub(s03m, s12m)));
-    const ulong2 x34 = modMul2(F34_2, (ulong2)(s12m, s03m));
-    const ulong  x2  = x25.s0;
-    const ulong  x5  = x25.s1;
-    const ulong  x3  = x34.s0;
-    const ulong  x4  = x34.s1;
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    const ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
-    const ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
-    const ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
-    const ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
+    ulong u0 = modMul(lm[lid], d0);
 
-    x[i0] = modAdd(z0, u0);
+    lm[LOCAL_SIZE5+lid]       = modMul(lm[LOCAL_SIZE5+lid], d1);
+    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(lm[LOCAL_SIZE5_TIMES2+lid], d2);
+    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(lm[LOCAL_SIZE5_TIMES3+lid], d3);
+    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(lm[LOCAL_SIZE5_TIMES4+lid], d4);
 
-    const ulong acc1 = modSub(z2, t4);
-    const ulong acc2 = modSub(z4, t2);
-    const ulong acc3 = modSub(z1, t3);
-    const ulong acc4 = modSub(z3, t1);
+    ulong t0 = modAdd(lm[LOCAL_SIZE5+lid],        lm[LOCAL_SIZE5_TIMES4+lid]);
+    ulong t1 = modSub(lm[LOCAL_SIZE5+lid],        lm[LOCAL_SIZE5_TIMES4+lid]);
+    ulong t2 = modAdd(lm[LOCAL_SIZE5_TIMES2+lid], lm[LOCAL_SIZE5_TIMES3+lid]);
+    ulong t3 = modSub(lm[LOCAL_SIZE5_TIMES2+lid], lm[LOCAL_SIZE5_TIMES3+lid]);
 
-    const uint   woff = (uint)(k << 2);
-    const ulong4 wv   = vload4(0, w5 + woff);
-    const ulong4 outv = modMul4((ulong4)(acc1, acc2, acc3, acc4), wv);
+    ulong z0 = modAdd(t0, t2);
 
-    x[i1] = outv.s0;
-    x[i2] = outv.s1;
-    x[i3] = outv.s2;
-    x[i4] = outv.s3;
+    ulong2 v25 = modMul2(F25_2, (ulong2)(modSub(t0, t2), modSub(t1, t3)));
+    ulong2 v34 = modMul2(F34_2, (ulong2)(t3, t1));
+    ulong x2 = v25.s0;
+    ulong x5 = v25.s1;
+    ulong x3 = v34.s0;
+    ulong x4 = v34.s1;
+
+    ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
+    ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
+    ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
+    ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
+
+    
+    x[k] = modAdd(z0, u0);
+    x[k +     TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z2, lm[LOCAL_SIZE5_TIMES4+lid]), wv.s0);
+    x[k + C_2_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z4, lm[LOCAL_SIZE5_TIMES2+lid]), wv.s1);
+    x[k + C_3_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z1, lm[LOCAL_SIZE5_TIMES3+lid]), wv.s2);
+    x[k + C_4_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z3, lm[LOCAL_SIZE5+lid]),       wv.s3);
+
 }
 
 __kernel void kernel_ntt_inverse_radix5_mm_last(
@@ -1987,57 +2002,66 @@ __kernel void kernel_ntt_inverse_radix5_mm_last(
     __global const ulong * restrict invw5,
     __global const ulong * restrict digit_inv_weight)
 {
-    const uint k  = get_global_id(0);
+    __local ulong lm[5*LOCAL_SIZE5];
 
-    const uint i0 = k;
-    const uint i1 = k +     TRANSFORM_SIZE_N_DIV5;
-    const uint i2 = k + C_2_TRANSFORM_SIZE_N_DIV5;
-    const uint i3 = k + C_3_TRANSFORM_SIZE_N_DIV5;
-    const uint i4 = k + C_4_TRANSFORM_SIZE_N_DIV5;
+    const uint lid = get_local_id(0);
+    const uint k = get_global_id(0);
 
-    const ulong u0 = x[i0];
+    ulong d0=0,d1=0,d2=0,d3=0,d4=0;
+    ulong4 wv;
 
-    const uint   woff = (uint)(k << 2);
-    const ulong4 wv   = vload4(0, invw5 + woff);
-    const ulong t1 = modMul(x[i1], wv.s0);
-    const ulong t2 = modMul(x[i2], wv.s1);
-    const ulong t3 = modMul(x[i3], wv.s2);
-    const ulong t4 = modMul(x[i4], wv.s3);
+    lm[lid]                     = x[k];
+    lm[LOCAL_SIZE5 + lid]       = x[k +     TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES2+lid]  = x[k + C_2_TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES3+lid]  = x[k + C_3_TRANSFORM_SIZE_N_DIV5];
+    lm[LOCAL_SIZE5_TIMES4+lid]  = x[k + C_4_TRANSFORM_SIZE_N_DIV5];
 
-    const ulong s40p = modAdd(t4, t1);
-    const ulong s40m = modSub(t4, t1);
-    const ulong s32p = modAdd(t3, t2);
-    const ulong s32m = modSub(t3, t2);
+    d0 = digit_inv_weight[k];
+    d1 = digit_inv_weight[k +     TRANSFORM_SIZE_N_DIV5];
+    d2 = digit_inv_weight[k + C_2_TRANSFORM_SIZE_N_DIV5];
+    d3 = digit_inv_weight[k + C_3_TRANSFORM_SIZE_N_DIV5];
+    d4 = digit_inv_weight[k + C_4_TRANSFORM_SIZE_N_DIV5];
 
-    const ulong z0 = modAdd(s40p, s32p);
+    wv = vload4(0, invw5 + ((uint)k << 2));
 
-    const ulong2 x25 = modMul2(F25_2, (ulong2)(modSub(s40p, s32p), modSub(s40m, s32m)));
-    const ulong2 x34 = modMul2(F34_2, (ulong2)(s32m, s40m));
-    const ulong  x2  = x25.s0;
-    const ulong  x5  = x25.s1;
-    const ulong  x3  = x34.s0;
-    const ulong  x4  = x34.s1;
 
-    const ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
-    const ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
-    const ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
-    const ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    x[i0] = modMul(modAdd(z0, u0), digit_inv_weight[i0]);
+    ulong u0 = lm[lid];
 
-    const ulong acc1 = modSub(z2, t1);
-    const ulong acc2 = modSub(z4, t3);
-    const ulong acc3 = modSub(z1, t2);
-    const ulong acc4 = modSub(z3, t4);
+    lm[LOCAL_SIZE5+lid]       = modMul(lm[LOCAL_SIZE5+lid],       wv.s0);
+    lm[LOCAL_SIZE5_TIMES2+lid]= modMul(lm[LOCAL_SIZE5_TIMES2+lid],wv.s1);
+    lm[LOCAL_SIZE5_TIMES3+lid]= modMul(lm[LOCAL_SIZE5_TIMES3+lid],wv.s2);
+    lm[LOCAL_SIZE5_TIMES4+lid]= modMul(lm[LOCAL_SIZE5_TIMES4+lid],wv.s3);
 
-    const ulong4 dvw  = (ulong4)(digit_inv_weight[i1], digit_inv_weight[i2], digit_inv_weight[i3], digit_inv_weight[i4]);
-    const ulong4 outv = modMul4((ulong4)(acc1, acc2, acc3, acc4), dvw);
+    ulong t0 = modAdd(lm[LOCAL_SIZE5_TIMES4+lid], lm[LOCAL_SIZE5+lid]);
+    ulong t1 = modSub(lm[LOCAL_SIZE5_TIMES4+lid], lm[LOCAL_SIZE5+lid]);
+    ulong t2 = modAdd(lm[LOCAL_SIZE5_TIMES3+lid], lm[LOCAL_SIZE5_TIMES2+lid]);
+    ulong t3 = modSub(lm[LOCAL_SIZE5_TIMES3+lid], lm[LOCAL_SIZE5_TIMES2+lid]);
 
-    x[i1] = outv.s0;
-    x[i2] = outv.s1;
-    x[i3] = outv.s2;
-    x[i4] = outv.s3;
+    ulong z0 = modAdd(t0, t2);
+
+    ulong2 v25 = modMul2(F25_2, (ulong2)(modSub(t0, t2), modSub(t1, t3)));
+    ulong2 v34 = modMul2(F34_2, (ulong2)(t3, t1));
+    ulong x2 = v25.s0;
+    ulong x5 = v25.s1;
+    ulong x3 = v34.s0;
+    ulong x4 = v34.s1;
+
+    ulong z1 = modAdd(modAdd(u0, x2), modSub(x4, x5));
+    ulong z4 = modSub(modAdd(u0, x2), modSub(x4, x5));
+    ulong z2 = modAdd(modSub(u0, x2), modAdd(x3, x5));
+    ulong z3 = modSub(modSub(u0, x2), modAdd(x3, x5));
+
+    x[k]                         = modMul(modAdd(z0, u0), d0);
+    x[k +     TRANSFORM_SIZE_N_DIV5] = modMul(modSub(z2, lm[LOCAL_SIZE5+lid]),        d1);
+    x[k + C_2_TRANSFORM_SIZE_N_DIV5] = modMul(modSub(z4, lm[LOCAL_SIZE5_TIMES3+lid]), d2);
+    x[k + C_3_TRANSFORM_SIZE_N_DIV5] = modMul(modSub(z1, lm[LOCAL_SIZE5_TIMES2+lid]), d3);
+    x[k + C_4_TRANSFORM_SIZE_N_DIV5] = modMul(modSub(z3, lm[LOCAL_SIZE5_TIMES4+lid]), d4);
+
 }
+
+
 
 #if __OPENCL_VERSION__ < 200
 #pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable

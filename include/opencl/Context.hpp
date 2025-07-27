@@ -32,6 +32,7 @@ public:
     std::size_t getLocalSize2() const noexcept;
     std::size_t getLocalSize3() const noexcept;
     std::size_t getLocalSize4() const noexcept;
+    std::size_t getLocalSize5() const noexcept;
     std::size_t getLocalSizeCarry() const noexcept;
     std::size_t getWorkersCarry() const noexcept;
     cl_uint getTransformSize() const noexcept;
@@ -39,7 +40,7 @@ public:
     int getExponent() const noexcept;
     bool isEvenExponent() const noexcept;
     cl_uint getWorkGroupCount() const noexcept;
-    void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, uint64_t p, bool debug = false, int localMaxSize = 0);
+    void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, uint64_t p, bool debug = false, int localMaxSize = 0, int localMaxSize5 = 0);
     static void listAllOpenCLDevices();
 private:
     cl_platform_id    platform_;
@@ -59,6 +60,7 @@ private:
     std::size_t localSize3_;
     std::size_t localSize4_;
     std::size_t localSizeCarry_;
+    std::size_t localSize5_;
     std::size_t workersCarry_;
     int localCarryPropagationDepth_;
     int exponent_;

@@ -145,12 +145,13 @@ inline std::vector<NttStage> buildForwardPipeline(
     cl_mem buf_w5,
     const size_t* ls0,
     const size_t* ls2,
-    const size_t* ls3
+    const size_t* ls3,
+    const size_t* ls5
 ) {
 
     std::vector<RadixOp> all = {
     { RadixOp::First,   5, 5,
-        k_r5_first,        ls0, "kernel_ntt_radix5_mm_first",
+        k_r5_first,        ls5, "kernel_ntt_radix5_mm_first",
          [](auto m0, auto nn){ return nn%5==0; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW } , 0},
       
@@ -311,12 +312,13 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_mem buf_w5,
     const size_t* ls0,
     const size_t* ls2,
-    const size_t* ls3
+    const size_t* ls3,
+    const size_t* ls5
 ) {
 
     std::vector<RadixOp> all = {
     { RadixOp::First,   5, 5,
-        k_r5_first,        ls0, "kernel_ntt_radix5_mm_first",
+        k_r5_first,        ls5, "kernel_ntt_radix5_mm_first",
          [](auto m0, auto nn){ return nn%5==0; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW } , 0},
       
@@ -463,7 +465,8 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
     cl_mem buf_diw,
     const size_t* ls0,
     const size_t* ls2,
-    int lastOutputInv
+    int lastOutputInv,
+    const size_t* ls5
 ) {
     std::vector<RadixOp> allInv = {
     { RadixOp::First,  2, 2,
@@ -498,7 +501,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
         /*outputInverse*/ 0
       },
       { RadixOp::Last,   5,  5,
-        k_i_r5_last,    ls0, "kernel_ntt_inverse_radix5_mm_last",
+        k_i_r5_last,    ls5, "kernel_ntt_inverse_radix5_mm_last",
         [](auto m0, auto nn){ return m0 == nn/5; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW },
         /*outputInverse*/ 0
@@ -593,7 +596,8 @@ inline std::vector<NttStage> buildInversePipeline(
     cl_mem buf_diw,
     const size_t* ls0,
     const size_t* ls2,
-    int lastOutputInv
+    int lastOutputInv,
+    const size_t* ls5
 ) {
     std::vector<RadixOp> allInv = {
       { RadixOp::First,  4, 4,
@@ -619,7 +623,7 @@ inline std::vector<NttStage> buildInversePipeline(
         /*outputInverse*/ 0
       },
       { RadixOp::Last,   5,  5,
-        k_i_r5_last,    ls0, "kernel_ntt_inverse_radix5_mm_last",
+        k_i_r5_last,    ls5, "kernel_ntt_inverse_radix5_mm_last",
         [](auto m0, auto nn){ return m0 == nn/5; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW },
         /*outputInverse*/ 0
