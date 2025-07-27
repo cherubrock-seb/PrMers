@@ -1974,32 +1974,28 @@ __kernel void kernel_ntt_radix5_mm_first(
     d3 = modSub(lm[LOCAL_SIZE5_TIMES2+lid], lm[LOCAL_SIZE5_TIMES3+lid]);
 
     ulong z0 = modAdd(d0, d2);
-
+    x[k] = modAdd(z0, u0);
     ulong2 v25 = modMul2(F25_2, (ulong2)(modSub(d0, d2), modSub(d1, d3)));
     ulong2 v34 = modMul2(F34_2, (ulong2)(d3, d1));
-    
-    ulong x2 = v25.s0;
-    ulong x5 = v25.s1;
-    ulong x3 = v34.s0;
-    ulong x4 = v34.s1;
 
     d0 = modAdd(u0, v25.s0);
     d1 = modSub(v34.s1, v25.s1);
     d2 = modSub(u0, v25.s0);
     d3 = modAdd(v34.s0, v25.s1);
 
-    ulong z1 = modAdd(d0, d1);
-    ulong z4 = modSub(d0, d1);
-    ulong z2 = modAdd(d2, d3);
-    ulong z3 = modSub(d2, d3);
+    d4 = modAdd(d0, d1);//z1
+    z0 = modSub(d0, d1);//z4
+    d0 = modAdd(d2, d3);//z2
+    d1 = modSub(d2, d3);//z3
 
-    const ulong4 wv = vload4(0, w5 + ((uint)k << 2));
-        
-    x[k] = modAdd(z0, u0);
-    x[k +     TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z2, lm[LOCAL_SIZE5_TIMES4+lid]), wv.s0);
-    x[k + C_2_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z4, lm[LOCAL_SIZE5_TIMES2+lid]), wv.s1);
-    x[k + C_3_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z1, lm[LOCAL_SIZE5_TIMES3+lid]), wv.s2);
-    x[k + C_4_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z3, lm[LOCAL_SIZE5+lid]),       wv.s3);
+    v25 = vload2(0, w5 + ((uint)k << 2));
+    v34 = vload2(0, w5 + ((uint)k << 2) + 2);
+
+    
+    x[k +     TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(d0, lm[LOCAL_SIZE5_TIMES4+lid]), v25.s0);
+    x[k + C_2_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(z0, lm[LOCAL_SIZE5_TIMES2+lid]), v25.s1);
+    x[k + C_3_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(d4, lm[LOCAL_SIZE5_TIMES3+lid]), v34.s0);
+    x[k + C_4_TRANSFORM_SIZE_N_DIV5]     = modMul(modSub(d1, lm[LOCAL_SIZE5+lid]),       v34.s1);
 
 }
 
