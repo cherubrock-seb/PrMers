@@ -239,7 +239,8 @@ static std::string generatePrimeNetJson(
     const std::string &aid,
     const std::string &uid,
     const std::string &timestamp,
-    const std::string &computer)
+    const std::string &computer,
+    const std::vector<std::string>& knownFactors)
 {
     std::ostringstream oss;
     bool isPRP = (worktype.rfind("PRP", 0) == 0);
@@ -276,6 +277,17 @@ static std::string generatePrimeNetJson(
     if (!aid.empty())      oss << ",\"aid\":"      << jsonEscape(aid);
     if (!uid.empty())      oss << ",\"uid\":"      << jsonEscape(uid);
     oss << ",\"timestamp\":" << jsonEscape(timestamp);
+
+    if (!knownFactors.empty()) {
+        oss << ",\"known-factors\":[";
+        for (size_t i = 0; i < knownFactors.size(); ++i) {
+            oss << jsonEscape(knownFactors[i]);
+            if (i < knownFactors.size() - 1) {
+                oss << ",";
+            }
+        }
+        oss << "]";
+    }
 
     // build canonical string …
     std::string prefix = oss.str();
@@ -340,6 +352,9 @@ std::string JsonBuilder::generate(const CliOptions& opts,
 
     status = isPrime ? "P" : "C";
     
+    // Use Type 5 residue for Mersenne cofactors
+    int residueType = opts.knownFactors.empty() ? 1 : 5;
+    
     // assemble JSON
     return generatePrimeNetJson(
         // status: P or C
@@ -348,7 +363,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.mode == "prp" ? "PRP-3" : "LL",
         res64,
         res2048,
-        1,  // residueType
+        residueType,
         opts.gerbicz_error_count,  // gerbiczError
         transform_size,
         opts.proof ? 2 : 0,
@@ -365,7 +380,8 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.aid,                  // aid
         opts.uid,                  // uid
         timestampBuf,              // timestamp
-        opts.computer_name         // computer
+        opts.computer_name,        // computer
+        opts.knownFactors
     );
 
 }

@@ -51,7 +51,15 @@ bool Printer::finalReport(const io::CliOptions& opts,
     if (mode == "ll") {
         std::cout << "\nM" << p << " is " << (isPrime ? "prime" : "composite") << ".\n";
     } else {
-        std::cout << "\nM" << p << " PRP test: " << (isPrime ? "probably prime (residue is 9)" : "composite") << ".\n";
+        if (!opts.knownFactors.empty()) {
+            std::cout << "\nM" << p;
+            for (const auto& factor : opts.knownFactors) {
+                std::cout << "/" << factor;
+            }
+            std::cout << " PRP test: " << (isPrime ? "probably prime" : "composite") << ".\n";
+        } else {
+            std::cout << "\nM" << p << " PRP test: " << (isPrime ? "probably prime (residue is 9)" : "composite") << ".\n";
+        }
     }
 
     std::cout << "\nManual submission JSON:\n" << jsonResult << std::endl;
