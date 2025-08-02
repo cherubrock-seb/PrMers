@@ -42,6 +42,8 @@
 #include <cstdint>
 #include <vector>
 #include <cstdio>
+#include <algorithm>
+#include <tuple>
 
 
 namespace io{
@@ -75,6 +77,53 @@ namespace io{
         doDiv3(E, W);
         doDiv3(E, W);
     }
+
+std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
+    const std::vector<uint64_t>& hostResult,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width) {
+    
+    std::vector<uint32_t> words = JsonBuilder::compactBits(hostResult, digit_width, opts.exponent);
+    if (opts.mode == "prp") {
+        doDiv9(opts.exponent, words);
+    }
+    
+    bool isPrime;
+    if (opts.mode == "prp") {
+        // Mersenne number PRP
+        isPrime = (hostResult[0] == 9
+                    && std::all_of(hostResult.begin()+1,
+                                    hostResult.end(),
+                                    [](uint64_t v){ return v == 0; }));
+    } else {
+        // Mersenne number LL
+        isPrime = std::all_of(hostResult.begin(),
+                              hostResult.end(),
+                              [](uint64_t v){ return v == 0; });
+    }
+    
+    // Ensure words array has correct size for residue computation
+    if (words.size() < 64) {
+        words.resize(64, 0);
+    } else if (words.size() > 64) {
+        words.resize(64);
+    }
+    
+    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    std::ostringstream oss64;
+    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << finalRes64;
+    std::string res64 = oss64.str();
+    
+    std::ostringstream oss2048;
+    oss2048 << std::hex << std::nouppercase << std::setfill('0');
+    for (int i = 63; i >= 0; --i) {
+        oss2048 << std::setw(8) << words[i];
+    }
+    std::string res2048 = oss2048.str();
+
+    return std::make_tuple(isPrime, res64, res2048);
+}
+
 std::vector<uint32_t> JsonBuilder::compactBits(
     const std::vector<uint64_t>& x,
     const std::vector<int>&      digit_width,
@@ -259,35 +308,14 @@ static std::string generatePrimeNetJson(
     return oss.str();
 }
 
-std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
-                                  const CliOptions& opts,
-                                  const std::vector<int>& digit_width,
-                                  double /*elapsed*/,
-                                  int transform_size) 
+std::string JsonBuilder::generate(const CliOptions& opts,
+                                  int transform_size,
+                                  bool isPrime,
+                                  const std::string& res64,
+                                  const std::string& res2048) 
 {
-    
-    
-    auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
-    if (opts.mode == "prp") doDiv9(opts.exponent, words);
-    if (words.size() < 64) {
-        words.resize(64, 0);
-    } else if (words.size() > 64) {
-        words.resize(64);
-    }
-    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
-    std::ostringstream oss64;
-    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
-        << finalRes64;
-    std::string res64 = oss64.str();
-
-    std::ostringstream oss2048;
-    oss2048 << std::hex << std::nouppercase << std::setfill('0');
-    for (int i = 63; i >= 0; --i) {
-        oss2048 << std::setw(8) << words[i];
-    }
-    std::string res2048 = oss2048.str();
     // ---------------------------------------------
-    // 4) timestamp
+    // timestamp
     std::time_t now = std::time(nullptr);
     std::tm timeinfo;
 
@@ -304,19 +332,9 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
 
     std::string status;
 
-    if (opts.mode == "prp") {
-        // PRP mode → “0000...0001” means prime
-        status = (res64 == "0000000000000001") ? "P" : "C";
-    }
-    else if (opts.mode == "ll") {
-        // LL mode  → “0000...0000” means prime
-        status = (res64 == "0000000000000000") ? "P" : "C";
-    }
-    else {
-        // any other mode always composite
-        status = "C";
-    }
-    // 5) assemble JSON
+    status = isPrime ? "P" : "C";
+    
+    // assemble JSON
     return generatePrimeNetJson(
         // status: P or C
         status,
