@@ -21,6 +21,7 @@
  */
 #include "io/JsonBuilder.hpp"
 #include "io/CliParser.hpp"          // for CliOptions
+#include "math/Cofactor.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -90,11 +91,16 @@ std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
     
     bool isPrime;
     if (opts.mode == "prp") {
-        // Mersenne number PRP
-        isPrime = (hostResult[0] == 9
-                    && std::all_of(hostResult.begin()+1,
-                                    hostResult.end(),
-                                    [](uint64_t v){ return v == 0; }));
+        if (!opts.knownFactors.empty()) {
+            // Mersenne cofactor PRP
+            isPrime = math::Cofactor::isCofactorPRP(opts.exponent, opts.knownFactors, words);
+        } else {
+            // Mersenne number PRP
+            isPrime = (hostResult[0] == 9
+                       && std::all_of(hostResult.begin()+1,
+                                      hostResult.end(),
+                                      [](uint64_t v){ return v == 0; }));
+        }
     } else {
         // Mersenne number LL
         isPrime = std::all_of(hostResult.begin(),
