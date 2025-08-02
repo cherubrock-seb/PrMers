@@ -340,7 +340,8 @@ App::App(int argc, char** argv)
         options.proof ? ProofSet::bestPower(options.exponent) : 0,
         context.getQueue(),
         precompute.getN(),
-        precompute.getDigitWidth()
+        precompute.getDigitWidth(),
+        options.knownFactors
     )
   , spinner()
   , logger(options.output_path)
