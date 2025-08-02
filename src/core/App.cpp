@@ -49,6 +49,7 @@
 #include <string>
 #include <cstring>
 #include <sstream>
+#include <tuple>
 #include <atomic>
 #include <fstream>
 #include <memory>
@@ -309,6 +310,7 @@ App::App(int argc, char** argv)
           o.exponent = e->exponent;
           o.mode     = e->prpTest ? "prp" : "ll";
           o.aid      = e->aid;
+          o.knownFactors = e->knownFactors;
           hasWorktodoEntry_ = true;
       }
       if (!hasWorktodoEntry_ && o.exponent == 0) {
@@ -338,7 +340,8 @@ App::App(int argc, char** argv)
         options.proof ? ProofSet::bestPower(options.exponent) : 0,
         context.getQueue(),
         precompute.getN(),
-        precompute.getDigitWidth()
+        precompute.getDigitWidth(),
+        options.knownFactors
     )
   , spinner()
   , logger(options.output_path)
@@ -1179,11 +1182,11 @@ int App::runPrpOrLl() {
             std::cout << std::endl;
         }
         res64_x = io::JsonBuilder::computeRes64(
-        hostData,
-        options,
-        precompute.getDigitWidth(),
-        timer.elapsed(),
-        static_cast<int>(context.getTransformSize())
+            hostData,
+            options,
+            precompute.getDigitWidth(),
+            timer.elapsed(),
+            static_cast<int>(context.getTransformSize())
         );
         
         spinner.displayProgress(
@@ -1219,16 +1222,6 @@ int App::runPrpOrLl() {
     
 
     double finalElapsed = timer.elapsed();
-
-    std::string json = io::JsonBuilder::generate(
-        hostData,
-        options,
-        precompute.getDigitWidth(),
-        finalElapsed,
-        static_cast<int>(context.getTransformSize())
-    );
-
-
     logger.logEnd(finalElapsed);
 
     std::vector<uint64_t> hostResult(precompute.getN());
@@ -1241,29 +1234,23 @@ int App::runPrpOrLl() {
         0, nullptr, nullptr
     );
 
-    //std::time_t t = std::chrono::system_clock::to_time_t(now2);
-    char timestampBuf[32];
-    std::time_t t = std::time(nullptr);
-    std::tm timeinfo;
 
-    #ifdef _WIN32
-        gmtime_s(&timeinfo, &t);
-    #else
-        std::tm* tmp = std::gmtime(&t);
-        if (tmp != nullptr)
-            timeinfo = *tmp;
-    #endif
+    auto [isPrime, res64, res2048] = io::JsonBuilder::computeResult(hostResult, options, precompute.getDigitWidth());
 
-    std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+    std::string json = io::JsonBuilder::generate(
+        options,
+        static_cast<int>(context.getTransformSize()),
+        isPrime,
+        res64,
+        res2048
+    );
+
 
     Printer::finalReport(
         options,
-        hostResult,
-        res64_x,
-        precompute.getN(),
-        timestampBuf,
         finalElapsed,
-        json
+        json,
+        isPrime
     );
     bool skippedSubmission = false;
 
@@ -1309,14 +1296,6 @@ int App::runPrpOrLl() {
     }
 
 
-    bool isPrime = (options.mode == "prp")
-                   ? (hostResult[0] == 9
-                      && std::all_of(hostResult.begin()+1,
-                                     hostResult.end(),
-                                     [](uint64_t v){ return v == 0; }))
-                   : std::all_of(hostResult.begin(),
-                                 hostResult.end(),
-                                 [](uint64_t v){ return v == 0; });
     backupManager.clearState();
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);

@@ -11,9 +11,10 @@ public:
     const uint32_t E;
     const std::vector<uint32_t> B;
     const std::vector<std::vector<uint32_t>> middles;
+    const std::vector<std::string> knownFactors;
 
-    Proof(uint32_t exponent, std::vector<uint32_t> finalResidue, std::vector<std::vector<uint32_t>> intermediateResidues)
-        : E(exponent), B(std::move(finalResidue)), middles(std::move(intermediateResidues)) {}
+    Proof(uint32_t exponent, std::vector<uint32_t> finalResidue, std::vector<std::vector<uint32_t>> intermediateResidues, std::vector<std::string> factors = {})
+        : E(exponent), B(std::move(finalResidue)), middles(std::move(intermediateResidues)), knownFactors(std::move(factors)) {}
 
     // File I/O methods for proof files
     void save(const std::filesystem::path& filePath) const;

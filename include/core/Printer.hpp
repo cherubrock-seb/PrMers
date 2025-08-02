@@ -10,11 +10,9 @@ class Printer {
 public:
     static void banner(const io::CliOptions& opts);
     static bool finalReport(const io::CliOptions& opts,
-                          const std::vector<uint64_t>& resultVec,
-                          std::string res64,                          
-                          uint64_t n,
-                          const std::string& timestampBuf,
-                          double elapsed, std::string jsonResult);
+                          double elapsed,
+                          const std::string& jsonResult,
+                          bool isPrime);
     static void displayVector(const std::vector<uint64_t>& vec, const std::string& label = "Vector");
 
 };

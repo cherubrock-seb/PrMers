@@ -41,7 +41,12 @@ void Proof::save(const std::filesystem::path& filePath) const {
   file << "VERSION=2\n";
   file << "HASHSIZE=64\n";
   file << "POWER=" << middles.size() << "\n";
-  file << "NUMBER=M" << E << "\n";
+  
+  file << "NUMBER=M" << E;
+  for (const auto& factor : knownFactors) {
+    file << "/" << factor;
+  }
+  file << "\n";
 
   if (!file.good()) {
     throw std::runtime_error("Error writing proof file header: " + filePath.string());
@@ -86,6 +91,7 @@ Proof Proof::load(const std::filesystem::path& filePath) {
   // Parse ASCII header
   std::string line;
   uint32_t version = 0, hashsize = 0, power = 0, exponent = 0;
+  std::vector<std::string> factors;
 
   // Read and validate "PRP PROOF"
   if (!std::getline(file, line) || line != "PRP PROOF") {
@@ -114,7 +120,29 @@ Proof Proof::load(const std::filesystem::path& filePath) {
     } else if (key == "POWER") {
       power = std::stoul(value);
     } else if (key == "NUMBER" && !value.empty() && value[0] == 'M') {
-      exponent = std::stoul(value.substr(1));
+      // Parse cofactor format: M18178631/36357263/145429049
+      std::string numberStr = value.substr(1); // Remove 'M'
+      size_t slashPos = numberStr.find('/');
+      
+      if (slashPos != std::string::npos) {
+        // Cofactor format detected
+        exponent = std::stoul(numberStr.substr(0, slashPos));
+        
+        // Parse factors separated by '/'
+        std::string factorStr = numberStr.substr(slashPos + 1);
+        size_t start = 0;
+        size_t end = factorStr.find('/');
+        
+        while (end != std::string::npos) {
+          factors.push_back(factorStr.substr(start, end - start));
+          start = end + 1;
+          end = factorStr.find('/', start);
+        }
+        factors.push_back(factorStr.substr(start)); // Last factor
+      } else {
+        // Mersenne number: M18178631
+        exponent = std::stoul(numberStr);
+      }
     } else {
       throw std::runtime_error("Unexpected header field: " + key);
     }
@@ -167,7 +195,7 @@ Proof Proof::load(const std::filesystem::path& filePath) {
     middles.push_back(readResidue());
   }
 
-  return Proof(exponent, std::move(B), std::move(middles));
+  return Proof(exponent, std::move(B), std::move(middles), std::move(factors));
 }
 
 // Hash functions for proof generation

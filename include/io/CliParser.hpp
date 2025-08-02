@@ -52,6 +52,7 @@ struct CliOptions {
     std::string uid = "";
     int res64_display_interval = 0;
     bool cl_queue_throttle_active = false;
+    std::vector<std::string> knownFactors;
 };
 
 class CliParser {

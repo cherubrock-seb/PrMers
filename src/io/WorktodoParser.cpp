@@ -21,6 +21,8 @@
  */
 // io/WorktodoParser.cpp
 #include "io/WorktodoParser.hpp"
+#include "math/Cofactor.hpp"
+#include "util/StringUtils.hpp"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -33,22 +35,53 @@ WorktodoParser::WorktodoParser(const std::string& filename)
   : filename_(filename)
 {}
 
-
-static std::vector<std::string> split(const std::string& s, char sep) {
-    std::vector<std::string> out;
-    size_t i = 0, j;
-    while ((j = s.find(sep, i)) != std::string::npos) {
-        out.push_back(s.substr(i, j-i));
-        i = j+1;
-    }
-    out.push_back(s.substr(i));
-    return out;
-}
 static bool isHex(const std::string& s) {
     if (s.size() != 32) return false;
     for (char c : s)
         if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
     return true;
+}
+
+// Split string respecting quoted sections (for PRP-CF assignment parsing)
+std::vector<std::string> splitRespectingQuotes(const std::string& s, char delim) {
+  std::vector<std::string> result;
+  std::string current;
+  bool inQuotes = false;
+  
+  for (char c : s) {
+    if (c == '"') {
+      inQuotes = !inQuotes;
+      current += c;
+    } else if (c == delim && !inQuotes) {
+      result.push_back(current);
+      current.clear();
+    } else {
+      current += c;
+    }
+  }
+  if (!current.empty()) {
+    result.push_back(current);
+  }
+  return result;
+}
+
+// Parse comma-separated factors from quoted string like "36357263,145429049,8411216206439"
+static std::vector<std::string> parseFactors(const std::string& factorStr) {
+    std::vector<std::string> factors;
+    
+    // Remove leading/trailing whitespace and check for quotes
+    std::string trimmed = factorStr;
+    while (!trimmed.empty() && std::isspace(trimmed.back())) {
+        trimmed.pop_back();
+    }
+    
+    if (trimmed.size() >= 2 && trimmed.front() == '"' && trimmed.back() == '"') {
+        // Remove quotes and split by comma
+        std::string content = trimmed.substr(1, trimmed.size() - 2);
+        factors = util::split(content, ',');
+    }
+    
+    return factors;
 }
 
 std::optional<WorktodoEntry> WorktodoParser::parse() {
@@ -62,14 +95,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
 
-        auto top = split(line, '=');
+        auto top = util::split(line, '=');
         if (top.size() < 2) continue;
 
         bool isPRP  = (top[0] == "PRP" || top[0] == "PRPDC");
         bool isLL   = (top[0] == "Test" || top[0] == "DoubleCheck");
         if (!(isPRP || isLL)) continue;
 
-        auto parts = split(top[1], ',');
+        auto parts = splitRespectingQuotes(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
             parts.erase(parts.begin());
 
@@ -100,6 +133,31 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                       << " exponent=" << entry.exponent
                       << (aid.empty() ? "" : " (AID=" + aid + ")")
                       << "\n";
+            if (isPRP && parts.size() == 7) {
+                const std::string& lastPart = parts.back();
+                auto factors = parseFactors(lastPart);
+                if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
+                    entry.knownFactors = factors;
+                    entry.residueType = 5; // Type 5 for cofactor tests
+                    std::cout << "Known factors: ";
+                    for (size_t i = 0; i < factors.size(); ++i) {
+                        if (i > 0) std::cout << ", ";
+                        std::cout << factors[i];
+                    }
+                    std::cout << std::endl;
+                }
+                else {
+                    continue;
+                }
+            }
+            
+            // Check that LL test is not used for Mersenne cofactors
+            if (entry.llTest && !entry.knownFactors.empty()) {
+                std::cerr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
+                std::cerr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;
+                continue; // Skip this entry and try the next one
+            }
+            
             return entry;
         }
         catch (...) {

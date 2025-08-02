@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
-#include <gmpxx.h>
 
 namespace core {
 
@@ -26,8 +25,9 @@ class ProofSet {
 public:
     const uint32_t E;     // exponent
     const uint32_t power; // proof power level
+    const std::vector<std::string> knownFactors; // known factors (for cofactor tests)
 
-    ProofSet(uint32_t exponent, uint32_t proofLevel);
+    ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {});
 
     bool shouldCheckpoint(uint32_t iter) const;
     void save(uint32_t iter, const std::vector<uint32_t>& words);
@@ -47,12 +47,6 @@ private:
     
     bool isValidTo(uint32_t limitK) const;
     bool fileExists(uint32_t k) const;
-    
-    // GMP-based modular arithmetic helpers
-    mpz_class convertToGMP(const std::vector<uint32_t>& words) const;
-    std::vector<uint32_t> convertFromGMP(const mpz_class& gmp_val) const;
-    mpz_class mersenneReduce(const mpz_class& x, uint32_t E) const;
-    mpz_class mersennePowMod(const mpz_class& base, uint64_t exp, uint32_t E) const;
 };
 
 } // namespace core

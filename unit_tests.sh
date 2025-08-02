@@ -236,4 +236,25 @@ else
     exit 1
 fi
 
+echo ""
+echo "=== Mersenne cofactor PRP tests ==="
+
+echo -n "Testing M2699 cofactor with 4 factors (composite)... "
+./prmers -noask -prp 2699 -factors 5399,307687,1187561,7570504839257 > "logs/cofactor_composite_2699.log" 2>&1  
+if [ $? -eq 0 ]; then
+    echo "❌ Unexpected success (should be composite)"
+    exit 1
+else
+    echo "✅"
+fi
+
+echo -n "Testing M2699 cofactor with 5 factors (PRP)... "
+./prmers -noask -prp 2699 -factors 5399,307687,1187561,7570504839257,1987104667810711 > "logs/cofactor_prime_2699.log" 2>&1
+if [ $? -ne 0 ]; then
+    echo "❌ Failed (see logs/cofactor_prime_2699.log)"
+    exit 1
+else
+    echo "✅"
+fi
+
 echo -e "\n🎉 All tests passed."
