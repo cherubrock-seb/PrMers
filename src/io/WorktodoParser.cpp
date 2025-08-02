@@ -21,6 +21,7 @@
  */
 // io/WorktodoParser.cpp
 #include "io/WorktodoParser.hpp"
+#include "util/StringUtils.hpp"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -33,17 +34,6 @@ WorktodoParser::WorktodoParser(const std::string& filename)
   : filename_(filename)
 {}
 
-
-static std::vector<std::string> split(const std::string& s, char sep) {
-    std::vector<std::string> out;
-    size_t i = 0, j;
-    while ((j = s.find(sep, i)) != std::string::npos) {
-        out.push_back(s.substr(i, j-i));
-        i = j+1;
-    }
-    out.push_back(s.substr(i));
-    return out;
-}
 static bool isHex(const std::string& s) {
     if (s.size() != 32) return false;
     for (char c : s)
@@ -62,14 +52,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
 
-        auto top = split(line, '=');
+        auto top = util::split(line, '=');
         if (top.size() < 2) continue;
 
         bool isPRP  = (top[0] == "PRP" || top[0] == "PRPDC");
         bool isLL   = (top[0] == "Test" || top[0] == "DoubleCheck");
         if (!(isPRP || isLL)) continue;
 
-        auto parts = split(top[1], ',');
+        auto parts = util::split(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
             parts.erase(parts.begin());
 
