@@ -30,4 +30,39 @@ bool Cofactor::validateFactors(uint32_t exponent, const std::vector<std::string>
     return true;
 }
 
+// Check Type 5 residue:
+// KF = product(known_factors)
+// N = (2^p - 1) / KF
+// residue == base^(KF-1) (mod N)
+bool Cofactor::isCofactorPRP(uint32_t exponent,
+                             const std::vector<std::string>& factors,
+                             const std::vector<uint32_t>& finalResidue,
+                             uint32_t base) {  
+  try {
+    mpz_class finalRes = util::convertToGMP(finalResidue);
+    mpz_class baseGmp{base};
+    
+    mpz_class knownFactorsProduct{1};
+    for (const auto& factorStr : factors) {
+      mpz_class factor{factorStr};
+      knownFactorsProduct *= factor;
+    }
+    
+    mpz_class mersenne = (mpz_class{1} << exponent) - 1;
+    mpz_class cofactor = mersenne / knownFactorsProduct;
+    
+    mpz_class kfMinus1 = knownFactorsProduct - 1;
+    mpz_class expected;
+    mpz_powm(expected.get_mpz_t(), baseGmp.get_mpz_t(), kfMinus1.get_mpz_t(), cofactor.get_mpz_t());
+    
+    mpz_class actual = finalRes % cofactor;
+    bool isPrime = (actual == expected);
+    
+    return isPrime;
+  } catch (const std::exception& e) {
+    std::cout << "Cofactor PRP error:" << e.what() << std::endl;
+    return false;
+  }
+}
+
 } // namespace math
