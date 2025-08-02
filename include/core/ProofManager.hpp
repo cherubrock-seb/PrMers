@@ -19,7 +19,8 @@ class ProofManager {
 public:
     ProofManager(uint32_t exponent, int proofLevel,
                  cl_command_queue queue, uint32_t n,
-                 const std::vector<int>& digitWidth);
+                 const std::vector<int>& digitWidth,
+                 const std::vector<std::string>& knownFactors = {});
     void checkpoint(cl_mem buf, uint32_t iter);    
     std::filesystem::path proof() const;
 

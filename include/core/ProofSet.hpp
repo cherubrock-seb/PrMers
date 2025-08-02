@@ -25,8 +25,9 @@ class ProofSet {
 public:
     const uint32_t E;     // exponent
     const uint32_t power; // proof power level
+    const std::vector<std::string> knownFactors; // known factors (for cofactor tests)
 
-    ProofSet(uint32_t exponent, uint32_t proofLevel);
+    ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {});
 
     bool shouldCheckpoint(uint32_t iter) const;
     void save(uint32_t iter, const std::vector<uint32_t>& words);

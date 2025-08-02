@@ -53,8 +53,8 @@ Words Words::fromUint64(const std::vector<uint64_t>& host, uint32_t exponent) {
 }
 
 // ProofSet
-ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel)
-  : E{exponent}, power{proofLevel} {
+ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
+  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
   if(exponent%2!=0){
       assert(E & 1); // E is supposed to be prime
     
@@ -307,7 +307,7 @@ Proof ProofSet::computeProof() const {
   double elapsed = timer.elapsed();
   std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
   
-  return Proof{E, std::move(B), std::move(middles)};
+  return Proof{E, std::move(B), std::move(middles), knownFactors};
 }
 
 double ProofSet::diskUsageGB(uint32_t E, uint32_t power) {
