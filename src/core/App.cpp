@@ -310,6 +310,7 @@ App::App(int argc, char** argv)
           o.exponent = e->exponent;
           o.mode     = e->prpTest ? "prp" : "ll";
           o.aid      = e->aid;
+          o.knownFactors = e->knownFactors;
           hasWorktodoEntry_ = true;
       }
       if (!hasWorktodoEntry_ && o.exponent == 0) {
