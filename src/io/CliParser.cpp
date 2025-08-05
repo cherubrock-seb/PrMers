@@ -21,6 +21,7 @@
  * This code is released as free software. 
  */
 #include "io/CliParser.hpp"
+#include "util/StringUtils.hpp"
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -227,6 +228,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-gerbiczli") == 0 || std::strcmp(argv[i], "-gerbiczli") == 0) {
             opts.gerbiczli = false;
         }
+        else if (strcmp(argv[i], "-factors") == 0 && i + 1 < argc) {
+            opts.knownFactors = util::split(argv[++i], ',');
+        }
         else if (argv[i][0] != '-') {
             if (opts.exponent == 0) {
                 opts.exponent = std::strtoull(argv[i], nullptr, 10);
@@ -243,6 +247,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     if(opts.mode == "ll"){
         opts.erroriter = 0;
     }
+    
+    // Check that LL test is not used for Mersenne cofactors
+    if (opts.mode == "ll" && !opts.knownFactors.empty()) {
+        std::cerr << "Error: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
+        std::cerr << "Use PRP test for Mersenne cofactors instead." << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    
     if(opts.iterforce == 0){
         opts.iterforce = 500;
     }

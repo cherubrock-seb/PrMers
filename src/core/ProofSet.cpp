@@ -64,8 +64,8 @@ Words Words::fromUint64(const std::vector<uint64_t>& host, uint32_t exponent) {
 }
 
 // ProofSet
-ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel)
-  : E{exponent}, power{proofLevel} {
+ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
+  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
   if(exponent%2!=0){
       assert(E & 1); // E is supposed to be prime
     
@@ -301,6 +301,7 @@ Proof ProofSet::computeProof(const GpuContext& gpu) const {
     }
     
     // Convert the final result to words format
+
     auto levelResult = gpu.read(bufferPool[0]);
     
     if (levelResult.empty()) {
@@ -334,6 +335,7 @@ Proof ProofSet::computeProof(const GpuContext& gpu) const {
 }
 
 
+
 double ProofSet::diskUsageGB(uint32_t E, uint32_t power) {
   // Calculate disk usage in GB for proof files
   // Formula from PRPLL: ldexp(E, -33 + int(power)) * 1.05
@@ -365,6 +367,7 @@ std::vector<uint32_t> GpuContext::read(cl_mem buffer) const {
   }
   
   return io::JsonBuilder::compactBits(gpu_data, digitWidth, exponent);
+
 }
 
 } // namespace core

@@ -2,6 +2,7 @@
 #define IO_JSONBUILDER_HPP
 
 #include <string>
+#include <tuple>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -18,11 +19,16 @@ namespace io {
 
 class JsonBuilder {
 public:
-    static std::string generate(const std::vector<uint64_t>& x,
-                                 const CliOptions& opts,
-                                 const std::vector<int>& digit_width,
-                                 double elapsed,
-                                 int transform_size);
+    static std::tuple<bool, std::string, std::string> computeResult(
+        const std::vector<uint64_t>& hostResult,
+        const CliOptions& opts,
+        const std::vector<int>& digit_width);
+
+    static std::string generate(const CliOptions& opts,
+                                 int transform_size,
+                                 bool isPrime,
+                                 const std::string& res64,
+                                 const std::string& res2048);
 
     // Write JSON string to a file.
     static void write(const std::string& json,
