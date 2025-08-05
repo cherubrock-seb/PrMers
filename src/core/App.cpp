@@ -214,7 +214,10 @@ void App::tuneIterforce() {
             if (ipsMid > bestIps) { bestIps = ipsMid; best = mid; }
         }
     }
+    otions.iterforce = best;
     std::cout << "Optimal iterforce=" << best << " IPS=" << bestIps << "\n";
+    std::cout << "Set iterforce to optimal " << best "\n";
+    
 }
 
 
@@ -495,6 +498,10 @@ int App::runPrpOrLl() {
     std::cout << "Sampling " << 100 << " \n";
     double sampleIps = measureIps(options.iterforce, 100);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
+    if (options.tune) {
+        tuneIterforce();
+        return 0;
+    }
     clEnqueueWriteBuffer(
             context.getQueue(),
             buffers->input,
@@ -503,10 +510,7 @@ int App::runPrpOrLl() {
             x.data(),
             0, nullptr, nullptr
         );
-    if (options.tune) {
-        tuneIterforce();
-        return 0;
-    }
+    
 
     math::Carry carry(
         context,
