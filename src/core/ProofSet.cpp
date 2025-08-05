@@ -23,12 +23,24 @@
 #include "io/Sha3Hash.h"
 #include "util/Crc32.hpp"
 #include "util/Timer.hpp"
+#include "opencl/NttEngine.hpp"
+#include "math/Carry.hpp"
+#include "io/JsonBuilder.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 300
+#endif
+#ifdef __APPLE__
+#include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
 
 namespace core {
 
@@ -209,7 +221,7 @@ std::vector<uint32_t> ProofSet::load(uint32_t iter) const {
   return words;
 }
 
-Proof ProofSet::computeProof() const {
+Proof ProofSet::computeProof(const GpuContext& gpu) const {
   // Start timing proof generation
   util::Timer timer;
 
@@ -222,7 +234,23 @@ Proof ProofSet::computeProof() const {
 
   // Pre-allocate maximum needed buffer pool (power levels use 2^p buffers max)
   uint32_t maxBuffers = (1u << power);
-  std::vector<mpz_class> bufferPool(maxBuffers);
+  std::vector<cl_mem> bufferPool(maxBuffers);
+  
+  // Get OpenCL context for buffer creation
+  cl_context cl_ctx = gpu.ctx.getContext();
+  
+  // Initialize GPU buffers
+  for (uint32_t i = 0; i < maxBuffers; ++i) {
+    cl_int err;
+    bufferPool[i] = clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+      // Clean up on error
+      for (uint32_t j = 0; j < i; ++j) {
+        clReleaseMemObject(bufferPool[j]);
+      }
+      throw std::runtime_error("Failed to create GPU buffer for proof computation");
+    }
+  }
 
   // Main computation loop
   for (uint32_t p = 0; p < power; ++p) {
@@ -231,11 +259,6 @@ Proof ProofSet::computeProof() const {
     uint32_t s = (1u << (power - p - 1)); // Step size for this level
     uint32_t levelBuffers = (1u << p); // Number of buffers needed for this level
     uint32_t bufIndex = 0;
-    
-    // Clear buffers that will be used for this level
-    for (uint32_t i = 0; i < levelBuffers; ++i) {
-      bufferPool[i] = 0;
-    }
     
     // Load residues and apply binary tree algorithm
     for (uint32_t i = 0; i < levelBuffers; ++i) {
@@ -253,7 +276,7 @@ Proof ProofSet::computeProof() const {
       }
       
       auto w = load(iteration);
-      bufferPool[bufIndex] = convertToGMP(w);
+      gpu.write(bufferPool[bufIndex], w);
       bufIndex++;
       
       // Apply hashes from previous levels
@@ -267,13 +290,9 @@ Proof ProofSet::computeProof() const {
         bufIndex--;
         uint64_t h = hashes[p - 1 - k]; // Hash from previous level
         
-        // PRPLL's expMul: (bufIndex-1) := (bufIndex-1)^h * bufIndex
-        mpz_class temp = mersennePowMod(bufferPool[bufIndex - 1], h, E); // A^h mod (2^E - 1)
-        mpz_class result = temp * bufferPool[bufIndex]; // A^h * B
-        bufferPool[bufIndex - 1] = mersenneReduce(result, E); // Optimized Mersenne reduction
-        
-        // Clear the consumed buffer
-        bufferPool[bufIndex] = 0;
+        // (bufIndex-1) := (bufIndex-1)^h * bufIndex
+        gpu.ntt.powInPlace(bufferPool[bufIndex - 1], bufferPool[bufIndex - 1], h, gpu.carry, gpu.limbBytes);
+        gpu.ntt.mulInPlace5(bufferPool[bufIndex - 1], bufferPool[bufIndex], gpu.carry, gpu.limbBytes);
       }
     }
     
@@ -282,7 +301,7 @@ Proof ProofSet::computeProof() const {
     }
     
     // Convert the final result to words format
-    auto levelResult = convertFromGMP(bufferPool[0]);
+    auto levelResult = gpu.read(bufferPool[0]);
     
     if (levelResult.empty()) {
       throw std::runtime_error("Read ZERO during proof generation at level " + std::to_string(p));
@@ -302,6 +321,11 @@ Proof ProofSet::computeProof() const {
               << ", h " << std::setw(16) << newHash << std::dec << std::endl;
   }
   
+  // Clean up GPU buffers
+  for (uint32_t i = 0; i < maxBuffers; ++i) {
+    clReleaseMemObject(bufferPool[i]);
+  }
+  
   // Display proof generation time
   double elapsed = timer.elapsed();
   std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
@@ -309,98 +333,38 @@ Proof ProofSet::computeProof() const {
   return Proof{E, std::move(B), std::move(middles)};
 }
 
-mpz_class ProofSet::convertToGMP(const std::vector<uint32_t>& words) const {
-  mpz_class result;
-  // Use GMP's optimized mpz_import function
-  mpz_import(result.get_mpz_t(), words.size(), -1 /*order: LSWord first*/, sizeof(uint32_t), 0 /*endian: native*/, 0 /*nails*/, words.data());
-  return result;
-}
-
-// Optimized modular reduction for Mersenne numbers: x mod (2^E - 1)
-// Uses the identity: X mod (2^E - 1) ≡ (Xlo + Xhi) mod (2^E - 1)
-mpz_class ProofSet::mersenneReduce(const mpz_class& x, uint32_t E) const {
-  // For small numbers, use regular mod
-  if (mpz_sizeinbase(x.get_mpz_t(), 2) <= E + 1) {
-    return x;
-  }
-  
-  // Create Mersenne modulus: 2^E - 1
-  mpz_class mersenne_mod = 1;
-  mersenne_mod <<= E;
-  mersenne_mod -= 1;
-  
-  // Split x into high and low parts
-  // xlo = x & (2^E - 1)  (low E bits)
-  mpz_class xlo = x & mersenne_mod;
-  
-  // xhi = x >> E  (remaining high bits)
-  mpz_class xhi = x >> E;
-  
-  // Add high and low parts
-  mpz_class result = xlo + xhi;
-  
-  // If result >= 2^E - 1, subtract the modulus
-  if (result >= mersenne_mod) {
-    result -= mersenne_mod;
-  }
-  
-  return result;
-}
-
-// Optimized modular exponentiation for Mersenne numbers: base^exp mod (2^E - 1)
-// Uses fast Mersenne reduction at each step instead of general division
-mpz_class ProofSet::mersennePowMod(const mpz_class& base, uint64_t exp, uint32_t E) const {
-  if (exp == 0) {
-    return mpz_class(1);
-  }
-  
-  if (exp == 1) {
-    return mersenneReduce(base, E);
-  }
-  
-  // Initialize result to 1
-  mpz_class result = 1;
-  
-  // Copy base and reduce it
-  mpz_class square = mersenneReduce(base, E);
-  
-  // Binary exponentiation with fast Mersenne reduction
-  while (exp > 0) {
-    if (exp & 1) {
-      // result = result * square mod (2^E - 1)
-      mpz_class temp = result * square;
-      result = mersenneReduce(temp, E);
-    }
-    
-    exp >>= 1;
-    if (exp > 0) {
-      // square = square * square mod (2^E - 1)
-      mpz_class temp = square * square;
-      square = mersenneReduce(temp, E);
-    }
-  }
-  
-  return result;
-}
-
-std::vector<uint32_t> ProofSet::convertFromGMP(const mpz_class& gmp_val) const {
-  size_t wordCount = (E + 31) / 32;
-  std::vector<uint32_t> data(wordCount, 0);
-  
-  // Use GMP's optimized mpz_export function
-  size_t actualWords = 0;
-  mpz_export(data.data(), &actualWords, -1 /*order: LSWord first*/, sizeof(uint32_t), 0 /*endian: native*/, 0 /*nails*/, gmp_val.get_mpz_t());
-  
-  // Note: actualWords may be less than wordCount if the number has leading zeros
-  // The vector is already zero-initialized, so this is correct
-  return data;
-}
 
 double ProofSet::diskUsageGB(uint32_t E, uint32_t power) {
   // Calculate disk usage in GB for proof files
   // Formula from PRPLL: ldexp(E, -33 + int(power)) * 1.05
   if (power == 0) return 0.0;
   return std::ldexp(static_cast<double>(E), -33 + static_cast<int>(power)) * 1.05;
+}
+
+void GpuContext::write(cl_mem buffer, const std::vector<uint32_t>& data) const {
+  std::vector<uint64_t> gpu_data = io::JsonBuilder::expandBits(data, digitWidth, exponent);
+  
+  // Ensure we have the correct size for the GPU buffer
+  size_t numWords = limbBytes / sizeof(uint64_t);
+  if (gpu_data.size() != numWords) {
+    gpu_data.resize(numWords, 0);
+  }
+  
+  cl_int err = clEnqueueWriteBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to upload data to GPU buffer");
+  }
+}
+
+std::vector<uint32_t> GpuContext::read(cl_mem buffer) const {
+  size_t numWords = limbBytes / sizeof(uint64_t);
+  std::vector<uint64_t> gpu_data(numWords);
+  cl_int err = clEnqueueReadBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to download data from GPU buffer");
+  }
+  
+  return io::JsonBuilder::compactBits(gpu_data, digitWidth, exponent);
 }
 
 } // namespace core

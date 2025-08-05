@@ -1074,7 +1074,7 @@ int App::runPrpOrLl() {
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
-            auto proofFilePath = proofManager.proof();
+            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
         } catch (const std::exception& e) {

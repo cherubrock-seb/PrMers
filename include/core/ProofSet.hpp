@@ -4,9 +4,39 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
-#include <gmpxx.h>
+
+// Forward declarations for GPU types
+namespace opencl {
+    class NttEngine;
+    class Context;
+}
+
+namespace math {
+    class Carry;
+}
+
+typedef struct _cl_mem* cl_mem;
 
 namespace core {
+
+// Helper class to group commonly used GPU parameters and operations
+class GpuContext {
+public:
+    uint32_t exponent;
+    const opencl::Context& ctx;
+    opencl::NttEngine& ntt;
+    math::Carry& carry;
+    const std::vector<int>& digitWidth;
+    size_t limbBytes;
+    
+    GpuContext(uint32_t exponent_, const opencl::Context& ctx_, opencl::NttEngine& ntt_, 
+               math::Carry& carry_, const std::vector<int>& digitWidth_, size_t limbBytes_)
+        : exponent(exponent_), ctx(ctx_), ntt(ntt_), carry(carry_), digitWidth(digitWidth_), limbBytes(limbBytes_) {}
+    
+    // GPU data transfer methods
+    std::vector<uint32_t> read(cl_mem buffer) const;
+    void write(cl_mem buffer, const std::vector<uint32_t>& data) const;
+};
 
 class Words {
 public:
@@ -40,19 +70,13 @@ public:
     static double diskUsageGB(uint32_t E, uint32_t power);
     
     // Core proof generation algorithm
-    Proof computeProof() const;
+    Proof computeProof(const GpuContext& gpu) const;
 
 private:
     std::vector<uint32_t> points; // checkpoint iteration points
     
     bool isValidTo(uint32_t limitK) const;
     bool fileExists(uint32_t k) const;
-    
-    // GMP-based modular arithmetic helpers
-    mpz_class convertToGMP(const std::vector<uint32_t>& words) const;
-    std::vector<uint32_t> convertFromGMP(const mpz_class& gmp_val) const;
-    mpz_class mersenneReduce(const mpz_class& x, uint32_t E) const;
-    mpz_class mersennePowMod(const mpz_class& base, uint64_t exp, uint32_t E) const;
 };
 
 } // namespace core
