@@ -392,11 +392,29 @@ int NttEngine::pointwiseMul(cl_mem a, cl_mem b)
 }
 
 void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
-    buffers_.input = A;
-    forward(buffers_.input, 0);   
-    //ntt.pointwiseMul(A, A);
-    inverse(buffers_.input, 0); 
-    //carry.carryGPU(A, blockCarryBuf, limbBytes);
+    cl_int err;
+    
+    cl_mem tmpA = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+    
+    clEnqueueCopyBuffer(queue_, A, tmpA,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    
+    forward_simple(tmpA, 0);
+    pointwiseMul(tmpA, tmpA);
+    inverse_simple(tmpA, 0);
+    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+    
+    clEnqueueCopyBuffer(queue_, tmpA, A,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    
+    clReleaseMemObject(tmpA);
 }
 
 void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
