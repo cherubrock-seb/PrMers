@@ -495,6 +495,14 @@ int App::runPrpOrLl() {
     std::cout << "Sampling " << 100 << " \n";
     double sampleIps = measureIps(options.iterforce, 100);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
+    clEnqueueWriteBuffer(
+            context.getQueue(),
+            buffers->input,
+            CL_TRUE, 0,
+            x.size() * sizeof(uint64_t),
+            x.data(),
+            0, nullptr, nullptr
+        );
     if (options.tune) {
         tuneIterforce();
         return 0;
