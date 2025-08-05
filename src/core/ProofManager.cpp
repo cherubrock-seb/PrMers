@@ -76,16 +76,22 @@ void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
     }
 }
 
-std::filesystem::path ProofManager::proof() const {
+std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry) const {
     try {
+                    
+        // Calculate limbBytes for GPU proof generation
+        size_t limbBytes = n_ * sizeof(uint64_t);
+
+        // Create GPU context for proof generation
+        core::GpuContext gpu(exponent_, ctx, ntt, carry, digitWidth_, limbBytes);
+        
         // Generate proof from collected checkpoints
-        Proof proof = proofSet_.computeProof();
+        Proof proof = proofSet_.computeProof(gpu);
         
         // Create proof file name: {exponent}-{power}.proof
         std::string filename = std::to_string(exponent_) + "-" + 
-                              std::to_string(proof.middles.size()) + ".proof";
+                               std::to_string(proof.middles.size()) + ".proof";
         std::filesystem::path proofFilePath = std::filesystem::current_path() / filename;
-        
         
         // Save the proof file
         proof.save(proofFilePath);
