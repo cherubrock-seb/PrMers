@@ -510,6 +510,71 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
     clReleaseMemObject(tmpB);
 }
 
+// Modular exponentiation for Mersenne numbers: result = base^exp mod (2^E - 1)
+void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes) {
+    if (exp == 0) {
+        // Set result to 1 - initialize result buffer with 1
+        size_t numWords = limbBytes / sizeof(uint64_t);
+        std::vector<uint64_t> one_data(numWords, 0);
+        one_data[0] = 1;
+        clEnqueueWriteBuffer(queue_, result, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+        return;
+    }
+    
+    if (exp == 1) {
+        // Copy base to result (safe even if they're the same buffer)
+        if (result != base) {
+            copy(base, result, limbBytes);
+        }
+        return;
+    }
+    
+    // For binary exponentiation, we need to preserve the base value
+    // Create temporary buffers for safe computation
+    cl_int err;
+    
+    cl_mem base_copy_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create base copy buffer");
+    }
+    
+    cl_mem accumulator_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+        clReleaseMemObject(base_copy_buf);
+        throw std::runtime_error("Failed to create accumulator buffer");
+    }
+    
+    // Copy base to temporary buffer to preserve it
+    copy(base, base_copy_buf, limbBytes);
+    
+    // Initialize accumulator with 1
+    size_t numWords = limbBytes / sizeof(uint64_t);
+    std::vector<uint64_t> one_data(numWords, 0);
+    one_data[0] = 1;
+    clEnqueueWriteBuffer(queue_, accumulator_buf, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+    
+    // Binary exponentiation: result = base^exp mod (2^E - 1)
+    while (exp > 0) {
+        if (exp & 1) {
+            // accumulator = accumulator * base_copy mod (2^E - 1)
+            mulInPlace5(accumulator_buf, base_copy_buf, carry, limbBytes);
+        }
+        
+        exp >>= 1;
+        if (exp > 0) {
+            // base_copy = base_copy * base_copy mod (2^E - 1)
+            squareInPlace(base_copy_buf, carry, limbBytes);
+        }
+    }
+    
+    // Copy final result to result buffer
+    copy(accumulator_buf, result, limbBytes);
+    
+    // Clean up temporary buffers
+    clReleaseMemObject(base_copy_buf);
+    clReleaseMemObject(accumulator_buf);
+}
+
 void NttEngine::subOne(cl_mem buf) {
     kernels_.runSub1(buf);
 }
