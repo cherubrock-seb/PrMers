@@ -214,9 +214,7 @@ void App::tuneIterforce() {
             if (ipsMid > bestIps) { bestIps = ipsMid; best = mid; }
         }
     }
-    otions.iterforce = best;
     std::cout << "Optimal iterforce=" << best << " IPS=" << bestIps << "\n";
-    std::cout << "Set iterforce to optimal " << best "\n";
     
 }
 
