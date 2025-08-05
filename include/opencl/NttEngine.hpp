@@ -14,6 +14,8 @@
 #include "opencl/Kernels.hpp"
 #include "opencl/NttPipeline.hpp"
 
+namespace math { class Carry; }
+
 namespace opencl {
 
 class NttEngine {
@@ -28,6 +30,15 @@ public:
     int forward_simple(cl_mem buf_x, uint64_t iter);
     int inverse_simple(cl_mem buf_x, uint64_t iter);
     int pointwiseMul(cl_mem a, cl_mem b);
+    
+    void mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
+    void mulInPlace2(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
+    void mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
+    void mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
+    void squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes);
+    void powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes);
+    void copy(cl_mem src, cl_mem dst, size_t bytes);
+    void subOne(cl_mem buf);
 
 private:
     size_t ls0_val_, ls2_val_, ls3_val_, ls5_val_;

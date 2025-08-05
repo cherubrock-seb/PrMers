@@ -58,6 +58,11 @@ public:
         const std::vector<uint64_t>& x,
         const std::vector<int>& digit_width,
         uint32_t E);
+    
+    static std::vector<uint64_t> expandBits(
+        const std::vector<uint32_t>& compactWords,
+        const std::vector<int>& digit_width,
+        uint32_t E);
 };
 
 } // namespace io

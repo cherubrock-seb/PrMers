@@ -2,6 +2,7 @@
 #include "opencl/Buffers.hpp"
 #include "opencl/Kernels.hpp"
 #include "util/OpenCLError.hpp"
+#include "math/Carry.hpp"
 #include <iostream>
 #include <algorithm>
 #ifndef CL_TARGET_OPENCL_VERSION
@@ -388,6 +389,194 @@ int NttEngine::pointwiseMul(cl_mem a, cl_mem b)
         false,
         n);
     return 1;
+}
+
+void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
+    cl_int err;
+    
+    cl_mem tmpA = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+    
+    clEnqueueCopyBuffer(queue_, A, tmpA,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    
+    forward_simple(tmpA, 0);
+    pointwiseMul(tmpA, tmpA);
+    inverse_simple(tmpA, 0);
+    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+    
+    clEnqueueCopyBuffer(queue_, tmpA, A,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    
+    clReleaseMemObject(tmpA);
+}
+
+void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
+    clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
+}
+
+void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    copy(A, buffers_.input, limbBytes);
+    cl_int err;
+    forward_simple(buffers_.input, 0);
+    cl_mem temp = clCreateBuffer(
+        ctx_.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    copy(buffers_.input, temp, limbBytes);
+   
+    copy(B, buffers_.input, limbBytes);
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, temp);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+    copy(buffers_.input, A, limbBytes);
+    clReleaseMemObject(temp);
+}
+
+void NttEngine::mulInPlace2(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, B);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+}
+
+void NttEngine::mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    //copy(A, buffers_.input, limbBytes);
+    cl_int err;
+    forward_simple(A, 0);
+    cl_mem temp = clCreateBuffer(
+        ctx_.getContext(),
+        CL_MEM_READ_WRITE,
+        limbBytes,
+        nullptr,
+        &err
+    );
+    copy(A, temp, limbBytes);
+   
+    copy(B, buffers_.input, limbBytes);
+    forward_simple(buffers_.input, 0);
+    pointwiseMul(buffers_.input, temp);
+    inverse_simple(buffers_.input, 0);
+    carry.carryGPU(buffers_.input, buffers_.blockCarryBuf, limbBytes);
+    copy(buffers_.input, A, limbBytes);
+    clReleaseMemObject(temp);
+}
+
+void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+    cl_int err;
+
+    cl_mem tmpA = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    cl_mem tmpB = clCreateBuffer(ctx_.getContext(),
+                                 CL_MEM_READ_WRITE,
+                                 limbBytes,
+                                 nullptr,
+                                 &err);
+    if (err != CL_SUCCESS) std::abort();
+
+    clEnqueueCopyBuffer(queue_, A, tmpA,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+    clEnqueueCopyBuffer(queue_, B, tmpB,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    forward_simple(tmpA, 0);
+    forward_simple(tmpB, 0);
+    pointwiseMul(tmpA, tmpB);
+    inverse_simple(tmpA, 0);
+    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+
+    clEnqueueCopyBuffer(queue_, tmpA, A,
+                        0, 0, limbBytes,
+                        0, nullptr, nullptr);
+
+    clReleaseMemObject(tmpA);
+    clReleaseMemObject(tmpB);
+}
+
+// Modular exponentiation for Mersenne numbers: result = base^exp mod (2^E - 1)
+void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes) {
+    if (exp == 0) {
+        // Set result to 1 - initialize result buffer with 1
+        size_t numWords = limbBytes / sizeof(uint64_t);
+        std::vector<uint64_t> one_data(numWords, 0);
+        one_data[0] = 1;
+        clEnqueueWriteBuffer(queue_, result, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+        return;
+    }
+    
+    if (exp == 1) {
+        // Copy base to result (safe even if they're the same buffer)
+        if (result != base) {
+            copy(base, result, limbBytes);
+        }
+        return;
+    }
+    
+    // For binary exponentiation, we need to preserve the base value
+    // Create temporary buffers for safe computation
+    cl_int err;
+    
+    cl_mem base_copy_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create base copy buffer");
+    }
+    
+    cl_mem accumulator_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+        clReleaseMemObject(base_copy_buf);
+        throw std::runtime_error("Failed to create accumulator buffer");
+    }
+    
+    // Copy base to temporary buffer to preserve it
+    copy(base, base_copy_buf, limbBytes);
+    
+    // Initialize accumulator with 1
+    size_t numWords = limbBytes / sizeof(uint64_t);
+    std::vector<uint64_t> one_data(numWords, 0);
+    one_data[0] = 1;
+    clEnqueueWriteBuffer(queue_, accumulator_buf, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+    
+    // Binary exponentiation: result = base^exp mod (2^E - 1)
+    while (exp > 0) {
+        if (exp & 1) {
+            // accumulator = accumulator * base_copy mod (2^E - 1)
+            mulInPlace5(accumulator_buf, base_copy_buf, carry, limbBytes);
+        }
+        
+        exp >>= 1;
+        if (exp > 0) {
+            // base_copy = base_copy * base_copy mod (2^E - 1)
+            squareInPlace(base_copy_buf, carry, limbBytes);
+        }
+    }
+    
+    // Copy final result to result buffer
+    copy(accumulator_buf, result, limbBytes);
+    
+    // Clean up temporary buffers
+    clReleaseMemObject(base_copy_buf);
+    clReleaseMemObject(accumulator_buf);
+}
+
+void NttEngine::subOne(cl_mem buf) {
+    kernels_.runSub1(buf);
 }
 
 } // namespace opencl

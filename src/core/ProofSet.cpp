@@ -23,13 +23,24 @@
 #include "io/Sha3Hash.h"
 #include "util/Crc32.hpp"
 #include "util/Timer.hpp"
-#include "util/GmpUtils.hpp"
+#include "opencl/NttEngine.hpp"
+#include "math/Carry.hpp"
+#include "io/JsonBuilder.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 300
+#endif
+#ifdef __APPLE__
+#include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
 
 namespace core {
 
@@ -210,7 +221,7 @@ std::vector<uint32_t> ProofSet::load(uint32_t iter) const {
   return words;
 }
 
-Proof ProofSet::computeProof() const {
+Proof ProofSet::computeProof(const GpuContext& gpu) const {
   // Start timing proof generation
   util::Timer timer;
 
@@ -223,7 +234,23 @@ Proof ProofSet::computeProof() const {
 
   // Pre-allocate maximum needed buffer pool (power levels use 2^p buffers max)
   uint32_t maxBuffers = (1u << power);
-  std::vector<mpz_class> bufferPool(maxBuffers);
+  std::vector<cl_mem> bufferPool(maxBuffers);
+  
+  // Get OpenCL context for buffer creation
+  cl_context cl_ctx = gpu.ctx.getContext();
+  
+  // Initialize GPU buffers
+  for (uint32_t i = 0; i < maxBuffers; ++i) {
+    cl_int err;
+    bufferPool[i] = clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
+    if (err != CL_SUCCESS) {
+      // Clean up on error
+      for (uint32_t j = 0; j < i; ++j) {
+        clReleaseMemObject(bufferPool[j]);
+      }
+      throw std::runtime_error("Failed to create GPU buffer for proof computation");
+    }
+  }
 
   // Main computation loop
   for (uint32_t p = 0; p < power; ++p) {
@@ -232,11 +259,6 @@ Proof ProofSet::computeProof() const {
     uint32_t s = (1u << (power - p - 1)); // Step size for this level
     uint32_t levelBuffers = (1u << p); // Number of buffers needed for this level
     uint32_t bufIndex = 0;
-    
-    // Clear buffers that will be used for this level
-    for (uint32_t i = 0; i < levelBuffers; ++i) {
-      bufferPool[i] = 0;
-    }
     
     // Load residues and apply binary tree algorithm
     for (uint32_t i = 0; i < levelBuffers; ++i) {
@@ -254,7 +276,7 @@ Proof ProofSet::computeProof() const {
       }
       
       auto w = load(iteration);
-      bufferPool[bufIndex] = util::convertToGMP(w);
+      gpu.write(bufferPool[bufIndex], w);
       bufIndex++;
       
       // Apply hashes from previous levels
@@ -268,13 +290,9 @@ Proof ProofSet::computeProof() const {
         bufIndex--;
         uint64_t h = hashes[p - 1 - k]; // Hash from previous level
         
-        // PRPLL's expMul: (bufIndex-1) := (bufIndex-1)^h * bufIndex
-        mpz_class temp = util::mersennePowMod(bufferPool[bufIndex - 1], h, E); // A^h mod (2^E - 1)
-        mpz_class result = temp * bufferPool[bufIndex]; // A^h * B
-        bufferPool[bufIndex - 1] = util::mersenneReduce(result, E); // Optimized Mersenne reduction
-        
-        // Clear the consumed buffer
-        bufferPool[bufIndex] = 0;
+        // (bufIndex-1) := (bufIndex-1)^h * bufIndex
+        gpu.ntt.powInPlace(bufferPool[bufIndex - 1], bufferPool[bufIndex - 1], h, gpu.carry, gpu.limbBytes);
+        gpu.ntt.mulInPlace5(bufferPool[bufIndex - 1], bufferPool[bufIndex], gpu.carry, gpu.limbBytes);
       }
     }
     
@@ -283,7 +301,8 @@ Proof ProofSet::computeProof() const {
     }
     
     // Convert the final result to words format
-    auto levelResult = util::convertFromGMP(bufferPool[0]);
+
+    auto levelResult = gpu.read(bufferPool[0]);
     
     if (levelResult.empty()) {
       throw std::runtime_error("Read ZERO during proof generation at level " + std::to_string(p));
@@ -303,18 +322,52 @@ Proof ProofSet::computeProof() const {
               << ", h " << std::setw(16) << newHash << std::dec << std::endl;
   }
   
+  // Clean up GPU buffers
+  for (uint32_t i = 0; i < maxBuffers; ++i) {
+    clReleaseMemObject(bufferPool[i]);
+  }
+  
   // Display proof generation time
   double elapsed = timer.elapsed();
   std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
   
-  return Proof{E, std::move(B), std::move(middles), knownFactors};
+  return Proof{E, std::move(B), std::move(middles)};
 }
+
+
 
 double ProofSet::diskUsageGB(uint32_t E, uint32_t power) {
   // Calculate disk usage in GB for proof files
   // Formula from PRPLL: ldexp(E, -33 + int(power)) * 1.05
   if (power == 0) return 0.0;
   return std::ldexp(static_cast<double>(E), -33 + static_cast<int>(power)) * 1.05;
+}
+
+void GpuContext::write(cl_mem buffer, const std::vector<uint32_t>& data) const {
+  std::vector<uint64_t> gpu_data = io::JsonBuilder::expandBits(data, digitWidth, exponent);
+  
+  // Ensure we have the correct size for the GPU buffer
+  size_t numWords = limbBytes / sizeof(uint64_t);
+  if (gpu_data.size() != numWords) {
+    gpu_data.resize(numWords, 0);
+  }
+  
+  cl_int err = clEnqueueWriteBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to upload data to GPU buffer");
+  }
+}
+
+std::vector<uint32_t> GpuContext::read(cl_mem buffer) const {
+  size_t numWords = limbBytes / sizeof(uint64_t);
+  std::vector<uint64_t> gpu_data(numWords);
+  cl_int err = clEnqueueReadBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to download data from GPU buffer");
+  }
+  
+  return io::JsonBuilder::compactBits(gpu_data, digitWidth, exponent);
+
 }
 
 } // namespace core
