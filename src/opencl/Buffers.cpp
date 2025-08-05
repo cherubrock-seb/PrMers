@@ -101,6 +101,7 @@ Buffers::~Buffers() {
     if (twiddle5Buf)         clReleaseMemObject(twiddle5Buf);
     if (invTwiddle5Buf)      clReleaseMemObject(invTwiddle5Buf);
     if (blockCarryBuf)      clReleaseMemObject(blockCarryBuf);
+    if (digitWidthMaskBuf)      clReleaseMemObject(digitWidthMaskBuf);
     if (Hbuf)      clReleaseMemObject(Hbuf);
     if (Hq)      clReleaseMemObject(Hq);
     if (Qbuf)      clReleaseMemObject(Qbuf);

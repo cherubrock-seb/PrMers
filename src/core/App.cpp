@@ -223,14 +223,18 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
     uint64_t oldIterforce = options.iterforce;
     options.iterforce = testIterforce;
 
-    std::vector<uint64_t> x(precompute.getN(), 0ULL);
-    x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
-    cl_mem inputBuf = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-        x.size() * sizeof(uint64_t),
-        x.data(), nullptr
-    );
+    if (!buffers->input) {
+        std::vector<uint64_t> x(precompute.getN(), 0ULL);
+        x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
+        cl_int err = CL_SUCCESS;
+        buffers->input = clCreateBuffer(
+            context.getContext(),
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            x.size() * sizeof(uint64_t),
+            x.data(), &err
+        );
+        if (err != CL_SUCCESS) throw std::runtime_error("clCreateBuffer input failed");
+    }
 
     math::Carry carry(
         context,
@@ -247,39 +251,25 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
 
     auto start = high_resolution_clock::now();
     for (uint64_t iter = 1; iter <= testIters; ++iter) {
-        nttEngine->forward(inputBuf, iter - 1);
-        nttEngine->inverse(inputBuf, iter - 1);
+        nttEngine->forward(buffers->input, iter - 1);
+        nttEngine->inverse(buffers->input, iter - 1);
         carry.carryGPU(
-            inputBuf,
+            buffers->input,
             buffers->blockCarryBuf,
             precompute.getN() * sizeof(uint64_t)
         );
-
-        if (iter % options.iterforce == 0) {
-            
-            clFinish(context.getQueue());
-            //usleep(10000);
-            //clFlush(context.getQueue());
-
-            std::cout << "";
-        }
-        if (iter % markInterval == 0) {
-            std::cout << "." << std::flush;
-        }
+        if (iter % options.iterforce == 0) clFinish(context.getQueue());
+        if (iter % markInterval == 0) std::cout << "." << std::flush;
     }
-
     clFinish(context.getQueue());
-    //usleep(10000);
     auto end = high_resolution_clock::now();
-
     std::cout << "]\n";
 
-    clReleaseMemObject(inputBuf);
     options.iterforce = oldIterforce;
-
     double seconds = duration_cast<duration<double>>(end - start).count();
     return testIters / seconds;
 }
+
 
 
 
@@ -478,13 +468,6 @@ void vectToMpz2(mpz_t out,
 
 
 int App::runPrpOrLl() {
-    std::cout << "Sampling " << 100 << " \n";
-    double sampleIps = measureIps(options.iterforce, 100);
-    std::cout << "Estimated IPS: " << sampleIps << "\n";
-    if (options.tune) {
-        tuneIterforce();
-        return 0;
-    }
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
@@ -509,6 +492,13 @@ int App::runPrpOrLl() {
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
+    std::cout << "Sampling " << 100 << " \n";
+    double sampleIps = measureIps(options.iterforce, 100);
+    std::cout << "Estimated IPS: " << sampleIps << "\n";
+    if (options.tune) {
+        tuneIterforce();
+        return 0;
+    }
 
     math::Carry carry(
         context,
