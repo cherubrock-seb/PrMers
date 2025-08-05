@@ -13,6 +13,16 @@
 #include <filesystem>
 #include "core/ProofSet.hpp"
 
+// Forward declarations
+namespace opencl {
+    class NttEngine;
+    class Context;
+}
+
+namespace math {
+    class Carry;
+}
+
 namespace core {
 
 class ProofManager {
@@ -22,7 +32,7 @@ public:
                  const std::vector<int>& digitWidth,
                  const std::vector<std::string>& knownFactors = {});
     void checkpoint(cl_mem buf, uint32_t iter);    
-    std::filesystem::path proof() const;
+    std::filesystem::path proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry) const;
 
 private:
     ProofSet           proofSet_;

@@ -410,53 +410,6 @@ App::App(int argc, char** argv)
 }
 
 
-void App::gpuMulInPlace5(cl_mem A,
-                        cl_mem B,
-                        math::Carry& carry,
-                        size_t limbBytes,
-                        cl_mem blockCarryBuf)
-{
-    cl_int err;
-
-    cl_mem tmpA = clCreateBuffer(context.getContext(),
-                                 CL_MEM_READ_WRITE,
-                                 limbBytes,
-                                 nullptr,
-                                 &err);
-    if (err != CL_SUCCESS) std::abort();
-
-    cl_mem tmpB = clCreateBuffer(context.getContext(),
-                                 CL_MEM_READ_WRITE,
-                                 limbBytes,
-                                 nullptr,
-                                 &err);
-    if (err != CL_SUCCESS) std::abort();
-
-    clEnqueueCopyBuffer(context.getQueue(), A, tmpA,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    clEnqueueCopyBuffer(context.getQueue(), B, tmpB,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-
-    nttEngine->forward_simple(tmpA, 0);
-    nttEngine->forward_simple(tmpB, 0);
-    nttEngine->pointwiseMul(tmpA, tmpB);
-    nttEngine->inverse_simple(tmpA, 0);
-    carry.carryGPU(tmpA, blockCarryBuf, limbBytes);
-
-    clEnqueueCopyBuffer(context.getQueue(), tmpA, A,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-
-    clReleaseMemObject(tmpA);
-    clReleaseMemObject(tmpB);
-}
-
-void App::gpuCopy(cl_command_queue q, cl_mem src, cl_mem dst, size_t bytes)
-{
-    clEnqueueCopyBuffer(context.getQueue(), src, dst, 0, 0, bytes, 0, nullptr, nullptr);
-}
 
 struct MpzWrapper {
     mpz_t val;
@@ -523,94 +476,6 @@ void vectToMpz2(mpz_t out,
     }
 }
 
-void App::gpuSquareInPlace(
-                                    cl_mem A,
-                                    math::Carry& carry,
-                                    size_t limbBytes,
-                                    cl_mem blockCarryBuf)
-{
-    buffers->input = A;
-    nttEngine->forward(buffers->input, 0);   
-    //ntt.pointwiseMul(A, A);
-    nttEngine->inverse(buffers->input, 0); 
-    //carry.carryGPU(A, blockCarryBuf, limbBytes);
-}
-
-void App::gpuMulInPlace(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
-    cl_int err;
-    nttEngine->forward_simple(buffers->input, 0);
-    cl_mem temp = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        limbBytes,
-        nullptr,
-        &err
-    );
-    gpuCopy(context.getQueue(), buffers->input, temp, limbBytes);
-   
-    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, temp);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-    clReleaseMemObject(temp);
-    
-}
-
-
-
-void App::gpuMulInPlace3(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    //gpuCopy(context.getQueue(), A, buffers->input, limbBytes);
-    cl_int err;
-    nttEngine->forward_simple(A, 0);
-    cl_mem temp = clCreateBuffer(
-        context.getContext(),
-        CL_MEM_READ_WRITE,
-        limbBytes,
-        nullptr,
-        &err
-    );
-    gpuCopy(context.getQueue(), A, temp, limbBytes);
-   
-    gpuCopy(context.getQueue(), B, buffers->input, limbBytes);
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, temp);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    gpuCopy(context.getQueue(), buffers->input, A, limbBytes);
-    clReleaseMemObject(temp);
-    
-}
-
-
-void App::gpuMulInPlace2(
-                                 cl_mem A, cl_mem B,
-                                 math::Carry& carry,
-                                 size_t limbBytes,
-                                 cl_mem blockCarryBuf)
-{
-    
-    
-    nttEngine->forward_simple(buffers->input, 0);
-    nttEngine->pointwiseMul(buffers->input, B);
-    nttEngine->inverse_simple(buffers->input, 0);
-    carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-    
-}
 
 int App::runPrpOrLl() {
     std::cout << "Sampling " << 100 << " \n";
@@ -989,8 +854,8 @@ int App::runPrpOrLl() {
 
             checkpass += 1;
             bool condcheck = !(checkpass != checkpasslevel && (iter != totalIters - 1));
-            gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
-            if (condcheck) gpuCopy(context.getQueue(), buffers->bufd, buffers->r2, limbBytes);
+            nttEngine->copy(buffers->input, buffers->save, limbBytes);
+            if (condcheck) nttEngine->copy(buffers->bufd, buffers->r2, limbBytes);
             nttEngine->forward_simple(buffers->bufd, 0);
             nttEngine->forward_simple(buffers->save, 0);
             nttEngine->pointwiseMul(buffers->bufd, buffers->save);
@@ -998,10 +863,10 @@ int App::runPrpOrLl() {
             carry.carryGPU(buffers->bufd, buffers->blockCarryBuf, limbBytes);
 
             if (condcheck) {
-                gpuCopy(context.getQueue(), buffers->input, buffers->save, limbBytes);
+                nttEngine->copy(buffers->input, buffers->save, limbBytes);
 
                 checkpass = 0;
-                gpuCopy(context.getQueue(), buffers->r2, buffers->input, limbBytes);
+                nttEngine->copy(buffers->r2, buffers->input, limbBytes);
                 for (uint64_t z = 0; z < B - (options.exponent % B); ++z) {
                     nttEngine->forward(buffers->input, iter);
                     nttEngine->inverse(buffers->input, iter);
@@ -1042,9 +907,9 @@ int App::runPrpOrLl() {
 
                 if (ok == 1u) {
                     std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
-                    gpuCopy(context.getQueue(), buffers->save, buffers->input, limbBytes);
-                    gpuCopy(context.getQueue(), buffers->save, buffers->last_correct_state, limbBytes);
-                    gpuCopy(context.getQueue(), buffers->bufd, buffers->last_correct_bufd, limbBytes);
+                    nttEngine->copy(buffers->save, buffers->input, limbBytes);
+                    nttEngine->copy(buffers->save, buffers->last_correct_state, limbBytes);
+                    nttEngine->copy(buffers->bufd, buffers->last_correct_bufd, limbBytes);
                     itersave = iter;
                     jsave = j;
                     cl_event postEvt;
@@ -1064,8 +929,8 @@ int App::runPrpOrLl() {
                     }
                     checkpass = 0;
                     options.gerbicz_error_count += 1;
-                    gpuCopy(context.getQueue(), buffers->last_correct_state, buffers->input, limbBytes);
-                    gpuCopy(context.getQueue(), buffers->last_correct_bufd, buffers->bufd, limbBytes);
+                    nttEngine->copy(buffers->last_correct_state, buffers->input, limbBytes);
+                    nttEngine->copy(buffers->last_correct_bufd, buffers->bufd, limbBytes);
                     cl_event postEvt;
                     clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
                     clWaitForEvents(1, &postEvt);
@@ -1212,7 +1077,7 @@ int App::runPrpOrLl() {
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
-            auto proofFilePath = proofManager.proof();
+            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
         } catch (const std::exception& e) {
@@ -1423,11 +1288,6 @@ mpz_class buildE(uint64_t B1) {
     return E;
 }
 
-void App::subOneGPU(cl_mem buf)
-{
-    kernels->runSub1(buf);
-}
-
 
 
 
@@ -1482,7 +1342,7 @@ int App::runPM1Stage2() {
     carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
 
     buffers->evenPow[0] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-    gpuCopy(context.getQueue(), buffers->input, buffers->evenPow[0], limbBytes);
+    nttEngine->copy(buffers->input, buffers->evenPow[0], limbBytes);
     auto ensureEvenPow = [&](unsigned long needIdx) {
         while (buffers->evenPow.size() <= needIdx) {
             size_t kPrev = buffers->evenPow.size() - 1;
@@ -1490,8 +1350,8 @@ int App::runPM1Stage2() {
                                         CL_MEM_READ_WRITE,
                                         limbBytes, nullptr, &err);
 
-            gpuCopy(context.getQueue(), buffers->evenPow[kPrev], buf, limbBytes);
-            gpuMulInPlace(buf, buffers->evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
+            nttEngine->copy(buffers->evenPow[kPrev], buf, limbBytes);
+            nttEngine->mulInPlace(buf, buffers->evenPow[0], carry, limbBytes);
             buffers->evenPow.push_back(buf);
         }
     };
@@ -1499,17 +1359,17 @@ int App::runPM1Stage2() {
     std::cout << "Precomputing H powers: 0%" << std::flush;
     for (unsigned long k = 1; k < nbEven; ++k) {
         buffers->evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-        gpuCopy(context.getQueue(), buffers->evenPow[k - 1], buffers->evenPow[k], limbBytes);
-        gpuMulInPlace(buffers->evenPow[k], buffers->evenPow[0], carry, limbBytes, buffers->blockCarryBuf);
+        nttEngine->copy(buffers->evenPow[k - 1], buffers->evenPow[k], limbBytes);
+        nttEngine->mulInPlace(buffers->evenPow[k], buffers->evenPow[0], carry, limbBytes);
         
         int newPct = int((k + 1) * 100 / nbEven);
         if (newPct > pct) { pct = newPct; std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush; }
     }
     for (unsigned long k = 0; k < nbEven; ++k) {
         
-        gpuCopy(context.getQueue(), buffers->evenPow[k], buffers->input, limbBytes);
+        nttEngine->copy(buffers->evenPow[k], buffers->input, limbBytes);
         nttEngine->forward_simple(buffers->input,0);
-        gpuCopy(context.getQueue(), buffers->input, buffers->evenPow[k], limbBytes);
+        nttEngine->copy(buffers->input, buffers->evenPow[k], limbBytes);
         
     }
 
@@ -1517,7 +1377,7 @@ int App::runPM1Stage2() {
    
 
     buffers->Hq = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-    gpuCopy(context.getQueue(), buffers->Hbuf, buffers->input, limbBytes);
+    nttEngine->copy(buffers->Hbuf, buffers->input, limbBytes);
 
     mpz_class p_prev;
     mpz_class p;
@@ -1530,10 +1390,10 @@ int App::runPM1Stage2() {
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
         if (mpz_tstbit(p.get_mpz_t(), i)) {
-            gpuMulInPlace(buffers->input, buffers->Hbuf, carry, limbBytes, buffers->blockCarryBuf);
+            nttEngine->mulInPlace(buffers->input, buffers->Hbuf, carry, limbBytes);
         }
     }
-    gpuCopy(context.getQueue(), buffers->input, buffers->Hq, limbBytes);
+    nttEngine->copy(buffers->input, buffers->Hq, limbBytes);
 
     buffers->Qbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     std::vector<uint64_t> one(limbs, 0ULL); one[0] = 1ULL;
@@ -1579,8 +1439,8 @@ int App::runPM1Stage2() {
             
         }
 
-        gpuCopy(context.getQueue(), buffers->Hq, buffers->tmp, limbBytes);
-        subOneGPU(buffers->tmp);
+        nttEngine->copy(buffers->Hq, buffers->tmp, limbBytes);
+        nttEngine->subOne(buffers->tmp);
         nttEngine->forward_simple(buffers->tmp, 0);
         nttEngine->forward_simple(buffers->Qbuf, 0);
         nttEngine->pointwiseMul(buffers->Qbuf, buffers->tmp);

@@ -173,6 +173,40 @@ std::vector<uint32_t> JsonBuilder::compactBits(
     return out;
 }
 
+std::vector<uint64_t> JsonBuilder::expandBits(
+    const std::vector<uint32_t>& compactWords,
+    const std::vector<int>&      digit_width,
+    uint32_t                     E
+) {
+    uint32_t digitCount = static_cast<uint32_t>(digit_width.size());
+    std::vector<uint64_t> out(digitCount, 0);
+    
+    // Bit buffer for extracting variable-width values
+    uint64_t bitBuffer = 0;
+    int      availableBits = 0;
+    uint32_t wordIndex = 0;
+    
+    for (uint32_t p = 0; p < digitCount; ++p) {
+        int w = digit_width[p];
+        
+        // Fill buffer if we don't have enough bits
+        while (availableBits < w && wordIndex < compactWords.size()) {
+            bitBuffer |= (uint64_t(compactWords[wordIndex]) << availableBits);
+            availableBits += 32;
+            wordIndex++;
+        }
+        
+        // Extract w bits as the value
+        uint64_t mask = (1ULL << w) - 1;
+        out[p] = bitBuffer & mask;
+        
+        // Remove extracted bits from buffer
+        bitBuffer >>= w;
+        availableBits -= w;
+    }
+    
+    return out;
+}
 
 static std::string fileMD5(const std::string& filePath) {
     namespace fs = std::filesystem;
