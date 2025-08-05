@@ -42,25 +42,24 @@ void Printer::banner(const io::CliOptions& o) {
 }
 
 bool Printer::finalReport(const io::CliOptions& opts,
-                          const std::vector<uint64_t>& resultVec,
-                          std::string res64,
-                          uint64_t n,
-                          const std::string& timestampBuf,
-                          double elapsed, std::string jsonResult) {
+                          double elapsed,
+                          const std::string& jsonResult,
+                          bool isPrime) {
     const uint32_t p = opts.exponent;
     const std::string& mode = opts.mode;
 
-    bool isPrime = false;
-    std::string statusCode;
-
     if (mode == "ll") {
-        isPrime = std::all_of(resultVec.begin(), resultVec.end(), [](uint64_t v) { return v == 0; });
-        statusCode = isPrime ? "P" : "C";
         std::cout << "\nM" << p << " is " << (isPrime ? "prime" : "composite") << ".\n";
     } else {
-        isPrime = (resultVec[0] == 9) && std::all_of(resultVec.begin() + 1, resultVec.end(), [](uint64_t v) { return v == 0; });
-        statusCode = isPrime ? "P" : "C";
-        std::cout << "\nM" << p << " PRP test: " << (isPrime ? "probably prime (residue is 9)" : "composite") << ".\n";
+        if (!opts.knownFactors.empty()) {
+            std::cout << "\nM" << p;
+            for (const auto& factor : opts.knownFactors) {
+                std::cout << "/" << factor;
+            }
+            std::cout << " PRP test: " << (isPrime ? "probably prime" : "composite") << ".\n";
+        } else {
+            std::cout << "\nM" << p << " PRP test: " << (isPrime ? "probably prime (residue is 9)" : "composite") << ".\n";
+        }
     }
 
     std::cout << "\nManual submission JSON:\n" << jsonResult << std::endl;
