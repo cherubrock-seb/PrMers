@@ -36,6 +36,7 @@ public:
     void mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
     void mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
     void squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes);
+    void powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes);
     void copy(cl_mem src, cl_mem dst, size_t bytes);
     void subOne(cl_mem buf);
 
