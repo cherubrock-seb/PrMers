@@ -21,6 +21,7 @@
  */
 #include "io/JsonBuilder.hpp"
 #include "io/CliParser.hpp"          // for CliOptions
+#include "math/Cofactor.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -42,6 +43,8 @@
 #include <cstdint>
 #include <vector>
 #include <cstdio>
+#include <algorithm>
+#include <tuple>
 
 
 namespace io{
@@ -75,6 +78,58 @@ namespace io{
         doDiv3(E, W);
         doDiv3(E, W);
     }
+
+std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
+    const std::vector<uint64_t>& hostResult,
+    const CliOptions& opts,
+    const std::vector<int>& digit_width) {
+    
+    std::vector<uint32_t> words = JsonBuilder::compactBits(hostResult, digit_width, opts.exponent);
+    if (opts.mode == "prp") {
+        doDiv9(opts.exponent, words);
+    }
+    
+    bool isPrime;
+    if (opts.mode == "prp") {
+        if (!opts.knownFactors.empty()) {
+            // Mersenne cofactor PRP
+            isPrime = math::Cofactor::isCofactorPRP(opts.exponent, opts.knownFactors, words);
+        } else {
+            // Mersenne number PRP
+            isPrime = (hostResult[0] == 9
+                       && std::all_of(hostResult.begin()+1,
+                                      hostResult.end(),
+                                      [](uint64_t v){ return v == 0; }));
+        }
+    } else {
+        // Mersenne number LL
+        isPrime = std::all_of(hostResult.begin(),
+                              hostResult.end(),
+                              [](uint64_t v){ return v == 0; });
+    }
+    
+    // Ensure words array has correct size for residue computation
+    if (words.size() < 64) {
+        words.resize(64, 0);
+    } else if (words.size() > 64) {
+        words.resize(64);
+    }
+    
+    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    std::ostringstream oss64;
+    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << finalRes64;
+    std::string res64 = oss64.str();
+    
+    std::ostringstream oss2048;
+    oss2048 << std::hex << std::nouppercase << std::setfill('0');
+    for (int i = 63; i >= 0; --i) {
+        oss2048 << std::setw(8) << words[i];
+    }
+    std::string res2048 = oss2048.str();
+
+    return std::make_tuple(isPrime, res64, res2048);
+}
+
 std::vector<uint32_t> JsonBuilder::compactBits(
     const std::vector<uint64_t>& x,
     const std::vector<int>&      digit_width,
@@ -218,7 +273,8 @@ static std::string generatePrimeNetJson(
     const std::string &aid,
     const std::string &uid,
     const std::string &timestamp,
-    const std::string &computer)
+    const std::string &computer,
+    const std::vector<std::string>& knownFactors)
 {
     std::ostringstream oss;
     bool isPRP = (worktype.rfind("PRP", 0) == 0);
@@ -255,6 +311,17 @@ static std::string generatePrimeNetJson(
     if (!aid.empty())      oss << ",\"aid\":"      << jsonEscape(aid);
     if (!uid.empty())      oss << ",\"uid\":"      << jsonEscape(uid);
     oss << ",\"timestamp\":" << jsonEscape(timestamp);
+
+    if (!knownFactors.empty()) {
+        oss << ",\"known-factors\":[";
+        for (size_t i = 0; i < knownFactors.size(); ++i) {
+            oss << jsonEscape(knownFactors[i]);
+            if (i < knownFactors.size() - 1) {
+                oss << ",";
+            }
+        }
+        oss << "]";
+    }
 
     // build canonical string …
     std::string prefix = oss.str();
@@ -293,35 +360,14 @@ static std::string generatePrimeNetJson(
     return oss.str();
 }
 
-std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
-                                  const CliOptions& opts,
-                                  const std::vector<int>& digit_width,
-                                  double /*elapsed*/,
-                                  int transform_size) 
+std::string JsonBuilder::generate(const CliOptions& opts,
+                                  int transform_size,
+                                  bool isPrime,
+                                  const std::string& res64,
+                                  const std::string& res2048) 
 {
-    
-    
-   auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
-    if (opts.mode == "prp") doDiv9(opts.exponent, words);
-    if (words.size() < 64) {
-        words.resize(64, 0);
-    } else if (words.size() > 64) {
-        words.resize(64);
-    }
-    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
-    std::ostringstream oss64;
-    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0')
-        << finalRes64;
-    std::string res64 = oss64.str();
-
-    std::ostringstream oss2048;
-    oss2048 << std::hex << std::nouppercase << std::setfill('0');
-    for (int i = 63; i >= 0; --i) {
-        oss2048 << std::setw(8) << words[i];
-    }
-    std::string res2048 = oss2048.str();
     // ---------------------------------------------
-    // 4) timestamp
+    // timestamp
     std::time_t now = std::time(nullptr);
     std::tm timeinfo;
 
@@ -338,19 +384,12 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
 
     std::string status;
 
-    if (opts.mode == "prp") {
-        // PRP mode → “0000...0001” means prime
-        status = (res64 == "0000000000000001") ? "P" : "C";
-    }
-    else if (opts.mode == "ll") {
-        // LL mode  → “0000...0000” means prime
-        status = (res64 == "0000000000000000") ? "P" : "C";
-    }
-    else {
-        // any other mode always composite
-        status = "C";
-    }
-    // 5) assemble JSON
+    status = isPrime ? "P" : "C";
+    
+    // Use Type 5 residue for Mersenne cofactors
+    int residueType = opts.knownFactors.empty() ? 1 : 5;
+    
+    // assemble JSON
     return generatePrimeNetJson(
         // status: P or C
         status,
@@ -358,7 +397,7 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
         opts.mode == "prp" ? "PRP-3" : "LL",
         res64,
         res2048,
-        1,  // residueType
+        residueType,
         opts.gerbicz_error_count,  // gerbiczError
         transform_size,
         opts.proof ? 2 : 0,
@@ -375,7 +414,8 @@ std::string JsonBuilder::generate(const std::vector<uint64_t>& x,
         opts.aid,                  // aid
         opts.uid,                  // uid
         timestampBuf,              // timestamp
-        opts.computer_name         // computer
+        opts.computer_name,        // computer
+        opts.knownFactors
     );
 
 }

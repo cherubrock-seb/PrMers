@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace io {
 
@@ -12,6 +13,9 @@ struct WorktodoEntry {
     uint32_t exponent;
     std::string aid;
     std::string rawLine;  
+    // Cofactor test support
+    std::vector<std::string> knownFactors;  // List of known factors as strings
+    uint32_t residueType = 1;               // Default Type 1, Type 5 for cofactors
 };
 
 class WorktodoParser {
