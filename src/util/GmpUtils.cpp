@@ -3,6 +3,7 @@
 #include <atomic>
 #include <algorithm>
 #include <cstdio>
+#include <climits>
 
 namespace util {
 
@@ -93,12 +94,22 @@ std::vector<uint32_t> convertFromGMP(const mpz_class& gmp_val) {
   return data;
 }
 
+static inline void add_ui64(mpz_class& x, uint64_t w) {
+#if ULONG_MAX == 0xFFFFFFFFFFFFFFFFULL
+    mpz_add_ui(x.get_mpz_t(), x.get_mpz_t(), static_cast<unsigned long>(w));
+#else
+    mpz_class tmp;
+    mpz_import(tmp.get_mpz_t(), 1, -1, sizeof(uint64_t), 0, 0, &w);
+    x += tmp;
+#endif
+}
+
 mpz_class vectToMpz(const std::vector<uint64_t>& v,
                     const std::vector<int>& widths,
                     const mpz_class& Mp)
 {
     const size_t n = v.size();
-    const unsigned T = std::thread::hardware_concurrency();
+    const unsigned T = std::max(1u, std::thread::hardware_concurrency());
     std::vector<mpz_class> partial(T);
 
     std::vector<unsigned> total_width(T, 0);
@@ -114,9 +125,9 @@ mpz_class vectToMpz(const std::vector<uint64_t>& v,
             mpz_class acc = 0;
             for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
                 acc <<= widths[i];
-                acc += v[i];
-                if (acc >= Mp)
-                    acc -= Mp;
+                add_ui64(acc, v[i]);
+                if (acc >= Mp) acc -= Mp;
+
                 total_width[t] += widths[i];
 
                 size_t count = ++global_count;
@@ -137,11 +148,11 @@ mpz_class vectToMpz(const std::vector<uint64_t>& v,
     for (int t = T - 1; t >= 0; --t) {
         result <<= total_width[t];
         result += partial[t];
-        if (result >= Mp)
-            result -= Mp;
+        if (result >= Mp) result -= Mp;
     }
-    
+
     return result;
 }
+
 
 }
