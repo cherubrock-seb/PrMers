@@ -16,3 +16,10 @@ logs/
 *.o
 *.swp
 /prmers
+*.bufd
+*.gli
+*.isav
+*.jsav
+*.lbufd
+*.proof
+*/proof/*
