@@ -14,6 +14,8 @@ Key features:
 Prmers in PRP mode is doing Gerbicz–Li error checking See: “An Efficient Modular Exponentiation Proof Scheme”, §2 — Darren Li, Yves Gallot — https://arxiv.org/abs/2209.15623
 see below
 
+Additionally, Prmers supports PRP testing of Mersenne cofactors. When there are known factors of a Mersenne number, PrMers can test if the remaining cofactor is a probable prime.
+
 
 ## 🚀 Try the PrMers Demo on Google Colab
 
@@ -813,6 +815,7 @@ You should now have `prmers.exe` ready to run!
 - `-profile`: Enable kernel execution profiling
 - `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9)
 - `-ll`: Run in Lucas–Lehmer mode, with an initial value of 4 and p-2 iterations of `kernel_sub2`
+- `-factors <factor1,factor2,...>`: Specify known factors to run PRP test on the Mersenne cofactor
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
 - `-enqueue_max <value>`: Manually set the maximum number of enqueued kernels before `clFinish` is called (default: autodetect)
