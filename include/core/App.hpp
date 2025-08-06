@@ -67,9 +67,6 @@ private:
 };
 
 mpz_class buildE(uint64_t B1);
-void vectToMpz(mpz_t out,
-                const std::vector<uint64_t>& v,
-                const std::vector<int>& widths);
 void readGpuBufferWithProgress(cl_command_queue q,
                                cl_mem            deviceBuf,
                                void*             hostPtr,

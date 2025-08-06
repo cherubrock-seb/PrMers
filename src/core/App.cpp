@@ -27,6 +27,7 @@
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
 #include "math/Carry.hpp"
+#include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
@@ -402,70 +403,6 @@ App::App(int argc, char** argv)
 
 
 
-struct MpzWrapper {
-    mpz_t val;
-    MpzWrapper() { mpz_init(val); }
-    ~MpzWrapper() { mpz_clear(val); }
-
-    mpz_t& get() { return val; }
-    const mpz_t& get() const { return val; }
-};
-
-void vectToMpz2(mpz_t out,
-                const std::vector<uint64_t>& v,
-                const std::vector<int>& widths,
-                const mpz_t Mp)
-{
-    const size_t n = v.size();
-    const unsigned T = std::thread::hardware_concurrency();
-    std::vector<MpzWrapper> partial(T);
-
-    std::vector<unsigned> total_width(T, 0);
-    std::atomic<size_t> global_count{0};
-
-    for (unsigned t = 0; t < T; ++t)
-        mpz_init(partial[t].get());
-
-    std::vector<std::thread> threads(T);
-    size_t chunk = (n + T - 1) / T;
-
-    for (unsigned t = 0; t < T; ++t) {
-        size_t start = t * chunk;
-        size_t end = std::min(start + chunk, n);
-        threads[t] = std::thread([&, start, end, t]() {
-            mpz_t acc;
-            mpz_init_set_ui(acc, 0);
-            for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
-                mpz_mul_2exp(acc, acc, widths[i]);
-                mpz_add_ui(acc, acc, v[i]);
-                if (mpz_cmp(acc, Mp) >= 0)
-                    mpz_sub(acc, acc, Mp);
-                total_width[t] += widths[i];
-
-                size_t count = ++global_count;
-                if (count % 10000 == 0 || count == n) {
-                    double progress = 100.0 * count / n;
-                    printf("\rProgress: %.2f%%", progress);
-                    fflush(stdout);
-                }
-            }
-            mpz_set(partial[t].get(), acc);
-            mpz_clear(acc);
-        });
-    }
-
-    for (auto& th : threads) th.join();
-    printf("\n");
-
-    mpz_set_ui(out, 0);
-    for (int t = T - 1; t >= 0; --t) {
-        mpz_mul_2exp(out, out, total_width[t]);
-        mpz_add(out, out, partial[t].get());
-        if (mpz_cmp(out, Mp) >= 0)
-            mpz_sub(out, out, Mp);
-        //mpz_clear(partial[t].get());
-    }
-}
 
 
 int App::runPrpOrLl() {
@@ -1330,9 +1267,7 @@ int App::runPM1Stage2() {
 
     math::Carry carry(context, context.getQueue(), program->getProgram(),
                       precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
-    mpz_t Mp; mpz_init(Mp);
-    mpz_ui_pow_ui(Mp, 2, options.exponent);
-    mpz_sub_ui(Mp, Mp, 1);
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
 
     buffers->evenPow.resize(nbEven, nullptr);
     std::cout << "Stage 2: Will precompute " << nbEven << " powers of H^2, H^.." << "." << std::endl;
@@ -1501,14 +1436,14 @@ int App::runPM1Stage2() {
     std::vector<uint64_t> hostQ(limbs);
     clEnqueueReadBuffer(context.getQueue(), buffers->Qbuf, CL_TRUE, 0, limbBytes, hostQ.data(), 0, nullptr, nullptr);
     carry.handleFinalCarry(hostQ, precompute.getDigitWidth());
-    mpz_t Q; mpz_init(Q); vectToMpz2(Q, hostQ, precompute.getDigitWidth(), Mp);
-    mpz_t g; mpz_init(g); mpz_gcd(g, Q, Mp);
-    bool found = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
+    mpz_class Q = util::vectToMpz(hostQ, precompute.getDigitWidth(), Mp);
+    mpz_class g; mpz_gcd(g.get_mpz_t(), Q.get_mpz_t(), Mp.get_mpz_t());
+    bool found = g != 1 && g != Mp;
     std::string filename = "stage2_result_B2_" + B2.get_str() +
                         "_p_" + std::to_string(options.exponent) + ".txt";
 
     if (found) {
-        char* s = mpz_get_str(nullptr, 10, g);
+        char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
         std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
         std::free(s);
@@ -1669,22 +1604,17 @@ int App::runPM1() {
     carry.handleFinalCarry(hostData, precompute.getDigitWidth());
     std::cout << "vectToResidue start" << std::endl;
 
-    mpz_t X; mpz_init(X);
-    mpz_t Mp;  mpz_init(Mp);
-    mpz_ui_pow_ui(Mp, 2, options.exponent);
-    mpz_sub_ui(Mp, Mp, 1);
-    vectToMpz2(X, hostData, precompute.getDigitWidth(), Mp);
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+    mpz_class X = util::vectToMpz(hostData, precompute.getDigitWidth(), Mp);
     //std::cout << "digitWidths = ";
     //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
     //std::cout << "\n";
     //gmp_printf("X final  = %Zd\n", X);
 
-    mpz_sub_ui(X, X, 1);
+    X -= 1;
 
-
-    
-    mpz_t g; mpz_init(g);
-    mpz_gcd(g, X, Mp);
+    mpz_class g;
+    mpz_gcd(g.get_mpz_t(), X.get_mpz_t(), Mp.get_mpz_t());
 
 
 /*
@@ -1702,13 +1632,13 @@ int App::runPM1() {
 
     //gmp_printf("GCD(x - 1, 2^%u - 1) = %Zd\n", options.exponent, g);
 
-    bool factorFound = mpz_cmp_ui(g, 1) && mpz_cmp(g, Mp);
+    bool factorFound = g != 1 && g != Mp;
 
     std::string filename = "stage1_result_B1_" + std::to_string(B1) +
                         "_p_" + std::to_string(options.exponent) + ".txt";
 
     if (factorFound) {
-        char* fstr = mpz_get_str(nullptr, 10, g);
+        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
         std::free(fstr);
     } else {
@@ -1717,7 +1647,7 @@ int App::runPM1() {
 
 
     if (factorFound) {
-        char* fstr = mpz_get_str(nullptr, 10, g);
+        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
         std::free(fstr);
         std::cout << "\n";
