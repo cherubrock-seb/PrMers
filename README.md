@@ -818,6 +818,7 @@ You should now have `prmers.exe` ready to run!
 - `-factors <factor1,factor2,...>`: Specify known factors to run PRP test on the Mersenne cofactor
 - `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
+- `-proof <level>`: Set proof power between 1 and 12 or 0 to disable proof generation (default: optimal proof power selected automatically)
 - `-enqueue_max <value>`: Manually set the maximum number of enqueued kernels before `clFinish` is called (default: autodetect)
 - `--noask`: Automatically submit results to PrimeNet without prompting
 - `-user <username>`: PrimeNet account username to use for automatic result submission

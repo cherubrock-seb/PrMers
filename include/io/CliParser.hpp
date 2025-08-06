@@ -42,7 +42,8 @@ struct CliOptions {
     std::string kernel_path;
     std::string output_path;
     std::string build_options = "";
-    int proofPower = 1;
+    uint32_t proofPower = 1;
+    bool manual_proofPower = false; // Track if proof power is set manually
     std::string proofFile = "";
     int portCode = 8;
     std::string osName = "Linux";
