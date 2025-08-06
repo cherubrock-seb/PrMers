@@ -36,10 +36,9 @@ bool Cofactor::validateFactors(uint32_t exponent, const std::vector<std::string>
 // residue == base^(KF-1) (mod N)
 bool Cofactor::isCofactorPRP(uint32_t exponent,
                              const std::vector<std::string>& factors,
-                             const std::vector<uint32_t>& finalResidue,
+                             const mpz_class& finalResidue,
                              uint32_t base) {  
   try {
-    mpz_class finalRes = util::convertToGMP(finalResidue);
     mpz_class baseGmp{base};
     
     mpz_class knownFactorsProduct{1};
@@ -55,7 +54,7 @@ bool Cofactor::isCofactorPRP(uint32_t exponent,
     mpz_class expected;
     mpz_powm(expected.get_mpz_t(), baseGmp.get_mpz_t(), kfMinus1.get_mpz_t(), cofactor.get_mpz_t());
     
-    mpz_class actual = finalRes % cofactor;
+    mpz_class actual = finalResidue % cofactor;
     bool isPrime = (actual == expected);
     
     return isPrime;
