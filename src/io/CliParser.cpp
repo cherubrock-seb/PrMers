@@ -67,7 +67,7 @@ void printUsage(const char* progName) {
     std::cout << "  -computer <name>     : (Optional) PrimeNet computer name to auto-fill the result submission" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
-    std::cout << "  -proof               : (Optional) Disable proof generation (by default a proof is created if PRP test passes)" << std::endl;
+    std::cout << "  -proof <level>       : (Optional) Set proof power between 1 and 12 or 0 to disable proof generation (default: optimal proof power selected automatically)" << std::endl;
     std::cout << "  -erroriter <iter>    : (Optional) injects an error at iteration <iter> to test Gerbicz-Li error detection mechanism." << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
@@ -146,8 +146,17 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
             opts.cl_queue_throttle_active = true;
         }
-        else if (std::strcmp(argv[i], "-proof") == 0) {
-            opts.proof = false;
+        else if (std::strcmp(argv[i], "-proof") == 0 && i + 1 < argc) {
+            int level = std::atoi(argv[++i]);
+            if (level == 0) {
+                opts.proof = false;
+            } else if (1 <= level && level <= 12) {
+                opts.proofPower = level;
+                opts.manual_proofPower = true;
+            } else {
+                std::cerr << "Error: -proof level must be between 0 and 12. Given: " << level << std::endl;
+                std::exit(EXIT_FAILURE);
+            }
         }
         else if (std::strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
             opts.localCarryPropagationDepth = std::atoi(argv[++i]);
