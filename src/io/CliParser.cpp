@@ -50,6 +50,7 @@ void printUsage(const char* progName) {
     std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -factors <factor1,factor2,...> : (Optional) Specify known factors to run PRP test on the Mersenne cofactor" << std::endl;
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
     std::cout << "  -b2                  : (Optional) B2 for factoring P-1" << std::endl;
