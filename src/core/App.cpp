@@ -329,7 +329,11 @@ App::App(int argc, char** argv)
     )
   , proofManager(
         options.exponent,
-        options.proof ? ProofSet::bestPower(options.exponent) : 0,
+        [this]() -> uint32_t {
+            if (!this->options.proof) return 0;
+            if (this->options.manual_proofPower) return this->options.proofPower;
+            return ProofSet::bestPower(this->options.exponent);
+        }(),
         context.getQueue(),
         precompute.getN(),
         precompute.getDigitWidth(),
@@ -458,7 +462,7 @@ int App::runPrpOrLl() {
 
     // Display proof disk usage estimate at start of computation
     if (options.proof) {
-        int proofPower = ProofSet::bestPower(options.exponent);
+        uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSet::bestPower(options.exponent);
         options.proofPower = proofPower;
         double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
         std::cout << "Proof of power " << proofPower << " requires about "
