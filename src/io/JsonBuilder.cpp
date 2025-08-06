@@ -22,6 +22,7 @@
 #include "io/JsonBuilder.hpp"
 #include "io/CliParser.hpp"          // for CliOptions
 #include "math/Cofactor.hpp"
+#include "util/GmpUtils.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -84,47 +85,39 @@ std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
     const CliOptions& opts,
     const std::vector<int>& digit_width) {
     
-    std::vector<uint32_t> words = JsonBuilder::compactBits(hostResult, digit_width, opts.exponent);
-    if (opts.mode == "prp") {
-        doDiv9(opts.exponent, words);
-    }
+    mpz_class Mp = (mpz_class(1) << opts.exponent) - 1;
+    mpz_class finalResidue = util::vectToMpz(hostResult, digit_width, Mp);
     
     bool isPrime;
     if (opts.mode == "prp") {
+        mpz_class inv9; // The inverse of 9 in the ring modulo Mp
+        mpz_invert(inv9.get_mpz_t(), mpz_class(9).get_mpz_t(), Mp.get_mpz_t());
+        finalResidue = (finalResidue * inv9) % Mp;
+
         if (!opts.knownFactors.empty()) {
             // Mersenne cofactor PRP
-            isPrime = math::Cofactor::isCofactorPRP(opts.exponent, opts.knownFactors, words);
+            isPrime = math::Cofactor::isCofactorPRP(opts.exponent, opts.knownFactors, finalResidue);
         } else {
             // Mersenne number PRP
-            isPrime = (hostResult[0] == 9
-                       && std::all_of(hostResult.begin()+1,
-                                      hostResult.end(),
-                                      [](uint64_t v){ return v == 0; }));
+            isPrime = (finalResidue == 1);
         }
     } else {
         // Mersenne number LL
-        isPrime = std::all_of(hostResult.begin(),
-                              hostResult.end(),
-                              [](uint64_t v){ return v == 0; });
+        isPrime = (finalResidue == 0);
     }
     
-    // Ensure words array has correct size for residue computation
-    if (words.size() < 64) {
-        words.resize(64, 0);
-    } else if (words.size() > 64) {
-        words.resize(64);
-    }
+    mpz_class mod2_64 = mpz_class(1) << 64;
+    mpz_class mod2_2048 = mpz_class(1) << 2048;
     
-    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    mpz_class res64_val = finalResidue % mod2_64;
+    mpz_class res2048_val = finalResidue % mod2_2048;
+    
     std::ostringstream oss64;
-    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << finalRes64;
+    oss64 << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << res64_val;
     std::string res64 = oss64.str();
     
     std::ostringstream oss2048;
-    oss2048 << std::hex << std::nouppercase << std::setfill('0');
-    for (int i = 63; i >= 0; --i) {
-        oss2048 << std::setw(8) << words[i];
-    }
+    oss2048 << std::hex << std::nouppercase << std::setw(512) << std::setfill('0') << res2048_val;
     std::string res2048 = oss2048.str();
 
     return std::make_tuple(isPrime, res64, res2048);

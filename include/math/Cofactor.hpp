@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <gmpxx.h>
 
 namespace math {
 
@@ -17,7 +18,7 @@ public:
     // residue == base^(KF-1) (mod N)
     static bool isCofactorPRP(uint32_t exponent,
                               const std::vector<std::string>& factors,
-                              const std::vector<uint32_t>& finalResidue,
+                              const mpz_class& finalResidue,
                               uint32_t base = 3);
 
 };
