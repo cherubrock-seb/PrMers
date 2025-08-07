@@ -66,40 +66,36 @@ Words Words::fromUint64(const std::vector<uint64_t>& host, uint32_t exponent) {
 // ProofSet
 ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
   : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
-  if(exponent%2!=0){
-      assert(E & 1); // E is supposed to be prime
-    
-    // Create proof directory
-    std::filesystem::create_directories(proofPath(E));
+  // Create proof directory
+  std::filesystem::create_directories(proofPath(E));
 
-    // Calculate checkpoint points using binary tree structure
-    std::vector<uint32_t> spans;
-    for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
-      spans.push_back(span); 
+  // Calculate checkpoint points using binary tree structure
+  std::vector<uint32_t> spans;
+  for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
+    spans.push_back(span); 
+  }
+
+  points.push_back(0);
+  for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
+    for (uint32_t i = 0, end = static_cast<uint32_t>(points.size()); i < end; ++i) {
+      points.push_back(points[i] + span);
     }
+  }
 
-    points.push_back(0);
-    for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
-      for (uint32_t i = 0, end = static_cast<uint32_t>(points.size()); i < end; ++i) {
-        points.push_back(points[i] + span);
-      }
-    }
+  assert(points.size() == (1u << power));
+  assert(points.front() == 0);
 
-    assert(points.size() == (1u << power));
-    assert(points.front() == 0);
+  points.front() = E;
+  std::sort(points.begin(), points.end());
 
-    points.front() = E;
-    std::sort(points.begin(), points.end());
+  assert(points.size() == (1u << power));
+  assert(points.back() == E);
 
-    assert(points.size() == (1u << power));
-    assert(points.back() == E);
+  points.push_back(uint32_t(-1)); // guard element
 
-    points.push_back(uint32_t(-1)); // guard element
-
-    // Verify all points are valid
-    for (uint32_t p : points) {
-      assert(p > E || isInPoints(E, power, p));
-    }
+  // Verify all points are valid
+  for (uint32_t p : points) {
+    assert(p > E || isInPoints(E, power, p));
   }
 }
 
