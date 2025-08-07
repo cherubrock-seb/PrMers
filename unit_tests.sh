@@ -93,7 +93,7 @@ for entry in "${optflags[@]}"; do
   opt=${entry%%:*}
   flag=${entry#*:}
   echo -n "Testing -O $opt... "
-  output=$(./prmers 127 --noask -O "$opt" -prp 2>&1)
+  output=$(./prmers 127 --noask -O "$opt" -prp -debug 2>&1)
   if echo "$output" | grep -F -- "$flag" >/dev/null; then
     echo "✅"
   else
@@ -105,7 +105,7 @@ done
 echo ""
 echo "=== Combined flags via '-O fastmath mad unsafe nans optdisable' ==="
 combined_flags=( -cl-fast-relaxed-math -cl-mad-enable -cl-unsafe-math-optimizations -cl-no-signed-zeros -cl-opt-disable )
-output=$(./prmers 127 --noask -O fastmath mad unsafe nans optdisable -prp 2>&1)
+output=$(./prmers 127 --noask -O fastmath mad unsafe nans optdisable -debug -prp 2>&1)
 for flag in "${combined_flags[@]}"; do
   echo -n "  checking $flag... "
   if echo "$output" | grep -F -- "$flag" >/dev/null; then
