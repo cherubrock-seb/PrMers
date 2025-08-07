@@ -48,7 +48,7 @@ namespace opencl {
 
 Program::Program(const opencl::Context& context, cl_device_id device,
                  const std::string& filePath,const math::Precompute& pre,
-                 const std::string& buildOptions
+                 const std::string& buildOptions, bool debug
                  )
     : program_(nullptr),
     context_(context)
@@ -177,7 +177,8 @@ Program::Program(const opencl::Context& context, cl_device_id device,
         //throw;
     }
     std::string buildOptions2 = ss.str();
-    std::cout << "Building OpenCL program with options: " << buildOptions2 << std::endl;
+    if(debug)
+        std::cout << "Building OpenCL program with options: " << buildOptions2 << std::endl;
 
     
     err = clBuildProgram(program_, 1, &device, buildOptions2.c_str(), nullptr, nullptr);
@@ -185,8 +186,8 @@ Program::Program(const opencl::Context& context, cl_device_id device,
         checkBuildError(program_, device);
         throw std::runtime_error("Failed to build OpenCL program.");
     }
-
-    std::cout << "OpenCL program built successfully from: " << filePath << std::endl;
+    if(debug)
+        std::cout << "OpenCL program built successfully from: " << filePath << std::endl;
     cl_uint numKernels = 0;
     clCreateKernelsInProgram(program_, 0, nullptr, &numKernels);
     std::vector<cl_kernel> kernels(numKernels);

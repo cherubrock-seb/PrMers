@@ -16,7 +16,7 @@ namespace opencl {
 
 class Context {
 public:
-    Context(int deviceIndex = 0, std::size_t enqueueMax = 0, bool cl_queue_throttle_active = false);
+    Context(int deviceIndex = 0, std::size_t enqueueMax = 0, bool cl_queue_throttle_active = false, bool debug = false);
     ~Context();
 
     cl_context        getContext()  const noexcept;
@@ -65,6 +65,7 @@ private:
     int localCarryPropagationDepth_;
     int exponent_;
     bool evenExponent_;
+    bool debug_;
 
     void pickPlatformAndDevice(int deviceIndex);
     void createContext();

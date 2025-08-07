@@ -142,7 +142,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.profiling = true;
         }
         else if (std::strcmp(argv[i], "-debug") == 0) {
-            opts.debug = false;
+            opts.debug = true;
         }
         
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
@@ -264,6 +264,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         opts.exponent = 2*opts.exponent;
         opts.mode = "prp";
         opts.gerbiczli = false;
+        opts.proof = false;
     }
     if(opts.mode == "ll"){
         opts.erroriter = 0;

@@ -89,7 +89,8 @@ inline NttStage makeStage(const RadixOp& op,
                           cl_mem buf_x,
                           cl_mem buf_w4,
                           cl_mem buf_w5,
-                          cl_mem buf_dw = nullptr)
+                          cl_mem buf_dw = nullptr,
+                          bool debug = false)
 {
     NttStage s;
     s.kernel    = op.kernel;
@@ -97,7 +98,8 @@ inline NttStage makeStage(const RadixOp& op,
     s.localSize   = op.localSize;
     s.name      = op.name + "(m=" + std::to_string(m) + ")";
     s.outputInverse = op.outputInverse;
-    std::cout << s.name << std::endl;
+    if(debug)
+      std::cout << s.name << std::endl;
     for (auto kind : op.argKinds) {
         switch (kind) {
             case ArgKind::BufX:
@@ -146,7 +148,8 @@ inline std::vector<NttStage> buildForwardPipeline(
     const size_t* ls0,
     const size_t* ls2,
     const size_t* ls3,
-    const size_t* ls5
+    const size_t* ls5,
+    bool debug
 ) {
 
     std::vector<RadixOp> all = {
@@ -244,7 +247,7 @@ inline std::vector<NttStage> buildForwardPipeline(
                 else{
                     m0 /= it->localFactor;
                 }
-                v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5, buf_dw));
+                v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5, buf_dw, debug));
                 if(it->name=="kernel_ntt_radix4_mm_2steps_first"){
                         m0 /= 4;
                 }
@@ -263,7 +266,7 @@ inline std::vector<NttStage> buildForwardPipeline(
             else{
                 m0 /= it->localFactor;
             }
-            v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5,buf_dw));
+            v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5,buf_dw, debug));
             if(it->name=="kernel_ntt_radix4_mm_2steps"){
                     m0 /= 4;
             }
@@ -277,7 +280,7 @@ inline std::vector<NttStage> buildForwardPipeline(
             
             if (it != all.end()) {
                 m0 /= it->localFactor;
-                v.push_back(makeStage(*it, m0, buf_x,buf_w4, buf_w5, buf_dw));
+                v.push_back(makeStage(*it, m0, buf_x,buf_w4, buf_w5, buf_dw, debug));
             } /*else {
                 throw std::runtime_error("Pas de RadixOp::Last pour m0=" + std::to_string(m0));
             }*/
@@ -313,7 +316,8 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     const size_t* ls0,
     const size_t* ls2,
     const size_t* ls3,
-    const size_t* ls5
+    const size_t* ls5,
+    bool debug
 ) {
 
     std::vector<RadixOp> all = {
@@ -403,7 +407,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
                 else{
                     m0 /= it->localFactor;
                 }
-                v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5, buf_dw));
+                v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5, buf_dw, debug));
                 if(it->name=="kernel_ntt_radix4_mm_2steps_first"){
                         m0 /= 4;
                 }
@@ -422,7 +426,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
             else{
                 m0 /= it->localFactor;
             }
-            v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5,buf_dw));
+            v.push_back(makeStage(*it,m0,buf_x,buf_w4, buf_w5,buf_dw, debug));
             if(it->name=="kernel_ntt_radix4_mm_2steps"){
                     m0 /= 4;
             }
@@ -436,7 +440,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
             
             if (it != all.end()) {
                 m0 /= it->localFactor;
-                v.push_back(makeStage(*it, m0, buf_x,buf_w4, buf_w5, buf_dw));
+                v.push_back(makeStage(*it, m0, buf_x,buf_w4, buf_w5, buf_dw, debug));
             } 
             
             /*else {
@@ -466,7 +470,8 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
     const size_t* ls0,
     const size_t* ls2,
     int lastOutputInv,
-    const size_t* ls5
+    const size_t* ls5,
+    bool debug
 ) {
     std::vector<RadixOp> allInv = {
     { RadixOp::First,  2, 2,
@@ -548,7 +553,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
                             && op.condition(m0,n);
                     });
         if (it != allInv.end()){
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
             m0 *= it->localFactor;    
         }
         
@@ -560,7 +565,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
                     && (m0 * op.localFactor) <= (unsigned)(n/4);
             });
             if (it == allInv.end()) break;
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
             m0 *= it->localFactor;
                 
         }
@@ -572,7 +577,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
 
             if (it != allInv.end()) {
                 
-                v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+                v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
                 m0 *= it->localFactor;
             }
         }
@@ -597,7 +602,8 @@ inline std::vector<NttStage> buildInversePipeline(
     const size_t* ls0,
     const size_t* ls2,
     int lastOutputInv,
-    const size_t* ls5
+    const size_t* ls5,
+    bool debug
 ) {
     std::vector<RadixOp> allInv = {
       { RadixOp::First,  4, 4,
@@ -670,7 +676,7 @@ inline std::vector<NttStage> buildInversePipeline(
                             && op.condition(m0,n);
                     });
         if (it != allInv.end()){
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
             m0 *= it->localFactor;    
         }
         
@@ -682,7 +688,7 @@ inline std::vector<NttStage> buildInversePipeline(
                     && (m0 * op.localFactor) <= (unsigned)(n/4);
             });
             if (it == allInv.end()) break;
-            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+            v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
             m0 *= it->localFactor;
                 
         }
@@ -694,7 +700,7 @@ inline std::vector<NttStage> buildInversePipeline(
 
             if (it != allInv.end()) {
                 
-                v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw));
+                v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
                 m0 *= it->localFactor;
             }
         }

@@ -315,7 +315,7 @@ App::App(int argc, char** argv)
       }
       return o;
   }())
-  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active)
+  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),
@@ -359,7 +359,7 @@ App::App(int argc, char** argv)
         options.max_local_size5
     );
     buffers.emplace(context, precompute);
-    program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options);
+    program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options, options.debug);
     kernels.emplace(program->getProgram(), context.getQueue());
     
 
@@ -400,7 +400,7 @@ App::App(int argc, char** argv)
     for (auto& name : kernelNames) {
         kernels->createKernel(name);
     }
-    nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1");
+    nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1", options.debug);
 
 
     std::signal(SIGINT, handle_sigint);
@@ -430,9 +430,11 @@ int App::runPrpOrLl() {
     uint64_t resumeIter = backupManager.loadState(x);
     if (resumeIter == 0) {
         x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
-        std::cout << "Initial x[0] set to " << x[0]
-                  << " (" << (options.mode == "prp" ? "PRP" : "LL")
-                  << " mode)" << std::endl;
+        if(options.debug){
+            std::cout << "Initial x[0] set to " << x[0]
+                    << " (" << (options.mode == "prp" ? "PRP" : "LL")
+                    << " mode)" << std::endl;
+        }
     }
     buffers->input = clCreateBuffer(
         context.getContext(),
@@ -440,7 +442,7 @@ int App::runPrpOrLl() {
         x.size() * sizeof(uint64_t),
         x.data(), nullptr
     );
-    std::cout << "Sampling " << 100 << " \n";
+    std::cout << "Sampling 100 iterations for IPS estimation...\n";
     double sampleIps = measureIps(options.iterforce, 100);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
     if (options.tune) {
@@ -591,7 +593,10 @@ int App::runPrpOrLl() {
     }
     if(checkpasslevel==0)
         checkpasslevel=1;
-    if(options.gerbiczli){
+    if(options.wagstaff){
+        std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
+    }
+    if(options.gerbiczli && options.debug){
         std::cout << "[Gerbicz Li] B=" << B << std::endl;
         std::cout << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl;
         std::cout << "[Gerbicz Li] j=" << totalIters-resumeIter-1 << std::endl;
@@ -613,9 +618,7 @@ int App::runPrpOrLl() {
             exit(1);
     }
     
-    if(options.wagstaff){
-        std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
-    }
+    
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
@@ -976,6 +979,16 @@ int App::runPrpOrLl() {
         carry.handleFinalCarry(hostData,
                                precompute.getDigitWidth());
         if (options.wagstaff) {
+            spinner.displayProgress(
+                lastIter+1,
+                totalIters,
+                timer.elapsed(),
+                timer2.elapsed(),
+                options.wagstaff ? p / 2 : p,
+                resumeIter,
+                startIter,
+                res64_x
+            );
             mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
             mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
 
@@ -990,6 +1003,9 @@ int App::runPrpOrLl() {
             //std::cout << "Residue modulo 2^p+1          : " << rF << '\n';
 
             bool isWagstaffPRP = (rF == 9);
+
+            double gpuElapsed = timer.elapsed();
+            std::cout << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
 
             if (isWagstaffPRP) {
                 std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";

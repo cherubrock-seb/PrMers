@@ -18,7 +18,7 @@ class Program {
 public:
     Program(const opencl::Context& context, cl_device_id device,
             const std::string& filePath, const math::Precompute& pre,
-            const std::string& buildOptions = "");
+            const std::string& buildOptions = "", bool debug = false);
 
     ~Program();
 
