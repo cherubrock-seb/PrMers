@@ -31,7 +31,7 @@ namespace core {
 
 void Printer::banner(const io::CliOptions& o) {
     std::cout << "PrMers : GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)\n"
-              << "Testing exponent : " << o.exponent << "\n"
+              << "Testing exponent : " << (o.wagstaff ? o.exponent / 2 : o.exponent) << "\n"
               << "Device OpenCL ID : " << o.device_id << "\n"
               << "Mode : " << (o.mode=="prp"?"PRP":"Lucas Lehmer") << "\n"
               << "Backup interval : " << o.backup_interval << " s\n"
