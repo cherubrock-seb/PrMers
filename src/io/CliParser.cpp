@@ -280,9 +280,6 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         std::cerr << "Error: No exponent provided.\n";
         std::exit(EXIT_FAILURE);
     }*/
-    if (opts.exponent % 2 == 0) {
-        opts.proof = false;
-    }
     constexpr uint64_t MAX_EXPONENT = 5650242869UL;
     if (opts.exponent > MAX_EXPONENT) {
         std::cerr << "Error: Exponent must be <= " << MAX_EXPONENT
