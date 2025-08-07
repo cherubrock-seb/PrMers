@@ -23,7 +23,7 @@ public:
     NttEngine(const Context& ctx,
               Kernels& kernels,
               Buffers& buffers,
-              const math::Precompute& precompute, bool pm1);
+              const math::Precompute& precompute, bool pm1, bool debug=false);
 
     int forward(cl_mem buf_x, uint64_t iter);
     int inverse(cl_mem buf_x, uint64_t iter);

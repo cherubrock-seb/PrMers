@@ -19,7 +19,7 @@ namespace opencl {
 NttEngine::NttEngine(const Context& ctx,
                      Kernels& kernels,
                      Buffers& buffers,
-                     const math::Precompute& precompute, bool pm1)
+                     const math::Precompute& precompute, bool pm1, bool debug)
     : ctx_(ctx)
     , queue_(ctx_.getQueue())
     , kernels_(kernels)
@@ -64,7 +64,8 @@ NttEngine::NttEngine(const Context& ctx,
             ls0,
             ls2,
             ls3,
-            ls5
+            ls5,
+            debug
         );
     }
     
@@ -98,12 +99,15 @@ NttEngine::NttEngine(const Context& ctx,
             ls0,
             ls2,
             lastOutputInv,
-            ls5
+            ls5,
+            debug
         );
     }
 
     //if(pm1){
-        std::cout << "\nPipeline simple (PM1 stage2)\n";
+        if(debug){
+            std::cout << "\nPipeline simple (PM1 stage2)\n";
+        }
         {
             ls0_val_ = ctx_.getLocalSize();
             ls2_val_ = ctx_.getLocalSize2();
@@ -143,7 +147,8 @@ NttEngine::NttEngine(const Context& ctx,
                 ls0,
                 ls2,
                 ls3,
-                ls5
+                ls5,
+                debug
             );
         }
 
@@ -177,7 +182,8 @@ NttEngine::NttEngine(const Context& ctx,
                 ls0,
                 ls2,
                 lastOutputInv,
-                ls5
+                ls5,
+                debug
             );
         }
     //}

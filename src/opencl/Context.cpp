@@ -39,7 +39,7 @@
 #endif
 namespace opencl {
 
-Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active)
+Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug)
     : platform_(nullptr), device_(nullptr),
       context_(nullptr), queue_(nullptr),
       queueSize_(0),
@@ -47,7 +47,8 @@ Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle
       localMemSize_(0),
       localSize_(0), localSize2_(0), localSize3_(0),
       localSizeCarry_(0), workersCarry_(2), localCarryPropagationDepth_(8),
-      evenExponent_(true)
+      evenExponent_(true),
+      debug_(debug)
 {
     pickPlatformAndDevice(deviceIndex);
     createContext();
@@ -225,7 +226,8 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
                                 nullptr);
             
             if(enqueueMax<maxSize){
-                std::cout << "Setting CL_QUEUE_SIZE=" << enqueueMax << std::endl;
+                if(debug_)
+                    std::cout << "Setting CL_QUEUE_SIZE=" << enqueueMax << std::endl;
                 const cl_queue_properties props[] = {
                     CL_QUEUE_PROPERTIES, 0,
                     CL_QUEUE_SIZE,       enqueueMax,
@@ -260,10 +262,11 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
         #endif
     }
 #endif
-    if (useThrottle && cl_queue_throttle_active) {
+    if (useThrottle && cl_queue_throttle_active && debug_) {
         std::printf(">>> OpenCL queue created **WITH** throttle hint (LOW)\n");
     } else {
-        std::printf(">>> OpenCL queue created **WITHOUT** throttle hint\n");
+        if(debug_)
+            std::printf(">>> OpenCL queue created **WITHOUT** throttle hint\n");
     }
     if (err != CL_SUCCESS)
         throw std::runtime_error("Failed to create command queue");
@@ -274,7 +277,8 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
     else {
         auto vendor = queryDeviceString(CL_DEVICE_VENDOR);
         std::transform(vendor.begin(), vendor.end(), vendor.begin(), ::toupper);
-        std::cout << "GPU Vendor: " << vendor << std::endl;
+        if(debug_)
+            std::cout << "GPU Vendor: " << vendor << std::endl;
         if (vendor.find("NVIDIA") == std::string::npos) {
             #if defined(CL_DEVICE_QUEUE_ON_DEVICE_PREFERRED_SIZE) && defined(CL_DEVICE_QUEUE_ON_DEVICE_MAX_SIZE)
                 size_t preferredSize = 0, maxSize = 0;
@@ -288,9 +292,10 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
                                 sizeof(maxSize),
                                 &maxSize,
                                 nullptr);
+                if(debug_){
                 std::cout  
                 << "Device on-device queue preferred=" << preferredSize
-                << "  max=" << maxSize << "\n";
+                << "  max=" << maxSize << "\n";}
                 queueSize_ = preferredSize;
                 //queueSize_ = 16 * 1024;
                 
@@ -305,7 +310,8 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
     if (queueSize_ == std::numeric_limits<cl_ulong>::max()) {
         queueSize_ = 0;
     }
-    std::cout << "Queue preferred size = " << queueSize_ << std::endl;
+    if(debug_)
+        std::cout << "Queue preferred size = " << queueSize_ << std::endl;
 }
 
 void Context::queryDeviceCapabilities() {
@@ -319,13 +325,13 @@ void Context::queryDeviceCapabilities() {
 
     clGetDeviceInfo(device_, CL_DEVICE_LOCAL_MEM_SIZE,
                     sizeof(localMemSize_), &localMemSize_, nullptr);
-
+    if(debug_){
     std::cout << "Max CL_DEVICE_MAX_WORK_GROUP_SIZE = " << maxWorkGroupSize_ << std::endl;
     std::cout << "Max CL_DEVICE_MAX_WORK_ITEM_SIZES = "
               << maxWorkItemSizes_[0] << ", "
               << maxWorkItemSizes_[1] << ", "
               << maxWorkItemSizes_[2] << std::endl;
-    std::cout << "Max CL_DEVICE_LOCAL_MEM_SIZE = " << localMemSize_ << " bytes" << std::endl;
+    std::cout << "Max CL_DEVICE_LOCAL_MEM_SIZE = " << localMemSize_ << " bytes" << std::endl;}
 }
 
 void Context::computeOptimalSizes(std::size_t n,
@@ -349,7 +355,7 @@ void Context::computeOptimalSizes(std::size_t n,
     evenExponent_ = !(mm == 8 || mm == 2 || mm == 32) || (n == 4);
     exponent_ = p;
 
-    if (debug) {
+    if (debug_) {
         std::cout << "n=" << n
                   << " evenExponent=" << evenExponent_
                   << std::endl;
@@ -386,12 +392,12 @@ void Context::computeOptimalSizes(std::size_t n,
     
     localCarryPropagationDepth_ = 1;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
-    if (debug) std::cout << "max digit width = " << maxdw << std::endl;
+    if (debug_) std::cout << "max digit width = " << maxdw << std::endl;
     while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
         localCarryPropagationDepth_ *= 2;
     }
-
-std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
+    if (debug_)
+        std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
     if (workers % localCarryPropagationDepth_ == 0) {
         workersCarry_ = workers / localCarryPropagationDepth_;
     } else {
@@ -451,8 +457,8 @@ std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ <<
     
     workGroupCount_ = (transformSize_ < localSize_) ? 1u : transformSize_ / static_cast<cl_uint>(localSize_);
     //localSize_ = 0;
-    debug = false;
-    if (debug) {
+    
+    if (debug_) {
         std::cout << "final localSize=" << localSize_
                   << "final localSize3_=" << localSize3_
                   << " carryDepth=" << localCarryPropagationDepth_
