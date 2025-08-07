@@ -74,6 +74,7 @@ void printUsage(const char* progName) {
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
+    std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
    
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
@@ -224,6 +225,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "--noask") == 0 || std::strcmp(argv[i], "-noask") == 0) {
             opts.noAsk = true;
         }
+        else if (std::strcmp(argv[i], "-wagstaff") == 0) {
+            opts.wagstaff = true;
+        }
         else if (std::strcmp(argv[i], "-tune") == 0) {
             opts.tune = true;
         }
@@ -254,7 +258,13 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";
         }
     }
-
+    if(opts.wagstaff){
+        //std::cout << "[WAGSTAFF MODE] This test will check if (2^)" << options.exponent << " + 1)/3 is PRP prime" << std::endl;
+        //p  = p*2;
+        opts.exponent = 2*opts.exponent;
+        opts.mode = "prp";
+        opts.gerbiczli = false;
+    }
     if(opts.mode == "ll"){
         opts.erroriter = 0;
     }

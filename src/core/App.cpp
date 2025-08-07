@@ -325,7 +325,8 @@ App::App(int argc, char** argv)
         options.exponent,
         options.mode,
         options.B1,
-        options.B2
+        options.B2,
+        options.wagstaff
     )
   , proofManager(
         options.exponent,
@@ -410,6 +411,7 @@ App::App(int argc, char** argv)
 
 
 int App::runPrpOrLl() {
+    
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent))
         return *code;
@@ -419,6 +421,10 @@ int App::runPrpOrLl() {
     
     uint64_t p = options.exponent;
     uint64_t totalIters = options.mode == "prp" ? p : p - 2;
+    if(options.wagstaff){
+        totalIters /= 2;
+    }
+
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint64_t resumeIter = backupManager.loadState(x);
@@ -585,15 +591,16 @@ int App::runPrpOrLl() {
     }
     if(checkpasslevel==0)
         checkpasslevel=1;
-
-    std::cout << "[Gerbicz Li] B=" << B << std::endl;
-    std::cout << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl;
-    std::cout << "[Gerbicz Li] j=" << totalIters-resumeIter-1 << std::endl;
-    std::cout << "[Gerbicz Li] iter=" << resumeIter << std::endl;
-    std::cout << "[Gerbicz Li] jsave=" << jsave << std::endl;
-    std::cout << "[Gerbicz Li] itersave=" << itersave << std::endl;
+    if(options.gerbiczli){
+        std::cout << "[Gerbicz Li] B=" << B << std::endl;
+        std::cout << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl;
+        std::cout << "[Gerbicz Li] j=" << totalIters-resumeIter-1 << std::endl;
+        std::cout << "[Gerbicz Li] iter=" << resumeIter << std::endl;
+        std::cout << "[Gerbicz Li] jsave=" << jsave << std::endl;
+        std::cout << "[Gerbicz Li] itersave=" << itersave << std::endl;
+    }
     uint64_t lastJ = totalIters-resumeIter-1;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p,resumeIter, resumeIter,"");
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p,resumeIter, resumeIter,"");
    
     cl_mem outOkBuf  = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
@@ -604,6 +611,10 @@ int App::runPrpOrLl() {
     if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate outIdxBuf: " << err << std::endl;
             exit(1);
+    }
+    
+    if(options.wagstaff){
+        std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
     }
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
         lastJ = j;
@@ -755,7 +766,7 @@ int App::runPrpOrLl() {
                     totalIters,
                     timer.elapsed(),
                     timer2.elapsed(),
-                    p,
+                    options.wagstaff ? p / 2 : p,
                     resumeIter,
                     startIter,
                     res64_x
@@ -964,6 +975,30 @@ int App::runPrpOrLl() {
          
         carry.handleFinalCarry(hostData,
                                precompute.getDigitWidth());
+        if (options.wagstaff) {
+            mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+            mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
+
+            mpz_class rM = util::vectToMpz(hostData,
+                                        precompute.getDigitWidth(),
+                                        Mp);
+
+            //std::cout << "\nResidue modulo (2^p-1)*(2^p+1) : " << rM << '\n';
+
+            mpz_class rF = rM % Fp;
+
+            //std::cout << "Residue modulo 2^p+1          : " << rF << '\n';
+
+            bool isWagstaffPRP = (rF == 9);
+
+            if (isWagstaffPRP) {
+                std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+            } else {
+                std::cout << "Not a Wagstaff PRP.\n";
+            }
+
+            return isWagstaffPRP ? 0 : 1;
+        }
 
         clEnqueueWriteBuffer(
             context.getQueue(),
@@ -1000,7 +1035,7 @@ int App::runPrpOrLl() {
                         totalIters,
                         timer.elapsed(),
                         timer2.elapsed(),
-                        p,
+                        options.wagstaff ? p / 2 : p,
                         resumeIter,
                         startIter,
                         res64_x
