@@ -45,7 +45,8 @@ BackupManager::BackupManager(cl_command_queue queue,
                              unsigned exponent,
                              const std::string& mode,
                              const uint64_t b1,
-                             const uint64_t b2)
+                             const uint64_t b2,
+                             bool wagstaff)
   : queue_(queue)
   , backupInterval_(interval)
   , vectorSize_(vectorSize)
@@ -54,11 +55,15 @@ BackupManager::BackupManager(cl_command_queue queue,
   , mode_(mode)
   , b1_(b1)
   , b2_(b2)
+  , wagstaff_(wagstaff)
 {
     std::filesystem::create_directories(savePath_);
     auto base = std::to_string(exponent_) + mode_;
     if(b1_>0){
         base = std::to_string(exponent_) + mode_ + std::to_string(b1_);
+    }
+    if(wagstaff_){
+        base = base + "_wagstaff";
     }
     GerbiczLiBufDFilename_ = savePath_ + "/" + base + ".bufd";
     GerbiczLiCorrectBufFilename_ = savePath_ + "/" + base + ".gli";

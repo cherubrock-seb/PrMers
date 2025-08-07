@@ -24,7 +24,8 @@ public:
                   unsigned exponent,
                   const std::string& mode,
                   const uint64_t b1,
-                  const uint64_t b2
+                  const uint64_t b2,
+                  bool wagstaff
                   );
 
     // read existing .loop/.mers into x; return resume iteration
@@ -61,6 +62,7 @@ private:
     std::string      exponentFilename_;
     uint64_t b1_;
     uint64_t b2_;
+    bool             wagstaff_;
     std::string hqFilename_, qFilename_, loop2Filename_;
 
 };
