@@ -1,4 +1,0 @@
-B1=3527  factor=23671
-B1=3527  factor=23671
-B1=3527  factor=23671
-B1=3527  factor=23671
