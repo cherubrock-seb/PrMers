@@ -23,6 +23,7 @@
 #include "io/CliParser.hpp"          // for CliOptions
 #include "math/Cofactor.hpp"
 #include "util/GmpUtils.hpp"
+#include "core/Version.hpp"
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -398,7 +399,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.proof ? 64 : 0,
         opts.proof ? fileMD5(opts.proofFile) : "",
         "prmers",                  // programName
-        "0.1.0",                    // programVersion
+        core::PRMERS_VERSION,      // programVersion
         opts.portCode,             // portCode
         opts.osName,               // osName
         opts.osVersion,            // osVersion

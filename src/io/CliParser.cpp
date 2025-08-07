@@ -28,6 +28,7 @@
 #include "util/PathUtils.hpp"
 #include <filesystem>
 #include "opencl/Context.hpp"
+#include "core/Version.hpp"
 
 // Forward-declare the usage function (defined elsewhere, e.g. in your main host file)
 extern void printUsage(const char* progName);
@@ -100,7 +101,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         || std::strcmp(argv[i], "--version") == 0
         || std::strcmp(argv[i], "-version") == 0)
         {
-            std::cout << "prmers Release v4.8.05-alpha\n";
+            std::cout << "prmers Release v" << core::PRMERS_VERSION << "\n";
             std::exit(EXIT_SUCCESS);
         }
     }
