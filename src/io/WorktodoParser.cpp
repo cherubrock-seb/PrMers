@@ -90,7 +90,12 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         std::cerr << "Cannot open " << filename_ << "\n";
         return std::nullopt;
     }
-
+    auto trim_inplace = [](std::string& s){
+        size_t a = s.find_first_not_of(" \t\r\n");
+        size_t b = s.find_last_not_of(" \t\r\n");
+        if (a == std::string::npos) { s.clear(); return; }
+        s = s.substr(a, b - a + 1);
+    };
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '#') continue;
@@ -109,60 +114,108 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             parts.erase(parts.begin());
 
         std::string aid;
-        if (!parts.empty() && isHex(parts[0])) {
+        if (!parts.empty() && (isHex(parts[0]) || ((isPF || isPM1) && (parts[0]) == "AID"))) {
+
             aid = parts[0];
             parts.erase(parts.begin());
         }
 
         try {
+
             if (isPF) {
                 if (parts.size() < 6) continue;
                 if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
+
                 uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
                 if (exp == 0) continue;
+
                 WorktodoEntry entry;
                 entry.pm1Test   = true;
                 entry.exponent  = exp;
                 entry.rawLine   = line;
                 entry.aid       = aid;
-                entry.B1        = static_cast<uint64_t>(std::stoull(parts[4]));
-                entry.B2        = static_cast<uint64_t>(std::stod(parts[5])); 
+
+                entry.B1 = static_cast<uint64_t>(std::stoull(parts[4]));
+                entry.B2 = static_cast<uint64_t>(std::stod(parts[5])); // "1.3" accepté
+
                 if (parts.size() >= 7) {
-                    const std::string& lastPart = parts.back();
-                    auto factors = parseFactors(lastPart);
-                    if (!factors.empty()) {
-                        entry.knownFactors = factors;
+                    std::vector<std::string> kf;
+                    auto q = parseFactors(parts.back());
+                    if (!q.empty()) {
+                        kf = std::move(q);
+                    } else {
+                        for (size_t i = 6; i < parts.size(); ++i) {
+                            std::string s = parts[i];
+                            if (!s.empty() && s.front() == '"' && s.back() == '"')
+                                s = s.substr(1, s.size() - 2);
+                            trim_inplace(s);
+                            if (!s.empty()) kf.push_back(std::move(s));
+                        }
                     }
+                    if (!kf.empty()) entry.knownFactors = std::move(kf);
                 }
+
                 std::cout << "Loaded entry: PFactor exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
+                if (!entry.knownFactors.empty()) {
+                    std::cout << "Known factors: ";
+                    for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
+                        if (i) std::cout << ", ";
+                        std::cout << entry.knownFactors[i];
+                    }
+                    std::cout << "\n";
+                }
                 return entry;
             }
+
             if (isPM1) {
                 if (parts.size() < 6) continue;
                 if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
+
                 uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
                 if (exp == 0) continue;
+
                 WorktodoEntry entry;
                 entry.pm1Test   = true;
                 entry.exponent  = exp;
                 entry.rawLine   = line;
                 entry.aid       = aid;
-                entry.B1        = static_cast<uint64_t>(std::stoull(parts[4]));
-                entry.B2        = static_cast<uint64_t>(std::stoull(parts[5]));
+
+                entry.B1 = static_cast<uint64_t>(std::stoull(parts[4]));
+                entry.B2 = static_cast<uint64_t>(std::stoull(parts[5]));
+
                 if (parts.size() >= 7) {
-                    const std::string& lastPart = parts.back();
-                    auto factors = parseFactors(lastPart);
-                    if (!factors.empty()) {
-                        entry.knownFactors = factors;
+                    std::vector<std::string> kf;
+                    auto q = parseFactors(parts.back());
+                    if (!q.empty()) {
+                        kf = std::move(q);
+                    } else {
+                        for (size_t i = 6; i < parts.size(); ++i) {
+                            std::string s = parts[i];
+                            if (!s.empty() && s.front() == '"' && s.back() == '"')
+                                s = s.substr(1, s.size() - 2);
+                            trim_inplace(s);
+                            if (!s.empty()) kf.push_back(std::move(s));
+                        }
                     }
+                    if (!kf.empty()) entry.knownFactors = std::move(kf);
                 }
+
                 std::cout << "Loaded entry: Pminus1 exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
+                if (!entry.knownFactors.empty()) {
+                    std::cout << "Known factors: ";
+                    for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
+                        if (i) std::cout << ", ";
+                        std::cout << entry.knownFactors[i];
+                    }
+                    std::cout << "\n";
+                }
                 return entry;
             }
+
 
             if (parts.size() < 4
                 || parts[0] != "1"

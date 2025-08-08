@@ -22,4 +22,6 @@ logs/
 *.jsav
 *.lbufd
 *.proof
-*/proof/*
+*/proof/**.exponent
+stage1_result_*.txt
+worktodo*.txt
