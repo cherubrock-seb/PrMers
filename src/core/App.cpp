@@ -299,12 +299,17 @@ App::App(int argc, char** argv)
 
       io::WorktodoParser wp{o.worktodo_path};
       if (auto e = wp.parse()) {
-          o.exponent = e->exponent;
-          o.mode     = e->prpTest ? "prp" : "ll";
-          o.aid      = e->aid;
-          o.knownFactors = e->knownFactors;
-          hasWorktodoEntry_ = true;
+            o.exponent     = e->exponent;
+            o.mode         = e->prpTest ? "prp" : (e->llTest ? "ll" : (e->pm1Test ? "pm1" : ""));
+            o.aid          = e->aid;
+            o.knownFactors = e->knownFactors;
+            if (e->pm1Test) {
+                o.B1 = e->B1;
+                o.B2 = e->B2;
+            }
+            hasWorktodoEntry_ = true;
       }
+
       if (!hasWorktodoEntry_ && o.exponent == 0) {
         std::cerr << "Error: no valid entry in " 
                   << options.worktodo_path 
@@ -1501,6 +1506,7 @@ int App::runPM1Stage2() {
         char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
         std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
+        options.knownFactors.push_back(std::string(s));
         std::free(s);
     } else {
         writeStageResult(filename, "No factor P-1 up to B2=" + B2.get_str());
@@ -1704,6 +1710,7 @@ int App::runPM1() {
     if (factorFound) {
         char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+        options.knownFactors.push_back(std::string(fstr));
         std::free(fstr);
         std::cout << "\n";
         if(options.B2>0){
@@ -1712,16 +1719,58 @@ int App::runPM1() {
 //        else{
             //backupManager.clearState();
 //        }
-        return 0;
+        //return 0;
     }
-    std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
-    if(options.B2>0){
-        runPM1Stage2();
+    else{
+        std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+        if(options.B2>0){
+            runPM1Stage2();
+        }
     }
 /*    else{
             backupManager.clearState();
     }
     backupManager.clearState();*/
+    std::string json = io::JsonBuilder::generate(
+        options,
+        static_cast<int>(context.getTransformSize()),
+        false,
+        "",
+        ""
+    );
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.appendToResultsTxt(json);
+    
+     if (hasWorktodoEntry_) {
+        if (worktodoParser_->removeFirstProcessed()) {
+            std::cout << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+
+            std::ifstream f(options.worktodo_path);
+            std::string    l;
+            bool           more = false;
+            while (std::getline(f, l)) {
+                if (!l.empty() && l[0] != '#') {
+                    more = true;
+                    break;
+                }
+            }
+            f.close();
+
+            if (more) {
+                std::cout << "Restarting for next entry in worktodo.txt\n";
+                restart_self(argc_, argv_);
+            } else {
+                std::cout << "No more entries in worktodo.txt, exiting.\n";
+                std::exit(0);
+            }
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";
+            std::exit(-1);
+        }
+    }
     return 1;
 }
 
