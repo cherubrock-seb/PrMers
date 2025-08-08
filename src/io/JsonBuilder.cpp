@@ -360,59 +360,87 @@ std::string JsonBuilder::generate(const CliOptions& opts,
                                   const std::string& res64,
                                   const std::string& res2048) 
 {
-    // ---------------------------------------------
-    // timestamp
+    // timestamp UTC
     std::time_t now = std::time(nullptr);
     std::tm timeinfo;
-
     #ifdef _WIN32
         gmtime_s(&timeinfo, &now);
     #else
         std::tm* tmp = std::gmtime(&now);
-        if (tmp != nullptr)
-            timeinfo = *tmp;
+        if (tmp != nullptr) timeinfo = *tmp;
     #endif
-
     char timestampBuf[32];
     std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    // --- PM1 special case ---
+    if (opts.mode == "pm1") {
+        std::ostringstream oss;
+        bool hasFactor = !opts.knownFactors.empty();
 
-    std::string status;
+        oss << "{"
+            << "\"status\":\"" << (hasFactor ? "F" : "NF") << "\","
+            << "\"exponent\":" << opts.exponent << ","
+            << "\"worktype\":\"P-1\",";
 
-    status = isPrime ? "P" : "C";
-    
-    // Use Type 5 residue for Mersenne cofactors
+        oss << "\"factors\":[";
+        for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
+            oss << jsonEscape(opts.knownFactors[i]);
+            if (i < opts.knownFactors.size() - 1) oss << ",";
+        }
+        oss << "],";
+
+        oss << "\"b1\":" << opts.B1 << ",";
+        oss << "\"b2\":" << opts.B2 << ",";
+        oss << "\"fft-length\":" << transform_size << ",";
+        oss << "\"program\":{"
+            << "\"name\":\"prmers\","
+            << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
+            << "\"port\":" << opts.portCode
+            << "},"
+            << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
+            << "\"user\":" << jsonEscape(opts.user.empty() ? "cherubrock" : opts.user);
+
+        if (!opts.computer_name.empty())
+            oss << ",\"computer\":" << jsonEscape(opts.computer_name);
+        if (!opts.aid.empty())
+            oss << ",\"aid\":" << jsonEscape(opts.aid);
+
+        oss << "}";
+        return oss.str();
+    }
+
+
+    // --- PRP / LL (original path) ---
+    std::string status = isPrime ? "P" : "C";
     int residueType = opts.knownFactors.empty() ? 1 : 5;
-    
-    // assemble JSON
+
     return generatePrimeNetJson(
-        // status: P or C
         status,
         opts.exponent,
         opts.mode == "prp" ? "PRP-3" : "LL",
         res64,
         res2048,
         residueType,
-        opts.gerbicz_error_count,  // gerbiczError
+        opts.gerbicz_error_count,
         transform_size,
         opts.proof ? 2 : 0,
         opts.proof ? opts.proofPower : 0,
         opts.proof ? 64 : 0,
         opts.proof ? fileMD5(opts.proofFile) : "",
-        "prmers",                  // programName
-        core::PRMERS_VERSION,      // programVersion
-        opts.portCode,             // portCode
-        opts.osName,               // osName
-        opts.osVersion,            // osVersion
-        opts.osArch,               // osArchitecture
-        opts.user.empty() ? "cherubrock" : opts.user,                 // user
-        opts.aid,                  // aid
-        opts.uid,                  // uid
-        timestampBuf,              // timestamp
-        opts.computer_name,        // computer
+        "prmers",
+        core::PRMERS_VERSION,
+        opts.portCode,
+        opts.osName,
+        opts.osVersion,
+        opts.osArch,
+        opts.user.empty() ? "cherubrock" : opts.user,
+        opts.aid,
+        opts.uid,
+        timestampBuf,
+        opts.computer_name,
         opts.knownFactors
     );
-
 }
+
 
 
 std::string JsonBuilder::computeRes64(

@@ -100,7 +100,9 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
 
         bool isPRP  = (top[0] == "PRP" || top[0] == "PRPDC");
         bool isLL   = (top[0] == "Test" || top[0] == "DoubleCheck");
-        if (!(isPRP || isLL)) continue;
+        bool isPF   = (top[0] == "PFactor");
+        bool isPM1  = (top[0] == "Pminus1");
+        if (!(isPRP || isLL || isPF || isPM1)) continue;
 
         auto parts = splitRespectingQuotes(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
@@ -112,13 +114,62 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             parts.erase(parts.begin());
         }
 
-        if (parts.size() < 4
-            || parts[0] != "1"
-            || parts[1] != "2"
-            || parts[3] != "-1")
-            continue;
-
         try {
+            if (isPF) {
+                if (parts.size() < 6) continue;
+                if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
+                uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
+                if (exp == 0) continue;
+                WorktodoEntry entry;
+                entry.pm1Test   = true;
+                entry.exponent  = exp;
+                entry.rawLine   = line;
+                entry.aid       = aid;
+                entry.B1        = static_cast<uint64_t>(std::stoull(parts[4]));
+                entry.B2        = static_cast<uint64_t>(std::stod(parts[5])); 
+                if (parts.size() >= 7) {
+                    const std::string& lastPart = parts.back();
+                    auto factors = parseFactors(lastPart);
+                    if (!factors.empty()) {
+                        entry.knownFactors = factors;
+                    }
+                }
+                std::cout << "Loaded entry: PFactor exponent=" << entry.exponent
+                          << " B1=" << entry.B1 << " B2=" << entry.B2
+                          << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
+                return entry;
+            }
+            if (isPM1) {
+                if (parts.size() < 6) continue;
+                if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
+                uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
+                if (exp == 0) continue;
+                WorktodoEntry entry;
+                entry.pm1Test   = true;
+                entry.exponent  = exp;
+                entry.rawLine   = line;
+                entry.aid       = aid;
+                entry.B1        = static_cast<uint64_t>(std::stoull(parts[4]));
+                entry.B2        = static_cast<uint64_t>(std::stoull(parts[5]));
+                if (parts.size() >= 7) {
+                    const std::string& lastPart = parts.back();
+                    auto factors = parseFactors(lastPart);
+                    if (!factors.empty()) {
+                        entry.knownFactors = factors;
+                    }
+                }
+                std::cout << "Loaded entry: Pminus1 exponent=" << entry.exponent
+                          << " B1=" << entry.B1 << " B2=" << entry.B2
+                          << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
+                return entry;
+            }
+
+            if (parts.size() < 4
+                || parts[0] != "1"
+                || parts[1] != "2"
+                || parts[3] != "-1")
+                continue;
+
             uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
             if (exp == 0) continue;
 
@@ -138,7 +189,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 auto factors = parseFactors(lastPart);
                 if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
                     entry.knownFactors = factors;
-                    entry.residueType = 5; // Type 5 for cofactor tests
+                    entry.residueType = 5;
                     std::cout << "Known factors: ";
                     for (size_t i = 0; i < factors.size(); ++i) {
                         if (i > 0) std::cout << ", ";
@@ -150,14 +201,11 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     continue;
                 }
             }
-            
-            // Check that LL test is not used for Mersenne cofactors
             if (entry.llTest && !entry.knownFactors.empty()) {
                 std::cerr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
                 std::cerr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;
-                continue; // Skip this entry and try the next one
+                continue;
             }
-            
             return entry;
         }
         catch (...) {
@@ -168,6 +216,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::cerr << "No valid entry found in " << filename_ << "\n";
     return std::nullopt;
 }
+
 
 bool WorktodoParser::removeFirstProcessed() {
     std::ifstream inFile(filename_);
