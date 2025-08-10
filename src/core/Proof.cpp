@@ -20,12 +20,28 @@
  * This code is released as free software. 
  */
 #include "core/Proof.hpp"
+#include "core/ProofSet.hpp"
+#include "opencl/Context.hpp"
+#include "opencl/NttEngine.hpp"
+#include "math/Carry.hpp"
 #include "io/Sha3Hash.h"
+#include "util/Timer.hpp"
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <iostream>
+
+#ifndef CL_TARGET_OPENCL_VERSION
+#define CL_TARGET_OPENCL_VERSION 300
+#endif
+#ifdef __APPLE__
+#include <OpenCL/opencl.h>
+#else
+#include <CL/cl.h>
+#endif
 
 namespace core {
 
@@ -226,6 +242,116 @@ uint64_t Proof::res64(const std::vector<uint32_t>& words) {
     result |= (static_cast<uint64_t>(words[1]) << 32);
   }
   return result;
+}
+
+bool Proof::verify(const GpuContext& gpu) const {
+  uint32_t power = middles.size();
+  if (power == 0) {
+    throw std::runtime_error("Invalid proof: no middle residues");
+  }
+
+  // Initialize working values: A=3, B=finalResidue
+  uint32_t nWords = (E + 31) / 32;
+  std::vector<uint32_t> A(nWords, 0);
+  A[0] = 3;
+  auto B_work = B;
+
+  // Allocate temporary GPU buffers
+  cl_int err;
+  cl_mem bufA = clCreateBuffer(gpu.ctx.getContext(), CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to create GPU buffer A for verification");
+    return false;
+  }
+  
+  cl_mem bufB = clCreateBuffer(gpu.ctx.getContext(), CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
+  if (err != CL_SUCCESS) {
+    throw std::runtime_error("Failed to create GPU buffer B for verification");
+    clReleaseMemObject(bufA);
+    return false;
+  }
+
+  // Start timing proof verification
+  util::Timer timer;
+  
+  bool verificationResult = false;
+  
+  auto hash = hashWords(E, B);
+  uint32_t span = E;
+
+  std::cout << "Starting proof verification for M" << E;
+  if (!knownFactors.empty()) {
+    for (const auto& factor : knownFactors) {
+      std::cout << "/" << factor;
+    }
+  }
+  std::cout << " with power " << power << std::endl;
+
+  for (uint32_t i = 0; i < power; ++i, span = (span + 1) / 2) {
+    const auto& M = middles[i];
+    hash = hashWords(E, hash, M);
+    uint64_t h = hash[0];
+
+    bool doSquareB = (span % 2 != 0);
+    
+    // B = M^h * (B^2 if span odd else B)
+    gpu.write(bufB, B_work);
+    if (doSquareB) {
+      gpu.ntt.squareInPlace(bufB, gpu.carry, gpu.limbBytes);
+    }
+    gpu.write(bufA, M);
+    gpu.ntt.powInPlace(bufA, bufA, h, gpu.carry, gpu.limbBytes);
+    gpu.ntt.mulInPlace5(bufA, bufB, gpu.carry, gpu.limbBytes);
+    B_work = gpu.read(bufA);
+
+    // A = A^h * M  
+    gpu.write(bufA, A);
+    gpu.ntt.powInPlace(bufA, bufA, h, gpu.carry, gpu.limbBytes);
+    gpu.write(bufB, M);
+    gpu.ntt.mulInPlace5(bufA, bufB, gpu.carry, gpu.limbBytes);
+    A = gpu.read(bufA);      
+  }
+
+  // Final step: A = A^(2^span)
+  gpu.write(bufA, A);
+  
+  // Compute bufA^(2^span) by performing span consecutive squaring operations
+  const uint32_t blockSize = 1000; // Process in blocks
+  const uint32_t logStep = 10000;  // Log progress every logStep iterations
+  
+  uint32_t k = 0;
+  while (k < span) {
+    uint32_t its = std::min(blockSize, span - k);
+    
+    // Perform 'its' consecutive squaring operations
+    for (uint32_t i = 0; i < its; ++i) {
+      gpu.ntt.squareInPlace(bufA, gpu.carry, gpu.limbBytes);
+    }
+    
+    k += its;
+    
+    // Flush GPU operations
+    clFinish(gpu.ctx.getQueue());
+    
+    // Log progress for long operations
+    if (span > logStep && k % logStep == 0) {
+      std::cout << "Verification: " << k << " / " << span << " iterations completed" << std::endl;
+    }
+  }
+  
+  A = gpu.read(bufA);
+
+  verificationResult = (A == B_work);
+  std::cout << "Verification result: " << (verificationResult ? "SUCCESS" : "FAIL") << std::endl;
+
+  // Display proof verification time
+  double elapsed = timer.elapsed();
+  std::cout << "Proof verified in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
+
+  clReleaseMemObject(bufA);
+  clReleaseMemObject(bufB);
+
+  return verificationResult;
 }
 
 } // namespace core

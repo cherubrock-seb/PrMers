@@ -32,7 +32,7 @@ public:
                  const std::vector<int>& digitWidth,
                  const std::vector<std::string>& knownFactors = {});
     void checkpoint(cl_mem buf, uint32_t iter);    
-    std::filesystem::path proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry) const;
+    std::filesystem::path proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, bool verify=true) const;
 
 private:
     ProofSet           proofSet_;
