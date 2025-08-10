@@ -77,7 +77,7 @@ void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
     }
 }
 
-std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry) const {
+std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, bool verify) const {
     try {
                     
         // Calculate limbBytes for GPU proof generation
@@ -97,11 +97,15 @@ std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::Nt
         // Save the proof file
         proof.save(proofFilePath);
         
-        // Check the proof was saved correctly by attempting to load it
         try {
+            // Check the proof was saved correctly by attempting to load it
             auto loadedProof = Proof::load(proofFilePath);
+            // Verify generated proof
+            if (verify) {
+                loadedProof.verify(gpu);
+            }
         } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof file validation failed: " << e.what() << std::endl;
+            std::cerr << "Warning: Proof file verification failed: " << e.what() << std::endl;
         }
         
         return proofFilePath;
