@@ -6,6 +6,8 @@
 
 namespace core {
 
+class GpuContext;
+
 class Proof {
 public:
     const uint32_t E;
@@ -26,6 +28,9 @@ public:
                                            const std::array<uint64_t, 4>& hash,
                                            const std::vector<uint32_t>& words);
     static uint64_t res64(const std::vector<uint32_t>& words);
+
+    // Proof verification
+    bool verify(const GpuContext& gpu) const;
 };
 
 } // namespace core
