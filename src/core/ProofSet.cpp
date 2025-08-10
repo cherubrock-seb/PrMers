@@ -327,7 +327,7 @@ Proof ProofSet::computeProof(const GpuContext& gpu) const {
   double elapsed = timer.elapsed();
   std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
   
-  return Proof{E, std::move(B), std::move(middles)};
+  return Proof{E, std::move(B), std::move(middles), knownFactors};
 }
 
 
