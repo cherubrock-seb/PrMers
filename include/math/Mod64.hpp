@@ -5,6 +5,7 @@
 
 namespace math {
 
+
 enum class ModMode { Solinas, GF31, GF61 };
 
 struct gf31_2 { uint64_t a; uint64_t b; };
