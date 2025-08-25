@@ -193,21 +193,6 @@ inline ulong4 modMul3_2_w10(const ulong4 lhs)
     return (ulong4)(lhs.s0, lhs.s1, lhs.s2, m);
 }
 
-
-inline ulong4 modMul3(const ulong4 lhs,
-                      const ulong w1,
-                      const ulong w2,
-                      const ulong w3)
-{
-    return (ulong4)(
-        lhs.s0,
-        modMul(lhs.s1, w1),
-        modMul(lhs.s2, w2),
-        modMul(lhs.s3, w3)
-    );
-}
-
-
 inline ulong Reduce48(const ulong lo, const ulong hi) {
     ulong r      = lo;
     ulong rhs    = hi << 32;
