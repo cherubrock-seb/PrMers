@@ -18,134 +18,169 @@
 typedef uint  uint32_t;
 typedef ulong uint64_t;
 
-// Definition of the prime modulus and its complement
-#define MOD_P  0xffffffff00000001UL  // p = 2^64 - 2^32 + 1
-#define MOD_P_COMP 0xffffffffU       // 2^64 - p = 2^32 - 1
+#ifndef MOD_MODE
+#define MOD_MODE 0
+#endif
 
-// Constants stored in __constant memory for fast GPU access
-__constant ulong  mod_p_const         = MOD_P;
-__constant uint   mod_p_comp_const    = MOD_P_COMP;
-__constant ulong4 mod_p4_const        = (ulong4)(MOD_P, MOD_P, MOD_P, MOD_P);
-__constant ulong4 mod_p_comp4_const   = (ulong4)(MOD_P_COMP, MOD_P_COMP, MOD_P_COMP, MOD_P_COMP);
-__constant ulong2 mod_p2_const       = (ulong2)(MOD_P,      MOD_P);
-__constant ulong2 mod_p_comp2_const  = (ulong2)(MOD_P_COMP, MOD_P_COMP);
-__constant ulong4 zero4 = (ulong4)(0);
+#if (MOD_MODE==0)
 
-// Modular addition for vectors of 4 ulong
-inline ulong4 modAdd4(ulong4 lhs, ulong4 rhs) {
-    // 'select' avoids branching (if-else) on GPU
-    ulong4 c = select((ulong4)0, mod_p_comp4_const, lhs >= (mod_p4_const - rhs));
-    return lhs + rhs + c;
+#define MOD_P        0xffffffff00000001UL
+#define MOD_P_COMP   0xffffffffU
+__constant ulong  mod_p_const       = MOD_P;
+__constant uint   mod_p_comp_const  = MOD_P_COMP;
+__constant ulong4 mod_p4_const      = (ulong4)(MOD_P,MOD_P,MOD_P,MOD_P);
+__constant ulong4 mod_p_comp4_const = (ulong4)(MOD_P_COMP,MOD_P_COMP,MOD_P_COMP,MOD_P_COMP);
+__constant ulong2 mod_p2_const      = (ulong2)(MOD_P,MOD_P);
+__constant ulong2 mod_p_comp2_const = (ulong2)(MOD_P_COMP,MOD_P_COMP);
+
+inline ulong modAdd(const ulong a, const ulong b){ const uint c = (a >= mod_p_const - b) ? mod_p_comp_const : 0; return a + b + c; }
+inline ulong modSub(const ulong a, const ulong b){ const uint c = (a < b) ? mod_p_comp_const : 0; return a - b - c; }
+
+inline ulong Reduce(const ulong lo, const ulong hi){
+    ulong r = lo;
+    const ulong add = hi << 32;
+    r += add + ((r >= mod_p_const - add) ? mod_p_comp_const : 0);
+    const ulong sub = (hi >> 32) + (ulong)((uint)hi);
+    const uint c = (r < sub) ? mod_p_comp_const : 0;
+    r = r - sub - c;
+    return r;
 }
 
-// Modular subtraction for vectors of 4 ulong
-inline ulong4 modSub4(const ulong4 lhs, const ulong4 rhs) {
-    ulong4 c = select((ulong4)0, mod_p_comp4_const, lhs < rhs);
-    return lhs - rhs - c;
+inline ulong2 Reduce2(const ulong2 lo, const ulong2 hi){
+    ulong2 r = lo;
+    ulong2 add = hi << (ulong2)(32,32);
+    r += add + select((ulong2)(0,0), mod_p_comp2_const, r >= mod_p2_const - add);
+    ulong2 sub = (hi >> (ulong2)(32,32)) + convert_ulong2(convert_uint2(hi));
+    r = r - sub - select((ulong2)(0,0), mod_p_comp2_const, r < sub);
+    return r;
 }
 
-// Modular addition for scalar ulong
-inline ulong modAdd(const ulong lhs, const ulong rhs) {
-    const uint c = (lhs >= mod_p_const - rhs) ? mod_p_comp_const : 0;
-    return lhs + rhs + c;
+inline ulong4 Reduce4(const ulong4 lo, const ulong4 hi){
+    ulong4 r = lo;
+    ulong4 add = hi << (ulong4)(32,32,32,32);
+    r += add + select((ulong4)(0,0,0,0), mod_p_comp4_const, r >= mod_p4_const - add);
+    ulong4 sub = (hi >> (ulong4)(32,32,32,32)) + convert_ulong4(convert_uint4(hi));
+    r = r - sub - select((ulong4)(0,0,0,0), mod_p_comp4_const, r < sub);
+    return r;
 }
 
-// Modular subtraction for scalar ulong
-inline ulong modSub(const ulong lhs, const ulong rhs) {
-    const uint c = (lhs < rhs) ? mod_p_comp_const : 0;
-    return lhs - rhs - c;
-}
-
-// Modular reduction of a 128-bit product (lo, hi) to a 64-bit result mod p
-inline ulong Reduce(const ulong lo, const ulong hi) {
-    ulong c = select(0u, mod_p_comp_const, lo >= mod_p_const);
-    c += lo;
-    c = modAdd(c, hi << 32);                           // Add hi * 2^32
-    c = modSub(c, (hi >> 32) + (uint)hi);              // Subtract hi_high + hi_low
-    return c;
-}
-
-// Vectorized version of Reduce: reduces four (lo, hi) pairs simultaneously
-inline ulong4 Reduce4(const ulong4 lo, const ulong4 hi) {
-    ulong4 c = select(zero4, mod_p_comp4_const, lo >= mod_p4_const);
-    c += lo;
-    ulong4 hi_shifted = hi << 32;
-    ulong4 hi_reduced = (hi >> 32) + convert_ulong4(convert_uint4(hi));
-    c = modAdd4(c, hi_shifted);   // c devient r
-    c = modSub4(c, hi_reduced);
-    return c;
-}
-
-
-// Modular multiplication of 4 ulong vectors
-inline ulong4 modMul4(const ulong4 lhs, const ulong4 rhs) {
-    const ulong4 lo = lhs * rhs;
-    const ulong4 hi = mul_hi(lhs, rhs);
-    return Reduce4(lo, hi);
-}
-
-
-
-// Computes the full 128-bit product of two 64-bit integers
-inline void mul128(const ulong a, const ulong b, __private ulong *restrict hi, __private ulong *restrict lo) {
-    *lo = a * b;
-    *hi = mul_hi(a, b);
-}
-
-// Scalar modular multiplication using full 128-bit product
-inline ulong modMul(const ulong lhs, const ulong rhs) {
-    const ulong lo = lhs * rhs;
-    const ulong hi = mul_hi(lhs, rhs);
+inline ulong modMul(const ulong a, const ulong b){
+    const ulong lo = a * b;
+    const ulong hi = mul_hi(a, b);
     return Reduce(lo, hi);
 }
 
-
-// Modular addition for vectors of 2 ulong
-inline ulong2 modAdd2(ulong2 lhs, ulong2 rhs) {
-    ulong2 c = select((ulong2)0,
-                      mod_p_comp2_const,
-                      lhs >= (mod_p2_const - rhs));
-    return lhs + rhs + c;
-}
-
-// Modular subtraction for vectors of 2 ulong
-inline ulong2 modSub2(ulong2 lhs, ulong2 rhs) {
-    ulong2 c = select((ulong2)0,
-                      mod_p_comp2_const,
-                      lhs < rhs);
-    return lhs - rhs - c;
-}
-
-inline ulong2 Reduce2(const ulong2 lo, const ulong2 hi) {
-    ulong2 c = select((ulong2)0, mod_p_comp2_const, lo >= mod_p2_const);
-    c += lo;
-
-    ulong2 hi_shifted = hi << 32;
-    ulong2 hi_reduced    = (hi >> 32) + convert_ulong2(convert_uint2(hi));
-    
-
-    c = modAdd2(c, hi_shifted);
-    c = modSub2(c, hi_reduced);
-    return c;
-}
-
-
-inline ulong2 modMul2(const ulong2 lhs, const ulong2 rhs) {
-    ulong2 lo = lhs * rhs;
-    ulong2 hi = mul_hi(lhs, rhs);
+inline ulong2 modMul2(const ulong2 a, const ulong2 b){
+    ulong2 lo = a * b;
+    ulong2 hi = (ulong2)(mul_hi(a.s0,b.s0), mul_hi(a.s1,b.s1));
     return Reduce2(lo, hi);
 }
 
+inline ulong4 modMul4(const ulong4 a, const ulong4 b){
+    ulong4 lo = a * b;
+    ulong4 hi = (ulong4)(mul_hi(a.s0,b.s0), mul_hi(a.s1,b.s1), mul_hi(a.s2,b.s2), mul_hi(a.s3,b.s3));
+    return Reduce4(lo, hi);
+}
 
-inline ulong4 modMul3_2(const ulong4 lhs,
-                        const ulong2 w02,
-                        const ulong w3)
-{
+inline ulong4 modAdd4(const ulong4 a, const ulong4 b){
+    ulong4 r = a + b;
+    ulong4 c = select((ulong4)(0), mod_p_comp4_const, a >= mod_p4_const - b);
+    return r + c;
+}
+
+inline ulong4 modSub4(const ulong4 a, const ulong4 b){
+    ulong4 c = select((ulong4)(0), mod_p_comp4_const, a < b);
+    return a - b - c;
+}
+
+inline ulong2 modAdd2(const ulong2 a, const ulong2 b){
+    ulong2 r = a + b;
+    ulong2 c = select((ulong2)(0), mod_p_comp2_const, a >= mod_p2_const - b);
+    return r + c;
+}
+
+inline ulong2 modSub2(const ulong2 a, const ulong2 b){
+    ulong2 c = select((ulong2)(0), mod_p_comp2_const, a < b);
+    return a - b - c;
+}
+
+inline ulong4 modMul3_2(const ulong4 lhs, const ulong2 w02, const ulong w3){
     ulong2 x = (ulong2)(lhs.s1, lhs.s2);
     x = modMul2(x, (ulong2)(w02.s1, w02.s0));
     ulong m = modMul(lhs.s3, w3);
     return (ulong4)(lhs.s0, x.s0, x.s1, m);
 }
+
+#elif (MOD_MODE==61)
+
+#define M61 ((ulong)0x1fffffffffffffffUL)
+inline ulong m61_add(ulong a, ulong b){ ulong s=a+b; s=(s&M61)+(s>>61); return s>=M61?s-M61:s; }
+inline ulong m61_sub(ulong a, ulong b){ return (a>=b)?(a-b):(a+M61-b); }
+inline ulong m61_reduce128(ulong lo, ulong hi){ ulong x0=lo&M61; ulong x1=(lo>>61)|(hi<<3); ulong x2=hi>>58; ulong r=x0+x1+x2; r=(r&M61)+(r>>61); return r>=M61?r-M61:r; }
+inline ulong m61_mul(ulong a, ulong b){ ulong lo=a*b; ulong hi=mul_hi(a,b); return m61_reduce128(lo,hi); }
+inline ulong m61_lshift(ulong a, uchar s){ uchar k=s%61; if(k==0) return a; ulong lo=a<<k; ulong hi=a>>(64-k); return m61_reduce128(lo,hi); }
+inline ulong m61_rshift(ulong a, uchar s){ uchar k=s%61; if(k==0) return a; return m61_lshift(a,(uchar)(61-k)); }
+
+inline ulong modAdd(const ulong a, const ulong b){ return m61_add(a,b); }
+inline ulong modSub(const ulong a, const ulong b){ return m61_sub(a,b); }
+inline ulong Reduce(const ulong lo, const ulong hi){ return m61_reduce128(lo,hi); }
+inline ulong modMul(const ulong a, const ulong b){ return m61_mul(a,b); }
+
+inline ulong2 modAdd2(const ulong2 a, const ulong2 b){ return (ulong2)(m61_add(a.s0,b.s0), m61_add(a.s1,b.s1)); }
+inline ulong2 modSub2(const ulong2 a, const ulong2 b){ return (ulong2)(m61_sub(a.s0,b.s0), m61_sub(a.s1,b.s1)); }
+inline ulong2 modMul2(const ulong2 a, const ulong2 b){ ulong2 lo=a*b; ulong2 hi=(ulong2)(mul_hi(a.s0,b.s0),mul_hi(a.s1,b.s1)); return (ulong2)(m61_reduce128(lo.s0,hi.s0),m61_reduce128(lo.s1,hi.s1)); }
+inline ulong4 modAdd4(const ulong4 a, const ulong4 b){ return (ulong4)(m61_add(a.s0,b.s0),m61_add(a.s1,b.s1),m61_add(a.s2,b.s2),m61_add(a.s3,b.s3)); }
+inline ulong4 modSub4(const ulong4 a, const ulong4 b){ return (ulong4)(m61_sub(a.s0,b.s0),m61_sub(a.s1,b.s1),m61_sub(a.s2,b.s2),m61_sub(a.s3,b.s3)); }
+inline ulong4 modMul4(const ulong4 a, const ulong4 b){ ulong4 lo=a*b; ulong4 hi=(ulong4)(mul_hi(a.s0,b.s0),mul_hi(a.s1,b.s1),mul_hi(a.s2,b.s2),mul_hi(a.s3,b.s3)); return (ulong4)(m61_reduce128(lo.s0,hi.s0),m61_reduce128(lo.s1,hi.s1),m61_reduce128(lo.s2,hi.s2),m61_reduce128(lo.s3,hi.s3)); }
+inline ulong4 modMul3_2(const ulong4 lhs, const ulong2 w02, const ulong w3){ ulong2 x=(ulong2)(lhs.s1,lhs.s2); x=modMul2(x,(ulong2)(w02.s1,w02.s0)); ulong m=modMul(lhs.s3,w3); return (ulong4)(lhs.s0,x.s0,x.s1,m); }
+
+inline ulong2 gf61_add(ulong2 a, ulong2 b){ return (ulong2)(m61_add(a.s0,b.s0),m61_add(a.s1,b.s1)); }
+inline ulong2 gf61_sub(ulong2 a, ulong2 b){ return (ulong2)(m61_sub(a.s0,b.s0),m61_sub(a.s1,b.s1)); }
+inline ulong2 gf61_sqr(ulong2 a){ ulong t=m61_mul(a.s0,a.s1); return (ulong2)(m61_sub(m61_mul(a.s0,a.s0),m61_mul(a.s1,a.s1)), m61_add(t,t)); }
+inline ulong2 gf61_mul(ulong2 a, ulong2 b){ return (ulong2)(m61_sub(m61_mul(a.s0,b.s0),m61_mul(a.s1,b.s1)), m61_add(m61_mul(a.s1,b.s0),m61_mul(a.s0,b.s1))); }
+inline ulong2 gf61_mulconj(ulong2 a, ulong2 b){ return (ulong2)(m61_add(m61_mul(a.s0,b.s0),m61_mul(a.s1,b.s1)), m61_sub(m61_mul(a.s1,b.s0),m61_mul(a.s0,b.s1))); }
+inline ulong2 gf61_addi(ulong2 a, ulong2 b){ return (ulong2)(m61_add(a.s0,b.s1), m61_sub(a.s1,b.s0)); }
+inline ulong2 gf61_subi(ulong2 a, ulong2 b){ return (ulong2)(m61_sub(a.s0,b.s1), m61_add(a.s1,b.s0)); }
+inline ulong2 gf61_lshift(ulong2 a, uchar2 s){ return (ulong2)(m61_lshift(a.s0,(uchar)s.s0), m61_lshift(a.s1,(uchar)s.s1)); }
+inline ulong2 gf61_rshift(ulong2 a, uchar2 s){ return (ulong2)(m61_rshift(a.s0,(uchar)s.s0), m61_rshift(a.s1,(uchar)s.s1)); }
+
+#elif (MOD_MODE==31)
+
+#define M31 ((ulong)0x7fffffffUL)
+inline ulong m31_add(ulong a, ulong b){ ulong s=a+b; s=(s&M31)+(s>>31); return s>=M31?s-M31:s; }
+inline ulong m31_sub(ulong a, ulong b){ return (a>=b)?(a-b):(a+M31-b); }
+inline ulong m31_reduce128(ulong lo, ulong hi){ ulong x0=lo&M31; ulong x1=(lo>>31)|(hi<<33); ulong x2=hi>>31; ulong r=x0+x1+x2; r=(r&M31)+(r>>31); return r>=M31?r-M31:r; }
+inline ulong m31_mul(ulong a, ulong b){ ulong lo=a*b; ulong hi=mul_hi(a,b); return m31_reduce128(lo,hi); }
+inline ulong m31_lshift(ulong a, uchar s){ uchar k=s%31; if(k==0) return a; ulong lo=a<<k; ulong hi=a>>(64-k); return m31_reduce128(lo,hi); }
+inline ulong m31_rshift(ulong a, uchar s){ uchar k=s%31; if(k==0) return a; return m31_lshift(a,(uchar)(31-k)); }
+
+inline ulong modAdd(const ulong a, const ulong b){ return m31_add(a,b); }
+inline ulong modSub(const ulong a, const ulong b){ return m31_sub(a,b); }
+inline ulong Reduce(const ulong lo, const ulong hi){ return m31_reduce128(lo,hi); }
+inline ulong modMul(const ulong a, const ulong b){ return m31_mul(a,b); }
+
+inline ulong2 modAdd2(const ulong2 a, const ulong2 b){ return (ulong2)(m31_add(a.s0,b.s0), m31_add(a.s1,b.s1)); }
+inline ulong2 modSub2(const ulong2 a, const ulong2 b){ return (ulong2)(m31_sub(a.s0,b.s0), m31_sub(a.s1,b.s1)); }
+inline ulong2 modMul2(const ulong2 a, const ulong2 b){ ulong2 lo=a*b; ulong2 hi=(ulong2)(mul_hi(a.s0,b.s0),mul_hi(a.s1,b.s1)); return (ulong2)(m31_reduce128(lo.s0,hi.s0),m31_reduce128(lo.s1,hi.s1)); }
+inline ulong4 modAdd4(const ulong4 a, const ulong4 b){ return (ulong4)(m31_add(a.s0,b.s0),m31_add(a.s1,b.s1),m31_add(a.s2,b.s2),m31_add(a.s3,b.s3)); }
+inline ulong4 modSub4(const ulong4 a, const ulong4 b){ return (ulong4)(m31_sub(a.s0,b.s0),m31_sub(a.s1,b.s1),m31_sub(a.s2,b.s2),m31_sub(a.s3,b.s3)); }
+inline ulong4 modMul4(const ulong4 a, const ulong4 b){ ulong4 lo=a*b; ulong4 hi=(ulong4)(mul_hi(a.s0,b.s0),mul_hi(a.s1,b.s1),mul_hi(a.s2,b.s2),mul_hi(a.s3,b.s3)); return (ulong4)(m31_reduce128(lo.s0,hi.s0),m31_reduce128(lo.s1,hi.s1),m31_reduce128(lo.s2,hi.s2),m31_reduce128(lo.s3,hi.s3)); }
+inline ulong4 modMul3_2(const ulong4 lhs, const ulong2 w02, const ulong w3){ ulong2 x=(ulong2)(lhs.s1,lhs.s2); x=modMul2(x,(ulong2)(w02.s1,w02.s0)); ulong m=modMul(lhs.s3,w3); return (ulong4)(lhs.s0,x.s0,x.s1,m); }
+
+inline ulong2 gf31_add(ulong2 a, ulong2 b){ return (ulong2)(m31_add(a.s0,b.s0),m31_add(a.s1,b.s1)); }
+inline ulong2 gf31_sub(ulong2 a, ulong2 b){ return (ulong2)(m31_sub(a.s0,b.s0),m31_sub(a.s1,b.s1)); }
+inline ulong2 gf31_sqr(ulong2 a){ ulong t=m31_mul(a.s0,a.s1); return (ulong2)(m31_sub(m31_mul(a.s0,a.s0),m31_mul(a.s1,a.s1)), m31_add(t,t)); }
+inline ulong2 gf31_mul(ulong2 a, ulong2 b){ return (ulong2)(m31_sub(m31_mul(a.s0,b.s0),m31_mul(a.s1,b.s1)), m31_add(m31_mul(a.s1,b.s0),m31_mul(a.s0,b.s1))); }
+inline ulong2 gf31_mulconj(ulong2 a, ulong2 b){ return (ulong2)(m31_add(m31_mul(a.s0,b.s0),m31_mul(a.s1,b.s1)), m31_sub(m31_mul(a.s1,b.s0),m31_mul(a.s0,b.s1))); }
+inline ulong2 gf31_addi(ulong2 a, ulong2 b){ return (ulong2)(m31_add(a.s0,b.s1), m31_sub(a.s1,b.s0)); }
+inline ulong2 gf31_subi(ulong2 a, ulong2 b){ return (ulong2)(m31_sub(a.s0,b.s1), m31_add(a.s1,b.s0)); }
+inline ulong2 gf31_lshift(ulong2 a, uchar2 s){ return (ulong2)(m31_lshift(a.s0,(uchar)s.s0), m31_lshift(a.s1,(uchar)s.s1)); }
+inline ulong2 gf31_rshift(ulong2 a, uchar2 s){ return (ulong2)(m31_rshift(a.s0,(uchar)s.s0), m31_rshift(a.s1,(uchar)s.s1)); }
+
+#else
+#error Unsupported MOD_MODE
+#endif
+
 
 inline ulong modMulPminus1(const ulong x) {
     ulong r = mod_p_const - x;
