@@ -180,7 +180,7 @@ public:
 
 	typedef size_t Reg;
 
-	virtual void set(const Reg dst, const size_t a) const = 0;
+	virtual void set(const Reg dst, const uint64 a) const = 0;
 	virtual void get(uint64 * const d, const Reg src) const = 0;
 	virtual void copy(const Reg dst, const Reg src) const = 0;
 	virtual bool is_equal(const Reg src1, const Reg src2) const = 0;
