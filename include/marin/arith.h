@@ -8,8 +8,11 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include <cstdint>
+#include <bit>
 
-static constexpr int ilog2_32(const uint32_t n) { return 31 - __builtin_clz(n); }
+static constexpr int ilog2_32(uint32_t n) {
+    return std::bit_width(n) ? int(std::bit_width(n) - 1) : -1;
+}
 
 #define INLINE	static inline
 
@@ -32,20 +35,37 @@ INLINE uint64 reduce(const uint64 lo, const uint64 hi)
 	const uint64 r = (lo >= MOD_P) ? lo - MOD_P : lo;	// lhs * rhs < p^2 => hi * 2^32 < p^2 / 2^32 < p.
 	return mod_sub(mod_add(r, (hi << 32) - uint32_t(hi)), hi >> 32);
 }
-
 INLINE uint64 mod_mul(const uint64 lhs, const uint64 rhs)
 {
-	const __uint128_t t = lhs * __uint128_t(rhs);
-	return reduce(uint64(t), uint64(t >> 64));
+	uint64 hi, lo;
+#ifdef _MSC_VER
+	lo = _umul128(lhs, rhs, &hi);
+#else
+	__uint128_t t = (__uint128_t)lhs * (__uint128_t)rhs;
+	lo = uint64(t);
+	hi = uint64(t >> 64);
+#endif
+	return reduce(lo, hi);
 }
 
-INLINE uint64 mod_sqr(const uint64 lhs) { return mod_mul(lhs, lhs); }
+INLINE uint64 mod_sqr(const uint64 lhs)
+{
+	return mod_mul(lhs, lhs);
+}
 
 INLINE uint64 mod_muli(const uint64 lhs)
 {
-	const __uint128_t t = __uint128_t(lhs) << 48;	// sqrt(-1) = 2^48 (mod p)
-	return reduce(uint64(t), uint64(t >> 64));
+	uint64 hi, lo;
+#ifdef _MSC_VER
+	lo = _umul128(lhs, 1ULL << 48, &hi);
+#else
+	__uint128_t t = (__uint128_t)lhs << 48;
+	lo = uint64(t);
+	hi = uint64(t >> 64);
+#endif
+	return reduce(lo, hi);
 }
+
 
 INLINE uint64 mod_half(const uint64 lhs) { return ((lhs % 2 == 0) ? lhs / 2 : ((lhs - 1) / 2 + (MOD_P + 1) / 2)); }
 
