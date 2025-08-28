@@ -310,7 +310,9 @@ public:
 public:
 	size_t get_max_workgroup_size() const { return _max_workgroup_size; }
 	size_t get_local_mem_size() const { return _local_mem_size; }
-	size_t get_max_local_worksize(const size_t type_size) const { return std::min(_max_workgroup_size, _local_mem_size / type_size); }
+	size_t get_max_local_worksize(const size_t type_size) const { return std::min(static_cast<size_t>(_max_workgroup_size),
+                static_cast<size_t>(_local_mem_size / type_size));
+ }
 	size_t get_timer_resolution() const { return _timer_resolution; }
 	bool isIntel() const { return (_vendor == EVendor::INTEL); }
 
