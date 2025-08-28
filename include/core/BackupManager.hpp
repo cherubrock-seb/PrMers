@@ -25,7 +25,8 @@ public:
                   const std::string& mode,
                   const uint64_t b1,
                   const uint64_t b2,
-                  bool wagstaff
+                  bool wagstaff,
+                  bool marin
                   );
 
     // read existing .loop/.mers into x; return resume iteration
@@ -63,6 +64,7 @@ private:
     uint64_t b1_;
     uint64_t b2_;
     bool             wagstaff_;
+    bool             marin_;
     std::string hqFilename_, qFilename_, loop2Filename_;
 
 };
