@@ -335,7 +335,8 @@ App::App(int argc, char** argv)
         options.mode,
         options.B1,
         options.B2,
-        options.wagstaff
+        options.wagstaff,
+        options.marin
     )
   , proofManager(
         options.exponent,
