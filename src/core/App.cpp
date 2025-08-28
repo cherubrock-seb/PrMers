@@ -415,6 +415,17 @@ App::App(int argc, char** argv)
 
     std::signal(SIGINT, handle_sigint);
 }
+static inline std::string to_hex2048_le(const std::vector<uint64_t>& limbs)
+{
+    std::array<uint64_t, 32> a{};
+    const size_t n = std::min<size_t>(32, limbs.size());
+    for (size_t i = 0; i < n; ++i) a[i] = limbs[i];
+    std::ostringstream oss;
+    oss << std::hex << std::nouppercase << std::setfill('0');
+    for (int i = 31; i >= 0; --i) oss << std::setw(16) << a[i];
+    return oss.str();
+}
+
 
 int App::runPrpOrLlMarin()
 {
@@ -429,6 +440,14 @@ int App::runPrpOrLlMarin()
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
     if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
+
+    if (options.proof) {
+        uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSet::bestPower(options.exponent);
+        options.proofPower = proofPower;
+        double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
+        std::cout << "Proof of power " << proofPower << " requires about "
+                  << std::fixed << std::setprecision(2) << diskUsageGB << "GB of disk space" << std::endl;
+    }
 
     std::ostringstream ck; ck << "m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
@@ -494,6 +513,7 @@ int App::runPrpOrLlMarin()
 
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, res64_x);
     bool errordone = false;
+
     for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
     {
         if (interrupted)
@@ -506,11 +526,11 @@ int App::runPrpOrLlMarin()
             return 0;
         }
 
-
         eng->square_mul(0, (j != 0) ? 3 : 1);
+
         if (options.erroriter > 0 && (static_cast<uint64_t>(i) + 1) == options.erroriter && !errordone) {
-             eng->error();
-             std::cout << "Injected error at iteration " << static_cast<uint64_t>(i) + 1 << std::endl;
+            eng->error();
+            std::cout << "Injected error at iteration " << static_cast<uint64_t>(i) + 1 << std::endl;
         }
 
         if ((j % B_GL == 0) && (j != 0))
@@ -518,6 +538,7 @@ int App::runPrpOrLlMarin()
             eng->set_multiplicand(2, 0);
             eng->mul(1, 2);
         }
+
         auto now = std::chrono::high_resolution_clock::now();
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10)
@@ -553,6 +574,9 @@ int App::runPrpOrLlMarin()
     eng->get(d.data(), 0);
     uint64_t res64 = 0;
     const bool is_prp = eng->is_one(d, res64);
+    std::string res2048_hex = to_hex2048_le(d);
+    std::string res64_hex   = res2048_hex.substr(512 - 16);
+
     d.clear();
 
     eng->set_multiplicand(2, 1);
@@ -572,9 +596,7 @@ int App::runPrpOrLlMarin()
     eng->set_multiplicand(2, 2);
     eng->mul(1, 2);
 
-    //if (verbose) clearline();
     if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
-
 
     spinner.displayProgress(
         totalIters,
@@ -591,9 +613,95 @@ int App::runPrpOrLlMarin()
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
+
+    std::string res64_str = to_hex16(res64);
+
+
+    std::string json = io::JsonBuilder::generate(
+        options,
+        static_cast<int>(context.getTransformSize()),
+        is_prp,
+        res64_str,
+        res2048_hex
+    );
+
+    Printer::finalReport(
+        options,
+        elapsed_time,
+        json,
+        is_prp
+    );
+
+    bool skippedSubmission = false;
+    if (options.submit) {
+        bool noAsk = options.noAsk || hasWorktodoEntry_;
+        if (noAsk && options.password.empty()) {
+            std::cerr << "No password provided with --noask; skipping submission.\n";
+        } else {
+            std::string response;
+            std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
+            std::getline(std::cin, response);
+            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+                std::cout << "Result not sent." << std::endl;
+                skippedSubmission = true;
+            }
+            if (!skippedSubmission && options.user.empty()) {
+                std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
+                std::getline(std::cin, options.user);
+            }
+            if (!skippedSubmission && options.user.empty()) {
+                std::cerr << "No username entered; skipping submission.\n";
+                skippedSubmission = true;
+            }
+            if (!skippedSubmission) {
+                if (!noAsk && options.password.empty()) {
+                    options.password = io::CurlClient::promptHiddenPassword();
+                }
+                bool success = io::CurlClient::sendManualResultWithLogin(
+                    json,
+                    options.user,
+                    options.password
+                );
+                if (!success) {
+                    std::cerr << "Submission to PrimeNet failed\n";
+                }
+            }
+        }
+    }
+
+    backupManager.clearState();
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.appendToResultsTxt(json);
+
+    if (hasWorktodoEntry_) {
+        if (worktodoParser_->removeFirstProcessed()) {
+            std::cout << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+            std::ifstream f(options.worktodo_path);
+            std::string l;
+            bool more = false;
+            while (std::getline(f, l)) {
+                if (!l.empty() && l[0] != '#') { more = true; break; }
+            }
+            f.close();
+            if (more) {
+                std::cout << "Restarting for next entry in worktodo.txt\n";
+                restart_self(argc_, argv_);
+            } else {
+                std::cout << "No more entries in worktodo.txt, exiting.\n";
+                std::exit(0);
+            }
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";
+            std::exit(-1);
+        }
+    }
+
     delete eng;
     return is_prp ? 0 : 1;
 }
+
 
 
 
