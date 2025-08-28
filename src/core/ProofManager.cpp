@@ -76,6 +76,38 @@ void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
                   << ": " << e.what() << std::endl;
     }
 }
+void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
+    if (! proofSet_.shouldCheckpoint(iter)) return;
+
+    // Get residue from NTT buffer using compactBits
+    auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
+    
+    // Save in PRPLL-compatible format
+    proofSet_.save(iter, words);
+    
+    // Verify the checkpoint by loading it back and comparing
+    try {
+        auto loadedWords = proofSet_.load(iter);
+        
+        // Compare the saved and loaded data
+        if (words.size() != loadedWords.size()) {
+            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
+                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
+            return;
+        }
+        
+        for (size_t i = 0; i < words.size(); ++i) {
+            if (words[i] != loadedWords[i]) {
+                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
+                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
+                return;
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
+                  << ": " << e.what() << std::endl;
+    }
+}
 
 std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, bool verify) const {
     try {
