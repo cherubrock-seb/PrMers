@@ -137,6 +137,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-pm1") == 0) {
             opts.mode = "pm1";
+            opts.marin = false;
             opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-profile") == 0) {
