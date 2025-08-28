@@ -39,7 +39,7 @@
 #endif
 namespace opencl {
 
-Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug)
+Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug, bool marin)
     : platform_(nullptr), device_(nullptr),
       context_(nullptr), queue_(nullptr),
       queueSize_(0),
@@ -52,7 +52,9 @@ Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle
 {
     pickPlatformAndDevice(deviceIndex);
     createContext();
-    createQueue(enqueueMax, cl_queue_throttle_active);
+    if(!marin){
+        createQueue(enqueueMax, cl_queue_throttle_active);
+    }
     queryDeviceCapabilities(); 
 }
 

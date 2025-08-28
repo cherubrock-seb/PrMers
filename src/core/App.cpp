@@ -324,7 +324,7 @@ App::App(int argc, char** argv)
       }
       return o;
   }())
-  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug)
+  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug,options.marin)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),
@@ -367,50 +367,51 @@ App::App(int argc, char** argv)
         options.max_local_size1,
         options.max_local_size5
     );
-    buffers.emplace(context, precompute);
-    program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options, options.debug);
-    kernels.emplace(program->getProgram(), context.getQueue());
-    
+    if(!options.marin){
+        buffers.emplace(context, precompute);
+        program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options, options.debug);
+        kernels.emplace(program->getProgram(), context.getQueue());
+        
 
 
-    std::vector<std::string> kernelNames = {
-        "kernel_sub2",
-        "kernel_sub1",
-        "kernel_carry",
-        "kernel_carry_2",
-        "kernel_inverse_ntt_radix4_mm",
-        "kernel_ntt_radix4_last_m1_n4",
-        "kernel_ntt_radix4_last_m1_n4_nosquare",
-        "kernel_inverse_ntt_radix4_mm_last",
-        "kernel_ntt_radix4_last_m1",
-        "kernel_ntt_radix4_last_m1_nosquare",
-        "kernel_ntt_radix4_mm_first",
-        "kernel_ntt_radix4_mm_m8",
-        "kernel_ntt_radix4_mm_m4",
-        "kernel_ntt_radix4_mm_m2",
-        "kernel_ntt_radix4_mm_m16",
-        "kernel_ntt_radix4_mm_m32",
-        "kernel_inverse_ntt_radix4_m1",
-        "kernel_inverse_ntt_radix4_m1_n4",
-        "kernel_ntt_radix4_inverse_mm_2steps",
-        "kernel_ntt_radix4_inverse_mm_2steps_last",
-        "kernel_ntt_radix4_mm_2steps",
-        "kernel_ntt_radix4_mm_2steps_first",
-        "kernel_ntt_radix2_square_radix2",
-        "kernel_ntt_radix4_radix2_square_radix2_radix4",
-        "kernel_ntt_radix4_square_radix4",
-        "kernel_pointwise_mul",
-        "kernel_ntt_radix2",
-        "kernel_res64_display",
-        "kernel_ntt_radix5_mm_first",
-        "kernel_ntt_inverse_radix5_mm_last",
-        "check_equal"
-    };
-    for (auto& name : kernelNames) {
-        kernels->createKernel(name);
+        std::vector<std::string> kernelNames = {
+            "kernel_sub2",
+            "kernel_sub1",
+            "kernel_carry",
+            "kernel_carry_2",
+            "kernel_inverse_ntt_radix4_mm",
+            "kernel_ntt_radix4_last_m1_n4",
+            "kernel_ntt_radix4_last_m1_n4_nosquare",
+            "kernel_inverse_ntt_radix4_mm_last",
+            "kernel_ntt_radix4_last_m1",
+            "kernel_ntt_radix4_last_m1_nosquare",
+            "kernel_ntt_radix4_mm_first",
+            "kernel_ntt_radix4_mm_m8",
+            "kernel_ntt_radix4_mm_m4",
+            "kernel_ntt_radix4_mm_m2",
+            "kernel_ntt_radix4_mm_m16",
+            "kernel_ntt_radix4_mm_m32",
+            "kernel_inverse_ntt_radix4_m1",
+            "kernel_inverse_ntt_radix4_m1_n4",
+            "kernel_ntt_radix4_inverse_mm_2steps",
+            "kernel_ntt_radix4_inverse_mm_2steps_last",
+            "kernel_ntt_radix4_mm_2steps",
+            "kernel_ntt_radix4_mm_2steps_first",
+            "kernel_ntt_radix2_square_radix2",
+            "kernel_ntt_radix4_radix2_square_radix2_radix4",
+            "kernel_ntt_radix4_square_radix4",
+            "kernel_pointwise_mul",
+            "kernel_ntt_radix2",
+            "kernel_res64_display",
+            "kernel_ntt_radix5_mm_first",
+            "kernel_ntt_inverse_radix5_mm_last",
+            "check_equal"
+        };
+        for (auto& name : kernelNames) {
+            kernels->createKernel(name);
+        }
+        nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1", options.debug);
     }
-    nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1", options.debug);
-
 
     std::signal(SIGINT, handle_sigint);
 }
