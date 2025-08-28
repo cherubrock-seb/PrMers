@@ -492,7 +492,7 @@ int App::runPrpOrLlMarin()
     std::string res64_x;
 
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, res64_x);
-
+    bool errordone = false;
     for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
     {
         if (interrupted)
@@ -507,12 +507,16 @@ int App::runPrpOrLlMarin()
 
 
         eng->square_mul(0, (j != 0) ? 3 : 1);
-        //if ((j == 0) && options.gerbiczli) eng->error();
-        //if ((j % B_GL == 0) && (j != 0))
-        //{
-        //    eng->set_multiplicand(2, 0);
-        //    eng->mul(1, 2);
-        //}
+        if (options.erroriter > 0 && (static_cast<uint64_t>(i) + 1) == options.erroriter && !errordone) {
+             eng->error();
+             std::cout << "Injected error at iteration " << static_cast<uint64_t>(i) + 1 << std::endl;
+        }
+
+        if ((j % B_GL == 0) && (j != 0))
+        {
+            eng->set_multiplicand(2, 0);
+            eng->mul(1, 2);
+        }
         auto now = std::chrono::high_resolution_clock::now();
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10)
@@ -568,7 +572,7 @@ int App::runPrpOrLlMarin()
     eng->mul(1, 2);
 
     //if (verbose) clearline();
-    //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+    if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
 
 
     spinner.displayProgress(
