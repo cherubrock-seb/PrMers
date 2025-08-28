@@ -26,7 +26,7 @@ struct CliOptions {
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;
     bool proof = true;
-    bool submit = true;
+    bool submit = false;
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
     int backup_interval = 3000;
