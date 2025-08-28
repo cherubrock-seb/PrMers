@@ -13,7 +13,7 @@ SRCS        := $(shell find $(SRC_DIR) -type f -name '*.cpp')
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 
 CXX         := g++
-CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto
+CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto -I$(INC_DIR)/marin
 LDFLAGS     := -flto
 
 

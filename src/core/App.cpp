@@ -31,6 +31,10 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "io/CurlClient.hpp"
+#include "marin/engine.h"
+#include "marin/file.h"
+#include <sys/stat.h>
+#include <cstdio>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -413,6 +417,164 @@ App::App(int argc, char** argv)
 
 
 
+int App::runPrpOrLlMarin()
+{
+    Printer::banner(options);
+    if (auto code = QuickChecker::run(options.exponent)) return *code;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = options.debug;
+
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(3), static_cast<size_t>(options.device_id), verbose);
+
+    auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
+    auto fmt_time = [](double t){ uint64_t s=uint64_t(t), m=s/60, h=m/60; s-=m*60; m-=h*60; std::stringstream ss; ss<<std::setfill('0')<<std::setw(2)<<h<<':'<<std::setw(2)<<m<<':'<<std::setw(2)<<s; return ss.str(); };
+    auto clearline = [](){ std::cout << "                                                            \r"; };
+
+    if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
+
+    std::ostringstream ck; ck << "m_" << p << ".ckpt";
+    const std::string ckpt_file = ck.str();
+
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 1) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = eng->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!eng->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt = [&](uint32_t i, double et){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        {
+            File f(newf, "wb");
+            int version = 1;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!eng->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file.c_str());
+    };
+
+    uint32_t ri = 0; double restored_time = 0;
+    int r = read_ckpt(ckpt_file, ri, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
+    if (r == 0) { std::cout << "Resuming from a checkpoint." << std::endl; } else { ri = 0; restored_time = 0; eng->set(0, 1); eng->set(1, 1); }
+
+    logger.logStart(options);
+    timer.start();
+    const uint32_t B_GL = std::max<uint32_t>(uint32_t(std::sqrt(p)), 2u);
+    const auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastBackup = start_clock;
+    uint32_t display_i = ri, display_count = 2, display_count_reset = display_count;
+    auto display_clock = start_clock;
+
+    auto display_progress = [&](uint32_t i){
+        if (display_i == i) return 1u;
+        double display_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - display_clock).count();
+        const double iter_time = (i > display_i) ? display_time / (i - display_i) : display_time;
+        display_i = i;
+        const uint32_t count = std::max<uint32_t>(uint32_t(1.0 / std::max(iter_time, 1e-9)), 2u);
+        const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+        const double percent = i / double(p);
+        const double expected_time = (percent > 0 ? elapsed_time / percent : 0.0);
+        const double remaining_time = std::max(expected_time - elapsed_time, 0.0);
+        if ((i > 1) && (display_time > 0.5))
+        {
+            std::ostringstream ss; ss << std::setprecision(3) << percent * 100.0 << "% done, " << fmt_time(remaining_time)
+                                      << "/" << fmt_time(expected_time) << " remaining, " << elapsed_time / std::max<int>(i,1) * 1e3 << " ms/iter.        \r";
+            std::cout << ss.str();
+        }
+        display_clock = std::chrono::high_resolution_clock::now();
+        return count;
+    };
+
+    for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
+    {
+        if (interrupted)
+        {
+            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+            save_ckpt(i, elapsed_time);
+            delete eng;
+            std::cout << "\nInterrupted by user, state saved at iteration " << i << " j=" << j << std::endl;
+            logger.logEnd(elapsed_time);
+            return 0;
+        }
+
+        if (verbose && (--display_count == 0))
+        {
+            display_count_reset = display_count = display_progress(i);
+        }
+
+        eng->square_mul(0, (j != 0) ? 3 : 1);
+        //if ((j == 0) && options.gerbiczli) eng->error();
+        //if ((j % B_GL == 0) && (j != 0))
+        //{
+        //    eng->set_multiplicand(2, 0);
+        //    eng->mul(1, 2);
+        //}
+
+        auto now = std::chrono::high_resolution_clock::now();
+        if (now - lastBackup >= std::chrono::seconds(options.backup_interval))
+        {
+            const double elapsed_time = std::chrono::duration<double>(now - start_clock).count() + restored_time;
+            save_ckpt(i, elapsed_time);
+            lastBackup = now;
+        }
+    }
+
+    std::vector<uint64> d(eng->get_size());
+    eng->get(d.data(), 0);
+    uint64_t res64 = 0;
+    const bool is_prp = eng->is_one(d, res64);
+    d.clear();
+
+    eng->set_multiplicand(2, 1);
+    eng->mul(0, 2);
+
+    for (uint32_t i = 0; i < B_GL; ++i) eng->square_mul(1);
+
+    mpz_t res, t;
+    mpz_init_set_ui(res, p / B_GL); mpz_mul_2exp(res, res, B_GL);
+    mpz_init_set_ui(t, 1); mpz_mul_2exp(t, t, p % B_GL);
+    mpz_add(res, res, t); mpz_sub_ui(res, res, p / B_GL + 2);
+    mpz_clear(t);
+
+    eng->set(2, 1);
+    for (uint32_t i = uint32_t(mpz_sizeinbase(res, 2)); i > 0; --i) eng->square_mul(2, (mpz_tstbit(res, i - 1) != 0) ? 3 : 1);
+    mpz_clear(res);
+
+    eng->set_multiplicand(2, 2);
+    eng->mul(1, 2);
+
+    if (verbose) clearline();
+    //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+
+    const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+    std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << fmt_time(elapsed_time) << "." << std::endl;
+
+    logger.logEnd(elapsed_time);
+    delete eng;
+    return is_prp ? 0 : 1;
+}
 
 
 int App::runPrpOrLl() {
@@ -1778,6 +1940,9 @@ int App::runPM1() {
 
 
 int App::run() {
+    if(options.marin){
+        return runPrpOrLlMarin();
+    }
     if(options.mode == "prp" || options.mode == "ll"){
         return runPrpOrLl();
     }

@@ -75,6 +75,7 @@ void printUsage(const char* progName) {
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
+    std::cout << "  -marin               : (Optional) use marin backend" << std::endl;
    
     std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
@@ -143,6 +144,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-debug") == 0) {
             opts.debug = true;
+        }
+        else if (std::strcmp(argv[i], "-marin") == 0) {
+            opts.marin = true;
         }
         
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
