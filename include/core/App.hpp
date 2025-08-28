@@ -39,6 +39,7 @@ class App {
 public:
     App(int argc, char** argv);
     int runPrpOrLl();
+    int runPrpOrLlMarin();
     int runPM1();
     int runPM1Stage2();
     int run();
