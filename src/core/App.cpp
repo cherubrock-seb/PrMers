@@ -415,16 +415,55 @@ App::App(int argc, char** argv)
 
     std::signal(SIGINT, handle_sigint);
 }
-static inline std::string to_hex2048_le(const std::vector<uint64_t>& limbs)
-{
-    std::array<uint64_t, 32> a{};
-    const size_t n = std::min<size_t>(32, limbs.size());
-    for (size_t i = 0; i < n; ++i) a[i] = limbs[i];
-    std::ostringstream oss;
-    oss << std::hex << std::nouppercase << std::setfill('0');
-    for (int i = 31; i >= 0; --i) oss << std::setw(16) << a[i];
+// --- Helpers: pack digits (hi32 = width w, lo32 = value) into 32-bit words, PRP-3 normalize, format hex ---
+static inline std::vector<uint32_t> pack_words_from_eng_digits(const std::vector<uint64_t>& digits, uint32_t E) {
+    const size_t totalWords = (E + 31) / 32;
+    std::vector<uint32_t> out(totalWords, 0u);
+
+    uint64_t acc = 0;
+    int acc_bits = 0;
+    size_t o = 0;
+
+    for (uint64_t u : digits) {
+        uint32_t w = uint32_t(u >> 32);
+        uint32_t v = uint32_t(u & 0xFFFFFFFFu);
+        if (w < 32) v &= (uint32_t((1ull << w) - 1));
+        acc |= (uint64_t)v << acc_bits;
+        acc_bits += int(w);
+        while (acc_bits >= 32 && o < totalWords) {
+            out[o++] = uint32_t(acc & 0xFFFFFFFFu);
+            acc >>= 32;
+            acc_bits -= 32;
+        }
+    }
+    if (o < totalWords) out[o++] = uint32_t(acc & 0xFFFFFFFFu);
+    return out;
+}
+
+static inline uint32_t mod3_words(const std::vector<uint32_t>& W) {
+    uint32_t r = 0; for (uint32_t w : W) r = (r + (w % 3)) % 3; return r;
+}
+static inline void div3_words(uint32_t E, std::vector<uint32_t>& W) {
+    uint32_t r = (3 - mod3_words(W)) % 3;
+    int topBits = int(E % 32);
+    { uint64_t t = (uint64_t(r) << topBits) + W.back(); W.back() = uint32_t(t / 3); r = uint32_t(t % 3); }
+    for (auto it = W.rbegin() + 1; it != W.rend(); ++it) { uint64_t t = (uint64_t(r) << 32) + *it; *it = uint32_t(t / 3); r = uint32_t(t % 3); }
+}
+static inline void prp3_div9(uint32_t E, std::vector<uint32_t>& W) { div3_words(E, W); div3_words(E, W); }
+
+static inline std::string format_res64_hex(const std::vector<uint32_t>& W) {
+    uint64_t r64 = (uint64_t(W.size() > 1 ? W[1] : 0) << 32) | (W.empty() ? 0u : W[0]);
+    std::ostringstream oss; oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << r64; return oss.str();
+}
+static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
+    std::ostringstream oss; oss << std::hex << std::nouppercase << std::setfill('0');
+    for (int i = 63; i >= 0; --i) {
+        uint32_t w = (i < int(W.size())) ? W[i] : 0u;
+        oss << std::setw(8) << w;
+    }
     return oss.str();
 }
+
 
 
 int App::runPrpOrLlMarin()
@@ -505,6 +544,9 @@ int App::runPrpOrLlMarin()
     auto lastDisplay = start_clock;
 
     uint64_t totalIters = p;
+    if(options.wagstaff){
+        totalIters /= 2;
+    }
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
     uint64_t lastIter   = ri ? ri - 1 : 0;
@@ -565,17 +607,31 @@ int App::runPrpOrLlMarin()
             lastBackup = now;
             spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
         }
-
+        if (options.proof && static_cast<uint64_t>(i) + 1 < totalIters) {
+            std::vector<uint64> d(eng->get_size());
+            eng->get(d.data(), 0);
+            proofManager.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
+        }
         lastIter = i;
         lastJ = j;
+    }
+
+    if (options.proof) {
+        std::vector<uint64> d(eng->get_size());
+        eng->get(d.data(), 0);
+        proofManager.checkpointMarin(d, totalIters);
     }
 
     std::vector<uint64> d(eng->get_size());
     eng->get(d.data(), 0);
     uint64_t res64 = 0;
     const bool is_prp = eng->is_one(d, res64);
-    std::string res2048_hex = to_hex2048_le(d);
-    std::string res64_hex   = res2048_hex.substr(512 - 16);
+    std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
+    //if (options.mode == "prp") prp3_div9(p, words);
+
+    std::string res64_hex    = format_res64_hex(words);
+    std::string res2048_hex  = format_res2048_hex(words);
+
 
     d.clear();
 
@@ -613,7 +669,17 @@ int App::runPrpOrLlMarin()
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
-
+/*
+    if (options.proof) {
+        try {
+            std::cout << "\nGenerating PRP proof file..." << std::endl;
+            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
+            options.proofFile = proofFilePath.string();  // Set proof file path
+            std::cout << "Proof file saved: " << proofFilePath << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+        }
+    }*/
     std::string res64_str = to_hex16(res64);
 
 
