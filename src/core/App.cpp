@@ -415,8 +415,6 @@ App::App(int argc, char** argv)
     std::signal(SIGINT, handle_sigint);
 }
 
-
-
 int App::runPrpOrLlMarin()
 {
     Printer::banner(options);
@@ -428,8 +426,6 @@ int App::runPrpOrLlMarin()
     engine* eng = engine::create_gpu(p, static_cast<size_t>(3), static_cast<size_t>(options.device_id), verbose);
 
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
-    auto fmt_time = [](double t){ uint64_t s=uint64_t(t), m=s/60, h=m/60; s-=m*60; m-=h*60; std::stringstream ss; ss<<std::setfill('0')<<std::setw(2)<<h<<':'<<std::setw(2)<<m<<':'<<std::setw(2)<<s; return ss.str(); };
-    auto clearline = [](){ std::cout << "                                                            \r"; };
 
     if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
 
@@ -481,31 +477,21 @@ int App::runPrpOrLlMarin()
 
     logger.logStart(options);
     timer.start();
+    timer2.start();
+
     const uint32_t B_GL = std::max<uint32_t>(uint32_t(std::sqrt(p)), 2u);
     const auto start_clock = std::chrono::high_resolution_clock::now();
     auto lastBackup = start_clock;
-    uint32_t display_i = ri, display_count = 2, display_count_reset = display_count;
-    auto display_clock = start_clock;
+    auto lastDisplay = start_clock;
 
-    auto display_progress = [&](uint32_t i){
-        if (display_i == i) return 1u;
-        double display_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - display_clock).count();
-        const double iter_time = (i > display_i) ? display_time / (i - display_i) : display_time;
-        display_i = i;
-        const uint32_t count = std::max<uint32_t>(uint32_t(1.0 / std::max(iter_time, 1e-9)), 2u);
-        const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-        const double percent = i / double(p);
-        const double expected_time = (percent > 0 ? elapsed_time / percent : 0.0);
-        const double remaining_time = std::max(expected_time - elapsed_time, 0.0);
-        if ((i > 1) && (display_time > 0.5))
-        {
-            std::ostringstream ss; ss << std::setprecision(3) << percent * 100.0 << "% done, " << fmt_time(remaining_time)
-                                      << "/" << fmt_time(expected_time) << " remaining, " << elapsed_time / std::max<int>(i,1) * 1e3 << " ms/iter.        \r";
-            std::cout << ss.str();
-        }
-        display_clock = std::chrono::high_resolution_clock::now();
-        return count;
-    };
+    uint64_t totalIters = p;
+    uint64_t resumeIter = ri;
+    uint64_t startIter  = ri;
+    uint64_t lastIter   = ri ? ri - 1 : 0;
+    uint64_t lastJ      = p - 1 - ri;
+    std::string res64_x;
+
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, res64_x);
 
     for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
     {
@@ -519,10 +505,6 @@ int App::runPrpOrLlMarin()
             return 0;
         }
 
-        if (verbose && (--display_count == 0))
-        {
-            display_count_reset = display_count = display_progress(i);
-        }
 
         eng->square_mul(0, (j != 0) ? 3 : 1);
         //if ((j == 0) && options.gerbiczli) eng->error();
@@ -531,14 +513,35 @@ int App::runPrpOrLlMarin()
         //    eng->set_multiplicand(2, 0);
         //    eng->mul(1, 2);
         //}
-
         auto now = std::chrono::high_resolution_clock::now();
+
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10)
+        {
+            spinner.displayProgress(
+                static_cast<uint64_t>(i) + 1,
+                totalIters,
+                timer.elapsed(),
+                timer2.elapsed(),
+                p,
+                resumeIter,
+                startIter,
+                res64_x
+            );
+            timer2.start();
+            lastDisplay = now;
+            resumeIter = static_cast<uint64_t>(i) + 1;
+        }
+
         if (now - lastBackup >= std::chrono::seconds(options.backup_interval))
         {
             const double elapsed_time = std::chrono::duration<double>(now - start_clock).count() + restored_time;
             save_ckpt(i, elapsed_time);
             lastBackup = now;
+            spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
         }
+
+        lastIter = i;
+        lastJ = j;
     }
 
     std::vector<uint64> d(eng->get_size());
@@ -549,7 +552,6 @@ int App::runPrpOrLlMarin()
 
     eng->set_multiplicand(2, 1);
     eng->mul(0, 2);
-
     for (uint32_t i = 0; i < B_GL; ++i) eng->square_mul(1);
 
     mpz_t res, t;
@@ -565,16 +567,29 @@ int App::runPrpOrLlMarin()
     eng->set_multiplicand(2, 2);
     eng->mul(1, 2);
 
-    if (verbose) clearline();
+    //if (verbose) clearline();
     //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
 
+
+    spinner.displayProgress(
+        totalIters,
+        totalIters,
+        timer.elapsed(),
+        timer2.elapsed(),
+        p,
+        resumeIter,
+        startIter,
+        res64_x
+    );
+
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-    std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << fmt_time(elapsed_time) << "." << std::endl;
+    std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
     delete eng;
     return is_prp ? 0 : 1;
 }
+
 
 
 int App::runPrpOrLl() {
