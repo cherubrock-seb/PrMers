@@ -643,10 +643,10 @@ int App::runPrpOrLlMarin()
     uint64_t res64 = 0;
     const bool is_prp = eng->is_one(d, res64);
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
-    //if (options.mode == "prp") prp3_div9(p, words);
-
+    
     std::string res64_hex    = format_res64_hex(words);
     std::string res2048_hex  = format_res2048_hex(words);
+    if (options.mode == "prp") prp3_div9(p, words);
 
 
     
