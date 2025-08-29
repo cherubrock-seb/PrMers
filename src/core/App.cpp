@@ -623,11 +623,11 @@ int App::runPrpOrLlMarin()
             lastBackup = now;
             spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
         }
-        if (options.proof && static_cast<uint64_t>(i) < totalIters) {
+        /*if (options.proof && static_cast<uint64_t>(i) < totalIters) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
             proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i));
-        }
+        }*/
         lastIter = i;
         lastJ = j;
     }
