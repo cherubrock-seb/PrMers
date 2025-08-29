@@ -644,9 +644,10 @@ int App::runPrpOrLlMarin()
     const bool is_prp = eng->is_one(d, res64);
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
     
+    if (options.mode == "prp") prp3_div9(p, words);
     std::string res64_hex    = format_res64_hex(words);
     std::string res2048_hex  = format_res2048_hex(words);
-    if (options.mode == "prp") prp3_div9(p, words);
+    
 
 
     
@@ -678,7 +679,7 @@ int App::runPrpOrLlMarin()
         options.wagstaff ? p / 2 : p,
         resumeIter,
         startIter,
-        res64_x
+        res64_hex
     );
 
     if (options.wagstaff) {
@@ -704,7 +705,7 @@ int App::runPrpOrLlMarin()
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
-
+    
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -715,14 +716,12 @@ int App::runPrpOrLlMarin()
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
         }
     }
-    std::string res64_str = to_hex16(res64);
-
 
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
         is_prp,
-        res64_str,
+        res64_hex,
         res2048_hex
     );
 
