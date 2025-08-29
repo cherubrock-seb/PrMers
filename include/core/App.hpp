@@ -15,6 +15,7 @@
 #include "core/Printer.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/ProofManager.hpp"
+#include "core/ProofManagerMarin.hpp"
 #include "core/Logger.hpp"
 #include "util/Timer.hpp"
 #include "io/JsonBuilder.hpp"
@@ -60,6 +61,7 @@ private:
   std::optional<opencl::NttEngine>   nttEngine;
   BackupManager                      backupManager;
   ProofManager                       proofManager;
+  ProofManagerMarin                  proofManagerMarin;
   Spinner                            spinner;
   Logger                             logger;
   util::Timer                        timer;
