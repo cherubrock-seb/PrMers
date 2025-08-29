@@ -26,6 +26,7 @@
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
+#include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
@@ -349,6 +350,18 @@ App::App(int argc, char** argv)
         precompute.getN(),
         precompute.getDigitWidth(),
         options.knownFactors
+    ),
+    proofManagerMarin(
+        options.exponent,
+        [this]() -> uint32_t {
+            if (!this->options.proof) return 0;
+            if (this->options.manual_proofPower) return this->options.proofPower;
+            return ProofSet::bestPower(this->options.exponent);
+        }(),
+        context.getQueue(),
+        precompute.getN(),
+        precompute.getDigitWidth(),
+        options.knownFactors
     )
   , spinner()
   , logger(options.output_path)
@@ -482,9 +495,9 @@ int App::runPrpOrLlMarin()
     if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
 
     if (options.proof) {
-        uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSet::bestPower(options.exponent);
+        uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSetMarin::bestPower(options.exponent);
         options.proofPower = proofPower;
-        double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
+        double diskUsageGB = ProofSetMarin::diskUsageGB(options.exponent, proofPower);
         std::cout << "Proof of power " << proofPower << " requires about "
                   << std::fixed << std::setprecision(2) << diskUsageGB << "GB of disk space" << std::endl;
     }
@@ -611,7 +624,7 @@ int App::runPrpOrLlMarin()
         if (options.proof && static_cast<uint64_t>(i) + 1 < totalIters) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
-            proofManager.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
+            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
         }
         lastIter = i;
         lastJ = j;
@@ -620,7 +633,7 @@ int App::runPrpOrLlMarin()
     if (options.proof) {
         std::vector<uint64> d(eng->get_size());
         eng->get(d.data(), 0);
-        proofManager.checkpointMarin(d, totalIters);
+        proofManagerMarin.checkpointMarin(d, totalIters);
     }
 
     std::vector<uint64> d(eng->get_size());
@@ -670,17 +683,17 @@ int App::runPrpOrLlMarin()
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
-/*
+
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
-            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
+            auto proofFilePath = proofManagerMarin.proof();
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
         }
-    }*/
+    }
     std::string res64_str = to_hex16(res64);
 
 
