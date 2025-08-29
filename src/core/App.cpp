@@ -567,9 +567,11 @@ int App::runPrpOrLlMarin()
     uint64_t lastJ      = p - 1 - ri;
     std::string res64_x;
 
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, res64_x);
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p, resumeIter, startIter, res64_x);
     bool errordone = false;
-
+    if(options.wagstaff){
+        std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
+    }
     for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
     {
         if (interrupted)
@@ -604,7 +606,7 @@ int App::runPrpOrLlMarin()
                 totalIters,
                 timer.elapsed(),
                 timer2.elapsed(),
-                p,
+                options.wagstaff ? p / 2 : p,
                 resumeIter,
                 startIter,
                 res64_x
@@ -621,10 +623,10 @@ int App::runPrpOrLlMarin()
             lastBackup = now;
             spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
         }
-        if (options.proof && static_cast<uint64_t>(i) + 1 < totalIters) {
+        if (options.proof && static_cast<uint64_t>(i) < totalIters) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
-            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
+            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i));
         }
         lastIter = i;
         lastJ = j;
@@ -647,7 +649,7 @@ int App::runPrpOrLlMarin()
     std::string res2048_hex  = format_res2048_hex(words);
 
 
-    d.clear();
+    
 
     eng->set_multiplicand(2, 1);
     eng->mul(0, 2);
@@ -673,12 +675,31 @@ int App::runPrpOrLlMarin()
         totalIters,
         timer.elapsed(),
         timer2.elapsed(),
-        p,
+        options.wagstaff ? p / 2 : p,
         resumeIter,
         startIter,
         res64_x
     );
 
+    if (options.wagstaff) {
+            mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+            mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
+            mpz_class rM = util::vectToMpz(d,
+                                        precompute.getDigitWidth(),
+                                        Mp);
+            mpz_class rF = rM % Fp;
+            bool isWagstaffPRP = (rF == 9);
+            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+            if (isWagstaffPRP) {
+                std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+            } else {
+                std::cout << "Not a Wagstaff PRP.\n";
+            }
+
+            logger.logEnd(elapsed_time);
+            return isWagstaffPRP ? 0 : 1;
+    }
+    
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
@@ -711,7 +732,7 @@ int App::runPrpOrLlMarin()
         json,
         is_prp
     );
-
+    d.clear();
     bool skippedSubmission = false;
     if (options.submit) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
