@@ -176,17 +176,51 @@ public:
 		return true;
 	}
 
+	bool is_zero(const std::vector<uint64> & d) const
+	{
+		const size_t n = get_size();
+		const uint64 * const x = d.data();
+
+		for (size_t k = 0; k < n; ++k) if (uint32(x[k]) != 0) return false;
+		return true;
+	}
+
+
+	bool is_nine(const std::vector<uint64> & d) const
+	{
+		const size_t n = get_size();
+		const uint64 * const x = d.data();
+		if (uint32(x[0]) != 9) return false;
+		for (size_t k = 1; k < n; ++k) if (uint32(x[k]) != 0) return false;
+		return true;
+	}
+
+	bool is_Mp(const std::vector<uint64> & d) const
+	{
+		const size_t n = get_size();
+		const uint64 * const x = d.data();
+
+		for (size_t k = 0; k < n; ++k)
+		{
+			const uint64_t x_k = x[k], u = uint32(x_k);
+			const uint8 width = uint8(x_k >> 32);
+			if (u != (uint64_t(1) << width) - 1) return false;
+		} 
+		return true;
+	}
+
 	// Interface
 
 	typedef size_t Reg;
 
 	virtual void set(const Reg dst, const uint64 a) const = 0;
-	virtual void get(uint64 * const d, const Reg src) const = 0;
+	virtual void get(uint64 * const d, const Reg src) const = 0;	// BEWARE - d is encoded: low 32-bit word is the value and high 32-bit word is the width of the base
 	virtual void copy(const Reg dst, const Reg src) const = 0;
 	virtual bool is_equal(const Reg src1, const Reg src2) const = 0;
-	virtual void square_mul(const Reg src, const uint32_t a = 1) const = 0;
+	virtual void square_mul(const Reg src, const uint32 a = 1) const = 0;
 	virtual void set_multiplicand(const Reg dst, const Reg src) const = 0;
 	virtual void mul(const Reg dst, const Reg src) const = 0;
+	virtual void sub(const Reg src, const uint32 a) const = 0;
 	virtual void error() const = 0;
 
 	virtual size_t get_checkpoint_size() const = 0;
@@ -207,9 +241,10 @@ public:
 	void get(uint64 *, const Reg) const override  {}
 	void copy(const Reg, const Reg) const override {}
 	bool is_equal(const Reg, const Reg) const override { return false; }
-	void square_mul(const Reg, const uint32_t) const override {}
+	void square_mul(const Reg, const uint32) const override {}
 	void set_multiplicand(const Reg, const Reg) const override {}
 	void mul(const Reg, const Reg) const override {}
+	void sub(const Reg, const uint32) const override {}
 	void error() const override {}
 	size_t get_checkpoint_size() const override { return 0; }
 	bool get_checkpoint(std::vector<char> &) const override { return false; }
