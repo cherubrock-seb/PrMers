@@ -546,7 +546,7 @@ int App::runPrpOrLlMarin()
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
-    if (r == 0) { std::cout << "Resuming from a checkpoint." << std::endl; } else { ri = 0; restored_time = 0; eng->set(0, 3); eng->set(1, 1); }
+    if (r == 0) { std::cout << "Resuming from a checkpoint." << std::endl; } else { ri = 0; restored_time = 0; eng->set(0, 1); eng->set(1, 1); }
 
     logger.logStart(options);
     timer.start();
@@ -572,7 +572,7 @@ int App::runPrpOrLlMarin()
     if(options.wagstaff){
         std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
     }
-    for (uint32_t i = ri, j = totalIters - ri - 1; i < totalIters; ++i, --j)
+    for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
     {
         if (interrupted)
         {
@@ -584,7 +584,7 @@ int App::runPrpOrLlMarin()
             return 0;
         }
 
-        eng->square_mul(0, 1);
+        eng->square_mul(0, (j != 0) ? 3 : 1);
 
         if (options.erroriter > 0 && (static_cast<uint64_t>(i) + 1) == options.erroriter && !errordone) {
             eng->error();
@@ -623,11 +623,11 @@ int App::runPrpOrLlMarin()
             lastBackup = now;
             spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
         }
-        /*if (options.proof && (static_cast<uint64_t>(i) + 1) < totalIters) {
+        if (options.proof && static_cast<uint64_t>(i) < totalIters) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
-            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
-        }*/
+            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i));
+        }
         lastIter = i;
         lastJ = j;
     }
@@ -643,11 +643,10 @@ int App::runPrpOrLlMarin()
     uint64_t res64 = 0;
     const bool is_prp = eng->is_one(d, res64);
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
-    
-    if (options.mode == "prp") prp3_div9(p, words);
+    //if (options.mode == "prp") prp3_div9(p, words);
+
     std::string res64_hex    = format_res64_hex(words);
     std::string res2048_hex  = format_res2048_hex(words);
-    
 
 
     
@@ -669,7 +668,7 @@ int App::runPrpOrLlMarin()
     eng->set_multiplicand(2, 2);
     eng->mul(1, 2);
 
-    //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+    if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
 
     spinner.displayProgress(
         totalIters,
@@ -679,7 +678,7 @@ int App::runPrpOrLlMarin()
         options.wagstaff ? p / 2 : p,
         resumeIter,
         startIter,
-        res64_hex
+        res64_x
     );
 
     if (options.wagstaff) {
@@ -705,7 +704,7 @@ int App::runPrpOrLlMarin()
     std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
 
     logger.logEnd(elapsed_time);
-    
+
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -716,12 +715,14 @@ int App::runPrpOrLlMarin()
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
         }
     }
+    std::string res64_str = to_hex16(res64);
+
 
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
         is_prp,
-        res64_hex,
+        res64_str,
         res2048_hex
     );
 
