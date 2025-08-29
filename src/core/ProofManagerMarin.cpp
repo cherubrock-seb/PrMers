@@ -77,39 +77,54 @@ void ProofManagerMarin::checkpoint(cl_mem buf, uint32_t iter) {
     }
 }
 
+bool ProofManagerMarin::shouldCheckpoint(uint32_t iter) const {
+  return proofSet_.shouldCheckpoint(iter);
+}
 
-void ProofManagerMarin::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
-    if (! proofSet_.shouldCheckpoint(iter)) return;
+void ProofManagerMarin::checkpointMarin(std::vector<uint64_t> host, uint32_t iter)
+{
+    if (!proofSet_.shouldCheckpoint(iter)) return;
 
-    // Get residue from NTT buffer using compactBits
-    auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
-    
-    // Save in PRPLL-compatible format
+    digitWidth_.resize(host.size());
+    std::vector<uint64_t> digits(host.size());
+
+    for (size_t i = 0; i < host.size(); ++i)
+    {
+        uint64_t x = host[i];
+        uint32_t v = static_cast<uint32_t>(x);
+        uint32_t w = static_cast<uint8_t>(x >> 32);
+        digitWidth_[i] = static_cast<uint8_t>(w);
+        if (w == 0) digits[i] = 0;
+        else if (w >= 32) digits[i] = static_cast<uint64_t>(v);
+        else digits[i] = static_cast<uint64_t>(v & ((1u << w) - 1));
+    }
+
+    auto words = io::JsonBuilder::compactBits(digits, digitWidth_, exponent_);
     proofSet_.save(iter, words);
-    
-    // Verify the checkpoint by loading it back and comparing
-    try {
+
+    try
+    {
         auto loadedWords = proofSet_.load(iter);
-        
-        // Compare the saved and loaded data
-        if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
-                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
+        if (words.size() != loadedWords.size())
+        {
+            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
             return;
         }
-        
-        for (size_t i = 0; i < words.size(); ++i) {
-            if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
-                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
+        for (size_t i = 0; i < words.size(); ++i)
+        {
+            if (words[i] != loadedWords[i])
+            {
+                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
                 return;
             }
         }
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
-                  << ": " << e.what() << std::endl;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter << ": " << e.what() << std::endl;
     }
 }
+
 
 std::filesystem::path ProofManagerMarin::proof() const {
     try {
