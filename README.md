@@ -66,19 +66,6 @@ Intel HD Graphics (OpenCL 1.2 legacy)
   | 1257787   | 245.44 | 0d 1h 24m 0s    |
   | 756839    | 249.23 | 0d 0h 49m 53s   |
 
-Full Performance Table on Radeon VII
-  | Exponent  | Iter/s  | ETA            |
-  |-----------|---------|----------------|
-  | 136279841 | 275.75  | 5d 17h 15m 57s |
-  | 82589933  | 473.57  | 2d 0h 25m 47s  |
-  | 77232917  | 474.60  | 1d 21h 11m 22s |
-  | 74207281  | 473.48  | 1d 19h 31m 18s |
-  | 57885161  | 473.77  | 1d 9h 55m 28s  |
-  | 43112609  | 469.56  | 1d 1h 29m 25s  |
-  | 42643801  | 471.80  | 1d 1h 5m 35s   |
-  | 37156667  | 849.48  | 0d 12h 8m 10s  |
-
-
 Requirements
 ------------
 - OpenCL drivers for your GPU
