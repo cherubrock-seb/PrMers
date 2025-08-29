@@ -455,7 +455,7 @@ public:
 
 		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << std::endl << std::endl;
 
-		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
+		if (!_gpu->read_OpenCL("kernels/marin.cl", "src/marin/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
 		_gpu->load_program(src.str());
 		_gpu->alloc_memory();
