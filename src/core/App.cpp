@@ -658,21 +658,23 @@ int App::runPrpOrLlMarin()
             lastBackup = now;
             spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
         }
-        /*if (options.proof && (static_cast<uint64_t>(i) + 1) < totalIters) {
+        if (options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
-            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
-        }*/
+            proofManagerMarin.checkpointMarin(d, iter + 1);
+        }
     }
 
-    /*if (options.proof) {
+    if (options.proof) {
         std::vector<uint64> d(eng->get_size());
         eng->get(d.data(), 0);
         proofManagerMarin.checkpointMarin(d, totalIters);
-    }*/
+    }
 
     std::vector<uint64> d(eng->get_size());
-	eng->get(d.data(), R0);
+	eng->get(d.data(), 0);
+    
+
     uint64_t res64 = 0;
     bool is_prp_prime = false;
     if (options.mode == "ll") {
@@ -747,7 +749,7 @@ int App::runPrpOrLlMarin()
         std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "prime" : "composite");
     }		
     logger.logEnd(elapsed_time);
-/*
+
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -757,7 +759,7 @@ int App::runPrpOrLlMarin()
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
         }
-    }*/
+    }
     
 
     std::string json = io::JsonBuilder::generate(

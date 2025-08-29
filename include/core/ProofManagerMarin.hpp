@@ -24,6 +24,7 @@ public:
     void checkpoint(cl_mem buf, uint32_t iter);    
     void checkpointMarin(std::vector<uint64_t> host, uint32_t iter);
     std::filesystem::path proof() const;
+    bool shouldCheckpoint(uint32_t iter) const;
 
 private:
     ProofSetMarin           proofSet_;
