@@ -98,24 +98,24 @@ Quick Start
 
 Command-Line Options (selected)
 -------------------------------
-<p>                 exponent to test (Mersenne p)
--d <id>            OpenCL device id
--prp               force PRP mode (default)
--ll                Lucas–Lehmer mode
--pm1               P-1 factoring; use -b1 <B1> and optional -b2 <B2>
--factors <csv>     known factors, test the remaining Mersenne cofactor
--t <sec>           checkpoint interval (default 60)
--f <path>          checkpoint directory (default .)
--proof <k>         set proof power (1..12) or 0 to disable
--user <name>       PrimeNet username (for submission)
--computer <name>   PrimeNet computer name
---noask            auto-submit results (requires -user and -password)
--password <pwd>    PrimeNet password (only with --noask)
--worktodo [path]   load exponent from PRP= line in worktodo file
--config <path>     load options from a .cfg file
--res64_display_interval <n>  print residues every n iterations
--erroriter <i>     inject fault at iteration i (PRP Gerbicz–Li testing)
--marin             disable the Marin backend (use legacy NTT backend)
+<p>                         exponent to test (Mersenne p)
+-d <id>                     OpenCL device id
+-prp                        force PRP mode (default)
+-ll                         Lucas–Lehmer mode
+-pm1                        P-1 factoring; use -b1 and optional -b2
+-factors <csv>              known factors, test the remaining Mersenne cofactor
+-t <sec>                    checkpoint interval (default 60)
+-f <path>                   checkpoint directory (default .)
+-proof <k>                  set proof power (1..12) or 0 to disable
+-user <name>                PrimeNet username (for submission)
+-computer <name>            PrimeNet computer name
+--noask                     auto-submit results (requires -user and -password)
+-password <pwd>             PrimeNet password (only with --noask)
+-worktodo [path]            load exponent from PRP= line in worktodo file
+-config <path>              load options from a .cfg file
+-res64_display_interval <n> print residues every n iterations
+-erroriter <i>              inject fault at iteration i (PRP Gerbicz–Li testing)
+-marin                      disable the Marin backend (use legacy NTT backend)
 
 Gerbicz–Li (PRP)
 ----------------
@@ -152,8 +152,12 @@ Build Notes
 Linux:
   sudo apt-get update
   sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev g++ make
+
 macOS:
-  Xcode CLT, curl available; OpenCL is preinstalled on supported versions.
+  Xcode Command Line Tools installed
+  curl available
+  OpenCL is preinstalled on supported macOS versions
+
 Windows (CMake + vcpkg recommended):
   vcpkg install curl:x64-windows
   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
