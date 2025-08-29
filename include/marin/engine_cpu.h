@@ -207,7 +207,7 @@ private:
 			const size_t m = size_t(1) << lm, m5 = size_t(5) << lm;
 			for (size_t id = 0; id < n_4; ++id)
 			{
-				const uint32_t id5 = uint32_t((uint64_t(id) * 858993460u) >> 32);	// id5 = id / 5 if id < 2^30
+				const uint32 id5 = uint32((uint64(id) * 858993460u) >> 32);	// id5 = id / 5 if id < 2^30
 				const size_t j = id5 >> lm, k = 3 * 5 * (id5 & ~(m - 1)) + id;
 				fwd4(x[k + 0 * m5], x[k + 1 * m5], x[k + 2 * m5], x[k + 3 * m5], r2[j], r4[2 * j + 0], r4[2 * j + 1]);
 			}
@@ -227,7 +227,7 @@ private:
 			const size_t m = size_t(1) << lm, m5 = size_t(5) << lm;
 			for (size_t id = 0; id < n_4; ++id)
 			{
-				const uint32_t id5 = uint32_t((uint64_t(id) * 858993460u) >> 32);	// id5 = id / 5 if id < 2^30
+				const uint32 id5 = uint32((uint64(id) * 858993460u) >> 32);	// id5 = id / 5 if id < 2^30
 				const size_t j = id5 >> lm, k = 3 * 5 * (id5 & ~(m - 1)) + id;
 				bck4(x[k + 0 * m5], x[k + 1 * m5], x[k + 2 * m5], x[k + 3 * m5], r2i[j], r4i[2 * j + 0], r4i[2 * j + 1]);
 			}
@@ -426,7 +426,7 @@ public:
 	{
 		const size_t n = get_size();
 		const uint64 * const x = &_reg[size_t(src) * n];
-		const uint64 * const wi_n = &_weight[n];
+		const uint64 * const wi = &_weight[2 * n];
 		const uint8 * const width = _digit_width;
 
 		for (size_t k = 0; k < n; ++k) d[k] = x[k];
@@ -442,13 +442,9 @@ public:
 			}
 		}
 
-		// unweight
-		const uint64 m = uint64((n % 5 == 0) ? n : n / 2);
-		for (size_t k = 0; k < n; ++k) d[k] = mod_mul(d[k], mod_mul(wi_n[k], m));
-
-		// carry (strong)
+		// unweight, carry (strong)
 		uint64 c = 0;
-		for (size_t k = 0; k < n; ++k) d[k] = adc(d[k], width[k], c);
+		for (size_t k = 0; k < n; ++k) d[k] = adc(mod_mul(d[k], wi[k]), width[k], c);
 
 		while (c != 0)
 		{
@@ -482,7 +478,7 @@ public:
 		return true;
 	}
 
-	void square_mul(const Reg src, const uint32_t a = 1) const override
+	void square_mul(const Reg src, const uint32 a = 1) const override
 	{
 		const size_t n = get_size();
 		uint64 * const x = &_reg[size_t(src) * n];
@@ -512,6 +508,50 @@ public:
 		if (n % 5 == 0) { forward5(x); mul10(x, y); backward5(x); }
 		else { forward4(x); mul4(x, y); backward4(x); }
 		if (get_even()) carry_weight_mul(x); else carry_weight_mul2(x);
+	}
+
+	void sub(const Reg src, const uint32 a) const override
+	{
+		const size_t n = get_size();
+		uint64 * const x = &_reg[size_t(src) * n];
+		const uint64 * const w = &_weight[0];
+		const uint64 * const wi = &_weight[2 * n];
+		const uint8 * const width = _digit_width;
+
+		uint32 c = a;
+		while (c != 0)
+		{
+			if (get_even())
+			{
+				// Unweight, sub with carry, weight
+				for (size_t k = 0; k < n; ++k)
+				{
+					x[k] = mod_mul(sbc(mod_mul(x[k], wi[k]), width[k], c), w[k]);
+					if (c == 0) return;
+				}
+			}
+			else
+			{
+				// Inverse radix-2, unweight, sub with carry, weight, radix-2
+				const size_t n_2 = n / 2;
+				for (size_t k = 0; k < n_2; ++k)
+				{
+					const uint64 u0 = x[k + 0 * n_2], u1 = x[k + 1 * n_2];
+					const uint64 v0 = mod_half(mod_add(u0, u1)), v1 = mod_half(mod_sub(u0, u1));
+					const uint64 v0n = mod_mul(sbc(mod_mul(v0, wi[k + 0 * n_2]), width[k + 0 * n_2], c), w[k + 0 * n_2]);
+					x[k + 0 * n_2] = mod_add(v0n, v1); x[k + 1 * n_2] = mod_sub(v0n, v1);
+					if (c == 0) return;
+				}
+				for (size_t k = 0; k < n_2; ++k)
+				{
+					const uint64 u0 = x[k + 0 * n_2], u1 = x[k + 1 * n_2];
+					const uint64 v0 = mod_half(mod_add(u0, u1)), v1 = mod_half(mod_sub(u0, u1));
+					const uint64 v1n = mod_mul(sbc(mod_mul(v1, wi[k + 1 * n_2]), width[k + 1 * n_2], c), w[k + 1 * n_2]);
+					x[k + 0 * n_2] = mod_add(v0, v1n); x[k + 1 * n_2] = mod_sub(v0, v1n);
+					if (c == 0) return;
+				}
+			}
+		}
 	}
 
 	void error() const override

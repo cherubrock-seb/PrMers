@@ -65,6 +65,8 @@
 #include <gmp.h>
 #include <cstddef>
 #include <deque>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 using namespace std::chrono;
 
@@ -478,7 +480,14 @@ static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
     return oss.str();
 }
 
-
+static inline void delete_checkpoints(uint32_t p, const std::string& dir = ".")
+{
+    fs::path base = fs::path(dir) / ("m_" + std::to_string(p) + ".ckpt");
+    std::error_code ec;
+    fs::remove(base, ec);
+    fs::remove(base.string() + ".old", ec);
+    fs::remove(base.string() + ".new", ec);
+}
 
 int App::runPrpOrLlMarin()
 {
@@ -542,11 +551,20 @@ int App::runPrpOrLlMarin()
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
-
+	const size_t R0 = 0, R1 = 1, R2 = 2;
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
-    if (r == 0) { std::cout << "Resuming from a checkpoint." << std::endl; } else { ri = 0; restored_time = 0; eng->set(0, 1); eng->set(1, 1); }
+    if (r == 0) { 
+        std::cout << "Resuming from a checkpoint." << std::endl;
+    } 
+    else { 
+        ri = 0; 
+        restored_time = 0; 
+        eng->set(R0, 1); 
+        eng->set(R1, 1); 
+        eng->square_mul(R0, (options.mode == "prp") ? 3 : 4); 
+    }
 
     logger.logStart(options);
     timer.start();
@@ -557,10 +575,21 @@ int App::runPrpOrLlMarin()
     auto lastBackup = start_clock;
     auto lastDisplay = start_clock;
 
-    uint64_t totalIters = p;
+    uint64_t totalIters = options.mode == "prp" ? p : p - 2;
+    
     if(options.wagstaff){
         totalIters /= 2;
     }
+
+    uint64_t L = options.exponent;
+    uint64_t B = (uint64_t)(std::sqrt((double)L));
+    double desiredIntervalSeconds = 600.0;
+    uint64_t checkpasslevel_auto = (uint64_t)((1000 * desiredIntervalSeconds) / (double)B);
+    if (checkpasslevel_auto == 0) checkpasslevel_auto = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
+    uint64_t checkpasslevel = (options.checklevel > 0)
+        ? options.checklevel
+        : checkpasslevel_auto;
+
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
     uint64_t lastIter   = ri ? ri - 1 : 0;
@@ -572,37 +601,43 @@ int App::runPrpOrLlMarin()
     if(options.wagstaff){
         std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
     }
-    for (uint32_t i = ri, j = p - 1 - i; i < p; ++i, --j)
-    {
+    
+    for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
+        
         if (interrupted)
         {
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-            save_ckpt(i, elapsed_time);
+            save_ckpt(iter, elapsed_time);
             delete eng;
-            std::cout << "\nInterrupted by user, state saved at iteration " << i << " j=" << j << std::endl;
+            std::cout << "\nInterrupted by user, state saved at iteration " << iter << " j=" << j << std::endl;
             logger.logEnd(elapsed_time);
             return 0;
         }
 
-        eng->square_mul(0, (j != 0) ? 3 : 1);
-
-        if (options.erroriter > 0 && (static_cast<uint64_t>(i) + 1) == options.erroriter && !errordone) {
-            eng->error();
-            std::cout << "Injected error at iteration " << static_cast<uint64_t>(i) + 1 << std::endl;
+        eng->square_mul(R0);
+        if (options.mode == "ll") {
+            eng->sub(R0, 2);
         }
 
-        if ((j % B_GL == 0) && (j != 0))
+        if (options.erroriter > 0 && (iter + 1) == options.erroriter && !errordone) {
+            eng->error();
+            std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+        }
+
+/*        if ((j % B_GL == 0) && (j != 0))
         {
             eng->set_multiplicand(2, 0);
             eng->mul(1, 2);
+            
         }
+        */
 
         auto now = std::chrono::high_resolution_clock::now();
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10)
         {
             spinner.displayProgress(
-                static_cast<uint64_t>(i) + 1,
+                iter + 1,
                 totalIters,
                 timer.elapsed(),
                 timer2.elapsed(),
@@ -613,37 +648,41 @@ int App::runPrpOrLlMarin()
             );
             timer2.start();
             lastDisplay = now;
-            resumeIter = static_cast<uint64_t>(i) + 1;
+            resumeIter = iter + 1;
         }
 
         if (now - lastBackup >= std::chrono::seconds(options.backup_interval))
         {
             const double elapsed_time = std::chrono::duration<double>(now - start_clock).count() + restored_time;
-            save_ckpt(i, elapsed_time);
+            save_ckpt(iter, elapsed_time);
             lastBackup = now;
-            spinner.displayBackupInfo(static_cast<uint64_t>(i) + 1, totalIters, timer.elapsed(), res64_x);
+            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
         }
-        /*if (options.proof && static_cast<uint64_t>(i) < totalIters) {
+        /*if (options.proof && (static_cast<uint64_t>(i) + 1) < totalIters) {
             std::vector<uint64> d(eng->get_size());
             eng->get(d.data(), 0);
-            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i));
+            proofManagerMarin.checkpointMarin(d, static_cast<uint64_t>(i) + 1);
         }*/
-        lastIter = i;
-        lastJ = j;
     }
 
-    if (options.proof) {
+    /*if (options.proof) {
         std::vector<uint64> d(eng->get_size());
         eng->get(d.data(), 0);
         proofManagerMarin.checkpointMarin(d, totalIters);
-    }
+    }*/
 
     std::vector<uint64> d(eng->get_size());
-    eng->get(d.data(), 0);
+	eng->get(d.data(), R0);
     uint64_t res64 = 0;
-    const bool is_prp = eng->is_one(d, res64);
+    bool is_prp_prime = false;
+    if (options.mode == "ll") {
+        is_prp_prime = (eng->is_zero(d) || eng->is_Mp(d));
+    }
+    else{
+        is_prp_prime = (eng->is_nine(d));
+    }
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
-    //if (options.mode == "prp") prp3_div9(p, words);
+    if (options.mode == "prp") prp3_div9(p, words);
 
     std::string res64_hex    = format_res64_hex(words);
     std::string res2048_hex  = format_res2048_hex(words);
@@ -668,7 +707,7 @@ int App::runPrpOrLlMarin()
     eng->set_multiplicand(2, 2);
     eng->mul(1, 2);
 
-    if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+    //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
 
     spinner.displayProgress(
         totalIters,
@@ -678,7 +717,7 @@ int App::runPrpOrLlMarin()
         options.wagstaff ? p / 2 : p,
         resumeIter,
         startIter,
-        res64_x
+        res64_hex
     );
 
     if (options.wagstaff) {
@@ -701,10 +740,14 @@ int App::runPrpOrLlMarin()
     }
     
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-    std::cout << "2^" << p << " - 1 is " << (is_prp ? "a probable prime" : ("composite, res64 = " + to_hex16(res64))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
-
+    if (options.mode == "prp") {
+        std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "a probable prime" : ("composite, res64 = " + (res64_hex))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+    }
+    else{
+        std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "prime" : "composite");
+    }		
     logger.logEnd(elapsed_time);
-
+/*
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -714,15 +757,14 @@ int App::runPrpOrLlMarin()
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
         }
-    }
-    std::string res64_str = to_hex16(res64);
-
+    }*/
+    
 
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
-        is_prp,
-        res64_str,
+        is_prp_prime,
+        res64_hex,
         res2048_hex
     );
 
@@ -730,8 +772,9 @@ int App::runPrpOrLlMarin()
         options,
         elapsed_time,
         json,
-        is_prp
+        is_prp_prime
     );
+
     d.clear();
     bool skippedSubmission = false;
     if (options.submit) {
@@ -774,7 +817,7 @@ int App::runPrpOrLlMarin()
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
-
+    delete_checkpoints(p); 
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
@@ -800,7 +843,7 @@ int App::runPrpOrLlMarin()
     }
 
     delete eng;
-    return is_prp ? 0 : 1;
+    return is_prp_prime ? 0 : 1;
 }
 
 

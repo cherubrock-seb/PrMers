@@ -10,9 +10,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <cstdint>
 #include <bit>
 
-static constexpr int ilog2_32(uint32_t n) {
-    return std::bit_width(n) ? int(std::bit_width(n) - 1) : -1;
-}
+static constexpr int ilog2_32(const uint32_t n) { return int(std::bit_width(n)) - 1; }
 
 #define INLINE	static inline
 
@@ -33,39 +31,24 @@ INLINE uint64 reduce(const uint64 lo, const uint64 hi)
 {
 	// hih * 2^96 + hil * 2^64 + lo = lo + hil * 2^32 - (hih + hil)
 	const uint64 r = (lo >= MOD_P) ? lo - MOD_P : lo;	// lhs * rhs < p^2 => hi * 2^32 < p^2 / 2^32 < p.
-	return mod_sub(mod_add(r, (hi << 32) - uint32_t(hi)), hi >> 32);
+	return mod_sub(mod_add(r, (hi << 32) - uint32(hi)), hi >> 32);
 }
+
 INLINE uint64 mod_mul(const uint64 lhs, const uint64 rhs)
 {
-	uint64 hi, lo;
+	uint64 lo, hi;
 #ifdef _MSC_VER
 	lo = _umul128(lhs, rhs, &hi);
 #else
-	__uint128_t t = (__uint128_t)lhs * (__uint128_t)rhs;
-	lo = uint64(t);
-	hi = uint64(t >> 64);
+	const __uint128_t t = (__uint128_t)lhs * (__uint128_t)rhs;
+	lo = uint64(t); hi = uint64(t >> 64);
 #endif
 	return reduce(lo, hi);
 }
 
-INLINE uint64 mod_sqr(const uint64 lhs)
-{
-	return mod_mul(lhs, lhs);
-}
+INLINE uint64 mod_sqr(const uint64 lhs) { return mod_mul(lhs, lhs); }
 
-INLINE uint64 mod_muli(const uint64 lhs)
-{
-	uint64 hi, lo;
-#ifdef _MSC_VER
-	lo = _umul128(lhs, 1ULL << 48, &hi);
-#else
-	__uint128_t t = (__uint128_t)lhs << 48;
-	lo = uint64(t);
-	hi = uint64(t >> 64);
-#endif
-	return reduce(lo, hi);
-}
-
+INLINE uint64 mod_muli(const uint64 lhs) { return reduce(lhs << 48, lhs >> (64 - 48)); }
 
 INLINE uint64 mod_half(const uint64 lhs) { return ((lhs % 2 == 0) ? lhs / 2 : ((lhs - 1) / 2 + (MOD_P + 1) / 2)); }
 
@@ -103,5 +86,14 @@ INLINE uint32 adc_mul(const uint64 lhs, const uint32 a, const uint8 width, uint6
 	const uint32 d = adc(lhs, width, c);
 	const uint32 r = adc(uint64(d) * a, width, carry);
 	carry += a * c;
+	return r;
+}
+
+// Subtract a carry and return the carry if borrowing
+INLINE uint64 sbc(const uint64 lhs, const uint8 width, uint32 & carry)
+{
+	const bool borrow = (lhs < carry);
+	const uint64 r = lhs - carry + (borrow ? (uint64(1) << width) : 0);
+	carry = borrow ? 1 : 0;
 	return r;
 }

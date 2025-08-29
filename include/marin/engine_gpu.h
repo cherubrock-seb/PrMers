@@ -69,6 +69,7 @@ private:
 
 	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_mul_p2 = nullptr, _carry_weight_mul2_p1 = nullptr, _carry_weight_mul2_p2 = nullptr;
 	cl_kernel _copy = nullptr;
+	cl_kernel _subtract = nullptr, _subtract2 = nullptr;
 
 	std::vector<cl_kernel> _kernels;
 
@@ -167,6 +168,16 @@ public:
 		return kernel;
 	}
 
+	cl_kernel create_kernel_subtract(const char * const kernel_name)
+	{
+		cl_kernel kernel = _create_kernel(kernel_name);
+		_set_kernel_arg(kernel, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(kernel, 1, sizeof(cl_mem), &_weight);
+		_set_kernel_arg(kernel, 2, sizeof(cl_mem), &_digit_width);
+		_kernels.push_back(kernel);
+		return kernel;
+	}
+
 	void create_kernels()
 	{
 #if defined(ocl_debug)
@@ -252,6 +263,9 @@ public:
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
 		_kernels.push_back(_copy);
+
+		_subtract = create_kernel_subtract("subtract");
+		_subtract2 = create_kernel_subtract("subtract2");
 	}
 
 	void release_kernels()
@@ -378,6 +392,20 @@ public:
 		_set_kernel_arg(_copy, 2, sizeof(uint32), &offset_x);
 		_execute_kernel(_copy, _n);
 	}
+
+	void ek_sub(cl_kernel & kernel, const size_t src, const uint32 a)
+	{
+		const uint32 offset = uint32(src * _n);
+		_set_kernel_arg(kernel, 3, sizeof(uint32), &offset);
+		_set_kernel_arg(kernel, 4, sizeof(uint32), &a);
+		_execute_kernel(kernel, 1);
+	}
+
+	void subtract(const size_t src, const uint32 a)
+	{
+		if (_even) ek_sub(_subtract, src, a);
+		else ek_sub(_subtract2, src, a);
+	}
 };
 
 class engine_gpu : public engine
@@ -470,7 +498,7 @@ public:
 	void get(uint64 * const d, const Reg src) const override
 	{
 		const size_t n = get_size();
-		const uint64 * const wi_n = &_weight[n];
+		const uint64 * const wi = &_weight[2 * n];
 		const uint8 * const width = &_digit_width[0];
 
 		_gpu->read_reg(d, size_t(src));
@@ -486,13 +514,9 @@ public:
 			}
 		}
 
-		// unweight
-		const uint64 m = uint64((n % 5 == 0) ? n : n / 2);
-		for (size_t k = 0; k < n; ++k) d[k] = mod_mul(d[k], mod_mul(wi_n[k], m));
-
-		// carry (strong)
+		// unweight, carry (strong)
 		uint64 c = 0;
-		for (size_t k = 0; k < n; ++k) d[k] = adc(d[k], width[k], c);
+		for (size_t k = 0; k < n; ++k) d[k] = adc(mod_mul(d[k], wi[k]), width[k], c);
 
 		while (c != 0)
 		{
@@ -594,7 +618,7 @@ public:
 		}
 	}
 
-	void square_mul(const Reg rsrc, const uint32_t a = 1) const override
+	void square_mul(const Reg rsrc, const uint32 a = 1) const override
 	{
 		const size_t n = get_size(), src = size_t(rsrc), wg_size = _gpu->get_max_workgroup_size();
 		switch (n)
@@ -729,6 +753,8 @@ public:
 
 		_gpu->carry_weight_mul(dst, 1);
 	}
+
+	void sub(const Reg src, const uint32 a) const override { _gpu->subtract(size_t(src), a); }
 
 	void error() const override
 	{

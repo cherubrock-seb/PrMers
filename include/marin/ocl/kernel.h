@@ -154,6 +154,15 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
+"// Subtract a carry and return the carry if borrowing\n" \
+"INLINE uint64 sbc(const uint64 lhs, const uint_8 width, uint32 * const carry)\n" \
+"{\n" \
+"	const bool borrow = (lhs < *carry);\n" \
+"	const uint64 r = lhs - *carry + (borrow ? (1u << width) : 0);\n" \
+"	*carry = borrow ? 1 : 0;\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
 "// --- transform - inline ---\n" \
 "\n" \
 "// Radix-2\n" \
@@ -1589,5 +1598,56 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
 "	reg[offset_y + gid] = reg[offset_x + gid];\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void subtract(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,\n" \
+"	__global const uint_8 * restrict const width, const sz_t offset, const uint32 a)\n" \
+"{\n" \
+"	__global uint64 * restrict const x = &reg[offset];\n" \
+"	__global const uint64 * restrict const weighti = &weight[2 * N_SZ];\n" \
+"\n" \
+"	uint32 c = a;\n" \
+"	while (c != 0)\n" \
+"	{\n" \
+"		// Unweight, sub with carry, weight\n" \
+"		for (size_t k = 0; k < N_SZ; ++k)\n" \
+"		{\n" \
+"			x[k] = mod_mul(sbc(mod_mul(x[k], weighti[k]), width[k], &c), weight[k]);\n" \
+"			if (c == 0) return;\n" \
+"		}\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"#define N_SZ_2	(N_SZ / 2)\n" \
+"\n" \
+"__kernel\n" \
+"void subtract2(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,\n" \
+"	__global const uint_8 * restrict const width, const sz_t offset, const uint32 a)\n" \
+"{\n" \
+"	__global uint64 * restrict const x = &reg[offset];\n" \
+"	__global const uint64 * restrict const weighti = &weight[2 * N_SZ];\n" \
+"\n" \
+"	uint32 c = a;\n" \
+"	while (c != 0)\n" \
+"	{\n" \
+"		// Inverse radix-2, unweight, sub with carry, weight, radix-2\n" \
+"		for (size_t k = 0; k < N_SZ_2; ++k)\n" \
+"		{\n" \
+"			const uint64 u0 = x[k + 0 * N_SZ_2], u1 = x[k + 1 * N_SZ_2];\n" \
+"			const uint64 v0 = mod_half(mod_add(u0, u1)), v1 = mod_half(mod_sub(u0, u1));\n" \
+"			const uint64 v0n = mod_mul(sbc(mod_mul(v0, weighti[k + 0 * N_SZ_2]), width[k + 0 * N_SZ_2], &c), weight[k + 0 * N_SZ_2]);\n" \
+"			x[k + 0 * N_SZ_2] = mod_add(v0n, v1); x[k + 1 * N_SZ_2] = mod_sub(v0n, v1);\n" \
+"			if (c == 0) return;\n" \
+"		}\n" \
+"		for (size_t k = 0; k < N_SZ_2; ++k)\n" \
+"		{\n" \
+"			const uint64 u0 = x[k + 0 * N_SZ_2], u1 = x[k + 1 * N_SZ_2];\n" \
+"			const uint64 v0 = mod_half(mod_add(u0, u1)), v1 = mod_half(mod_sub(u0, u1));\n" \
+"			const uint64 v1n = mod_mul(sbc(mod_mul(v1, weighti[k + 1 * N_SZ_2]), width[k + 1 * N_SZ_2], &c), weight[k + 1 * N_SZ_2]);\n" \
+"			x[k + 0 * N_SZ_2] = mod_add(v0, v1n); x[k + 1 * N_SZ_2] = mod_sub(v0, v1n);\n" \
+"			if (c == 0) return;\n" \
+"		}\n" \
+"	}\n" \
 "}\n" \
 "";
