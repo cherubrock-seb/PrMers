@@ -497,7 +497,7 @@ int App::runPrpOrLlMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
 
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(3), static_cast<size_t>(options.device_id), verbose);
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(4), static_cast<size_t>(options.device_id), verbose);
 
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
@@ -551,7 +551,7 @@ int App::runPrpOrLlMarin()
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
-	const size_t R0 = 0, R1 = 1, R2 = 2;
+	const size_t R0 = 0, R1 = 1, R2 = 2, R3=3;
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
@@ -561,9 +561,9 @@ int App::runPrpOrLlMarin()
     else { 
         ri = 0; 
         restored_time = 0; 
-        eng->set(R0, 1); 
+        
         eng->set(R1, 1); 
-        eng->square_mul(R0, (options.mode == "prp") ? 3 : 4); 
+        eng->set(R0, (options.mode == "prp") ? 3  : 4); 
     }
 
     logger.logStart(options);
@@ -584,18 +584,21 @@ int App::runPrpOrLlMarin()
     uint64_t L = options.exponent;
     uint64_t B = (uint64_t)(std::sqrt((double)L));
     double desiredIntervalSeconds = 600.0;
+    uint64_t checkpass = 0;
+
     uint64_t checkpasslevel_auto = (uint64_t)((1000 * desiredIntervalSeconds) / (double)B);
     if (checkpasslevel_auto == 0) checkpasslevel_auto = (totalIters/B)/((uint64_t)(std::sqrt((double)B)));
     uint64_t checkpasslevel = (options.checklevel > 0)
         ? options.checklevel
         : checkpasslevel_auto;
-
+    if(checkpasslevel==0)
+        checkpasslevel=1;
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
     uint64_t lastIter   = ri ? ri - 1 : 0;
     uint64_t lastJ      = p - 1 - ri;
     std::string res64_x;
-
+    
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p, resumeIter, startIter, res64_x);
     bool errordone = false;
     if(options.wagstaff){
@@ -629,8 +632,30 @@ int App::runPrpOrLlMarin()
             eng->set_multiplicand(2, 0);
             eng->mul(1, 2);
             
-        }
-        */
+        }*/
+       
+        if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
+            checkpass += 1;
+            eng->set(R3, 1);
+            eng->set_multiplicand(R2, R1);
+            eng->mul(R3, R2);
+            eng->set_multiplicand(R2, R0);
+            eng->mul(R1, R2);
+            bool condcheck = !(checkpass != checkpasslevel && (iter != totalIters - 1));
+            
+            if (condcheck) {
+                    checkpass = 0;
+                    for (uint64_t z = 0; z < B - (options.exponent % B) - 1; ++z) {
+                        eng->square_mul(R3);
+                    }
+                    eng->square_mul(R3, 3);
+                    for (uint64_t z = 0; z < (options.exponent % B); ++z) {
+                        eng->square_mul(R3);
+                    }
+                    if (!eng->is_equal(R3, R1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+            }
+
+        } 
 
         auto now = std::chrono::high_resolution_clock::now();
 
@@ -692,24 +717,6 @@ int App::runPrpOrLlMarin()
 
     
 
-    eng->set_multiplicand(2, 1);
-    eng->mul(0, 2);
-    for (uint32_t i = 0; i < B_GL; ++i) eng->square_mul(1);
-
-    mpz_t res, t;
-    mpz_init_set_ui(res, p / B_GL); mpz_mul_2exp(res, res, B_GL);
-    mpz_init_set_ui(t, 1); mpz_mul_2exp(t, t, p % B_GL);
-    mpz_add(res, res, t); mpz_sub_ui(res, res, p / B_GL + 2);
-    mpz_clear(t);
-
-    eng->set(2, 1);
-    for (uint32_t i = uint32_t(mpz_sizeinbase(res, 2)); i > 0; --i) eng->square_mul(2, (mpz_tstbit(res, i - 1) != 0) ? 3 : 1);
-    mpz_clear(res);
-
-    eng->set_multiplicand(2, 2);
-    eng->mul(1, 2);
-
-    //if (!eng->is_equal(0, 1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
 
     spinner.displayProgress(
         totalIters,
