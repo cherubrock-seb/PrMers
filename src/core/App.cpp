@@ -565,8 +565,8 @@ int App::runPrpOrLlMarin()
         eng->set(R1, 1); 
         eng->set(R0, (options.mode == "prp") ? 3  : 4); 
     }
-    eng->copy(R0, R4);//Last correct state
-    eng->copy(R1, R5);//Last correct bufd
+    eng->copy(R4, R0);//Last correct state
+    eng->copy(R5, R1);//Last correct bufd
     logger.logStart(options);
     timer.start();
     timer2.start();
@@ -669,13 +669,13 @@ int App::runPrpOrLlMarin()
                         }
                         checkpass = 0;
                         options.gerbicz_error_count += 1;
-                        eng->copy(R4, R0);
-                        eng->copy(R5, R1);
+                        eng->copy(R0, R4);
+                        eng->copy(R1, R5);
                     }
                     else{
                         std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
-                        eng->copy(R0, R4);//Last correct state
-                        eng->copy(R1, R5);//Last correct bufd
+                        eng->copy(R4, R0);//Last correct state
+                        eng->copy(R5, R1);//Last correct bufd
                         itersave = iter;
                         jsave = j;
                         cl_event postEvt;
