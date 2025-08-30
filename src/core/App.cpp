@@ -497,7 +497,7 @@ int App::runPrpOrLlMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
 
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(4), static_cast<size_t>(options.device_id), verbose);
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), verbose);
 
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
@@ -551,7 +551,7 @@ int App::runPrpOrLlMarin()
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
-	const size_t R0 = 0, R1 = 1, R2 = 2, R3=3;
+	const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4,  R5 = 5;
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
@@ -565,7 +565,8 @@ int App::runPrpOrLlMarin()
         eng->set(R1, 1); 
         eng->set(R0, (options.mode == "prp") ? 3  : 4); 
     }
-
+    eng->copy(R0, R4);//Last correct state
+    eng->copy(R1, R5);//Last correct bufd
     logger.logStart(options);
     timer.start();
     timer2.start();
@@ -579,6 +580,12 @@ int App::runPrpOrLlMarin()
     
     if(options.wagstaff){
         totalIters /= 2;
+    }
+
+    uint64_t itersave =  backupManager.loadGerbiczIterSave();
+    uint64_t jsave = backupManager.loadGerbiczJSave();
+    if(jsave==0){
+        jsave = totalIters - 1;
     }
 
     uint64_t L = options.exponent;
@@ -606,7 +613,8 @@ int App::runPrpOrLlMarin()
     }
     
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters; ++iter, --j) {
-        
+        lastJ = j;
+        lastIter = iter;
         if (interrupted)
         {
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
@@ -623,17 +631,11 @@ int App::runPrpOrLlMarin()
         }
 
         if (options.erroriter > 0 && (iter + 1) == options.erroriter && !errordone) {
+            errordone = true;
             eng->error();
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
         }
 
-/*        if ((j % B_GL == 0) && (j != 0))
-        {
-            eng->set_multiplicand(2, 0);
-            eng->mul(1, 2);
-            
-        }*/
-       
         if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
             checkpass += 1;
             eng->copy(R3, R1);
@@ -650,7 +652,34 @@ int App::runPrpOrLlMarin()
                     for (uint64_t z = 0; z < (options.exponent % B); ++z) {
                         eng->square_mul(R3);
                     }
-                    if (!eng->is_equal(R3, R1)) { delete eng; throw std::runtime_error("Gerbicz-Li error checking failed!"); }
+                    if (!eng->is_equal(R3, R1)) 
+                    { 
+                        //delete eng; 
+                        //throw std::runtime_error("Gerbicz-Li error checking failed!"); 
+                        std::cout << "[Gerbicz Li] Mismatch \n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                        j = jsave;
+                        iter = itersave;
+                        lastIter = itersave;
+                        lastIter = iter;
+                        if (iter == 0) {
+                            iter = iter - 1;
+                            j = j + 1;
+                        }
+                        checkpass = 0;
+                        options.gerbicz_error_count += 1;
+                        eng->copy(R4, R0);
+                        eng->copy(R5, R1);
+                    }
+                    else{
+                        std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                        eng->copy(R0, R4);//Last correct state
+                        eng->copy(R1, R5);//Last correct bufd
+                        itersave = iter;
+                        jsave = j;
+                        cl_event postEvt;
+                    }
             }
 
         } 
@@ -825,6 +854,7 @@ int App::runPrpOrLlMarin()
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
     delete_checkpoints(p); 
+    backupManager.clearState();
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
