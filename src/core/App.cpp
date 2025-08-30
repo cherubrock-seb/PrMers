@@ -636,9 +636,7 @@ int App::runPrpOrLlMarin()
        
         if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
             checkpass += 1;
-            eng->set(R3, 1);
-            eng->set_multiplicand(R2, R1);
-            eng->mul(R3, R2);
+            eng->copy(R3, R1);
             eng->set_multiplicand(R2, R0);
             eng->mul(R1, R2);
             bool condcheck = !(checkpass != checkpasslevel && (iter != totalIters - 1));
