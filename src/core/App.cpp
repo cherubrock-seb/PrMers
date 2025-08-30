@@ -727,7 +727,6 @@ int App::runPrpOrLlMarin()
 	eng->get(d.data(), 0);
     
 
-    uint64_t res64 = 0;
     bool is_prp_prime = false;
     if (options.mode == "ll") {
         is_prp_prime = (eng->is_zero(d) || eng->is_Mp(d));
@@ -795,22 +794,22 @@ int App::runPrpOrLlMarin()
         }
     }
     
+    auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
 
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
-        is_prp_prime,
-        res64_hex,
-        res2048_hex
+        isPrime,
+        res64,
+        res2048
     );
 
     Printer::finalReport(
         options,
         elapsed_time,
         json,
-        is_prp_prime
+        isPrime
     );
-
     d.clear();
     bool skippedSubmission = false;
     if (options.submit) {

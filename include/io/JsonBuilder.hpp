@@ -23,6 +23,9 @@ public:
         const std::vector<uint64_t>& hostResult,
         const CliOptions& opts,
         const std::vector<int>& digit_width);
+    static std::tuple<bool, std::string, std::string> computeResultMarin(
+        const std::vector<uint64_t>& hostResult,
+        const CliOptions& opts);
 
     static std::string generate(const CliOptions& opts,
                                  int transform_size,

@@ -124,6 +124,53 @@ std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
     return std::make_tuple(isPrime, res64, res2048);
 }
 
+std::tuple<bool, std::string, std::string> JsonBuilder::computeResultMarin(
+    const std::vector<uint64_t>& hostResult,
+    const CliOptions& opts)
+{
+    std::vector<uint64_t> digits(hostResult.size());
+    std::vector<int> digit_width(hostResult.size());
+    for (size_t i = 0; i < hostResult.size(); ++i) {
+        uint64_t x = hostResult[i];
+        uint32_t v = static_cast<uint32_t>(x);
+        uint32_t w = static_cast<uint8_t>(x >> 32);
+        digit_width[i] = static_cast<int>(w);
+        if (w == 0) digits[i] = 0;
+        else if (w >= 32) digits[i] = static_cast<uint64_t>(v);
+        else digits[i] = static_cast<uint64_t>(v & ((1u << w) - 1));
+    }
+
+    mpz_class Mp = (mpz_class(1) << opts.exponent) - 1;
+    mpz_class finalResidue = util::vectToMpz(digits, digit_width, Mp);
+
+    bool isPrime;
+    if (opts.mode == "prp") {
+        mpz_class inv9;
+        mpz_invert(inv9.get_mpz_t(), mpz_class(9).get_mpz_t(), Mp.get_mpz_t());
+        finalResidue = (finalResidue * inv9) % Mp;
+        if (!opts.knownFactors.empty()) {
+            isPrime = math::Cofactor::isCofactorPRP(opts.exponent, opts.knownFactors, finalResidue);
+        } else {
+            isPrime = (finalResidue == 1);
+        }
+    } else {
+        isPrime = (finalResidue == 0);
+    }
+
+    mpz_class res64_val = finalResidue & ((mpz_class(1) << 64) - 1);
+    mpz_class res2048_val = finalResidue & ((mpz_class(1) << 2048) - 1);
+
+    std::string s64 = res64_val.get_str(16);
+    if (s64.size() < 16) s64.insert(s64.begin(), 16 - s64.size(), '0');
+    for (auto& c : s64) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    std::string s2048 = res2048_val.get_str(16);
+    if (s2048.size() < 512) s2048.insert(s2048.begin(), 512 - s2048.size(), '0');
+
+    return std::make_tuple(isPrime, s64, s2048);
+}
+
+
 std::vector<uint32_t> JsonBuilder::compactBits(
     const std::vector<uint64_t>& x,
     const std::vector<int>&      digit_width,
