@@ -795,7 +795,7 @@ int App::runPrpOrLlMarin()
     }
     
     auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
-
+    is_prp_prime = isPrime;
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
