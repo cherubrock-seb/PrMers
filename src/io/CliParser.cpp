@@ -38,17 +38,16 @@ namespace io {
 // Usage printing helper (updated with new backup and path options)
 // -----------------------------------------------------------------------------
 void printUsage(const char* progName) {
-    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-O <options>] [-c <localCarryPropagationDepth>]" << std::endl;
+    std::cout << "Usage: " << progName << " <p> [-d <device_id>] [-c <localCarryPropagationDepth>]" << std::endl;
     std::cout << "              [-profile] [-prp|-ll] [-t <backup_interval>] [-f <path>] [-computer <name>]" << std::endl;
     std::cout << "              [--noask] [-user <username>]" << std::endl;
-    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] [-res64_display_interval] " << std::endl;
+    std::cout << "              [-enqueue_max <value>] [-worktodo <path>] [-config <path>] [-iterforce] " << std::endl;
     std::cout << "               " << std::endl;
     std::cout << std::endl;
     std::cout << "  <p>       : Exponent to test (required unless -worktodo is used)" << std::endl;
     std::cout << "  -d <device_id>       : (Optional) Specify OpenCL device ID (default: 0)" << std::endl;
-    std::cout << "  -O <options>         : (Optional) Enable OpenCL optimization flags (e.g., fastmath, mad, unsafe, nans, optdisable)" << std::endl;
     std::cout << "  -c <depth>           : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
-    std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
+    //std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
     std::cout << "  -factors <factor1,factor2,...> : (Optional) Specify known factors to run PRP test on the Mersenne cofactor" << std::endl;
@@ -77,11 +76,11 @@ void printUsage(const char* progName) {
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     
-    std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
+    //std::cout << "  -res64_display_interval <N> : (Optional) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
-    std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
+    //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
-    std::cout << "Example:\n  " << progName << " 127 -O fastmath mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
+    std::cout << "Example:\n  " << progName << " 127 mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
               << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg -proof" << std::endl;
     opencl::Context::listAllOpenCLDevices();
@@ -115,21 +114,6 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-prp") == 0) {
             opts.mode = "prp";
-        }
-        else if (std::strcmp(argv[i], "-O") == 0 && i + 1 < argc) {
-            opts.build_options.clear();
-            while (i + 1 < argc && argv[i + 1][0] != '-') {
-                std::string opt = argv[++i];
-                if (opt == "fastmath")     opts.build_options += " -cl-fast-relaxed-math";
-                else if (opt == "mad")     opts.build_options += " -cl-mad-enable";
-                else if (opt == "unsafe")  opts.build_options += " -cl-unsafe-math-optimizations";
-                else if (opt == "nans")    opts.build_options += " -cl-no-signed-zeros";
-                else if (opt == "optdisable") opts.build_options += " -cl-opt-disable";
-                else {
-                    std::cerr << "Warning: unrecognized optimization flag '" << opt << "'\n";
-                 }
-
-            }
         }
         else if (std::strcmp(argv[i], "-ll") == 0) {
             opts.mode = "ll";
