@@ -328,6 +328,8 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "#if N_SZ % 5 != 0\n" \
 "\n" \
+"#if N_SZ <= 1024\n" \
+"\n" \
 "// 2 x Radix-4\n" \
 "__kernel\n" \
 "void forward4x2(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset, const uint32 lm)\n" \
@@ -359,6 +361,9 @@ static const char * const src_ocl_kernel = \
 "	bck4_2(xl, r1i, r23i);\n" \
 "	storeg2(4, &x[k], m, xl);\n" \
 "}\n" \
+"\n" \
+"#endif\n" \
+"#if N_SZ == 4\n" \
 "\n" \
 "// Radix-2\n" \
 "__kernel\n" \
@@ -410,6 +415,8 @@ static const char * const src_ocl_kernel = \
 "	storeg2(2, &x[k], 1, xl);\n" \
 "}\n" \
 "\n" \
+"#elif (N_SZ == 8) || (N_SZ == 16)\n" \
+"\n" \
 "// 2 x Radix-2\n" \
 "__kernel\n" \
 "void forward_mul4x2(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset)\n" \
@@ -460,7 +467,11 @@ static const char * const src_ocl_kernel = \
 "	storeg2(4, &x[k], 1, xl);\n" \
 "}\n" \
 "\n" \
-"#else\n" \
+"#endif\n" \
+"\n" \
+"#else	// N_SZ % 5 != 0\n" \
+"\n" \
+"#if (N_SZ == 2560) || (N_SZ == 5120)\n" \
 "\n" \
 "// 2 x Radix-4, 5 | N_SZ\n" \
 "__kernel\n" \
@@ -495,6 +506,8 @@ static const char * const src_ocl_kernel = \
 "	bck4_2(xl, r1i, r23i);\n" \
 "	storeg2(4, &x[k], m5, xl);\n" \
 "}\n" \
+"\n" \
+"#endif\n" \
 "\n" \
 "/*\n" \
 "\n" \
@@ -571,7 +584,7 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "*/\n" \
 "\n" \
-"#endif\n" \
+"#endif	// N_SZ % 5 != 0\n" \
 "\n" \
 "// --- transform - local mem ---\n" \
 "\n" \
@@ -726,12 +739,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t ki = block_idx + block_idx_mm * (B_N * 3 - 1) + idx_mm, ko = block_idx - block_idx_mm + idx_mm * 4; \\\n" \
 "	const sz_t j = idx_m;\n" \
 "\n" \
-"#if MAX_WG_SZ >= 16 / 4 * CHUNK16\n" \
-"#define ATTR_FB_16x2() \\\n" \
-"	__attribute__((reqd_work_group_size(16 / 4 * CHUNK16, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_16x2()\n" \
-"#endif\n" \
+"#if ((N_SZ == 4096) || (N_SZ == 8192)) && (MAX_WG_SZ >= 16 / 4 * CHUNK16)\n" \
+"\n" \
+"#define ATTR_FB_16x2()	__attribute__((reqd_work_group_size(16 / 4 * CHUNK16, 1, 1)))\n" \
 "\n" \
 "// 2 x Radix-4, radix-4\n" \
 "__kernel\n" \
@@ -755,12 +765,10 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(4u << lm, &x[ki], 4 * CHUNK16, &X[i], r2i[j / 4], r4i[j / 4]);\n" \
 "}\n" \
 "\n" \
-"#if MAX_WG_SZ >= 64 / 4 * CHUNK64\n" \
-"#define ATTR_FB_64x2() \\\n" \
-"	__attribute__((reqd_work_group_size(64 / 4 * CHUNK64, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_64x2()\n" \
 "#endif\n" \
+"#if (N_SZ >= 16384) && (MAX_WG_SZ >= 64 / 4 * CHUNK64)\n" \
+"\n" \
+"#define ATTR_FB_64x2()	__attribute__((reqd_work_group_size(64 / 4 * CHUNK64, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64x2()\n" \
@@ -786,12 +794,10 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(16u << lm, &x[ki], 16 * CHUNK64, &X[i], r2i[j / 16], r4i[j / 16]);\n" \
 "}\n" \
 "\n" \
-"#if MAX_WG_SZ >= 256 / 4 * CHUNK256\n" \
-"#define ATTR_FB_256x2() \\\n" \
-"	__attribute__((reqd_work_group_size(256 / 4 * CHUNK256, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_256x2()\n" \
 "#endif\n" \
+"#if (N_SZ >= 65536) && (MAX_WG_SZ >= 256 / 4 * CHUNK256)\n" \
+"\n" \
+"#define ATTR_FB_256x2()	__attribute__((reqd_work_group_size(256 / 4 * CHUNK256, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256x2()\n" \
@@ -821,12 +827,10 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(64u << lm, &x[ki], 64 * CHUNK256, &X[i], r2i[j / 64], r4i[j / 64]);\n" \
 "}\n" \
 "\n" \
-"#if MAX_WG_SZ >= 1024 / 4\n" \
-"#define ATTR_FB_1024x2() \\\n" \
-"	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_1024x2()\n" \
 "#endif\n" \
+"#if (N_SZ >= 262144) && (MAX_WG_SZ >= 1024 / 4)\n" \
+"\n" \
+"#define ATTR_FB_1024x2()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1024x2()\n" \
@@ -860,7 +864,11 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(256u << lm, &x[ki], 256, &X[i], r2i[j / 256], r4i[j / 256]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"\n" \
 "////////////////////////////////////\n" \
+"\n" \
+"#if ((N_SZ == 32) || (N_SZ == 64)) && (MAX_WG_SZ >= 16 / 4 * BLK16)\n" \
 "\n" \
 "#define DECLARE_VAR_16x2() \\\n" \
 "	__local uint64_2 X[16 * BLK16]; \\\n" \
@@ -869,12 +877,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j = id, k = 4 * id, i = k % (16 * BLK16); \\\n" \
 "	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % (16 * BLK16);\n" \
 "\n" \
-"#if MAX_WG_SZ >= 16 / 4 * BLK16\n" \
-"#define ATTR_16x2() \\\n" \
-"	__attribute__((reqd_work_group_size(16 / 4 * BLK16, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_16x2()\n" \
-"#endif\n" \
+"#define ATTR_16x2()	__attribute__((reqd_work_group_size(16 / 4 * BLK16, 1, 1)))\n" \
 "\n" \
 "// 2 x Radix-4, 2 x radix-2\n" \
 "__kernel\n" \
@@ -912,6 +915,9 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(2, &x[k4], 2, &X[i4], r2i[j4], r4i[j4]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"#if ((N_SZ == 128) || (N_SZ == 256)) && (MAX_WG_SZ >= 64 / 4 * BLK64)\n" \
+"\n" \
 "#define DECLARE_VAR_64x2() \\\n" \
 "	__local uint64_2 X[64 * BLK64]; \\\n" \
 "	\\\n" \
@@ -920,12 +926,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % (64 * BLK64); \\\n" \
 "	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % (64 * BLK64);\n" \
 "\n" \
-"#if MAX_WG_SZ >= 64 / 4 * BLK64\n" \
-"#define ATTR_64x2() \\\n" \
-"	__attribute__((reqd_work_group_size(64 / 4 * BLK64, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_64x2()\n" \
-"#endif\n" \
+"#define ATTR_64x2()	__attribute__((reqd_work_group_size(64 / 4 * BLK64, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_64x2()\n" \
@@ -965,6 +966,11 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(8, &x[k16], 8, &X[i16], r2i[j16], r4i[j16]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"#if (N_SZ > 256) && (MAX_WG_SZ >= 256 / 4)\n" \
+"\n" \
+"#define ATTR_256x2()	__attribute__((reqd_work_group_size(256 / 4, 1, 1)))\n" \
+"\n" \
 "#define DECLARE_VAR_256x2() \\\n" \
 "	__local uint64_2 X[256]; \\\n" \
 "	\\\n" \
@@ -973,13 +979,6 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % 256; \\\n" \
 "	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % 256; \\\n" \
 "	const sz_t j64 = id / 32, k64 = 4 * (id & ~(32 - 1)) + (id % 32), i64 = k64 % 256;\n" \
-"\n" \
-"#if MAX_WG_SZ >= 256 / 4\n" \
-"#define ATTR_256x2() \\\n" \
-"	__attribute__((reqd_work_group_size(256 / 4, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_256x2()\n" \
-"#endif\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_256x2()\n" \
@@ -1024,6 +1023,11 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(32, &x[k64], 32, &X[i64], r2i[j64], r4i[j64]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"#if (N_SZ > 256) && (MAX_WG_SZ >= 1024 / 4)\n" \
+"\n" \
+"#define ATTR_1024x2()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))\n" \
+"\n" \
 "#define DECLARE_VAR_1024x2() \\\n" \
 "	__local uint64_2 X[1024]; \\\n" \
 "	\\\n" \
@@ -1033,13 +1037,6 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % 1024; \\\n" \
 "	const sz_t j64 = id / 32, k64 = 4 * (id & ~(32 - 1)) + (id % 32), i64 = k64 % 1024; \\\n" \
 "	const sz_t j256 = id / 128, k256 = 4 * (id & ~(128 - 1)) + (id % 128), i256 = k256 % 1024;\n" \
-"\n" \
-"#if MAX_WG_SZ >= 1024 / 4\n" \
-"#define ATTR_1024x2() \\\n" \
-"	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_1024x2()\n" \
-"#endif\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_1024x2()\n" \
@@ -1089,7 +1086,9 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(128, &x[k256], 128, &X[i256], r2i[j256], r4i[j256]);\n" \
 "}\n" \
 "\n" \
-"#else\n" \
+"#endif\n" \
+"\n" \
+"#else	// N_SZ % 5 != 0\n" \
 "\n" \
 "#define DECLARE_VAR_REG_5() \\\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]); \\\n" \
@@ -1116,12 +1115,9 @@ static const char * const src_ocl_kernel = \
 "	const sz_t ko = 5 * (block_idx - block_idx_mm + idx_mm * 4) + id_mod5; \\\n" \
 "	const sz_t j = idx_m;\n" \
 "\n" \
-"#if MAX_WG_SZ >= 5 * 16 / 4 * CHUNK16_5\n" \
-"#define ATTR_FB_16x2_5() \\\n" \
-"	__attribute__((reqd_work_group_size(5 * 16 / 4 * CHUNK16_5, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_16x2_5()\n" \
-"#endif\n" \
+"#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 16 / 4 * CHUNK16_5)\n" \
+"\n" \
+"#define ATTR_FB_16x2_5()	__attribute__((reqd_work_group_size(5 * 16 / 4 * CHUNK16_5, 1, 1)))\n" \
 "\n" \
 "// 2 x Radix-4, radix-4, 5 | N_SZ\n" \
 "__kernel\n" \
@@ -1145,12 +1141,10 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(20u << lm, &x[ki], 20 * CHUNK16_5, &X[5 * i + id_mod5], r2i[j / 4], r4i[j / 4]);\n" \
 "}\n" \
 "\n" \
-"#if MAX_WG_SZ >= 5 * 64 / 4 * CHUNK64_5\n" \
-"#define ATTR_FB_64x2_5() \\\n" \
-"	__attribute__((reqd_work_group_size(5 * 64 / 4 * CHUNK64_5, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_64x2_5()\n" \
 "#endif\n" \
+"#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 64 / 4 * CHUNK64_5)\n" \
+"\n" \
+"#define ATTR_FB_64x2_5()	__attribute__((reqd_work_group_size(5 * 64 / 4 * CHUNK64_5, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64x2_5()\n" \
@@ -1176,12 +1170,10 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(80u << lm, &x[ki], 80 * CHUNK64_5, &X[5 * i + id_mod5], r2i[j / 16], r4i[j / 16]);\n" \
 "}\n" \
 "\n" \
-"#if MAX_WG_SZ >= 5 * 256 / 4\n" \
-"#define ATTR_FB_256x2_5() \\\n" \
-"	__attribute__((reqd_work_group_size(5 * 256 / 4, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_FB_256x2_5()\n" \
 "#endif\n" \
+"#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 256 / 4)\n" \
+"\n" \
+"#define ATTR_FB_256x2_5()	__attribute__((reqd_work_group_size(5 * 256 / 4, 1, 1)))\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256x2_5()\n" \
@@ -1211,6 +1203,8 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(320u << lm, &x[ki], 320, &X[5 * i + id_mod5], r2i[j / 64], r4i[j / 64]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"\n" \
 "////////////////////////////////////\n" \
 "\n" \
 "#define DECLARE_VAR_REG5() \\\n" \
@@ -1223,19 +1217,16 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "#define WGSIZE40	(40 / 8 * BLK40)\n" \
 "\n" \
+"#if ((N_SZ == 40) || (N_SZ == 80)) && (MAX_WG_SZ >= WGSIZE40)\n" \
+"\n" \
+"#define ATTR_40()	__attribute__((reqd_work_group_size(WGSIZE40, 1, 1)))\n" \
+"\n" \
 "#define DECLARE_VAR_40() \\\n" \
 "	__local uint64_2 X[20 * BLK40]; \\\n" \
 "	\\\n" \
 "	DECLARE_VAR_REG5(); \\\n" \
 "	const sz_t lid4 = local_id, id4 = 4 * WGSIZE40 / 5 * group_id + lid4, j = id4, k = 5 * id4, i = 5 * lid4; \\\n" \
 "	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, k1 = 5 * t1 + id_mod5, i1 = 5 * (t1 % (20 * BLK40 / 5)) + id_mod5;\n" \
-"\n" \
-"#if MAX_WG_SZ >= WGSIZE40\n" \
-"#define ATTR_40() \\\n" \
-"	__attribute__((reqd_work_group_size(WGSIZE40, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_40()\n" \
-"#endif\n" \
 "\n" \
 "// Radix-4, radix-2, radix-5\n" \
 "__kernel\n" \
@@ -1273,7 +1264,13 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(1 * 5, &x[k1], 1 * 5, &X[i1], r2i[j1], r4i[j1]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"\n" \
 "#define WGSIZE160	(160 / 8 * BLK160)\n" \
+"\n" \
+"#if ((N_SZ == 160) || (N_SZ == 320)) && (MAX_WG_SZ >= WGSIZE160)\n" \
+"\n" \
+"#define ATTR_160()	__attribute__((reqd_work_group_size(WGSIZE160, 1, 1)))\n" \
 "\n" \
 "#define DECLARE_VAR_160() \\\n" \
 "	__local uint64_2 X[80 * BLK160]; \\\n" \
@@ -1282,13 +1279,6 @@ static const char * const src_ocl_kernel = \
 "	const sz_t lid4 = local_id, id4 = 4 * WGSIZE160 / 5 * group_id + lid4, j = id4, k = 5 * id4, i = 5 * lid4; \\\n" \
 "	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, /*k1 = 5 * t1 + id_mod5,*/ i1 = 5 * (t1 % (80 * BLK160 / 5)) + id_mod5; \\\n" \
 "	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), k4 = 5 * t4 + id_mod5, i4 = 5 * (t4 % (80 * BLK160 / 5)) + id_mod5;\n" \
-"\n" \
-"#if MAX_WG_SZ >= WGSIZE160\n" \
-"#define ATTR_160() \\\n" \
-"	__attribute__((reqd_work_group_size(WGSIZE160, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_160()\n" \
-"#endif\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_160()\n" \
@@ -1328,7 +1318,13 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(4 * 5, &x[k4], 4 * 5, &X[i4], r2i[j4], r4i[j4]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"\n" \
 "#define WGSIZE640	(640 / 8 * BLK640)\n" \
+"\n" \
+"#if (N_SZ > 320) && (MAX_WG_SZ >= WGSIZE640)\n" \
+"\n" \
+"#define ATTR_640() __attribute__((reqd_work_group_size(WGSIZE640, 1, 1)))\n" \
 "\n" \
 "#define DECLARE_VAR_640() \\\n" \
 "	__local uint64_2 X[320 * BLK640]; \\\n" \
@@ -1338,13 +1334,6 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, /*k1 = 5 * t1 + id_mod5,*/ i1 = 5 * (t1 % (320 * BLK640 / 5)) + id_mod5; \\\n" \
 "	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), /*k4 = 5 * t4 + id_mod5,*/ i4 = 5 * (t4 % (320 * BLK640 / 5)) + id_mod5; \\\n" \
 "	const sz_t j16 = id_5 / 16, t16 = 4 * (id_5 & ~(16 - 1)) + (id_5 % 16), k16 = 5 * t16 + id_mod5, i16 = 5 * (t16 % (320 * BLK640 / 5)) + id_mod5;\n" \
-"\n" \
-"#if MAX_WG_SZ >= WGSIZE640\n" \
-"#define ATTR_640() \\\n" \
-"	__attribute__((reqd_work_group_size(WGSIZE640, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_640()\n" \
-"#endif\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_640()\n" \
@@ -1389,7 +1378,13 @@ static const char * const src_ocl_kernel = \
 "	backward_4o(16 * 5, &x[k16], 16 * 5, &X[i16], r2i[j16], r4i[j16]);\n" \
 "}\n" \
 "\n" \
+"#endif\n" \
+"\n" \
 "#define WGSIZE2560	(2560 / 8)\n" \
+"\n" \
+"#if (N_SZ > 320) && (MAX_WG_SZ >= WGSIZE2560)\n" \
+"\n" \
+"#define ATTR_2560() __attribute__((reqd_work_group_size(WGSIZE2560, 1, 1)))\n" \
 "\n" \
 "#define DECLARE_VAR_2560() \\\n" \
 "	__local uint64_2 X[1280]; \\\n" \
@@ -1400,13 +1395,6 @@ static const char * const src_ocl_kernel = \
 "	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), /*k4 = 5 * t4 + id_mod5,*/ i4 = 5 * (t4 % (1280 / 5)) + id_mod5; \\\n" \
 "	const sz_t j16 = id_5 / 16, t16 = 4 * (id_5 & ~(16 - 1)) + (id_5 % 16), /*k16 = 5 * t16 + id_mod5,*/ i16 = 5 * (t16 % (1280 / 5)) + id_mod5; \\\n" \
 "	const sz_t j64 = id_5 / 64, t64 = 4 * (id_5 & ~(64 - 1)) + (id_5 % 64), k64 = 5 * t64 + id_mod5, i64 = local_id;	// 5 * (t64 % (1280 / 5)) + id_mod5;\n" \
-"\n" \
-"#if MAX_WG_SZ >= WGSIZE2560\n" \
-"#define ATTR_2560() \\\n" \
-"	__attribute__((reqd_work_group_size(WGSIZE2560, 1, 1)))\n" \
-"#else\n" \
-"#define ATTR_2560()\n" \
-"#endif\n" \
 "\n" \
 "__kernel\n" \
 "ATTR_2560()\n" \
@@ -1457,6 +1445,8 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "#endif\n" \
+"\n" \
+"#endif	// N_SZ % 5 != 0\n" \
 "\n" \
 "// --- carry ---\n" \
 "\n" \
@@ -1600,6 +1590,8 @@ static const char * const src_ocl_kernel = \
 "	reg[offset_y + gid] = reg[offset_x + gid];\n" \
 "}\n" \
 "\n" \
+"#if defined(CWM_WG_SZ)\n" \
+"\n" \
 "__kernel\n" \
 "void subtract(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,\n" \
 "	__global const uint_8 * restrict const width, const sz_t offset, const uint32 a)\n" \
@@ -1618,6 +1610,9 @@ static const char * const src_ocl_kernel = \
 "		}\n" \
 "	}\n" \
 "}\n" \
+"\n" \
+"#endif\n" \
+"#if defined(CWM_WG_SZ2)\n" \
 "\n" \
 "#define N_SZ_2	(N_SZ / 2)\n" \
 "\n" \
@@ -1650,4 +1645,6 @@ static const char * const src_ocl_kernel = \
 "		}\n" \
 "	}\n" \
 "}\n" \
+"\n" \
+"#endif\n" \
 "";
