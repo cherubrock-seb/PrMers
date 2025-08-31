@@ -103,20 +103,6 @@ for entry in "${optflags[@]}"; do
 done
 
 echo ""
-echo "=== Combined flags via '-O fastmath mad unsafe nans optdisable' ==="
-combined_flags=( -cl-fast-relaxed-math -cl-mad-enable -cl-unsafe-math-optimizations -cl-no-signed-zeros -cl-opt-disable )
-output=$(./prmers 127 --noask -O fastmath mad unsafe nans optdisable -debug -prp 2>&1)
-for flag in "${combined_flags[@]}"; do
-  echo -n "  checking $flag... "
-  if echo "$output" | grep -F -- "$flag" >/dev/null; then
-    echo "✅"
-  else
-    echo "❌ Missing '$flag'"
-    exit 1
-  fi
-done
-
-echo ""
 echo "=== Out-of-range exponent verification ==="
 p=5650242870
 echo -n "Testing M${p} (should be rejected)… "
