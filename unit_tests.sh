@@ -227,7 +227,7 @@ fi
 
 echo -n "Testing M2699 cofactor with 5 factors (PRP)... "
 ./prmers -noask -prp 2699 -factors 5399,307687,1187561,7570504839257,1987104667810711 > "logs/cofactor_prime_2699.log" 2>&1
-if [ $? -ne 1]; then
+if [ $? -ne 0]; then
     echo "❌ Failed (see logs/cofactor_prime_2699.log)"
     exit 1
 else
