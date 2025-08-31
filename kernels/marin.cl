@@ -316,6 +316,8 @@ INLINE void storel2(const sz_t n, __local uint64_2 * restrict const X, const sz_
 
 #if N_SZ % 5 != 0
 
+#if N_SZ <= 1024
+
 // 2 x Radix-4
 __kernel
 void forward4x2(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset, const uint32 lm)
@@ -347,6 +349,9 @@ void backward4x2(__global uint64 * restrict const reg, __global const uint64 * r
 	bck4_2(xl, r1i, r23i);
 	storeg2(4, &x[k], m, xl);
 }
+
+#endif
+#if N_SZ == 4
 
 // Radix-2
 __kernel
@@ -398,6 +403,8 @@ void mul4(__global uint64 * restrict const reg, __global const uint64 * restrict
 	storeg2(2, &x[k], 1, xl);
 }
 
+#elif (N_SZ == 8) || (N_SZ == 16)
+
 // 2 x Radix-2
 __kernel
 void forward_mul4x2(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset)
@@ -448,7 +455,11 @@ void mul4x2(__global uint64 * restrict const reg, __global const uint64 * restri
 	storeg2(4, &x[k], 1, xl);
 }
 
-#else
+#endif
+
+#else	// N_SZ % 5 != 0
+
+#if (N_SZ == 2560) || (N_SZ == 5120)
 
 // 2 x Radix-4, 5 | N_SZ
 __kernel
@@ -483,6 +494,8 @@ void backward4x2_5(__global uint64 * restrict const reg, __global const uint64 *
 	bck4_2(xl, r1i, r23i);
 	storeg2(4, &x[k], m5, xl);
 }
+
+#endif
 
 /*
 
@@ -559,7 +572,7 @@ void mul10(__global uint64 * restrict const reg, __global const uint64 * restric
 }
 */
 
-#endif
+#endif	// N_SZ % 5 != 0
 
 // --- transform - local mem ---
 
@@ -714,12 +727,9 @@ INLINE void mul_10(__local uint64_2 * restrict const X, __global const uint64_2 
 	const sz_t ki = block_idx + block_idx_mm * (B_N * 3 - 1) + idx_mm, ko = block_idx - block_idx_mm + idx_mm * 4; \
 	const sz_t j = idx_m;
 
-#if MAX_WG_SZ >= 16 / 4 * CHUNK16
-#define ATTR_FB_16x2() \
-	__attribute__((reqd_work_group_size(16 / 4 * CHUNK16, 1, 1)))
-#else
-#define ATTR_FB_16x2()
-#endif
+#if ((N_SZ == 4096) || (N_SZ == 8192)) && (MAX_WG_SZ >= 16 / 4 * CHUNK16)
+
+#define ATTR_FB_16x2()	__attribute__((reqd_work_group_size(16 / 4 * CHUNK16, 1, 1)))
 
 // 2 x Radix-4, radix-4
 __kernel
@@ -743,12 +753,10 @@ void backward16x2(__global uint64 * restrict const reg, __global const uint64 * 
 	backward_4o(4u << lm, &x[ki], 4 * CHUNK16, &X[i], r2i[j / 4], r4i[j / 4]);
 }
 
-#if MAX_WG_SZ >= 64 / 4 * CHUNK64
-#define ATTR_FB_64x2() \
-	__attribute__((reqd_work_group_size(64 / 4 * CHUNK64, 1, 1)))
-#else
-#define ATTR_FB_64x2()
 #endif
+#if (N_SZ >= 16384) && (MAX_WG_SZ >= 64 / 4 * CHUNK64)
+
+#define ATTR_FB_64x2()	__attribute__((reqd_work_group_size(64 / 4 * CHUNK64, 1, 1)))
 
 __kernel
 ATTR_FB_64x2()
@@ -774,12 +782,10 @@ void backward64x2(__global uint64 * restrict const reg, __global const uint64 * 
 	backward_4o(16u << lm, &x[ki], 16 * CHUNK64, &X[i], r2i[j / 16], r4i[j / 16]);
 }
 
-#if MAX_WG_SZ >= 256 / 4 * CHUNK256
-#define ATTR_FB_256x2() \
-	__attribute__((reqd_work_group_size(256 / 4 * CHUNK256, 1, 1)))
-#else
-#define ATTR_FB_256x2()
 #endif
+#if (N_SZ >= 65536) && (MAX_WG_SZ >= 256 / 4 * CHUNK256)
+
+#define ATTR_FB_256x2()	__attribute__((reqd_work_group_size(256 / 4 * CHUNK256, 1, 1)))
 
 __kernel
 ATTR_FB_256x2()
@@ -809,12 +815,10 @@ void backward256x2(__global uint64 * restrict const reg, __global const uint64 *
 	backward_4o(64u << lm, &x[ki], 64 * CHUNK256, &X[i], r2i[j / 64], r4i[j / 64]);
 }
 
-#if MAX_WG_SZ >= 1024 / 4
-#define ATTR_FB_1024x2() \
-	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))
-#else
-#define ATTR_FB_1024x2()
 #endif
+#if (N_SZ >= 262144) && (MAX_WG_SZ >= 1024 / 4)
+
+#define ATTR_FB_1024x2()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))
 
 __kernel
 ATTR_FB_1024x2()
@@ -848,7 +852,11 @@ void backward1024x2(__global uint64 * restrict const reg, __global const uint64 
 	backward_4o(256u << lm, &x[ki], 256, &X[i], r2i[j / 256], r4i[j / 256]);
 }
 
+#endif
+
 ////////////////////////////////////
+
+#if ((N_SZ == 32) || (N_SZ == 64)) && (MAX_WG_SZ >= 16 / 4 * BLK16)
 
 #define DECLARE_VAR_16x2() \
 	__local uint64_2 X[16 * BLK16]; \
@@ -857,12 +865,7 @@ void backward1024x2(__global uint64 * restrict const reg, __global const uint64 
 	const sz_t j = id, k = 4 * id, i = k % (16 * BLK16); \
 	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % (16 * BLK16);
 
-#if MAX_WG_SZ >= 16 / 4 * BLK16
-#define ATTR_16x2() \
-	__attribute__((reqd_work_group_size(16 / 4 * BLK16, 1, 1)))
-#else
-#define ATTR_16x2()
-#endif
+#define ATTR_16x2()	__attribute__((reqd_work_group_size(16 / 4 * BLK16, 1, 1)))
 
 // 2 x Radix-4, 2 x radix-2
 __kernel
@@ -900,6 +903,9 @@ void mul16x2(__global uint64 * restrict const reg, __global const uint64 * restr
 	backward_4o(2, &x[k4], 2, &X[i4], r2i[j4], r4i[j4]);
 }
 
+#endif
+#if ((N_SZ == 128) || (N_SZ == 256)) && (MAX_WG_SZ >= 64 / 4 * BLK64)
+
 #define DECLARE_VAR_64x2() \
 	__local uint64_2 X[64 * BLK64]; \
 	\
@@ -908,12 +914,7 @@ void mul16x2(__global uint64 * restrict const reg, __global const uint64 * restr
 	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % (64 * BLK64); \
 	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % (64 * BLK64);
 
-#if MAX_WG_SZ >= 64 / 4 * BLK64
-#define ATTR_64x2() \
-	__attribute__((reqd_work_group_size(64 / 4 * BLK64, 1, 1)))
-#else
-#define ATTR_64x2()
-#endif
+#define ATTR_64x2()	__attribute__((reqd_work_group_size(64 / 4 * BLK64, 1, 1)))
 
 __kernel
 ATTR_64x2()
@@ -953,6 +954,11 @@ void mul64x2(__global uint64 * restrict const reg, __global const uint64 * restr
 	backward_4o(8, &x[k16], 8, &X[i16], r2i[j16], r4i[j16]);
 }
 
+#endif
+#if (N_SZ > 256) && (MAX_WG_SZ >= 256 / 4)
+
+#define ATTR_256x2()	__attribute__((reqd_work_group_size(256 / 4, 1, 1)))
+
 #define DECLARE_VAR_256x2() \
 	__local uint64_2 X[256]; \
 	\
@@ -961,13 +967,6 @@ void mul64x2(__global uint64 * restrict const reg, __global const uint64 * restr
 	const sz_t j4 = id / 2, k4 = 4 * (id & ~(2 - 1)) + (id % 2), i4 = k4 % 256; \
 	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % 256; \
 	const sz_t j64 = id / 32, k64 = 4 * (id & ~(32 - 1)) + (id % 32), i64 = k64 % 256;
-
-#if MAX_WG_SZ >= 256 / 4
-#define ATTR_256x2() \
-	__attribute__((reqd_work_group_size(256 / 4, 1, 1)))
-#else
-#define ATTR_256x2()
-#endif
 
 __kernel
 ATTR_256x2()
@@ -1012,6 +1011,11 @@ void mul256x2(__global uint64 * restrict const reg, __global const uint64 * rest
 	backward_4o(32, &x[k64], 32, &X[i64], r2i[j64], r4i[j64]);
 }
 
+#endif
+#if (N_SZ > 256) && (MAX_WG_SZ >= 1024 / 4)
+
+#define ATTR_1024x2()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))
+
 #define DECLARE_VAR_1024x2() \
 	__local uint64_2 X[1024]; \
 	\
@@ -1021,13 +1025,6 @@ void mul256x2(__global uint64 * restrict const reg, __global const uint64 * rest
 	const sz_t j16 = id / 8, k16 = 4 * (id & ~(8 - 1)) + (id % 8), i16 = k16 % 1024; \
 	const sz_t j64 = id / 32, k64 = 4 * (id & ~(32 - 1)) + (id % 32), i64 = k64 % 1024; \
 	const sz_t j256 = id / 128, k256 = 4 * (id & ~(128 - 1)) + (id % 128), i256 = k256 % 1024;
-
-#if MAX_WG_SZ >= 1024 / 4
-#define ATTR_1024x2() \
-	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))
-#else
-#define ATTR_1024x2()
-#endif
 
 __kernel
 ATTR_1024x2()
@@ -1077,7 +1074,9 @@ void mul1024x2(__global uint64 * restrict const reg, __global const uint64 * res
 	backward_4o(128, &x[k256], 128, &X[i256], r2i[j256], r4i[j256]);
 }
 
-#else
+#endif
+
+#else	// N_SZ % 5 != 0
 
 #define DECLARE_VAR_REG_5() \
 	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]); \
@@ -1104,12 +1103,9 @@ void mul1024x2(__global uint64 * restrict const reg, __global const uint64 * res
 	const sz_t ko = 5 * (block_idx - block_idx_mm + idx_mm * 4) + id_mod5; \
 	const sz_t j = idx_m;
 
-#if MAX_WG_SZ >= 5 * 16 / 4 * CHUNK16_5
-#define ATTR_FB_16x2_5() \
-	__attribute__((reqd_work_group_size(5 * 16 / 4 * CHUNK16_5, 1, 1)))
-#else
-#define ATTR_FB_16x2_5()
-#endif
+#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 16 / 4 * CHUNK16_5)
+
+#define ATTR_FB_16x2_5()	__attribute__((reqd_work_group_size(5 * 16 / 4 * CHUNK16_5, 1, 1)))
 
 // 2 x Radix-4, radix-4, 5 | N_SZ
 __kernel
@@ -1133,12 +1129,10 @@ void backward16x2_5(__global uint64 * restrict const reg, __global const uint64 
 	backward_4o(20u << lm, &x[ki], 20 * CHUNK16_5, &X[5 * i + id_mod5], r2i[j / 4], r4i[j / 4]);
 }
 
-#if MAX_WG_SZ >= 5 * 64 / 4 * CHUNK64_5
-#define ATTR_FB_64x2_5() \
-	__attribute__((reqd_work_group_size(5 * 64 / 4 * CHUNK64_5, 1, 1)))
-#else
-#define ATTR_FB_64x2_5()
 #endif
+#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 64 / 4 * CHUNK64_5)
+
+#define ATTR_FB_64x2_5()	__attribute__((reqd_work_group_size(5 * 64 / 4 * CHUNK64_5, 1, 1)))
 
 __kernel
 ATTR_FB_64x2_5()
@@ -1164,12 +1158,10 @@ void backward64x2_5(__global uint64 * restrict const reg, __global const uint64 
 	backward_4o(80u << lm, &x[ki], 80 * CHUNK64_5, &X[5 * i + id_mod5], r2i[j / 16], r4i[j / 16]);
 }
 
-#if MAX_WG_SZ >= 5 * 256 / 4
-#define ATTR_FB_256x2_5() \
-	__attribute__((reqd_work_group_size(5 * 256 / 4, 1, 1)))
-#else
-#define ATTR_FB_256x2_5()
 #endif
+#if (N_SZ >= 10240) && (MAX_WG_SZ >= 5 * 256 / 4)
+
+#define ATTR_FB_256x2_5()	__attribute__((reqd_work_group_size(5 * 256 / 4, 1, 1)))
 
 __kernel
 ATTR_FB_256x2_5()
@@ -1199,6 +1191,8 @@ void backward256x2_5(__global uint64 * restrict const reg, __global const uint64
 	backward_4o(320u << lm, &x[ki], 320, &X[5 * i + id_mod5], r2i[j / 64], r4i[j / 64]);
 }
 
+#endif
+
 ////////////////////////////////////
 
 #define DECLARE_VAR_REG5() \
@@ -1211,19 +1205,16 @@ void backward256x2_5(__global uint64 * restrict const reg, __global const uint64
 
 #define WGSIZE40	(40 / 8 * BLK40)
 
+#if ((N_SZ == 40) || (N_SZ == 80)) && (MAX_WG_SZ >= WGSIZE40)
+
+#define ATTR_40()	__attribute__((reqd_work_group_size(WGSIZE40, 1, 1)))
+
 #define DECLARE_VAR_40() \
 	__local uint64_2 X[20 * BLK40]; \
 	\
 	DECLARE_VAR_REG5(); \
 	const sz_t lid4 = local_id, id4 = 4 * WGSIZE40 / 5 * group_id + lid4, j = id4, k = 5 * id4, i = 5 * lid4; \
 	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, k1 = 5 * t1 + id_mod5, i1 = 5 * (t1 % (20 * BLK40 / 5)) + id_mod5;
-
-#if MAX_WG_SZ >= WGSIZE40
-#define ATTR_40() \
-	__attribute__((reqd_work_group_size(WGSIZE40, 1, 1)))
-#else
-#define ATTR_40()
-#endif
 
 // Radix-4, radix-2, radix-5
 __kernel
@@ -1261,7 +1252,13 @@ void mul40(__global uint64 * restrict const reg, __global const uint64 * restric
 	backward_4o(1 * 5, &x[k1], 1 * 5, &X[i1], r2i[j1], r4i[j1]);
 }
 
+#endif
+
 #define WGSIZE160	(160 / 8 * BLK160)
+
+#if ((N_SZ == 160) || (N_SZ == 320)) && (MAX_WG_SZ >= WGSIZE160)
+
+#define ATTR_160()	__attribute__((reqd_work_group_size(WGSIZE160, 1, 1)))
 
 #define DECLARE_VAR_160() \
 	__local uint64_2 X[80 * BLK160]; \
@@ -1270,13 +1267,6 @@ void mul40(__global uint64 * restrict const reg, __global const uint64 * restric
 	const sz_t lid4 = local_id, id4 = 4 * WGSIZE160 / 5 * group_id + lid4, j = id4, k = 5 * id4, i = 5 * lid4; \
 	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, /*k1 = 5 * t1 + id_mod5,*/ i1 = 5 * (t1 % (80 * BLK160 / 5)) + id_mod5; \
 	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), k4 = 5 * t4 + id_mod5, i4 = 5 * (t4 % (80 * BLK160 / 5)) + id_mod5;
-
-#if MAX_WG_SZ >= WGSIZE160
-#define ATTR_160() \
-	__attribute__((reqd_work_group_size(WGSIZE160, 1, 1)))
-#else
-#define ATTR_160()
-#endif
 
 __kernel
 ATTR_160()
@@ -1316,7 +1306,13 @@ void mul160(__global uint64 * restrict const reg, __global const uint64 * restri
 	backward_4o(4 * 5, &x[k4], 4 * 5, &X[i4], r2i[j4], r4i[j4]);
 }
 
+#endif
+
 #define WGSIZE640	(640 / 8 * BLK640)
+
+#if (N_SZ > 320) && (MAX_WG_SZ >= WGSIZE640)
+
+#define ATTR_640() __attribute__((reqd_work_group_size(WGSIZE640, 1, 1)))
 
 #define DECLARE_VAR_640() \
 	__local uint64_2 X[320 * BLK640]; \
@@ -1326,13 +1322,6 @@ void mul160(__global uint64 * restrict const reg, __global const uint64 * restri
 	const sz_t j1 = id_5 / 1, t1 = 4 * id_5, /*k1 = 5 * t1 + id_mod5,*/ i1 = 5 * (t1 % (320 * BLK640 / 5)) + id_mod5; \
 	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), /*k4 = 5 * t4 + id_mod5,*/ i4 = 5 * (t4 % (320 * BLK640 / 5)) + id_mod5; \
 	const sz_t j16 = id_5 / 16, t16 = 4 * (id_5 & ~(16 - 1)) + (id_5 % 16), k16 = 5 * t16 + id_mod5, i16 = 5 * (t16 % (320 * BLK640 / 5)) + id_mod5;
-
-#if MAX_WG_SZ >= WGSIZE640
-#define ATTR_640() \
-	__attribute__((reqd_work_group_size(WGSIZE640, 1, 1)))
-#else
-#define ATTR_640()
-#endif
 
 __kernel
 ATTR_640()
@@ -1377,7 +1366,13 @@ void mul640(__global uint64 * restrict const reg, __global const uint64 * restri
 	backward_4o(16 * 5, &x[k16], 16 * 5, &X[i16], r2i[j16], r4i[j16]);
 }
 
+#endif
+
 #define WGSIZE2560	(2560 / 8)
+
+#if (N_SZ > 320) && (MAX_WG_SZ >= WGSIZE2560)
+
+#define ATTR_2560() __attribute__((reqd_work_group_size(WGSIZE2560, 1, 1)))
 
 #define DECLARE_VAR_2560() \
 	__local uint64_2 X[1280]; \
@@ -1388,13 +1383,6 @@ void mul640(__global uint64 * restrict const reg, __global const uint64 * restri
 	const sz_t j4 = id_5 / 4, t4 = 4 * (id_5 & ~(4 - 1)) + (id_5 % 4), /*k4 = 5 * t4 + id_mod5,*/ i4 = 5 * (t4 % (1280 / 5)) + id_mod5; \
 	const sz_t j16 = id_5 / 16, t16 = 4 * (id_5 & ~(16 - 1)) + (id_5 % 16), /*k16 = 5 * t16 + id_mod5,*/ i16 = 5 * (t16 % (1280 / 5)) + id_mod5; \
 	const sz_t j64 = id_5 / 64, t64 = 4 * (id_5 & ~(64 - 1)) + (id_5 % 64), k64 = 5 * t64 + id_mod5, i64 = local_id;	// 5 * (t64 % (1280 / 5)) + id_mod5;
-
-#if MAX_WG_SZ >= WGSIZE2560
-#define ATTR_2560() \
-	__attribute__((reqd_work_group_size(WGSIZE2560, 1, 1)))
-#else
-#define ATTR_2560()
-#endif
 
 __kernel
 ATTR_2560()
@@ -1445,6 +1433,8 @@ void mul2560(__global uint64 * restrict const reg, __global const uint64 * restr
 }
 
 #endif
+
+#endif	// N_SZ % 5 != 0
 
 // --- carry ---
 
@@ -1588,6 +1578,8 @@ void copy(__global uint64 * restrict const reg, const sz_t offset_y, const sz_t 
 	reg[offset_y + gid] = reg[offset_x + gid];
 }
 
+#if defined(CWM_WG_SZ)
+
 __kernel
 void subtract(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,
 	__global const uint_8 * restrict const width, const sz_t offset, const uint32 a)
@@ -1606,6 +1598,9 @@ void subtract(__global uint64 * restrict const reg, __global const uint64 * rest
 		}
 	}
 }
+
+#endif
+#if defined(CWM_WG_SZ2)
 
 #define N_SZ_2	(N_SZ / 2)
 
@@ -1638,3 +1633,5 @@ void subtract2(__global uint64 * restrict const reg, __global const uint64 * res
 		}
 	}
 }
+
+#endif

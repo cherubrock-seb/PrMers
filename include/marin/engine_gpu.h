@@ -15,11 +15,11 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #define CREATE_KERNEL_TRANSFORM(name) _##name = create_kernel_transform(#name);
 #define CREATE_KERNEL_CARRY(name) _##name = create_kernel_carry(#name);
 
-#define DEFINE_FORWARDx2(u) void forward##u##x2(const size_t src, const int lm) { ek_fb(_forward##u##x2, src, lm, (u / 4) * _chunk##u); }
-#define DEFINE_BACKWARDx2(u) void backward##u##x2(const size_t src, const int lm) { ek_fb(_backward##u##x2, src, lm, (u / 4) * _chunk##u); }
+#define DEFINE_FORWARDx2(u) void forward##u##x2(const size_t src, const uint32 lm) { ek_fb(_forward##u##x2, src, lm, (u / 4) * _chunk##u); }
+#define DEFINE_BACKWARDx2(u) void backward##u##x2(const size_t src, const uint32 lm) { ek_fb(_backward##u##x2, src, lm, (u / 4) * _chunk##u); }
 
-#define DEFINE_FORWARDx2_5(u) void forward##u##x2_5(const size_t src, const int lm) { ek_fb(_forward##u##x2_5, src, lm, 5 * (u / 4) * _chunk##u##_5); }
-#define DEFINE_BACKWARDx2_5(u) void backward##u##x2_5(const size_t src, const int lm) { ek_fb(_backward##u##x2_5, src, lm, 5 * (u / 4) * _chunk##u##_5); }
+#define DEFINE_FORWARDx2_5(u) void forward##u##x2_5(const size_t src, const uint32 lm) { ek_fb(_forward##u##x2_5, src, lm, 5 * (u / 4) * _chunk##u##_5); }
+#define DEFINE_BACKWARDx2_5(u) void backward##u##x2_5(const size_t src, const uint32 lm) { ek_fb(_backward##u##x2_5, src, lm, 5 * (u / 4) * _chunk##u##_5); }
 
 #define DEFINE_FORWARD_MULx2(u) void forward_mul##u##x2(const size_t src) { ek_fms(_forward_mul##u##x2, 8, src, (u / 4) * _blk##u); }
 #define DEFINE_SQRx2(u) void sqr##u##x2(const size_t src) { ek_fms(_sqr##u##x2, 8, src, (u / 4) * _blk##u); }
@@ -183,69 +183,114 @@ public:
 #if defined(ocl_debug)
 		std::cout << "Create ocl kernels." << std::endl;
 #endif
-		if (_n % 5 != 0)
+		const size_t n = _n;
+		if (n % 5 != 0)
 		{
-			CREATE_KERNEL_TRANSFORM(forward4x2);
-			CREATE_KERNEL_TRANSFORM(backward4x2);
-			CREATE_KERNEL_TRANSFORM(forward16x2);
-			CREATE_KERNEL_TRANSFORM(backward16x2);
-			CREATE_KERNEL_TRANSFORM(forward64x2);
-			CREATE_KERNEL_TRANSFORM(backward64x2);
-			CREATE_KERNEL_TRANSFORM(forward256x2);
-			CREATE_KERNEL_TRANSFORM(backward256x2);
-			CREATE_KERNEL_TRANSFORM(forward1024x2);
-			CREATE_KERNEL_TRANSFORM(backward1024x2);
+			if (n <= 1024)
+			{
+				CREATE_KERNEL_TRANSFORM(forward4x2);
+				CREATE_KERNEL_TRANSFORM(backward4x2);
+			}
+			if ((n == 4096) || (n == 8192))
+			{
+				CREATE_KERNEL_TRANSFORM(forward16x2);
+				CREATE_KERNEL_TRANSFORM(backward16x2);
+			}
+			if (n >= 16384)
+			{
+				CREATE_KERNEL_TRANSFORM(forward64x2);
+				CREATE_KERNEL_TRANSFORM(backward64x2);
+			}
+			if (n >= 65536)
+			{
+				CREATE_KERNEL_TRANSFORM(forward256x2);
+				CREATE_KERNEL_TRANSFORM(backward256x2);
+			}
+			if (n >= 262144)
+			{
+				CREATE_KERNEL_TRANSFORM(forward1024x2);
+				CREATE_KERNEL_TRANSFORM(backward1024x2);
+			}
 
-			CREATE_KERNEL_TRANSFORM(forward_mul4);
-			CREATE_KERNEL_TRANSFORM(sqr4);
-			CREATE_KERNEL_TRANSFORM(mul4);
-			CREATE_KERNEL_TRANSFORM(forward_mul4x2);
-			CREATE_KERNEL_TRANSFORM(sqr4x2);
-			CREATE_KERNEL_TRANSFORM(mul4x2);
-			CREATE_KERNEL_TRANSFORM(forward_mul16x2);
-			CREATE_KERNEL_TRANSFORM(sqr16x2);
-			CREATE_KERNEL_TRANSFORM(mul16x2);
-			CREATE_KERNEL_TRANSFORM(forward_mul64x2);
-			CREATE_KERNEL_TRANSFORM(sqr64x2);
-			CREATE_KERNEL_TRANSFORM(mul64x2);
-			CREATE_KERNEL_TRANSFORM(forward_mul256x2);
-			CREATE_KERNEL_TRANSFORM(sqr256x2);
-			CREATE_KERNEL_TRANSFORM(mul256x2);
-			CREATE_KERNEL_TRANSFORM(forward_mul1024x2);
-			CREATE_KERNEL_TRANSFORM(sqr1024x2);
-			CREATE_KERNEL_TRANSFORM(mul1024x2);
+			if (n == 4)
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul4);
+				CREATE_KERNEL_TRANSFORM(sqr4);
+				CREATE_KERNEL_TRANSFORM(mul4);
+			}
+			else if ((n == 8) || (n == 16))
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul4x2);
+				CREATE_KERNEL_TRANSFORM(sqr4x2);
+				CREATE_KERNEL_TRANSFORM(mul4x2);
+			}
+			else if ((n == 32) || (n == 64))
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul16x2);
+				CREATE_KERNEL_TRANSFORM(sqr16x2);
+				CREATE_KERNEL_TRANSFORM(mul16x2);
+			}
+			else if ((n == 128) || (n == 256))
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul64x2);
+				CREATE_KERNEL_TRANSFORM(sqr64x2);
+				CREATE_KERNEL_TRANSFORM(mul64x2);
+			}
+			else
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul256x2);
+				CREATE_KERNEL_TRANSFORM(sqr256x2);
+				CREATE_KERNEL_TRANSFORM(mul256x2);
+				CREATE_KERNEL_TRANSFORM(forward_mul1024x2);
+				CREATE_KERNEL_TRANSFORM(sqr1024x2);
+				CREATE_KERNEL_TRANSFORM(mul1024x2);
+			}
 		}
 		else
 		{
-			CREATE_KERNEL_TRANSFORM(forward4x2_5);
-			CREATE_KERNEL_TRANSFORM(backward4x2_5);
-			CREATE_KERNEL_TRANSFORM(forward16x2_5);
-			CREATE_KERNEL_TRANSFORM(backward16x2_5);
-			CREATE_KERNEL_TRANSFORM(forward64x2_5);
-			CREATE_KERNEL_TRANSFORM(backward64x2_5);
-			if (get_max_workgroup_size() >= 5 * (256 / 4))
+			if ((n == 2560) || (n == 5120))
 			{
-				CREATE_KERNEL_TRANSFORM(forward256x2_5);
-				CREATE_KERNEL_TRANSFORM(backward256x2_5);
+				CREATE_KERNEL_TRANSFORM(forward4x2_5);
+				CREATE_KERNEL_TRANSFORM(backward4x2_5);
 			}
-
+			if (n >= 10240)
+			{
+				CREATE_KERNEL_TRANSFORM(forward16x2_5);
+				CREATE_KERNEL_TRANSFORM(backward16x2_5);
+				CREATE_KERNEL_TRANSFORM(forward64x2_5);
+				CREATE_KERNEL_TRANSFORM(backward64x2_5);
+				if (get_max_workgroup_size() >= 5 * (256 / 4))
+				{
+					CREATE_KERNEL_TRANSFORM(forward256x2_5);
+					CREATE_KERNEL_TRANSFORM(backward256x2_5);
+				}
+			}
 			// CREATE_KERNEL_TRANSFORM(forward_mul10);
 			// CREATE_KERNEL_TRANSFORM(sqr10);
 			// CREATE_KERNEL_TRANSFORM(mul10);
-			CREATE_KERNEL_TRANSFORM(forward_mul40);
-			CREATE_KERNEL_TRANSFORM(sqr40);
-			CREATE_KERNEL_TRANSFORM(mul40);
-			CREATE_KERNEL_TRANSFORM(forward_mul160);
-			CREATE_KERNEL_TRANSFORM(sqr160);
-			CREATE_KERNEL_TRANSFORM(mul160);
-			CREATE_KERNEL_TRANSFORM(forward_mul640);
-			CREATE_KERNEL_TRANSFORM(sqr640);
-			CREATE_KERNEL_TRANSFORM(mul640);
-			if (get_max_workgroup_size() >= 2560 / 8)
+			if ((n == 40) || (n == 80))
 			{
-				CREATE_KERNEL_TRANSFORM(forward_mul2560);
-				CREATE_KERNEL_TRANSFORM(sqr2560);
-				CREATE_KERNEL_TRANSFORM(mul2560);
+				CREATE_KERNEL_TRANSFORM(forward_mul40);
+				CREATE_KERNEL_TRANSFORM(sqr40);
+				CREATE_KERNEL_TRANSFORM(mul40);
+			}
+			else if ((n == 160) || (n == 320))
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul160);
+				CREATE_KERNEL_TRANSFORM(sqr160);
+				CREATE_KERNEL_TRANSFORM(mul160);
+			}
+			else
+			{
+				CREATE_KERNEL_TRANSFORM(forward_mul640);
+				CREATE_KERNEL_TRANSFORM(sqr640);
+				CREATE_KERNEL_TRANSFORM(mul640);
+				if (get_max_workgroup_size() >= 2560 / 8)
+				{
+					CREATE_KERNEL_TRANSFORM(forward_mul2560);
+					CREATE_KERNEL_TRANSFORM(sqr2560);
+					CREATE_KERNEL_TRANSFORM(mul2560);
+				}
 			}
 		}
 
@@ -264,8 +309,8 @@ public:
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
 		_kernels.push_back(_copy);
 
-		_subtract = create_kernel_subtract("subtract");
-		_subtract2 = create_kernel_subtract("subtract2");
+		if (_even) _subtract = create_kernel_subtract("subtract");
+		else _subtract2 = create_kernel_subtract("subtract2");
 	}
 
 	void release_kernels()
@@ -290,11 +335,11 @@ public:
 
 ///////////////////////////////
 
-	void ek_fb(cl_kernel & kernel, const size_t src, const int lm, const size_t local_size = 0)
+	void ek_fb(cl_kernel & kernel, const size_t src, const uint32 lm, const size_t local_size = 0)
 	{
-		const uint32 offset = uint32(src * _n), ulm = uint32(lm - 1);
+		const uint32 offset = uint32(src * _n);
 		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
-		_set_kernel_arg(kernel, 3, sizeof(uint32), &ulm);
+		_set_kernel_arg(kernel, 3, sizeof(uint32), &lm);
 		_execute_kernel(kernel, _n / 8, local_size);
 	}
 
@@ -455,7 +500,7 @@ public:
 
 		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << std::endl << std::endl;
 
-		if (!_gpu->read_OpenCL("kernels/marinZ.cl", "src/marin/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
+		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
 		_gpu->load_program(src.str());
 		_gpu->alloc_memory();
@@ -557,29 +602,29 @@ public:
 		{
 			case 1u <<  2: _gpu->forward_mul4(dst); break;
 			case 1u <<  3: _gpu->forward_mul4x2(dst); break;
-			case 1u <<  4: _gpu->forward4x2(dst, 2); _gpu->forward_mul4x2(dst); break;
+			case 1u <<  4: _gpu->forward4x2(dst, 1); _gpu->forward_mul4x2(dst); break;
 			case 1u <<  5: _gpu->forward_mul16x2(dst); break;
-			case 1u <<  6: _gpu->forward4x2(dst, 4); _gpu->forward_mul16x2(dst); break;
+			case 1u <<  6: _gpu->forward4x2(dst, 3); _gpu->forward_mul16x2(dst); break;
 			case 1u <<  7: _gpu->forward_mul64x2(dst); break;
-			case 1u <<  8: _gpu->forward4x2(dst, 6); _gpu->forward_mul64x2(dst); break;
+			case 1u <<  8: _gpu->forward4x2(dst, 5); _gpu->forward_mul64x2(dst); break;
 			case 1u <<  9: _gpu->forward_mul256x2(dst); break;
-			case 1u << 10: _gpu->forward4x2(dst, 8); _gpu->forward_mul256x2(dst); break;
+			case 1u << 10: _gpu->forward4x2(dst, 7); _gpu->forward_mul256x2(dst); break;
 			case 1u << 11: _gpu->forward_mul1024x2(dst); break;
 			case 1u << 12:
-			case 1u << 13: _gpu->forward16x2(dst, 8); _gpu->forward_mul256x2(dst); break;
+			case 1u << 13: _gpu->forward16x2(dst, 7); _gpu->forward_mul256x2(dst); break;
 			case 1u << 14:
-			case 1u << 15: _gpu->forward64x2(dst, 8); _gpu->forward_mul256x2(dst); break;
+			case 1u << 15: _gpu->forward64x2(dst, 7); _gpu->forward_mul256x2(dst); break;
 			case 1u << 16:
-			case 1u << 17: _gpu->forward256x2(dst, 8); _gpu->forward_mul256x2(dst); break;
+			case 1u << 17: _gpu->forward256x2(dst, 7); _gpu->forward_mul256x2(dst); break;
 			case 1u << 18:
-			case 1u << 19: _gpu->forward256x2(dst, 10); _gpu->forward_mul1024x2(dst); break;
+			case 1u << 19: _gpu->forward256x2(dst, 9); _gpu->forward_mul1024x2(dst); break;
 			case 1u << 20:
-			case 1u << 21: _gpu->forward1024x2(dst, 10); _gpu->forward_mul1024x2(dst); break;
+			case 1u << 21: _gpu->forward1024x2(dst, 9); _gpu->forward_mul1024x2(dst); break;
 			case 1u << 22:
-			case 1u << 23: _gpu->forward64x2(dst, 16); _gpu->forward256x2(dst, 8); _gpu->forward_mul256x2(dst); break;
+			case 1u << 23: _gpu->forward64x2(dst, 15); _gpu->forward256x2(dst, 7); _gpu->forward_mul256x2(dst); break;
 			case 1u << 24:
-			case 1u << 25: _gpu->forward256x2(dst, 16); _gpu->forward256x2(dst, 8); _gpu->forward_mul256x2(dst); break;
-			case 1u << 26: _gpu->forward256x2(dst, 18); _gpu->forward256x2(dst, 10); _gpu->forward_mul1024x2(dst); break;
+			case 1u << 25: _gpu->forward256x2(dst, 15); _gpu->forward256x2(dst, 7); _gpu->forward_mul256x2(dst); break;
+			case 1u << 26: _gpu->forward256x2(dst, 17); _gpu->forward256x2(dst, 9); _gpu->forward_mul1024x2(dst); break;
 
 			case 5u <<  3:
 			case 5u <<  4: _gpu->forward_mul40(dst); break;
@@ -589,29 +634,29 @@ public:
 			case 5u <<  8: _gpu->forward_mul640(dst); break;
 			case 5u <<  9:
 			case 5u << 10: if (wg_size >= 2560 / 8) _gpu->forward_mul2560(dst);
-							else { _gpu->forward4x2_5(dst, 7); _gpu->forward_mul640(dst); }
+							else { _gpu->forward4x2_5(dst, 6); _gpu->forward_mul640(dst); }
 							break;
 			case 5u << 11:
-			case 5u << 12: _gpu->forward16x2_5(dst, 7); _gpu->forward_mul640(dst); break;
+			case 5u << 12: _gpu->forward16x2_5(dst, 6); _gpu->forward_mul640(dst); break;
 			case 5u << 13:
-			case 5u << 14: _gpu->forward64x2_5(dst, 7); _gpu->forward_mul640(dst); break;
+			case 5u << 14: _gpu->forward64x2_5(dst, 6); _gpu->forward_mul640(dst); break;
 			case 5u << 15:
-			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 9); _gpu->forward_mul2560(dst); }
-							else { _gpu->forward16x2_5(dst, 11); _gpu->forward16x2_5(dst, 7); _gpu->forward_mul640(dst);}
+			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 8); _gpu->forward_mul2560(dst); }
+							else { _gpu->forward16x2_5(dst, 10); _gpu->forward16x2_5(dst, 6); _gpu->forward_mul640(dst);}
 							break;
 			case 5u << 17:
-			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(dst, 9); _gpu->forward_mul2560(dst); }
-							else { _gpu->forward16x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->forward_mul640(dst);}
+			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(dst, 8); _gpu->forward_mul2560(dst); }
+							else { _gpu->forward16x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->forward_mul640(dst);}
 							break;
 			case 5u << 19:
-			case 5u << 20: _gpu->forward64x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->forward_mul640(dst); break;
+			case 5u << 20: _gpu->forward64x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->forward_mul640(dst); break;
 			case 5u << 21:
-			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 15); _gpu->forward64x2_5(dst, 9); _gpu->forward_mul2560(dst); }
-							else { _gpu->forward16x2_5(dst, 17); _gpu->forward16x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->forward_mul640(dst); }
+			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 14); _gpu->forward64x2_5(dst, 8); _gpu->forward_mul2560(dst); }
+							else { _gpu->forward16x2_5(dst, 16); _gpu->forward16x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->forward_mul640(dst); }
 							break;
 			case 5u << 23:
-			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 17); _gpu->forward256x2_5(dst, 9); _gpu->forward_mul2560(dst); }
-							else { _gpu->forward16x2_5(dst, 19); _gpu->forward64x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->forward_mul640(dst); }
+			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 16); _gpu->forward256x2_5(dst, 8); _gpu->forward_mul2560(dst); }
+							else { _gpu->forward16x2_5(dst, 18); _gpu->forward64x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->forward_mul640(dst); }
 							break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
@@ -625,29 +670,29 @@ public:
 		{
 			case 1u <<  2: _gpu->sqr4(src); break;
 			case 1u <<  3: _gpu->sqr4x2(src); break;
-			case 1u <<  4: _gpu->forward4x2(src, 2); _gpu->sqr4x2(src); _gpu->backward4x2(src, 2); break;
+			case 1u <<  4: _gpu->forward4x2(src, 1); _gpu->sqr4x2(src); _gpu->backward4x2(src, 1); break;
 			case 1u <<  5: _gpu->sqr16x2(src); break;
-			case 1u <<  6: _gpu->forward4x2(src, 4); _gpu->sqr16x2(src); _gpu->backward4x2(src, 4); break;
+			case 1u <<  6: _gpu->forward4x2(src, 3); _gpu->sqr16x2(src); _gpu->backward4x2(src, 3); break;
 			case 1u <<  7: _gpu->sqr64x2(src); break;
-			case 1u <<  8: _gpu->forward4x2(src, 6); _gpu->sqr64x2(src); _gpu->backward4x2(src, 6); break;
+			case 1u <<  8: _gpu->forward4x2(src, 5); _gpu->sqr64x2(src); _gpu->backward4x2(src, 5); break;
 			case 1u <<  9: _gpu->sqr256x2(src); break;
-			case 1u << 10: _gpu->forward4x2(src, 8); _gpu->sqr256x2(src); _gpu->backward4x2(src, 8); break;
+			case 1u << 10: _gpu->forward4x2(src, 7); _gpu->sqr256x2(src); _gpu->backward4x2(src, 7); break;
 			case 1u << 11: _gpu->sqr1024x2(src); break;
 			case 1u << 12:
-			case 1u << 13: _gpu->forward16x2(src, 8); _gpu->sqr256x2(src); _gpu->backward16x2(src, 8); break;
+			case 1u << 13: _gpu->forward16x2(src, 7); _gpu->sqr256x2(src); _gpu->backward16x2(src, 7); break;
 			case 1u << 14:
-			case 1u << 15: _gpu->forward64x2(src, 8); _gpu->sqr256x2(src); _gpu->backward64x2(src, 8); break;
+			case 1u << 15: _gpu->forward64x2(src, 7); _gpu->sqr256x2(src); _gpu->backward64x2(src, 7); break;
 			case 1u << 16:
-			case 1u << 17: _gpu->forward256x2(src, 8); _gpu->sqr256x2(src); _gpu->backward256x2(src, 8); break;
+			case 1u << 17: _gpu->forward256x2(src, 7); _gpu->sqr256x2(src); _gpu->backward256x2(src, 7); break;
 			case 1u << 18:
-			case 1u << 19: _gpu->forward256x2(src, 10); _gpu->sqr1024x2(src); _gpu->backward256x2(src, 10); break;
+			case 1u << 19: _gpu->forward256x2(src, 9); _gpu->sqr1024x2(src); _gpu->backward256x2(src, 9); break;
 			case 1u << 20:
-			case 1u << 21: _gpu->forward1024x2(src, 10); _gpu->sqr1024x2(src); _gpu->backward1024x2(src, 10); break;
+			case 1u << 21: _gpu->forward1024x2(src, 9); _gpu->sqr1024x2(src); _gpu->backward1024x2(src, 9); break;
 			case 1u << 22:
-			case 1u << 23: _gpu->forward64x2(src, 16); _gpu->forward256x2(src, 8); _gpu->sqr256x2(src); _gpu->backward256x2(src, 8); _gpu->backward64x2(src, 16); break;
+			case 1u << 23: _gpu->forward64x2(src, 15); _gpu->forward256x2(src, 7); _gpu->sqr256x2(src); _gpu->backward256x2(src, 7); _gpu->backward64x2(src, 15); break;
 			case 1u << 24:
-			case 1u << 25: _gpu->forward256x2(src, 16); _gpu->forward256x2(src, 8); _gpu->sqr256x2(src); _gpu->backward256x2(src, 8); _gpu->backward256x2(src, 16); break;
-			case 1u << 26: _gpu->forward256x2(src, 18); _gpu->forward256x2(src, 10); _gpu->sqr1024x2(src); _gpu->backward256x2(src, 10); _gpu->backward256x2(src, 18); break;
+			case 1u << 25: _gpu->forward256x2(src, 15); _gpu->forward256x2(src, 7); _gpu->sqr256x2(src); _gpu->backward256x2(src, 7); _gpu->backward256x2(src, 15); break;
+			case 1u << 26: _gpu->forward256x2(src, 17); _gpu->forward256x2(src, 9); _gpu->sqr1024x2(src); _gpu->backward256x2(src, 9); _gpu->backward256x2(src, 17); break;
 
 			case 5u <<  3:
 			case 5u <<  4: _gpu->sqr40(src); break;
@@ -656,28 +701,28 @@ public:
 			case 5u <<  7:
 			case 5u <<  8: _gpu->sqr640(src); break;
 			case 5u <<  9:
-			case 5u << 10: if (wg_size >= 2560 / 8) _gpu->sqr2560(src); else { _gpu->forward4x2_5(src, 7); _gpu->sqr640(src); _gpu->backward4x2_5(src, 7); } break;
+			case 5u << 10: if (wg_size >= 2560 / 8) _gpu->sqr2560(src); else { _gpu->forward4x2_5(src, 6); _gpu->sqr640(src); _gpu->backward4x2_5(src, 6); } break;
 			case 5u << 11:
-			case 5u << 12: _gpu->forward16x2_5(src, 7); _gpu->sqr640(src); _gpu->backward16x2_5(src, 7); break;
+			case 5u << 12: _gpu->forward16x2_5(src, 6); _gpu->sqr640(src); _gpu->backward16x2_5(src, 6); break;
 			case 5u << 13:
-			case 5u << 14: _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); break;
+			case 5u << 14: _gpu->forward64x2_5(src, 6); _gpu->sqr640(src); _gpu->backward64x2_5(src, 6); break;
 			case 5u << 15:
-			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 9); _gpu->sqr2560(src); _gpu->backward64x2_5(src, 9); }
-							else { _gpu->forward4x2_5(src, 13); _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); _gpu->backward4x2_5(src, 13); }
+			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 8); _gpu->sqr2560(src); _gpu->backward64x2_5(src, 8); }
+							else { _gpu->forward16x2_5(src, 10); _gpu->forward16x2_5(src, 6); _gpu->sqr640(src); _gpu->backward16x2_5(src, 6); _gpu->backward16x2_5(src, 10); }
 							break;
 			case 5u << 17:
-			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(src, 9); _gpu->sqr2560(src); _gpu->backward256x2_5(src, 9); }
-							else { _gpu->forward16x2_5(src, 13); _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); _gpu->backward16x2_5(src, 13); }
+			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(src, 8); _gpu->sqr2560(src); _gpu->backward256x2_5(src, 8); }
+							else { _gpu->forward16x2_5(src, 12); _gpu->forward64x2_5(src, 6); _gpu->sqr640(src); _gpu->backward64x2_5(src, 6); _gpu->backward16x2_5(src, 12); }
 							break;
 			case 5u << 19:
-			case 5u << 20: _gpu->forward64x2_5(src, 13); _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); _gpu->backward64x2_5(src, 13); break;
+			case 5u << 20: _gpu->forward64x2_5(src, 12); _gpu->forward64x2_5(src, 6); _gpu->sqr640(src); _gpu->backward64x2_5(src, 6); _gpu->backward64x2_5(src, 12); break;
 			case 5u << 21:
-			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 15); _gpu->forward64x2_5(src, 9); _gpu->sqr2560(src); _gpu->backward64x2_5(src, 9); _gpu->backward64x2_5(src, 15); }
-							else { _gpu->forward16x2_5(src, 17); _gpu->forward16x2_5(src, 13); _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); _gpu->backward16x2_5(src, 13); _gpu->backward16x2_5(src, 17); }
+			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 14); _gpu->forward64x2_5(src, 8); _gpu->sqr2560(src); _gpu->backward64x2_5(src, 8); _gpu->backward64x2_5(src, 14); }
+							else { _gpu->forward16x2_5(src, 16); _gpu->forward16x2_5(src, 12); _gpu->forward64x2_5(src, 6); _gpu->sqr640(src); _gpu->backward64x2_5(src, 6); _gpu->backward16x2_5(src, 12); _gpu->backward16x2_5(src, 16); }
 							break;
 			case 5u << 23:
-			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 17); _gpu->forward256x2_5(src, 9); _gpu->sqr2560(src); _gpu->backward256x2_5(src, 9); _gpu->backward64x2_5(src, 17); }
-							else { _gpu->forward16x2_5(src, 19); _gpu->forward64x2_5(src, 13); _gpu->forward64x2_5(src, 7); _gpu->sqr640(src); _gpu->backward64x2_5(src, 7); _gpu->backward64x2_5(src, 13); _gpu->backward16x2_5(src, 19); }
+			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(src, 16); _gpu->forward256x2_5(src, 8); _gpu->sqr2560(src); _gpu->backward256x2_5(src, 8); _gpu->backward64x2_5(src, 16); }
+							else { _gpu->forward16x2_5(src, 18); _gpu->forward64x2_5(src, 12); _gpu->forward64x2_5(src, 6); _gpu->sqr640(src); _gpu->backward64x2_5(src, 6); _gpu->backward64x2_5(src, 12); _gpu->backward16x2_5(src, 18); }
 							break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
@@ -693,29 +738,29 @@ public:
 		{
 			case 1u <<  2: _gpu->mul4(dst, src); break;
 			case 1u <<  3: _gpu->mul4x2(dst, src); break;
-			case 1u <<  4: _gpu->forward4x2(dst, 2); _gpu->mul4x2(dst, src); _gpu->backward4x2(dst, 2); break;
+			case 1u <<  4: _gpu->forward4x2(dst, 1); _gpu->mul4x2(dst, src); _gpu->backward4x2(dst, 1); break;
 			case 1u <<  5: _gpu->mul16x2(dst, src); break;
-			case 1u <<  6: _gpu->forward4x2(dst, 4); _gpu->mul16x2(dst, src); _gpu->backward4x2(dst, 4); break;
+			case 1u <<  6: _gpu->forward4x2(dst, 3); _gpu->mul16x2(dst, src); _gpu->backward4x2(dst, 3); break;
 			case 1u <<  7: _gpu->mul64x2(dst, src); break;
-			case 1u <<  8: _gpu->forward4x2(dst, 6); _gpu->mul64x2(dst, src); _gpu->backward4x2(dst, 6); break;
+			case 1u <<  8: _gpu->forward4x2(dst, 5); _gpu->mul64x2(dst, src); _gpu->backward4x2(dst, 5); break;
 			case 1u <<  9: _gpu->mul256x2(dst, src); break;
-			case 1u << 10: _gpu->forward4x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward4x2(dst, 8); break;
+			case 1u << 10: _gpu->forward4x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward4x2(dst, 7); break;
 			case 1u << 11: _gpu->mul1024x2(dst, src); break;
 			case 1u << 12:
-			case 1u << 13: _gpu->forward16x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward16x2(dst, 8); break;
+			case 1u << 13: _gpu->forward16x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward16x2(dst, 7); break;
 			case 1u << 14:
-			case 1u << 15: _gpu->forward64x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward64x2(dst, 8); break;
+			case 1u << 15: _gpu->forward64x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward64x2(dst, 7); break;
 			case 1u << 16:
-			case 1u << 17: _gpu->forward256x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 8); break;
+			case 1u << 17: _gpu->forward256x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 7); break;
 			case 1u << 18:
-			case 1u << 19: _gpu->forward256x2(dst, 10); _gpu->mul1024x2(dst, src); _gpu->backward256x2(dst, 10); break;
+			case 1u << 19: _gpu->forward256x2(dst, 9); _gpu->mul1024x2(dst, src); _gpu->backward256x2(dst, 9); break;
 			case 1u << 20:
-			case 1u << 21: _gpu->forward1024x2(dst, 10); _gpu->mul1024x2(dst, src); _gpu->backward1024x2(dst, 10); break;
+			case 1u << 21: _gpu->forward1024x2(dst, 9); _gpu->mul1024x2(dst, src); _gpu->backward1024x2(dst, 9); break;
 			case 1u << 22:
-			case 1u << 23: _gpu->forward64x2(dst, 16); _gpu->forward256x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 8); _gpu->backward64x2(dst, 16); break;
+			case 1u << 23: _gpu->forward64x2(dst, 15); _gpu->forward256x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 7); _gpu->backward64x2(dst, 15); break;
 			case 1u << 24:
-			case 1u << 25: _gpu->forward256x2(dst, 16); _gpu->forward256x2(dst, 8); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 8); _gpu->backward256x2(dst, 16); break;
-			case 1u << 26: _gpu->forward256x2(dst, 18); _gpu->forward256x2(dst, 10); _gpu->mul1024x2(dst, src); _gpu->backward256x2(dst, 10); _gpu->backward256x2(dst, 18); break;
+			case 1u << 25: _gpu->forward256x2(dst, 15); _gpu->forward256x2(dst, 7); _gpu->mul256x2(dst, src); _gpu->backward256x2(dst, 7); _gpu->backward256x2(dst, 15); break;
+			case 1u << 26: _gpu->forward256x2(dst, 17); _gpu->forward256x2(dst, 9); _gpu->mul1024x2(dst, src); _gpu->backward256x2(dst, 9); _gpu->backward256x2(dst, 17); break;
 
 			case 5u <<  3:
 			case 5u <<  4: _gpu->mul40(dst, src); break;
@@ -724,28 +769,28 @@ public:
 			case 5u <<  7:
 			case 5u <<  8: _gpu->mul640(dst, src); break;
 			case 5u <<  9:
-			case 5u << 10: if (wg_size >= 2560 / 8) _gpu->mul2560(dst, src); else { _gpu->forward4x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward4x2_5(dst, 7); } break;
+			case 5u << 10: if (wg_size >= 2560 / 8) _gpu->mul2560(dst, src); else { _gpu->forward4x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward4x2_5(dst, 6); } break;
 			case 5u << 11:
-			case 5u << 12: _gpu->forward16x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward16x2_5(dst, 7); break;
+			case 5u << 12: _gpu->forward16x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward16x2_5(dst, 6); break;
 			case 5u << 13:
-			case 5u << 14: _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); break;
+			case 5u << 14: _gpu->forward64x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 6); break;
 			case 5u << 15:
-			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 9); _gpu->mul2560(dst, src); _gpu->backward64x2_5(dst, 9); }
-							else { _gpu->forward4x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); _gpu->backward4x2_5(dst, 13); }
+			case 5u << 16: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 8); _gpu->mul2560(dst, src); _gpu->backward64x2_5(dst, 8); }
+							else { _gpu->forward16x2_5(dst, 10); _gpu->forward16x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward16x2_5(dst, 6); _gpu->backward16x2_5(dst, 10); }
 							break;
 			case 5u << 17:
-			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(dst, 9); _gpu->mul2560(dst, src); _gpu->backward256x2_5(dst, 9); }
-							else { _gpu->forward16x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); _gpu->backward16x2_5(dst, 13); }
+			case 5u << 18: if (wg_size >= 2560 / 8) { _gpu->forward256x2_5(dst, 8); _gpu->mul2560(dst, src); _gpu->backward256x2_5(dst, 8); }
+							else { _gpu->forward16x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 6); _gpu->backward16x2_5(dst, 12); }
 							break;
 			case 5u << 19:
-			case 5u << 20: _gpu->forward64x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); _gpu->backward64x2_5(dst, 13); break;
+			case 5u << 20: _gpu->forward64x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 6); _gpu->backward64x2_5(dst, 12); break;
 			case 5u << 21:
-			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 15); _gpu->forward64x2_5(dst, 9); _gpu->mul2560(dst, src); _gpu->backward64x2_5(dst, 9); _gpu->backward64x2_5(dst, 15); }
-							else { _gpu->forward16x2_5(dst, 17); _gpu->forward16x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); _gpu->backward16x2_5(dst, 13); _gpu->backward16x2_5(dst, 17); }
+			case 5u << 22: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 14); _gpu->forward64x2_5(dst, 8); _gpu->mul2560(dst, src); _gpu->backward64x2_5(dst, 8); _gpu->backward64x2_5(dst, 14); }
+							else { _gpu->forward16x2_5(dst, 16); _gpu->forward16x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 6); _gpu->backward16x2_5(dst, 12); _gpu->backward16x2_5(dst, 16); }
 							break;
 			case 5u << 23:
-			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 17); _gpu->forward256x2_5(dst, 9); _gpu->mul2560(dst, src); _gpu->backward256x2_5(dst, 9); _gpu->backward64x2_5(dst, 17); }
-							else { _gpu->forward16x2_5(dst, 19); _gpu->forward64x2_5(dst, 13); _gpu->forward64x2_5(dst, 7); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 7); _gpu->backward64x2_5(dst, 13); _gpu->backward16x2_5(dst, 19); }
+			case 5u << 24: if (wg_size >= 2560 / 8) { _gpu->forward64x2_5(dst, 16); _gpu->forward256x2_5(dst, 8); _gpu->mul2560(dst, src); _gpu->backward256x2_5(dst, 8); _gpu->backward64x2_5(dst, 16); }
+							else { _gpu->forward16x2_5(dst, 18); _gpu->forward64x2_5(dst, 12); _gpu->forward64x2_5(dst, 6); _gpu->mul640(dst, src); _gpu->backward64x2_5(dst, 6); _gpu->backward64x2_5(dst, 12); _gpu->backward16x2_5(dst, 18); }
 							break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
