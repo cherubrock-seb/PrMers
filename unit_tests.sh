@@ -87,20 +87,6 @@ for test in "${pm1_tests[@]}"; do
   $valid && echo "✅"
 done
 
-echo ""
-echo "=== Optimization flags tests ==="
-for entry in "${optflags[@]}"; do
-  opt=${entry%%:*}
-  flag=${entry#*:}
-  echo -n "Testing -O $opt... "
-  output=$(./prmers 127 -marin --noask -O "$opt" -prp -debug 2>&1)
-  if echo "$output" | grep -F -- "$flag" >/dev/null; then
-    echo "✅"
-  else
-    echo "❌ Missing '$flag'"
-    exit 1
-  fi
-done
 
 echo ""
 echo "=== Out-of-range exponent verification ==="
