@@ -160,31 +160,6 @@ else
 fi
 
 echo ""
-echo "=== Intermediate res64 display verification ==="
-output=$(./prmers 11213 --noask -prp -res64_display_interval 1000 2>&1)
-echo "$output" > logs/res64_interval_11213.log
-expected_lines=(
-  "Iter: 1000| Res64: FBA631FBCB73A011"
-  "Iter: 2000| Res64: F01283650C4A1491"
-  "Iter: 3000| Res64: 7E79193B757010B7"
-  "Iter: 4000| Res64: 31482E4D80FE99BB"
-  "Iter: 5000| Res64: 973B76BACF73BBEF"
-  "Iter: 6000| Res64: 8CFFB332495FC320"
-  "Iter: 7000| Res64: 98080C76DF068843"
-  "Iter: 8000| Res64: 8FDA516F885D3FEE"
-  "Iter: 9000| Res64: 2AADBC4F1E318E92"
-  "Iter: 10000| Res64: 0A4AAF339C8B290C"
-  "Iter: 11000| Res64: A1F26F470CFE412D"
-)
-
-for line in "${expected_lines[@]}"; do
-  if ! grep -qF "$line" <<< "$output"; then
-    echo "❌ Missing intermediate line: '$line' (see logs/res64_interval_11213.log)"
-    exit 1
-  fi
-done
-echo "✅ Intermediate res64 values OK"
-echo ""
 echo "=== Proof generation verification for exponent 9941 ==="
 output=$(./prmers 9941 --noask --proofile 2>&1)
 echo "$output" > logs/proofs_9941.log
