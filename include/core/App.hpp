@@ -46,7 +46,7 @@ public:
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);
-
+    int runGpuBenchmarkMarin();
 private:
   int    argc_;
   char** argv_;

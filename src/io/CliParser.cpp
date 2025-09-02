@@ -75,8 +75,8 @@ void printUsage(const char* progName) {
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
-    
     std::cout << "  -res64_display_interval <N> : (Optional) (only in -marin mode) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
+    std::cout << "  -bench               : (Optional) run benchmark on all NTT transform sizes" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
@@ -133,7 +133,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-marin") == 0) {
             opts.marin = false;
         }
-        
+        else if (std::strcmp(argv[i], "-bench") == 0) {
+            opts.bench = true;
+            opts.exponent = 127;
+        }
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
             opts.cl_queue_throttle_active = true;
         }

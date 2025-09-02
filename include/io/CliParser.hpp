@@ -17,6 +17,7 @@ struct CliOptions {
     bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"
     bool marin = true;
+    bool bench = false;
     bool profiling = false;
     bool debug = false;
     bool gerbiczli = true;

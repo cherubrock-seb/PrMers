@@ -36,6 +36,7 @@
 #include "marin/file.h"
 #include <sys/stat.h>
 #include <cstdio>
+#include <map>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -66,6 +67,9 @@
 #include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <set>
+
+
 namespace fs = std::filesystem;
 
 using namespace std::chrono;
@@ -2252,10 +2256,176 @@ int App::runPM1() {
     return 1;
 }
 
+static volatile sig_atomic_t prmers_bench_stop = 0;
+static void prmers_bench_sigint(int) { prmers_bench_stop = 1; }
+
+static std::string fmt_dhms(double s) {
+    if (s < 0) s = 0;
+    uint64_t t = (uint64_t)(s + 0.5);
+    uint64_t d = t / 86400;
+    uint64_t h = (t % 86400) / 3600;
+    uint64_t m = (t % 3600) / 60;
+    uint64_t sec = t % 60;
+    std::ostringstream o;
+    if (d) o << d << "d " << h << "h " << std::setw(2) << std::setfill('0') << m << "m " << std::setw(2) << std::setfill('0') << sec << "s";
+    else o << h << "h " << std::setw(2) << std::setfill('0') << m << "m " << std::setw(2) << std::setfill('0') << sec << "s";
+    return o.str();
+}
+
+uint32_t transformsize_custom(uint64_t exponent) {
+    uint64_t log_n = 0;
+    uint64_t w = 0;
+    do {
+        ++log_n;
+        w = exponent >> log_n;
+    } while ((w + 1) * 2 + log_n >= 63);
+    uint64_t n2 = uint64_t(1) << log_n;
+    if (n2 >= 128) {
+        uint64_t n5 = (n2 >> 3) * 5u;
+        if (n5 >= 80) {
+            uint64_t w5 = exponent / n5;
+            long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
+            if (cost5 < 64.0L) return (uint32_t)n5;
+        }
+    }
+    if (exponent > 1207959503) n2 = (n2 / 4) * 5;
+    return (uint32_t)n2;
+}
+
+int App::runGpuBenchmarkMarin() {
+    auto fmt_pct = [&](double x){ std::ostringstream o; o<<std::fixed<<std::setprecision(1)<<x*100.0<<"%"; return o.str(); };
+
+    std::string gpu_name = "Unknown";
+    std::string gpu_vendor = "Unknown";
+    std::string driver_ver = "Unknown";
+    uint32_t cu = 0;
+    uint64_t vram = 0;
+    uint64_t lmem = 0;
+    std::string fp64 = "Unknown";
+    #ifdef CL_VERSION_1_0
+    {
+        cl_uint np = 0; clGetPlatformIDs(0, nullptr, &np);
+        std::vector<cl_platform_id> plats(np); if (np) clGetPlatformIDs(np, plats.data(), nullptr);
+        std::vector<cl_device_id> devs;
+        for (auto pid : plats) {
+            cl_uint nd = 0; clGetDeviceIDs(pid, CL_DEVICE_TYPE_ALL, 0, nullptr, &nd);
+            if (!nd) continue;
+            size_t old = devs.size(); devs.resize(old + nd);
+            clGetDeviceIDs(pid, CL_DEVICE_TYPE_ALL, nd, devs.data() + old, nullptr);
+        }
+        size_t idx = (size_t)options.device_id;
+        if (!devs.empty() && idx < devs.size()) {
+            cl_device_id d = devs[idx];
+            auto get_str = [&](cl_device_info p) {
+                size_t sz = 0; clGetDeviceInfo(d, p, 0, nullptr, &sz);
+                std::string s(sz, '\0'); if (sz) clGetDeviceInfo(d, p, sz, s.data(), nullptr);
+                if (!s.empty() && s.back() == '\0') s.pop_back();
+                return s;
+            };
+            gpu_name = get_str(CL_DEVICE_NAME);
+            gpu_vendor = get_str(CL_DEVICE_VENDOR);
+            driver_ver = get_str(CL_DRIVER_VERSION);
+            cl_uint u = 0; clGetDeviceInfo(d, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(u), &u, nullptr); cu = (uint32_t)u;
+            cl_ulong gm = 0; clGetDeviceInfo(d, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(gm), &gm, nullptr); vram = (uint64_t)gm;
+            cl_ulong lm = 0; clGetDeviceInfo(d, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(lm), &lm, nullptr); lmem = (uint64_t)lm;
+            cl_device_fp_config df = 0; clGetDeviceInfo(d, CL_DEVICE_DOUBLE_FP_CONFIG, sizeof(df), &df, nullptr); fp64 = (df ? "Yes" : "No");
+        }
+    }
+    #endif
+    std::cout << "GPU: " << gpu_vendor << " " << gpu_name << " | Driver: " << driver_ver << " | CUs: " << cu << " | VRAM: " << (vram / (1024*1024)) << " MB | LocalMem: " << (lmem / 1024) << " KB | FP64: " << fp64 << "\n";
+
+    std::vector<uint32_t> exps = {
+        127u, 1279u, 2203u, 9941u, 44497u, 756839u, 3021377u, 37156667u, 57885161u, 77232917u, 82589933u, 136279841u,
+        146410013u, 161051017u, 177156127u, 180000017u, 200000033u, 220000013u, 250000013u, 280000027u, 300000007u,
+        320000077u, 340000019u, 360000019u, 400000009u, 500000003u, 600000001u
+    };
+
+    struct Task { uint32_t ts; uint32_t p; };
+    std::vector<Task> tasks;
+    tasks.reserve(exps.size());
+    for (auto p : exps) tasks.push_back({transformsize_custom(p), p});
+
+    struct Row { uint32_t ts; uint32_t p; double ips; double eta_prp; };
+    std::vector<Row> rows;
+
+    auto print_live = [&](size_t i, size_t n, uint32_t ts, uint32_t p, double frac, double ips_live, double eta_all){
+        std::ostringstream o;
+        o << "\r[" << (i+1) << "/" << n << "] TS=" << std::setw(9) << ts << " p=" << std::setw(10) << p
+          << " " << std::setw(6) << fmt_pct((i + frac) / n)
+          << " ips=" << std::fixed << std::setprecision(2) << std::setw(10) << ips_live
+          << " ETA=" << fmt_dhms(eta_all) << "    ";
+        std::cout << o.str() << std::flush;
+    };
+
+    auto old_handler = std::signal(SIGINT, prmers_bench_sigint);
+    const size_t R0 = 0, R1 = 1;
+    double sum_time = 0.0;
+
+    for (size_t ti = 0; ti < tasks.size(); ++ti) {
+        if (prmers_bench_stop) break;
+        uint32_t p = tasks[ti].p;
+        engine* eng = nullptr;
+        try { eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), false); } catch (...) { eng = nullptr; }
+        if (!eng) continue;
+        eng->set(R1, 1);
+        eng->set(R0, 3);
+
+        uint32_t warm = 96;
+        for (uint32_t i = 0; i < warm && !prmers_bench_stop; ++i) eng->square_mul(R0);
+
+        uint32_t ts = tasks[ti].ts;
+        double target = (ts >= 33554432u) ? 10.0 : (ts >= 8388608u ? 8.0 : (ts >= 2621440u ? 6.0 : 5.0));
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+        uint64_t cnt = 0;
+        double last_update = 0.0;
+
+        for (;;) {
+            if (prmers_bench_stop) break;
+            eng->square_mul(R0);
+            ++cnt;
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double e = std::chrono::duration<double>(t1 - t0).count();
+            double frac = std::min(1.0, e / target);
+            double per_task_est = (ti==0 && frac>0.0) ? (e/frac) : ((sum_time + e) / (ti + frac));
+            double eta_all = per_task_est * ((tasks.size() - (ti + 1)) + (1.0 - frac));
+            double ips_live = cnt / std::max(1e-9, e);
+            if (e - last_update >= 0.2 || frac >= 1.0) { print_live(ti, tasks.size(), ts, p, frac, ips_live, eta_all); last_update = e; }
+            if (e >= target) break;
+        }
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(t1 - t0).count();
+        sum_time += elapsed;
+
+        if (!prmers_bench_stop) {
+            double ips = cnt / std::max(1e-9, elapsed);
+            double eta_prp = (double)p / std::max(1e-9, ips);
+            rows.push_back({ts, p, ips, eta_prp});
+        }
+
+        delete eng;
+        if (prmers_bench_stop) break;
+    }
+
+    std::signal(SIGINT, old_handler);
+    std::cout << "\n";
+    std::cout << "Transform  Exponent      Iter/s       PRP_ETA\n";
+    for (auto &r : rows) {
+        std::cout << std::setw(9) << r.ts << "  " << std::setw(10) << r.p
+                  << "  " << std::fixed << std::setprecision(2) << std::setw(10) << r.ips
+                  << "  " << std::setw(14) << fmt_dhms(r.eta_prp) << "\n";
+    }
+    return 0;
+}
+
 
 
 
 int App::run() {
+    if(options.bench){
+        return runGpuBenchmarkMarin();
+    }
     if(options.marin){
         return runPrpOrLlMarin();
     }
