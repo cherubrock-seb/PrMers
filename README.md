@@ -9,14 +9,14 @@ Backend
 -------
 - Default backend: Marin (https://github.com/galloty/marin)
   - Efficient modular exponentiation with Gerbicz–Li error checking.
-  - Fast Mersenne-mod multiplication via IDBWT over Z/(2^64 - 2^32 + 1)Z.
+  - Fast Mersenne-mod multiplication via IDBWT over Z/(2^64 - 2^32 + 1.Z.
 - You can disable Marin and use the legacy internal backend with: -marin
 
 Key Features
 ------------
 - OpenCL GPU acceleration (OpenCL 1.2+; 2.0 recommended)
 - LL and PRP for Mersenne (and PRP of cofactors with known factors)
-- P-1 factoring (stage-1 and stage-2)
+- P-1 factoring (stage-1 and stage-2.
 - Gerbicz–Li timed validation checkpoints (PRP)
 - Automatic disk checkpoints with deterministic resume
 - PrimeNet result submission (JSON + optional auto-submit)
@@ -50,7 +50,7 @@ Radeon VII
   | 74207281  | 544.38  | 1d 15h 46m 49s |
   | 57885161  | 552.32  | 1d 5h 6m 18s   |
 
-MacBook Air 2022 (Apple M2)
+MacBook Air 2022 (Apple M2.
   | Exponent  | Iter/s | ETA             |
   |-----------|--------|-----------------|
   | 136279841 | 31.16  | 50d 14h 57m 35s |
@@ -75,38 +75,52 @@ Requirements
 
 Quick Start
 -----------
-1) Build from source
-   Linux/macOS (example):
+1. Build from source
+   * Linux/macOS (example):
+     ```sh
      make
-   Windows (recommended): CMake + vcpkg + Visual Studio
+     ```
+   * Windows (recommended): CMake + vcpkg + Visual Studio
+     ```cmd
      cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
      cmake --build build --config Release
+     ```
 
-2) Run a PRP test
+2. Run a PRP test
+   ```sh
    ./prmers 136279841
+   ```
    (Default: PRP mode, Marin backend on)
 
-3) Disable Marin (use legacy internal backend)
+4. Disable Marin (use legacy internal backend)
+   ```sh
    ./prmers 136279841 -marin
+   ```
 
-4) P-1 stage-1 + stage-2
+6. P-1 stage-1 + stage-2
+   ```sh
    ./prmers 367 -pm1 -b1 11981 -b2 38971
+   ```
 
-5) Use worktodo.txt or a config file
+8. Use worktodo.txt or a config file
+   ```sh
    ./prmers -worktodo ./worktodo.txt
    ./prmers -config ./settings.cfg
+   ```
 
 Command-Line Options (selected)
 -------------------------------
+
+```
 <p>                         exponent to test (Mersenne p)
 -d <id>                     OpenCL device id
 -prp                        force PRP mode (default)
 -ll                         Lucas–Lehmer mode
 -pm1                        P-1 factoring; use -b1 and optional -b2
 -factors <csv>              known factors, test the remaining Mersenne cofactor
--t <sec>                    checkpoint interval (default 60)
+-t <sec>                    checkpoint interval (default 60.
 -f <path>                   checkpoint directory (default .)
--proof <k>                  set proof power (1..12) or 0 to disable
+-proof <k>                  set proof power (1..12. or 0 to disable
 -user <name>                PrimeNet username (for submission)
 -computer <name>            PrimeNet computer name
 --noask                     auto-submit results (requires -user and -password)
@@ -116,19 +130,20 @@ Command-Line Options (selected)
 -res64_display_interval <n> print residues every n iterations
 -erroriter <i>              inject fault at iteration i (PRP Gerbicz–Li testing)
 -marin                      disable the Marin backend (use legacy NTT backend)
+```
 
 Gerbicz–Li (PRP)
 ----------------
-- Time-based verification every ~T seconds (default T=600).
+- Time-based verification every ~T seconds (default T=600..
 - Two rolling products; on mismatch the run restores to the last verified state.
 - Files: .bufd, .lbufd, .gli, .isav, .jsav ensure deterministic recovery.
 Reference: D. Li, Y. Gallot, "An Efficient Modular Exponentiation Proof Scheme", arXiv:2209.15623
 
 P-1 Factoring (overview)
 ------------------------
-Stage-1:
-  choose B1, build E=lcm(1..B1), compute x=3^(E·2p) mod (2^p-1), factor=gcd(x-1,2^p-1)
-Stage-2:
+* Stage-1:
+  choose B1, build E=lcm(1..B1., compute x=3^(E·2p) mod (2^p-1., factor=gcd(x-1,2^p-1.
+* Stage-2:
   search primes q in (B1,B2] using cached powers; final gcd reveals a factor if present.
 
 worktodo.txt and Config
@@ -150,28 +165,32 @@ Proofs (experimental)
 Build Notes
 -----------
 Linux:
-  sudo apt-get update
-  sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev g++ make
+* `sudo apt-get update`
+* `sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev g++ make`
 
 macOS:
-  Xcode Command Line Tools installed
-  curl available
-  OpenCL is preinstalled on supported macOS versions
+* Xcode Command Line Tools installed
+* curl available
+* OpenCL is preinstalled on supported macOS versions
 
 Windows (CMake + vcpkg recommended):
-  vcpkg install curl:x64-windows
-  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
-  cmake --build build --config Release
+* `vcpkg install curl:x64-windows`
+* `cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release`
+* `cmake --build build --config Release`
 
 Uninstall / Clean
 -----------------
+```
 sudo make uninstall
 make clean
+```
 
 Sample Usage
 ------------
 PRP with residues every 1000 iterations, inject a test error:
-  ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
+
+    ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
+
 Resume from checkpoints automatically on restart.
 
 Resources and Credits
@@ -234,7 +253,7 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 | 57885161  | 552.32  | 1d 5h 6m 18s    |
 ```
 
-#### 🍏 MacBook Air 2022 (Apple M2)
+#### 🍏 MacBook Air 2022 (Apple M2.
 
 ```
 | Exponent  | Iter/s  | ETA              |
@@ -305,7 +324,7 @@ Example on ubuntu :
 sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
 
 ### 🪟 On Windows
-- A compiler supporting C++20 (e.g., MSVC or MinGW64)
+- A compiler supporting C++20 (e.g., MSVC or MinGW64.
 - OpenCL SDK (e.g., [Khronos OpenCL SDK](https://github.com/KhronosGroup/OpenCL-SDK))
 - CMake (if building via CMake)
 - Git for Windows (optional, if cloning directly)
@@ -334,9 +353,9 @@ A factor \( q \) of \( 2^p - 1 \) must satisfy \( q \equiv 1 \mod 2p \), i.e. \(
 The algorithm proceeds as follows:
 
 1. Choose a smoothness bound \( B_1 \)
-2. Build an exponent \( E = \text{lcm}(1, 2, \ldots, B_1) \)
-3. Compute \( x = 3^{E \cdot 2p} \mod (2^p - 1) \)
-4. Compute \( \gcd(x - 1, 2^p - 1) \)
+2. Build an exponent \( E = \text{lcm}(1, 2, \ldots, B_1. \)
+3. Compute \( x = 3^{E \cdot 2p} \mod (2^p - 1. \)
+4. Compute \( \gcd(x - 1, 2^p - 1. \)
 
 If the result is a nontrivial factor, the algorithm succeeds.
 
@@ -350,7 +369,7 @@ Sample output if a factor is found:
 
 ```
 Start a P-1 factoring stage 1 up to B1=8099
-GCD(x - 1, 2^541 - 1) = 4312790327
+GCD(x - 1, 2^541 - 1. = 4312790327
 P-1 factor stage 1 found: 4312790327
 ```
 
@@ -368,7 +387,7 @@ This stage-1 P−1 test is GPU-accelerated using optimized NTT-based exponentiat
 After a first‑stage bound **B1** has eliminated all small prime factors of _p − 1_, the second stage searches for a single remaining prime factor lying in the interval (B1, B2].  
 `prmers` sets **H = aᴹ mod n** (with the stage‑1 exponent **M**) and forms  
 
-&nbsp;&nbsp;**Q = ∏_{B1 < q ≤ B2} (Hᵠ − 1) mod n**,  
+&nbsp;&nbsp;**Q = ∏_{B1 < q ≤ B2} (Hᵠ − 1. mod n**,  
 
 where _q_ ranges over primes in (B1, B2].  Consecutive primes satisfy _qₙ = qₙ₋₁ + dₙ_ with small even gaps _dₙ_; the program caches powers **H², H⁴, …** so that each **Hᵠ** is obtained via a single modular multiplication **Hᵠₙ = Hᵠₙ₋₁·Hᵈⁿ**.  When the product is complete, **gcd(Q, n)** reveals any non‑trivial factor.
 
@@ -404,7 +423,7 @@ Timing-based check scheduling:
 By default, a full validation check is scheduled every 10 minutes.
 If the current performance is `sampleIps` (iterations per second), and the current `B`, we compute:
 
-    checkpasslevel = (sampleIps × 600) / B
+    checkpasslevel = (sampleIps × 600. / B
 
 The user can override this by passing the option `-checklevel <value>`:
     > This forces a validation every B × <value> iterations instead of 10 minutes.
@@ -420,7 +439,7 @@ Example:
     Injected error at iteration 55
     [Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
     [Gerbicz Li] Check FAILED! iter=1030
-    [Gerbicz Li] Restore iter=0 (j=0)
+    [Gerbicz Li] Restore iter=0 (j=0.
     [Gerbicz Li] Check passed! iter=1030
     ...
     [Gerbicz Li] Check passed! iter=9940
@@ -432,7 +451,7 @@ Example:
     Injected error at iteration 9940
     [Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
     [Gerbicz Li] Check FAILED! iter=9940
-    [Gerbicz Li] Restore iter=9742 (j=198)
+    [Gerbicz Li] Restore iter=9742 (j=198.
     [Gerbicz Li] Check passed! iter=9940
 
 Disabling protection:
@@ -690,7 +709,7 @@ Iter: 131000| Res64: C511CA4623D7612B
 Iter: 132000| Res64: 5DCADB0CC6545C44
 **[Gerbicz Li] Mismatch at index 0: r2=1384243, input=1773270**
 **[Gerbicz Li] Check FAILED! iter=132352**
-**[Gerbicz Li] Restore iter=0 (j=6972592)**
+**[Gerbicz Li] Restore iter=0 (j=6972592.**
 Iter: 1000| Res64: **54439D1F5A21BA8F**
 Iter: 2000| Res64: **40ABE45409907381**
 Iter: 3000| Res64: **9C4EB13478E46820**
@@ -750,7 +769,7 @@ Iter: 295000| Res64: D0CFCF5958FB9897
 Iter: 296000| Res64: CE523E94C1BB0752
 **[Gerbicz Li] Mismatch at index 0: r2=3304645, input=2763271**
 **[Gerbicz Li] Check FAILED! iter=296032**
-**[Gerbicz Li] Restore iter=132352 (j=6840240)**
+**[Gerbicz Li] Restore iter=132352 (j=6840240.**
 Iter: 133000| Res64: 859A264D49A60850
 Iter: 134000| Res64: 86A5A1C5DE66B269
 Iter: 135000| Res64: 0E0EF0BA1B88E88C
@@ -996,14 +1015,14 @@ You should now have `prmers.exe` ready to run!
 ## Command-Line Options
 
 - `<p>`: Minimum exponent to test (required)
-- `-d <device_id>`: Specify the OpenCL device ID (default: 0)
+- `-d <device_id>`: Specify the OpenCL device ID (default: 0.
 - `-O <options>`: Enable OpenCL optimization flags (e.g., `fastmath`, `mad`, `unsafe`, `nans`, `optdisable`)
-- `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8)
+- `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8.
 - `-profile`: Enable kernel execution profiling
-- `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9)
+- `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9.
 - `-ll`: Run in Lucas–Lehmer mode, with an initial value of 4 and p-2 iterations of `kernel_sub2`
 - `-factors <factor1,factor2,...>`: Specify known factors to run PRP test on the Mersenne cofactor
-- `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
+- `-t <backup_interval>`: Specify the backup interval in seconds (default: 60.
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
 - `-proof <level>`: Set proof power between 1 and 12 or 0 to disable proof generation (default: optimal proof power selected automatically)
 - `-enqueue_max <value>`: Manually set the maximum number of enqueued kernels before `clFinish` is called (default: autodetect)
@@ -1087,7 +1106,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 9279
 Using OpenCL device ID: 1
 
-Launching OpenCL kernel (p = 9279); computation may take a while depending on the exponent.
+Launching OpenCL kernel (p = 9279.; computation may take a while depending on the exponent.
 Max global workers possible: 256
 Final workers count: 256
 Progress: 100.00% | Elapsed: 11.09s | Iterations/sec: 836.78 | ETA: 0.00s       
@@ -1103,7 +1122,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 216091
 Using OpenCL device ID: 0
 
-Launching OpenCL kernel (p = 216091); computation may take a while depending on the exponent.
+Launching OpenCL kernel (p = 216091.; computation may take a while depending on the exponent.
 Max global workers possible: 256
 Final workers count: 256
 Progress: 0.11% | Elapsed: 4.05s | Iterations/sec: 57.50 | ETA: 3754.28s
@@ -1116,7 +1135,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 13
 Using OpenCL device ID: 1
 
-Launching OpenCL kernel (p_min_i = 13) without progress display; computation may take a while depending on the exponent.
+Launching OpenCL kernel (p_min_i = 13. without progress display; computation may take a while depending on the exponent.
 
 Lucas-Lehmer test results:
 Mp with p = 13 is a Mersenne prime.
@@ -1148,7 +1167,7 @@ The proof system is **heavily based on** the one used in [GpuOwl](https://github
 The proof process generates a `.proof` file, which contains:
 - The final residue after all PRP iterations.
 - A sequence of intermediate residues at exponentially spaced iteration points.
-- A verification mechanism that ensures `B == A^(2^span) (mod 2^E - 1)`.
+- A verification mechanism that ensures `B == A^(2^span) (mod 2^E - 1.`.
 
 Currently, verification is **not fully stable** and needs further debugging.  
 Performance is also significantly slower than GpuOwl, as optimizations are still in progress.  
@@ -1211,7 +1230,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 216091); computation may take a while.
+   Launching OpenCL kernel (p = 216091.; computation may take a while.
    Transform size: 16384
    Final workers count: 16384
    Work-groups count: 256
@@ -1266,7 +1285,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 127); computation may take a while.
+   Launching OpenCL kernel (p = 127.; computation may take a while.
    Transform size: 16
    Final workers count: 16
    Work-groups count: 4
@@ -1276,7 +1295,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Local size carry: 2
    Building OpenCL program with options:  -DWG_SIZE=4 -DLOCAL_PROPAGATION_DEPTH=8 -DCARRY_WORKER=2
    Progress: 100.00% | Elapsed: 0.03s | Iterations/sec: 4102.95 | ETA: 0.00s       
-   M127 PRP test succeeded (result is 9).
+   M127 PRP test succeeded (result is 9..
    Kernel execution time: 0.03 seconds
    Iterations per second: 4098.09 (127 iterations in total)
   ```
@@ -1297,7 +1316,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 756839); computation may take a while.
+   Launching OpenCL kernel (p = 756839.; computation may take a while.
    Transform size: 65536
    Final workers count: 65536
    Work-groups count: 256
