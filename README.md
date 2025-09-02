@@ -75,29 +75,43 @@ Requirements
 
 Quick Start
 -----------
-1) Build from source
-   Linux/macOS (example):
+Build from source
+   * Linux/macOS (example):
+     ```sh
      make
-   Windows (recommended): CMake + vcpkg + Visual Studio
+     ```
+   * Windows (recommended): CMake + vcpkg + Visual Studio
+     ```cmd
      cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
      cmake --build build --config Release
+     ```
 
-2) Run a PRP test
+Run a PRP test
+   ```sh
    ./prmers 136279841
+   ```
    (Default: PRP mode, Marin backend on)
 
-3) Disable Marin (use legacy internal backend)
+4. Disable Marin (use legacy internal backend)
+   ```sh
    ./prmers 136279841 -marin
+   ```
 
-4) P-1 stage-1 + stage-2
+6. P-1 stage-1 + stage-2
+   ```sh
    ./prmers 367 -pm1 -b1 11981 -b2 38971
+   ```
 
-5) Use worktodo.txt or a config file
+8. Use worktodo.txt or a config file
+   ```sh
    ./prmers -worktodo ./worktodo.txt
    ./prmers -config ./settings.cfg
+   ```
 
 Command-Line Options (selected)
 -------------------------------
+
+```
 <p>                         exponent to test (Mersenne p)
 -d <id>                     OpenCL device id
 -prp                        force PRP mode (default)
@@ -116,19 +130,20 @@ Command-Line Options (selected)
 -res64_display_interval <n> print residues every n iterations
 -erroriter <i>              inject fault at iteration i (PRP Gerbicz–Li testing)
 -marin                      disable the Marin backend (use legacy NTT backend)
+```
 
 Gerbicz–Li (PRP)
 ----------------
-- Time-based verification every ~T seconds (default T=600).
+- Time-based verification every ~T seconds (default T=600..
 - Two rolling products; on mismatch the run restores to the last verified state.
 - Files: .bufd, .lbufd, .gli, .isav, .jsav ensure deterministic recovery.
 Reference: D. Li, Y. Gallot, "An Efficient Modular Exponentiation Proof Scheme", arXiv:2209.15623
 
 P-1 Factoring (overview)
 ------------------------
-Stage-1:
+* Stage-1:
   choose B1, build E=lcm(1..B1), compute x=3^(E·2p) mod (2^p-1), factor=gcd(x-1,2^p-1)
-Stage-2:
+* Stage-2:
   search primes q in (B1,B2] using cached powers; final gcd reveals a factor if present.
 
 worktodo.txt and Config
@@ -150,28 +165,32 @@ Proofs (experimental)
 Build Notes
 -----------
 Linux:
-  sudo apt-get update
-  sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev g++ make
+* `sudo apt-get update`
+* `sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev g++ make`
 
 macOS:
-  Xcode Command Line Tools installed
-  curl available
-  OpenCL is preinstalled on supported macOS versions
+* Xcode Command Line Tools installed
+* curl available
+* OpenCL is preinstalled on supported macOS versions
 
 Windows (CMake + vcpkg recommended):
-  vcpkg install curl:x64-windows
-  cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
-  cmake --build build --config Release
+* `vcpkg install curl:x64-windows`
+* `cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release`
+* `cmake --build build --config Release`
 
 Uninstall / Clean
 -----------------
+```
 sudo make uninstall
 make clean
+```
 
 Sample Usage
 ------------
 PRP with residues every 1000 iterations, inject a test error:
-  ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
+
+    ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
+
 Resume from checkpoints automatically on restart.
 
 Resources and Credits
@@ -666,7 +685,7 @@ You can also control the frequency of displayed residues using `-res64_display_i
 ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
 ```
 
-This is a test scenario where an error is injected at iteration 19500.
+This is a test scenario where an error is injected at iteration 19500)
 
 ```
 [Gerbicz Li] B=2640
@@ -1116,7 +1135,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 13
 Using OpenCL device ID: 1
 
-Launching OpenCL kernel (p_min_i = 13) without progress display; computation may take a while depending on the exponent.
+Launching OpenCL kernel (p_min_i = 13. without progress display; computation may take a while depending on the exponent.
 
 Lucas-Lehmer test results:
 Mp with p = 13 is a Mersenne prime.
@@ -1129,9 +1148,9 @@ Iterations per second: 7294.76 (11 iterations in total)
 - **Modes:**
   - **-prp**: Run in PRP mode (default).  
     Sets the initial value to 3 and performs *p* iterations without executing kernel_sub2.  
-    The final result must equal 9.
+    The final result must equal 9)
   - **-ll**: Run in Lucas-Lehmer mode.  
-    Sets the initial value to 4 and performs *p-2* iterations, including the execution of kernel_sub2.
+    Sets the initial value to 4 and performs *p-2* iterations, including the execution of kernel_sub2)
 
 - **Backup / Save and Resume:**
   - The program periodically saves its state (the contents of buf_x) and the current loop iteration into files.
@@ -1276,7 +1295,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Local size carry: 2
    Building OpenCL program with options:  -DWG_SIZE=4 -DLOCAL_PROPAGATION_DEPTH=8 -DCARRY_WORKER=2
    Progress: 100.00% | Elapsed: 0.03s | Iterations/sec: 4102.95 | ETA: 0.00s       
-   M127 PRP test succeeded (result is 9).
+   M127 PRP test succeeded (result is 9..
    Kernel execution time: 0.03 seconds
    Iterations per second: 4098.09 (127 iterations in total)
   ```
@@ -1317,7 +1336,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
 - It implements both PRP and Lucas-Lehmer (LL) tests.
 - State saving is performed periodically based on the backup interval.
 - When interrupted (Ctrl-C), the program saves its state before exiting, allowing you to resume later.
-- The project implements an integer-based NTT and IBDWT using modular arithmetic modulo 2^64 - 2^32 + 1.
+- The project implements an integer-based NTT and IBDWT using modular arithmetic modulo 2^64 - 2^32 + 1)
 - The chosen modulus enables fast modular reduction using only bit shifts and additions.
 - For more details on the underlying techniques, refer to Nick Craig-Wood's ARM Prime Math:
   https://www.craig-wood.com/nick/armprime/math/
