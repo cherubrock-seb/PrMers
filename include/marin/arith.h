@@ -40,7 +40,7 @@ INLINE uint64 mod_mul(const uint64 lhs, const uint64 rhs)
 #ifdef _MSC_VER
 	lo = _umul128(lhs, rhs, &hi);
 #else
-	const __uint128_t t = (__uint128_t)lhs * (__uint128_t)rhs;
+	const __uint128_t t = lhs * __uint128_t(rhs);
 	lo = uint64(t); hi = uint64(t >> 64);
 #endif
 	return reduce(lo, hi);
@@ -52,7 +52,7 @@ INLINE uint64 mod_muli(const uint64 lhs) { return reduce(lhs << 48, lhs >> (64 -
 
 INLINE uint64 mod_half(const uint64 lhs) { return ((lhs % 2 == 0) ? lhs / 2 : ((lhs - 1) / 2 + (MOD_P + 1) / 2)); }
 
-static uint64 mod_pow(const uint64 lhs, const uint64 e)
+INLINE uint64 mod_pow(const uint64 lhs, const uint64 e)
 {
 	if (e == 0) return 1;
 
@@ -66,9 +66,9 @@ static uint64 mod_pow(const uint64 lhs, const uint64 e)
 	return mod_mul(r, y);
 }
 
-static uint64 mod_invert(const uint64 lhs) { return mod_pow(lhs, MOD_P - 2); }
+INLINE uint64 mod_invert(const uint64 lhs) { return mod_pow(lhs, MOD_P - 2); }
 
-static uint64 mod_root_nth(const uint64 n) { return mod_pow(7, (MOD_P - 1) / n); }
+INLINE uint64 mod_root_nth(const uint64 n) { return mod_pow(7, (MOD_P - 1) / n); }
 
 // Add a carry onto the number and return the carry of the first width bits
 INLINE uint32 adc(const uint64 lhs, const uint8 width, uint64 & carry)

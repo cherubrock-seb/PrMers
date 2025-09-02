@@ -77,7 +77,7 @@ static const char * const src_ocl_kernel = \
 "#if defined(PTX_ASM)\n" \
 "	uint64 r; uint32 nc, c;\n" \
 "	asm volatile (\"add.cc.u64 %0, %1, %2;\" : \"=l\" (r) : \"l\" (s), \"l\" (lo));		// r = s + lo\n" \
-"	asm volatile (\"addc.u32 %0, 0xffffffff, 0;\" : \"=r\" (nc));							// If no carry then nc = MOD_MP64 else nc = 0\n" \
+"	asm volatile (\"addc.u32 %0, 0xffffffff, 0;\" : \"=r\" (nc));					// If no carry then nc = MOD_MP64 else nc = 0\n" \
 "	const uint64 nc64 = upsample(0, nc);\n" \
 "	asm volatile (\"sub.cc.u64 %0, %1, %2;\" : \"=l\" (r) : \"l\" (r), \"l\" (nc64));	// r -= nc\n" \
 "	asm volatile (\"subc.u32 %0, 0, 0;\" : \"=r\" (c));								// If borrow then c = MOD_MP64 else c = 0\n" \
