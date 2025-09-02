@@ -81,22 +81,17 @@ bool ProofManagerMarin::shouldCheckpoint(uint32_t iter) const {
   return proofSet_.shouldCheckpoint(iter);
 }
 
-void ProofManagerMarin::checkpointMarin(std::vector<uint64_t> host, uint32_t iter)
+void ProofManagerMarin::checkpointMarin(engine::digit host, uint32_t iter)
 {
     if (!proofSet_.shouldCheckpoint(iter)) return;
 
-    digitWidth_.resize(host.size());
-    std::vector<uint64_t> digits(host.size());
+    digitWidth_.resize(host.get_size());
+    std::vector<uint64_t> digits(host.get_size());
 
-    for (size_t i = 0; i < host.size(); ++i)
+    for (size_t i = 0; i < host.get_size(); ++i)
     {
-        uint64_t x = host[i];
-        uint32_t v = static_cast<uint32_t>(x);
-        uint32_t w = static_cast<uint8_t>(x >> 32);
-        digitWidth_[i] = static_cast<uint8_t>(w);
-        if (w == 0) digits[i] = 0;
-        else if (w >= 32) digits[i] = static_cast<uint64_t>(v);
-        else digits[i] = static_cast<uint64_t>(v & ((1u << w) - 1));
+        digits[i] = host.val(i);
+        digitWidth_[i] = static_cast<uint8_t>(host.width(i));
     }
 
     auto words = io::JsonBuilder::compactBits(digits, digitWidth_, exponent_);
