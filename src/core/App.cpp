@@ -2292,6 +2292,8 @@ uint32_t transformsize_custom(uint64_t exponent) {
     return (uint32_t)n2;
 }
 
+
+
 int App::runGpuBenchmarkMarin() {
     auto fmt_pct = [&](double x){ std::ostringstream o; o<<std::fixed<<std::setprecision(1)<<x*100.0<<"%"; return o.str(); };
 
@@ -2416,6 +2418,26 @@ int App::runGpuBenchmarkMarin() {
                   << "  " << std::fixed << std::setprecision(2) << std::setw(10) << r.ips
                   << "  " << std::setw(14) << fmt_dhms(r.eta_prp) << "\n";
     }
+    double prmers_score_val = 0.0;
+    if (!rows.empty()) {
+        const double base_ts = 8388608.0;
+        double wsum = 0.0, logsum = 0.0;
+        for (const auto& r : rows) {
+            double ips_base = (r.ips * (double)r.ts) / base_ts;
+            double w = std::log2((double)std::max<uint32_t>(r.ts, 2));
+            if (r.p >= 1000000u) w *= 1.25;
+            logsum += std::log(std::max(ips_base, 1e-9)) * w;
+            wsum += w;
+        }
+        double gmean = std::exp(logsum / std::max(1e-9, wsum));
+        prmers_score_val = 100.0 * (gmean / 400.0);
+        if (prmers_score_val < 0.0) prmers_score_val = 0.0;
+        if (prmers_score_val > 100.0) prmers_score_val = 100.0;
+    }
+    std::cout << "\nPRMERS_SCORE|" << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
+    std::cout << gpu_vendor << " " << gpu_name << " has a PRMERS SCORE OF " << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
+
+
     return 0;
 }
 
