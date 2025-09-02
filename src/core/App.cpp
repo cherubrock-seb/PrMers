@@ -431,8 +431,8 @@ App::App(int argc, char** argv)
 
     std::signal(SIGINT, handle_sigint);
 }
-
-static inline std::vector<uint32_t> pack_words_from_eng_digits(const engine::digit& d, uint32_t E) {
+// --- Helpers: pack digits (hi32 = width w, lo32 = value) into 32-bit words, PRP-3 normalize, format hex ---
+static inline std::vector<uint32_t> pack_words_from_eng_digits(const std::vector<uint64_t>& digits, uint32_t E) {
     const size_t totalWords = (E + 31) / 32;
     std::vector<uint32_t> out(totalWords, 0u);
 
@@ -440,11 +440,10 @@ static inline std::vector<uint32_t> pack_words_from_eng_digits(const engine::dig
     int acc_bits = 0;
     size_t o = 0;
 
-    const size_t n = d.get_size();
-    for (size_t i = 0; i < n; ++i) {
-        uint32_t w = uint32_t(d.width(i));
-        uint32_t v = d.val(i);
-        if (w < 32) v &= uint32_t((uint64_t(1) << w) - 1);
+    for (uint64_t u : digits) {
+        uint32_t w = uint32_t(u >> 32);
+        uint32_t v = uint32_t(u & 0xFFFFFFFFu);
+        if (w < 32) v &= (uint32_t((1ull << w) - 1));
         acc |= (uint64_t)v << acc_bits;
         acc_bits += int(w);
         while (acc_bits >= 32 && o < totalWords) {
@@ -456,17 +455,6 @@ static inline std::vector<uint32_t> pack_words_from_eng_digits(const engine::dig
     if (o < totalWords) out[o++] = uint32_t(acc & 0xFFFFFFFFu);
     return out;
 }
-
-static inline std::vector<uint64_t> helperu(const engine::digit& d) {
-    std::vector<uint64_t> out;
-    out.reserve(d.get_size());
-    for (size_t i = 0; i < d.get_size(); ++i) {
-        uint64_t x = (uint64_t(d.width(i)) << 32) | uint64_t(d.val(i));
-        out.push_back(x);
-    }
-    return out;
-}
-
 
 static inline uint32_t mod3_words(const std::vector<uint32_t>& W) {
     uint32_t r = 0; for (uint32_t w : W) r = (r + (w % 3)) % 3; return r;
@@ -644,8 +632,7 @@ int App::runPrpOrLlMarin()
 
         if (options.erroriter > 0 && (iter + 1) == options.erroriter && !errordone) {
             errordone = true;
-            //eng->error();
-            eng->sub(R0, 2);
+            eng->error();
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
         }
 
@@ -724,26 +711,30 @@ int App::runPrpOrLlMarin()
             spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
         }
         if (options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
-            engine::digit d(eng, R0);
+            std::vector<uint64> d(eng->get_size());
+            eng->get(d.data(), 0);
             proofManagerMarin.checkpointMarin(d, iter + 1);
         }
     }
 
     if (options.proof) {
-        engine::digit d(eng, R0);
+        std::vector<uint64> d(eng->get_size());
+        eng->get(d.data(), 0);
         proofManagerMarin.checkpointMarin(d, totalIters);
     }
 
+    std::vector<uint64> d(eng->get_size());
+	eng->get(d.data(), 0);
+    
+
     bool is_prp_prime = false;
-    engine::digit digit(eng, R0);
-    std::vector<uint64_t> d = helperu(digit);
     if (options.mode == "ll") {
-        is_prp_prime = (digit.equal_to(0) || digit.equal_to_Mp());
+        is_prp_prime = (eng->is_zero(d) || eng->is_Mp(d));
     }
     else{
-        is_prp_prime = digit.equal_to(9);
+        is_prp_prime = (eng->is_nine(d));
     }
-    std::vector<uint32_t> words = pack_words_from_eng_digits(digit, p);
+    std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
     if (options.mode == "prp") prp3_div9(p, words);
 
     std::string res64_hex    = format_res64_hex(words);
@@ -819,6 +810,7 @@ int App::runPrpOrLlMarin()
         json,
         isPrime
     );
+    d.clear();
     bool skippedSubmission = false;
     if (options.submit) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;

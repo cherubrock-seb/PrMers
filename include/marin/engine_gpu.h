@@ -8,7 +8,6 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include "engine.h"
-#include "ibdwt.h"
 #include "ocl.h"
 
 #include "ocl/kernel.h"
@@ -458,20 +457,17 @@ class engine_gpu : public engine
 {
 private:
 	const size_t _reg_count;
-	const size_t _n;
-	const bool _even;
 	gpu * _gpu;
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
 
 public:
-	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
-		_reg_count(reg_count), _n(ibdwt::transform_size(q)), _even(ibdwt::is_even(_n))
+	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(q), _reg_count(reg_count)
 	{
-		const size_t n = _n;
+		const size_t n = get_size();
 
 		const ocl::platform eng_platform = ocl::platform();
-		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose);
+		_gpu = new gpu(eng_platform, device, n, get_even(), _reg_count, verbose);
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
@@ -499,8 +495,8 @@ public:
 		src << "#define CHUNK16_5\t" << _gpu->get_chunk16_5() << "u" << std::endl;
 		src << "#define CHUNK64_5\t" << _gpu->get_chunk64_5() << "u" << std::endl;
 
-		if (_even) src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
-		else       src << "#define CWM_WG_SZ2\t" << (1u << _gpu->get_lcwm_wg_size2()) << "u" << std::endl;
+		if (get_even()) src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
+		else            src << "#define CWM_WG_SZ2\t" << (1u << _gpu->get_lcwm_wg_size2()) << "u" << std::endl;
 
 		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << std::endl << std::endl;
 
@@ -511,12 +507,12 @@ public:
 		_gpu->create_kernels();
 
 		std::vector<uint64> root(2 * n);
-		ibdwt::roots(n, root.data());
+		roots(root.data());
 		_gpu->write_root(root.data());
 
 		_weight.resize(3 * n);
 		_digit_width.resize(n);
-		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
+		weights_widths(q, _weight.data(), _digit_width.data());
 		_gpu->write_weight(_weight.data());
 		_gpu->write_width(_digit_width.data());
 	}
@@ -530,31 +526,29 @@ public:
 		delete _gpu;
 	}
 
-	size_t get_size() const override { return _n; }
-
 	void set(const Reg dst, const uint64 a) const override
 	{
-		const size_t n = _n;
+		const size_t n = get_size();
 		std::vector<uint64> x(n);
 
-		x[0] = a;	// weight[0] = 1
+		x[0] = a;	// digit_weight[0] = 1
 		for (size_t k = 1; k < n; ++k) x[k] = 0;
 
 		// radix-2
-		if (!_even) x[n / 2] = x[0];
+		if (!get_even()) x[n / 2] = x[0];
 
 		_gpu->write_reg(x.data(), size_t(dst));
 	}
 
 	void get(uint64 * const d, const Reg src) const override
 	{
-		const size_t n = _n;
-		const uint64 * const wi = &_weight.data()[2 * n];
-		const uint8 * const width = &_digit_width.data()[0];
+		const size_t n = get_size();
+		const uint64 * const wi = &_weight[2 * n];
+		const uint8 * const width = &_digit_width[0];
 
 		_gpu->read_reg(d, size_t(src));
 
-		if (!_even)
+		if (!get_even())
 		{
 			// inverse radix-2
 			for (size_t k = 0; k < n / 2; ++k)
@@ -589,7 +583,7 @@ public:
 
 	bool is_equal(const Reg src1, const Reg src2) const override
 	{
-		const size_t n = _n;
+		const size_t n = get_size();
 		std::vector<uint64> x(n), y(n);
 
 		_gpu->read_reg(x.data(), size_t(src1));
@@ -603,7 +597,7 @@ public:
 	{
 		if (rsrc != rdst) copy(rdst, rsrc);
 
-		const size_t n = _n, dst = size_t(rdst), wg_size = _gpu->get_max_workgroup_size();
+		const size_t n = get_size(), dst = size_t(rdst), wg_size = _gpu->get_max_workgroup_size();
 		switch (n)
 		{
 			case 1u <<  2: _gpu->forward_mul4(dst); break;
@@ -671,7 +665,7 @@ public:
 
 	void square_mul(const Reg rsrc, const uint32 a = 1) const override
 	{
-		const size_t n = _n, src = size_t(rsrc), wg_size = _gpu->get_max_workgroup_size();
+		const size_t n = get_size(), src = size_t(rsrc), wg_size = _gpu->get_max_workgroup_size();
 		switch (n)
 		{
 			case 1u <<  2: _gpu->sqr4(src); break;
@@ -739,7 +733,7 @@ public:
 
 	void mul(const Reg rdst, const Reg rsrc) const override
 	{
-		const size_t n = _n, dst = size_t(rdst), src = size_t(rsrc), wg_size = _gpu->get_max_workgroup_size();
+		const size_t n = get_size(), dst = size_t(rdst), src = size_t(rsrc), wg_size = _gpu->get_max_workgroup_size();
 		switch (n)
 		{
 			case 1u <<  2: _gpu->mul4(dst, src); break;
@@ -807,7 +801,16 @@ public:
 
 	void sub(const Reg src, const uint32 a) const override { _gpu->subtract(size_t(src), a); }
 
-	size_t get_checkpoint_size() const override { return _reg_count * _n * sizeof(uint64); }
+	void error() const override
+	{
+		const size_t n = get_size();
+		std::vector<uint64> x(n);
+		_gpu->read_reg(x.data(), 0);
+		x[get_size() / 2] += 1;
+		_gpu->write_reg(x.data(), 0);
+	}
+
+	size_t get_checkpoint_size() const override { return _reg_count * get_size() * sizeof(uint64); }
 
 	bool get_checkpoint(std::vector<char> & data) const override
 	{
