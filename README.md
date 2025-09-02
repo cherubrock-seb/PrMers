@@ -75,7 +75,7 @@ Requirements
 
 Quick Start
 -----------
-1. Build from source
+Build from source
    * Linux/macOS (example):
      ```sh
      make
@@ -86,7 +86,7 @@ Quick Start
      cmake --build build --config Release
      ```
 
-2. Run a PRP test
+Run a PRP test
    ```sh
    ./prmers 136279841
    ```
@@ -120,7 +120,7 @@ Command-Line Options (selected)
 -factors <csv>              known factors, test the remaining Mersenne cofactor
 -t <sec>                    checkpoint interval (default 60.
 -f <path>                   checkpoint directory (default .)
--proof <k>                  set proof power (1..12. or 0 to disable
+-proof <k>                  set proof power (1..12) or 0 to disable
 -user <name>                PrimeNet username (for submission)
 -computer <name>            PrimeNet computer name
 --noask                     auto-submit results (requires -user and -password)
@@ -353,9 +353,9 @@ A factor \( q \) of \( 2^p - 1 \) must satisfy \( q \equiv 1 \mod 2p \), i.e. \(
 The algorithm proceeds as follows:
 
 1. Choose a smoothness bound \( B_1 \)
-2. Build an exponent \( E = \text{lcm}(1, 2, \ldots, B_1. \)
-3. Compute \( x = 3^{E \cdot 2p} \mod (2^p - 1. \)
-4. Compute \( \gcd(x - 1, 2^p - 1. \)
+2. Build an exponent \( E = \text{lcm}(1, 2, \ldots, B_1) \)
+3. Compute \( x = 3^{E \cdot 2p} \mod (2^p - 1) \)
+4. Compute \( \gcd(x - 1, 2^p - 1) \)
 
 If the result is a nontrivial factor, the algorithm succeeds.
 
@@ -369,7 +369,7 @@ Sample output if a factor is found:
 
 ```
 Start a P-1 factoring stage 1 up to B1=8099
-GCD(x - 1, 2^541 - 1. = 4312790327
+GCD(x - 1, 2^541 - 1) = 4312790327
 P-1 factor stage 1 found: 4312790327
 ```
 
@@ -387,7 +387,7 @@ This stage-1 P−1 test is GPU-accelerated using optimized NTT-based exponentiat
 After a first‑stage bound **B1** has eliminated all small prime factors of _p − 1_, the second stage searches for a single remaining prime factor lying in the interval (B1, B2].  
 `prmers` sets **H = aᴹ mod n** (with the stage‑1 exponent **M**) and forms  
 
-&nbsp;&nbsp;**Q = ∏_{B1 < q ≤ B2} (Hᵠ − 1. mod n**,  
+&nbsp;&nbsp;**Q = ∏_{B1 < q ≤ B2} (Hᵠ − 1) mod n**,  
 
 where _q_ ranges over primes in (B1, B2].  Consecutive primes satisfy _qₙ = qₙ₋₁ + dₙ_ with small even gaps _dₙ_; the program caches powers **H², H⁴, …** so that each **Hᵠ** is obtained via a single modular multiplication **Hᵠₙ = Hᵠₙ₋₁·Hᵈⁿ**.  When the product is complete, **gcd(Q, n)** reveals any non‑trivial factor.
 
@@ -423,7 +423,7 @@ Timing-based check scheduling:
 By default, a full validation check is scheduled every 10 minutes.
 If the current performance is `sampleIps` (iterations per second), and the current `B`, we compute:
 
-    checkpasslevel = (sampleIps × 600. / B
+    checkpasslevel = (sampleIps × 600) / B
 
 The user can override this by passing the option `-checklevel <value>`:
     > This forces a validation every B × <value> iterations instead of 10 minutes.
