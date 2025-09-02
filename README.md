@@ -9,14 +9,14 @@ Backend
 -------
 - Default backend: Marin (https://github.com/galloty/marin)
   - Efficient modular exponentiation with Gerbicz–Li error checking.
-  - Fast Mersenne-mod multiplication via IDBWT over Z/(2^64 - 2^32 + 1.Z.
+  - Fast Mersenne-mod multiplication via IDBWT over Z/(2^64 - 2^32 + 1)Z.
 - You can disable Marin and use the legacy internal backend with: -marin
 
 Key Features
 ------------
 - OpenCL GPU acceleration (OpenCL 1.2+; 2.0 recommended)
 - LL and PRP for Mersenne (and PRP of cofactors with known factors)
-- P-1 factoring (stage-1 and stage-2.
+- P-1 factoring (stage-1 and stage-2)
 - Gerbicz–Li timed validation checkpoints (PRP)
 - Automatic disk checkpoints with deterministic resume
 - PrimeNet result submission (JSON + optional auto-submit)
@@ -50,7 +50,7 @@ Radeon VII
   | 74207281  | 544.38  | 1d 15h 46m 49s |
   | 57885161  | 552.32  | 1d 5h 6m 18s   |
 
-MacBook Air 2022 (Apple M2.
+MacBook Air 2022 (Apple M2)
   | Exponent  | Iter/s | ETA             |
   |-----------|--------|-----------------|
   | 136279841 | 31.16  | 50d 14h 57m 35s |
@@ -118,7 +118,7 @@ Command-Line Options (selected)
 -ll                         Lucas–Lehmer mode
 -pm1                        P-1 factoring; use -b1 and optional -b2
 -factors <csv>              known factors, test the remaining Mersenne cofactor
--t <sec>                    checkpoint interval (default 60.
+-t <sec>                    checkpoint interval (default 60)
 -f <path>                   checkpoint directory (default .)
 -proof <k>                  set proof power (1..12) or 0 to disable
 -user <name>                PrimeNet username (for submission)
@@ -142,7 +142,7 @@ Reference: D. Li, Y. Gallot, "An Efficient Modular Exponentiation Proof Scheme",
 P-1 Factoring (overview)
 ------------------------
 * Stage-1:
-  choose B1, build E=lcm(1..B1., compute x=3^(E·2p) mod (2^p-1., factor=gcd(x-1,2^p-1.
+  choose B1, build E=lcm(1..B1), compute x=3^(E·2p) mod (2^p-1), factor=gcd(x-1,2^p-1)
 * Stage-2:
   search primes q in (B1,B2] using cached powers; final gcd reveals a factor if present.
 
@@ -253,7 +253,7 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 | 57885161  | 552.32  | 1d 5h 6m 18s    |
 ```
 
-#### 🍏 MacBook Air 2022 (Apple M2.
+#### 🍏 MacBook Air 2022 (Apple M2)
 
 ```
 | Exponent  | Iter/s  | ETA              |
@@ -324,7 +324,7 @@ Example on ubuntu :
 sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev
 
 ### 🪟 On Windows
-- A compiler supporting C++20 (e.g., MSVC or MinGW64.
+- A compiler supporting C++20 (e.g., MSVC or MinGW64)
 - OpenCL SDK (e.g., [Khronos OpenCL SDK](https://github.com/KhronosGroup/OpenCL-SDK))
 - CMake (if building via CMake)
 - Git for Windows (optional, if cloning directly)
@@ -439,7 +439,7 @@ Example:
     Injected error at iteration 55
     [Gerbicz Li] Mismatch at index 0: r2=759575, input=247747
     [Gerbicz Li] Check FAILED! iter=1030
-    [Gerbicz Li] Restore iter=0 (j=0.
+    [Gerbicz Li] Restore iter=0 (j=0)
     [Gerbicz Li] Check passed! iter=1030
     ...
     [Gerbicz Li] Check passed! iter=9940
@@ -451,7 +451,7 @@ Example:
     Injected error at iteration 9940
     [Gerbicz Li] Mismatch at index 0: r2=203030, input=481380
     [Gerbicz Li] Check FAILED! iter=9940
-    [Gerbicz Li] Restore iter=9742 (j=198.
+    [Gerbicz Li] Restore iter=9742 (j=198)
     [Gerbicz Li] Check passed! iter=9940
 
 Disabling protection:
@@ -685,7 +685,7 @@ You can also control the frequency of displayed residues using `-res64_display_i
 ./prmers 6972593 -res64_display_interval 1000 -erroriter 19500
 ```
 
-This is a test scenario where an error is injected at iteration 19500.
+This is a test scenario where an error is injected at iteration 19500)
 
 ```
 [Gerbicz Li] B=2640
@@ -709,7 +709,7 @@ Iter: 131000| Res64: C511CA4623D7612B
 Iter: 132000| Res64: 5DCADB0CC6545C44
 **[Gerbicz Li] Mismatch at index 0: r2=1384243, input=1773270**
 **[Gerbicz Li] Check FAILED! iter=132352**
-**[Gerbicz Li] Restore iter=0 (j=6972592.**
+**[Gerbicz Li] Restore iter=0 (j=6972592)**
 Iter: 1000| Res64: **54439D1F5A21BA8F**
 Iter: 2000| Res64: **40ABE45409907381**
 Iter: 3000| Res64: **9C4EB13478E46820**
@@ -769,7 +769,7 @@ Iter: 295000| Res64: D0CFCF5958FB9897
 Iter: 296000| Res64: CE523E94C1BB0752
 **[Gerbicz Li] Mismatch at index 0: r2=3304645, input=2763271**
 **[Gerbicz Li] Check FAILED! iter=296032**
-**[Gerbicz Li] Restore iter=132352 (j=6840240.**
+**[Gerbicz Li] Restore iter=132352 (j=6840240)**
 Iter: 133000| Res64: 859A264D49A60850
 Iter: 134000| Res64: 86A5A1C5DE66B269
 Iter: 135000| Res64: 0E0EF0BA1B88E88C
@@ -1015,14 +1015,14 @@ You should now have `prmers.exe` ready to run!
 ## Command-Line Options
 
 - `<p>`: Minimum exponent to test (required)
-- `-d <device_id>`: Specify the OpenCL device ID (default: 0.
+- `-d <device_id>`: Specify the OpenCL device ID (default: 0)
 - `-O <options>`: Enable OpenCL optimization flags (e.g., `fastmath`, `mad`, `unsafe`, `nans`, `optdisable`)
-- `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8.
+- `-c <localCarryPropagationDepth>`: Set the local carry propagation depth (default: 8)
 - `-profile`: Enable kernel execution profiling
-- `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9.
+- `-prp`: Run in PRP mode (default), with an initial value of 3 and no execution of `kernel_sub2` (final result must equal 9)
 - `-ll`: Run in Lucas–Lehmer mode, with an initial value of 4 and p-2 iterations of `kernel_sub2`
 - `-factors <factor1,factor2,...>`: Specify known factors to run PRP test on the Mersenne cofactor
-- `-t <backup_interval>`: Specify the backup interval in seconds (default: 60.
+- `-t <backup_interval>`: Specify the backup interval in seconds (default: 60)
 - `-f <path>`: Specify the directory path for saving/loading backup files (default: current directory)
 - `-proof <level>`: Set proof power between 1 and 12 or 0 to disable proof generation (default: optimal proof power selected automatically)
 - `-enqueue_max <value>`: Manually set the maximum number of enqueued kernels before `clFinish` is called (default: autodetect)
@@ -1106,7 +1106,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 9279
 Using OpenCL device ID: 1
 
-Launching OpenCL kernel (p = 9279.; computation may take a while depending on the exponent.
+Launching OpenCL kernel (p = 9279); computation may take a while depending on the exponent.
 Max global workers possible: 256
 Final workers count: 256
 Progress: 100.00% | Elapsed: 11.09s | Iterations/sec: 836.78 | ETA: 0.00s       
@@ -1122,7 +1122,7 @@ PrMers: GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas-Lehmer)
 Testing exponent: 216091
 Using OpenCL device ID: 0
 
-Launching OpenCL kernel (p = 216091.; computation may take a while depending on the exponent.
+Launching OpenCL kernel (p = 216091); computation may take a while depending on the exponent.
 Max global workers possible: 256
 Final workers count: 256
 Progress: 0.11% | Elapsed: 4.05s | Iterations/sec: 57.50 | ETA: 3754.28s
@@ -1148,9 +1148,9 @@ Iterations per second: 7294.76 (11 iterations in total)
 - **Modes:**
   - **-prp**: Run in PRP mode (default).  
     Sets the initial value to 3 and performs *p* iterations without executing kernel_sub2.  
-    The final result must equal 9.
+    The final result must equal 9)
   - **-ll**: Run in Lucas-Lehmer mode.  
-    Sets the initial value to 4 and performs *p-2* iterations, including the execution of kernel_sub2.
+    Sets the initial value to 4 and performs *p-2* iterations, including the execution of kernel_sub2)
 
 - **Backup / Save and Resume:**
   - The program periodically saves its state (the contents of buf_x) and the current loop iteration into files.
@@ -1167,7 +1167,7 @@ The proof system is **heavily based on** the one used in [GpuOwl](https://github
 The proof process generates a `.proof` file, which contains:
 - The final residue after all PRP iterations.
 - A sequence of intermediate residues at exponentially spaced iteration points.
-- A verification mechanism that ensures `B == A^(2^span) (mod 2^E - 1.`.
+- A verification mechanism that ensures `B == A^(2^span) (mod 2^E - 1)`.
 
 Currently, verification is **not fully stable** and needs further debugging.  
 Performance is also significantly slower than GpuOwl, as optimizations are still in progress.  
@@ -1230,7 +1230,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 216091.; computation may take a while.
+   Launching OpenCL kernel (p = 216091); computation may take a while.
    Transform size: 16384
    Final workers count: 16384
    Work-groups count: 256
@@ -1285,7 +1285,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 127.; computation may take a while.
+   Launching OpenCL kernel (p = 127); computation may take a while.
    Transform size: 16
    Final workers count: 16
    Work-groups count: 4
@@ -1316,7 +1316,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
    Max CL_DEVICE_MAX_WORK_GROUP_SIZE = 256
    Max CL_DEVICE_MAX_WORK_ITEM_SIZES = 1024
 
-   Launching OpenCL kernel (p = 756839.; computation may take a while.
+   Launching OpenCL kernel (p = 756839); computation may take a while.
    Transform size: 65536
    Final workers count: 65536
    Work-groups count: 256
@@ -1336,7 +1336,7 @@ Performance is also significantly slower than GpuOwl, as optimizations are still
 - It implements both PRP and Lucas-Lehmer (LL) tests.
 - State saving is performed periodically based on the backup interval.
 - When interrupted (Ctrl-C), the program saves its state before exiting, allowing you to resume later.
-- The project implements an integer-based NTT and IBDWT using modular arithmetic modulo 2^64 - 2^32 + 1.
+- The project implements an integer-based NTT and IBDWT using modular arithmetic modulo 2^64 - 2^32 + 1)
 - The chosen modulus enables fast modular reduction using only bit shifts and additions.
 - For more details on the underlying techniques, refer to Nick Craig-Wood's ARM Prime Math:
   https://www.craig-wood.com/nick/armprime/math/
