@@ -640,7 +640,15 @@ int App::runPrpOrLlMarin()
             logger.logEnd(elapsed_time);
             return 0;
         }
+        auto now0 = std::chrono::high_resolution_clock::now();
 
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval))
+        {
+            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            save_ckpt(iter, elapsed_time);
+            lastBackup = now0;
+            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
+        }
         eng->square_mul(R0);
         if (options.mode == "ll") {
             eng->sub(R0, 2);
@@ -720,13 +728,6 @@ int App::runPrpOrLlMarin()
             resumeIter = iter + 1;
         }
 
-        if (now - lastBackup >= std::chrono::seconds(options.backup_interval))
-        {
-            const double elapsed_time = std::chrono::duration<double>(now - start_clock).count() + restored_time;
-            save_ckpt(iter, elapsed_time);
-            lastBackup = now;
-            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
-        }
         if (options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
             engine::digit d(eng, R0);
             proofManagerMarin.checkpointMarin(d, iter + 1);
