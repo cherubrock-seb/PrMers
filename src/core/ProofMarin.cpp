@@ -37,7 +37,7 @@ void ProofMarin::save(const std::filesystem::path& filePath) const {
   }
 
   // Write ASCII header according to GIMPS specification
-  file << "PRP ProofMarin\n";
+  file << "PRP PROOF\n";
   file << "VERSION=2\n";
   file << "HASHSIZE=64\n";
   file << "POWER=" << middles.size() << "\n";
@@ -94,7 +94,7 @@ ProofMarin ProofMarin::load(const std::filesystem::path& filePath) {
   std::vector<std::string> factors;
 
   // Read and validate "PRP ProofMarin"
-  if (!std::getline(file, line) || line != "PRP ProofMarin") {
+  if (!std::getline(file, line) || line != "PRP PROOF") {
     throw std::runtime_error("Invalid ProofMarin file header: " + filePath.string());
   }
 
