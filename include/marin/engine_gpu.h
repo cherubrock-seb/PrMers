@@ -75,7 +75,7 @@ private:
 	std::vector<cl_kernel> _kernels;
 
 public:
-	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose)
+	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose, const size_t chunk256_max = 4)
 		: device(platform, d, verbose), _n(n), _even(even), _reg_count(reg_count),
 		_lcwm_wg_size(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 4, get_max_local_worksize(sizeof(uint64)))))),
 		_lcwm_wg_size2(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 8, get_max_local_worksize(2 * sizeof(uint64)))))),
@@ -94,7 +94,7 @@ public:
 		// We must have (u / 4) * CHUNKu <= n / 8 and CHUNKu < m
 		_chunk16(std::min(std::max(n / 8 * 4 / 16, size_t(1)), size_t(16))),	// 16 * CHUNK16 uint64_2 <= 4KB, workgroup size = (16 / 4) * CHUNK16 <= 64
 		_chunk64(std::min(std::max(n / 8 * 4 / 64, size_t(1)), size_t(4))),		// 64 * CHUNK64 uint64_2 <= 4KB, workgroup size = (64 / 4) * CHUNK64 <= 64
-		_chunk256(std::min(std::max(n / 8 * 4 / 256, size_t(1)), size_t(4))),	// 256 * CHUNK256 uint64_2 <= 16KB, workgroup size = (256 / 4) * CHUNK256 <= 256
+		_chunk256(std::min(std::max(n / 8 * 4 / 256, size_t(1)), size_t(chunk256_max))),	// 256 * CHUNK256 uint64_2 <= 16KB, workgroup size = (256 / 4) * CHUNK256 <= 256
 		// 1024: 1024 uint64_2 = 16KB, workgroup size = 1024 / 4 = 256
 
 		// We must have 5 * (u / 4) * CHUNKu <= n / 8
@@ -465,13 +465,13 @@ private:
 	std::vector<uint8> _digit_width;
 
 public:
-	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
+	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose, size_t chunk256_max = 4) : engine(),
 		_reg_count(reg_count), _n(ibdwt::transform_size(q)), _even(ibdwt::is_even(_n))
 	{
 		const size_t n = _n;
 
 		const ocl::platform eng_platform = ocl::platform();
-		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose);
+		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose, chunk256_max);
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;

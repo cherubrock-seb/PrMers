@@ -36,6 +36,19 @@ public:
 	virtual bool get_checkpoint(std::vector<char> & data) const = 0;
 	virtual bool set_checkpoint(const std::vector<char> & data) const = 0;
 
+	// dst = src^e, src is erased
+	void pow(const Reg dst, const Reg src, const uint64_t e) const
+	{
+		set_multiplicand(src, src);
+		set(dst, 1);
+		if (e == 0) return;
+		for (int i = std::bit_width(e) - 1; i >= 0; --i)
+		{
+			square_mul(dst);
+			if ((e & (static_cast<uint64_t>(1) << i)) != 0) mul(dst, src);
+		}
+	}
+
 	class digit
 	{
 	private:
@@ -93,6 +106,6 @@ public:
 		}
 	};
 
-	static engine * create_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose);
+	static engine * create_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose, const size_t chunk256_max);
 	static engine * create_cpu(const uint32_t q);
 };

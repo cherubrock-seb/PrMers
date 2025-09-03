@@ -78,6 +78,7 @@ void printUsage(const char* progName) {
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) (only in -marin mode) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     std::cout << "  -bench               : (Optional) run benchmark on all NTT transform sizes" << std::endl;
+    std::cout << "  -chunk256 <1..4>     : (Optional) cap for CHUNK256; lower can help on Radeon VII/GCN (default: auto)" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
@@ -182,6 +183,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-checklevel") == 0 && i + 1 < argc) {
             opts.checklevel = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-chunk256") == 0 && i + 1 < argc) {
+            opts.chunk256 = std::atoi(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l5") == 0 && i + 1 < argc) {
             opts.max_local_size5 = std::atoi(argv[++i]);

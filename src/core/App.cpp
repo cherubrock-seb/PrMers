@@ -513,7 +513,7 @@ int App::runPrpOrLlMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
 
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), verbose);
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), verbose,  options.chunk256);
 
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
@@ -2377,7 +2377,7 @@ int App::runGpuBenchmarkMarin() {
         if (prmers_bench_stop) break;
         uint32_t p = tasks[ti].p;
         engine* eng = nullptr;
-        try { eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), false); } catch (...) { eng = nullptr; }
+        try { eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), false, options.chunk256); } catch (...) { eng = nullptr; }
         if (!eng) continue;
         eng->set(R1, 1);
         eng->set(R0, 3);

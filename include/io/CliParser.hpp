@@ -28,6 +28,7 @@ struct CliOptions {
     uint64_t erroriter = 0;
     bool proof = true;
     bool submit = false;
+    uint64_t chunk256 = 4;
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
     int backup_interval = 3000;
