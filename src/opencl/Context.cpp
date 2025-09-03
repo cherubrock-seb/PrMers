@@ -52,9 +52,9 @@ Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle
 {
     pickPlatformAndDevice(deviceIndex);
     createContext();
-    if(!marin){
+    //if(!marin){
         createQueue(enqueueMax, cl_queue_throttle_active);
-    }
+    //}
     queryDeviceCapabilities(); 
 }
 

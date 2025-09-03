@@ -387,7 +387,7 @@ App::App(int argc, char** argv)
         options.max_local_size1,
         options.max_local_size5
     );
-    if(!options.marin){
+    //if(!options.marin){
         buffers.emplace(context, precompute);
         program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options, options.debug);
         kernels.emplace(program->getProgram(), context.getQueue());
@@ -431,7 +431,7 @@ App::App(int argc, char** argv)
             kernels->createKernel(name);
         }
         nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1", options.debug);
-    }
+    //}
 
     std::signal(SIGINT, handle_sigint);
 }
@@ -797,9 +797,18 @@ int App::runPrpOrLlMarin()
     logger.logEnd(elapsed_time);
 
     if (options.proof) {
+        cl_command_queue queue   = context.getQueue();
+        math::Carry carry(
+            context,
+            queue,
+            program->getProgram(),
+            precompute.getN(),
+            precompute.getDigitWidth(),
+            buffers->digitWidthMaskBuf
+        );
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
-            auto proofFilePath = proofManagerMarin.proof();
+            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
         } catch (const std::exception& e) {
