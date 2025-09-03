@@ -2375,7 +2375,7 @@ int App::runGpuBenchmarkMarin() {
         uint32_t warm = 96;
         for (uint32_t i = 0; i < warm && !prmers_bench_stop; ++i) eng->square_mul(R0);
 
-        uint32_t ts = tasks[ti].ts;
+        uint32_t ts =  eng->get_size();
         double target = (ts >= 33554432u) ? 10.0 : (ts >= 8388608u ? 8.0 : (ts >= 2621440u ? 6.0 : 5.0));
 
         auto t0 = std::chrono::high_resolution_clock::now();
