@@ -61,6 +61,7 @@ void printUsage(const char* progName) {
      
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
+    std::cout << "  -submit              : (Optional) activate the possibility to send results to PrimeNet (prompt or autosend)" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
     std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
     std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
@@ -132,6 +133,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-marin") == 0) {
             opts.marin = false;
+        }
+        else if (std::strcmp(argv[i], "-submit") == 0) {
+            opts.submit = true;
         }
         else if (std::strcmp(argv[i], "-bench") == 0) {
             opts.bench = true;
