@@ -496,14 +496,16 @@ static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
     return oss.str();
 }
 
-static inline void delete_checkpoints(uint32_t p, const std::string& dir = ".")
+static inline void delete_checkpoints(uint32_t p, bool wagstaff, const std::string& dir = ".")
 {
-    fs::path base = fs::path(dir) / ("m_" + std::to_string(p) + ".ckpt");
+    const std::string prefix = wagstaff ? "wagstaff_" : "";
+    fs::path base = fs::path(dir) / (prefix + "m_" + std::to_string(p) + ".ckpt");
     std::error_code ec;
     fs::remove(base, ec);
     fs::remove(base.string() + ".old", ec);
     fs::remove(base.string() + ".new", ec);
 }
+
 
 int App::runPrpOrLlMarin()
 {
@@ -875,7 +877,7 @@ int App::runPrpOrLlMarin()
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
-    delete_checkpoints(p); 
+    delete_checkpoints(p, options.wagstaff); 
     backupManager.clearState();
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
