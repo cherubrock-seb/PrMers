@@ -526,8 +526,9 @@ int App::runPrpOrLlMarin()
         std::cout << "Proof of power " << proofPower << " requires about "
                   << std::fixed << std::setprecision(2) << diskUsageGB << "GB of disk space" << std::endl;
     }
-
-    std::ostringstream ck; ck << "m_" << p << ".ckpt";
+    std::ostringstream ck;
+    if (options.wagstaff) ck << "wagstaff_";
+    ck << "m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
 
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
@@ -567,20 +568,20 @@ int App::runPrpOrLlMarin()
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
-	const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4,  R5 = 5;
+
+    const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5;
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
-    if (r == 0) { 
+    if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
-    } 
-    else { 
-        ri = 0; 
-        restored_time = 0; 
-        
-        eng->set(R1, 1); 
-        eng->set(R0, (options.mode == "prp") ? 3  : 4); 
+    } else {
+        ri = 0;
+        restored_time = 0;
+        eng->set(R1, 1);
+        eng->set(R0, (options.mode == "prp") ? 3 : 4);
     }
+
     eng->copy(R4, R0);//Last correct state
     eng->copy(R5, R1);//Last correct bufd
     logger.logStart(options);
