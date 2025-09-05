@@ -16,6 +16,8 @@ struct CliOptions {
     int device_id = 0;
     bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"
+    std::string filemers = "";
+    bool exportmers = false; 
     bool marin = true;
     bool bench = false;
     bool profiling = false;

@@ -2067,6 +2067,59 @@ void writeEcmResumeLine(const std::string& path,
 }
 
 
+static bool read_mers_file(const std::string& path, std::vector<uint64_t>& v) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "Error: cannot open " << path << " for reading\n";
+        return false;
+    }
+
+    in.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(uint64_t));
+    std::streamsize readBytes = in.gcount();
+    if (readBytes < static_cast<std::streamsize>(sizeof(uint64_t))) {
+        std::cerr << "Error: file too small: " << path << std::endl;
+        return false;
+    }
+
+    if (readBytes != static_cast<std::streamsize>(v.size() * sizeof(uint64_t))) {
+        std::cerr << "Warning: partial read from " << path
+                  << " (" << readBytes << " / " << v.size() * sizeof(uint64_t) << " bytes)\n";
+    }
+
+    return true;
+}
+
+
+int App::exportResumeFromMersFile(const std::string& mersPath,
+                                  const std::string& savePath)
+{
+    std::vector<uint64_t> v(precompute.getN(), 0ULL);
+    if (!read_mers_file(mersPath, v)) return -1;
+
+    std::string fname = std::filesystem::path(mersPath).filename().string();
+    size_t pos_pm = fname.find("pm");
+    size_t pos_dot = fname.rfind('.');
+    if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot)
+        return std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n", -1;
+
+    std::string p_str  = fname.substr(0, pos_pm);
+    std::string b1_str = fname.substr(pos_pm + 2, pos_dot - (pos_pm + 2));
+    uint32_t p  = std::stoul(p_str);
+    uint64_t B1 = std::stoull(b1_str);
+
+    mpz_class Mp = (mpz_class(1) << p) - 1;
+    mpz_class X  = util::vectToMpz(v, precompute.getDigitWidth(), Mp);
+
+    std::string out = savePath.empty()
+        ? (fname.substr(0, pos_dot) + ".save")
+        : savePath;
+
+    writeEcmResumeLine(out, B1, p, X);
+    return 0;
+}
+
+
+
 int App::runPM1() {
 
     uint64_t B1 = options.B1;
@@ -2509,6 +2562,9 @@ int App::runGpuBenchmarkMarin() {
 
 
 int App::run() {
+    if(options.exportmers){
+        return exportResumeFromMersFile(options.filemers, "");
+    }
     if(options.bench){
         return runGpuBenchmarkMarin();
     }

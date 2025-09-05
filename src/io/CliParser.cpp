@@ -80,6 +80,7 @@ void printUsage(const char* progName) {
     std::cout << "  -res64_display_interval <N> : (Optional) (only in -marin mode) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     std::cout << "  -bench               : (Optional) run benchmark on all NTT transform sizes" << std::endl;
     std::cout << "  -chunk256 <1..4>     : (Optional) cap for CHUNK256; lower can help on Radeon VII/GCN (default: auto)" << std::endl;
+    std::cout << "  -filemers <path>     : (Optional) Export .mers file to GMP-ECM .save format using stored state" << std::endl;
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
@@ -166,6 +167,21 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             opts.save_path = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-filemers") == 0 && i + 1 < argc) {
+            opts.filemers = argv[++i];
+            std::string fname = std::filesystem::path(opts.filemers).filename().string();
+            size_t pos_pm = fname.find("pm");
+            size_t pos_dot = fname.rfind('.');
+            if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot){
+                std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n";
+                std::exit(EXIT_FAILURE);
+            }
+            std::string p_str  = fname.substr(0, pos_pm);
+
+            uint32_t p  = std::stoul(p_str);
+            opts.exportmers = true;
+            opts.exponent = p;
         }
         else if (std::strcmp(argv[i], "-b1") == 0 && i + 1 < argc) {
             opts.B1 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
