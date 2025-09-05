@@ -2319,14 +2319,15 @@ int App::runGpuBenchmarkMarin() {
     std::string fp64 = "Unknown";
     #ifdef CL_VERSION_1_0
     {
+        // Enumerate only GPU devices
         cl_uint np = 0; clGetPlatformIDs(0, nullptr, &np);
         std::vector<cl_platform_id> plats(np); if (np) clGetPlatformIDs(np, plats.data(), nullptr);
         std::vector<cl_device_id> devs;
         for (auto pid : plats) {
-            cl_uint nd = 0; clGetDeviceIDs(pid, CL_DEVICE_TYPE_ALL, 0, nullptr, &nd);
+            cl_uint nd = 0; clGetDeviceIDs(pid, CL_DEVICE_TYPE_GPU, 0, nullptr, &nd);
             if (!nd) continue;
             size_t old = devs.size(); devs.resize(old + nd);
-            clGetDeviceIDs(pid, CL_DEVICE_TYPE_ALL, nd, devs.data() + old, nullptr);
+            clGetDeviceIDs(pid, CL_DEVICE_TYPE_GPU, nd, devs.data() + old, nullptr);
         }
         size_t idx = (size_t)options.device_id;
         if (!devs.empty() && idx < devs.size()) {
