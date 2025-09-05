@@ -2022,53 +2022,50 @@ int App::runPM1Stage2() {
     return found ? 0 : 1;
 }
 
+static constexpr uint64_t CHKSUMMOD = 4294967291ULL;
 
+static uint32_t ecm_checksum_pminus1(uint64_t B1, uint32_t p, const mpz_class& X_raw) {
+    mpz_class N = (mpz_class(1) << p) - 1;
 
-static constexpr unsigned long CHKSUMMOD = 4294967291UL;
+    uint64_t n = mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD);
+    uint64_t x = mpz_fdiv_ui(X_raw.get_mpz_t(), CHKSUMMOD);
+    uint64_t b = B1 % CHKSUMMOD;
 
-static std::string mpz_to_lower_hex(const mpz_class& z) {
-    char* s = mpz_get_str(nullptr, 16, z.get_mpz_t());
-    std::string out(s ? s : "");
-    std::free(s);
-    return out;
+    uint64_t acc = (b * n) % CHKSUMMOD;
+    acc = (acc * x) % CHKSUMMOD;
+    return static_cast<uint32_t>(acc);
 }
 
-static unsigned int ecm_checksum_pminus1(uint64_t B1, uint32_t p, const mpz_class& X_raw) {
-    mpz_class N = (mpz_class(1) << p) - 1;
-    mpz_class Xnorm = X_raw;
-    mpz_class cs = B1;
-    cs *= mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD);
-    cs *= mpz_fdiv_ui(Xnorm.get_mpz_t(), CHKSUMMOD);
-
-    return static_cast<unsigned int>(mpz_fdiv_ui(cs.get_mpz_t(), CHKSUMMOD));
+static std::string mpz_to_lower_hex(const mpz_class& z){
+    char* s = mpz_get_str(nullptr, 16, z.get_mpz_t());
+    std::string hex = s ? s : "";
+    std::free(s);
+    size_t i = 0; while (i + 1 < hex.size() && hex[i] == '0') ++i;
+    return hex.substr(i);
 }
 
 void writeEcmResumeLine(const std::string& path,
                         uint64_t B1, uint32_t p,
-                        const mpz_class& X_in)
+                        const mpz_class& X)
 {
-    //mpz_class N = (mpz_class(1) << p) - 1;
-    mpz_class X = X_in;
-
-    unsigned int chk = ecm_checksum_pminus1(B1, p, X);
+    const uint32_t chk = ecm_checksum_pminus1(B1, p, X);
 
     std::ofstream out(path);
     if (!out) {
         std::cerr << "Error: could not write GMP-ECM resume file to " << path << std::endl;
         return;
     }
-
     out << "METHOD=P-1; "
         << "B1=" << B1 << "; "
         << "N=2^" << p << "-1; "
         << "X=0x" << mpz_to_lower_hex(X) << "; "
         << "CHECKSUM=" << chk << "; "
-        << "PROGRAM=PrMers; "
-        << "X0=0x3; Y=0x0; Y0=0x0; WHO=; TIME=;";
-    out << '\n';
+        << "PROGRAM=PrMers; X0=0x3; Y=0x0; Y0=0x0; WHO=; TIME=;"
+        << '\n';
 
-    std::cout << "GMP-ECM resume file written to: " << path << "\n";
+    std::cout << "GMP-ECM resume file written to: " << path << std::endl;
 }
+
 
 int App::runPM1() {
 
