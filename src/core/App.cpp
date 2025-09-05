@@ -2024,6 +2024,52 @@ int App::runPM1Stage2() {
 
 
 
+static constexpr unsigned long CHKSUMMOD = 4294967291UL;
+
+static std::string mpz_to_lower_hex(const mpz_class& z) {
+    char* s = mpz_get_str(nullptr, 16, z.get_mpz_t());
+    std::string out(s ? s : "");
+    std::free(s);
+    return out;
+}
+
+static unsigned int ecm_checksum_pminus1(uint64_t B1, uint32_t p, const mpz_class& X_raw) {
+    mpz_class N = (mpz_class(1) << p) - 1;
+    mpz_class Xnorm = X_raw;
+    mpz_class cs = B1;
+    cs *= mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD);
+    cs *= mpz_fdiv_ui(Xnorm.get_mpz_t(), CHKSUMMOD);
+
+    return static_cast<unsigned int>(mpz_fdiv_ui(cs.get_mpz_t(), CHKSUMMOD));
+}
+
+void writeEcmResumeLine(const std::string& path,
+                        uint64_t B1, uint32_t p,
+                        const mpz_class& X_in)
+{
+    //mpz_class N = (mpz_class(1) << p) - 1;
+    mpz_class X = X_in;
+
+    unsigned int chk = ecm_checksum_pminus1(B1, p, X);
+
+    std::ofstream out(path);
+    if (!out) {
+        std::cerr << "Error: could not write GMP-ECM resume file to " << path << std::endl;
+        return;
+    }
+
+    out << "METHOD=P-1; "
+        << "B1=" << B1 << "; "
+        << "N=2^" << p << "-1; "
+        << "X=0x" << mpz_to_lower_hex(X) << "; "
+        << "CHECKSUM=" << chk << "; "
+        << "PROGRAM=PrMers; "
+        << "X0=0x3; Y=0x0; Y0=0x0; WHO=; TIME=;";
+    out << '\n';
+
+    std::cout << "GMP-ECM resume file written to: " << path << "\n";
+}
+
 int App::runPM1() {
 
     uint64_t B1 = options.B1;
@@ -2148,7 +2194,8 @@ int App::runPM1() {
         res64_x
     );
     backupManager.saveState(buffers->input, lastIter, &E);
-    
+
+
     std::cout << "\nStart get result from GPU" << std::endl;
     std::vector<uint64_t> hostData(precompute.getN());
 
@@ -2162,6 +2209,12 @@ int App::runPM1() {
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X = util::vectToMpz(hostData, precompute.getDigitWidth(), Mp);
+    if(options.resume){
+        
+        writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" +
+                    std::to_string(options.B1) + ".save",
+                    options.B1, options.exponent, X);
+    }
     //std::cout << "digitWidths = ";
     //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
     //std::cout << "\n";
