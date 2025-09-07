@@ -31,7 +31,7 @@ namespace core {
 
 void Printer::banner(const io::CliOptions& o) {
     std::cout << "PrMers : GPU-accelerated Mersenne primality test (OpenCL, NTT, Lucas Lehmer)\n"
-              << "Testing exponent : " << (o.wagstaff ? o.exponent / 2 : o.exponent) << "\n"
+              << "Testing : " << Printer::formatNumber(o) << "\n"
               << "Device OpenCL ID : " << o.device_id << "\n"
               << "Mode : " << (o.mode=="prp"?"PRP":"Lucas Lehmer") << "\n"
               << "Backup interval : " << o.backup_interval << " s\n"
@@ -76,6 +76,19 @@ void Printer::displayVector(const std::vector<uint64_t>& vec, const std::string&
     }
     std::cout << std::dec; // Reset to decimal output
 }
-
-
+std::string Printer::formatNumber(const io::CliOptions& opts) {
+    std::ostringstream oss;
+    if (opts.wagstaff) {
+        oss << "(2^" << opts.exponent/2 << "+1)/3";
+    } else {
+        oss << "(2^" << opts.exponent << "-1)";
+    }
+    if (!opts.knownFactors.empty()) {
+        oss << "/";
+        for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
+            if (i > 0) oss << "/";
+            oss << opts.knownFactors[i];
+        }
+    }
+    return oss.str();
 } // namespace core
