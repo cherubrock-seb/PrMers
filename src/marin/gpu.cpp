@@ -9,4 +9,4 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include "marin/engine_gpu.h"
 
-engine * engine::create_gpu(const uint32_t p, const size_t reg_count, const size_t device, const bool verbose, const size_t chunk256_max) { return new engine_gpu(p, reg_count, device, verbose, chunk256_max); }
+engine * engine::create_gpu(const uint32_t p, const size_t reg_count, const size_t device, const bool verbose) { return new engine_gpu(p, reg_count, device, verbose); }

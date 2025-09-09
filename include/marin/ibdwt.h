@@ -39,7 +39,7 @@ public:
 
 	static constexpr bool is_even(const size_t n)
 	{
-		size_t m = (n % 5 == 0) ? n / 10 : n;
+		size_t m = (n % 5 == 0) ? n / 5 : n;
 		for (; m > 1; m /= 4);
 		return (m == 1);
 	}
@@ -52,8 +52,26 @@ public:
 		return r;
 	}
 
-	// Init roots
-	static void roots(const size_t n, uint64 * const root)
+	// Digit-reversal permutation (n = 2^e * 5^f)
+	static constexpr size_t reversal(const size_t i, const size_t n)
+	{
+		size_t r = 0, k = n, j = i;
+		while (k % 2 == 0) { r = 2 * r + j % 2; k /= 2; j /= 2; }
+		while (k % 5 == 0) { r = 5 * r + j % 5; k /= 5; j /= 5; }
+		return r;
+	}
+
+	// Inverse digit-reversal permutation (n = 2^e * 5^f)
+	static constexpr size_t inv_reversal(const size_t i, const size_t n)
+	{
+		size_t r = 0, k = n, j = i;
+		while (k % 5 == 0) { r = 5 * r + j % 5; k /= 5; j /= 5; }
+		while (k % 2 == 0) { r = 2 * r + j % 2; k /= 2; j /= 2; }
+		return r;
+	}
+
+	// Init roots, radix-5 is the last stage of the transform
+	static void roots45(const size_t n, uint64 * const root)
 	{
 		const size_t n5 = (n % 5 == 0) ? n / 5 : n;
 
@@ -97,20 +115,49 @@ public:
 		}
 	}
 
+	// Init roots, radix-5 is the first stage of the transform
+	static void roots54(const size_t n, uint64 * const root)
+	{
+		uint64 * const r2 = &root[0];
+		uint64 * const r2i = &root[n / 2];
+
+		for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
+		{
+			const uint64 rs = mod_root_nth(2 * s), rsi = mod_invert(rs);
+			uint64 rsj = 1, rsji = 1;
+			for (size_t j = 0; j < s; ++j)
+			{
+				const size_t jr = inv_reversal(j, s);
+				r2[s + jr] = rsj; r2i[s + jr] = rsji;
+				rsj = mod_mul(rsj, rs); rsji = mod_mul(rsji, rsi);
+			}
+		}
+
+		uint64 * const r4 = &root[n];
+		uint64 * const r4i = &root[n + n];
+
+		for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
+		{
+			for (size_t j = 0; j < s; ++j)
+			{
+				const size_t sj = s + j;
+				r4[2 * sj + 0] = r2[2 * sj]; r4i[2 * sj + 0] = r2i[2 * sj];
+				r4[2 * sj + 1] = mod_mul(r2[sj], r2[2 * sj]); r4i[2 * sj + 1] = mod_mul(r2i[sj], r2i[2 * sj]);
+			}
+		}
+	}
+
 	// Init weights and digit widths
 	static void weights_widths(const size_t n, const uint32_t q, uint64 * const weight, uint8 * const width)
 	{
 		uint64 * const w = &weight[0];
-		uint64 * const wi_n = &weight[n];
-		uint64 * const wi = &weight[2 * n];
 
 		// n-th root of two
 		const uint64 nr2 = mod_pow(554, (MOD_P - 1) / 192 / n);
 
 		const uint32 q_n = q / uint32(n);
 
-		const uint64 inv_n = mod_invert((n % 5 == 0) ? n : n / 2);
-		w[0] = 1; wi_n[0] = inv_n; wi[0] = 1;
+		w[2 * 0 + 0] = 1; w[2 * 0 + 1] = 1;
 
 		uint32 ceil_qjm1_n = 0;
 		for (size_t j = 1; j <= n; ++j)
@@ -132,8 +179,9 @@ public:
 			// qj = k * n + r, r > 0 => ((k + 1).n - k.n + r) / n = (n - r) / n
 			const uint32 r = uint32(qj % n);
 			const uint64 nr2r = (r != 0) ? mod_pow(nr2, n - r) : 1;
-			const uint64 nr2ri = mod_invert(nr2r);
-			w[j] = nr2r; wi_n[j] = mod_mul(nr2ri, inv_n); wi[j] = nr2ri;
+			const size_t i = (j % 4) * (n / 4) + (j / 4);
+			w[2 * i + 0] = nr2r; w[2 * i + 1] = mod_invert(nr2r);
+
 			ceil_qjm1_n = ceil_qj_n;
 		}
 	}

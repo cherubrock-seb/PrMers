@@ -91,4 +91,6 @@ std::string Printer::formatNumber(const io::CliOptions& opts) {
         }
     }
     return oss.str();
+}
+
 } // namespace core

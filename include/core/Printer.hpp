@@ -14,7 +14,7 @@ public:
                           const std::string& jsonResult,
                           bool isPrime);
     static void displayVector(const std::vector<uint64_t>& vec, const std::string& label = "Vector");
-    static std::string formatNumber(const io::CliOptions& opts, uint64_t number);
+    static std::string formatNumber(const io::CliOptions& opts);
 
 };
 

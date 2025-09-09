@@ -10,7 +10,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <cstdint>
 #include <bit>
 
-static constexpr int ilog2_32(const uint32_t n) { return int(std::bit_width(n)) - 1; }
+static constexpr int ilog2(const size_t n) { return int(std::bit_width(n)) - 1; }
 
 #define INLINE	static inline
 

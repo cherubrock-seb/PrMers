@@ -77,8 +77,8 @@ private:
 public:
 	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose)
 		: device(platform, d, verbose), _n(n), _even(even), _reg_count(reg_count),
-		_lcwm_wg_size(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 4, get_max_local_worksize(sizeof(uint64)))))),
-		_lcwm_wg_size2(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 8, get_max_local_worksize(2 * sizeof(uint64)))))),
+		_lcwm_wg_size(ilog2(std::min(((n % 5 == 0) ? n / 5 : n) / 4, get_max_local_worksize(sizeof(uint64))))),
+		_lcwm_wg_size2(ilog2(std::min(((n % 5 == 0) ? n / 5 : n) / 8, get_max_local_worksize(2 * sizeof(uint64))))),
 
 		// We must have (u / 4) * BLKu <= n / 8
 		_blk16((n >= 512) ? 16 : 1),	// 16 * BLK16 uint64_2 <= 4KB, workgroup size = (16 / 4) * BLK16 <= 64
@@ -94,7 +94,7 @@ public:
 		// We must have (u / 4) * CHUNKu <= n / 8 and CHUNKu < m
 		_chunk16(std::min(std::max(n / 8 * 4 / 16, size_t(1)), size_t(16))),	// 16 * CHUNK16 uint64_2 <= 4KB, workgroup size = (16 / 4) * CHUNK16 <= 64
 		_chunk64(std::min(std::max(n / 8 * 4 / 64, size_t(1)), size_t(4))),		// 64 * CHUNK64 uint64_2 <= 4KB, workgroup size = (64 / 4) * CHUNK64 <= 64
-		_chunk256(std::min(std::max(n / 8 * 4 / 256, size_t(1)), size_t(chunk256_max))),	// 256 * CHUNK256 uint64_2 <= 16KB, workgroup size = (256 / 4) * CHUNK256 <= 256
+		_chunk256(std::min(std::max(n / 8 * 4 / 256, size_t(1)), size_t(4))),	// 256 * CHUNK256 uint64_2 <= 16KB, workgroup size = (256 / 4) * CHUNK256 <= 256
 		// 1024: 1024 uint64_2 = 16KB, workgroup size = 1024 / 4 = 256
 
 		// We must have 5 * (u / 4) * CHUNKu <= n / 8
@@ -130,7 +130,7 @@ public:
 			_reg = _create_buffer(CL_MEM_READ_WRITE, _reg_count * n * sizeof(uint64));
 			_carry = _create_buffer(CL_MEM_READ_WRITE, n / 4 * sizeof(uint64));
 			_root = _create_buffer(CL_MEM_READ_ONLY, 2 * n * sizeof(uint64));
-			_weight = _create_buffer(CL_MEM_READ_ONLY, 3 * n * sizeof(uint64));
+			_weight = _create_buffer(CL_MEM_READ_ONLY, 2 * n * sizeof(uint64));
 			_digit_width = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint8));
 		}
 	}
@@ -331,7 +331,7 @@ public:
 	void write_reg(const uint64 * const ptr, const size_t index) { _write_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
 
 	void write_root(const uint64 * const ptr) { _write_buffer(_root, ptr, 2 * _n * sizeof(uint64)); }
-	void write_weight(const uint64 * const ptr) { _write_buffer(_weight, ptr, 3 * _n * sizeof(uint64)); }
+	void write_weight(const uint64 * const ptr) { _write_buffer(_weight, ptr, 2 * _n * sizeof(uint64)); }
 	void write_width(const uint8 * const ptr) { _write_buffer(_digit_width, ptr, _n * sizeof(uint8)); }
 
 ///////////////////////////////
@@ -465,8 +465,8 @@ private:
 	std::vector<uint8> _digit_width;
 
 public:
-	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose, size_t chunk256_max = 4) : engine(),
-		_reg_count(reg_count), _n(ibdwt::transform_size(q)), _even(ibdwt::is_even(_n))
+	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
+		_reg_count(reg_count), _n(ibdwt::transform_size(q)), _even(ibdwt::is_even((_n % 5 == 0) ? _n / 2 : _n))
 	{
 		const size_t n = _n;
 
@@ -475,6 +475,7 @@ public:
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
+		src << "#define INV_N\t" << MOD_P - (MOD_P - 1) / ((n % 5 == 0) ? n : n / 2) << "ul" << std::endl;
 
 		const uint64 K = mod_root_nth(5), K2 = mod_sqr(K), K3 = mod_mul(K, K2), K4 = mod_sqr(K2); \
 		const uint64 cosu = mod_half(mod_add(K, K4)), isinu = mod_half(mod_sub(K, K4)); \
@@ -502,7 +503,7 @@ public:
 		if (_even) src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
 		else       src << "#define CWM_WG_SZ2\t" << (1u << _gpu->get_lcwm_wg_size2()) << "u" << std::endl;
 
-		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << std::endl << std::endl;
+		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << "u" << std::endl << std::endl;
 
 		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
@@ -511,10 +512,10 @@ public:
 		_gpu->create_kernels();
 
 		std::vector<uint64> root(2 * n);
-		ibdwt::roots(n, root.data());
+		ibdwt::roots45(n, root.data());
 		_gpu->write_root(root.data());
 
-		_weight.resize(3 * n);
+		_weight.resize(2 * n);
 		_digit_width.resize(n);
 		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
 		_gpu->write_weight(_weight.data());
@@ -532,7 +533,7 @@ public:
 
 	size_t get_size() const override { return _n; }
 
-	void set(const Reg dst, const uint64 a) const override
+	void set(const Reg dst, const uint32 a) const override
 	{
 		const size_t n = _n;
 		std::vector<uint64> x(n);
@@ -549,7 +550,7 @@ public:
 	void get(uint64 * const d, const Reg src) const override
 	{
 		const size_t n = _n;
-		const uint64 * const wi = &_weight.data()[2 * n];
+		const uint64 * const w = &_weight.data()[0];
 		const uint8 * const width = &_digit_width.data()[0];
 
 		_gpu->read_reg(d, size_t(src));
@@ -567,7 +568,11 @@ public:
 
 		// unweight, carry (strong)
 		uint64 c = 0;
-		for (size_t k = 0; k < n; ++k) d[k] = adc(mod_mul(d[k], wi[k]), width[k], c);
+		for (size_t k = 0; k < n; ++k)
+		{
+			const uint64 wi = w[2 * (k / 4 + (k % 4) * (n / 4)) + 1];
+			d[k] = adc(mod_mul(d[k], wi), width[k], c);
+		} 
 
 		while (c != 0)
 		{
@@ -806,6 +811,22 @@ public:
 	}
 
 	void sub(const Reg src, const uint32 a) const override { _gpu->subtract(size_t(src), a); }
+
+	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
+
+	bool get_data(std::vector<char> & data, const Reg src) const override
+	{
+		if (data.size() != get_register_data_size()) return false;
+		_gpu->read_reg(reinterpret_cast<uint64 *>(data.data()), size_t(src));
+		return true;
+	}
+
+	bool set_data(const Reg dst, const std::vector<char> & data) const override
+	{
+		if (data.size() != get_register_data_size()) return false;
+		_gpu->write_reg(reinterpret_cast<const uint64 *>(data.data()), size_t(dst));
+		return true;
+	}
 
 	size_t get_checkpoint_size() const override { return _reg_count * _n * sizeof(uint64); }
 

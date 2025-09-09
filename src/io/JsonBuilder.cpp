@@ -446,7 +446,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
                 << "\"port\":" << opts.portCode
             << "},"
             << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
-            << "\"user\":" << jsonEscape(opts.user.empty() ? "cherubrock" : opts.user);
+            << "\"user\":" << jsonEscape(opts.user.empty() ? "prmers" : opts.user);
 
         if (!opts.computer_name.empty())
             oss << ",\"computer\":" << jsonEscape(opts.computer_name);
@@ -482,7 +482,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.osName,
         opts.osVersion,
         opts.osArch,
-        opts.user.empty() ? "cherubrock" : opts.user,
+        opts.user.empty() ? "prmers" : opts.user,
         opts.aid,
         opts.uid,
         timestampBuf,
