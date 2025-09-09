@@ -75,7 +75,7 @@ private:
 	std::vector<cl_kernel> _kernels;
 
 public:
-	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose, const size_t chunk256_max = 4)
+	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose)
 		: device(platform, d, verbose), _n(n), _even(even), _reg_count(reg_count),
 		_lcwm_wg_size(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 4, get_max_local_worksize(sizeof(uint64)))))),
 		_lcwm_wg_size2(ilog2_32(uint32_t(std::min(((n % 5 == 0) ? n / 5 : n) / 8, get_max_local_worksize(2 * sizeof(uint64)))))),
@@ -471,7 +471,7 @@ public:
 		const size_t n = _n;
 
 		const ocl::platform eng_platform = ocl::platform();
-		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose, chunk256_max);
+		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose);
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;

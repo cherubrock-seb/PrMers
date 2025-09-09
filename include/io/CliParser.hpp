@@ -17,6 +17,9 @@ struct CliOptions {
     bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"
     std::string filemers = "";
+    std::string filep95 = "";
+    bool exportp95 = false;
+    bool resume95 = false;
     bool exportmers = false; 
     bool marin = true;
     bool bench = false;

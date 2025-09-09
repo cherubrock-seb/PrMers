@@ -77,10 +77,13 @@ void printUsage(const char* progName) {
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM resume file after P-1 stage 1" << std::endl;
+    std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) (only in -marin mode) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
     std::cout << "  -bench               : (Optional) run benchmark on all NTT transform sizes" << std::endl;
     std::cout << "  -chunk256 <1..4>     : (Optional) cap for CHUNK256; lower can help on Radeon VII/GCN (default: auto)" << std::endl;
     std::cout << "  -filemers <path>     : (Optional) Export .mers file to GMP-ECM .save format using stored state" << std::endl;
+    std::cout << "  -filemers95 <path>   : (Optional) Export .mers file to Prime95 .p95 format using stored state" << std::endl;
+    
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
@@ -183,6 +186,21 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.exportmers = true;
             opts.exponent = p;
         }
+        else if (std::strcmp(argv[i], "-filep95") == 0 && i + 1 < argc) {
+            opts.filep95 = argv[++i];
+            std::string fname = std::filesystem::path(opts.filep95).filename().string();
+            size_t pos_pm = fname.find("pm");
+            size_t pos_dot = fname.rfind('.');
+            if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot){
+                std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n";
+                std::exit(EXIT_FAILURE);
+            }
+            std::string p_str  = fname.substr(0, pos_pm);
+
+            uint32_t p  = std::stoul(p_str);
+            opts.exportp95 = true;
+            opts.exponent = p;
+        }
         else if (std::strcmp(argv[i], "-b1") == 0 && i + 1 < argc) {
             opts.B1 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
@@ -247,6 +265,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-resume") == 0) {
             opts.resume = true;
+        }
+        else if (std::strcmp(argv[i], "-p95") == 0) {
+            opts.resume95 = true;
         }
         else if (std::strcmp(argv[i], "-tune") == 0) {
             opts.tune = true;

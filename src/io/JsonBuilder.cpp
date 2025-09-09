@@ -428,20 +428,22 @@ std::string JsonBuilder::generate(const CliOptions& opts,
             << "\"exponent\":" << opts.exponent << ","
             << "\"worktype\":\"P-1\",";
 
-        oss << "\"factors\":[";
-        for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
-            oss << jsonEscape(opts.knownFactors[i]);
-            if (i < opts.knownFactors.size() - 1) oss << ",";
+        if (hasFactor) {
+            oss << "\"factors\":[";
+            for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
+                if (i) oss << ",";
+                oss << jsonEscape(opts.knownFactors[i]);
+            }
+            oss << "],";
         }
-        oss << "],";
 
-        oss << "\"b1\":" << opts.B1 << ",";
-        oss << "\"b2\":" << opts.B2 << ",";
-        oss << "\"fft-length\":" << transform_size << ",";
-        oss << "\"program\":{"
-            << "\"name\":\"prmers\","
-            << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
-            << "\"port\":" << opts.portCode
+        oss << "\"b1\":" << opts.B1 << ","
+            << "\"b2\":" << opts.B2 << ","
+            << "\"fft-length\":" << transform_size << ","
+            << "\"program\":{"
+                << "\"name\":\"prmers\","
+                << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
+                << "\"port\":" << opts.portCode
             << "},"
             << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
             << "\"user\":" << jsonEscape(opts.user.empty() ? "cherubrock" : opts.user);
@@ -454,6 +456,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         oss << "}";
         return oss.str();
     }
+
 
 
     // --- PRP / LL (original path) ---
