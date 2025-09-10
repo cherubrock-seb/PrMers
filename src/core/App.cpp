@@ -2193,11 +2193,15 @@ int App::exportPrime95FromMersFile(const std::string& mersPath, const std::strin
 
     std::string out = outPath;
     if (out.empty()) {
-        std::ostringstream oss; oss << (std::filesystem::path(mersPath).parent_path().string());
-        if (!oss.str().empty() && oss.str().back() != '/' && oss.str().back() != '\\') oss << std::filesystem::path::preferred_separator;
+        std::ostringstream oss;
+        oss << std::filesystem::path(mersPath).parent_path().string();
+        if (!oss.str().empty() && oss.str().back() != '/' && oss.str().back() != '\\') {
+            oss << static_cast<char>(std::filesystem::path::preferred_separator);
+        }
         oss << 'm' << std::setw(7) << std::setfill('0') << p;
         out = oss.str();
     }
+
     writePrime95S1File(out, p, B1, X);
     return 0;
 }
