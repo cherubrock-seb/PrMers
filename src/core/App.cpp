@@ -2627,17 +2627,22 @@ int App::runPM1Marin() {
     for (mp_bitcnt_t i = resumeI; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
-            save_ckpt(static_cast<uint32_t>(lastIter - 1), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
+            std::cout << "\nInterrupted signal received\n " << std::endl;
+            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
             delete eng;
+            std::cout << "\nInterrupted by user, state saved at iteration "
+            << lastIter << std::endl;
+
             return 0;
         }
-        if (mpz_tstbit(E.get_mpz_t(), i - 1)) eng->square_mul(0, 3); else eng->square_mul(0);
-
         auto now = std::chrono::high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
-            save_ckpt(static_cast<uint32_t>(lastIter - 1), std::chrono::duration<double>(now - start_clock).count() + restored_time);
+            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(now - start_clock).count() + restored_time);
             lastBackup = now;
         }
+
+        if (mpz_tstbit(E.get_mpz_t(), i - 1)) eng->square_mul(0, 3); else eng->square_mul(0);
+
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
             std::string res64_x;
             spinner.displayProgress(bits - i, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_x);
