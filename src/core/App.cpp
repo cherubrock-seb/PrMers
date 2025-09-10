@@ -2135,26 +2135,71 @@ static std::vector<uint8_t> hex_to_le_bytes_pad4(const mpz_class& X) {
     return le;
 }
 
-static void write_u32(std::ofstream& o, uint32_t v) { o.write(reinterpret_cast<const char*>(&v), 4); }
-static void write_i32(std::ofstream& o, int32_t v) { o.write(reinterpret_cast<const char*>(&v), 4); }
-static void write_u64(std::ofstream& o, uint64_t v) { o.write(reinterpret_cast<const char*>(&v), 8); }
-static void write_u16(std::ofstream& o, uint16_t v) { o.write(reinterpret_cast<const char*>(&v), 2); }
-static void write_f64(std::ofstream& o, double v) { o.write(reinterpret_cast<const char*>(&v), 8); }
-static void write_u8 (std::ofstream& o, uint8_t v) { o.write(reinterpret_cast<const char*>(&v), 1); }
+static void write_u32(std::ofstream& o, uint32_t v){ o.write(reinterpret_cast<const char*>(&v),4); }
+static void write_i32(std::ofstream& o, int32_t v){ o.write(reinterpret_cast<const char*>(&v),4); }
+static void write_u64(std::ofstream& o, uint64_t v){ o.write(reinterpret_cast<const char*>(&v),8); }
+static void write_u16(std::ofstream& o, uint16_t v){ o.write(reinterpret_cast<const char*>(&v),2); }
+static void write_f64(std::ofstream& o, double v){ o.write(reinterpret_cast<const char*>(&v),8); }
+static void write_u8 (std::ofstream& o, uint8_t  v){ o.write(reinterpret_cast<const char*>(&v),1); }
 
-void writePrime95S1File(const std::string& outPath, uint32_t p, uint64_t B1, const mpz_class& X) {
-    std::vector<uint8_t> data = hex_to_le_bytes_pad4(X);
+static bool read_text_file(const std::string& path, std::string& out){
+    std::ifstream f(path);
+    if(!f) return false;
+    std::ostringstream ss; ss << f.rdbuf();
+    out = ss.str();
+    return true;
+}
+
+static bool parse_ecm_resume_line(const std::string& t, uint64_t& B1, uint32_t& p, std::string& hexX){
+    size_t iB1 = t.find("B1=");
+    if(iB1==std::string::npos) return false;
+    size_t eB1 = t.find(';', iB1);
+    if(eB1==std::string::npos) return false;
+    B1 = std::stoull(t.substr(iB1+3, eB1-(iB1+3)));
+
+    size_t iN = t.find("N=2^");
+    if(iN==std::string::npos) return false;
+    size_t eN = t.find('-', iN);
+    if(eN==std::string::npos) return false;
+    p = (uint32_t)std::stoul(t.substr(iN+4, eN-(iN+4)));
+
+    size_t iX = t.find("X=0x");
+    if(iX==std::string::npos) return false;
+    size_t eX = t.find(';', iX);
+    if(eX==std::string::npos) return false;
+    hexX = t.substr(iX+4, eX-(iX+4));
+    return true;
+}
+
+static std::vector<uint8_t> hex_to_bytes_reversed_pad8(const std::string& hex){
+    std::string h = hex;
+    if(h.empty()) h = "0";
+    size_t pad = (8 - (h.size() & 7)) & 7;
+    if(pad) h.insert(0, pad, '0');
+    std::vector<uint8_t> data; data.reserve(h.size()/2);
+    size_t bytes = h.size()/2;
+    for(size_t i=0;i<bytes;++i){
+        size_t pos = h.size() - (i+1)*2;
+        uint8_t b = (uint8_t)std::stoul(h.substr(pos,2), nullptr, 16);
+        data.push_back(b);
+    }
+    return data;
+}
+
+static uint32_t checksum_prime95_s1(uint64_t B1, const std::vector<uint8_t>& data){
     uint64_t sum32 = 0;
-    for (size_t i = 0; i + 3 < data.size(); i += 4) {
-        uint32_t w = (uint32_t)data[i] | ((uint32_t)data[i+1] << 8) | ((uint32_t)data[i+2] << 16) | ((uint32_t)data[i+3] << 24);
+    for(size_t i=0;i+3<data.size();i+=4){
+        uint32_t w = (uint32_t)data[i] | ((uint32_t)data[i+1]<<8) | ((uint32_t)data[i+2]<<16) | ((uint32_t)data[i+3]<<24);
         sum32 += w;
     }
-    uint64_t chk64 = ((B1 << 1) + 6u + (data.size() >> 1) + sum32) & 0xFFFFFFFFULL;
-    uint32_t chk = (uint32_t)chk64;
+    uint64_t chk64 = ((B1<<1) + 6u + (data.size()>>1) + sum32) & 0xFFFFFFFFULL;
+    return (uint32_t)chk64;
+}
 
+static bool write_prime95_s1_from_bytes(const std::string& outPath, uint32_t p, uint64_t B1, const std::vector<uint8_t>& data){
     std::ofstream out(outPath, std::ios::binary);
-    if (!out) { std::cerr << "Error: cannot write " << outPath << std::endl; return; }
-
+    if(!out) return false;
+    uint32_t chk = checksum_prime95_s1(B1, data);
     write_u32(out, 830093643u);
     write_u32(out, 8u);
     write_f64(out, 1.0);
@@ -2167,42 +2212,29 @@ void writePrime95S1File(const std::string& outPath, uint32_t p, uint64_t B1, con
     write_u64(out, 0);
     write_f64(out, 1.0);
     write_u32(out, chk);
-
     write_i32(out, 5);
     write_u64(out, B1);
     write_u64(out, B1);
     write_i32(out, 1);
-    write_i32(out, (int32_t)(data.size() >> 2));
+    write_i32(out, (int32_t)(data.size()>>2));
     out.write(reinterpret_cast<const char*>(data.data()), (std::streamsize)data.size());
-
-    std::cout << "Prime 95 resume file written to: " << outPath << std::endl;
+    return (bool)out;
 }
 
-int App::exportPrime95FromMersFile(const std::string& mersPath, const std::string& outPath) {
-    std::vector<uint64_t> v(precompute.getN(), 0ULL);
-    if (!read_mers_file(mersPath, v)) return -1;
-    std::string fname = std::filesystem::path(mersPath).filename().string();
-    size_t pos_pm = fname.find("pm");
-    size_t pos_dot = fname.rfind('.');
-    if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot) return std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n", -1;
-    uint32_t p  = (uint32_t)std::stoul(fname.substr(0, pos_pm));
-    uint64_t B1 = (uint64_t)std::stoull(fname.substr(pos_pm + 2, pos_dot - (pos_pm + 2)));
-
-    mpz_class Mp = (mpz_class(1) << p) - 1;
-    mpz_class X  = util::vectToMpz(v, precompute.getDigitWidth(), Mp);
-
+int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath){
+    std::string txt;
+    if(!read_text_file(ecmPath, txt)) return -1;
+    uint64_t B1=0; uint32_t p=0; std::string hexX;
+    if(!parse_ecm_resume_line(txt, B1, p, hexX)) return -2;
+    std::vector<uint8_t> data = hex_to_bytes_reversed_pad8(hexX);
     std::string out = outPath;
-    if (out.empty()) {
-        std::ostringstream oss;
-        oss << std::filesystem::path(mersPath).parent_path().string();
-        if (!oss.str().empty() && oss.str().back() != '/' && oss.str().back() != '\\') {
-            oss << static_cast<char>(std::filesystem::path::preferred_separator);
-        }
-        oss << 'm' << std::setw(7) << std::setfill('0') << p;
-        out = oss.str();
+    if(out.empty()){
+        std::ostringstream name; name << 'm' << std::setw(7) << std::setfill('0') << p;
+        std::filesystem::path outp = std::filesystem::path(ecmPath).parent_path() / name.str();
+        out = outp.string();
     }
-
-    writePrime95S1File(out, p, B1, X);
+    if(!write_prime95_s1_from_bytes(out, p, B1, data)) return -3;
+    std::cout << "Prime95 S1 file written to: " << out << std::endl;
     return 0;
 }
 
@@ -2351,12 +2383,12 @@ int App::runPM1() {
         writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" +
                     std::to_string(options.B1) + ".save",
                     options.B1, options.exponent, X);
+        convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" +
+                    std::to_string(options.B1) + ".save","resume_p" + std::to_string(options.exponent) + "_B1_" +
+                    std::to_string(options.B1) + ".p95");
+                    
     }
-    if(options.resume95){
-        writePrime95S1File("resume_p" + std::to_string(options.exponent) + "_B1_" +
-                    std::to_string(options.B1) + ".p95",
-                    options.B1, options.exponent, X);
-    }
+    
     //std::cout << "digitWidths = ";
     //for (int w : precompute.getDigitWidth()) std::cout << w << " ";
     //std::cout << "\n";
@@ -2656,9 +2688,6 @@ int App::runGpuBenchmarkMarin() {
 int App::run() {
     if(options.exportmers){
         return exportResumeFromMersFile(options.filemers, "");
-    }
-    if(options.exportp95){
-        return exportPrime95FromMersFile(options.filep95, "");
     }
     if(options.bench){
         return runGpuBenchmarkMarin();

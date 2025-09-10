@@ -50,14 +50,22 @@ static const char * const src_ocl_kernel = \
 "#define MAX_WG_SZ	256\n" \
 "#endif\n" \
 "\n" \
-"typedef uint	sz_t;\n" \
-"typedef uchar	uint_8;\n" \
-"typedef uint	uint32;\n" \
-"typedef int		int32;\n" \
-"typedef ulong	uint64;\n" \
-"typedef uchar4	uint_8_4;\n" \
-"typedef ulong2	uint64_2;\n" \
-"typedef ulong4	uint64_4;\n" \
+"typedef uchar  u8;\n" \
+"typedef uint   u32;\n" \
+"typedef int    s32;\n" \
+"typedef ulong  u64;\n" \
+"typedef uchar4 u8x4;\n" \
+"typedef ulong2 u64x2;\n" \
+"typedef ulong4 u64x4;\n" \
+"typedef u32    sz_t;\n" \
+"\n" \
+"#define uint_8    u8\n" \
+"#define uint32    u32\n" \
+"#define int32     s32\n" \
+"#define uint64    u64\n" \
+"#define uint_8_4  u8x4\n" \
+"#define uint64_2  u64x2\n" \
+"#define uint64_4  u64x4\n" \
 "\n" \
 "INLINE sz_t div5(const sz_t n) { return mul_hi(n, 858993460u); }	// = n / 5 if n < 2^30\n" \
 "\n" \
