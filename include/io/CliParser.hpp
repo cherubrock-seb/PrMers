@@ -32,7 +32,7 @@ struct CliOptions {
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;
     bool proof = true;
-    bool resume = false;
+    bool resume = true;
     bool submit = false;
     uint64_t chunk256 = 4;
     int localCarryPropagationDepth = 8;

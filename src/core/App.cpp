@@ -496,9 +496,10 @@ static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
     return oss.str();
 }
 
-static inline void delete_checkpoints(uint32_t p, bool wagstaff, const std::string& dir = ".")
+static inline void delete_checkpoints(uint32_t p, bool wagstaff,bool pm1, const std::string& dir = ".")
 {
-    const std::string prefix = wagstaff ? "wagstaff_" : "";
+    std::string prefix = wagstaff ? "wagstaff_" : "";
+    prefix = pm1 ? "pm1_" : "";
     fs::path base = fs::path(dir) / (prefix + "m_" + std::to_string(p) + ".ckpt");
     std::error_code ec;
     fs::remove(base, ec);
@@ -877,7 +878,7 @@ int App::runPrpOrLlMarin()
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
-    delete_checkpoints(p, options.wagstaff); 
+    delete_checkpoints(p, options.wagstaff, false); 
     backupManager.clearState();
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
@@ -2496,6 +2497,231 @@ int App::runPM1() {
     return 1;
 }
 
+
+mpz_class gcd_with_dots(const mpz_class& A, const mpz_class& B) {
+    std::atomic<bool> done{false};
+
+    std::thread ticker([&]{
+        using namespace std::chrono;
+        std::cout << "Computing GCD (this may take a while) ";
+        std::cout.flush();
+        size_t dots = 0;
+        while (!done.load()) {
+            std::cout << '.' << std::flush;
+            std::this_thread::sleep_for(milliseconds(300));
+            if (++dots % 60 == 0) {
+                std::cout << "\rComputing GCD (this may take a while) " << std::string(0, ' ');
+                std::cout.flush();
+            }
+        }
+        std::cout << " done.\n";
+    });
+
+    mpz_class g;
+    mpz_gcd(g.get_mpz_t(), A.get_mpz_t(), B.get_mpz_t());
+
+    done.store(true);
+    ticker.join();
+    return g;
+}
+
+mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_class& Mp) {
+    std::atomic<bool> done{false};
+
+    std::thread ticker([&] {
+        std::cout << "Constructing and reducing large integer ";
+        std::cout.flush();
+        while (!done.load()) {
+            std::cout << '.' << std::flush;
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        }
+        std::cout << " done.\n";
+    });
+
+    mpz_class X = 0;
+    for (int i = (int)words.size() - 1; i >= 0; --i) {
+        X <<= 32;
+        X += words[(size_t)i];
+    }
+    X %= Mp;
+
+    done.store(true);
+    ticker.join();
+    return X;
+}
+
+
+int App::runPM1Marin() {
+    bool debug = false;
+    uint64_t B1 = options.B1;
+    std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+
+    mpz_class E = buildE(B1);
+    E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+    mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = options.debug;
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(2), static_cast<size_t>(options.device_id), verbose);
+
+    std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
+    const std::string ckpt_file = ck.str();
+
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 1) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = eng->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!eng->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt = [&](uint32_t i, double et){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        {
+            File f(newf, "wb");
+            int version = 1;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!eng->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::error_code ec;
+        fs::remove(oldf, ec);
+        fs::rename(ckpt_file, oldf, ec);
+        fs::rename(ckpt_file + ".new", ckpt_file, ec);
+        fs::remove(oldf, ec);
+    };
+
+    uint32_t resumeI = 0;
+    double restored_time = 0.0;
+    if (read_ckpt(ckpt_file, resumeI, restored_time) != 0) {
+        eng->set(0, 1);
+        resumeI = static_cast<uint32_t>(bits);
+    }
+
+    timer.start();
+    timer2.start();
+    auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastDisplay = start_clock;
+    auto lastBackup = start_clock;
+    interrupted.store(false, std::memory_order_relaxed);
+
+    uint64_t startIter = resumeI;
+    uint64_t lastIter = resumeI;
+    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, resumeI, "");
+
+    for (mp_bitcnt_t i = resumeI; i > 0; --i) {
+        lastIter = i;
+        if (interrupted) {
+            save_ckpt(static_cast<uint32_t>(lastIter - 1), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
+            delete eng;
+            return 0;
+        }
+        if (mpz_tstbit(E.get_mpz_t(), i - 1)) eng->square_mul(0, 3); else eng->square_mul(0);
+
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
+            save_ckpt(static_cast<uint32_t>(lastIter - 1), std::chrono::duration<double>(now - start_clock).count() + restored_time);
+            lastBackup = now;
+        }
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+            std::string res64_x;
+            spinner.displayProgress(bits - i, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_x);
+            timer2.start();
+            lastDisplay = now;
+            resumeI = static_cast<uint32_t>(bits - i);
+        }
+        if (options.iterforce > 0 && ((i + 1) % options.iterforce == 0)) {}
+    }
+    const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+
+    std::string res64_done;
+    spinner.displayProgress(bits, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_done);
+    std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+
+    save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
+    
+
+    engine::digit d(eng, 0);
+    std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
+
+    if (debug) {
+        std::string res64_hex = format_res64_hex(words);
+        std::string res2048_hex = format_res2048_hex(words);
+        std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
+    }
+
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+    mpz_class X = compute_X_with_dots(words, Mp);
+
+
+    if (debug) {
+        gmp_printf("[DEBUG] X(before GCD) = 0x%Zx\n", X.get_mpz_t());
+    }
+
+    if (options.resume) {
+        writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save",
+                           options.B1, options.exponent, X);
+        convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save",
+                                  "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95");
+    }
+
+    X -= 1;
+    mpz_class g = gcd_with_dots(X, Mp);
+    bool factorFound = (g != 1) && (g != Mp);
+
+    std::string filename = "stage1_result_B1_" + std::to_string(B1) + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (factorFound) {
+        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
+        writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
+        std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+        options.knownFactors.push_back(std::string(fstr));
+        std::free(fstr);
+        std::cout << "\n";
+    } else {
+        writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
+        std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+    }
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.appendToResultsTxt(json);
+
+    if (hasWorktodoEntry_) {
+        if (worktodoParser_->removeFirstProcessed()) {
+            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+            std::ifstream f(options.worktodo_path);
+            std::string l;
+            bool more = false;
+            while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
+            f.close();
+            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; restart_self(argc_, argv_); }
+            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; std::exit(0); }
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";
+            std::exit(-1);
+        }
+    }
+    delete_checkpoints(options.exponent, options.wagstaff, true); 
+    delete eng;
+    return factorFound ? 0 : 1;
+}
+
 static volatile sig_atomic_t prmers_bench_stop = 0;
 static void prmers_bench_sigint(int) { prmers_bench_stop = 1; }
 
@@ -2686,19 +2912,28 @@ int App::runGpuBenchmarkMarin() {
 
 
 int App::run() {
+    if(options.mode == "pm1" && options.marin && options.B2<=0){
+        if(options.exponent > 89){
+            return runPM1Marin();
+        }
+        else{
+            std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
+        }
+    }
     if(options.exportmers){
         return exportResumeFromMersFile(options.filemers, "");
     }
     if(options.bench){
         return runGpuBenchmarkMarin();
     }
-    if(options.marin){
+    if((options.mode == "prp" || options.mode == "ll") && options.marin){
         return runPrpOrLlMarin();
     }
     if(options.mode == "prp" || options.mode == "ll"){
         return runPrpOrLl();
     }
     else if(options.mode == "pm1"){
+        //options.marin = false;
         if(options.exponent > 89){
             return runPM1();
         }

@@ -42,6 +42,7 @@ public:
     int runPrpOrLl();
     int runPrpOrLlMarin();
     int runPM1();
+    int runPM1Marin();
     int runPM1Stage2();
     int run();
     void tuneIterforce();

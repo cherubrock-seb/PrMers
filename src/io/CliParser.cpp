@@ -128,7 +128,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-pm1") == 0) {
             opts.mode = "pm1";
-            opts.marin = false;
+            //opts.marin = false;
             opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-profile") == 0) {
@@ -302,7 +302,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         std::cerr << "Use PRP test for Mersenne cofactors instead." << std::endl;
         std::exit(EXIT_FAILURE);
     }
-    
+    if(opts.mode == "pm1" && opts.B2>0){
+        opts.marin = false;
+    }
     if(opts.iterforce == 0){
         opts.iterforce = 500;
     }
