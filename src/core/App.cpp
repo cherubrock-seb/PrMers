@@ -2622,7 +2622,7 @@ int App::runPM1Marin() {
 
     uint64_t startIter = resumeI;
     uint64_t lastIter = resumeI;
-    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, resumeI, "");
+    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, bits - resumeI, resumeI, "");
 
     for (mp_bitcnt_t i = resumeI; i > 0; --i) {
         lastIter = i;

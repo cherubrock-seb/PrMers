@@ -75,8 +75,8 @@ void Spinner::displayProgress(uint64_t iter,
                     + (1.0 - alpha) * smoothedIPS;
     }
 
-    double remaining = smoothedIPS > 0
-                     ? (totalIters - iter) / smoothedIPS
+    double remaining = currentIPS > 0
+                     ? (totalIters - iter) / currentIPS
                      : 0.0;
 
     const char* color = (pct < 50.0) ? COLOR_RED
