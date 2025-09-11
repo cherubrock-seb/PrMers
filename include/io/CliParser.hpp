@@ -21,6 +21,7 @@ struct CliOptions {
     bool exportp95 = false;
     bool resume95 = false;
     bool exportmers = false; 
+    uint64_t llsafe_block = 0;
     bool marin = true;
     bool bench = false;
     bool profiling = false;

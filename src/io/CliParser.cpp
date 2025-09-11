@@ -208,6 +208,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.erroriter = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
+        else if (std::strcmp(argv[i], "-llsafeb") == 0 && i + 1 < argc) {
+            opts.llsafe_block = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
             opts.max_local_size1 = std::atoi(argv[++i]);
         }

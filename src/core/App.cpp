@@ -1150,8 +1150,11 @@ int App::runLlSafeMarin()
     uint64_t totalIters = (p >= 2) ? (uint64_t)(p - 2) : 0ULL;
 
     uint64_t L = options.exponent;
-    uint64_t B = (uint64_t)(std::sqrt((double)L));
-    if (B == 0) B = 1;
+    uint64_t B = (options.llsafe_block > 0) ? (uint64_t)options.llsafe_block
+                                            : (uint64_t)(std::sqrt((double)L));;
+    
+    if (B < 1) B = 1;
+    if (B > totalIters) B = totalIters;
 
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
