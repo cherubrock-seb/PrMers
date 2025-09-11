@@ -51,7 +51,7 @@ void printUsage(const char* progName) {
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
     std::cout << "  -llsafe              : (Optional) Run on GPU in Lucas-Lehmer Safe mode ( LL Doubling error check by block)" << std::endl;
-    std::cout << "  -llsafeb             : (Optional) override length for block verification in llsafe mode by default sqrt(exponent) " << std::endl;
+    std::cout << "  -llsafeb             : (Optional) override length for block verification in llsafe mode by default exponent/sqrt(exponent) " << std::endl;
     
     //std::cout << "  -llsafecpu           : (Optional) Run on CPU in Lucas-Lehmer Safe mode (matrix squaring with Gerbicz-Li check)" << std::endl;
     std::cout << "  -factors <factor1,factor2,...> : (Optional) Specify known factors to run PRP test on the Mersenne cofactor" << std::endl;
