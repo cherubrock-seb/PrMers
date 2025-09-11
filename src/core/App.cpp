@@ -1151,7 +1151,7 @@ int App::runLlSafeMarin()
 
     uint64_t L = options.exponent;
     uint64_t B = (options.llsafe_block > 0) ? (uint64_t)options.llsafe_block
-                                            : (uint64_t)(std::sqrt((double)L));;
+                                            : (uint64_t)(options.exponent/std::sqrt((double)L));;
     
     if (B < 1) B = 1;
     if (B > totalIters) B = totalIters;
@@ -1215,9 +1215,9 @@ int App::runLlSafeMarin()
             bool okV = eng->is_equal(RVCHK, RV);
             bool okU = eng->is_equal(RUCHK, RU);
             if (!(okV && okU)) {
-                std::cout << "[Gerbicz Li] Mismatch \n"
-                          << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
-                          << "[Gerbicz Li] Restore iter=" << itersave << "\n";
+                std::cout << "[Error check] Mismatch \n"
+                          << "[Error check] Check FAILED! iter=" << iter << "\n"
+                          << "[Error check] Restore iter=" << itersave << "\n";
                 eng->copy(RV, RVC);
                 eng->copy(RU, RUC);
                 if (itersave == 0) {
@@ -1228,7 +1228,7 @@ int App::runLlSafeMarin()
                     resumeIter = itersave;
                 }
             } else {
-                std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                std::cout << "[Error check] Check passed! iter=" << iter << "\n";
                 eng->copy(RVC, RV);
                 eng->copy(RUC, RU);
                 itersave = iter + 1;
