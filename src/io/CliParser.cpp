@@ -50,6 +50,8 @@ void printUsage(const char* progName) {
     //std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
     std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -llsafe              : (Optional) Run on GPU in Lucas-Lehmer Safe mode (matrix squaring with Gerbicz-Li check)" << std::endl;
+    //std::cout << "  -llsafecpu           : (Optional) Run on CPU in Lucas-Lehmer Safe mode (matrix squaring with Gerbicz-Li check)" << std::endl;
     std::cout << "  -factors <factor1,factor2,...> : (Optional) Specify known factors to run PRP test on the Mersenne cofactor" << std::endl;
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
@@ -124,6 +126,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-ll") == 0) {
             opts.mode = "ll";
+            opts.proof = false;
+        }
+        /*else if (std::strcmp(argv[i], "-llsafecpu") == 0) {
+            opts.mode = "llsafecpu";
+            opts.proof = false;
+        }*/
+        else if (std::strcmp(argv[i], "-llsafe") == 0) {
+            opts.mode = "llsafe";
             opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-pm1") == 0) {

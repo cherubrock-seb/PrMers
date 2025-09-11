@@ -908,6 +908,385 @@ int App::runPrpOrLlMarin()
     return is_prp_prime ? 0 : 1;
 }
 
+/*
+int App::runLlSafeCpu()
+{
+    
+    Printer::banner(options);
+    std::cout << "[Lucas Lehmer CPU SAFE Mode with error detection]\n";
+    if (auto code = QuickChecker::run(options.exponent)) return *code;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = options.debug;
+
+    auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastDisplay = start_clock;
+    auto lastBackup  = start_clock;
+    timer.start();
+    timer2.start();
+    logger.logStart(options);
+
+    mpz_class Mp = (mpz_class(1) << p) - 1;
+
+    struct Mat { mpz_class a,b,c,d; };
+    auto norm = [&](mpz_class& x){ x %= Mp; if (x < 0) x += Mp; };
+    auto madd = [&](const mpz_class& x, const mpz_class& y)->mpz_class{ mpz_class t = x + y; t %= Mp; if (t < 0) t += Mp; return t; };
+    auto mmul = [&](const mpz_class& x, const mpz_class& y)->mpz_class{ mpz_class t; mpz_mul(t.get_mpz_t(), x.get_mpz_t(), y.get_mpz_t()); t %= Mp; return t; };
+
+    auto matmul = [&](const Mat& A, const Mat& B)->Mat{
+        Mat R;
+        R.a = madd(mmul(A.a,B.a), mmul(A.b,B.c));
+        R.b = madd(mmul(A.a,B.b), mmul(A.b,B.d));
+        R.c = madd(mmul(A.c,B.a), mmul(A.d,B.c));
+        R.d = madd(mmul(A.c,B.b), mmul(A.d,B.d));
+        return R;
+    };
+    auto matsqr = [&](const Mat& A)->Mat{ return matmul(A,A); };
+
+    auto pow2 = [&](const Mat& A, uint64_t k)->Mat{
+        Mat B = A;
+        for (uint64_t i = 0; i < k; ++i) B = matsqr(B);
+        return B;
+    };
+
+    auto pow_mat = [&](const Mat& A, const mpz_class& e)->Mat{
+        Mat R{1,0,0,1};
+        Mat B = A;
+        mpz_class E = e;
+        while (E > 0) {
+            if (mpz_odd_p(E.get_mpz_t())) R = matmul(R, B);
+            B = matsqr(B);
+            mpz_fdiv_q_2exp(E.get_mpz_t(), E.get_mpz_t(), 1);
+        }
+        return R;
+    };
+
+    Mat A{4 % Mp, (Mp - 1) % Mp, 1 % Mp, 0};
+    Mat I{1,0,0,1};
+    mpz_class v0 = 4 % Mp, v1 = 2 % Mp;
+
+    uint64_t steps = (p >= 2) ? (uint64_t)(p - 2) : 0ULL;
+    uint64_t k_half = (p >= 2) ? (uint64_t)((p - 2) / 2) : 0ULL;
+
+    Mat X = pow2(A, k_half);
+    mpz_class e = mpz_class(1) << (p >= 2 ? (p - 2) : 0);
+    mpz_class r = mpz_class(1) << k_half;
+    mpz_class qplus = e / r;
+    Mat Y2 = pow_mat(X, qplus);
+    Mat Y1 = pow2(A, steps);
+    bool ok_ref = (Y1.a == Y2.a) && (Y1.b == Y2.b) && (Y1.c == Y2.c) && (Y1.d == Y2.d);
+    if (!ok_ref) {
+        logger.logEnd(0.0);
+        std::cout << "Gerbicz reference failed\n";
+        return 1;
+    }
+
+    Mat B = A;
+    bool errordone = false;
+    spinner.displayProgress(0, steps, timer.elapsed(), timer2.elapsed(), p, 0, 0, "");
+            
+    for (uint64_t i = 0; i < steps; ++i) {
+        if (options.erroriter > 0 && (i + 1) == (uint64_t)options.erroriter && !errordone) {
+            B.a = madd(B.a, 1);
+            errordone = true;
+            std::cout << "Injected error at iteration " << (i + 1) << std::endl;
+        }
+        B = matsqr(B);
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+            spinner.displayProgress(i + 1, steps, timer.elapsed(), timer2.elapsed(), p, 0, 0, "");
+            timer2.start();
+            lastDisplay = now;
+        }
+        if (interrupted) {
+            logger.logEnd(std::chrono::duration<double>(now - start_clock).count());
+            std::cout << "\nInterrupted by user at iteration " << (i + 1) << std::endl;
+            return 0;
+        }
+        if (options.backup_interval > 0 && std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= options.backup_interval) {
+            lastBackup = now;
+            spinner.displayBackupInfo(i + 1, steps, timer.elapsed(), "");
+        }
+    }
+    spinner.displayProgress(p, steps, timer.elapsed(), timer2.elapsed(), p, 0, 0, "");
+         
+    bool run_ok = (B.a == Y1.a) && (B.b == Y1.b) && (B.c == Y1.c) && (B.d == Y1.d);
+    if (!run_ok) {
+        std::cout << "[Gerbicz Li] Mismatch detected\n";
+        B = Y1;
+    }
+    else{
+        std::cout << "[Gerbicz Li] Check passed!\n";
+    }
+
+    mpz_class out0 = madd(mmul(B.a, v0), mmul(B.b, v1));
+    mpz_class out1 = madd(mmul(B.c, v0), mmul(B.d, v1));
+    mpz_class s = out1 % Mp;
+
+    std::string verdict = (s == 0) ? "prime" : "composite";
+    //std::cout << "s_" << (p >= 2 ? (p - 2) : 0) << " mod M_" << p << " = " << s.get_str() << std::endl;
+    std::cout << "2^" << p << " - 1 is " << verdict << std::endl;
+
+    double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count();
+    logger.logEnd(elapsed_time);
+
+    if (options.submit) {
+        bool skippedSubmission = false;
+        std::string res64_hex = "";
+        std::string res2048_hex = "";
+        std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), s == 0, res64_hex, res2048_hex);
+        Printer::finalReport(options, elapsed_time, json, s == 0);
+        std::cout << "Manual submission JSON:\n" << json << "\n";
+        if (options.noAsk && options.password.empty()) {
+            std::cerr << "No password provided with --noask; skipping submission.\n";
+            skippedSubmission = true;
+        }
+        if (!skippedSubmission) {
+            if (options.user.empty()) {
+                std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
+                std::getline(std::cin, options.user);
+            }
+            if (options.user.empty()) {
+                std::cerr << "No username entered; skipping submission.\n";
+                skippedSubmission = true;
+            }
+        }
+        if (!skippedSubmission) {
+            if (!options.noAsk && options.password.empty()) {
+                options.password = io::CurlClient::promptHiddenPassword();
+            }
+            bool success = io::CurlClient::sendManualResultWithLogin(json, options.user, options.password);
+            if (!success) std::cerr << "Submission to PrimeNet failed\n";
+        }
+        io::WorktodoManager wm(options);
+        wm.saveIndividualJson(options.exponent, "llsafe", json);
+        wm.appendToResultsTxt(json);
+    }
+
+    return (s == 0) ? 0 : 1;
+}*/
+int App::runLlSafeMarin()
+{
+    Printer::banner(options);
+    std::cout << "[Lucas Lehmer GPU SAFE Mode with error detection]\n";
+    if (auto code = QuickChecker::run(options.exponent)) return *code;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = options.debug;
+
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose);
+    if (verbose) std::cout << "Testing 2^" << p << " - 1 (LL-safe, GPU), " << eng->get_size() << " 64-bit words..." << std::endl;
+
+    std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
+    const std::string ckpt_file = ck.str();
+
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 1) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = eng->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!eng->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt = [&](uint32_t i, double et){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        {
+            File f(newf, "wb");
+            int version = 1;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!eng->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file.c_str());
+    };
+
+    const size_t RV = 0, RU = 1, RVC = 2, RUC = 3, RTMP = 4, RVCHK = 5, RUCHK = 6, RSCR = 7;
+
+    uint32_t ri = 0; double restored_time = 0.0;
+    int r = read_ckpt(ckpt_file, ri, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
+    if (r == 0) {
+        std::cout << "Resuming from a checkpoint." << std::endl;
+    } else {
+        ri = 0;
+        restored_time = 0.0;
+        eng->set(RV, 4);
+        eng->set(RU, 2);
+    }
+
+    eng->copy(RVC, RV);
+    eng->copy(RUC, RU);
+    eng->copy(RVCHK, RVC);
+    eng->copy(RUCHK, RUC);
+
+    logger.logStart(options);
+    timer.start();
+    timer2.start();
+
+    const auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastBackup = start_clock;
+    auto lastDisplay = start_clock;
+
+    uint64_t totalIters = (p >= 2) ? (uint64_t)(p - 2) : 0ULL;
+
+    uint64_t L = options.exponent;
+    uint64_t B = (uint64_t)(std::sqrt((double)L));
+    if (B == 0) B = 1;
+
+    uint64_t resumeIter = ri;
+    uint64_t startIter  = ri;
+
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, "");
+
+    bool errordone = false;
+    uint64_t itersave = (ri / B) * B;
+
+    for (uint64_t iter = resumeIter; iter < totalIters; ++iter) {
+        if (interrupted) {
+            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+            save_ckpt((uint32_t)iter, elapsed_time);
+            delete eng;
+            std::cout << "\nInterrupted by user, state saved at iteration " << iter << std::endl;
+            logger.logEnd(elapsed_time);
+            return 0;
+        }
+
+        if (options.erroriter > 0 && (iter + 1) == (uint64_t)options.erroriter && !errordone) {
+            errordone = true;
+            eng->sub(RV, 2);
+            std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+        }
+
+        eng->set_multiplicand(RTMP, RV);
+        eng->mul(RU, RTMP);
+        eng->square_mul(RV);
+        eng->sub(RV, 2);
+
+        auto now0 = std::chrono::high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            save_ckpt((uint32_t)iter, elapsed_time);
+            lastBackup = now0;
+            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), "");
+        }
+
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+            spinner.displayProgress(iter + 1, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, "");
+            timer2.start();
+            lastDisplay = now;
+            resumeIter = iter + 1;
+        }
+
+        bool boundary = (((iter + 1) % B) == 0) || (iter + 1 == totalIters);
+        if (boundary) {
+            uint64_t blk = ((iter + 1) % B == 0) ? B : ((iter + 1) - itersave);
+            eng->copy(RVCHK, RVC);
+            eng->copy(RUCHK, RUC);
+            for (uint64_t z = 0; z < blk; ++z) {
+                eng->set_multiplicand(RTMP, RVCHK);
+                eng->mul(RUCHK, RTMP);
+                eng->square_mul(RVCHK);
+                eng->sub(RVCHK, 2);
+            }
+            bool okV = eng->is_equal(RVCHK, RV);
+            bool okU = eng->is_equal(RUCHK, RU);
+            if (!(okV && okU)) {
+                std::cout << "[Gerbicz Li] Mismatch \n"
+                          << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                          << "[Gerbicz Li] Restore iter=" << itersave << "\n";
+                eng->copy(RV, RVC);
+                eng->copy(RU, RUC);
+                if (itersave == 0) {
+                    iter = (uint64_t)-1;
+                    resumeIter = 0;
+                } else {
+                    iter = itersave - 1;
+                    resumeIter = itersave;
+                }
+            } else {
+                std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                eng->copy(RVC, RV);
+                eng->copy(RUC, RU);
+                itersave = iter + 1;
+            }
+        }
+    }
+
+    engine::digit dV(eng, RV);
+    bool is_prime = (dV.equal_to(0) || dV.equal_to_Mp());
+
+    std::vector<uint32_t> words = pack_words_from_eng_digits(dV, p);
+    if (is_prime && dV.equal_to_Mp()) {
+        std::fill(words.begin(), words.end(), 0u);
+    }
+    std::string res64_hex   = format_res64_hex(words);
+    std::string res2048_hex = format_res2048_hex(words);
+
+    spinner.displayProgress(totalIters, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, res64_hex);
+
+    const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+    std::cout << "2^" << p << " - 1 is " << (is_prime ? "prime" : ("composite, res64 = " + res64_hex)) << std::endl;
+    logger.logEnd(elapsed_time);
+
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), is_prime, res64_hex, res2048_hex);
+    Printer::finalReport(options, elapsed_time, json, is_prime);
+
+    if (options.submit) {
+        bool noAsk = options.noAsk || hasWorktodoEntry_;
+        if (noAsk && options.password.empty()) {
+            std::cerr << "No password provided with --noask; skipping submission.\n";
+        } else {
+            std::string response;
+            std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
+            std::getline(std::cin, response);
+            bool skippedSubmission = false;
+            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+                std::cout << "Result not sent." << std::endl;
+                skippedSubmission = true;
+            }
+            if (!skippedSubmission && options.user.empty()) {
+                std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
+                std::getline(std::cin, options.user);
+            }
+            if (!skippedSubmission && options.user.empty()) {
+                std::cerr << "No username entered; skipping submission.\n";
+                skippedSubmission = true;
+            }
+            if (!skippedSubmission) {
+                if (!noAsk && options.password.empty()) {
+                    options.password = io::CurlClient::promptHiddenPassword();
+                }
+                bool success = io::CurlClient::sendManualResultWithLogin(json, options.user, options.password);
+                if (!success) {
+                    std::cerr << "Submission to PrimeNet failed\n";
+                }
+            }
+        }
+    }
+
+    delete_checkpoints(options.exponent, options.wagstaff, true, options.mode);
+    delete eng;
+    return is_prime ? 0 : 1;
+}
 
 
 
@@ -2497,58 +2876,52 @@ int App::runPM1() {
     return 1;
 }
 
-
 mpz_class gcd_with_dots(const mpz_class& A, const mpz_class& B) {
     std::atomic<bool> done{false};
-
     std::thread ticker([&]{
         using namespace std::chrono;
-        std::cout << "Computing GCD (this may take a while) ";
-        std::cout.flush();
-        size_t dots = 0;
-        while (!done.load()) {
+        const char* msg = "Computing GCD (this may take a while) ";
+        std::cout << msg << std::flush;
+        size_t dots = 0, wrap = 60;
+        while (!done.load(std::memory_order_relaxed)) {
             std::cout << '.' << std::flush;
+            if (++dots % wrap == 0) std::cout << '\n' << msg << std::flush;
             std::this_thread::sleep_for(milliseconds(300));
-            if (++dots % 60 == 0) {
-                std::cout << "\rComputing GCD (this may take a while) " << std::string(0, ' ');
-                std::cout.flush();
-            }
         }
         std::cout << " done.\n";
     });
-
     mpz_class g;
     mpz_gcd(g.get_mpz_t(), A.get_mpz_t(), B.get_mpz_t());
-
-    done.store(true);
+    done.store(true, std::memory_order_relaxed);
     ticker.join();
     return g;
 }
 
 mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_class& Mp) {
     std::atomic<bool> done{false};
-
-    std::thread ticker([&] {
-        std::cout << "Constructing and reducing large integer ";
-        std::cout.flush();
-        while (!done.load()) {
+    std::thread ticker([&]{
+        using namespace std::chrono;
+        const char* msg = "Constructing and reducing large integer ";
+        std::cout << msg << std::flush;
+        size_t dots = 0, wrap = 60;
+        while (!done.load(std::memory_order_relaxed)) {
             std::cout << '.' << std::flush;
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            if (++dots % wrap == 0) std::cout << '\n' << msg << std::flush;
+            std::this_thread::sleep_for(milliseconds(300));
         }
         std::cout << " done.\n";
     });
-
     mpz_class X = 0;
     for (int i = (int)words.size() - 1; i >= 0; --i) {
         X <<= 32;
         X += words[(size_t)i];
     }
     X %= Mp;
-
-    done.store(true);
+    done.store(true, std::memory_order_relaxed);
     ticker.join();
     return X;
 }
+
 
 
 int App::runPM1Marin() {
@@ -2917,6 +3290,12 @@ int App::runGpuBenchmarkMarin() {
 
 
 int App::run() {
+    /*if(options.mode == "llsafecpu"){
+        return runLlSafeCpu();
+    }*/
+    if(options.mode == "llsafe"){
+        return runLlSafeMarin();
+    }
     if(options.mode == "pm1" && options.marin && options.B2<=0){
         if(options.exponent > 89){
             return runPM1Marin();

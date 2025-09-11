@@ -41,6 +41,8 @@ public:
     App(int argc, char** argv);
     int runPrpOrLl();
     int runPrpOrLlMarin();
+    int runLlSafeMarin();
+    int runLlSafeCpu();
     int runPM1();
     int runPM1Marin();
     int runPM1Stage2();

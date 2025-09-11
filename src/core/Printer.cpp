@@ -48,7 +48,7 @@ bool Printer::finalReport(const io::CliOptions& opts,
     const uint32_t p = opts.exponent;
     const std::string& mode = opts.mode;
 
-    if (mode == "ll") {
+    if (mode == "ll" || mode == "llsafecpu" || mode == "llsafe") {
         std::cout << "\nM" << p << " is " << (isPrime ? "prime" : "composite") << ".\n";
     } else {
         if (!opts.knownFactors.empty()) {
