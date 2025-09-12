@@ -20,10 +20,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Rename CMakeList.txt to CMakeLists.txt
-        shell: bash
-        run: mv CMakeList.txt CMakeLists.txt
-
       - name: Install zip utility
         run: choco install zip --no-progress
 
