@@ -84,6 +84,17 @@ static std::vector<std::string> parseFactors(const std::string& factorStr) {
     return factors;
 }
 
+static bool isQuoted(const std::string& s) {
+    return s.size() >= 2 && s.front() == '"' && s.back() == '"';
+}
+
+static bool isIntegerToken(const std::string& s) {
+    if (s.empty()) return false;
+    size_t i = (s[0] == '+' || s[0] == '-') ? 1 : 0;
+    if (i == s.size()) return false;
+    for (; i < s.size(); ++i) if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    return true;
+}
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
     if (!file.is_open()) {
@@ -114,7 +125,9 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             parts.erase(parts.begin());
 
         std::string aid;
-        if (!parts.empty() && (isHex(parts[0]) || ((isPF || isPM1) && (parts[0]) == "AID"))) {
+        // Accept AID (or 32-hex) for ALL work types (PRP/PRPDC/LL/PF/PM1)
+        if (!parts.empty() && (isHex(parts[0]) || parts[0] == "AID")) {
+        //if (!parts.empty() && (isHex(parts[0]) || ((isPF || isPM1) && (parts[0]) == "AID"))) {
 
             aid = parts[0];
             parts.erase(parts.begin());
@@ -217,13 +230,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             }
 
 
-            if (parts.size() < 4
-                || parts[0] != "1"
-                || parts[1] != "2"
-                || parts[3] != "-1")
-                continue;
+            // Generic PRP/LL (Mersenne): PRP=k,b,n,c[,how_far,tests_saved[,base,residue_type]][,"factors"]
+            if (parts.size() < 4) continue;
+            size_t idx = 0;
+            const std::string k = parts[idx++], b = parts[idx++], nstr = parts[idx++], c = parts[idx++];
+            if (k != "1" || b != "2" || c != "-1") continue;
 
-            uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
+            //uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
+            uint32_t exp = static_cast<uint32_t>(std::stoul(nstr));
             if (exp == 0) continue;
 
             WorktodoEntry entry;
@@ -237,23 +251,50 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                       << " exponent=" << entry.exponent
                       << (aid.empty() ? "" : " (AID=" + aid + ")")
                       << "\n";
-            if (isPRP && parts.size() == 7) {
-                const std::string& lastPart = parts.back();
-                auto factors = parseFactors(lastPart);
-                if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
-                    entry.knownFactors = factors;
-                    entry.residueType = 5;
-                    std::cout << "Known factors: ";
-                    for (size_t i = 0; i < factors.size(); ++i) {
-                        if (i > 0) std::cout << ", ";
-                        std::cout << factors[i];
-                    }
-                    std::cout << std::endl;
-                }
-                else {
-                    continue;
+
+            int prpBase = 0;
+            int residueType = 0;
+            if (idx < parts.size() && !isQuoted(parts[idx]) && isIntegerToken(parts[idx])) {
+                /* how_far_factored */ idx++;
+                if (idx < parts.size() && !isQuoted(parts[idx]) && isIntegerToken(parts[idx])) {
+                    /* tests_saved */ idx++;
                 }
             }
+
+            // Optional: base, residue_type
+            if ((idx + 1) < parts.size()
+                && !isQuoted(parts[idx]) && isIntegerToken(parts[idx])
+                && !isQuoted(parts[idx+1]) && isIntegerToken(parts[idx+1])) {
+                prpBase = std::stoi(parts[idx]);      idx++;
+                residueType = std::stoi(parts[idx]);  idx++;
+            }
+
+            // Optional: quoted known_factors at the end
+            if (idx < parts.size() && isQuoted(parts.back()) && isPRP) {
+                auto factors = parseFactors(parts.back());
+                if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
+                    entry.knownFactors = std::move(factors);
+                    // If residue_type not explicitly given, force cofactor type
+                    entry.residueType = (residueType != 0) ? residueType : 5;
+                    std::cout << "Known factors: ";
+                    for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
+                        if (i > 0) std::cout << ", ";
+                        std::cout << entry.knownFactors[i];
+                    }
+                    std::cout << std::endl;
+                } else {
+                    // Malformed factor list -> skip this line entirely
+                    continue;
+                }
+            } else if (residueType != 0) {
+                entry.residueType = residueType;
+            }
+
+            if (entry.llTest && !entry.knownFactors.empty()) {
+                std::cerr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
+                std::cerr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;
+                continue;
+             }
             if (entry.llTest && !entry.knownFactors.empty()) {
                 std::cerr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
                 std::cerr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;

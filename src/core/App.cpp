@@ -498,9 +498,11 @@ static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
 
 static inline void delete_checkpoints(uint32_t p, bool wagstaff,bool pm1, bool llsafe, const std::string& dir = ".")
 {
-    std::string prefix = wagstaff ? "wagstaff_" : "";
-    prefix = pm1 ? "pm1_" : "";
-    prefix = llsafe ? "llsafe_" : "";
+    std::string prefix;
+
+    if (wagstaff) prefix += "wagstaff_";
+    if (pm1)      prefix += "pm1_";
+    if (llsafe)   prefix += "llsafe_";
     
     fs::path base = fs::path(dir) / (prefix + "m_" + std::to_string(p) + ".ckpt");
     std::error_code ec;
