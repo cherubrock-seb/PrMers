@@ -956,11 +956,6 @@ int App::runPrpOrLlMarin()
         json,
         isPrime
     );
-    if (guiServer_) {
-                std::ostringstream oss;
-                oss  <<  "Manual submission JSON:\n" << json;
-                guiServer_->appendLog(oss.str());
-    }
     bool skippedSubmission = false;
     if (options.submit) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
@@ -1297,11 +1292,7 @@ int App::runLlSafeMarin()
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), is_prime, res64_hex, res2048_hex);
     Printer::finalReport(options, elapsed_time, json, is_prime);
-    if (guiServer_) {
-                std::ostringstream oss;
-                oss  <<  "Manual submission JSON:\n" << json;
-                guiServer_->appendLog(oss.str());
-    }
+
     if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
         if (noAsk && options.password.empty()) {
@@ -2194,11 +2185,7 @@ int App::runPrpOrLl() {
         isPrime
     );
     bool skippedSubmission = false;
-    if (guiServer_) {
-                std::ostringstream oss;
-                oss  <<  "Manual submission JSON:\n" << json;
-                guiServer_->appendLog(oss.str());
-    }
+
     if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
 
@@ -3175,11 +3162,11 @@ int App::runPM1() {
         ""
     );
     std::cout << "Manual submission JSON:\n" << json << "\n";
-   if (guiServer_) {
+   /*if (guiServer_) {
                                 std::ostringstream oss;
                                 oss  << "Manual submission JSON:\n" << json << "\n";
                       guiServer_->appendLog(oss.str());
-            }
+            }*/
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
@@ -3478,11 +3465,11 @@ int App::runPM1Marin() {
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
-    if (guiServer_) {
+    /*if (guiServer_) {
                                     std::ostringstream oss;
                                     oss  << "Manual submission JSON:\n" << json << "\n";
                         guiServer_->appendLog(oss.str());
-    }
+    }*/
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
