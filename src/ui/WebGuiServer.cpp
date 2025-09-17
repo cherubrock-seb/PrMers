@@ -23,6 +23,11 @@
 #include <net/if.h>
 #include <netdb.h>
 #endif
+#ifndef _WIN32
+#include <fcntl.h>
+#include <poll.h>
+#include <errno.h>
+#endif
 
 namespace ui {
 
@@ -101,6 +106,7 @@ void WebGuiServer::start() {
     thr_ = std::thread([this]{ run(); });
 }
 
+
 void WebGuiServer::stop() {
     if (!running_) return;
     running_ = false;
@@ -134,24 +140,41 @@ void WebGuiServer::appendLog(const std::string& line) {
 }
 
 void WebGuiServer::run() {
-    while (running_) {
 #ifdef _WIN32
-        SOCKET cfd = accept((SOCKET)listen_fd_, nullptr, nullptr);
-        if (cfd == INVALID_SOCKET) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
-        std::thread([this, cfd]{
-            serveOne((int)cfd);
-            closesocket(cfd);
-        }).detach();
-#else
-        int cfd = ::accept(listen_fd_, nullptr, nullptr);
-        if (cfd < 0) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); continue; }
-        std::thread([this, cfd]{
-            serveOne(cfd);
-            ::close(cfd);
-        }).detach();
-#endif
+    u_long nb = 1; ioctlsocket((SOCKET)listen_fd_, FIONBIO, &nb);
+    while (running_) {
+        fd_set rfds; FD_ZERO(&rfds); FD_SET((SOCKET)listen_fd_, &rfds);
+        timeval tv; tv.tv_sec = 0; tv.tv_usec = 200000;
+        int r = select((int)listen_fd_ + 1, &rfds, nullptr, nullptr, &tv);
+        if (r <= 0) continue;
+        for (;;) {
+            SOCKET cfd = accept((SOCKET)listen_fd_, nullptr, nullptr);
+            if (cfd == INVALID_SOCKET) {
+                int e = WSAGetLastError();
+                if (e == WSAEWOULDBLOCK || e == WSAEINTR) break;
+                break;
+            }
+            std::thread([this, cfd]{ serveOne((int)cfd); closesocket(cfd); }).detach();
+        }
     }
+#else
+    struct pollfd pfd; pfd.fd = listen_fd_; pfd.events = POLLIN; pfd.revents = 0;
+    while (running_) {
+        int r = ::poll(&pfd, 1, 200);
+        if (r < 0) { if (errno == EINTR) continue; else break; }
+        if (r == 0) continue;
+        for (;;) {
+            int cfd = ::accept(listen_fd_, nullptr, nullptr);
+            if (cfd < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) break;
+                break;
+            }
+            std::thread([this, cfd]{ serveOne(cfd); ::close(cfd); }).detach();
+        }
+    }
+#endif
 }
+
 
 void WebGuiServer::closeListen() {
 #ifdef _WIN32
@@ -170,14 +193,18 @@ int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int
     fd = (int)socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
     int yes = 1; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&yes, sizeof(yes));
+#ifdef SO_REUSEPORT
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, (char*)&yes, sizeof(yes));
+#endif
+    int fl = fcntl(fd, F_GETFD, 0); if (fl != -1) fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
+    int fl2 = fcntl(fd, F_GETFL, 0); if (fl2 != -1) fcntl(fd, F_SETFL, fl2 | O_NONBLOCK);
 #endif
 
     sockaddr_in addr; std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)port);
 
-    in_addr ip{};
-    std::string h = bind_host;
+    in_addr ip{}; std::string h = bind_host;
     if (h.empty() || h == "localhost") h = "127.0.0.1";
     if (h == "0.0.0.0") ip.s_addr = htonl(INADDR_ANY);
 #ifdef _WIN32
@@ -188,9 +215,19 @@ int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int
     addr.sin_addr = ip;
 
     if (::bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { 
+#ifdef _WIN32
+        closesocket((SOCKET)fd);
+#else
+        ::close(fd);
+#endif
         return -1; 
     }
-    if (::listen(fd, 16) < 0) { 
+    if (::listen(fd, 64) < 0) { 
+#ifdef _WIN32
+        closesocket((SOCKET)fd);
+#else
+        ::close(fd);
+#endif
         return -1; 
     }
 

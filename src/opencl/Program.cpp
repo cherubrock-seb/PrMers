@@ -124,12 +124,12 @@ Program::Program(const opencl::Context& context, cl_device_id device,
         const auto& tw   = pre.twiddlesRadix4();
         const auto& i_tw = pre.invTwiddlesRadix4();
 
-        if (tw.size()  <= idx8+1 || 
+        /*if (tw.size()  <= idx8+1 || 
             i_tw.size() <= idx8+1) 
         {
             throw std::out_of_range(
                 "pre.twiddles()/pre.invTwiddles() trop court pour idx 6,7,8");
-        }
+        }*/
 
         ss 
         << " -DW12_01_X=" << tw[idx6] 
