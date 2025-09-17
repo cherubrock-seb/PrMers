@@ -3805,7 +3805,7 @@ static bool file_non_empty(const std::string& p) {
 
 int App::run() {
 
-    std::cout << "host : " << options.http_host << "\n";
+    //std::cout << "host : " << options.http_host << "\n";
     install_signal_handlers();
 
     if (options.gui) {
@@ -3814,7 +3814,7 @@ int App::run() {
         cfg.port = options.http_port;
         cfg.bind_host = options.http_host;
         cfg.advertise_host = options.http_host;
-        std::cout << "host : " << cfg.bind_host << "\n";
+        //std::cout << "host : " << cfg.bind_host << "\n";
         cfg.lanipv4 = options.ipv4;
         cfg.worktodo_path = options.worktodo_path;
         cfg.config_path = "./settings.cfg";

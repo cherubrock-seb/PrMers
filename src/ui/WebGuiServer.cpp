@@ -87,15 +87,15 @@ void WebGuiServer::start() {
     } else {
         host = cfg_.bind_host;
     }
-    url_ = "http://" + host + ":" + std::to_string(bound_port_) + "/";
+    url_ = "http://" + host + ":" + std::to_string(cfg_.port) + "/";
 
 
-    listen_fd_ = createListenSocket(host, cfg_.port, bound_port_);
+    listen_fd_ = createListenSocket(host, cfg_.port, cfg_.port));
     if (listen_fd_ < 0) return;
-    url_ = "http://" + host + ":" + std::to_string(bound_port_) + "/";
+    url_ = "http://" + host + ":" + std::to_string(cfg_.port)) + "/";
     //std::string host = firstLanIPv4();
     if (host.empty()) host = "127.0.0.1";    // fallback
-    url_ = std::string("http://") + host + ":" + std::to_string(bound_port_) + "/";
+    url_ = std::string("http://") + host + ":" + std::to_string(cfg_.port)) + "/";
 
     running_ = true;
     thr_ = std::thread([this]{ run(); });

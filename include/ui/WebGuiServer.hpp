@@ -50,7 +50,7 @@ private:
     std::atomic<bool> running_{false};
     std::thread thr_;
     int listen_fd_ = -1;
-    int bound_port_ = 0;
+    int bound_port_ = 3131;
     std::string url_;
     void run();
     void closeListen();
