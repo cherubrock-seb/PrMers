@@ -3751,22 +3751,47 @@ static volatile std::sig_atomic_t g_stop = 0;
 
 static void handle_signal(int) noexcept { g_stop = 1; }
 
-static void install_signal_handlers() {
-    struct sigaction sa{};
-    sa.sa_handler = handle_signal;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0; // ou SA_RESTART si tu préfères
-    sigaction(SIGINT,  &sa, nullptr);
-    sigaction(SIGTERM, &sa, nullptr);
-    sigaction(SIGHUP,  &sa, nullptr);
-
-    // (optionnel mais utile avec un serveur HTTP)
-    struct sigaction ign{};
-    ign.sa_handler = SIG_IGN;
-    sigemptyset(&ign.sa_mask);
-    ign.sa_flags = 0;
-    sigaction(SIGPIPE, &ign, nullptr);
+#if defined(_WIN32)
+#include <windows.h>
+#include <csignal>
+static BOOL WINAPI prmers_ctrl_handler(DWORD type){
+    switch(type){
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+            handle_signal(SIGINT);
+            return TRUE;
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            handle_signal(SIGTERM);
+            return TRUE;
+        default:
+            return FALSE;
+    }
 }
+static void install_signal_handlers() {
+    SetConsoleCtrlHandler(prmers_ctrl_handler, TRUE);
+}
+#else
+#include <signal.h>
+static void install_signal_handlers() {
+    struct sigaction sa; sigemptyset(&sa.sa_mask); sa.sa_flags = 0; sa.sa_handler = handle_signal;
+#ifdef SIGINT
+    sigaction(SIGINT, &sa, nullptr);
+#endif
+#ifdef SIGTERM
+    sigaction(SIGTERM, &sa, nullptr);
+#endif
+#ifdef SIGHUP
+    sigaction(SIGHUP, &sa, nullptr);
+#endif
+    struct sigaction ign; sigemptyset(&ign.sa_mask); ign.sa_flags = 0; ign.sa_handler = SIG_IGN;
+#ifdef SIGPIPE
+    sigaction(SIGPIPE, &ign, nullptr);
+#endif
+}
+#endif
+
 
 
 int App::run() {

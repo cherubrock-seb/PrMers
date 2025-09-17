@@ -394,10 +394,17 @@ std::string WebGuiServer::handleLoadWorktodo() {
 bool WebGuiServer::handleStop() {
     appendLog("Stop requested");
     setStatus("Stop requested");
-    if (onStop_) { onStop_(); return true; }
+#ifdef _WIN32
+    if (!GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)) {
+        std::raise(SIGINT);
+    }
+#else
     std::raise(SIGINT);
+#endif
+    if (onStop_) onStop_();
     return true;
 }
+
 
 std::string WebGuiServer::htmlPage() {
     return
