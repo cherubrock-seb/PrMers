@@ -5,6 +5,7 @@
 #include <chrono>
 #include <algorithm>
 #include <fstream>
+#include <csignal>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -27,9 +28,8 @@ namespace ui {
 
 static std::shared_ptr<WebGuiServer> g_instance;
 
-WebGuiServer::WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit)
-: cfg_(cfg), onSubmit_(std::move(onSubmit)) {}
-
+WebGuiServer::WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit, StopFn onStop)
+: cfg_(cfg), onSubmit_(std::move(onSubmit)), onStop_(std::move(onStop)) {}
 WebGuiServer::~WebGuiServer() { stop(); }
 
 std::shared_ptr<WebGuiServer> WebGuiServer::instance() { return g_instance; }
@@ -298,6 +298,9 @@ void WebGuiServer::serveOne(int fd) {
             if (onSubmit_) onSubmit_(line);
             resp = httpOk("application/json", "{\"ok\":true}");
         }
+        } else if (method == "POST" && path == "/api/stop") {
+        bool ok = handleStop();
+        resp = ok ? httpOk("application/json", "{\"ok\":true}") : httpBadRequest("stop-failed");
     } else {
         resp = httpNotFound();
     }
@@ -388,6 +391,14 @@ std::string WebGuiServer::handleLoadWorktodo() {
     return readFile(cfg_.worktodo_path);
 }
 
+bool WebGuiServer::handleStop() {
+    appendLog("Stop requested");
+    setStatus("Stop requested");
+    if (onStop_) { onStop_(); return true; }
+    std::raise(SIGINT);
+    return true;
+}
+
 std::string WebGuiServer::htmlPage() {
     return
 "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -408,22 +419,21 @@ std::string WebGuiServer::htmlPage() {
 ".mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap}"
 ".muted{opacity:.8}"
 ".rowbtn{display:flex;gap:8px;flex-wrap:wrap}"
-".sticky-wrap{position:sticky;top:52px;z-index:20}"
 "#logs{max-height:160px;overflow:auto}"
+".right{margin-left:auto;display:flex;gap:8px;align-items:center}"
+".btn-red{background:#e53935}"
 "</style></head><body>"
 "<div class=bar><div><a href='https://github.com/cherubrock-seb/PrMers' target=_blank rel=noopener noreferrer style='display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:inherit'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' aria-hidden='true'><circle cx='12' cy='12' r='9' stroke='#3d5afe' stroke-width='2'/><path d='M7 15V9l5 6 5-6v6' stroke='#00e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg><b>PrMers</b></a></div><div class=url id=url></div><div class=stat id=stat></div></div>"
-"<!--div class=wrap-->"
-"<!--div class='sticky-wrap'-->"
+"<div class=wrap>"
 "<div class='card'>"
 "<div style='font-weight:600;margin-bottom:8px'>Logs</div>"
 "<div id=logs class='mono'></div>"
 "</div>"
 "<div class='card'>"
-"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><div>Status</div><div class=muted id=res64></div></div>"
+"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'><div>Status</div><div class='right'><div class=muted id=res64></div><button id=stop class='btn-red'>Stop</button></div></div>"
 "<div class=progress><div class=fill id=fill style='background:linear-gradient(90deg,#3d5afe,#00e5ff)'></div></div>"
 "<div class=muted style='margin-top:8px' id=prog></div>"
-"<!--/div-->"
-"<!--/div-->"
+"</div>"
 "<div class=card>"
 "<div style='font-weight:600;margin-bottom:8px'>Worktodo</div>"
 "<div class='grid-2'>"
@@ -489,6 +499,7 @@ std::string WebGuiServer::htmlPage() {
 "const statEl=$('#stat');const resEl=$('#res64');const progEl=$('#prog');const fill=$('#fill');const logs=$('#logs');"
 "async function pull(){try{const r=await fetch('/api/state');const j=await r.json();resEl.textContent=j.res64||'';fill.style.width=(j.percent||0)+'%';progEl.textContent=(j.current||0)+' / '+(j.total||0)+'  ('+(j.percent||0)+'%)';statEl.textContent=j.status||'';logs.innerHTML=(j.logs||[]).slice(-1000).map(x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('\\n');logs.scrollTop=logs.scrollHeight;}catch(e){}}"
 "setInterval(pull,1000);pull();"
+"$('#stop').onclick=async()=>{try{await fetch('/api/stop',{method:'POST'});}catch(e){}};"
 "function buildWorktodo(){const m=$('#mode').value;const p=parseInt($('#exp').value||'0');const b1=$('#b1').value.trim();const b2=$('#b2').value.trim();const factors=($('#factors').value||'').split(',').map(s=>s.trim()).filter(Boolean);const basert=($('#basert').value||'').split(',').map(s=>s.trim()).filter(Boolean);let line='';if(m==='prp'){line=`PRP=1,2,${p},-1`;if(basert.length===2)line+=`,`+basert[0]+`,`+basert[1];if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}else if(m==='ll'){line=`Test=1,2,${p},-1`;}else if(m==='llsafe'){line=`DoubleCheck=1,2,${p},-1`;}else if(m==='pm1'){let B1=(b1||'0');let B2=(b2||'0');line=`Pminus1=1,2,${p},-1,${B1},${B2}`;if(factors.length)line+=`,`+factors.map(s=>`\"${s}\"`).join(',');}return line;}"
 "$('#buildwt').onclick=()=>{$('#wt').value=buildWorktodo();};"
 "$('#appendrun').onclick=async()=>{const t=$('#wt').value;await fetch('/api/append-worktodo',{method:'POST',headers:{'Content-Type':'text/plain'},body:t});};"

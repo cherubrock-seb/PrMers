@@ -20,7 +20,8 @@ struct WebGuiConfig {
 class WebGuiServer {
 public:
     using SubmitFn = std::function<void(const std::string&)>;
-    WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit);
+    using StopFn = std::function<void()>;
+    WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit, StopFn onStop = {});
     ~WebGuiServer();
     void start();
     void stop();
@@ -40,6 +41,7 @@ private:
     };
     WebGuiConfig cfg_;
     SubmitFn onSubmit_;
+    StopFn onStop_;
     mutable std::mutex mtx_;
     State st_;
     std::atomic<bool> running_{false};
@@ -58,6 +60,7 @@ private:
     std::string handleLoadSettings();
     bool handleSaveSettings(const std::string& body);
     std::string handleLoadWorktodo();
+    bool handleStop();
     std::string htmlPage();
     std::string httpOk(const std::string& contentType, const std::string& body);
     std::string httpBadRequest(const std::string& msg);
