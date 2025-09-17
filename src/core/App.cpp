@@ -34,6 +34,7 @@
 #include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
+#include "ui/WebGuiServer.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -69,6 +70,10 @@
 #include <filesystem>
 #include <set>
 
+namespace {
+std::atomic<bool> g_stop{false};
+void g_onSig(int){ g_stop = true; }
+}
 
 namespace fs = std::filesystem;
 
@@ -86,82 +91,97 @@ static std::vector<std::string> parseConfigFile(const std::string& config_path) 
 
     if (!config.is_open()) {
         std::cerr << "Warning: no config file: " << config_path << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) {
+            std::ostringstream oss;
+            oss << "Warning: no config file: " << config_path;
+            g->appendLog(oss.str());
+        }
         return args;
     }
 
     std::cout << "Loading options from config file: " << config_path << std::endl;
+    if (auto g = ui::WebGuiServer::instance()) {
+        std::ostringstream oss;
+        oss << "Loading options from config file: " << config_path;
+        g->appendLog(oss.str());
+    }
 
     while (std::getline(config, line)) {
         std::istringstream iss(line);
         std::string token;
-        while (iss >> token) {
-            args.push_back(token);
-        }
+        while (iss >> token) args.push_back(token);
     }
 
     if (!args.empty()) {
         std::cout << "Options from config file:" << std::endl;
-        for (const auto& arg : args) {
-            std::cout << "  " << arg << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog("Options from config file:");
+        for (const auto& arg : args) std::cout << "  " << arg << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) {
+            std::ostringstream oss;
+            for (const auto& arg : args) oss << "  " << arg << std::endl;
+            g->appendLog(oss.str());
         }
     } else {
         std::cout << "No options found in config file." << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog("No options found in config file.");
     }
 
     return args;
 }
 
-inline void writeStageResult(const std::string& file,
-                             const std::string& message)
-{
+inline void writeStageResult(const std::string& file, const std::string& message) {
     std::ofstream out(file, std::ios::app);
     if (!out) {
         std::cerr << "Cannot open " << file << " for writing\n";
+        if (auto g = ui::WebGuiServer::instance()) {
+            std::ostringstream oss;
+            oss << "Cannot open " << file << " for writing";
+            g->appendLog(oss.str());
+        }
         return;
     }
     out << message << '\n';
 }
 
+
 void restart_self(int argc, char* argv[]) {
     std::vector<std::string> args(argv, argv + argc);
 
     if (args.size() > 1 && args[1].find_first_not_of("0123456789") == std::string::npos) {
-        args.erase(args.begin() + 1); 
+        args.erase(args.begin() + 1);
     }
 
 #ifdef _WIN32
     std::string command = "\"" + args[0] + "\"";
-    for (size_t i = 1; i < args.size(); ++i) {
-        command += " \"" + args[i] + "\"";
-    }
+    for (size_t i = 1; i < args.size(); ++i) command += " \"" + args[i] + "\"";
     STARTUPINFO si = { sizeof(si) };
     PROCESS_INFORMATION pi;
-    if (CreateProcessA(
-            NULL,
-            const_cast<char*>(command.c_str()),
-            NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    if (CreateProcessA(NULL, const_cast<char*>(command.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         exit(0);
     } else {
         std::cerr << "Failed to restart program (CreateProcess failed)" << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog("Failed to restart program (CreateProcess failed)");
     }
-
 #else
     std::cout << "\nRestarting program without exponent:\n";
-    for (const auto& arg : args) {
-        std::cout << "   " << arg << std::endl;
+    if (auto g = ui::WebGuiServer::instance()) g->appendLog("\nRestarting program without exponent:\n");
+    for (const auto& arg : args) std::cout << "   " << arg << std::endl;
+    if (auto g = ui::WebGuiServer::instance()) {
+        std::ostringstream oss;
+        for (const auto& arg : args) oss << "  " << arg << std::endl;
+        g->appendLog(oss.str());
     }
-
     std::vector<char*> exec_args;
     for (auto& s : args) exec_args.push_back(const_cast<char*>(s.c_str()));
     exec_args.push_back(nullptr);
-
     execv(exec_args[0], exec_args.data());
-
     std::cerr << "Failed to restart program (execv failed)" << std::endl;
+    if (auto g = ui::WebGuiServer::instance()) g->appendLog("Failed to restart program (execv failed)");
 #endif
 }
+
 
 static int askExponentInteractively() {
   #ifdef _WIN32
@@ -325,7 +345,17 @@ App::App(int argc, char** argv)
         std::cerr << "Error: no valid entry in " 
                   << options.worktodo_path 
                   << " and no exponent provided on the command line\n";
-        o.exponent = askExponentInteractively();
+                  
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "Error: no valid entry in " 
+                  << options.worktodo_path 
+                  << " and no exponent provided on the command line\n";
+            guiServer_->appendLog(oss.str());
+        }
+        if (!options.gui) {
+            o.exponent = askExponentInteractively();
+        }
         o.mode = "prp";
         //std::exit(-1);
       }
@@ -514,6 +544,12 @@ static inline void delete_checkpoints(uint32_t p, bool wagstaff,bool pm1, bool l
 
 int App::runPrpOrLlMarin()
 {
+    if (guiServer_) {
+        guiServer_->setProgress(0, 100, "Started");
+        guiServer_->setStatus("PrMers");
+    }
+    //if (guiServer_) guiServer_->appendLog("Hello world");
+
     Printer::banner(options);
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
@@ -525,13 +561,28 @@ int App::runPrpOrLlMarin()
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
     if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
-
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "Testing 2^" << p << " - 1";
+        guiServer_->setStatus(oss.str());
+    }
+    if (guiServer_) {
+            std::ostringstream oss;
+            oss << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words...";
+            guiServer_->appendLog(oss.str());
+    }
     if (options.proof) {
         uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSetMarin::bestPower(options.exponent);
         options.proofPower = proofPower;
         double diskUsageGB = ProofSetMarin::diskUsageGB(options.exponent, proofPower);
         std::cout << "Proof of power " << proofPower << " requires about "
                   << std::fixed << std::setprecision(2) << diskUsageGB << "GB of disk space" << std::endl;
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "Proof of power " << proofPower << " requires about "
+                  << std::fixed << std::setprecision(2) << diskUsageGB << "GB of disk space";
+            guiServer_->appendLog(oss.str());
+        }
     }
     std::ostringstream ck;
     if (options.wagstaff) ck << "wagstaff_";
@@ -582,6 +633,12 @@ int App::runPrpOrLlMarin()
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "Resuming from a checkpoint.";
+            guiServer_->appendLog(oss.str());
+        }
+        
     } else {
         ri = 0;
         restored_time = 0;
@@ -630,10 +687,15 @@ int App::runPrpOrLlMarin()
     uint64_t lastJ      = p - 1 - ri;
     std::string res64_x;
     
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p, resumeIter, startIter, res64_x);
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p, resumeIter, startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
     bool errordone = false;
     if(options.wagstaff){
         std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime";
+            guiServer_->appendLog(oss.str());
+        }
     }
     
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters; ++iter, --j) {
@@ -645,6 +707,11 @@ int App::runPrpOrLlMarin()
             save_ckpt(iter, elapsed_time);
             delete eng;
             std::cout << "\nInterrupted by user, state saved at iteration " << iter << " j=" << j << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime";
+                guiServer_->appendLog(oss.str());
+            }
             logger.logEnd(elapsed_time);
             return 0;
         }
@@ -667,6 +734,11 @@ int App::runPrpOrLlMarin()
             //eng->error();
             eng->sub(R0, 2);
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Injected error at iteration " << (iter + 1);
+                guiServer_->appendLog(oss.str());
+            }
         }
 
         if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
@@ -692,6 +764,13 @@ int App::runPrpOrLlMarin()
                         std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                        if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "[Gerbicz Li] Mismatch \n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                            guiServer_->appendLog(oss.str());
+                        }
                         j = jsave;
                         iter = itersave;
                         lastIter = itersave;
@@ -707,6 +786,11 @@ int App::runPrpOrLlMarin()
                     }
                     else{
                         std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                        if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                            guiServer_->appendLog(oss.str());
+                        }
                         eng->copy(R4, R0);//Last correct state
                         eng->copy(R5, R1);//Last correct bufd
                         itersave = iter;
@@ -729,7 +813,8 @@ int App::runPrpOrLlMarin()
                 options.wagstaff ? p / 2 : p,
                 resumeIter,
                 startIter,
-                res64_x
+                res64_x, 
+                guiServer_ ? guiServer_.get() : nullptr
             );
             timer2.start();
             lastDisplay = now;
@@ -774,7 +859,8 @@ int App::runPrpOrLlMarin()
         options.wagstaff ? p / 2 : p,
         resumeIter,
         startIter,
-        res64_hex
+        res64_hex, 
+        guiServer_ ? guiServer_.get() : nullptr
     );
 
     if (options.wagstaff) {
@@ -788,8 +874,18 @@ int App::runPrpOrLlMarin()
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
             if (isWagstaffPRP) {
                 std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+                if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+                            guiServer_->appendLog(oss.str());
+                }
             } else {
                 std::cout << "Not a Wagstaff PRP.\n";
+                if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "Not a Wagstaff PRP.\n";
+                            guiServer_->appendLog(oss.str());
+                }
             }
 
             logger.logEnd(elapsed_time);
@@ -799,9 +895,19 @@ int App::runPrpOrLlMarin()
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
     if (options.mode == "prp") {
         std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "a probable prime" : ("composite, res64 = " + (res64_hex))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+        if (guiServer_) {
+                std::ostringstream oss;
+                oss << "2^" << p << " - 1 is " << (is_prp_prime ? "a probable prime" : ("composite, res64 = " + (res64_hex))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+                guiServer_->appendLog(oss.str());
+        }
     }
     else{
         std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "prime" : "composite");
+        if (guiServer_) {
+                std::ostringstream oss;
+                oss  << "2^" << p << " - 1 is " << (is_prp_prime ? "prime" : "composite");
+                guiServer_->appendLog(oss.str());
+        }
     }		
     logger.logEnd(elapsed_time);
 
@@ -817,11 +923,26 @@ int App::runPrpOrLlMarin()
         );
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss  << "\nGenerating PRP proof file..." ;
+                guiServer_->appendLog(oss.str());
+            }
             auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss  << "Proof file saved: " << proofFilePath;
+                guiServer_->appendLog(oss.str());
+            }
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss  <<  "Warning: Proof generation failed: " << e.what();
+                guiServer_->appendLog(oss.str());
+            }
         }
     }
     
@@ -846,33 +967,40 @@ int App::runPrpOrLlMarin()
         bool noAsk = options.noAsk || hasWorktodoEntry_;
         if (noAsk && options.password.empty()) {
             std::cerr << "No password provided with --noask; skipping submission.\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss  <<  "No password provided with --noask; skipping submission.\n";
+                guiServer_->appendLog(oss.str());
+            }
         } else {
-            std::string response;
-            std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
-            std::getline(std::cin, response);
-            if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
-                std::cout << "Result not sent." << std::endl;
-                skippedSubmission = true;
-            }
-            if (!skippedSubmission && options.user.empty()) {
-                std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
-                std::getline(std::cin, options.user);
-            }
-            if (!skippedSubmission && options.user.empty()) {
-                std::cerr << "No username entered; skipping submission.\n";
-                skippedSubmission = true;
-            }
-            if (!skippedSubmission) {
-                if (!noAsk && options.password.empty()) {
-                    options.password = io::CurlClient::promptHiddenPassword();
+            if(!options.gui){
+                std::string response;
+                std::cout << "Do you want to send the result to PrimeNet (https://www.mersenne.org) ? (y/n): ";
+                std::getline(std::cin, response);
+                if (response.empty() || (response[0] != 'y' && response[0] != 'Y')) {
+                    std::cout << "Result not sent." << std::endl;
+                    skippedSubmission = true;
                 }
-                bool success = io::CurlClient::sendManualResultWithLogin(
-                    json,
-                    options.user,
-                    options.password
-                );
-                if (!success) {
-                    std::cerr << "Submission to PrimeNet failed\n";
+                if (!skippedSubmission && options.user.empty()) {
+                    std::cout << "\nEnter your PrimeNet username (Don't have an account? Create one at https://www.mersenne.org): ";
+                    std::getline(std::cin, options.user);
+                }
+                if (!skippedSubmission && options.user.empty()) {
+                    std::cerr << "No username entered; skipping submission.\n";
+                    skippedSubmission = true;
+                }
+                if (!skippedSubmission) {
+                    if (!noAsk && options.password.empty()) {
+                        options.password = io::CurlClient::promptHiddenPassword();
+                    }
+                    bool success = io::CurlClient::sendManualResultWithLogin(
+                        json,
+                        options.user,
+                        options.password
+                    );
+                    if (!success) {
+                        std::cerr << "Submission to PrimeNet failed\n";
+                    }
                 }
             }
         }
@@ -888,6 +1016,12 @@ int App::runPrpOrLlMarin()
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss  <<   "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+                guiServer_->appendLog(oss.str());
+            }
             std::ifstream f(options.worktodo_path);
             std::string l;
             bool more = false;
@@ -897,14 +1031,33 @@ int App::runPrpOrLlMarin()
             f.close();
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  <<   "Restarting for next entry in worktodo.txt\n";
+                    guiServer_->appendLog(oss.str());
+                }
                 restart_self(argc_, argv_);
             } else {
                 std::cout << "No more entries in worktodo.txt, exiting.\n";
-                std::exit(0);
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  <<    "No more entries in worktodo.txt, exiting.\n";
+                    guiServer_->appendLog(oss.str());
+                }
+                if (!options.gui) {
+                    std::exit(0);
+                }
             }
         } else {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            std::exit(-1);
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "Failed to update " << options.worktodo_path << "\n";
+                    guiServer_->appendLog(oss.str());
+            }
+            if (!options.gui) {
+                std::exit(-1);
+            }
         }
     }
 
@@ -916,14 +1069,28 @@ int App::runLlSafeMarin()
 {
     Printer::banner(options);
     std::cout << "[Lucas Lehmer GPU SAFE Mode with error detection]\n";
+    if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "[Lucas Lehmer GPU SAFE Mode with error detection]\n";
+                    guiServer_->appendLog(oss.str());
+    }
+    
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
-
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "Testing 2^" << p << " - 1";
+        guiServer_->setStatus(oss.str());
+    }
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose);
     if (verbose) std::cout << "Testing 2^" << p << " - 1 (LL-safe, GPU), " << eng->get_size() << " 64-bit words..." << std::endl;
-
+    if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "Testing 2^" << p << " - 1 (LL-safe, GPU), " << eng->get_size() << " 64-bit words..." << std::endl;
+                    guiServer_->appendLog(oss.str());
+    }
     std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
 
@@ -972,6 +1139,11 @@ int App::runLlSafeMarin()
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
+        if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  <<  "Resuming from a checkpoint." << std::endl;
+                    guiServer_->appendLog(oss.str());
+        }
     } else {
         ri = 0;
         restored_time = 0.0;
@@ -1004,7 +1176,7 @@ int App::runLlSafeMarin()
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
 
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, "");
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, "", guiServer_ ? guiServer_.get() : nullptr);
 
     bool errordone = false;
     uint64_t itersave = (ri / B) * B;
@@ -1015,6 +1187,11 @@ int App::runLlSafeMarin()
             save_ckpt((uint32_t)iter, elapsed_time);
             delete eng;
             std::cout << "\nInterrupted by user, state saved at iteration " << iter << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "\nInterrupted by user, state saved at iteration " << iter << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             logger.logEnd(elapsed_time);
             return 0;
         }
@@ -1023,6 +1200,11 @@ int App::runLlSafeMarin()
             errordone = true;
             eng->sub(RV, 2);
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "Injected error at iteration " << (iter + 1) << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
         }
 
         eng->set_multiplicand(RTMP, RV);
@@ -1040,7 +1222,7 @@ int App::runLlSafeMarin()
 
         auto now = std::chrono::high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
-            spinner.displayProgress(iter + 1, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, "");
+            spinner.displayProgress(iter + 1, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, "", guiServer_ ? guiServer_.get() : nullptr);
             timer2.start();
             lastDisplay = now;
             resumeIter = iter + 1;
@@ -1063,6 +1245,13 @@ int App::runLlSafeMarin()
                 std::cout << "[Error check] Mismatch \n"
                           << "[Error check] Check FAILED! iter=" << iter << "\n"
                           << "[Error check] Restore iter=" << itersave << "\n";
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss  << "[Error check] Mismatch \n"
+                          << "[Error check] Check FAILED! iter=" << iter << "\n"
+                          << "[Error check] Restore iter=" << itersave << "\n";
+                    guiServer_->appendLog(oss.str());
+                }
                 eng->copy(RV, RVC);
                 eng->copy(RU, RUC);
                 if (itersave == 0) {
@@ -1074,6 +1263,11 @@ int App::runLlSafeMarin()
                 }
             } else {
                 std::cout << "[Error check] Check passed! iter=" << iter << "\n";
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "[Error check] Check passed! iter=" << iter << "\n";
+                    guiServer_->appendLog(oss.str());
+                }
                 eng->copy(RVC, RV);
                 eng->copy(RUC, RU);
                 itersave = iter + 1;
@@ -1091,16 +1285,21 @@ int App::runLlSafeMarin()
     std::string res64_hex   = format_res64_hex(words);
     std::string res2048_hex = format_res2048_hex(words);
 
-    spinner.displayProgress(totalIters, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, res64_hex);
+    spinner.displayProgress(totalIters, totalIters, timer.elapsed(), timer2.elapsed(), p, resumeIter, startIter, res64_hex, guiServer_ ? guiServer_.get() : nullptr);
 
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
     std::cout << "2^" << p << " - 1 is " << (is_prime ? "prime" : ("composite, res64 = " + res64_hex)) << std::endl;
     logger.logEnd(elapsed_time);
-
+    if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "2^" << p << " - 1 is " << (is_prime ? "prime" : ("composite, res64 = " + res64_hex)) << std::endl;
+    
+                    guiServer_->appendLog(oss.str());
+    }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), is_prime, res64_hex, res2048_hex);
     Printer::finalReport(options, elapsed_time, json, is_prime);
 
-    if (options.submit) {
+    if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
         if (noAsk && options.password.empty()) {
             std::cerr << "No password provided with --noask; skipping submission.\n";
@@ -1150,6 +1349,11 @@ int App::runPrpOrLl() {
     size_t          queued   = 0;
     
     uint64_t p = options.exponent;
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "Testing 2^" << p << " - 1";
+        guiServer_->setStatus(oss.str());
+    }
     uint64_t totalIters = options.mode == "prp" ? p : p - 2;
     if(options.wagstaff){
         totalIters /= 2;
@@ -1173,8 +1377,18 @@ int App::runPrpOrLl() {
         x.data(), nullptr
     );
     std::cout << "Sampling 100 iterations for IPS estimation...\n";
+    if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Sampling 100 iterations for IPS estimation...\n";
+                    guiServer_->appendLog(oss.str());
+    }
     double sampleIps = measureIps(options.iterforce, 100);
     std::cout << "Estimated IPS: " << sampleIps << "\n";
+    if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Estimated IPS: " << sampleIps << "\n";
+                    guiServer_->appendLog(oss.str());
+    }
     if (options.tune) {
         tuneIterforce();
         return 0;
@@ -1206,6 +1420,13 @@ int App::runPrpOrLl() {
         std::cout << "Proof of power " << proofPower << " requires about "
                 << std::fixed << std::setprecision(2) << diskUsageGB
                 << "GB of disk space" << std::endl;
+        if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Proof of power " << proofPower << " requires about "
+                << std::fixed << std::setprecision(2) << diskUsageGB
+                << "GB of disk space" << std::endl;
+                    guiServer_->appendLog(oss.str());
+        }
     }
 
     logger.logStart(options);
@@ -1240,6 +1461,11 @@ int App::runPrpOrLl() {
         );
         if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate bufd: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate bufd: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             exit(1);
         }
         
@@ -1253,6 +1479,11 @@ int App::runPrpOrLl() {
         );
         if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate last_correct_bufd: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate last_correct_bufd: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             exit(1);
         }
         std::vector<uint64_t> hots3(precompute.getN(), 0ULL);
@@ -1266,6 +1497,11 @@ int App::runPrpOrLl() {
             );
             if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate r2: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate r2: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             exit(1);
         }
 
@@ -1277,7 +1513,12 @@ int App::runPrpOrLl() {
             hots3.data(),  &err
             );
         if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate save: " << err << std::endl;
+            std::cerr << "Failed to allocate save: " << err << std::endl; 
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate save: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             exit(1);
         }
         
@@ -1291,6 +1532,11 @@ int App::runPrpOrLl() {
         );
         if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate last_correct_state: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate last_correct_state: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
             exit(1);
         }
 
@@ -1325,6 +1571,11 @@ int App::runPrpOrLl() {
         checkpasslevel=1;
     if(options.wagstaff){
         std::cout << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
+        if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "[WAGSTAFF MODE] This test will check if (2^" << options.exponent/2 << " + 1)/3 is PRP prime" << std::endl;
+                    guiServer_->appendLog(oss.str());
+        }
     }
     if(options.gerbiczli && options.debug){
         std::cout << "[Gerbicz Li] B=" << B << std::endl;
@@ -1333,18 +1584,35 @@ int App::runPrpOrLl() {
         std::cout << "[Gerbicz Li] iter=" << resumeIter << std::endl;
         std::cout << "[Gerbicz Li] jsave=" << jsave << std::endl;
         std::cout << "[Gerbicz Li] itersave=" << itersave << std::endl;
+        if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "[Gerbicz Li] B=" << B << std::endl << "[Gerbicz Li] Checkpasslevel=" << checkpasslevel << std::endl << "[Gerbicz Li] j=" << totalIters-resumeIter-1 << std::endl << "[Gerbicz Li] iter=" << resumeIter << std::endl << "[Gerbicz Li] jsave=" << jsave << std::endl << "[Gerbicz Li] itersave=" << itersave << std::endl;
+                    guiServer_->appendLog(oss.str());
+        }
     }
     uint64_t lastJ = totalIters-resumeIter-1;
-    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p,resumeIter, resumeIter,"");
+    spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p,resumeIter, resumeIter,"", guiServer_ ? guiServer_.get() : nullptr);
    
     cl_mem outOkBuf  = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate outOkBuf: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate outOkBuf: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+                    return 0;
+            }
             exit(1);
     }
     cl_mem outIdxBuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
             std::cerr << "Failed to allocate outIdxBuf: " << err << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Failed to allocate outIdxBuf: " << err << std::endl;
+                    guiServer_->appendLog(oss.str());
+                    return 0;
+            }
             exit(1);
     }
     
@@ -1373,6 +1641,11 @@ int App::runPrpOrLl() {
                 0, nullptr, nullptr
             );
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+            if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Injected error at iteration " << (iter + 1) << std::endl;
+                    guiServer_->appendLog(oss.str());
+            }
         }
         
         queued += nttEngine->forward(buffers->input, iter);
@@ -1425,6 +1698,11 @@ int App::runPrpOrLl() {
                             transformSize
                         );
                         std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                        /*if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                                guiServer_->appendLog(oss.str());
+                        }*/
                     }).detach();
                 }
 
@@ -1484,6 +1762,11 @@ int App::runPrpOrLl() {
                             transformSize
                         );
                         std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                        /*if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                                guiServer_->appendLog(oss.str());
+                        }*/
                     }).detach();
                 }
 
@@ -1502,7 +1785,8 @@ int App::runPrpOrLl() {
                     options.wagstaff ? p / 2 : p,
                     resumeIter,
                     startIter,
-                    res64_x
+                    res64_x, 
+                    guiServer_ ? guiServer_.get() : nullptr
                 );
                 timer2.start();
                 lastDisplay = now;
@@ -1535,6 +1819,11 @@ int App::runPrpOrLl() {
                     if (idx + 1 < buf.size()) oss << ", ";
                 }
                 std::cout << oss.str() << std::endl;
+                if (guiServer_) {
+                                //std::ostringstream oss;
+                                //oss << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                                guiServer_->appendLog(oss.str());
+                }
             };
 
             checkpass += 1;
@@ -1592,6 +1881,11 @@ int App::runPrpOrLl() {
 
                 if (ok == 1u) {
                     std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                                guiServer_->appendLog(oss.str());
+                    }
                     nttEngine->copy(buffers->save, buffers->input, limbBytes);
                     nttEngine->copy(buffers->save, buffers->last_correct_state, limbBytes);
                     nttEngine->copy(buffers->bufd, buffers->last_correct_bufd, limbBytes);
@@ -1604,6 +1898,13 @@ int App::runPrpOrLl() {
                     std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "[Gerbicz Li] Mismatch \n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                                guiServer_->appendLog(oss.str());
+                    }
                     j = jsave;
                     iter = itersave;
                     lastIter = itersave;
@@ -1658,6 +1959,11 @@ int App::runPrpOrLl() {
                             transformSize
                         );
                         std::cout << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                        /*if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
+                                guiServer_->appendLog(oss.str());
+                        }*/
                     }).detach();
                 }
                 spinner.displayBackupInfo(
@@ -1676,6 +1982,11 @@ int App::runPrpOrLl() {
 
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nInterrupted signal received\n " << std::endl;
+                                guiServer_->appendLog(oss.str());
+                        }
         clFinish(queue);
         queued = 0;
         backupManager.saveState(buffers->input, lastIter);
@@ -1683,7 +1994,12 @@ int App::runPrpOrLl() {
         
         std::cout << "\nInterrupted by user, state saved at iteration "
                   << lastIter << " last j = " << lastJ << std::endl;
-        
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nInterrupted by user, state saved at iteration "
+                  << lastIter << " last j = " << lastJ << std::endl;
+                                guiServer_->appendLog(oss.str());
+                        }
         return 0;
     }
     if (queued > 0) {
@@ -1717,7 +2033,8 @@ int App::runPrpOrLl() {
                 options.wagstaff ? p / 2 : p,
                 resumeIter,
                 startIter,
-                res64_x
+                res64_x, 
+                guiServer_ ? guiServer_.get() : nullptr
             );
             mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
             mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
@@ -1736,11 +2053,25 @@ int App::runPrpOrLl() {
 
             double gpuElapsed = timer.elapsed();
             std::cout << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
-
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
+                                guiServer_->appendLog(oss.str());
+            }
             if (isWagstaffPRP) {
                 std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+                if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
+                                guiServer_->appendLog(oss.str());
+                }
             } else {
                 std::cout << "Not a Wagstaff PRP.\n";
+                if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Not a Wagstaff PRP.\n";
+                                guiServer_->appendLog(oss.str());
+                }
             }
 
             return isWagstaffPRP ? 0 : 1;
@@ -1784,7 +2115,8 @@ int App::runPrpOrLl() {
                         options.wagstaff ? p / 2 : p,
                         resumeIter,
                         startIter,
-                        res64_x
+                        res64_x, 
+                        guiServer_ ? guiServer_.get() : nullptr
                     );
         backupManager.saveState(buffers->input, lastIter);
         backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
@@ -1794,16 +2126,35 @@ int App::runPrpOrLl() {
     
     double gpuElapsed = timer.elapsed();
     std::cout << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
-
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Total GPU time: " << gpuElapsed << " seconds." << std::endl;
+                                guiServer_->appendLog(oss.str());
+    }
     // Generate proof file after successful completion
     if (options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nGenerating PRP proof file..." << std::endl;
+                                guiServer_->appendLog(oss.str());
+            }
             auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
             options.proofFile = proofFilePath.string();  // Set proof file path
             std::cout << "Proof file saved: " << proofFilePath << std::endl;
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Proof file saved: " << proofFilePath << std::endl;
+                                guiServer_->appendLog(oss.str());
+            }
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Warning: Proof generation failed: " << e.what() << std::endl;
+                                guiServer_->appendLog(oss.str());
+            }
         }
     }
     
@@ -1841,7 +2192,7 @@ int App::runPrpOrLl() {
     );
     bool skippedSubmission = false;
 
-    if (options.submit) {
+    if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
 
         if (noAsk && options.password.empty()) {
@@ -1892,7 +2243,12 @@ int App::runPrpOrLl() {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
-
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+                      guiServer_->appendLog(oss.str());
+            }
             std::ifstream f(options.worktodo_path);
             std::string    l;
             bool           more = false;
@@ -1906,14 +2262,29 @@ int App::runPrpOrLl() {
 
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
+                if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+                      guiServer_->appendLog(oss.str());
+                }
                 restart_self(argc_, argv_);
             } else {
                 std::cout << "No more entries in worktodo.txt, exiting.\n";
-                std::exit(0);
+                if (!options.gui) {
+                    std::exit(0);
+                }
             }
         } else {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            std::exit(-1);
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Failed to update " << options.worktodo_path << "\n";
+                      guiServer_->appendLog(oss.str());
+            }
+            if (!options.gui) {
+                std::exit(-1);
+            }
         }
     }
 
@@ -2037,11 +2408,26 @@ int App::runPM1Stage2() {
     bool debug = false;
     mpz_class B1(static_cast<unsigned long>(options.B1));
     mpz_class B2(static_cast<unsigned long>(options.B2));
-    if (B2 <= B1) { std::cerr << "Stage 2 error B2 < B1.\n"; return -1; }
-
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "P-1 factoring stage 2";
+        guiServer_->setStatus(oss.str());
+    }
+    if (B2 <= B1) { std::cerr << "Stage 2 error B2 < B1.\n"; 
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Stage 2 error B2 < B1.\n";
+                      guiServer_->appendLog(oss.str());
+    }
+    return -1; }
+    
     if (debug) std::cout << "[DEBUG] Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
-
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
     unsigned long nbEven = evenGapBound(B2);
     size_t limbs = precompute.getN();
     size_t limbBytes = limbs * sizeof(uint64_t);
@@ -2056,7 +2442,11 @@ int App::runPM1Stage2() {
 
     buffers->evenPow.resize(nbEven, nullptr);
     std::cout << "Stage 2: Will precompute " << nbEven << " powers of H^2, H^.." << "." << std::endl;
-
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Stage 2: Will precompute " << nbEven << " powers of H^2, H^.." << "." << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
     nttEngine->forward(buffers->input, 0);
     nttEngine->inverse(buffers->input, 0);
     carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
@@ -2077,6 +2467,11 @@ int App::runPM1Stage2() {
     };
     int pct = -1;
     std::cout << "Precomputing H powers: 0%" << std::flush;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Precomputing H powers..." << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
     for (unsigned long k = 1; k < nbEven; ++k) {
         buffers->evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
         nttEngine->copy(buffers->evenPow[k - 1], buffers->evenPow[k], limbBytes);
@@ -2094,6 +2489,11 @@ int App::runPM1Stage2() {
     }
 
     std::cout << "\rPrecomputing H powers: 100%" << std::endl;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\rPrecomputing H powers: 100%" << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
    
 
     buffers->Hq = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
@@ -2188,6 +2588,17 @@ int App::runPM1Stage2() {
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
                       << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
                       << std::endl;
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
+                      << "prime: " << p.get_ui() << " | "
+                      << "Iter: " << (idx + 1) << " | "
+                      << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
+                      << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
             lastDisplay = now;
         }
         /*if (duration_cast<seconds>(now - lastBackup).count() >= 180) {
@@ -2231,11 +2642,21 @@ int App::runPM1Stage2() {
         char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
         std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
+                      guiServer_->appendLog(oss.str());
+            }
         options.knownFactors.push_back(std::string(s));
         std::free(s);
     } else {
         writeStageResult(filename, "No factor P-1 up to B2=" + B2.get_str());
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+                      guiServer_->appendLog(oss.str());
+        }
     }
 
     /*
@@ -2345,6 +2766,11 @@ int App::exportResumeFromMersFile(const std::string& mersPath,
         : savePath;
 
     writeEcmResumeLine(out, B1, p, X);
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "GMP ECM file written to: " << out << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
     return 0;
 }
 
@@ -2465,6 +2891,11 @@ int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string
     }
     if(!write_prime95_s1_from_bytes(out, p, B1, data)) return -3;
     std::cout << "Prime95 S1 file written to: " << out << std::endl;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Prime95 S1 file written to: " << out << std::endl;
+                      guiServer_->appendLog(oss.str());
+    }
     return 0;
 }
 
@@ -2472,10 +2903,24 @@ int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string
 int App::runPM1() {
 
     uint64_t B1 = options.B1;
-
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "P-1 factoring stage 1";
+        guiServer_->setStatus(oss.str());
+    }
     std::cout << "Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
     mpz_class E = backupManager.loadExponent();
     if(E==0){    
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Building E....";
+                      guiServer_->appendLog(oss.str());
+        }
         E = buildE(B1);
         E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
 
@@ -2512,12 +2957,18 @@ int App::runPM1() {
                     options.exponent,
                     resumeIter,
                     resumeIter,
-                    ""
+                    "", 
+                    guiServer_ ? guiServer_.get() : nullptr
                 );
     for (mp_bitcnt_t i = resumeIter; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
             std::cout << "\nInterrupted signal received\n " << std::endl;
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nInterrupted signal received\n " << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
             clFinish(context.getQueue());
             backupManager.saveState(buffers->input, lastIter-1, &E);
             //backupManager.saveState(buffers->input, lastIter);
@@ -2571,7 +3022,8 @@ int App::runPM1() {
                     options.exponent,
                     resumeIter,
                     startIter,
-                    res64_x
+                    res64_x, 
+                    guiServer_ ? guiServer_.get() : nullptr
                 );
                 timer2.start();
                 lastDisplay = now;
@@ -2590,22 +3042,37 @@ int App::runPM1() {
         options.exponent,
         resumeIter,
         startIter,
-        res64_x
+        res64_x, 
+        guiServer_ ? guiServer_.get() : nullptr
     );
     backupManager.saveState(buffers->input, lastIter, &E);
 
 
     std::cout << "\nStart get result from GPU" << std::endl;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "\nStart get result from GPU" << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
     std::vector<uint64_t> hostData(precompute.getN());
 
     clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
                         hostData.size() * sizeof(uint64_t), hostData.data(),
                         0, nullptr, nullptr);
     std::cout << "Handle final carry start" << std::endl;
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "Handle final carry start" << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
 
     carry.handleFinalCarry(hostData, precompute.getDigitWidth());
     std::cout << "vectToResidue start" << std::endl;
-
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss << "vectToResidue start" << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X = util::vectToMpz(hostData, precompute.getDigitWidth(), Mp);
     if(options.resume){
@@ -2662,6 +3129,11 @@ int App::runPM1() {
     if (factorFound) {
         char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
         options.knownFactors.push_back(std::string(fstr));
         std::free(fstr);
         std::cout << "\n";
@@ -2675,6 +3147,11 @@ int App::runPM1() {
     }
     else{
         std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+        if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+                      guiServer_->appendLog(oss.str());
+            }
         if(options.B2>0){
             runPM1Stage2();
         }
@@ -2691,6 +3168,11 @@ int App::runPM1() {
         ""
     );
     std::cout << "Manual submission JSON:\n" << json << "\n";
+    if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "Manual submission JSON:\n" << json << "\n";
+                      guiServer_->appendLog(oss.str());
+            }
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
@@ -2699,7 +3181,12 @@ int App::runPM1() {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
-
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+                      guiServer_->appendLog(oss.str());
+            }
             std::ifstream f(options.worktodo_path);
             std::string    l;
             bool           more = false;
@@ -2713,14 +3200,34 @@ int App::runPM1() {
 
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
+                if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+                      guiServer_->appendLog(oss.str());
+                }
                 restart_self(argc_, argv_);
             } else {
                 std::cout << "No more entries in worktodo.txt, exiting.\n";
-                std::exit(0);
+                if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "No more entries in worktodo.txt, exiting.\n";
+                      guiServer_->appendLog(oss.str());
+                }
+                if (!options.gui) {
+                    std::exit(0);
+                }
             }
         } else {
             std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            std::exit(-1);
+            if (guiServer_) {
+                                std::ostringstream oss;
+                                oss  << "Failed to update " << options.worktodo_path << "\n";
+                      guiServer_->appendLog(oss.str());
+                }
+            if (!options.gui) {
+                std::exit(-1);
+            }
         }
     }
     return 1;
@@ -2775,10 +3282,19 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
 
 
 int App::runPM1Marin() {
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "P-1 factoring stage 1";
+        guiServer_->setStatus(oss.str());
+    }
     bool debug = false;
     uint64_t B1 = options.B1;
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
-
+    if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+                        guiServer_->appendLog(oss.str());
+                    }
     mpz_class E = buildE(B1);
     E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
@@ -2845,17 +3361,27 @@ int App::runPM1Marin() {
 
     uint64_t startIter = resumeI;
     uint64_t lastIter = resumeI;
-    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, bits - resumeI, resumeI, "");
+    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, bits - resumeI, resumeI, "", guiServer_ ? guiServer_.get() : nullptr);
 
     for (mp_bitcnt_t i = resumeI; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
             std::cout << "\nInterrupted signal received\n " << std::endl;
+            if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "\nInterrupted signal received\n " << std::endl;
+                        guiServer_->appendLog(oss.str());
+            }
             save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
             delete eng;
             std::cout << "\nInterrupted by user, state saved at iteration "
             << lastIter << std::endl;
-
+            if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "\nInterrupted by user, state saved at iteration "
+            << lastIter << std::endl;
+                        guiServer_->appendLog(oss.str());
+            }
             return 0;
         }
         auto now = std::chrono::high_resolution_clock::now();
@@ -2868,7 +3394,7 @@ int App::runPM1Marin() {
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
             std::string res64_x;
-            spinner.displayProgress(bits - i, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_x);
+            spinner.displayProgress(bits - i, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
             timer2.start();
             lastDisplay = now;
             resumeI = static_cast<uint32_t>(bits - i);
@@ -2878,9 +3404,13 @@ int App::runPM1Marin() {
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
 
     std::string res64_done;
-    spinner.displayProgress(bits, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_done);
+    spinner.displayProgress(bits, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_done, guiServer_ ? guiServer_.get() : nullptr);
     std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
-
+    if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+                        guiServer_->appendLog(oss.str());
+        }
     save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
     
 
@@ -2891,6 +3421,11 @@ int App::runPM1Marin() {
         std::string res64_hex = format_res64_hex(words);
         std::string res2048_hex = format_res2048_hex(words);
         std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
+        if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
+                        guiServer_->appendLog(oss.str());
+        }
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
@@ -2917,15 +3452,30 @@ int App::runPM1Marin() {
         char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+        if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+                        guiServer_->appendLog(oss.str());
+        }
         options.knownFactors.push_back(std::string(fstr));
         std::free(fstr);
         std::cout << "\n";
     } else {
         writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
         std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+        if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+                        guiServer_->appendLog(oss.str());
+        }
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
+    if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "Manual submission JSON:\n" << json << "\n";
+                        guiServer_->appendLog(oss.str());
+        }
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
@@ -2933,16 +3483,34 @@ int App::runPM1Marin() {
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+            if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                        guiServer_->appendLog(oss.str());
+        }
             std::ifstream f(options.worktodo_path);
             std::string l;
             bool more = false;
             while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
             f.close();
-            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; restart_self(argc_, argv_); }
-            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; std::exit(0); }
+            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "Restarting for next entry in worktodo.txt\n";
+                        guiServer_->appendLog(oss.str());
+        }
+        restart_self(argc_, argv_); }
+            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "No more entries in worktodo.txt, exiting.\n";
+                        guiServer_->appendLog(oss.str());
+        }if (!options.gui) {std::exit(0);} }
         } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            std::exit(-1);
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";if (guiServer_) {
+                                    std::ostringstream oss;
+                                    oss  << "Failed to update " << options.worktodo_path << "\n";
+                        guiServer_->appendLog(oss.str());
+            }
+            if (!options.gui) {std::exit(-1);}
         }
     }
     delete_checkpoints(options.exponent, options.wagstaff, true, false); 
@@ -2989,6 +3557,11 @@ uint32_t transformsize_custom(uint64_t exponent) {
 
 
 int App::runGpuBenchmarkMarin() {
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "BENCH";
+        guiServer_->setStatus(oss.str());
+    }
     auto fmt_pct = [&](double x){ std::ostringstream o; o<<std::fixed<<std::setprecision(1)<<x*100.0<<"%"; return o.str(); };
 
     std::string gpu_name = "Unknown";
@@ -3030,7 +3603,11 @@ int App::runGpuBenchmarkMarin() {
     }
     #endif
     std::cout << "GPU: " << gpu_vendor << " " << gpu_name << " | Driver: " << driver_ver << " | CUs: " << cu << " | VRAM: " << (vram / (1024*1024)) << " MB | LocalMem: " << (lmem / 1024) << " KB | FP64: " << fp64 << "\n";
-
+    if (guiServer_) {
+                                        std::ostringstream oss;
+                                        oss  << "GPU: " << gpu_vendor << " " << gpu_name << " | Driver: " << driver_ver << " | CUs: " << cu << " | VRAM: " << (vram / (1024*1024)) << " MB | LocalMem: " << (lmem / 1024) << " KB | FP64: " << fp64 << "\n";
+                            guiServer_->appendLog(oss.str());
+    }
     std::vector<uint32_t> exps = {
         127u, 1279u, 2203u, 9941u, 44497u, 756839u, 3021377u, 37156667u, 57885161u, 77232917u, 82589933u, 136279841u,
         146410013u, 161051017u, 177156127u, 180000017u, 200000033u, 220000013u, 250000013u, 280000027u, 300000007u,
@@ -3052,6 +3629,15 @@ int App::runGpuBenchmarkMarin() {
           << " ips=" << std::fixed << std::setprecision(2) << std::setw(10) << ips_live
           << " ETA=" << fmt_dhms(eta_all) << "    ";
         std::cout << o.str() << std::flush;
+        if (guiServer_) {
+                                        std::ostringstream oss;
+                                        oss  << "\r[" << (i+1) << "/" << n << "] TS=" << std::setw(9) << ts << " p=" << std::setw(10) << p
+          << " " << std::setw(6) << fmt_pct((i + frac) / n)
+          << " ips=" << std::fixed << std::setprecision(2) << std::setw(10) << ips_live
+          << " ETA=" << fmt_dhms(eta_all) << "    ";
+
+                            guiServer_->appendLog(oss.str());
+        }
     };
 
     auto old_handler = std::signal(SIGINT, prmers_bench_sigint);
@@ -3108,10 +3694,24 @@ int App::runGpuBenchmarkMarin() {
     std::signal(SIGINT, old_handler);
     std::cout << "\n";
     std::cout << "Transform  Exponent      Iter/s       PRP_ETA\n";
+    if (guiServer_) {
+                                        std::ostringstream oss;
+                                        oss  << "Transform  Exponent      Iter/s       PRP_ETA";
+
+                            guiServer_->appendLog(oss.str());
+        }
     for (auto &r : rows) {
         std::cout << std::setw(9) << r.ts << "  " << std::setw(10) << r.p
                   << "  " << std::fixed << std::setprecision(2) << std::setw(10) << r.ips
                   << "  " << std::setw(14) << fmt_dhms(r.eta_prp) << "\n";
+        if (guiServer_) {
+                                        std::ostringstream oss;
+                                        oss  << std::setw(9) << r.ts << "  " << std::setw(10) << r.p
+                  << "  " << std::fixed << std::setprecision(2) << std::setw(10) << r.ips
+                  << "  " << std::setw(14) << fmt_dhms(r.eta_prp);
+
+                            guiServer_->appendLog(oss.str());
+        }
     }
     double prmers_score_val = 0.0;
     if (!rows.empty()) {
@@ -3131,53 +3731,119 @@ int App::runGpuBenchmarkMarin() {
     }
     std::cout << "\nPRMERS_SCORE|" << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
     std::cout << gpu_vendor << " " << gpu_name << " has a PRMERS SCORE OF " << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss  << "\nPRMERS_SCORE|" << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
 
+        guiServer_->appendLog(oss.str());
+    }
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << gpu_vendor << " " << gpu_name << " has a PRMERS SCORE OF " << std::fixed << std::setprecision(2) << prmers_score_val << "/100\n";
+
+        guiServer_->appendLog(oss.str());
+    }
 
     return 0;
 }
 
+static volatile std::sig_atomic_t g_stop = 0;
 
+static void handle_signal(int) noexcept { g_stop = 1; }
+
+static void install_signal_handlers() {
+    struct sigaction sa{};
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0; // ou SA_RESTART si tu préfères
+    sigaction(SIGINT,  &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+    sigaction(SIGHUP,  &sa, nullptr);
+
+    // (optionnel mais utile avec un serveur HTTP)
+    struct sigaction ign{};
+    ign.sa_handler = SIG_IGN;
+    sigemptyset(&ign.sa_mask);
+    ign.sa_flags = 0;
+    sigaction(SIGPIPE, &ign, nullptr);
+}
 
 
 int App::run() {
-    /*if(options.mode == "llsafecpu"){
-        return runLlSafeCpu();
-    }*/
-    if(options.mode == "llsafe"){
-        return runLlSafeMarin();
+    if (options.gui) {
+        if (options.http_port == 0) options.http_port = 8080;
+        ui::WebGuiConfig cfg;
+        cfg.port = options.http_port;
+        cfg.worktodo_path = options.worktodo_path;
+        cfg.config_path = "./settings.cfg";
+        cfg.results_path = "./results.txt";
+        auto submitFn = [this](const std::string& line){
+            std::ofstream out(this->options.worktodo_path, std::ios::app);
+            out << line << "\n";
+            out.close();
+            std::cout << "worktodo appended\n";
+            if (guiServer_) guiServer_->stop();
+            restart_self(argc_, argv_);
+        };
+        guiServer_ = std::make_shared<ui::WebGuiServer>(cfg, submitFn);
+        ui::WebGuiServer::setInstance(guiServer_);
+        guiServer_->start();
+        std::cout << "GUI " << guiServer_->url() << std::endl;
     }
-    if(options.mode == "pm1" && options.marin && options.B2<=0){
-        if(options.exponent > 89){
-            return runPM1Marin();
-        }
-        else{
+
+    int rc = 1;
+    bool ran = false;
+
+    if (options.mode == "llsafe") {
+        rc = runLlSafeMarin();
+        ran = true;
+    } else if (options.mode == "pm1" && options.marin && options.B2 <= 0) {
+        if (options.exponent > 89) {
+            rc = runPM1Marin();
+            ran = true;
+        } else {
             std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
         }
-    }
-    if(options.exportmers){
-        return exportResumeFromMersFile(options.filemers, "");
-    }
-    if(options.bench){
-        return runGpuBenchmarkMarin();
-    }
-    if((options.mode == "prp" || options.mode == "ll") && options.marin){
-        return runPrpOrLlMarin();
-    }
-    if(options.mode == "prp" || options.mode == "ll"){
-        return runPrpOrLl();
-    }
-    else if(options.mode == "pm1"){
-        //options.marin = false;
-        if(options.exponent > 89){
-            return runPM1();
-        }
-        else{
+    } else if (options.exportmers) {
+        rc = exportResumeFromMersFile(options.filemers, "");
+        ran = true;
+    } else if (options.bench) {
+        rc = runGpuBenchmarkMarin();
+        ran = true;
+    } else if ((options.mode == "prp" || options.mode == "ll") && options.marin) {
+        rc = runPrpOrLlMarin();
+        ran = true;
+    } else if (options.mode == "prp" || options.mode == "ll") {
+        rc = runPrpOrLl();
+        ran = true;
+    } else if (options.mode == "pm1") {
+        if (options.exponent > 89) {
+            rc = runPM1();
+            ran = true;
+        } else {
             std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
         }
     }
 
-    return 1;
+    if (options.gui) {
+        if (guiServer_) {
+            std::cout << "GUI " << guiServer_->url() << std::endl;
+            guiServer_->setStatus(ran ? "Completed" : "Idle");
+        }
+
+        install_signal_handlers();
+
+        while (!g_stop) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        if (guiServer_) guiServer_->stop();
+    }
+
+
+    return rc;
 }
+
 
 
 } // namespace core

@@ -32,6 +32,7 @@
 #else
 #  include <CL/cl.h>
 #endif
+namespace ui { class WebGuiServer; }
 
 namespace core {
 
@@ -73,6 +74,7 @@ private:
   util::Timer                        timer;
   util::Timer                        timer2;
   double                             elapsed;
+  std::shared_ptr<ui::WebGuiServer> guiServer_;
 };
 
 mpz_class buildE(uint64_t B1);

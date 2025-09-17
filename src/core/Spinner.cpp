@@ -25,6 +25,8 @@
 #include <iomanip>
 #include <thread>
 #include <chrono>
+#include <sstream>
+#include "ui/WebGuiServer.hpp"
 
 #ifdef _WIN32
   // Sur Windows (avant Win10 ou si ANSI non activé), on neutralise les couleurs
@@ -53,7 +55,8 @@ void Spinner::displayProgress(uint64_t iter,
                               uint64_t expo,
                               uint64_t resumeIter,
                               uint64_t startIter,
-                              std::string res64)
+                              std::string res64,
+                              ui::WebGuiServer* gui)
 {
     double pct = totalIters
                ? (100.0 * iter) / totalIters
@@ -102,7 +105,22 @@ void Spinner::displayProgress(uint64_t iter,
     if (!res64.empty()) {
     std::cout << " | RES64: " << res64;
     }
-
+    if (gui) {
+        gui->setProgress(iter, totalIters, res64);
+        std::ostringstream ss;
+        ss  << "Progress: "  << std::fixed << std::setprecision(2) << pct << "% | "
+            << "Exp: "       << expo                                << " | "
+            << "Iter: "      << iter                                << " | "
+            << "Elapsed: "   << std::fixed << elapsedTime           << "s | "
+            << "IPS: "       << std::fixed << std::setprecision(2)
+                            << currentIPS                          << " | "
+            << "ETA: "       << days << "d " << hrs << "h "
+                            << min  << "m " << sec << "s";
+        gui->appendLog(ss.str());
+        if (!res64.empty()) {
+            gui->appendLog(ss.str()); 
+        }
+    }
     std::cout << COLOR_RESET << std::endl;
 
 }
@@ -111,7 +129,8 @@ void Spinner::displayProgress(uint64_t iter,
 void Spinner::displayBackupInfo(uint64_t iter,
                                 uint64_t totalIters,
                                 double elapsedTime,
-                                std::string res64)
+                                std::string res64,
+                                ui::WebGuiServer* gui)
 {
     double pct       = totalIters ? (100.0 * iter) / totalIters : 100.0;
     double ips       = elapsedTime > 0 ? iter / elapsedTime : 0.0;
@@ -131,6 +150,20 @@ void Spinner::displayBackupInfo(uint64_t iter,
                        << min  << "m " << sec << "s";
     if (!res64.empty()) {
         std::cout << " | RES64: " << res64;
+    }
+    if (gui) {
+        gui->setProgress(iter, totalIters, res64);
+        std::ostringstream ss;
+        ss  << "[Backup] " 
+            << std::fixed << std::setprecision(2) << pct << "% | "
+            << "Elapsed: " << elapsedTime << "s | "
+            << "IPS: "     << std::fixed << ips << " | "
+            << "ETA: "       << days << "d " << hrs << "h "
+                            << min  << "m " << sec << "s";
+        gui->appendLog(ss.str());
+        if (!res64.empty()) {
+            gui->appendLog(ss.str()); 
+        }
     }
     std::cout << COLOR_RESET << std::endl;
 }

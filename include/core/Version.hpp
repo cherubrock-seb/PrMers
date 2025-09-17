@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.12.04-alpha";
+    const std::string PRMERS_VERSION = "4.13.00-alpha";
 } // namespace core
 
 #endif // VERSION_HPP

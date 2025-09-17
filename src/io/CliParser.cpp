@@ -159,6 +159,13 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.bench = true;
             opts.exponent = 127;
         }
+        else if (std::strcmp(argv[i], "-gui") == 0) {
+            opts.gui = true;
+        }
+        else if (std::strcmp(argv[i], "-http") == 0 && i + 1 < argc) {
+            opts.http_port = std::atoi(argv[++i]);
+            opts.gui = true;
+        }
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
             opts.cl_queue_throttle_active = true;
         }
