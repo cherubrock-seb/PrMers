@@ -62,8 +62,10 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
 
 4. Click **"Append & Run"** to launch the computation.
 
-
+Screenshot 1 :
 ![Web GUI screenshot prmers](docs/webgui.png)
+
+Screenshot 2 :
 ![Web GUI screenshot 2 prmers](docs/webgui.png)
 
 Performance (as measured)
