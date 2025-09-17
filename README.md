@@ -49,7 +49,21 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
    ```bash
    ./prmers -gui -http 3131
    ```
-   (default port is `8080` if `-http` is omitted)
+   (default port is `3131` if `-http` is omitted)
+
+   Remark : it will find by default the first ipv4 valid interface, you can override this by using -host example :
+    ```bash
+   ./prmers -gui -http 3131 -host 127.0.0.1
+   ```
+    ```bash
+   ./prmers -gui -http 3131 -host localhost
+   ```
+  ```bash
+   ./prmers -gui -http 3131 -host 0.0.0.1
+   ```
+   ```bash
+   ./prmers -gui -http 3131 -host 192.1.1.99
+   ```
 
 2. Open the browser at the displayed address, for example:
    ```

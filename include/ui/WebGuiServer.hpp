@@ -15,6 +15,9 @@ struct WebGuiConfig {
     std::string worktodo_path;
     std::string config_path;
     std::string results_path;
+    std::string bind_host;
+    std::string advertise_host;
+    bool lanipv4 = false;
 };
 
 class WebGuiServer {
@@ -54,7 +57,7 @@ private:
     void serveOne(int fd);
     static bool readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers);
     static bool sendAll(int fd, const char* data, size_t len);
-    static int createListenSocket(int port, int& out_port);
+    static int createListenSocket(const std::string& bind_host, int port, int& out_port);
     std::string handleStateJson();
     std::string handleResultsJson(size_t limit, const std::string& pathOverride);
     std::string handleLoadSettings();

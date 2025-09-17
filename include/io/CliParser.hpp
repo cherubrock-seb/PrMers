@@ -66,7 +66,9 @@ struct CliOptions {
     bool cl_queue_throttle_active = false;
     std::vector<std::string> knownFactors;
     bool gui = false;
-    int http_port = 0;
+    int http_port = 3131;
+    std::string http_host = "localhost";
+    bool ipv4 = true;
 
 };
 

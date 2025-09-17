@@ -346,13 +346,7 @@ App::App(int argc, char** argv)
                   << options.worktodo_path 
                   << " and no exponent provided on the command line\n";
                   
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss << "Error: no valid entry in " 
-                  << options.worktodo_path 
-                  << " and no exponent provided on the command line\n";
-            guiServer_->appendLog(oss.str());
-        }
+        
         if (!options.gui) {
             o.exponent = askExponentInteractively();
         }
@@ -3789,19 +3783,43 @@ static void install_signal_handlers() {
 #ifdef SIGPIPE
     sigaction(SIGPIPE, &ign, nullptr);
 #endif
+#ifdef SIGINT
+    siginterrupt(SIGINT, 1);
+#endif
+#ifdef SIGTERM
+    siginterrupt(SIGTERM, 1);
+#endif
+#ifdef SIGHUP
+    siginterrupt(SIGHUP, 1);
+#endif
 }
 #endif
 
 
+static bool file_non_empty(const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    if (!f.is_open()) return false;
+    f.peek();
+    return !f.eof();
+}
 
 int App::run() {
+
+    std::cout << "host : " << options.http_host << "\n";
+    install_signal_handlers();
+
     if (options.gui) {
-        if (options.http_port == 0) options.http_port = 8080;
+        if (options.http_port == 0) options.http_port = 3131;
         ui::WebGuiConfig cfg;
         cfg.port = options.http_port;
+        cfg.bind_host = options.http_host;
+        cfg.advertise_host = options.http_host;
+        std::cout << "host : " << cfg.bind_host << "\n";
+        cfg.lanipv4 = options.ipv4;
         cfg.worktodo_path = options.worktodo_path;
         cfg.config_path = "./settings.cfg";
         cfg.results_path = "./results.txt";
+        static std::atomic<bool> gui_alive{true};
         auto submitFn = [this](const std::string& line){
             std::ofstream out(this->options.worktodo_path, std::ios::app);
             out << line << "\n";
@@ -3810,10 +3828,20 @@ int App::run() {
             if (guiServer_) guiServer_->stop();
             restart_self(argc_, argv_);
         };
-        guiServer_ = std::make_shared<ui::WebGuiServer>(cfg, submitFn);
+        auto stopFn = [&](){
+            handle_signal(SIGINT);
+            gui_alive = false;
+        };
+        guiServer_ = std::make_shared<ui::WebGuiServer>(cfg, submitFn, stopFn);
         ui::WebGuiServer::setInstance(guiServer_);
         guiServer_->start();
         std::cout << "GUI " << guiServer_->url() << std::endl;
+        if (!file_non_empty(cfg.worktodo_path)) {
+            guiServer_->setStatus("Idle");
+            while (!g_stop && gui_alive) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            if (guiServer_) guiServer_->stop();
+            return 0;
+        }
     }
 
     int rc = 1;
@@ -3855,19 +3883,15 @@ int App::run() {
             std::cout << "GUI " << guiServer_->url() << std::endl;
             guiServer_->setStatus(ran ? "Completed" : "Idle");
         }
-
         install_signal_handlers();
-
-        while (!g_stop) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        }
-
+        while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
         if (guiServer_) guiServer_->stop();
     }
 
-
     return rc;
 }
+
+
 
 
 

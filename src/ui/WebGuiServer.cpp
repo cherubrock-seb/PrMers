@@ -76,10 +76,24 @@ void WebGuiServer::start() {
 #ifdef _WIN32
     WSADATA wsa; WSAStartup(MAKEWORD(2,2), &wsa);
 #endif
-    listen_fd_ = createListenSocket(cfg_.port, bound_port_);
-    if (listen_fd_ < 0) return;
 
-    std::string host = firstLanIPv4();
+    std::string host;
+    if (cfg_.lanipv4) {
+        host = firstLanIPv4();
+    } else if (!cfg_.advertise_host.empty()) {
+        host = cfg_.advertise_host;
+    } else if (cfg_.bind_host.empty() || cfg_.bind_host == "0.0.0.0") {
+        host = "127.0.0.1";
+    } else {
+        host = cfg_.bind_host;
+    }
+    url_ = "http://" + host + ":" + std::to_string(bound_port_) + "/";
+
+
+    listen_fd_ = createListenSocket(host, cfg_.port, bound_port_);
+    if (listen_fd_ < 0) return;
+    url_ = "http://" + host + ":" + std::to_string(bound_port_) + "/";
+    //std::string host = firstLanIPv4();
     if (host.empty()) host = "127.0.0.1";    // fallback
     url_ = std::string("http://") + host + ":" + std::to_string(bound_port_) + "/";
 
@@ -146,15 +160,12 @@ void WebGuiServer::closeListen() {
     if (listen_fd_ != -1) { ::close(listen_fd_); listen_fd_ = -1; }
 #endif
 }
-
-int WebGuiServer::createListenSocket(int port, int& out_port) {
+int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int& out_port) {
     int fd;
 #ifdef _WIN32
     fd = (int)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd == (int)INVALID_SOCKET) return -1;
-    {
-        BOOL yes = 1; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
-    }
+    { BOOL yes = 1; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes)); }
 #else
     fd = (int)socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
@@ -163,16 +174,31 @@ int WebGuiServer::createListenSocket(int port, int& out_port) {
 
     sockaddr_in addr; std::memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);     // <-- au lieu de 127.0.0.1
     addr.sin_port = htons((uint16_t)port);
 
-    if (::bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { /* close + return -1 ... */ }
-    if (::listen(fd, 16) < 0) { /* close + return -1 ... */ }
+    in_addr ip{};
+    std::string h = bind_host;
+    if (h.empty() || h == "localhost") h = "127.0.0.1";
+    if (h == "0.0.0.0") ip.s_addr = htonl(INADDR_ANY);
+#ifdef _WIN32
+    else if (InetPtonA(AF_INET, h.c_str(), &ip) != 1) ip.s_addr = htonl(INADDR_LOOPBACK);
+#else
+    else if (inet_pton(AF_INET, h.c_str(), &ip) != 1) ip.s_addr = htonl(INADDR_LOOPBACK);
+#endif
+    addr.sin_addr = ip;
+
+    if (::bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { 
+        return -1; 
+    }
+    if (::listen(fd, 16) < 0) { 
+        return -1; 
+    }
 
     socklen_t len = sizeof(addr);
     if (::getsockname(fd, (sockaddr*)&addr, &len) == 0) out_port = ntohs(addr.sin_port); else out_port = port;
     return fd;
 }
+
 
 
 bool WebGuiServer::readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers) {

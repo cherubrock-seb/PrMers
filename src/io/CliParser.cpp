@@ -89,6 +89,9 @@ void printUsage(const char* progName) {
     //std::cout << "  -filep95 <path>      : (Optional) Export .mers file to Prime95 .p95 format using stored state" << std::endl;
     std::cout << "  -gui                  : (Optional) Enable the embedded web GUI accessible via your browser" << std::endl;
     std::cout << "  -http <port>          : (Optional) Specify the HTTP port for the GUI server (default: 3131)" << std::endl;
+    std::cout << "  -host <ip|0.0.0.0|localhost> : (Optional) Specify the HTTP host for the GUI server (default: 127.0.0.1)" << std::endl;
+    //std::cout << "  -ipv4                 : (Optional) Set the HTTP host to the first IPv4 interface" << std::endl;
+    
 
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
@@ -167,6 +170,17 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-http") == 0 && i + 1 < argc) {
             opts.http_port = std::atoi(argv[++i]);
             opts.gui = true;
+        }
+        else if (std::strcmp(argv[i], "-host") == 0) {
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                opts.http_host = argv[++i];
+            } else {
+                std::cerr << "Error: missing value for -host\n";
+                std::exit(1);
+            }
+        }
+        else if (std::strcmp(argv[i], "-ipv4") == 0) {
+            opts.ipv4 = true;
         }
         else if (std::strcmp(argv[i], "-throttle_low") == 0) {
             opts.cl_queue_throttle_active = true;
