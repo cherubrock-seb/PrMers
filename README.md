@@ -66,7 +66,7 @@ Screenshot 1 :
 ![Web GUI screenshot prmers](docs/webgui.png)
 
 Screenshot 2 :
-![Web GUI screenshot 2 prmers](docs/webgui.png)
+![Web GUI screenshot 2 prmers](docs/webgui2.png)
 
 Performance (as measured)
 -------------------------
