@@ -76,11 +76,18 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
 
 4. Click **"Append & Run"** to launch the computation.
 
-Screenshot 1 :
-![Web GUI screenshot prmers](docs/webgui.png)
+<div style="display: flex; gap: 10px; align-items: flex-start;">
 
-Screenshot 2 :
-![Web GUI screenshot 2 prmers](docs/webgui2.png)
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <img src="docs/webgui.png" alt="Web GUI screenshot prmers" style="width: 180px; border: 1px solid #ccc;" />
+    <img src="docs/webgui2.png" alt="Web GUI screenshot 2 prmers" style="width: 180px; border: 1px solid #ccc;" />
+  </div>
+
+  <div>
+    <img src="docs/webgui3.png" alt="Web GUI screenshot 3 prmers" style="width: 370px; border: 1px solid #ccc;" />
+  </div>
+
+</div>
 
 Performance (as measured)
 -------------------------
