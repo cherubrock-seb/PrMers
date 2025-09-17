@@ -31,7 +31,7 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 
 https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb
 
-### 📊 Web-based GUI
+### Web-based GUI
 
 PrMers includes a built-in, responsive web interface to manage and monitor primality tests.
 
