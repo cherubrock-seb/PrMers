@@ -15,6 +15,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 	#include <CL/cl.h>
 #endif
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -393,8 +394,6 @@ public:
 		hFile << "*/" << std::endl << std::endl;
 
 		hFile << "#pragma once" << std::endl << std::endl;
-		hFile << "#include <cstdint>" << std::endl << std::endl;
-
 		hFile << "static const char * const " << varName << " = \\" << std::endl;
 
 		std::string line;

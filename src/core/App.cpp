@@ -3806,9 +3806,9 @@ static bool file_non_empty(const std::string& p) {
 int App::run() {
 
     //std::cout << "host : " << options.http_host << "\n";
-    install_signal_handlers();
-
+    
     if (options.gui) {
+        install_signal_handlers();
         if (options.http_port == 0) options.http_port = 3131;
         ui::WebGuiConfig cfg;
         cfg.port = options.http_port;

@@ -7,6 +7,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <iostream>

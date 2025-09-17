@@ -70,53 +70,8 @@ public:
 		return r;
 	}
 
-	// Init roots, radix-5 is the last stage of the transform
-	static void roots45(const size_t n, uint64 * const root)
-	{
-		const size_t n5 = (n % 5 == 0) ? n / 5 : n;
-
-		// n mod 5 != 0 => n roots
-		// n mod 5 != 0 => 2 * n / 5 roots
-
-		uint64 * const r2 = &root[0];
-		uint64 * const r2i = &root[n];
-
-		const uint64 r = mod_root_nth(2 * n5 / 2), ri = mod_invert(r);
-		uint64 r_j = 1, ri_j = 1;
-		for (size_t j = 0; j < n5 / 2; ++j)
-		{
-			const size_t jr = bitrev(j, n5 / 2);
-			r2[jr] = r_j; r2i[jr] = ri_j;
-			r_j = mod_mul(r_j, r); ri_j = mod_mul(ri_j, ri);
-		}
-
-		uint64 * const r4 = &root[n5 / 2];
-		uint64 * const r4i = &root[n + n5 / 2];
-
-		for (size_t j = 0; j < n5 / 4; ++j)
-		{
-			r4[2 * j + 0] = r2[2 * j]; r4i[2 * j + 0] = r2i[2 * j];
-			r4[2 * j + 1] = mod_mul(r2[j], r2[2 * j]); r4i[2 * j + 1] = mod_mul(r2i[j], r2i[2 * j]);
-		}
-
-		if (n % 5 == 0)
-		{
-			uint64 * const r5 = &root[n5];
-			uint64 * const r5i = &root[n + n5];
-
-			const uint64 r = mod_root_nth(5 * n5), ri = mod_invert(r);
-			uint64 r_j = 1, ri_j = 1;
-			for (size_t j = 0; j < n5; ++j)
-			{
-				const size_t jr = bitrev(j, n5);
-				r5[jr] = r_j; r5i[jr] = ri_j;
-				r_j = mod_mul(r_j, r); ri_j = mod_mul(ri_j, ri);
-			}
-		}
-	}
-
 	// Init roots, radix-5 is the first stage of the transform
-	static void roots54(const size_t n, uint64 * const root)
+	static void roots(const size_t n, uint64 * const root)
 	{
 		uint64 * const r2 = &root[0];
 		uint64 * const r2i = &root[n / 2];
@@ -186,4 +141,3 @@ public:
 		}
 	}
 };
-
