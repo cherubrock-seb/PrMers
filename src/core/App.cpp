@@ -3162,11 +3162,11 @@ int App::runPM1() {
         ""
     );
     std::cout << "Manual submission JSON:\n" << json << "\n";
-   /* if (guiServer_) {
+   if (guiServer_) {
                                 std::ostringstream oss;
                                 oss  << "Manual submission JSON:\n" << json << "\n";
                       guiServer_->appendLog(oss.str());
-            }*/
+            }
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
@@ -3465,11 +3465,11 @@ int App::runPM1Marin() {
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
-    /*if (guiServer_) {
+    if (guiServer_) {
                                     std::ostringstream oss;
                                     oss  << "Manual submission JSON:\n" << json << "\n";
                         guiServer_->appendLog(oss.str());
-        }*/
+        }
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
