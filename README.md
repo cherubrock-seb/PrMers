@@ -31,6 +31,39 @@ https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.
 
 https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb
 
+### 📊 Web-based GUI
+
+PrMers includes a built-in, responsive web interface to manage and monitor primality tests.
+
+**Features:**
+- Real-time logs and progress updates
+- Status and Res64 tracking
+- Worktodo editor and result viewer
+- Settings builder and loader
+- One-click append & run
+
+
+**How to use it:**
+
+1. Launch the program with the GUI enabled:
+   ```bash
+   ./prmers -gui -http 3131
+   ```
+   (default port is `8080` if `-http` is omitted)
+
+2. Open the browser at the displayed address, for example:
+   ```
+   GUI http://192.168.1.27:3131/
+   ```
+
+3. Use the interface to either:
+   - Fill in the parameters (mode, exponent, B1/B2, etc.) and click **"Build Line"** to generate a `worktodo` line  
+   - **or** paste one or more `worktodo` lines manually in the textarea
+
+4. Click **"Append & Run"** to launch the computation.
+
+
+![Web GUI screenshot](docs/webgui.png)
 
 Performance (as measured)
 -------------------------
