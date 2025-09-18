@@ -3741,9 +3741,8 @@ int App::runGpuBenchmarkMarin() {
     return 0;
 }
 
-static volatile std::sig_atomic_t g_stop = 0;
-
-static void handle_signal(int) noexcept { g_stop = 1; }
+static std::atomic<bool> g_stop{false};
+static void handle_signal(int) noexcept { g_stop = true; interrupted = true; }
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -3751,21 +3750,14 @@ static void handle_signal(int) noexcept { g_stop = 1; }
 static BOOL WINAPI prmers_ctrl_handler(DWORD type){
     switch(type){
         case CTRL_C_EVENT:
-        case CTRL_BREAK_EVENT:
-            handle_signal(SIGINT);
-            return TRUE;
+        case CTRL_BREAK_EVENT: handle_signal(SIGINT); return TRUE;
         case CTRL_CLOSE_EVENT:
         case CTRL_LOGOFF_EVENT:
-        case CTRL_SHUTDOWN_EVENT:
-            handle_signal(SIGTERM);
-            return TRUE;
-        default:
-            return FALSE;
+        case CTRL_SHUTDOWN_EVENT: handle_signal(SIGTERM); return TRUE;
+        default: return FALSE;
     }
 }
-static void install_signal_handlers() {
-    SetConsoleCtrlHandler(prmers_ctrl_handler, TRUE);
-}
+static void install_signal_handlers() { SetConsoleCtrlHandler(prmers_ctrl_handler, TRUE); }
 #else
 #include <signal.h>
 static void install_signal_handlers() {
@@ -3783,17 +3775,9 @@ static void install_signal_handlers() {
 #ifdef SIGPIPE
     sigaction(SIGPIPE, &ign, nullptr);
 #endif
-#ifdef SIGINT
-    siginterrupt(SIGINT, 1);
-#endif
-#ifdef SIGTERM
-    siginterrupt(SIGTERM, 1);
-#endif
-#ifdef SIGHUP
-    siginterrupt(SIGHUP, 1);
-#endif
 }
 #endif
+
 
 
 static bool file_non_empty(const std::string& p) {
@@ -3884,6 +3868,7 @@ int App::run() {
             guiServer_->setStatus(ran ? "Completed" : "Idle");
         }
         install_signal_handlers();
+        g_stop = 0;
         while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
         if (guiServer_) guiServer_->stop();
     }
