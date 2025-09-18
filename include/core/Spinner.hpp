@@ -20,6 +20,17 @@ public:
                        std::string res64,
                        ui::WebGuiServer* gui = nullptr);
 
+  void displayProgress2(uint64_t iter,
+                       uint64_t totalIters,
+                       double elapsedTime,
+                       double elapsedTime2,
+                       uint64_t expo,
+                       uint64_t resumeIter,
+                       uint64_t startIter,
+                       std::string res64,
+                       ui::WebGuiServer* gui = nullptr);
+
+
   void displayBackupInfo(uint64_t iter,
                          uint64_t totalIters,
                          double elapsedTime,

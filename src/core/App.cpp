@@ -3273,7 +3273,6 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
     return X;
 }
 
-
 int App::runPM1Marin() {
     if (guiServer_) {
         std::ostringstream oss;
@@ -3284,26 +3283,38 @@ int App::runPM1Marin() {
     uint64_t B1 = options.B1;
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
     if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
-                        guiServer_->appendLog(oss.str());
-                    }
+        std::ostringstream oss;
+        oss  << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
+        guiServer_->appendLog(oss.str());
+    }
+
     mpz_class E = buildE(B1);
     E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(2), static_cast<size_t>(options.device_id), verbose);
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(10), static_cast<size_t>(options.device_id), verbose);
+
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9;
 
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
 
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+    uint32_t resumeI = 0;
+    double restored_time = 0.0;
+    uint64_t gl_checkpass = 0;
+    uint64_t gl_blocks_since_check = 0;
+    uint64_t gl_bits_in_block = 0;
+    uint64_t gl_current_block_len = 0;
+    uint8_t  gl_in_lot = 0;
+    mpz_class gl_eacc = 0;
+    mpz_class gl_wbits = 0;
+
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 1) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
@@ -3312,15 +3323,36 @@ int App::runPM1Marin() {
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
         if (!eng->set_checkpoint(data)) return -2;
-        if (!f.check_crc32()) return -2;
-        return 0;
+        if (version == 1) {
+            if (!f.check_crc32()) return -2;
+            chk = 0; blks = 0; bib = 0; cbl = 0; inlot = 0; ceacc = 0; cwbits = 0;
+            return 0;
+        } else if (version == 2) {
+            if (!f.read(reinterpret_cast<char*>(&chk), sizeof(chk))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&blks), sizeof(blks))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&bib), sizeof(bib))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&cbl), sizeof(cbl))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+            std::string eacc_hex; eacc_hex.resize(eacc_len);
+            if (eacc_len && !f.read(eacc_hex.data(), eacc_len)) return -2;
+            if (eacc_len) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
+            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+            std::string wbits_hex; wbits_hex.resize(wbits_len);
+            if (wbits_len && !f.read(wbits_hex.data(), wbits_len)) return -2;
+            if (wbits_len) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
+            if (!f.check_crc32()) return -2;
+            return 0;
+        } else {
+            return -2;
+        }
     };
 
-    auto save_ckpt = [&](uint32_t i, double et){
+    auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 1;
+            int version = 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
             if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
@@ -3329,6 +3361,21 @@ int App::runPM1Marin() {
             std::vector<char> data(cksz);
             if (!eng->get_checkpoint(data)) return;
             if (!f.write(data.data(), cksz)) return;
+            if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return;
+            if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return;
+            if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return;
+            if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return;
+            char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t());
+            uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0;
+            if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; }
+            if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; }
+            if (eacc_hex_c) std::free(eacc_hex_c);
+            char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t());
+            uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0;
+            if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; }
+            if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; }
+            if (wbits_hex_c) std::free(wbits_hex_c);
             f.write_crc32();
         }
         std::error_code ec;
@@ -3338,11 +3385,22 @@ int App::runPM1Marin() {
         fs::remove(oldf, ec);
     };
 
-    uint32_t resumeI = 0;
-    double restored_time = 0.0;
-    if (read_ckpt(ckpt_file, resumeI, restored_time) != 0) {
-        eng->set(0, 1);
+    if (read_ckpt(ckpt_file, resumeI, restored_time, gl_checkpass, gl_blocks_since_check, gl_bits_in_block, gl_current_block_len, gl_in_lot, gl_eacc, gl_wbits) != 0) {
+        eng->set(RSTATE, 1);
         resumeI = static_cast<uint32_t>(bits);
+        eng->set(RACC_L, 1);
+        eng->set(RACC_R, 1);
+        eng->copy(RSTART, RSTATE);
+        eng->copy(RSAVE_S, RSTATE);
+        eng->copy(RSAVE_L, RACC_L);
+        eng->copy(RSAVE_R, RACC_R);
+        gl_checkpass = 0;
+        gl_blocks_since_check = 0;
+        gl_bits_in_block = 0;
+        gl_current_block_len = 0;
+        gl_in_lot = 0;
+        gl_eacc = 0;
+        gl_wbits = 0;
     }
 
     timer.start();
@@ -3354,60 +3412,203 @@ int App::runPM1Marin() {
 
     uint64_t startIter = resumeI;
     uint64_t lastIter = resumeI;
-    spinner.displayProgress(bits - resumeI, bits, timer.elapsed(), timer2.elapsed(), options.exponent, bits - resumeI, resumeI, "", guiServer_ ? guiServer_.get() : nullptr);
+    spinner.displayProgress2(bits - resumeI, bits,
+                            timer.elapsed() + restored_time,
+                            timer2.elapsed(),
+                            options.exponent, bits - resumeI, resumeI,
+                            "", guiServer_ ? guiServer_.get() : nullptr);
+
+    uint64_t L = bits;
+    uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)L));
+    double desiredIntervalSeconds = 600.0;
+    uint64_t checkpasslevel_auto = (uint64_t)((1000.0 * desiredIntervalSeconds) / (double)B);
+    if (checkpasslevel_auto == 0) checkpasslevel_auto = (L / B) / (uint64_t)std::sqrt((double)B);
+    uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : checkpasslevel_auto;
+    if (checkpass == 0) checkpass = 1;
+
+    mpz_class eacc = gl_eacc;
+    mpz_class wbits = gl_wbits;
+    uint64_t blocks_since_check = gl_blocks_since_check;
+    uint64_t processed = 0;
+    bool errordone = false;
+    bool in_lot = gl_in_lot != 0;
+    uint64_t bits_in_block = gl_bits_in_block;
+    uint64_t current_block_len = gl_current_block_len;
+
+    if (bits_in_block == 0) current_block_len = ((uint64_t)((resumeI - 1) % B)) + 1;
 
     for (mp_bitcnt_t i = resumeI; i > 0; --i) {
         lastIter = i;
+
         if (interrupted) {
             std::cout << "\nInterrupted signal received\n " << std::endl;
-            if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "\nInterrupted signal received\n " << std::endl;
-                        guiServer_->appendLog(oss.str());
-            }
-            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
+            if (guiServer_) { std::ostringstream oss; oss  << "\nInterrupted signal received\n " << std::endl; guiServer_->appendLog(oss.str()); }
+            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time,
+                      gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
             delete eng;
-            std::cout << "\nInterrupted by user, state saved at iteration "
-            << lastIter << std::endl;
-            if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "\nInterrupted by user, state saved at iteration "
-            << lastIter << std::endl;
-                        guiServer_->appendLog(oss.str());
-            }
+            std::cout << "\nInterrupted by user, state saved at iteration " << lastIter << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss  << "\nInterrupted by user, state saved at iteration " << lastIter << std::endl; guiServer_->appendLog(oss.str()); }
             return 0;
         }
+
         auto now = std::chrono::high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
-            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(now - start_clock).count() + restored_time);
+            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(now - start_clock).count() + restored_time,
+                      gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
             lastBackup = now;
         }
 
-        if (mpz_tstbit(E.get_mpz_t(), i - 1)) eng->square_mul(0, 3); else eng->square_mul(0);
+        if (bits_in_block == 0) {
+            current_block_len = ((uint64_t)((i - 1) % B)) + 1;
+            if (current_block_len == B) {
+                if (gl_checkpass == 0 && blocks_since_check == 0 && wbits == 0 && eacc == 0) {
+                    eng->set(RACC_L, 1);
+                    eng->set(RACC_R, 1);
+                    eng->copy(RSAVE_S, RSTATE);
+                    eng->set(RSAVE_L, 1);
+                    eng->set(RSAVE_R, 1);
+                    eacc = 0;
+                    blocks_since_check = 0;
+                    wbits = 0;
+                    in_lot = true;
+                }
+            } else {
+                in_lot = false;
+                gl_checkpass = 0;
+                eacc = 0;
+                blocks_since_check = 0;
+                wbits = 0;
+            }
+            eng->copy(RSTART, RSTATE);
+            if (wbits == 0) wbits = 0;
+        }
+
+        int b = mpz_tstbit(E.get_mpz_t(), i - 1) ? 1 : 0;
+        if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE);
+        processed += 1;
+        wbits <<= 1;
+        if (b) wbits += 1;
+        bits_in_block += 1;
+
+        bool end_block = (bits_in_block == current_block_len);
+        if (end_block) {
+            if (current_block_len == B) {
+                eng->set_multiplicand(RTMP, RSTART);
+                eng->mul(RACC_L, RTMP);
+                eng->set_multiplicand(RTMP, RSTATE);
+                eng->mul(RACC_R, RTMP);
+                eacc += wbits;
+                blocks_since_check += 1;
+                gl_checkpass += 1;
+
+                bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
+                if (doCheck) {
+                    eng->copy(RCHK, RACC_L);
+                    for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
+                    eng->set(RPOW, 1);
+                    size_t ebits = mpz_sizeinbase(eacc.get_mpz_t(), 2);
+                    for (ssize_t k = (ssize_t)ebits - 1; k >= 0; --k) {
+                        if (mpz_tstbit(eacc.get_mpz_t(), (size_t)k)) eng->square_mul(RPOW, 3);
+                        else eng->square_mul(RPOW);
+                    }
+                    eng->set_multiplicand(RTMP, RPOW);
+                    eng->mul(RCHK, RTMP);
+                    bool ok = eng->is_equal(RCHK, RACC_R);
+                    if (!ok) {
+                        std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
+                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); }
+                        options.gerbicz_error_count += 1;
+                        eng->copy(RSTATE, RSAVE_S);
+                        eng->set(RACC_L, 1);
+                        eng->set(RACC_R, 1);
+                        eng->copy(RSTART, RSTATE);
+                        i = (mp_bitcnt_t)(i + blocks_since_check * B);
+                        processed -= blocks_since_check * B;
+                        eacc = 0;
+                        blocks_since_check = 0;
+                        wbits = 0;
+                        gl_checkpass = 0;
+                        bits_in_block = 0;
+                        continue;
+                    } else {
+                        std::cout << "[Gerbicz Li] Check passed\n";
+                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); }
+                        eng->copy(RSAVE_S, RSTATE);
+                        eng->set(RACC_L, 1);
+                        eng->set(RACC_R, 1);
+                        eacc = 0;
+                        blocks_since_check = 0;
+                        gl_checkpass = 0;
+                    }
+                }
+            } else {
+                if (options.gerbiczli) {
+                    eng->copy(RCHK, RSTART);
+                    for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
+                    eng->set(RPOW, 1);
+                    size_t wb = mpz_sizeinbase(wbits.get_mpz_t(), 2);
+                    for (ssize_t k = (ssize_t)wb - 1; k >= 0; --k) {
+                        if (mpz_tstbit(wbits.get_mpz_t(), (size_t)k)) eng->square_mul(RPOW, 3);
+                        else eng->square_mul(RPOW);
+                    }
+                    eng->set_multiplicand(RTMP, RPOW);
+                    eng->mul(RCHK, RTMP);
+                    bool ok0 = eng->is_equal(RCHK, RSTATE);
+                    if (!ok0) {
+                        std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
+                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); }
+                        options.gerbicz_error_count += 1;
+                        eng->copy(RSTATE, RSTART);
+                        i = (mp_bitcnt_t)(i + current_block_len);
+                        wbits = 0;
+                        bits_in_block = 0;
+                        continue;
+                    }
+                }
+            }
+            bits_in_block = 0;
+            wbits = 0;
+        }
+
+        if (options.erroriter > 0 && processed == (uint64_t)options.erroriter && !errordone) {
+            errordone = true;
+            eng->sub(RSTATE, 2);
+            std::cout << "Injected error at iteration " << processed << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << processed; guiServer_->appendLog(oss.str()); }
+        }
 
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
             std::string res64_x;
-            spinner.displayProgress(bits - i, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
+            spinner.displayProgress2(bits - i + 1, bits,
+                         timer.elapsed() + restored_time,
+                         timer2.elapsed(),
+                         options.exponent, bits - i + 1, startIter,
+                         res64_x, guiServer_ ? guiServer_.get() : nullptr);
             timer2.start();
             lastDisplay = now;
-            resumeI = static_cast<uint32_t>(bits - i);
         }
+
         if (options.iterforce > 0 && ((i + 1) % options.iterforce == 0)) {}
     }
+
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
 
     std::string res64_done;
-    spinner.displayProgress(bits, bits, timer.elapsed(), timer2.elapsed(), options.exponent, resumeI, startIter, res64_done, guiServer_ ? guiServer_.get() : nullptr);
+    spinner.displayProgress2(bits, bits,
+                         timer.elapsed() + restored_time,
+                         timer2.elapsed(),
+                         options.exponent, bits, startIter,
+                         res64_done, guiServer_ ? guiServer_.get() : nullptr);
     std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
     if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
-                        guiServer_->appendLog(oss.str());
-        }
-    save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time);
-    
+        std::ostringstream oss;
+        oss  << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+        guiServer_->appendLog(oss.str());
+    }
+    save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time,
+              gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
 
-    engine::digit d(eng, 0);
+    engine::digit d(eng, RSTATE);
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
 
     if (debug) {
@@ -3415,15 +3616,14 @@ int App::runPM1Marin() {
         std::string res2048_hex = format_res2048_hex(words);
         std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
         if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
-                        guiServer_->appendLog(oss.str());
+            std::ostringstream oss;
+            oss  << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
+            guiServer_->appendLog(oss.str());
         }
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X = compute_X_with_dots(words, Mp);
-
 
     if (debug) {
         gmp_printf("[DEBUG] X(before GCD) = 0x%Zx\n", X.get_mpz_t());
@@ -3446,9 +3646,9 @@ int App::runPM1Marin() {
         writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
         if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "\nP-1 factor stage 1 found: " << fstr << std::endl;
-                        guiServer_->appendLog(oss.str());
+            std::ostringstream oss;
+            oss  << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+            guiServer_->appendLog(oss.str());
         }
         options.knownFactors.push_back(std::string(fstr));
         std::free(fstr);
@@ -3457,18 +3657,13 @@ int App::runPM1Marin() {
         writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
         std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
         if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
-                        guiServer_->appendLog(oss.str());
+            std::ostringstream oss;
+            oss  << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+            guiServer_->appendLog(oss.str());
         }
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
-    /*if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Manual submission JSON:\n" << json << "\n";
-                        guiServer_->appendLog(oss.str());
-    }*/
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
@@ -3477,36 +3672,23 @@ int App::runPM1Marin() {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-                        guiServer_->appendLog(oss.str());
-        }
+                std::ostringstream oss;
+                oss  << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                guiServer_->appendLog(oss.str());
+            }
             std::ifstream f(options.worktodo_path);
             std::string l;
             bool more = false;
             while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
             f.close();
-            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Restarting for next entry in worktodo.txt\n";
-                        guiServer_->appendLog(oss.str());
-        }
-        restart_self(argc_, argv_); }
-            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "No more entries in worktodo.txt, exiting.\n";
-                        guiServer_->appendLog(oss.str());
-        }if (!options.gui) {std::exit(0);} }
+            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss  << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
+            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss  << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
         } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n";if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Failed to update " << options.worktodo_path << "\n";
-                        guiServer_->appendLog(oss.str());
-            }
+            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss  << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); }
             if (!options.gui) {std::exit(-1);}
         }
     }
-    delete_checkpoints(options.exponent, options.wagstaff, true, false); 
+    delete_checkpoints(options.exponent, options.wagstaff, true, false);
     delete eng;
     return factorFound ? 0 : 1;
 }

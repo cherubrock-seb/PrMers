@@ -125,6 +125,66 @@ void Spinner::displayProgress(uint64_t iter,
 
 }
 
+void Spinner::displayProgress2(uint64_t iter,
+                              uint64_t totalIters,
+                              double elapsedTime,
+                              double elapsedTime2,
+                              uint64_t expo,
+                              uint64_t resumeIter,
+                              uint64_t startIter,
+                              std::string res64,
+                              ui::WebGuiServer* gui)
+{
+    double pct = totalIters ? (100.0 * (double)iter) / (double)totalIters : 100.0;
+
+    static uint64_t prevIter = 0;
+    static bool     first    = true;
+    uint64_t deltaIter = 0;
+    if (first || iter <= prevIter) {
+        deltaIter = 0;
+        first = false;
+    } else {
+        deltaIter = iter - prevIter;
+    }
+    prevIter = iter;
+
+    double intervalT = (elapsedTime2 > 0.0) ? elapsedTime2 : ((elapsedTime > 0.0) ? elapsedTime : 1.0);
+    double instIPS   = (intervalT > 0.0) ? ((double)deltaIter / intervalT) : 0.0;
+
+    static double smoothedIPS = 0.0;
+    const double alpha = 0.20;
+    if (smoothedIPS == 0.0) {
+        smoothedIPS = (elapsedTime > 0.0) ? ((double)iter / elapsedTime) : instIPS;
+    } else {
+        smoothedIPS = alpha * instIPS + (1.0 - alpha) * smoothedIPS;
+    }
+
+    double remaining = (smoothedIPS > 0.0) ? ((double)(totalIters - iter) / smoothedIPS) : 0.0;
+    uint64_t sec  = (uint64_t)(remaining + 0.5);
+    uint64_t days = sec / 86400; sec %= 86400;
+    uint64_t hrs  = sec / 3600;  sec %= 3600;
+    uint64_t min  = sec / 60;    sec %= 60;
+
+    const char* color = (pct < 50.0) ? COLOR_RED : ((pct < 90.0) ? COLOR_YELLOW : COLOR_GREEN);
+
+    std::ostringstream line;
+    line << "\r" << color
+         << "Progress: "  << std::fixed << std::setprecision(2) << pct << "% | "
+         << "Exp: "       << expo                                << " | "
+         << "Iter: "      << iter                                << " | "
+         << "Elapsed: "   << std::fixed << elapsedTime           << "s | "
+         << "IPS: "       << std::fixed << std::setprecision(2)  << smoothedIPS   << " | "
+         << "ETA: "       << days << "d " << hrs << "h " << min << "m " << sec << "s";
+    if (!res64.empty()) line << " | RES64: " << res64;
+
+    std::cout << line.str() << COLOR_RESET << std::endl;
+
+    if (gui) {
+        gui->setProgress(iter, totalIters, res64);
+        gui->appendLog(line.str());
+    }
+}
+
 
 void Spinner::displayBackupInfo(uint64_t iter,
                                 uint64_t totalIters,
