@@ -3507,8 +3507,8 @@ int App::runPM1Marin() {
                     for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
                     eng->set(RPOW, 1);
                     size_t ebits = mpz_sizeinbase(eacc.get_mpz_t(), 2);
-                    for (ssize_t k = (ssize_t)ebits - 1; k >= 0; --k) {
-                        if (mpz_tstbit(eacc.get_mpz_t(), (size_t)k)) eng->square_mul(RPOW, 3);
+                    for (size_t k = ebits; k-- > 0; ) {
+                        if (mpz_tstbit(eacc.get_mpz_t(), k)) eng->square_mul(RPOW, 3);
                         else eng->square_mul(RPOW);
                     }
                     eng->set_multiplicand(RTMP, RPOW);
@@ -3547,8 +3547,8 @@ int App::runPM1Marin() {
                     for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
                     eng->set(RPOW, 1);
                     size_t wb = mpz_sizeinbase(wbits.get_mpz_t(), 2);
-                    for (ssize_t k = (ssize_t)wb - 1; k >= 0; --k) {
-                        if (mpz_tstbit(wbits.get_mpz_t(), (size_t)k)) eng->square_mul(RPOW, 3);
+                    for (size_t k = wb; k-- > 0; ) {
+                        if (mpz_tstbit(wbits.get_mpz_t(), k)) eng->square_mul(RPOW, 3);
                         else eng->square_mul(RPOW);
                     }
                     eng->set_multiplicand(RTMP, RPOW);
