@@ -3578,7 +3578,7 @@ int App::runPM1Marin() {
         std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : "") << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
         uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
-        double desiredIntervalSeconds = 600.0;
+        double desiredIntervalSeconds = 150.0;
         uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
         auto chunkStart = std::chrono::high_resolution_clock::now();
         bool tunedCheckpass = false;
