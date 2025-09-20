@@ -38,6 +38,7 @@
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
+#include <future>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -2720,7 +2721,10 @@ static bool read_mers_file(const std::string& path, std::vector<uint64_t>& v) {
         return false;
     }
 
-    in.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(uint64_t));
+    //in.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(v.data()),
+        static_cast<std::streamsize>(v.size() * sizeof(uint64_t)));
+
     std::streamsize readBytes = in.gcount();
     if (readBytes < static_cast<std::streamsize>(sizeof(uint64_t))) {
         std::cerr << "Error: file too small: " << path << std::endl;
@@ -3273,6 +3277,50 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
     ticker.join();
     return X;
 }
+static mpz_class product_tree_range_u64(const std::vector<uint64_t>& v, size_t lo, size_t hi, size_t leaf, int par) {
+    size_t n = hi - lo;
+    if (n == 0) return mpz_class(1);
+    if (n <= leaf) {
+        mpz_class r = 1;
+        for (size_t i = lo; i < hi; ++i) {
+            mpz_class t; mpz_set_ui(t.get_mpz_t(), (unsigned long)v[i]);
+            r *= t;
+        }
+        return r;
+    }
+    size_t mid = lo + (n >> 1);
+    if (par > 1) {
+        auto fut = std::async(std::launch::async, [&]{ return product_tree_range_u64(v, lo, mid, leaf, par >> 1); });
+        mpz_class right = product_tree_range_u64(v, mid, hi, leaf, par - (par >> 1));
+        mpz_class left = fut.get();
+        return left * right;
+    } else {
+        mpz_class left  = product_tree_range_u64(v, lo, mid, leaf, 1);
+        mpz_class right = product_tree_range_u64(v, mid, hi, leaf, 1);
+        return left * right;
+    }
+}
+
+static size_t product_prefix_fit_u64(const std::vector<uint64_t>& v, size_t lo, size_t hi, const mpz_class& Ecur, uint64_t maxBits, mpz_class& outProd, size_t leaf, int par) {
+    mpz_class P = product_tree_range_u64(v, lo, hi, leaf, par);
+    mpz_class Etmp = Ecur * P;
+    if (mpz_cmp_ui(Ecur.get_mpz_t(), 1) == 0 || mpz_sizeinbase(Etmp.get_mpz_t(), 2) <= maxBits) { outProd = P; return hi; }
+    if (hi - lo == 1) { outProd = 1; return lo; }
+    size_t mid = lo + ((hi - lo) >> 1);
+    mpz_class Pleft;
+    size_t k = product_prefix_fit_u64(v, lo, mid, Ecur, maxBits, Pleft, leaf, par > 1 ? (par >> 1) : 1);
+    if (k == mid) {
+        mpz_class E2 = Ecur * Pleft;
+        mpz_class Pright;
+        size_t k2 = product_prefix_fit_u64(v, mid, hi, E2, maxBits, Pright, leaf, par > 1 ? (par - (par >> 1)) : 1);
+        outProd = Pleft * Pright;
+        return k2;
+    } else {
+        outProd = Pleft;
+        return k;
+    }
+}
+
 mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& nextStart, bool includeTwo) {
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now(), last = t0;
@@ -3293,20 +3341,36 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
         if (base[i >> 1]) small.push_back(i);
 
     mpz_class E = 1;
+    std::vector<uint64_t> batch;
+    std::vector<uint64_t> batch_primes;
+    batch.reserve(1u << 16);
+    batch_primes.reserve(1u << 16);
+
     if (includeTwo) {
-        mpz_class pw2 = 2;
-        unsigned long lim2 = static_cast<unsigned long>(B1 / 2);
-        mpz_class limit2; mpz_set_ui(limit2.get_mpz_t(), lim2);
-        while (pw2 <= limit2) pw2 *= 2;
-        mpz_class Etmp = E * pw2;
-        if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) <= maxBits || mpz_cmp_ui(E.get_mpz_t(), 1) == 0) E = Etmp;
+        uint64_t pw2 = 2;
+        while (pw2 <= B1 / 2) pw2 <<= 1;
+        batch.push_back(pw2);
+        batch_primes.push_back(2);
     }
 
     const uint64_t span = 1ULL << 24;
     if ((s & 1ULL) == 0) s += 1;
     uint64_t totalOdd = (B1 >= s) ? (((B1 - s) >> 1) + 1) : 0;
-
     std::cout << "Building E-chunk:   0%  ETA  --:--:--" << std::flush;
+
+    auto flush_batch = [&](bool final_segment)->bool{
+        if (batch.empty()) return true;
+        size_t leaf = 16;
+        int par = (int)std::thread::hardware_concurrency(); if (par <= 0) par = 2;
+        mpz_class Pfit;
+        size_t used = product_prefix_fit_u64(batch, 0, batch.size(), E, maxBits, Pfit, leaf, par);
+        E *= Pfit;
+        if (used < batch.size() && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = batch_primes[used]; return false; }
+        batch.clear();
+        batch_primes.clear();
+        if (final_segment && nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
+        return true;
+    };
 
     uint64_t low = s;
     while (low <= B1 && !interrupted) {
@@ -3348,15 +3412,15 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
                 }
                 continue;
             }
-
             uint64_t p = n;
-            mpz_class pw; mpz_set_ui(pw.get_mpz_t(), (unsigned long)p);
-            unsigned long lim1 = static_cast<unsigned long>(B1 / p);
-            mpz_class limit; mpz_set_ui(limit.get_mpz_t(), lim1);
-            while (pw <= limit) pw *= mpz_class((unsigned long)p);
-            mpz_class Etmp = E * pw;
-            if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) > maxBits && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = p; goto done; }
-            E = Etmp;
+            uint64_t pw = p;
+            while (pw <= B1 / p) pw *= p;
+            batch.push_back(pw);
+            batch_primes.push_back(p);
+
+            if (batch.size() >= (1u << 16)) {
+                if (!flush_batch(false)) goto done;
+            }
 
             auto now = clock::now();
             if (now - last >= std::chrono::milliseconds(500)) {
@@ -3376,6 +3440,8 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
             if (interrupted) break;
         }
 
+        if (!flush_batch(false)) goto done;
+
         low = high + 2;
         auto now = clock::now();
         uint64_t progressedOdd = ((low > s) ? (((std::min(low - 2, B1) - s) >> 1) + 1) : 0);
@@ -3392,6 +3458,7 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
     }
 
 done:
+    if (!batch.empty() && nextStart == 0) flush_batch(true);
     if (interrupted) {
         std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
         mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
@@ -3402,6 +3469,7 @@ done:
     if (nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
     return E;
 }
+
 
 
 
