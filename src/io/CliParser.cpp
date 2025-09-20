@@ -92,6 +92,7 @@ void printUsage(const char* progName) {
     std::cout << "  -host <ip|0.0.0.0|localhost> : (Optional) Specify the HTTP host for the GUI server (default: 127.0.0.1)" << std::endl;
     //std::cout << "  -ipv4                 : (Optional) Set the HTTP host to the first IPv4 interface" << std::endl;
     
+    std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 → 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
 
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
