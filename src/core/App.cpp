@@ -3337,28 +3337,39 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
     auto t0 = clock::now(), last = t0;
     nextStart = 0;
     if (B1 < 3) return includeTwo ? mpz_class(2) : mpz_class(1);
+
     uint64_t s = startPrime < 3 ? 3 : (startPrime | 1ULL);
     uint64_t R = (uint64_t)std::sqrt((long double)B1);
     if ((R & 1ULL) == 0) R -= 1;
+
     std::vector<uint8_t> base((R >> 1) + 1, 1);
-    for (uint64_t i = 3; i * i <= R; i += 2) if (base[i >> 1]) for (uint64_t j = i * i; j <= R; j += (i << 1)) base[j >> 1] = 0;
-    std::vector<uint64_t> small;
-    for (uint64_t i = 3; i <= R; i += 2) if (base[i >> 1]) small.push_back(i);
+    for (uint64_t i = 3; i * i <= R; i += 2)
+        if (base[i >> 1])
+            for (uint64_t j = i * i; j <= R; j += (i << 1))
+                base[j >> 1] = 0;
+
+    std::vector<uint64_t> small_primes;
+    for (uint64_t i = 3; i <= R; i += 2)
+        if (base[i >> 1]) small_primes.push_back(i);
+
     mpz_class E = 1;
     std::vector<uint64_t> batch;
     std::vector<uint64_t> batch_primes;
     batch.reserve(1u << 16);
     batch_primes.reserve(1u << 16);
+
     if (includeTwo) {
         uint64_t pw2 = 2;
         while (pw2 <= B1 / 2) pw2 <<= 1;
         batch.push_back(pw2);
         batch_primes.push_back(2);
     }
+
     const uint64_t span = 1ULL << 24;
     if ((s & 1ULL) == 0) s += 1;
     uint64_t totalOdd = (B1 >= s) ? (((B1 - s) >> 1) + 1) : 0;
     std::cout << "Building E-chunk:   0%  ETA  --:--:--" << std::flush;
+
     auto flush_batch = [&](bool final_segment)->bool{
         if (batch.empty()) return true;
         size_t leaf = 16;
@@ -3366,27 +3377,34 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
         mpz_class Pfit;
         size_t used = product_prefix_fit_u64(batch, 0, batch.size(), E, maxBits, Pfit, leaf, par);
         E *= Pfit;
-        if (used < batch.size()) { nextStart = batch_primes[used]; return false; }
+        if (used < batch.size() && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = batch_primes[used]; return false; }
         batch.clear();
         batch_primes.clear();
         if (final_segment && nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
         return true;
     };
+
     uint64_t low = s;
     while (low <= B1 && !interrupted) {
         uint64_t high = low + span - 1;
         if (high > B1) high = B1;
         if ((high & 1ULL) == 0) high -= 1;
         if (high < low) break;
+
         size_t len = size_t(((high - low) >> 1) + 1);
         std::vector<uint8_t> seg(len, 1);
-        for (uint64_t q : small) {
+
+        for (uint64_t q : small_primes) {
             uint64_t q2 = q * q;
             uint64_t start = (q2 > low) ? q2 : ((low + q - 1) / q) * q;
             if ((start & 1ULL) == 0) start += q;
             if (start < low) start += q;
-            for (uint64_t j = start; j <= high; j += (q << 1)) seg[size_t((j - low) >> 1)] = 0;
+            for (uint64_t j = start; j <= high; j += (q << 1)) {
+                size_t idx = size_t((j - low) >> 1);
+                seg[idx] = 0;
+            }
         }
+
         for (uint64_t n = low; n <= high; n += 2) {
             if (!seg[size_t((n - low) >> 1)]) {
                 auto now = clock::now();
@@ -3411,9 +3429,11 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
             while (pw <= B1 / p) pw *= p;
             batch.push_back(pw);
             batch_primes.push_back(p);
+
             if (batch.size() >= (1u << 16)) {
                 if (!flush_batch(false)) goto done;
             }
+
             auto now = clock::now();
             if (now - last >= std::chrono::milliseconds(500)) {
                 uint64_t progressedOdd = ((n >= s) ? (((n - s) >> 1) + 1) : 0);
@@ -3431,7 +3451,9 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
             }
             if (interrupted) break;
         }
+
         if (!flush_batch(false)) goto done;
+
         low = high + 2;
         auto now = clock::now();
         uint64_t progressedOdd = ((low > s) ? (((std::min(low - 2, B1) - s) >> 1) + 1) : 0);
@@ -3446,6 +3468,7 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
                   << std::setw(2) << ss << std::setfill(' ')
                   << std::flush;
     }
+
 done:
     if (!batch.empty() && nextStart == 0) flush_batch(true);
     if (interrupted) {
@@ -3458,6 +3481,7 @@ done:
     if (nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
     return E;
 }
+
 
 int App::runPM1Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 1"; guiServer_->setStatus(oss.str()); }
