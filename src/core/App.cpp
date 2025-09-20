@@ -3273,7 +3273,6 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
     ticker.join();
     return X;
 }
-
 mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& nextStart, bool includeTwo) {
     using clock = std::chrono::steady_clock;
     auto t0 = clock::now(), last = t0;
@@ -3304,24 +3303,24 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
     }
 
     const uint64_t span = 1ULL << 24;
-    uint64_t low = s;
-    if ((low & 1ULL) == 0) low += 1;
-    uint64_t totalRange = (B1 > s) ? (B1 - s + 1) : 1;
+    if ((s & 1ULL) == 0) s += 1;
+    uint64_t totalOdd = (B1 >= s) ? (((B1 - s) >> 1) + 1) : 0;
 
     std::cout << "Building E-chunk:   0%  ETA  --:--:--" << std::flush;
 
+    uint64_t low = s;
     while (low <= B1 && !interrupted) {
         uint64_t high = low + span - 1;
         if (high > B1) high = B1;
-        if (((high - low) & 1ULL) == 1) high -= 1;
+        if ((high & 1ULL) == 0) high -= 1;
         if (high < low) break;
 
         size_t len = size_t(((high - low) >> 1) + 1);
         std::vector<uint8_t> seg(len, 1);
 
         for (uint64_t q : small) {
-            __uint128_t q2 = ( (__uint128_t)q * ( __uint128_t)q );
-            uint64_t start = (q2 > low) ? (uint64_t)q2 : ((low + q - 1) / q) * q;
+            uint64_t q2 = q * q;
+            uint64_t start = (q2 > low) ? q2 : ((low + q - 1) / q) * q;
             if ((start & 1ULL) == 0) start += q;
             if (start < low) start += q;
             for (uint64_t j = start; j <= high; j += (q << 1)) {
@@ -3331,14 +3330,29 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
         }
 
         for (uint64_t n = low; n <= high; n += 2) {
-            if (!seg[size_t((n - low) >> 1)]) continue;
+            if (!seg[size_t((n - low) >> 1)]) {
+                auto now = clock::now();
+                if (now - last >= std::chrono::milliseconds(500)) {
+                    uint64_t progressedOdd = ((n >= s) ? (((n - s) >> 1) + 1) : 0);
+                    double prog = totalOdd ? (double)progressedOdd / (double)totalOdd : 1.0;
+                    double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
+                    long sec = long(eta + 0.5);
+                    int h = int(sec / 3600), m = int((sec % 3600) / 60), ss = int(sec % 60);
+                    std::cout << "\rBuilding E-chunk: " << std::setw(3) << int(prog * 100)
+                              << "%  ETA "
+                              << std::setw(2) << std::setfill('0') << h << ':'
+                              << std::setw(2) << m << ':'
+                              << std::setw(2) << ss << std::setfill(' ')
+                              << std::flush;
+                    last = now;
+                }
+                continue;
+            }
+
             uint64_t p = n;
             mpz_class pw; mpz_set_ui(pw.get_mpz_t(), (unsigned long)p);
-            //uint64_t lim1 = B1 / p;
             unsigned long lim1 = static_cast<unsigned long>(B1 / p);
             mpz_class limit; mpz_set_ui(limit.get_mpz_t(), lim1);
-
-            //mpz_class limit(lim1);
             while (pw <= limit) pw *= mpz_class((unsigned long)p);
             mpz_class Etmp = E * pw;
             if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) > maxBits && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = p; goto done; }
@@ -3346,9 +3360,8 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
 
             auto now = clock::now();
             if (now - last >= std::chrono::milliseconds(500)) {
-                uint64_t progressed = (high - s + 1);
-                if (progressed > totalRange) progressed = totalRange;
-                double prog = double(progressed) / double(totalRange);
+                uint64_t progressedOdd = ((n >= s) ? (((n - s) >> 1) + 1) : 0);
+                double prog = totalOdd ? (double)progressedOdd / (double)totalOdd : 1.0;
                 double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
                 long sec = long(eta + 0.5);
                 int h = int(sec / 3600), m = int((sec % 3600) / 60), ss = int(sec % 60);
@@ -3364,10 +3377,9 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
         }
 
         low = high + 2;
-        uint64_t progressed = (high - s + 1);
-        if (progressed > totalRange) progressed = totalRange;
-        double prog = double(progressed) / double(totalRange);
         auto now = clock::now();
+        uint64_t progressedOdd = ((low > s) ? (((std::min(low - 2, B1) - s) >> 1) + 1) : 0);
+        double prog = totalOdd ? (double)progressedOdd / (double)totalOdd : 1.0;
         double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
         long sec = long(eta + 0.5);
         int h = int(sec / 3600), m = int((sec % 3600) / 60), ss = int(sec % 60);
@@ -3387,10 +3399,10 @@ done:
         interrupted = false;
         return E;
     }
-
     if (nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
     return E;
 }
+
 
 
 
