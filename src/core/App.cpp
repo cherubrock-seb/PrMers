@@ -3398,8 +3398,7 @@ int App::runPM1Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl; guiServer_->appendLog(oss.str()); }
     const double L_est_bits = 1.4426950408889634 * static_cast<double>(B1);
     const uint64_t MAX_E_BITS = options.max_e_bits;
-    std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ "
-          << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
+    std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
@@ -3474,23 +3473,31 @@ int App::runPM1Marin() {
     if (rr == 0) { restored = true; firstChunk = (firstChunk_ck != 0); }
     while (true) {
         bool errordone = false;
+        bool useFast3Candidate = firstChunk;
         uint64_t nextStart = 0;
-        mpz_class Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
+        mpz_class Echunk;
+        if (useFast3Candidate) {
+            uint64_t twoe = 2ULL * (uint64_t)options.exponent;
+            uint64_t extra = 0; { uint64_t t = twoe; while (t) { extra++; t >>= 1; } if (extra == 0) extra = 1; }
+            uint64_t estBits = (uint64_t)std::ceil(L_est_bits) + extra + 8;
+            if (estBits <= MAX_E_BITS) { Echunk = buildE(B1); nextStart = 0; }
+            else { Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk); }
+        } else {
+            Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
+        }
         if (firstChunk) Echunk *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+        bool useFast3 = useFast3Candidate && (nextStart == 0);
         mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
         if (bits == 0) break;
         if (restored && bits_in_chunk_ck) bits = (mp_bitcnt_t)bits_in_chunk_ck;
         chunkIndex = std::max<uint64_t>(chunkIndex, 1);
-        std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl;
-        if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl; guiServer_->appendLog(oss.str()); }
-        //uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
-        //uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : std::max<uint64_t>(1, (bits / B) / (uint64_t)std::sqrt((double)B));
+        std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : "") << std::endl;
+        if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
         uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
         double desiredIntervalSeconds = 600.0;
         uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
         auto chunkStart = std::chrono::high_resolution_clock::now();
         bool tunedCheckpass = false;
-
         uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
         uint64_t lastIter = resumeI;
         uint64_t blocks_since_check = restored ? gl_blocks_since_check_ck : 0;
@@ -3500,7 +3507,6 @@ int App::runPM1Marin() {
         mpz_class wbits = restored ? wbits_ck : 0;
         uint64_t gl_checkpass = restored ? gl_checkpass_ck : 0;
         bool in_lot = restored ? (in_lot_ck != 0) : false;
-        //spinner.displayProgress2(processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits + bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits, "", guiServer_ ? guiServer_.get() : nullptr);
         spinner.displayProgress2(
             processed_total_bits + (restored ? (bits - resumeI) : 0),
             processed_total_bits + bits,
@@ -3517,8 +3523,10 @@ int App::runPM1Marin() {
             bits,
             true
         );
-
-        if (!restored) { if (firstChunk) { eng->set(RBASE, 3); eng->set(RSTATE, 1); } else { eng->copy(RBASE, RSTATE); eng->set(RSTATE, 1); } }
+        if (!restored) {
+            if (firstChunk) { eng->set(RBASE, 3); eng->set(RSTATE, 1); }
+            else { eng->copy(RBASE, RSTATE); eng->set(RSTATE, 1); }
+        }
         for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
             lastIter = i;
             if (interrupted) {
@@ -3557,8 +3565,8 @@ int App::runPM1Marin() {
                 eng->copy(RSTART, RSTATE);
             }
             int b = mpz_tstbit(Echunk.get_mpz_t(), i - 1) ? 1 : 0;
-            eng->square_mul(RSTATE);
-            if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); }
+            if (useFast3) { if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE); }
+            else { eng->square_mul(RSTATE); if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); } }
             wbits <<= 1; if (b) wbits += 1;
             bits_in_block += 1;
             if (options.erroriter > 0 && (resumeI - i + 1) == options.erroriter && !errordone) { errordone = true; eng->sub(RSTATE, 2); std::cout << "Injected error at iteration " << (resumeI - i + 1) << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (resumeI - i + 1); guiServer_->appendLog(oss.str()); } }
@@ -3589,7 +3597,10 @@ int App::runPM1Marin() {
                         for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
                         eng->set(RPOW, 1);
                         size_t eb = mpz_sizeinbase(eacc.get_mpz_t(), 2);
-                        for (size_t k = eb; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(eacc.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        for (size_t k = eb; k-- > 0;) {
+                            if (useFast3) { if (mpz_tstbit(eacc.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); }
+                            else { eng->square_mul(RPOW); if (mpz_tstbit(eacc.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        }
                         eng->set_multiplicand(RTMP, RPOW);
                         eng->mul(RCHK, RTMP);
                         bool ok = eng->is_equal(RCHK, RACC_R);
@@ -3602,7 +3613,10 @@ int App::runPM1Marin() {
                         for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
                         eng->set(RPOW, 1);
                         size_t wb = mpz_sizeinbase(wbits.get_mpz_t(), 2);
-                        for (size_t k = wb; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wbits.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        for (size_t k = wb; k-- > 0;) {
+                            if (useFast3) { if (mpz_tstbit(wbits.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); }
+                            else { eng->square_mul(RPOW); if (mpz_tstbit(wbits.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        }
                         eng->set_multiplicand(RTMP, RPOW);
                         eng->mul(RCHK, RTMP);
                         bool ok0 = eng->is_equal(RCHK, RSTATE);
@@ -3615,7 +3629,6 @@ int App::runPM1Marin() {
             auto now2 = std::chrono::high_resolution_clock::now();
             if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
                 std::string res64_x;
-                //spinner.displayProgress2(processed_total_bits + (bits - i + 1), processed_total_bits + bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits + (bits - i + 1), processed_total_bits, res64_x, guiServer_ ? guiServer_.get() : nullptr);
                 spinner.displayProgress2(
                     processed_total_bits + (bits - i + 1),
                     processed_total_bits + bits,
@@ -3632,7 +3645,6 @@ int App::runPM1Marin() {
                     bits,
                     false
                 );
-
                 timer2.start();
                 lastDisplay = now2;
             }
@@ -3644,11 +3656,14 @@ int App::runPM1Marin() {
             for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK);
             eng->set(RPOW, 1);
             size_t wbl = mpz_sizeinbase(wtail.get_mpz_t(), 2);
-            for (size_t k = wbl; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+            for (size_t k = wbl; k-- > 0;) {
+                if (useFast3) { if (mpz_tstbit(wtail.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); }
+                else { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+            }
             eng->set_multiplicand(RTMP, RPOW);
             eng->mul(RCHK, RTMP);
             bool ok_tail = eng->is_equal(RCHK, RSTATE);
-            if (!ok_tail) { std::cout << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
+            if (!ok_tail) { std::cout << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { if (useFast3) { if (mpz_tstbit(wtail.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); } else { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
             bits_in_block = 0;
             wbits = 0;
         }
@@ -3661,7 +3676,6 @@ int App::runPM1Marin() {
     }
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
     std::string res64_done;
-    //spinner.displayProgress2(processed_total_bits, processed_total_bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits, processed_total_bits, res64_done, guiServer_ ? guiServer_.get() : nullptr);
     spinner.displayProgress2(
         processed_total_bits,
         processed_total_bits,
@@ -3678,7 +3692,6 @@ int App::runPM1Marin() {
         1,
         true
     );
-
     std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl; guiServer_->appendLog(oss.str()); }
     engine::digit d(eng, RSTATE);
@@ -3727,6 +3740,7 @@ int App::runPM1Marin() {
     delete eng;
     return factorFound ? 0 : 1;
 }
+
 
 
 static volatile sig_atomic_t prmers_bench_stop = 0;
