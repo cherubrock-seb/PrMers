@@ -182,7 +182,7 @@ void Spinner::displayProgress2(uint64_t iter,
          << "Iter: "      << iter << " | "
          << "ChIter: "    << chunkIter << " | "
          << "Elapsed: "   << std::fixed << elapsedTime << "s | "
-         << "IPS: "       << std::fixed << std::setprecision(2)  << smoothedIPS   << " | "
+         << "IPS: "       << std::fixed << std::setprecision(2)  << instIPS   << " | "
          << "ETA: "       << days << "d " << hrs << "h " << min << "m " << sec << "s";
     if (!res64.empty()) line << " | RES64: " << res64;
 
