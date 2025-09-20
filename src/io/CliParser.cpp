@@ -255,6 +255,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-iterforce2") == 0 && i + 1 < argc) {
             opts.iterforce2 = std::atoi(argv[++i]);
         }
+        else if (std::strcmp(argv[i], "-maxe") == 0 && i + 1 < argc) {
+            uint64_t mb = std::strtoull(argv[i + 1], nullptr, 10);
+            opts.max_e_bits = (mb == 0 ? 10000ULL : (mb << 23));
+            ++i;
+        }
         else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
             opts.max_local_size2 = std::atoi(argv[++i]);
         }

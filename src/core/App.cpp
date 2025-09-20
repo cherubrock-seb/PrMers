@@ -3273,48 +3273,150 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
     return X;
 }
 
-int App::runPM1Marin() {
-    if (guiServer_) {
-        std::ostringstream oss;
-        oss << "P-1 factoring stage 1";
-        guiServer_->setStatus(oss.str());
+mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& nextStart, bool includeTwo) {
+    using clock = std::chrono::steady_clock;
+    auto t0 = clock::now(), last = t0;
+    nextStart = 0;
+    if (B1 < 3) return includeTwo ? mpz_class(2) : mpz_class(1);
+
+    uint64_t s = startPrime < 3 ? 3 : (startPrime | 1ULL);
+    uint64_t R = (uint64_t)std::sqrt((long double)B1);
+    if ((R & 1ULL) == 0) R -= 1;
+
+    std::vector<uint8_t> base((R >> 1) + 1, 1);
+    for (uint64_t i = 3; i * i <= R; i += 2)
+        if (base[i >> 1])
+            for (uint64_t j = i * i; j <= R; j += (i << 1))
+                base[j >> 1] = 0;
+    std::vector<uint64_t> small;
+    for (uint64_t i = 3; i <= R; i += 2)
+        if (base[i >> 1]) small.push_back(i);
+
+    mpz_class E = 1;
+    if (includeTwo) {
+        mpz_class pw2 = 2;
+        uint64_t lim2 = B1 / 2;
+        mpz_class limit2(lim2);
+        while (pw2 <= limit2) pw2 *= 2;
+        mpz_class Etmp = E * pw2;
+        if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) <= maxBits || mpz_cmp_ui(E.get_mpz_t(), 1) == 0) E = Etmp;
     }
+
+    const uint64_t span = 1ULL << 24;
+    uint64_t low = s;
+    if ((low & 1ULL) == 0) low += 1;
+    uint64_t totalRange = (B1 > s) ? (B1 - s + 1) : 1;
+
+    std::cout << "Building E-chunk:   0%  ETA  --:--:--" << std::flush;
+
+    while (low <= B1 && !interrupted) {
+        uint64_t high = low + span - 1;
+        if (high > B1) high = B1;
+        if (((high - low) & 1ULL) == 1) high -= 1;
+        if (high < low) break;
+
+        size_t len = size_t(((high - low) >> 1) + 1);
+        std::vector<uint8_t> seg(len, 1);
+
+        for (uint64_t q : small) {
+            __uint128_t q2 = ( (__uint128_t)q * ( __uint128_t)q );
+            uint64_t start = (q2 > low) ? (uint64_t)q2 : ((low + q - 1) / q) * q;
+            if ((start & 1ULL) == 0) start += q;
+            if (start < low) start += q;
+            for (uint64_t j = start; j <= high; j += (q << 1)) {
+                size_t idx = size_t((j - low) >> 1);
+                seg[idx] = 0;
+            }
+        }
+
+        for (uint64_t n = low; n <= high; n += 2) {
+            if (!seg[size_t((n - low) >> 1)]) continue;
+            uint64_t p = n;
+            mpz_class pw; mpz_set_ui(pw.get_mpz_t(), (unsigned long)p);
+            uint64_t lim1 = B1 / p;
+            mpz_class limit(lim1);
+            while (pw <= limit) pw *= mpz_class((unsigned long)p);
+            mpz_class Etmp = E * pw;
+            if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) > maxBits && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = p; goto done; }
+            E = Etmp;
+
+            auto now = clock::now();
+            if (now - last >= std::chrono::milliseconds(500)) {
+                uint64_t progressed = (high - s + 1);
+                if (progressed > totalRange) progressed = totalRange;
+                double prog = double(progressed) / double(totalRange);
+                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
+                long sec = long(eta + 0.5);
+                int h = int(sec / 3600), m = int((sec % 3600) / 60), ss = int(sec % 60);
+                std::cout << "\rBuilding E-chunk: " << std::setw(3) << int(prog * 100)
+                          << "%  ETA "
+                          << std::setw(2) << std::setfill('0') << h << ':'
+                          << std::setw(2) << m << ':'
+                          << std::setw(2) << ss << std::setfill(' ')
+                          << std::flush;
+                last = now;
+            }
+            if (interrupted) break;
+        }
+
+        low = high + 2;
+        uint64_t progressed = (high - s + 1);
+        if (progressed > totalRange) progressed = totalRange;
+        double prog = double(progressed) / double(totalRange);
+        auto now = clock::now();
+        double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
+        long sec = long(eta + 0.5);
+        int h = int(sec / 3600), m = int((sec % 3600) / 60), ss = int(sec % 60);
+        std::cout << "\rBuilding E-chunk: " << std::setw(3) << int(prog * 100)
+                  << "%  ETA "
+                  << std::setw(2) << std::setfill('0') << h << ':'
+                  << std::setw(2) << m << ':'
+                  << std::setw(2) << ss << std::setfill(' ')
+                  << std::flush;
+    }
+
+done:
+    if (interrupted) {
+        std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
+        mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
+        std::cout << "\nlog2(E) ≈ " << bits << " bits" << std::endl;
+        interrupted = false;
+        return E;
+    }
+
+    if (nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
+    return E;
+}
+
+
+
+int App::runPM1Marin() {
+    if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 1"; guiServer_->setStatus(oss.str()); }
     bool debug = false;
     uint64_t B1 = options.B1;
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
-    if (guiServer_) {
-        std::ostringstream oss;
-        oss  << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
-        guiServer_->appendLog(oss.str());
-    }
-
-    mpz_class E = buildE(B1);
-    E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
-    mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
-
+    if (guiServer_) { std::ostringstream oss; oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl; guiServer_->appendLog(oss.str()); }
+    const double L_est_bits = 1.4426950408889634 * static_cast<double>(B1);
+    const uint64_t MAX_E_BITS = options.max_e_bits;
+    std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ "
+          << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
+    uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(10), static_cast<size_t>(options.device_id), verbose);
-
-    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9;
-
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(11), static_cast<size_t>(options.device_id), verbose);
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9, RBASE=10;
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
-
-    uint32_t resumeI = 0;
-    double restored_time = 0.0;
-    uint64_t gl_checkpass = 0;
-    uint64_t gl_blocks_since_check = 0;
-    uint64_t gl_bits_in_block = 0;
-    uint64_t gl_current_block_len = 0;
-    uint8_t  gl_in_lot = 0;
-    mpz_class gl_eacc = 0;
-    mpz_class gl_wbits = 0;
-
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits)->int{
+    auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
+        std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
+    };
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 3) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
@@ -3323,369 +3425,284 @@ int App::runPM1Marin() {
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
         if (!eng->set_checkpoint(data)) return -2;
-        if (version == 1) {
-            if (!f.check_crc32()) return -2;
-            chk = 0; blks = 0; bib = 0; cbl = 0; inlot = 0; ceacc = 0; cwbits = 0;
-            return 0;
-        } else if (version == 2) {
-            if (!f.read(reinterpret_cast<char*>(&chk), sizeof(chk))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&blks), sizeof(blks))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&bib), sizeof(bib))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&cbl), sizeof(cbl))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
-            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
-            std::string eacc_hex; eacc_hex.resize(eacc_len);
-            if (eacc_len && !f.read(eacc_hex.data(), eacc_len)) return -2;
-            if (eacc_len) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
-            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
-            std::string wbits_hex; wbits_hex.resize(wbits_len);
-            if (wbits_len && !f.read(wbits_hex.data(), wbits_len)) return -2;
-            if (wbits_len) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
-            if (!f.check_crc32()) return -2;
-            return 0;
-        } else {
-            return -2;
-        }
+        if (!f.read(reinterpret_cast<char*>(&chk), sizeof(chk))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&blks), sizeof(blks))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&bib), sizeof(bib))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&cbl), sizeof(cbl))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+        uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+        std::string eacc_hex; eacc_hex.resize(eacc_len);
+        if (eacc_len && !f.read(eacc_hex.data(), eacc_len)) return -2;
+        if (eacc_len) mpz_set_str(ceacc.get_mpz_t(), eacc_hex.c_str(), 16); else ceacc = 0;
+        uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+        std::string wbits_hex; wbits_hex.resize(wbits_len);
+        if (wbits_len && !f.read(wbits_hex.data(), wbits_len)) return -2;
+        if (wbits_len) mpz_set_str(cwbits.get_mpz_t(), wbits_hex.c_str(), 16); else cwbits = 0;
+        if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
     };
-
-    auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits){
-        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-        {
-            File f(newf, "wb");
-            int version = 2;
-            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
-            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
-            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
-            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
-            const size_t cksz = eng->get_checkpoint_size();
-            std::vector<char> data(cksz);
-            if (!eng->get_checkpoint(data)) return;
-            if (!f.write(data.data(), cksz)) return;
-            if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return;
-            if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return;
-            if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return;
-            if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return;
-            if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return;
-            char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t());
-            uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0;
-            if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; }
-            if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; }
-            if (eacc_hex_c) std::free(eacc_hex_c);
-            char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t());
-            uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0;
-            if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; }
-            if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; }
-            if (wbits_hex_c) std::free(wbits_hex_c);
-            f.write_crc32();
-        }
-        std::error_code ec;
-        fs::remove(oldf, ec);
-        fs::rename(ckpt_file, oldf, ec);
-        fs::rename(ckpt_file + ".new", ckpt_file, ec);
-        fs::remove(oldf, ec);
-    };
-
-    if (read_ckpt(ckpt_file, resumeI, restored_time, gl_checkpass, gl_blocks_since_check, gl_bits_in_block, gl_current_block_len, gl_in_lot, gl_eacc, gl_wbits) != 0) {
-        eng->set(RSTATE, 1);
-        resumeI = static_cast<uint32_t>(bits);
-        eng->set(RACC_L, 1);
-        eng->set(RACC_R, 1);
-        eng->copy(RSTART, RSTATE);
-        eng->copy(RSAVE_S, RSTATE);
-        eng->copy(RSAVE_L, RACC_L);
-        eng->copy(RSAVE_R, RACC_R);
-        gl_checkpass = 0;
-        gl_blocks_since_check = 0;
-        gl_bits_in_block = 0;
-        gl_current_block_len = 0;
-        gl_in_lot = 0;
-        gl_eacc = 0;
-        gl_wbits = 0;
-    }
-
     timer.start();
     timer2.start();
     auto start_clock = std::chrono::high_resolution_clock::now();
     auto lastDisplay = start_clock;
     auto lastBackup = start_clock;
     interrupted.store(false, std::memory_order_relaxed);
+    eng->set(RSTATE, 1);
+    eng->set(RACC_L, 1);
+    eng->set(RACC_R, 1);
+    eng->copy(RSTART, RSTATE);
+    eng->copy(RSAVE_S, RSTATE);
+    eng->copy(RSAVE_L, RACC_L);
+    eng->copy(RSAVE_R, RACC_R);
+    uint64_t chunkIndex = 0;
+    uint64_t startPrime = 3;
+    bool firstChunk = true;
+    uint64_t processed_total_bits = 0;
+    uint32_t resumeI_ck = 0;
+    double restored_time = 0.0;
+    uint64_t gl_checkpass_ck = 0, gl_blocks_since_check_ck = 0, gl_bits_in_block_ck = 0, gl_current_block_len_ck = 0, bits_in_chunk_ck = 0;
+    uint8_t in_lot_ck = 0, firstChunk_ck = 1;
+    mpz_class eacc_ck = 0, wbits_ck = 0;
+    bool restored = false;
+    int rr = read_ckpt(ckpt_file, resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
+    if (rr < 0) rr = read_ckpt(ckpt_file + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
+    if (rr == 0) { restored = true; firstChunk = (firstChunk_ck != 0); }
+    while (true) {
+        bool errordone = false;
+        uint64_t nextStart = 0;
+        mpz_class Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
+        if (firstChunk) Echunk *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+        mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
+        if (bits == 0) break;
+        if (restored && bits_in_chunk_ck) bits = (mp_bitcnt_t)bits_in_chunk_ck;
+        chunkIndex = std::max<uint64_t>(chunkIndex, 1);
+        std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl;
+        if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl; guiServer_->appendLog(oss.str()); }
+        uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
+        uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : std::max<uint64_t>(1, (bits / B) / (uint64_t)std::sqrt((double)B));
+        uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
+        uint64_t lastIter = resumeI;
+        uint64_t blocks_since_check = restored ? gl_blocks_since_check_ck : 0;
+        uint64_t bits_in_block = restored ? gl_bits_in_block_ck : 0;
+        uint64_t current_block_len = restored && gl_current_block_len_ck ? gl_current_block_len_ck : (((uint64_t)((resumeI - 1) % B)) + 1);
+        mpz_class eacc = restored ? eacc_ck : 0;
+        mpz_class wbits = restored ? wbits_ck : 0;
+        uint64_t gl_checkpass = restored ? gl_checkpass_ck : 0;
+        bool in_lot = restored ? (in_lot_ck != 0) : false;
+        //spinner.displayProgress2(processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits + bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits, "", guiServer_ ? guiServer_.get() : nullptr);
+        spinner.displayProgress2(
+    processed_total_bits + (restored ? (bits - resumeI) : 0),
+    processed_total_bits + bits,
+    timer.elapsed() + restored_time,
+    timer2.elapsed(),
+    options.exponent,
+    processed_total_bits + (restored ? (bits - resumeI) : 0),
+    processed_total_bits,
+    "",
+    guiServer_ ? guiServer_.get() : nullptr,
+    chunkIndex,
+    estChunks,
+    (restored ? (bits - resumeI) : 0),
+    bits,
+    true
+);
 
-    uint64_t startIter = resumeI;
-    uint64_t lastIter = resumeI;
-    spinner.displayProgress2(bits - resumeI, bits,
-                            timer.elapsed() + restored_time,
-                            timer2.elapsed(),
-                            options.exponent, bits - resumeI, resumeI,
-                            "", guiServer_ ? guiServer_.get() : nullptr);
-
-    uint64_t L = bits;
-    uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)L));
-    double desiredIntervalSeconds = 600.0;
-    uint64_t checkpasslevel_auto = (uint64_t)((1000.0 * desiredIntervalSeconds) / (double)B);
-    if (checkpasslevel_auto == 0) checkpasslevel_auto = (L / B) / (uint64_t)std::sqrt((double)B);
-    uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : checkpasslevel_auto;
-    if (checkpass == 0) checkpass = 1;
-
-    mpz_class eacc = gl_eacc;
-    mpz_class wbits = gl_wbits;
-    uint64_t blocks_since_check = gl_blocks_since_check;
-    uint64_t processed = 0;
-    bool errordone = false;
-    bool in_lot = gl_in_lot != 0;
-    uint64_t bits_in_block = gl_bits_in_block;
-    uint64_t current_block_len = gl_current_block_len;
-
-    if (bits_in_block == 0) current_block_len = ((uint64_t)((resumeI - 1) % B)) + 1;
-
-    for (mp_bitcnt_t i = resumeI; i > 0; --i) {
-        lastIter = i;
-
-        if (interrupted) {
-            std::cout << "\nInterrupted signal received\n " << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss  << "\nInterrupted signal received\n " << std::endl; guiServer_->appendLog(oss.str()); }
-            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time,
-                      gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
-            delete eng;
-            std::cout << "\nInterrupted by user, state saved at iteration " << lastIter << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss  << "\nInterrupted by user, state saved at iteration " << lastIter << std::endl; guiServer_->appendLog(oss.str()); }
-            return 0;
-        }
-
-        auto now = std::chrono::high_resolution_clock::now();
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
-            save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(now - start_clock).count() + restored_time,
-                      gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
-            lastBackup = now;
-        }
-
-        if (bits_in_block == 0) {
-            current_block_len = ((uint64_t)((i - 1) % B)) + 1;
-            if (current_block_len == B) {
-                if (gl_checkpass == 0 && blocks_since_check == 0 && wbits == 0 && eacc == 0) {
-                    eng->set(RACC_L, 1);
-                    eng->set(RACC_R, 1);
-                    eng->copy(RSAVE_S, RSTATE);
-                    eng->set(RSAVE_L, 1);
-                    eng->set(RSAVE_R, 1);
+        if (!restored) { if (firstChunk) { eng->set(RBASE, 3); eng->set(RSTATE, 1); } else { eng->copy(RBASE, RSTATE); eng->set(RSTATE, 1); } }
+        for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
+            lastIter = i;
+            if (interrupted) {
+                if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted signal received\n "; guiServer_->appendLog(oss.str()); }
+                save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
+                delete eng;
+                return 0;
+            }
+            auto now = std::chrono::high_resolution_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
+                save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(now - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
+                lastBackup = now;
+            }
+            if (bits_in_block == 0) {
+                current_block_len = ((uint64_t)((i - 1) % B)) + 1;
+                if (current_block_len == B) {
+                    if (gl_checkpass == 0 && blocks_since_check == 0 && wbits == 0 && eacc == 0) {
+                        eng->set(RACC_L, 1);
+                        eng->set(RACC_R, 1);
+                        eng->copy(RSAVE_S, RSTATE);
+                        eng->set(RSAVE_L, 1);
+                        eng->set(RSAVE_R, 1);
+                        eacc = 0;
+                        blocks_since_check = 0;
+                        wbits = 0;
+                        in_lot = true;
+                    }
+                } else {
+                    in_lot = false;
+                    gl_checkpass = 0;
                     eacc = 0;
                     blocks_since_check = 0;
                     wbits = 0;
-                    in_lot = true;
                 }
-            } else {
-                in_lot = false;
-                gl_checkpass = 0;
-                eacc = 0;
-                blocks_since_check = 0;
+                eng->copy(RSTART, RSTATE);
+            }
+            int b = mpz_tstbit(Echunk.get_mpz_t(), i - 1) ? 1 : 0;
+            eng->square_mul(RSTATE);
+            if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); }
+            wbits <<= 1; if (b) wbits += 1;
+            bits_in_block += 1;
+            if (options.erroriter > 0 && (resumeI - i + 1) == options.erroriter && !errordone) { errordone = true; eng->sub(RSTATE, 2); std::cout << "Injected error at iteration " << (resumeI - i + 1) << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (resumeI - i + 1); guiServer_->appendLog(oss.str()); } }
+            bool end_block = (bits_in_block == current_block_len);
+            if (end_block) {
+                if (current_block_len == B) {
+                    eng->set_multiplicand(RTMP, RSTART);
+                    eng->mul(RACC_L, RTMP);
+                    eng->set_multiplicand(RTMP, RSTATE);
+                    eng->mul(RACC_R, RTMP);
+                    eacc += wbits;
+                    blocks_since_check += 1;
+                    gl_checkpass += 1;
+                    bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
+                    if (doCheck) {
+                        eng->copy(RCHK, RACC_L);
+                        for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
+                        eng->set(RPOW, 1);
+                        size_t eb = mpz_sizeinbase(eacc.get_mpz_t(), 2);
+                        for (size_t k = eb; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(eacc.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        eng->set_multiplicand(RTMP, RPOW);
+                        eng->mul(RCHK, RTMP);
+                        bool ok = eng->is_equal(RCHK, RACC_R);
+                        if (!ok) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSAVE_S); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eng->copy(RSTART, RSTATE); i = (mp_bitcnt_t)(i + blocks_since_check * B); eacc = 0; blocks_since_check = 0; wbits = 0; gl_checkpass = 0; bits_in_block = 0; continue; }
+                        else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
+                    }
+                } else {
+                    if (options.gerbiczli) {
+                        eng->copy(RCHK, RSTART);
+                        for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
+                        eng->set(RPOW, 1);
+                        size_t wb = mpz_sizeinbase(wbits.get_mpz_t(), 2);
+                        for (size_t k = wb; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wbits.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+                        eng->set_multiplicand(RTMP, RPOW);
+                        eng->mul(RCHK, RTMP);
+                        bool ok0 = eng->is_equal(RCHK, RSTATE);
+                        if (!ok0) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSTART); i = (mp_bitcnt_t)(i + current_block_len); wbits = 0; bits_in_block = 0; continue; }
+                    }
+                }
+                bits_in_block = 0;
                 wbits = 0;
             }
-            eng->copy(RSTART, RSTATE);
-            if (wbits == 0) wbits = 0;
-        }
-        if (options.erroriter > 0 && processed == (uint64_t)options.erroriter && !errordone) {
-            errordone = true;
-            eng->sub(RSTATE, 2);
-            std::cout << "Injected error at iteration " << processed << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << processed; guiServer_->appendLog(oss.str()); }
-        }
+            auto now2 = std::chrono::high_resolution_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
+                std::string res64_x;
+                //spinner.displayProgress2(processed_total_bits + (bits - i + 1), processed_total_bits + bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits + (bits - i + 1), processed_total_bits, res64_x, guiServer_ ? guiServer_.get() : nullptr);
+                spinner.displayProgress2(
+                    processed_total_bits + (bits - i + 1),
+                    processed_total_bits + bits,
+                    timer.elapsed() + restored_time,
+                    timer2.elapsed(),
+                    options.exponent,
+                    processed_total_bits + (bits - i + 1),
+                    processed_total_bits,
+                    res64_x,
+                    guiServer_ ? guiServer_.get() : nullptr,
+                    chunkIndex,
+                    estChunks,
+                    (bits - i + 1),
+                    bits,
+                    false
+                );
 
-        int b = mpz_tstbit(E.get_mpz_t(), i - 1) ? 1 : 0;
-        if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE);
-        processed += 1;
-        wbits <<= 1;
-        if (b) wbits += 1;
-        bits_in_block += 1;
-
-        bool end_block = (bits_in_block == current_block_len);
-        if (end_block) {
-            if (current_block_len == B) {
-                eng->set_multiplicand(RTMP, RSTART);
-                eng->mul(RACC_L, RTMP);
-                eng->set_multiplicand(RTMP, RSTATE);
-                eng->mul(RACC_R, RTMP);
-                eacc += wbits;
-                blocks_since_check += 1;
-                gl_checkpass += 1;
-
-                bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
-                if (doCheck) {
-                    eng->copy(RCHK, RACC_L);
-                    for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
-                    eng->set(RPOW, 1);
-                    size_t ebits = mpz_sizeinbase(eacc.get_mpz_t(), 2);
-                    for (size_t k = ebits; k-- > 0; ) {
-                        if (mpz_tstbit(eacc.get_mpz_t(), k)) eng->square_mul(RPOW, 3);
-                        else eng->square_mul(RPOW);
-                    }
-                    eng->set_multiplicand(RTMP, RPOW);
-                    eng->mul(RCHK, RTMP);
-                    bool ok = eng->is_equal(RCHK, RACC_R);
-                    if (!ok) {
-                        std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
-                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); }
-                        options.gerbicz_error_count += 1;
-                        eng->copy(RSTATE, RSAVE_S);
-                        eng->set(RACC_L, 1);
-                        eng->set(RACC_R, 1);
-                        eng->copy(RSTART, RSTATE);
-                        i = (mp_bitcnt_t)(i + blocks_since_check * B);
-                        processed -= blocks_since_check * B;
-                        eacc = 0;
-                        blocks_since_check = 0;
-                        wbits = 0;
-                        gl_checkpass = 0;
-                        bits_in_block = 0;
-                        continue;
-                    } else {
-                        std::cout << "[Gerbicz Li] Check passed\n";
-                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); }
-                        eng->copy(RSAVE_S, RSTATE);
-                        eng->set(RACC_L, 1);
-                        eng->set(RACC_R, 1);
-                        eacc = 0;
-                        blocks_since_check = 0;
-                        gl_checkpass = 0;
-                    }
-                }
-            } else {
-                if (options.gerbiczli) {
-                    eng->copy(RCHK, RSTART);
-                    for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
-                    eng->set(RPOW, 1);
-                    size_t wb = mpz_sizeinbase(wbits.get_mpz_t(), 2);
-                    for (size_t k = wb; k-- > 0; ) {
-                        if (mpz_tstbit(wbits.get_mpz_t(), k)) eng->square_mul(RPOW, 3);
-                        else eng->square_mul(RPOW);
-                    }
-                    eng->set_multiplicand(RTMP, RPOW);
-                    eng->mul(RCHK, RTMP);
-                    bool ok0 = eng->is_equal(RCHK, RSTATE);
-                    if (!ok0) {
-                        std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
-                        if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); }
-                        options.gerbicz_error_count += 1;
-                        eng->copy(RSTATE, RSTART);
-                        i = (mp_bitcnt_t)(i + current_block_len);
-                        wbits = 0;
-                        bits_in_block = 0;
-                        continue;
-                    }
-                }
+                timer2.start();
+                lastDisplay = now2;
             }
+        }
+        if (bits_in_block != 0 && options.gerbiczli) {
+            mpz_class wtail = wbits;
+            uint64_t bt = bits_in_block;
+            eng->copy(RCHK, RSTART);
+            for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK);
+            eng->set(RPOW, 1);
+            size_t wbl = mpz_sizeinbase(wtail.get_mpz_t(), 2);
+            for (size_t k = wbl; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } }
+            eng->set_multiplicand(RTMP, RPOW);
+            eng->mul(RCHK, RTMP);
+            bool ok_tail = eng->is_equal(RCHK, RSTATE);
+            if (!ok_tail) { std::cout << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Tail check mismatch, recomputing tail\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
             bits_in_block = 0;
             wbits = 0;
         }
-
-       
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
-            std::string res64_x;
-            spinner.displayProgress2(bits - i + 1, bits,
-                         timer.elapsed() + restored_time,
-                         timer2.elapsed(),
-                         options.exponent, bits - i + 1, startIter,
-                         res64_x, guiServer_ ? guiServer_.get() : nullptr);
-            timer2.start();
-            lastDisplay = now;
-        }
-
-        if (options.iterforce > 0 && ((i + 1) % options.iterforce == 0)) {}
+        processed_total_bits += bits;
+        restored = false;
+        firstChunk = false;
+        if (nextStart == 0) break;
+        startPrime = nextStart;
+        chunkIndex += 1;
     }
-
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-
     std::string res64_done;
-    spinner.displayProgress2(bits, bits,
-                         timer.elapsed() + restored_time,
-                         timer2.elapsed(),
-                         options.exponent, bits, startIter,
-                         res64_done, guiServer_ ? guiServer_.get() : nullptr);
-    std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
-    if (guiServer_) {
-        std::ostringstream oss;
-        oss  << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
-        guiServer_->appendLog(oss.str());
-    }
-    save_ckpt(static_cast<uint32_t>(lastIter), std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time,
-              gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits);
+    //spinner.displayProgress2(processed_total_bits, processed_total_bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits, processed_total_bits, res64_done, guiServer_ ? guiServer_.get() : nullptr);
+    spinner.displayProgress2(
+        processed_total_bits,
+        processed_total_bits,
+        timer.elapsed() + restored_time,
+        timer2.elapsed(),
+        options.exponent,
+        processed_total_bits,
+        processed_total_bits,
+        res64_done,
+        guiServer_ ? guiServer_.get() : nullptr,
+        estChunks,
+        estChunks,
+        1,
+        1,
+        true
+    );
 
+    std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl; guiServer_->appendLog(oss.str()); }
     engine::digit d(eng, RSTATE);
     std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
-
-    if (debug) {
-        std::string res64_hex = format_res64_hex(words);
-        std::string res2048_hex = format_res2048_hex(words);
-        std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss  << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl;
-            guiServer_->appendLog(oss.str());
-        }
-    }
-
+    if (debug) { std::string res64_hex = format_res64_hex(words); std::string res2048_hex = format_res2048_hex(words); std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; if (guiServer_) { std::ostringstream oss; oss << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; guiServer_->appendLog(oss.str()); } }
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X = compute_X_with_dots(words, Mp);
-
-    if (debug) {
-        gmp_printf("[DEBUG] X(before GCD) = 0x%Zx\n", X.get_mpz_t());
-    }
-
-    if (options.resume) {
-        writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save",
-                           options.B1, options.exponent, X);
-        convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save",
-                                  "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95");
-    }
-
+    if (debug) gmp_printf("[DEBUG] X(before GCD) = 0x%Zx\n", X.get_mpz_t());
+    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95"); }
     X -= 1;
     mpz_class g = gcd_with_dots(X, Mp);
     bool factorFound = (g != 1) && (g != Mp);
-
     std::string filename = "stage1_result_B1_" + std::to_string(B1) + "_p_" + std::to_string(options.exponent) + ".txt";
     if (factorFound) {
         char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
         std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss  << "\nP-1 factor stage 1 found: " << fstr << std::endl;
-            guiServer_->appendLog(oss.str());
-        }
+        if (guiServer_) { std::ostringstream oss; oss << "\nP-1 factor stage 1 found: " << fstr << std::endl; guiServer_->appendLog(oss.str()); }
         options.knownFactors.push_back(std::string(fstr));
         std::free(fstr);
         std::cout << "\n";
     } else {
         writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
         std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss  << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
-            guiServer_->appendLog(oss.str());
-        }
+        if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
     }
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.appendToResultsTxt(json);
-
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-            if (guiServer_) {
-                std::ostringstream oss;
-                oss  << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-                guiServer_->appendLog(oss.str());
-            }
+            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
             std::ifstream f(options.worktodo_path);
-            std::string l;
-            bool more = false;
-            while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
+            std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
             f.close();
-            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss  << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
-            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss  << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
+            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
+            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
         } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss  << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); }
-            if (!options.gui) {std::exit(-1);}
+            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
         }
     }
     delete_checkpoints(options.exponent, options.wagstaff, true, false);

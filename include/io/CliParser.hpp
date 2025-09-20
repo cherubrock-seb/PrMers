@@ -69,6 +69,7 @@ struct CliOptions {
     int http_port = 3131;
     std::string http_host = "localhost";
     bool ipv4 = true;
+    uint64_t max_e_bits = 268'435'456ULL;
 
 };
 

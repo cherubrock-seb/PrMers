@@ -28,7 +28,12 @@ public:
                        uint64_t resumeIter,
                        uint64_t startIter,
                        std::string res64,
-                       ui::WebGuiServer* gui = nullptr);
+                       ui::WebGuiServer* gui,
+                       uint64_t chunkIndex,
+                       uint64_t chunkCount,
+                       uint64_t chunkIter,
+                       uint64_t chunkTotal,
+                       bool reset);
 
 
   void displayBackupInfo(uint64_t iter,
