@@ -144,6 +144,18 @@ INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 widt
 	return r;
 }
 
+INLINE uint64_4 addc4(const uint64_4 lhs, const uint64_4 rhs, const uint_8_4 width, uint64 * const carry)
+{
+	uint64_4 r;
+	uint64 c = *carry;
+	c += rhs.s0; r.s0 = adc(lhs.s0, width.s0, &c);
+	c += rhs.s1; r.s1 = adc(lhs.s1, width.s1, &c);
+	c += rhs.s2; r.s2 = adc(lhs.s2, width.s2, &c);
+	c += rhs.s3; r.s3 = adc(lhs.s3, width.s3, &c);
+	*carry = c;
+	return r;
+}
+
 // Subtract a carry and return the carry if borrowing
 INLINE uint64 sbc(const uint64 lhs, const uint_8 width, uint32 * const carry)
 {
@@ -1526,7 +1538,7 @@ void mul2048(__global uint64 * restrict const reg, __global const uint64 * restr
 
 // --- carry ---
 
-// Unweight, carry, mul by a, weight (pass 1)
+// Unweight, mul by a, carry (pass 1)
 __kernel
 __attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
 void carry_weight_mul_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,
@@ -1563,9 +1575,48 @@ void carry_weight_mul_p1(__global uint64 * restrict const reg, __global uint64 *
 	}
 }
 
-// Unweight, carry, mul by a, weight (pass 2)
+// Unweight, add, carry (pass 1)
 __kernel
-void carry_weight_mul_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,
+__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
+void carry_weight_add_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,
+	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,
+	const sz_t offset_y, const sz_t offset_x)
+{
+	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);
+	__global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);
+	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);
+	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);
+	__local uint64 cl[CWM_WG_SZ];
+
+	const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;
+
+	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
+
+	const uint64_4 w = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
+	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
+
+	const uint_8_4 wd = width4[gid];
+
+	uint64 c = 0;
+	uint64_4 u = mod_mul4(y[gid], wi); const uint64_4 v = mod_mul4(x[gid], wi);
+	u = addc4(u, v, wd, &c);
+
+	cl[lid] = c;
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);
+	y[gid] = mod_mul4(u, w);
+
+	if (lid == CWM_WG_SZ - 1)
+	{
+		carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;
+	}
+}
+
+// Carry, weight (pass 2)
+__kernel
+void carry_weight_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,
 	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width, const sz_t offset)
 {
 	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);

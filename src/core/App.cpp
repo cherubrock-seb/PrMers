@@ -3253,10 +3253,15 @@ mpz_class gcd_with_dots(const mpz_class& A, const mpz_class& B) {
     return g;
 }
 
-mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_class& Mp) {
+#include <atomic>
+#include <thread>
+#include <chrono>
+
+static mpz_class compute_X_with_dots(engine* eng, engine::Reg reg, const mpz_class& Mp) {
+    using namespace std::chrono;
+
     std::atomic<bool> done{false};
     std::thread ticker([&]{
-        using namespace std::chrono;
         const char* msg = "Constructing and reducing large integer ";
         std::cout << msg << std::flush;
         size_t dots = 0, wrap = 60;
@@ -3267,16 +3272,23 @@ mpz_class compute_X_with_dots(const std::vector<uint32_t>& words, const mpz_clas
         }
         std::cout << " done.\n";
     });
-    mpz_class X = 0;
-    for (int i = (int)words.size() - 1; i >= 0; --i) {
-        X <<= 32;
-        X += words[(size_t)i];
-    }
+
+    mpz_class X(0);
+    mpz_t tmp; mpz_init(tmp);
+    eng->get_mpz(tmp, reg);
+    mpz_set(X.get_mpz_t(), tmp);
+    mpz_clear(tmp);
+
     X %= Mp;
+
     done.store(true, std::memory_order_relaxed);
     ticker.join();
     return X;
 }
+
+
+
+
 static mpz_class product_tree_range_u64(const std::vector<uint64_t>& v, size_t lo, size_t hi, size_t leaf, int par) {
     size_t n = hi - lo;
     if (n == 0) return mpz_class(1);
@@ -3779,10 +3791,11 @@ int App::runPM1Marin() {
     std::cout << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "Elapsed time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl; guiServer_->appendLog(oss.str()); }
     engine::digit d(eng, RSTATE);
-    std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
-    if (debug) { std::string res64_hex = format_res64_hex(words); std::string res2048_hex = format_res2048_hex(words); std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; if (guiServer_) { std::ostringstream oss; oss << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; guiServer_->appendLog(oss.str()); } }
+    //std::vector<uint32_t> words = pack_words_from_eng_digits(d, p);
+    //if (debug) { std::string res64_hex = format_res64_hex(words); std::string res2048_hex = format_res2048_hex(words); std::cout << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; if (guiServer_) { std::ostringstream oss; oss << "[DEBUG] res64=" << res64_hex << " res2048=" << res2048_hex << std::endl; guiServer_->appendLog(oss.str()); } }
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-    mpz_class X = compute_X_with_dots(words, Mp);
+    mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RSTATE), Mp);
+
     if (debug) gmp_printf("[DEBUG] X(before GCD) = 0x%Zx\n", X.get_mpz_t());
     if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95"); }
     X -= 1;

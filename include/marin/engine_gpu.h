@@ -61,7 +61,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_mul_p2 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1, _carry_weight_p2 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -314,7 +314,8 @@ public:
 		// }
 
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1);
-		CREATE_KERNEL_CARRY(carry_weight_mul_p2);
+		CREATE_KERNEL_CARRY(carry_weight_add_p1);
+		CREATE_KERNEL_CARRY(carry_weight_p2);
 
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
@@ -464,8 +465,19 @@ public:
 		_set_kernel_arg(_carry_weight_mul_p1, 4, sizeof(uint32), &a);
 		_set_kernel_arg(_carry_weight_mul_p1, 5, sizeof(uint32), &offset);
 		_execute_kernel(_carry_weight_mul_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_mul_p2, 4, sizeof(uint32), &offset);
-		_execute_kernel(_carry_weight_mul_p2, (_n / 4) >> _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset);
+		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
+	}
+
+	void carry_weight_add(const size_t dst, const size_t src)
+	{
+		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		_set_kernel_arg(_carry_weight_add_p1, 4, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_add_p1, 5, sizeof(uint32), &offset_x);
+		_execute_kernel(_carry_weight_add_p1, _n / 4, 1u << _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
+		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
+
 	}
 
 	void copy(const size_t dst, const size_t src)
@@ -578,10 +590,26 @@ public:
 		_gpu->write_reg(x.data(), size_t(dst));
 	}
 
+	void set(const Reg dst, uint64 * const d) const override
+	{
+		const size_t n = _n;
+		const uint64 * const weight = _weight.data();
+
+		// weight
+		std::vector<uint64> x(n);
+		for (size_t k = 0; k < n; ++k)
+		{
+			const uint64 w = weight[2 * (k / 4 + (k % 4) * (n / 4)) + 0];
+			x[k] = mod_mul(uint32(d[k]), w);
+		}
+
+		_gpu->write_reg(x.data(), size_t(dst));
+	}
+
 	void get(uint64 * const d, const Reg src) const override
 	{
 		const size_t n = _n;
-		const uint64 * const w = _weight.data();
+		const uint64 * const weight = _weight.data();
 		const uint8 * const width = _digit_width.data();
 
 		_gpu->read_reg(d, size_t(src));
@@ -590,7 +618,7 @@ public:
 		uint64 c = 0;
 		for (size_t k = 0; k < n; ++k)
 		{
-			const uint64 wi = w[2 * (k / 4 + (k % 4) * (n / 4)) + 1];
+			const uint64 wi = weight[2 * (k / 4 + (k % 4) * (n / 4)) + 1];
 			d[k] = adc(mod_mul(d[k], wi), width[k], c);
 		} 
 
@@ -747,7 +775,7 @@ public:
 		}
 	}
 
-	void mul(const Reg rdst, const Reg rsrc) const override
+	void mul(const Reg rdst, const Reg rsrc, const uint32 a = 1) const override
 	{
 		const size_t n = _n, dst = size_t(rdst), src = size_t(rsrc);
 
@@ -805,10 +833,15 @@ public:
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
 
-		_gpu->carry_weight_mul(dst, 1);
+		_gpu->carry_weight_mul(dst, a);
 	}
 
 	void sub(const Reg src, const uint32 a) const override { _gpu->subtract(size_t(src), a); }
+
+	void add(const Reg dst, const Reg src) const override
+	{
+		_gpu->carry_weight_add(dst, src);
+	}
 
 	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
 

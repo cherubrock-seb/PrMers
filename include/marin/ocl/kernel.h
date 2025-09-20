@@ -154,6 +154,18 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
+"INLINE uint64_4 addc4(const uint64_4 lhs, const uint64_4 rhs, const uint_8_4 width, uint64 * const carry)\n" \
+"{\n" \
+"	uint64_4 r;\n" \
+"	uint64 c = *carry;\n" \
+"	c += rhs.s0; r.s0 = adc(lhs.s0, width.s0, &c);\n" \
+"	c += rhs.s1; r.s1 = adc(lhs.s1, width.s1, &c);\n" \
+"	c += rhs.s2; r.s2 = adc(lhs.s2, width.s2, &c);\n" \
+"	c += rhs.s3; r.s3 = adc(lhs.s3, width.s3, &c);\n" \
+"	*carry = c;\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
 "// Subtract a carry and return the carry if borrowing\n" \
 "INLINE uint64 sbc(const uint64 lhs, const uint_8 width, uint32 * const carry)\n" \
 "{\n" \
@@ -1536,7 +1548,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// --- carry ---\n" \
 "\n" \
-"// Unweight, carry, mul by a, weight (pass 1)\n" \
+"// Unweight, mul by a, carry (pass 1)\n" \
 "__kernel\n" \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_mul_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
@@ -1573,9 +1585,48 @@ static const char * const src_ocl_kernel = \
 "	}\n" \
 "}\n" \
 "\n" \
-"// Unweight, carry, mul by a, weight (pass 2)\n" \
+"// Unweight, add, carry (pass 1)\n" \
 "__kernel\n" \
-"void carry_weight_mul_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
+"__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
+"void carry_weight_add_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
+"	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
+"	const sz_t offset_y, const sz_t offset_x)\n" \
+"{\n" \
+"	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);\n" \
+"	__global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
+"	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"	__local uint64 cl[CWM_WG_SZ];\n" \
+"\n" \
+"	const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"\n" \
+"	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
+"\n" \
+"	const uint64_4 w = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"\n" \
+"	const uint_8_4 wd = width4[gid];\n" \
+"\n" \
+"	uint64 c = 0;\n" \
+"	uint64_4 u = mod_mul4(y[gid], wi); const uint64_4 v = mod_mul4(x[gid], wi);\n" \
+"	u = addc4(u, v, wd, &c);\n" \
+"\n" \
+"	cl[lid] = c;\n" \
+"\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"	u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
+"	y[gid] = mod_mul4(u, w);\n" \
+"\n" \
+"	if (lid == CWM_WG_SZ - 1)\n" \
+"	{\n" \
+"		carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"// Carry, weight (pass 2)\n" \
+"__kernel\n" \
+"void carry_weight_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width, const sz_t offset)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
