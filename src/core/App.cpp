@@ -3483,8 +3483,14 @@ int App::runPM1Marin() {
         chunkIndex = std::max<uint64_t>(chunkIndex, 1);
         std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << std::endl; guiServer_->appendLog(oss.str()); }
+        //uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
+        //uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : std::max<uint64_t>(1, (bits / B) / (uint64_t)std::sqrt((double)B));
         uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
-        uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : std::max<uint64_t>(1, (bits / B) / (uint64_t)std::sqrt((double)B));
+        double desiredIntervalSeconds = 600.0;
+        uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
+        auto chunkStart = std::chrono::high_resolution_clock::now();
+        bool tunedCheckpass = false;
+
         uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
         uint64_t lastIter = resumeI;
         uint64_t blocks_since_check = restored ? gl_blocks_since_check_ck : 0;
@@ -3496,26 +3502,27 @@ int App::runPM1Marin() {
         bool in_lot = restored ? (in_lot_ck != 0) : false;
         //spinner.displayProgress2(processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits + bits, timer.elapsed() + restored_time, timer2.elapsed(), options.exponent, processed_total_bits + (restored ? (bits - resumeI) : 0), processed_total_bits, "", guiServer_ ? guiServer_.get() : nullptr);
         spinner.displayProgress2(
-    processed_total_bits + (restored ? (bits - resumeI) : 0),
-    processed_total_bits + bits,
-    timer.elapsed() + restored_time,
-    timer2.elapsed(),
-    options.exponent,
-    processed_total_bits + (restored ? (bits - resumeI) : 0),
-    processed_total_bits,
-    "",
-    guiServer_ ? guiServer_.get() : nullptr,
-    chunkIndex,
-    estChunks,
-    (restored ? (bits - resumeI) : 0),
-    bits,
-    true
-);
+            processed_total_bits + (restored ? (bits - resumeI) : 0),
+            processed_total_bits + bits,
+            timer.elapsed() + restored_time,
+            timer2.elapsed(),
+            options.exponent,
+            processed_total_bits + (restored ? (bits - resumeI) : 0),
+            processed_total_bits,
+            "",
+            guiServer_ ? guiServer_.get() : nullptr,
+            chunkIndex,
+            estChunks,
+            (restored ? (bits - resumeI) : 0),
+            bits,
+            true
+        );
 
         if (!restored) { if (firstChunk) { eng->set(RBASE, 3); eng->set(RSTATE, 1); } else { eng->copy(RBASE, RSTATE); eng->set(RSTATE, 1); } }
         for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
             lastIter = i;
             if (interrupted) {
+                std::cout << "\nInterrupted by user, state saved at iteration " << i << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted signal received\n "; guiServer_->appendLog(oss.str()); }
                 save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
                 delete eng;
@@ -3565,6 +3572,17 @@ int App::runPM1Marin() {
                     eacc += wbits;
                     blocks_since_check += 1;
                     gl_checkpass += 1;
+                    if (!tunedCheckpass && options.checklevel == 0) {
+                        uint64_t processedChunk = bits - i + 1;
+                        double elapsedChunk = std::chrono::duration<double>(now - chunkStart).count();
+                        if (elapsedChunk > 0.0 && processedChunk >= B) {
+                            double sampleIps = (double)processedChunk / elapsedChunk;
+                            uint64_t checkpasslevel_auto = (uint64_t)((sampleIps * desiredIntervalSeconds) / (double)B);
+                            if (checkpasslevel_auto == 0) checkpasslevel_auto = std::max<uint64_t>(1, (bits / B) / (uint64_t)std::sqrt((double)B));
+                            checkpass = checkpasslevel_auto;
+                            tunedCheckpass = true;
+                        }
+                    }
                     bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
                     if (doCheck) {
                         eng->copy(RCHK, RACC_L);
