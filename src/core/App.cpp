@@ -3482,6 +3482,12 @@ int App::runPM1Marin() {
             eng->copy(RSTART, RSTATE);
             if (wbits == 0) wbits = 0;
         }
+        if (options.erroriter > 0 && processed == (uint64_t)options.erroriter && !errordone) {
+            errordone = true;
+            eng->sub(RSTATE, 2);
+            std::cout << "Injected error at iteration " << processed << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << processed; guiServer_->appendLog(oss.str()); }
+        }
 
         int b = mpz_tstbit(E.get_mpz_t(), i - 1) ? 1 : 0;
         if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE);
@@ -3570,13 +3576,7 @@ int App::runPM1Marin() {
             wbits = 0;
         }
 
-        if (options.erroriter > 0 && processed == (uint64_t)options.erroriter && !errordone) {
-            errordone = true;
-            eng->sub(RSTATE, 2);
-            std::cout << "Injected error at iteration " << processed << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << processed; guiServer_->appendLog(oss.str()); }
-        }
-
+       
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
             std::string res64_x;
             spinner.displayProgress2(bits - i + 1, bits,
