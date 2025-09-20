@@ -2334,7 +2334,8 @@ mpz_class buildE(uint64_t B1) {
     mpz_class E = 1;
     mpz_class pw2 = 2;
     unsigned long lim2 = static_cast<unsigned long>(B1 / 2);
-    mpz_class limit2(lim2);
+    mpz_class limit2; mpz_set_ui(limit2.get_mpz_t(), lim2);
+
     while (pw2 <= limit2) pw2 *= 2;
     E *= pw2;
 
@@ -3295,8 +3296,8 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
     mpz_class E = 1;
     if (includeTwo) {
         mpz_class pw2 = 2;
-        uint64_t lim2 = B1 / 2;
-        mpz_class limit2(lim2);
+        unsigned long lim2 = static_cast<unsigned long>(B1 / 2);
+        mpz_class limit2; mpz_set_ui(limit2.get_mpz_t(), lim2);
         while (pw2 <= limit2) pw2 *= 2;
         mpz_class Etmp = E * pw2;
         if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) <= maxBits || mpz_cmp_ui(E.get_mpz_t(), 1) == 0) E = Etmp;
@@ -3333,8 +3334,11 @@ mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uint64_t& 
             if (!seg[size_t((n - low) >> 1)]) continue;
             uint64_t p = n;
             mpz_class pw; mpz_set_ui(pw.get_mpz_t(), (unsigned long)p);
-            uint64_t lim1 = B1 / p;
-            mpz_class limit(lim1);
+            //uint64_t lim1 = B1 / p;
+            unsigned long lim1 = static_cast<unsigned long>(B1 / p);
+            mpz_class limit; mpz_set_ui(limit.get_mpz_t(), lim1);
+
+            //mpz_class limit(lim1);
             while (pw <= limit) pw *= mpz_class((unsigned long)p);
             mpz_class Etmp = E * pw;
             if (mpz_sizeinbase(Etmp.get_mpz_t(), 2) > maxBits && mpz_cmp_ui(E.get_mpz_t(), 1) != 0) { nextStart = p; goto done; }
