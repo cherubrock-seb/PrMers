@@ -3607,8 +3607,16 @@ int App::runPM1Marin() {
         std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : "") << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
         uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
-        double desiredIntervalSeconds = 150.0;
-        uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
+        double desiredIntervalSeconds = 600.0;
+        uint64_t checkpass = 0;
+        uint64_t checkpasslevel_auto = (uint64_t)((1000 * desiredIntervalSeconds) / (double)B);
+        if (checkpasslevel_auto == 0) checkpasslevel_auto = ((uint64_t)bits/B)/((uint64_t)(std::sqrt((double)B)));
+        uint64_t checkpasslevel = (options.checklevel > 0)
+            ? options.checklevel
+            : checkpasslevel_auto;
+        if(checkpasslevel==0)
+            checkpasslevel=1;
+        //uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
         auto chunkStart = std::chrono::high_resolution_clock::now();
         bool tunedCheckpass = false;
         uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
@@ -3693,7 +3701,7 @@ int App::runPM1Marin() {
                     eacc += wbits;
                     blocks_since_check += 1;
                     gl_checkpass += 1;
-                    if (!tunedCheckpass && options.checklevel == 0) {
+                    /*if (!tunedCheckpass && options.checklevel == 0) {
                         uint64_t processedChunk = bits - i + 1;
                         double elapsedChunk = std::chrono::duration<double>(now - chunkStart).count();
                         if (elapsedChunk > 0.0 && processedChunk >= B) {
@@ -3703,9 +3711,10 @@ int App::runPM1Marin() {
                             checkpass = checkpasslevel_auto;
                             tunedCheckpass = true;
                         }
-                    }
+                    }*/
                     bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
                     if (doCheck) {
+                        std::cout << "[Gerbicz Li] Start a Gerbicz Li check....\n";
                         eng->copy(RCHK, RACC_L);
                         for (uint64_t k = 0; k < B; ++k) eng->square_mul(RCHK);
                         eng->set(RPOW, 1);
