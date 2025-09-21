@@ -1244,16 +1244,16 @@ int App::runLlSafeMarin()
             //bool okV = eng->is_equal(RVCHK, RV);
             mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
             eng->get_mpz(z0, RVCHK); eng->get_mpz(z1, RV);
-            //bool okV = mpz_cmp(z0, z1);
-            mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-            bool okV = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+            bool okV = (mpz_cmp(z0, z1)==0);
+            //mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+            //bool okV = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
 
             //bool okU = eng->is_equal(RUCHK, RU);
             mpz_inits(z0, z1, nullptr);
             eng->get_mpz(z0, RUCHK); eng->get_mpz(z1, RU);
-            //bool okU = mpz_cmp(z0, z1);
+            bool okU = (mpz_cmp(z0, z1)==0);
             //mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-            bool okU = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+            //bool okU = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
 
             mpz_clears(z0, z1, nullptr);
             if (!(okV && okU)) {
@@ -3728,9 +3728,9 @@ int App::runPM1Marin() {
                         mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
                         eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RACC_R);
                         //if (mpz_cmp(z0, z1) != 0) throw std::runtime_error("Gerbicz-Li error checking failed!");
-                        //bool ok = mpz_cmp(z0, z1);
-                        mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-                        bool ok = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+                        bool ok = (mpz_cmp(z0, z1) == 0);
+                        //mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+                        //bool ok = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
 
                         mpz_clears(z0, z1, nullptr);
                         //bool ok = eng->is_equal(RCHK, RACC_R);
@@ -3753,9 +3753,9 @@ int App::runPM1Marin() {
                         mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
                         eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RSTATE);
                         //if (mpz_cmp(z0, z1) != 0) throw std::runtime_error("Gerbicz-Li error checking failed!");
-                        //bool ok0 = mpz_cmp(z0, z1);
-                        mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-                        bool ok0 = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+                        bool ok0 = (mpz_cmp(z0, z1) == 0);
+                        //mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+                        //bool ok0 = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
                         mpz_clears(z0, z1, nullptr);
                         if (!ok0) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSTART); i = (mp_bitcnt_t)(i + current_block_len); wbits = 0; bits_in_block = 0; continue; }
                     }
@@ -3802,9 +3802,9 @@ int App::runPM1Marin() {
             //bool ok_tail = eng->is_equal(RCHK, RSTATE);
             mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
             eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RSTATE);
-            //bool ok_tail = mpz_cmp(z0, z1);
-            mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-            bool ok_tail = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+            bool ok_tail = (mpz_cmp(z0, z1) == 0);
+            //mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+            //bool ok_tail = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
             mpz_clears(z0, z1, nullptr);
             if (!ok_tail) { eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { if (useFast3) { if (mpz_tstbit(wtail.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); } else { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
             bits_in_block = 0;
