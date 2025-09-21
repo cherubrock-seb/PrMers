@@ -715,8 +715,10 @@ int App::runPrpOrLlMarin()
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval))
         {
             const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            std::cout << "\nBackup point done at iter + 1=" << iter + 1 << " start...." << std::endl;
             save_ckpt(iter, elapsed_time);
             lastBackup = now0;
+            std::cout << "\nBackup point done at iter + 1=" << iter + 1 << " done...." << std::endl;
             spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), res64_x);
         }
         eng->square_mul(R0);
@@ -1197,7 +1199,15 @@ int App::runLlSafeMarin()
             logger.logEnd(elapsed_time);
             return 0;
         }
-
+        auto now0 = std::chrono::high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            std::cout << "\nBackup point done at iter=" << iter << " start...." << std::endl;
+            save_ckpt((uint32_t)iter, elapsed_time);
+            lastBackup = now0;
+            std::cout << "\nBackup point done at iter=" << iter << " done...." << std::endl;   
+            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), "");
+        }
         if (options.erroriter > 0 && (iter + 1) == (uint64_t)options.erroriter && !errordone) {
             errordone = true;
             eng->sub(RV, 2);
@@ -1214,13 +1224,7 @@ int App::runLlSafeMarin()
         eng->square_mul(RV);
         eng->sub(RV, 2);
 
-        auto now0 = std::chrono::high_resolution_clock::now();
-        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
-            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
-            save_ckpt((uint32_t)iter, elapsed_time);
-            lastBackup = now0;
-            spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), "");
-        }
+
 
         auto now = std::chrono::high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
@@ -3658,8 +3662,10 @@ int App::runPM1Marin() {
                 return 0;
             }
             auto now = std::chrono::high_resolution_clock::now();
-            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= 180) {
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= options.backup_interval) {
+                std::cout << "\nBackup point done at i=" << i << " start...." << std::endl;
                 save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(now - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
+                std::cout << "\nBackup point done at i=" << i << " done...." << std::endl;
                 lastBackup = now;
             }
             if (bits_in_block == 0) {

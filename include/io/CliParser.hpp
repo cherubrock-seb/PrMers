@@ -38,7 +38,7 @@ struct CliOptions {
     uint64_t chunk256 = 4;
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
-    int backup_interval = 3000;
+    int backup_interval = 300;
     std::string save_path = ".";
     std::string user;
     std::string password;
