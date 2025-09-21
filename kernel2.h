@@ -147,12 +147,10 @@ static const char * const src_ocl_kernel = \
 "INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 width, uint64 * const carry)\n" \
 "{\n" \
 "	uint64_4 r;\n" \
-"	uint64 c = *carry;\n" \
-"	r.s0 = adc_mul(lhs.s0, a, width.s0, &c);\n" \
-"	r.s1 = adc_mul(lhs.s1, a, width.s1, &c);\n" \
-"	r.s2 = adc_mul(lhs.s2, a, width.s2, &c);\n" \
-"	r.s3 = adc_mul(lhs.s3, a, width.s3, &c);\n" \
-"	*carry = c;\n" \
+"	r.s0 = adc_mul(lhs.s0, a, width.s0, carry);\n" \
+"	r.s1 = adc_mul(lhs.s1, a, width.s1, carry);\n" \
+"	r.s2 = adc_mul(lhs.s2, a, width.s2, carry);\n" \
+"	r.s3 = adc_mul(lhs.s3, a, width.s3, carry);\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \

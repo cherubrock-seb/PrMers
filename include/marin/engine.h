@@ -32,8 +32,6 @@ public:
 	virtual void set(const Reg dst, const uint32 a) const = 0;
 	// dst = src
 	virtual void copy(const Reg dst, const Reg src) const = 0;
-	// src1 ?= src2
-	virtual bool is_equal(const Reg src1, const Reg src2) const = 0;
 	// src = src^2 * a
 	virtual void square_mul(const Reg src, const uint32 a = 1) const = 0;
 	// dst = multiplicand(src). A multiplicand is the src of the mul operation.
@@ -133,6 +131,7 @@ public:
 
 		set(dst, data.data());
 	}
+
 	class digit
 	{
 	private:

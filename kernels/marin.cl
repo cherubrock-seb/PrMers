@@ -137,10 +137,12 @@ INLINE uint64_4 adc4(const uint64_4 lhs, const uint_8_4 width, const uint64 carr
 INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 width, uint64 * const carry)
 {
 	uint64_4 r;
-	r.s0 = adc_mul(lhs.s0, a, width.s0, carry);
-	r.s1 = adc_mul(lhs.s1, a, width.s1, carry);
-	r.s2 = adc_mul(lhs.s2, a, width.s2, carry);
-	r.s3 = adc_mul(lhs.s3, a, width.s3, carry);
+	uint64 c = *carry;
+	r.s0 = adc_mul(lhs.s0, a, width.s0, &c);
+	r.s1 = adc_mul(lhs.s1, a, width.s1, &c);
+	r.s2 = adc_mul(lhs.s2, a, width.s2, &c);
+	r.s3 = adc_mul(lhs.s3, a, width.s3, &c);
+	*carry = c;
 	return r;
 }
 

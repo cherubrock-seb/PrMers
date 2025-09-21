@@ -30,7 +30,6 @@ class gpu : public ocl::device
 {
 private:
 	const size_t _n, _n5;
-	const bool _even;
 	const size_t _reg_count;
 	const int _lcwm_wg_size;
 	const size_t _blk16, _blk32, _blk64, _blk128, _blk256, _blk512;
@@ -61,14 +60,14 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1, _carry_weight_p2 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_p2 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 
 	std::vector<cl_kernel> _kernels;
 
 public:
-	gpu(const ocl::platform & platform, const size_t d, const size_t n, const bool even, const size_t reg_count, const bool verbose)
-		: device(platform, d, verbose), _n(n), _n5((n % 5 == 0) ? n / 5 : n), _even(even), _reg_count(reg_count),
+	gpu(const ocl::platform & platform, const size_t d, const size_t n, const size_t reg_count, const bool verbose)
+		: device(platform, d, verbose), _n(n), _n5((n % 5 == 0) ? n / 5 : n), _reg_count(reg_count),
 		_lcwm_wg_size(ilog2(std::min(_n5 / 4, std::min(get_max_local_worksize(sizeof(uint64)), size_t(256))))),
 
 		// We must have (u / 4) * BLKu <= n / 8
@@ -502,19 +501,18 @@ class engine_gpu : public engine
 private:
 	const size_t _reg_count;
 	const size_t _n;
-	const bool _even;
 	gpu * _gpu;
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
 
 public:
 	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
-		_reg_count(reg_count), _n(ibdwt::transform_size(q)), _even(ibdwt::is_even(_n))
+		_reg_count(reg_count), _n(ibdwt::transform_size(q))
 	{
 		const size_t n = _n;
 
 		const ocl::platform eng_platform = ocl::platform();
-		_gpu = new gpu(eng_platform, device, n, _even, _reg_count, verbose);
+		_gpu = new gpu(eng_platform, device, n, _reg_count, verbose);
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
@@ -638,18 +636,6 @@ public:
 	void copy(const Reg dst, const Reg src) const override
 	{
 		_gpu->copy(size_t(dst), size_t(src));
-	}
-
-	bool is_equal(const Reg src1, const Reg src2) const override
-	{
-		const size_t n = _n;
-		std::vector<uint64> x(n), y(n);
-
-		_gpu->read_reg(x.data(), size_t(src1));
-		_gpu->read_reg(y.data(), size_t(src2));
-
-		for (size_t k = 0; k < n; ++k) if (y[k] != x[k]) return false;
-		return true;
 	}
 
 	void square_mul(const Reg rsrc, const uint32 a = 1) const override
