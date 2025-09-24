@@ -1026,23 +1026,42 @@ int App::runPrpOrLlMarin()
             }
         }
     }
+    std::string json;
+    if (!options.knownFactors.empty()) {
+        auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
     
-    //auto [isPrime, res64z, res2048z] = io::JsonBuilder::computeResultMarin(d, options);
-    //is_prp_prime = isPrime;
-    std::string json = io::JsonBuilder::generate(
-        options,
-        static_cast<int>(context.getTransformSize()),
-        is_prp_prime,
-        res64_hex,
-        res2048_hex
-    );
+        //is_prp_prime = isPrime;
+        json = io::JsonBuilder::generate(
+            options,
+            static_cast<int>(context.getTransformSize()),
+            isPrime,
+            res64,
+            res2048
+        );
 
-    Printer::finalReport(
-        options,
-        elapsed_time,
-        json,
-        is_prp_prime
-    );
+        Printer::finalReport(
+            options,
+            elapsed_time,
+            json,
+            isPrime
+        );
+    }
+    else{
+        json = io::JsonBuilder::generate(
+            options,
+            static_cast<int>(context.getTransformSize()),
+            is_prp_prime,
+            res64_hex,
+            res2048_hex
+        );
+
+        Printer::finalReport(
+            options,
+            elapsed_time,
+            json,
+            is_prp_prime
+        );
+    }
     bool skippedSubmission = false;
     if (options.submit) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
