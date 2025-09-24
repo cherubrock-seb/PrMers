@@ -537,6 +537,12 @@ static inline void delete_checkpoints(uint32_t p, bool wagstaff,bool pm1, bool l
 }
 
 
+
+inline void to_uppercase(std::string& s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c){ return std::toupper(c); });
+}
+
 int App::runPrpOrLlMarin()
 {
     if (guiServer_) {
@@ -551,7 +557,7 @@ int App::runPrpOrLlMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = options.debug;
 
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
 
     auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
@@ -622,7 +628,7 @@ int App::runPrpOrLlMarin()
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
 
-    const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5;
+    const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5, RBASE = 6, RTMP=7;
     uint32_t ri = 0; double restored_time = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
@@ -643,6 +649,8 @@ int App::runPrpOrLlMarin()
 
     eng->copy(R4, R0);//Last correct state
     eng->copy(R5, R1);//Last correct bufd
+    eng->set(RBASE, 3);
+    eng->set_multiplicand(RTMP, RBASE);
     logger.logStart(options);
     timer.start();
     timer2.start();
@@ -692,7 +700,13 @@ int App::runPrpOrLlMarin()
             guiServer_->appendLog(oss.str());
         }
     }
-    
+    std::vector<uint32_t> words;
+
+    bool is_divisible_by_9 = (((mpz_class(1) << options.exponent) - 1)%9==0);
+    if(is_divisible_by_9){
+        std::cout << "M_"<< options.exponent <<" IS DIVISIBLE BY 9" << std::endl;
+    }
+
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
@@ -747,11 +761,19 @@ int App::runPrpOrLlMarin()
             
             if (condcheck) {
                     checkpass = 0;
-                    for (uint64_t z = 0; z < B - (options.exponent % B) - 1; ++z) {
+                    uint64_t modB = (options.exponent % B == 0 ? B : options.exponent % B);
+                    uint64_t loop_count = (B > modB ? B - modB - 1 : 0);
+
+                    for (uint64_t z = 0; z < loop_count; ++z) {
                         eng->square_mul(R3);
                     }
-                    eng->square_mul(R3, 3);
-                    for (uint64_t z = 0; z < (options.exponent % B); ++z) {
+                    if(options.exponent % B == 0 ){
+                        eng->mul(R3, RTMP);
+                    }
+                    else{
+                        eng->square_mul(R3, 3);
+                    }
+                    for (uint64_t z = 0; z < ((options.exponent % B == 0 ? B : options.exponent % B)); ++z) {
                         eng->square_mul(R3);
                     }
                     mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
@@ -766,12 +788,12 @@ int App::runPrpOrLlMarin()
                         //delete eng; 
                         //throw std::runtime_error("Gerbicz-Li error checking failed!"); 
                         std::cout << "[Gerbicz Li] Mismatch \n"
-                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << (iter + 1) << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
                         if (guiServer_) {
                             std::ostringstream oss;
                             oss << "[Gerbicz Li] Mismatch \n"
-                            << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
+                            << "[Gerbicz Li] Check FAILED! iter=" << (iter + 1) << "\n"
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
                             guiServer_->appendLog(oss.str());
                         }
@@ -789,10 +811,10 @@ int App::runPrpOrLlMarin()
                         eng->copy(R1, R5);
                     }
                     else{
-                        std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                        std::cout << "[Gerbicz Li] Check passed! iter=" << (iter + 1) << "\n";
                         if (guiServer_) {
                             std::ostringstream oss;
-                            oss << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
+                            oss << "[Gerbicz Li] Check passed! iter=" << (iter + 1) << "\n";
                             guiServer_->appendLog(oss.str());
                         }
                         eng->copy(R4, R0);//Last correct state
@@ -802,6 +824,7 @@ int App::runPrpOrLlMarin()
                         cl_event postEvt;
                     }
             }
+            
 
         } 
 
@@ -825,10 +848,11 @@ int App::runPrpOrLlMarin()
             resumeIter = iter + 1;
         }
 
-        if (options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
+        if (options.mode == "prp"  && options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
             engine::digit d(eng, R0);
             proofManagerMarin.checkpointMarin(d, iter + 1);
         }
+
     }
 
     if (options.proof) {
@@ -845,16 +869,69 @@ int App::runPrpOrLlMarin()
     else{
         is_prp_prime = digit.equal_to(9);
     }
-    std::vector<uint32_t> words = pack_words_from_eng_digits(digit, p);
-    if (options.mode == "prp") prp3_div9(p, words);
+    words = pack_words_from_eng_digits(digit, p);
 
-    std::string res64_hex    = format_res64_hex(words);
-    std::string res2048_hex  = format_res2048_hex(words);
+    std::string res64_hex;
+    std::string res2048_hex;
+    if (!is_divisible_by_9) {
+        if (options.mode == "prp") prp3_div9(p, words);
+        res64_hex    = format_res64_hex(words);
+        res2048_hex  = format_res2048_hex(words);
+
+    } else {
+        mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+        mpz_t z0; mpz_inits(z0, nullptr);
+        eng->get_mpz(z0, R0);
+       // std::cout << "RESULTAT=" << z0 << "\n";
+        unsigned t=0;
+        mpz_class tmp = Mp;
+        while (mpz_divisible_ui_p(tmp.get_mpz_t(), 3)) {
+            mpz_divexact_ui(tmp.get_mpz_t(), tmp.get_mpz_t(), 3);
+            ++t;
+        }
+        //std::cout << "t=" << t << "\n";
+        mpz_class m3;
+        mpz_ui_pow_ui(m3.get_mpz_t(), 3, t); 
+        mpz_class u = Mp / m3;
+
+        mpz_class a_u;
+        mpz_mod(a_u.get_mpz_t(), z0, u.get_mpz_t());  // a_u = z0 mod u
+
+        // res_u = a_u * 9^{-1} mod u
+        mpz_class inv9, res_u;
+        if (mpz_invert(inv9.get_mpz_t(), mpz_class(9).get_mpz_t(), u.get_mpz_t()) == 0)
+            throw std::runtime_error("inv(9, u) failed");
+        res_u = (a_u * inv9) % u;
+
+        // calcul de k = (-res_u * u^{-1}) mod m3
+        mpz_class inv_u_mod_m3;
+        if (mpz_invert(inv_u_mod_m3.get_mpz_t(), u.get_mpz_t(), m3.get_mpz_t()) == 0)
+            throw std::runtime_error("inv(u, m3) failed");
+        mpz_class k = (-res_u * inv_u_mod_m3) % m3;
+        if (k < 0) k += m3; // assurer k ∈ [0, m3)
+
+        // x = res_u + k * u
+        mpz_class x = res_u + k * u;
+        x %= Mp;
+        mpz_class res64, res2048;
+        mpz_mod_2exp(res64.get_mpz_t(), x.get_mpz_t(), 64);       // res64 = x mod 2^64
+        mpz_mod_2exp(res2048.get_mpz_t(), x.get_mpz_t(), 2048);   // res2048 = x mod 2^2048
+
+        //std::cout << "[CRT] res64    = 0x" << res64.get_str(16) << "\n";
+        //std::cout << "[CRT] res2048  = 0x" << res2048.get_str(16) << "\n";
+        std::ostringstream oss64;
+        oss64 << std::hex << std::setfill('0') << std::setw(16) << res64.get_ui();
+        res64_hex = oss64.str();
+        res2048_hex = res2048.get_str(16);
+
+        if (res2048_hex.length() < 512) {
+            res2048_hex = std::string(512 - res2048_hex.length(), '0') + res2048_hex;
+        }
 
 
-    
-
-
+    }
+   // to_uppercase(res64_hex);
+   // to_uppercase(res2048_hex);
     spinner.displayProgress(
         totalIters,
         totalIters,
@@ -950,21 +1027,21 @@ int App::runPrpOrLlMarin()
         }
     }
     
-    auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
-    is_prp_prime = isPrime;
+    //auto [isPrime, res64z, res2048z] = io::JsonBuilder::computeResultMarin(d, options);
+    //is_prp_prime = isPrime;
     std::string json = io::JsonBuilder::generate(
         options,
         static_cast<int>(context.getTransformSize()),
-        isPrime,
-        res64,
-        res2048
+        is_prp_prime,
+        res64_hex,
+        res2048_hex
     );
 
     Printer::finalReport(
         options,
         elapsed_time,
         json,
-        isPrime
+        is_prp_prime
     );
     bool skippedSubmission = false;
     if (options.submit) {
@@ -1860,7 +1937,7 @@ int App::runPrpOrLl() {
 
                 checkpass = 0;
                 nttEngine->copy(buffers->r2, buffers->input, limbBytes);
-                for (uint64_t z = 0; z < B - (options.exponent % B); ++z) {
+                for (uint64_t z = 0; z < B - ((options.exponent % B == 0 ? B : options.exponent % B)); ++z) {
                     nttEngine->forward(buffers->input, iter);
                     nttEngine->inverse(buffers->input, iter);
                     carry.carryGPU(
@@ -1874,7 +1951,7 @@ int App::runPrpOrLl() {
                     buffers->blockCarryBuf,
                     precompute.getN() * sizeof(uint64_t)
                 );
-                for (uint64_t z = 0; z < (options.exponent % B); ++z) {
+                for (uint64_t z = 0; z < ((options.exponent % B == 0 ? B : options.exponent % B)); ++z) {
                     nttEngine->forward(buffers->input, iter);
                     nttEngine->inverse(buffers->input, iter);
                     carry.carryGPU(
@@ -3764,6 +3841,7 @@ int App::runPM1Marin() {
                         //bool ok0 = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
                         mpz_clears(z0, z1, nullptr);
                         if (!ok0) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSTART); i = (mp_bitcnt_t)(i + current_block_len); wbits = 0; bits_in_block = 0; continue; }
+                        else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                     }
                 }
                 bits_in_block = 0;

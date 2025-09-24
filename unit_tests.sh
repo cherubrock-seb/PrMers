@@ -27,7 +27,7 @@ for erriter in 55; do
   output=$(./prmers 9941 -erroriter "$erriter" --noask -prp 2>&1)
   echo "$output" > "logs/gerbicz_error_9941_iter${erriter}.log"
   if echo "$output" | grep -q "Injected error at iteration 55" \
-     && echo "$output" | grep -q "\[Gerbicz Li\] Check FAILED! iter=9940" \
+     && echo "$output" | grep -q "\[Gerbicz Li\] Check FAILED! iter=9941" \
      && echo "$output" | grep -q "\[Gerbicz Li\] Restore iter=0 (j=9940)"; then
     echo "✅"
   else
@@ -40,7 +40,7 @@ for erriter in 9940; do
   output=$(./prmers 9941 -erroriter "$erriter" --noask -prp 2>&1)
   echo "$output" > "logs/gerbicz_error_9941_iter${erriter}.log"
   if echo "$output" | grep -q "Injected error at iteration $erriter" \
-     && echo "$output" | grep -q "\[Gerbicz Li\] Check FAILED! iter=9940" \
+     && echo "$output" | grep -q "\[Gerbicz Li\] Check FAILED! iter=9941" \
      && echo "$output" | grep -q "\[Gerbicz Li\] Restore iter=0 (j=9940)"; then
     echo "✅"
   else

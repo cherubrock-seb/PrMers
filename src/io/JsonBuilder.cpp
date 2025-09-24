@@ -289,8 +289,6 @@ static std::string jsonEscape(const std::string& s) {
     return "\"" + o.str() + "\"";
 }
 
-
-// Full JSON generator (copy/paste from prmers.cpp) …
 static std::string generatePrimeNetJson(
     const std::string &status,
     unsigned int exponent,
@@ -364,32 +362,30 @@ static std::string generatePrimeNetJson(
         oss << "]";
     }
 
-    // build canonical string …
     std::string prefix = oss.str();
     std::ostringstream canon;
     std::string canonWT = worktype;
     if      (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
     else if (canonWT.rfind("LL",  0) == 0) canonWT = "LL";
 
-
     canon << exponent << ";" << canonWT << ";";
-    canon << "" << ";";  // factor list
-    canon << "" << ";";  // known factors
+    canon << "" << ";";
+    canon << "" << ";";
     if (canonWT == "LL" || canonWT == "PRP") canon << toLower(res64);
     canon << ";";
     if (canonWT == "PRP") canon << toLower(res2048);
     canon << ";";
-    canon << "0_3_1;";                               // shift-count
+    canon << "0_3_1;";
     canon << fftLength << ";";
     canon << "gerbicz:" << gerbiczError << ";";
     canon << programName << ";";
     canon << programVersion << ";";
-    canon << "" << ";";  // program.subversion
-    canon << "" << ";";  // program.details
+    canon << "" << ";";
+    canon << "" << ";";
     canon << osName << ";";
     canon << osArchitecture << ";";
     canon << timestamp;
-    //std::cout << "\n\n CRC32 to hash ==> " << canon.str() << "\n";
+
     unsigned int crc = computeCRC32(canon.str());
     std::ostringstream hex;
     hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
@@ -407,7 +403,6 @@ std::string JsonBuilder::generate(const CliOptions& opts,
                                   const std::string& res64,
                                   const std::string& res2048) 
 {
-    // timestamp UTC
     std::time_t now = std::time(nullptr);
     std::tm timeinfo;
     #ifdef _WIN32
@@ -418,7 +413,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
     #endif
     char timestampBuf[32];
     std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-    // --- PM1 special case ---
+
     if (opts.mode == "pm1") {
         std::ostringstream oss;
         bool hasFactor = !opts.knownFactors.empty();
@@ -426,8 +421,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         oss << "{"
             << "\"status\":\"" << (hasFactor ? "F" : "NF") << "\","
             << "\"exponent\":" << opts.exponent << ","
-            << "\"worktype\":\"P-1\",";
-
+            << "\"worktype\":\"PM1\",";
         if (hasFactor) {
             oss << "\"factors\":[";
             for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
@@ -436,10 +430,9 @@ std::string JsonBuilder::generate(const CliOptions& opts,
             }
             oss << "],";
         }
-
-        oss << "\"b1\":" << opts.B1 << ","
-            << "\"b2\":" << opts.B2 << ","
-            << "\"fft-length\":" << transform_size << ","
+        oss << "\"b1\":" << opts.B1 << ",";
+        if (opts.B2 > 0) oss << "\"b2\":" << opts.B2 << ",";
+        oss << "\"fft-length\":" << transform_size << ","
             << "\"program\":{"
                 << "\"name\":\"prmers\","
                 << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
@@ -447,19 +440,42 @@ std::string JsonBuilder::generate(const CliOptions& opts,
             << "},"
             << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
             << "\"user\":" << jsonEscape(opts.user.empty() ? "prmers" : opts.user);
-
         if (!opts.computer_name.empty())
             oss << ",\"computer\":" << jsonEscape(opts.computer_name);
         if (!opts.aid.empty())
             oss << ",\"aid\":" << jsonEscape(opts.aid);
 
-        oss << "}";
+        std::string prefix = oss.str();
+
+        std::ostringstream canon;
+        canon << opts.exponent << ";PM1;";
+        canon << "" << ";";
+        canon << "" << ";";
+        canon << opts.B1 << ";";
+        if (opts.B2 > 0) canon << opts.B2;
+        canon << ";";
+        canon << "" << ";";
+        canon << transform_size << ";";
+        canon << "" << ";";
+        canon << "prmers" << ";";
+        canon << core::PRMERS_VERSION << ";";
+        canon << "" << ";";
+        canon << "" << ";";
+        canon << "" << ";";
+        canon << "" << ";";
+        canon << timestampBuf;
+
+        unsigned int crc = computeCRC32(canon.str());
+        std::ostringstream hex;
+        hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
+
+        oss.str(""); oss.clear();
+        oss << prefix
+            << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hex.str() << "\"}"
+            << "}";
         return oss.str();
     }
 
-
-
-    // --- PRP / LL (original path) ---
     std::string status = isPrime ? "P" : "C";
     int residueType = opts.knownFactors.empty() ? 1 : 5;
 
