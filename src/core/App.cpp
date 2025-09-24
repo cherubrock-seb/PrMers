@@ -1030,7 +1030,7 @@ int App::runPrpOrLlMarin()
     if (!options.knownFactors.empty()) {
         auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
     
-        //is_prp_prime = isPrime;
+        is_prp_prime = isPrime;
         json = io::JsonBuilder::generate(
             options,
             static_cast<int>(context.getTransformSize()),
