@@ -993,7 +993,7 @@ int App::runPrpOrLlMarin()
     logger.logEnd(elapsed_time);
 
     if (options.proof) {
-        cl_command_queue queue   = context.getQueue();
+        cl_command_queue queue = context.getQueue();
         math::Carry carry(
             context,
             queue,
@@ -1002,30 +1002,44 @@ int App::runPrpOrLlMarin()
             precompute.getDigitWidth(),
             buffers->digitWidthMaskBuf
         );
-        try {
-            std::cout << "\nGenerating PRP proof file..." << std::endl;
-            if (guiServer_) {
-                std::ostringstream oss;
-                oss  << "\nGenerating PRP proof file..." ;
-                guiServer_->appendLog(oss.str());
-            }
-            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
-            options.proofFile = proofFilePath.string();  // Set proof file path
-            std::cout << "Proof file saved: " << proofFilePath << std::endl;
-            if (guiServer_) {
-                std::ostringstream oss;
-                oss  << "Proof file saved: " << proofFilePath;
-                guiServer_->appendLog(oss.str());
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
-            if (guiServer_) {
-                std::ostringstream oss;
-                oss  <<  "Warning: Proof generation failed: " << e.what();
-                guiServer_->appendLog(oss.str());
+        uint32_t proofPower = (options.proofPower);
+        while (proofPower >= 0) {
+            try {
+                std::cout << "\nGenerating PRP proof file..." << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "\nGenerating PRP proof file...";
+                    guiServer_->appendLog(oss.str());
+                }
+                options.proofPower = proofPower;
+                auto proofFilePath = proofManager.proof(context, *nttEngine, carry, proofPower, options.verify);
+                options.proofFile = proofFilePath.string();
+                std::cout << "Proof file saved: " << proofFilePath << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Proof file saved: " << proofFilePath;
+                    guiServer_->appendLog(oss.str());
+                }
+                break;
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Warning: Proof generation failed: " << e.what();
+                    guiServer_->appendLog(oss.str());
+                }
+                if (proofPower == 0) break;
+                --proofPower;
+                std::cout << "Retrying proof generation with reduced power: " << proofPower << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Retrying proof generation with reduced power: " << proofPower;
+                    guiServer_->appendLog(oss.str());
+                }
             }
         }
     }
+
     std::string json;
     if (!options.knownFactors.empty()) {
         auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
@@ -2248,30 +2262,44 @@ int App::runPrpOrLl() {
     }
     // Generate proof file after successful completion
     if (options.proof) {
-        try {
-            std::cout << "\nGenerating PRP proof file..." << std::endl;
-            if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "\nGenerating PRP proof file..." << std::endl;
-                                guiServer_->appendLog(oss.str());
-            }
-            auto proofFilePath = proofManager.proof(context, *nttEngine, carry);
-            options.proofFile = proofFilePath.string();  // Set proof file path
-            std::cout << "Proof file saved: " << proofFilePath << std::endl;
-            if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "Proof file saved: " << proofFilePath << std::endl;
-                                guiServer_->appendLog(oss.str());
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
-            if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "Warning: Proof generation failed: " << e.what() << std::endl;
-                                guiServer_->appendLog(oss.str());
+        int proofPower = static_cast<int>(options.proofPower);
+        while (proofPower >= 0) {
+            try {
+                std::cout << "\nGenerating PRP proof file..." << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "\nGenerating PRP proof file..." << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
+                options.proofPower = static_cast<decltype(options.proof)>(proofPower);
+                auto proofFilePath = proofManager.proof(context, *nttEngine, carry, proofPower, options.verify);
+                options.proofFile = proofFilePath.string();
+                std::cout << "Proof file saved: " << proofFilePath << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Proof file saved: " << proofFilePath << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
+                break;
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Warning: Proof generation failed: " << e.what() << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
+                if (proofPower == 0) break;
+                --proofPower;
+                std::cout << "Retrying proof generation with reduced power: " << proofPower << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Retrying proof generation with reduced power: " << proofPower << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
             }
         }
     }
+
     
 
     double finalElapsed = timer.elapsed();

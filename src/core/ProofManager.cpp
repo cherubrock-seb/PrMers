@@ -109,9 +109,9 @@ void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
     }
 }
 
-std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, bool verify) const {
+std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify) const {
     try {
-                    
+        //proofSet_.power = proofPower;
         // Calculate limbBytes for GPU proof generation
         size_t limbBytes = n_ * sizeof(uint64_t);
 
@@ -119,7 +119,7 @@ std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::Nt
         core::GpuContext gpu(exponent_, ctx, ntt, carry, digitWidth_, limbBytes);
         
         // Generate proof from collected checkpoints
-        Proof proof = proofSet_.computeProof(gpu);
+        Proof proof = proofSet_.computeProof(gpu, proofPower);
         
         // Create proof file name: {exponent}-{power}.proof
         std::string filename = std::to_string(exponent_) + "-" + 
@@ -134,7 +134,7 @@ std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::Nt
             auto loadedProof = Proof::load(proofFilePath);
             // Verify generated proof
             if (verify) {
-                loadedProof.verify(gpu);
+                loadedProof.verify(gpu, proofPower);
             }
         } catch (const std::exception& e) {
             std::cerr << "Warning: Proof file verification failed: " << e.what() << std::endl;

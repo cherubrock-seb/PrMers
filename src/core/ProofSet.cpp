@@ -103,6 +103,10 @@ bool ProofSet::shouldCheckpoint(uint32_t iter) const {
   return isInPoints(E, power, iter);
 }
 
+bool ProofSet::shouldCheckpoint2(uint32_t iter, uint32_t npower) const {
+  return isInPoints(E, npower, iter);
+}
+
 void ProofSet::save(uint32_t iter, const std::vector<uint32_t>& words) {
   if (!shouldCheckpoint(iter)) {
     return;
@@ -146,10 +150,10 @@ uint32_t ProofSet::bestPower(uint32_t E) {
   return static_cast<uint32_t>(power);
 }
 
-bool ProofSet::isInPoints(uint32_t E, uint32_t power, uint32_t k) {
+bool ProofSet::isInPoints(uint32_t E, uint32_t npower, uint32_t k) {
   if (k == E) { return true; } // special-case E
   uint32_t start = 0;
-  for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
+  for (uint32_t p = 0, span = (E + 1) / 2; p < npower; ++p, span = (span + 1) / 2) {
     assert(k >= start);
     if (k > start + span) {
       start += span;
@@ -217,117 +221,160 @@ std::vector<uint32_t> ProofSet::load(uint32_t iter) const {
   return words;
 }
 
-Proof ProofSet::computeProof(const GpuContext& gpu) const {
-  // Start timing proof generation
-  util::Timer timer;
-
-  std::vector<std::vector<uint32_t>> middles;
-  std::vector<uint64_t> hashes;
-
-  // Initial hash of the final residue B
-  auto B = load(E);
-  auto hash = Proof::hashWords(E, B);
-
-  // Pre-allocate maximum needed buffer pool (power levels use 2^p buffers max)
-  uint32_t maxBuffers = (1u << power);
-  std::vector<cl_mem> bufferPool(maxBuffers);
-  
-  // Get OpenCL context for buffer creation
-  cl_context cl_ctx = gpu.ctx.getContext();
-  
-  // Initialize GPU buffers
-  for (uint32_t i = 0; i < maxBuffers; ++i) {
-    cl_int err;
-    bufferPool[i] = clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
-    if (err != CL_SUCCESS) {
-      // Clean up on error
-      for (uint32_t j = 0; j < i; ++j) {
-        clReleaseMemObject(bufferPool[j]);
-      }
-      throw std::runtime_error("Failed to create GPU buffer for proof computation");
-    }
+std::vector<uint32_t> ProofSet::load2(uint32_t iter, uint32_t npower) const {
+  if (!shouldCheckpoint2(iter,npower)) {
+    throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
   }
 
-  // Main computation loop
-  for (uint32_t p = 0; p < power; ++p) {
-    assert(p == hashes.size());
-    
-    uint32_t s = (1u << (power - p - 1)); // Step size for this level
-    uint32_t levelBuffers = (1u << p); // Number of buffers needed for this level
-    uint32_t bufIndex = 0;
-    
-    // Load residues and apply binary tree algorithm
-    for (uint32_t i = 0; i < levelBuffers; ++i) {
-      // PRPLL's formula: load checkpoint at points[s * (i * 2 + 1) - 1]
-      uint32_t checkpointIndex = s * (i * 2 + 1) - 1;
-      
-      if (checkpointIndex >= points.size()) {
-        continue;
-      }
-      
-      uint32_t iteration = points[checkpointIndex];
-      
-      if (iteration > E || !shouldCheckpoint(iteration)) {
-        continue;
-      }
-      
-      auto w = load(iteration);
-      gpu.write(bufferPool[bufIndex], w);
-      bufIndex++;
-      
-      // Apply hashes from previous levels
-      for (uint32_t k = 0; i & (1u << k); ++k) {
-        assert(k <= p - 1);
-        if (bufIndex < 2) {
-          std::cerr << "Error: need at least 2 buffers for expMul, have " << bufIndex << std::endl;
-          continue;
+  auto filePath = proofPath(E) / std::to_string(iter);
+  std::ifstream file(filePath, std::ios::binary);
+  if (!file) {
+    throw std::runtime_error("Cannot open proof checkpoint file: " + filePath.string());
+  }
+
+  // Read CRC32 first
+  uint32_t crc;
+  file.read(reinterpret_cast<char*>(&crc), sizeof(crc));
+  if (!file.good()) {
+    throw std::runtime_error("Error reading CRC32 from proof checkpoint file: " + filePath.string());
+  }
+
+  // Calculate expected file size in 32-bit words: (E + 31) / 32
+  uint32_t expectedWords = (E + 31) / 32;
+  
+  // Read the 32-bit words data
+  std::vector<uint32_t> words(expectedWords);
+  file.read(reinterpret_cast<char*>(words.data()), expectedWords * sizeof(uint32_t));
+  if (!file.good()) {
+    throw std::runtime_error("Error reading data from proof checkpoint file: " + filePath.string());
+  }
+
+  // Verify CRC32
+  uint32_t computedCrc = computeCRC32(words.data(), words.size() * sizeof(uint32_t));
+  if (crc != computedCrc) {
+    throw std::runtime_error("CRC32 mismatch in proof checkpoint file: " + filePath.string());
+  }
+
+  return words;
+}
+
+void ProofSet::rebuildPointsForPower(uint32_t p) const {
+    std::vector<uint32_t> newPoints;
+    newPoints.push_back(0);
+
+    for (uint32_t level = 0, span = (E + 1) / 2; level < p; ++level, span = (span + 1) / 2) {
+        const uint32_t end = static_cast<uint32_t>(newPoints.size());
+        for (uint32_t i = 0; i < end; ++i) {
+            newPoints.push_back(newPoints[i] + span);
         }
-        
-        bufIndex--;
-        uint64_t h = hashes[p - 1 - k]; // Hash from previous level
-        
-        // (bufIndex-1) := (bufIndex-1)^h * bufIndex
-        gpu.ntt.powInPlace(bufferPool[bufIndex - 1], bufferPool[bufIndex - 1], h, gpu.carry, gpu.limbBytes);
-        gpu.ntt.mulInPlace5(bufferPool[bufIndex - 1], bufferPool[bufIndex], gpu.carry, gpu.limbBytes);
-      }
     }
-    
-    if (bufIndex != 1) {
-      std::cerr << "Warning: expected bufIndex=1, got " << bufIndex << std::endl;
-    }
-    
-    // Convert the final result to words format
 
-    auto levelResult = gpu.read(bufferPool[0]);
-    
-    if (levelResult.empty()) {
-      throw std::runtime_error("Read ZERO during proof generation at level " + std::to_string(p));
+    if (!newPoints.empty()) newPoints.front() = E;
+    std::sort(newPoints.begin(), newPoints.end());
+    newPoints.push_back(uint32_t(-1));
+
+    points.swap(newPoints);
+}
+
+
+Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
+    util::Timer timer;
+
+    if (npower == 0) {
+        auto B0 = load2(E, 0);
+        return Proof{E, std::move(B0), {}, knownFactors};
     }
-    
-    // Store the result as middle for this level
-    middles.push_back(levelResult);
-    
-    // Update hash chain with this level's middle
-    hash = Proof::hashWords(E, hash, levelResult);
-    uint64_t newHash = hash[0]; // The first 64 bits of the hash
-    hashes.push_back(newHash);
-    
-    // Show middle and hash for the current level
-    uint64_t middleRes64 = Proof::res64(levelResult);
-    std::cout << "proof [" << p << "] : M " << std::hex << std::setfill('0') << std::setw(16) << middleRes64 
-              << ", h " << std::setw(16) << newHash << std::dec << std::endl;
-  }
-  
-  // Clean up GPU buffers
-  for (uint32_t i = 0; i < maxBuffers; ++i) {
-    clReleaseMemObject(bufferPool[i]);
-  }
-  
-  // Display proof generation time
-  double elapsed = timer.elapsed();
-  std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
-  
-  return Proof{E, std::move(B), std::move(middles), knownFactors};
+
+    power = npower;
+    rebuildPointsForPower(power);
+
+    std::vector<std::vector<uint32_t>> middles;
+    std::vector<uint64_t> hashes;
+
+    auto B = load2(E, power);
+    auto hash = Proof::hashWords(E, B);
+
+    const uint32_t maxBuffers = (1u << power);
+    std::vector<cl_mem> bufferPool(maxBuffers);
+
+    cl_context cl_ctx = gpu.ctx.getContext();
+    for (uint32_t i = 0; i < maxBuffers; ++i) {
+        cl_int err;
+        bufferPool[i] = clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
+        if (err != CL_SUCCESS) {
+            for (uint32_t j = 0; j < i; ++j) clReleaseMemObject(bufferPool[j]);
+            throw std::runtime_error("Failed to create GPU buffer for proof computation");
+        }
+    }
+
+    for (uint32_t p = 0; p < power; ++p) {
+        assert(p == hashes.size());
+
+        const uint32_t s = (1u << (power - p - 1));
+        const uint32_t levelBuffers = (1u << p);
+        uint32_t bufIndex = 0;
+
+        for (uint32_t i = 0; i < levelBuffers; ++i) {
+            const uint32_t checkpointIndex = s * (i * 2 + 1) - 1;
+            if (checkpointIndex >= points.size()) {
+                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+                throw std::runtime_error("Missing checkpoint index");
+            }
+
+            const uint32_t iteration = points[checkpointIndex];
+            if (iteration > E) {
+                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+                throw std::runtime_error("Invalid checkpoint iteration");
+            }
+            if (!shouldCheckpoint2(iteration, power)) {
+                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+                throw std::runtime_error("Missing checkpoint file");
+            }
+
+            auto w = load2(iteration, power);
+            gpu.write(bufferPool[bufIndex], w);
+            ++bufIndex;
+
+            for (uint32_t k = 0; (i & (1u << k)) != 0; ++k) {
+                assert(k <= p - 1);
+                if (bufIndex < 2) {
+                    for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+                    throw std::runtime_error("Insufficient buffers for reduction");
+                }
+                --bufIndex;
+                uint64_t h = hashes[p - 1 - k];
+                gpu.ntt.powInPlace(bufferPool[bufIndex - 1], bufferPool[bufIndex - 1], h, gpu.carry, gpu.limbBytes);
+                gpu.ntt.mulInPlace5(bufferPool[bufIndex - 1], bufferPool[bufIndex], gpu.carry, gpu.limbBytes);
+            }
+        }
+
+        if (bufIndex != 1) {
+            for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+            throw std::runtime_error("Invalid buffer reduction at level");
+        }
+
+        auto levelResult = gpu.read(bufferPool[0]);
+        if (levelResult.empty()) {
+            for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+            throw std::runtime_error("Read ZERO during proof generation");
+        }
+
+        middles.push_back(levelResult);
+        hash = Proof::hashWords(E, hash, levelResult);
+        uint64_t newHash = hash[0];
+        hashes.push_back(newHash);
+
+        uint64_t middleRes64 = Proof::res64(levelResult);
+        std::cout << "proof [" << p << "] : M " << std::hex << std::setfill('0') << std::setw(16) << middleRes64
+                  << ", h " << std::setw(16) << newHash << std::dec << std::endl;
+    }
+
+    for (uint32_t i = 0; i < maxBuffers; ++i) clReleaseMemObject(bufferPool[i]);
+
+    double elapsed = timer.elapsed();
+    std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;
+
+    return Proof{E, std::move(B), std::move(middles), knownFactors};
 }
 
 

@@ -244,9 +244,10 @@ uint64_t Proof::res64(const std::vector<uint32_t>& words) {
   return result;
 }
 
-bool Proof::verify(const GpuContext& gpu) const {
-  uint32_t power = middles.size();
-  if (power == 0) {
+bool Proof::verify(const GpuContext& gpu, uint32_t npower) const {
+  //uint32_t power = middles.size();
+
+  if (npower == 0) {
     throw std::runtime_error("Invalid proof: no middle residues");
   }
 
@@ -285,9 +286,9 @@ bool Proof::verify(const GpuContext& gpu) const {
       std::cout << "/" << factor;
     }
   }
-  std::cout << " with power " << power << std::endl;
+  std::cout << " with power " << npower << std::endl;
 
-  for (uint32_t i = 0; i < power; ++i, span = (span + 1) / 2) {
+  for (uint32_t i = 0; i < npower; ++i, span = (span + 1) / 2) {
     const auto& M = middles[i];
     hash = hashWords(E, hash, M);
     uint64_t h = hash[0];

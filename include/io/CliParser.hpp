@@ -26,6 +26,7 @@ struct CliOptions {
     bool bench = false;
     bool profiling = false;
     bool debug = false;
+    bool verify = true;
     bool gerbiczli = true;
     uint64_t B1 = 10000;
     uint64_t B2 = 0;

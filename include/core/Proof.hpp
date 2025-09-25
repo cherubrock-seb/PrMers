@@ -30,7 +30,7 @@ public:
     static uint64_t res64(const std::vector<uint32_t>& words);
 
     // Proof verification
-    bool verify(const GpuContext& gpu) const;
+    bool verify(const GpuContext& gpu, uint32_t npower) const;
 };
 
 } // namespace core

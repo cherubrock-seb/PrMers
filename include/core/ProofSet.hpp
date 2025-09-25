@@ -54,30 +54,31 @@ private:
 
 class ProofSet {
 public:
-    const uint32_t E;     // exponent
-    const uint32_t power; // proof power level
-    const std::vector<std::string> knownFactors; // known factors (for cofactor tests)
+    const uint32_t E;
+    mutable uint32_t power;
+    const std::vector<std::string> knownFactors;
 
     ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {});
 
     bool shouldCheckpoint(uint32_t iter) const;
+    bool shouldCheckpoint2(uint32_t iter, uint32_t npower) const;
     void save(uint32_t iter, const std::vector<uint32_t>& words);
     std::vector<uint32_t> load(uint32_t iter) const;
+    std::vector<uint32_t> load2(uint32_t iter, uint32_t npower) const;
 
     static Words fromUint64(const std::vector<uint64_t>& host, uint32_t exponent);
     static uint32_t bestPower(uint32_t E);
     static bool isInPoints(uint32_t E, uint32_t power, uint32_t k);
     static std::filesystem::path proofPath(uint32_t E);
     static double diskUsageGB(uint32_t E, uint32_t power);
-    
-    // Core proof generation algorithm
-    Proof computeProof(const GpuContext& gpu) const;
+
+    Proof computeProof(const GpuContext& gpu, uint32_t npower) const;
 
 private:
-    std::vector<uint32_t> points; // checkpoint iteration points
-    
+    mutable std::vector<uint32_t> points;
     bool isValidTo(uint32_t limitK) const;
     bool fileExists(uint32_t k) const;
+    void rebuildPointsForPower(uint32_t p) const;
 };
 
 } // namespace core

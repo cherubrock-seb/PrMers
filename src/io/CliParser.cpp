@@ -73,6 +73,7 @@ void printUsage(const char* progName) {
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;
     std::cout << "  -proof <level>       : (Optional) Set proof power between 1 and 12 or 0 to disable proof generation (default: optimal proof power selected automatically)" << std::endl;
+    std::cout << "  -noverify            : (Optional) Skip verification of the generated PRP proof (useful for benchmarking or when verification will be done separately)" << std::endl;
     std::cout << "  -erroriter <iter>    : (Optional) injects an error at iteration <iter> to test Gerbicz-Li error detection mechanism." << std::endl;
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
@@ -298,6 +299,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-p95") == 0) {
             opts.resume95 = true;
+        }
+        else if (std::strcmp(argv[i], "-noverify") == 0) {
+            opts.verify = false;
         }
         else if (std::strcmp(argv[i], "-tune") == 0) {
             opts.tune = true;
