@@ -22,7 +22,7 @@ jobs:
 
       - name: Install zip utility
         run: choco install zip --no-progress
-
+        continue-on-error: true
       - name: Download OpenCL SDK
         run: |
           curl.exe -L -o $env:RUNNER_TEMP/opencl.zip "https://github.com/KhronosGroup/OpenCL-SDK/releases/download/v${env:OPENCL_VERSION}/OpenCL-SDK-v${env:OPENCL_VERSION}-Win-x64.zip"
