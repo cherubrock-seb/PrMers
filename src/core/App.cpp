@@ -3774,7 +3774,7 @@ int App::runPM1Stage2Marin() {
     mpz_class p = p_prev;
     uint64_t idx = 0;
     if (resumed_s2) {
-        p = mpz_class(resume_p_u64);
+        mpz_set_ui(p.get_mpz_t(), static_cast<unsigned long>(resume_p_u64));
         idx = resume_idx;
         std::cout << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")\n";
         if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")"; guiServer_->appendLog(oss.str()); }
