@@ -3630,6 +3630,283 @@ done:
     return E;
 }
 
+int App::runPM1Stage2Marin() {
+    using namespace std::chrono;
+    if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
+    bool debug = options.debug;
+    uint64_t B1u = options.B1, B2u = options.B2;
+    mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
+    if (B2 <= B1) {
+        std::cerr << "Stage 2 error B2 < B1.\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Stage 2 error B2 < B1.\n"; guiServer_->appendLog(oss.str()); }
+        return -1;
+    }
+    std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl; guiServer_->appendLog(oss.str()); }
+    uint32_t pexp = static_cast<uint32_t>(options.exponent);
+    const bool verbose = options.debug;
+    const size_t baseRegs = 11;
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5;
+    std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
+    const std::string ckpt_file_s2 = ck2.str();
+    auto read_ckpt_s2 = [&](engine* e, const std::string& file, uint64_t& saved_p, uint64_t& saved_idx, double& et, uint64_t& sB1, uint64_t& sB2)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 1) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != pexp) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = e->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!e->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, double et){
+        const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
+        {
+            File f(newf, "wb");
+            int version = 1;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
+            if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
+            if (!f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!e->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file_s2.c_str(), &s) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file_s2.c_str());
+    };
+    unsigned long nbEven = evenGapBound(B2);
+    if (nbEven == 0) nbEven = 1;
+    size_t regCount = baseRegs + nbEven + 2;
+    engine* eng = engine::create_gpu(pexp, regCount, static_cast<size_t>(options.device_id), verbose);
+    const size_t REVEN = baseRegs;
+    const size_t RSAVE_Q = baseRegs + nbEven;
+    const size_t RSAVE_HQ = baseRegs + nbEven + 1;
+    uint64_t resume_idx = 0;
+    uint64_t resume_p_u64 = 0;
+    double restored_time = 0.0;
+    uint64_t s2B1=0, s2B2=0;
+    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, restored_time, s2B1, s2B2);
+    bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u);
+    if (!resumed_s2) {
+        engine* eng_load = engine::create_gpu(pexp, baseRegs, static_cast<size_t>(options.device_id), verbose);
+        std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+        const std::string ckpt_file = ck.str();
+        auto read_ckpt = [&](engine* e, const std::string& file)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 3) return -2;
+            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != pexp) return -2;
+            uint32_t ri = 0; double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!e->set_checkpoint(data)) return -2;
+            uint64_t tmp64;
+            if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+            uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+            if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
+            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+            if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+            uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
+            if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+            if (!f.check_crc32()) return -2;
+            return 0;
+        };
+        int rr = read_ckpt(eng_load, ckpt_file);
+        if (rr < 0) rr = read_ckpt(eng_load, ckpt_file + ".old");
+        if (rr != 0) { delete eng_load; delete eng; std::cerr << "Stage 2: cannot load pm1 stage1 checkpoint.\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2: cannot load pm1 stage1 checkpoint.\n"; guiServer_->appendLog(oss.str()); } return -2; }
+        mpz_t H; mpz_init(H); eng_load->get_mpz(H, static_cast<engine::Reg>(RSTATE)); delete eng_load;
+        eng->set_mpz(static_cast<engine::Reg>(RSTATE), H);
+        mpz_clear(H);
+        std::cout << "Precomputing H even powers..." << std::endl;
+        if (guiServer_) { std::ostringstream oss; oss << "Precomputing H even powers..."; guiServer_->appendLog(oss.str()); }
+        eng->copy(static_cast<engine::Reg>(REVEN + 0), static_cast<engine::Reg>(RSTATE));
+        eng->square_mul(static_cast<engine::Reg>(REVEN + 0));
+        int pct = -1;
+        for (unsigned long k = 1; k < nbEven; ++k) {
+            eng->copy(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(REVEN + k - 1));
+            eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + 0));
+            eng->mul(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(RTMP));
+            int newPct = int((k + 1) * 100 / nbEven);
+            if (newPct > pct) {
+                pct = newPct;
+                std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush;
+                if (guiServer_) { std::ostringstream oss; oss << "Precomputing H powers: " << pct << "%"; guiServer_->appendLog(oss.str()); }
+            }
+        }
+        std::cout << "\n";
+        eng->set(static_cast<engine::Reg>(RACC_L), 1);
+    }
+    auto t0 = high_resolution_clock::now();
+    auto start_clock = high_resolution_clock::now();
+    auto lastBackup = start_clock;
+    auto lastDisplay = start_clock;
+    mpz_class p_prev; mpz_nextprime(p_prev.get_mpz_t(), B1.get_mpz_t());
+    mpz_class p = p_prev;
+    uint64_t idx = 0;
+    if (resumed_s2) {
+        p = mpz_class(resume_p_u64);
+        idx = resume_idx;
+        std::cout << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")"; guiServer_->appendLog(oss.str()); }
+        t0 = high_resolution_clock::now() - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
+        start_clock = high_resolution_clock::now();
+        lastBackup = start_clock;
+        lastDisplay = start_clock;
+    } else {
+        mpz_class p0 = p_prev;
+        eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), mpz_get_ui(p0.get_mpz_t()));
+        if (debug) {
+            mpz_t zh, zhq, zq; mpz_inits(zh, zhq, zq, nullptr);
+            eng->get_mpz(zh, static_cast<engine::Reg>(RSTATE));
+            eng->get_mpz(zhq, static_cast<engine::Reg>(RACC_R));
+            eng->get_mpz(zq, static_cast<engine::Reg>(RACC_L));
+            std::cout << "[DEBUG S2] H=" << mpz_class(zh) << std::endl;
+            std::cout << "[DEBUG S2] p0=" << p0.get_ui() << std::endl;
+            std::cout << "[DEBUG S2] H^p0=" << mpz_class(zhq) << std::endl;
+            std::cout << "[DEBUG S2] Q0=" << mpz_class(zq) << std::endl;
+            mpz_clears(zh, zhq, zq, nullptr);
+        }
+    }
+    size_t totalPrimes = primeCountApprox(B1, B2);
+    auto start = high_resolution_clock::now();
+    uint64_t primes_since_check = 0;
+    uint64_t checkpasslevel = options.checklevel > 0 ? options.checklevel : std::max<uint64_t>(1, (uint64_t)std::sqrt((double)std::max<size_t>(1, totalPrimes)));
+    eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
+    eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
+    mpz_class blockStartP = p;
+    for (;; ++idx) {
+        if (p > B2) break;
+        eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
+        eng->sub(static_cast<engine::Reg>(RTMP), 1);
+        eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RTMP));
+        eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
+        mpz_class nextp = p; mpz_nextprime(nextp.get_mpz_t(), nextp.get_mpz_t());
+        if (nextp > B2) { ++idx; break; }
+        mpz_class dgap = nextp - p;
+        uint64_t gap = mpz_get_ui(dgap.get_mpz_t());
+        uint64_t idxGap = (gap >> 1) - 1;
+        eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + idxGap));
+        eng->mul(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RTMP));
+        p = nextp;
+        ++primes_since_check;
+        auto now = high_resolution_clock::now();
+        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+            double done = static_cast<double>(idx + 1);
+            double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
+            double elapsedSec = duration<double>(now - start).count();
+            double ips = done > 0 ? done / elapsedSec : 0.0;
+            double remaining = totalPrimes > done ? static_cast<double>(totalPrimes) - done : 0.0;
+            double etaSec = ips > 0.0 ? remaining / ips : 0.0;
+            int days = static_cast<int>(etaSec) / 86400;
+            int hours = (static_cast<int>(etaSec) % 86400) / 3600;
+            int minutes = (static_cast<int>(etaSec) % 3600) / 60;
+            int seconds = static_cast<int>(etaSec) % 60;
+            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"; guiServer_->appendLog(oss.str()); }
+            lastDisplay = now;
+        }
+        auto now0 = high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            double et = duration<double>(now0 - t0).count();
+            std::cout << "\nBackup Stage 2 at prime " << p.get_ui() << " idx=" << idx << " start...\n";
+            save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
+            lastBackup = now0;
+            std::cout << "Backup Stage 2 done.\n";
+            if (guiServer_) { std::ostringstream oss; oss << "Backup Stage 2 at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
+        }
+        if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) { eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RSTATE)); }
+        if (interrupted) {
+            double et = duration<double>(high_resolution_clock::now() - t0).count();
+            save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
+            delete eng;
+            std::cout << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
+            return 0;
+        }
+    }
+    auto t1 = high_resolution_clock::now();
+    double elapsed = duration<double>(t1 - t0).count();
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+    mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RACC_L), Mp);
+    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".p95"); }
+    mpz_class g = gcd_with_dots(X, Mp);
+    bool found = g != 1 && g != Mp;
+    std::cout << "\nElapsed time (stage 2) = " << std::fixed << std::setprecision(2) << elapsed << " s." << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "Elapsed time (stage 2) = " << std::fixed << std::setprecision(2) << elapsed << " s."; guiServer_->appendLog(oss.str()); }
+    std::string filename = "stage2_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (found) {
+        char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
+        writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
+        std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n'; guiServer_->appendLog(oss.str()); }
+        options.knownFactors.push_back(std::string(s));
+        std::free(s);
+    } else {
+        writeStageResult(filename, "No factor P-1 up to B2=" + B2.get_str());
+        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
+    }
+    
+    std::remove(ckpt_file_s2.c_str());
+    std::remove((ckpt_file_s2 + ".old").c_str());
+    std::remove((ckpt_file_s2 + ".new").c_str());
+    
+    
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+   // wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
+    wm.appendToResultsTxt(json);
+    if (hasWorktodoEntry_) {
+        if (worktodoParser_->removeFirstProcessed()) {
+            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+            std::ifstream f(options.worktodo_path);
+            std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
+            f.close();
+            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
+            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
+        }
+    }
+    
+    delete eng;
+    return found ? 0 : 1;
+}
+
+
 
 int App::runPM1Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 1"; guiServer_->setStatus(oss.str()); }
@@ -3992,19 +4269,48 @@ int App::runPM1Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
     wm.appendToResultsTxt(json);
-    if (hasWorktodoEntry_) {
-        if (worktodoParser_->removeFirstProcessed()) {
-            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
-            std::ifstream f(options.worktodo_path);
-            std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
-            f.close();
-            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
-            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
-        } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
+
+    if(options.B2 >= 0){
+        {
+            const double elapsed_time_ck =
+                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                + restored_time;
+
+            save_ckpt(
+                0,                 // i
+                elapsed_time_ck,   // et
+                0,                 // chk
+                0,                 // blks
+                0,                 // bib
+                0,                 // cbl
+                0,                 // inlot
+                mpz_class(0),      // ceacc
+                mpz_class(0),      // cwbits
+                chunkIndex,        // chunkIdx
+                startPrime,        // startP
+                firstChunk ? 1 : 0,// first
+                processed_total_bits, // processedBits
+                0                  // bitsInChunk
+            );
+        }
+        //options.B2 = 214439;
+        factorFound = runPM1Stage2Marin() || factorFound;
+    }
+    else{
+        if (hasWorktodoEntry_) {
+            if (worktodoParser_->removeFirstProcessed()) {
+                std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+                std::ifstream f(options.worktodo_path);
+                std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
+                f.close();
+                if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
+                else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
+            } else {
+                std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
+            }
         }
     }
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
@@ -4338,11 +4644,43 @@ int App::run() {
     if (options.mode == "llsafe") {
         rc = runLlSafeMarin();
         ran = true;
-    } else if (options.mode == "pm1" && options.marin && options.B2 <= 0) {
+    } else if (options.mode == "pm1" && options.marin /*&& options.B2 <= 0*/) {
         if (options.exponent > 89) {
-            rc = runPM1Marin();
-            ran = true;
-        } else {
+            int rc_local = 0;
+            bool ran_local = false;
+
+            std::ostringstream s1; s1 << "pm1_m_" << options.exponent << ".ckpt";
+            std::ostringstream s2; s2 << "pm1_s2_m_" << options.exponent << ".ckpt";
+            const std::string s1f = s1.str();
+            const std::string s2f = s2.str();
+
+            bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
+            bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
+
+            if (haveS2 || haveS1) {
+                std::ostringstream msg;
+                msg << "Detected P-1 checkpoint(s): "
+                    << (haveS2 ? "[Stage 2] " : "")
+                    << (haveS1 ? "[Stage 1] " : "")
+                    << "→ jumping to runPM1Stage2Marin()";
+                std::cout << msg.str() << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Resuming P-1 Stage 2"); }
+
+                rc_local = runPM1Stage2Marin();
+                ran_local = true;
+            } else {
+                std::string msg = "No P-1 checkpoints found → running Stage 1 (runPM1Marin)";
+                std::cout << msg << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg); guiServer_->setStatus("Running P-1 Stage 1"); }
+
+                rc_local = runPM1Marin();
+                ran_local = true;
+            }
+
+            rc = rc_local;
+            ran = ran_local;
+        }
+        else {
             std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
         }
     } else if (options.exportmers) {
