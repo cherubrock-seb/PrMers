@@ -433,13 +433,61 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         opts.osVersion = "";
     #endif
 
-    #if defined(__x86_64__)
-        opts.osArch = "x86_64";
-    #elif defined(__aarch64__)
-        opts.osArch = "arm64";
+    #if defined(__x86_64__) || defined(__amd64__) || defined(_M_X64)
+    opts.osArch = "x86_64";
+    #elif defined(__i386__) || defined(__i386) || defined(i386) || defined(_M_IX86)
+    opts.osArch = "x86_32";
+    #elif defined(__aarch64__) || defined(_M_ARM64)
+    opts.osArch = "arm64";
+    #elif defined(_M_ARM64EC)
+    opts.osArch = "arm64ec";
+    #elif defined(__arm__) || defined(_M_ARM)
+    #if defined(__ARM_ARCH_7A__) || defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7S__)
+        opts.osArch = "armv7";
+    #elif defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6Z__) || defined(__ARM_ARCH_6ZK__)
+        opts.osArch = "armv6";
     #else
-        opts.osArch = "unknown";
+        opts.osArch = "arm32";
     #endif
+    #elif defined(__riscv)
+    #if defined(__riscv_xlen) && (__riscv_xlen == 64)
+        opts.osArch = "riscv64";
+    #else
+        opts.osArch = "riscv32";
+    #endif
+    #elif defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
+    #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        opts.osArch = "ppc64le";
+    #else
+        opts.osArch = "ppc64";
+    #endif
+    #elif defined(__powerpc__) || defined(__ppc__) || defined(_M_PPC)
+    opts.osArch = "ppc32";
+    #elif defined(__mips64) || defined(__mips64__) || defined(__MIPS64__)
+    #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        opts.osArch = "mips64el";
+    #else
+        opts.osArch = "mips64";
+    #endif
+    #elif defined(__mips__) || defined(__mips) || defined(__MIPS__)
+    #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        opts.osArch = "mipsel";
+    #else
+        opts.osArch = "mips";
+    #endif
+    #elif defined(__s390x__)
+    opts.osArch = "s390x";
+    #elif defined(__s390__)
+    opts.osArch = "s390";
+    #elif defined(__wasm64__)
+    opts.osArch = "wasm64";
+    #elif defined(__wasm32__)
+    opts.osArch = "wasm32";
+    #else
+    opts.osArch = "unknown";
+    #endif
+
+
     return opts;
 }
 
