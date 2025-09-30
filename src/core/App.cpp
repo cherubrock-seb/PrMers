@@ -3763,6 +3763,10 @@ int App::runPM1Stage2Marin() {
                 if (guiServer_) { std::ostringstream oss; oss << "Precomputing H powers: " << pct << "%"; guiServer_->appendLog(oss.str()); }
             }
         }
+        for (unsigned long k = 0; k < nbEven; ++k) {
+            eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + k));
+            eng->copy(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(RTMP));
+        }
         std::cout << "\n";
         eng->set(static_cast<engine::Reg>(RACC_L), 1);
     }
@@ -3815,8 +3819,8 @@ int App::runPM1Stage2Marin() {
         mpz_class dgap = nextp - p;
         uint64_t gap = mpz_get_ui(dgap.get_mpz_t());
         uint64_t idxGap = (gap >> 1) - 1;
-        eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + idxGap));
-        eng->mul(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RTMP));
+        //eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + idxGap));
+        eng->mul(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + idxGap));
         p = nextp;
         ++primes_since_check;
         auto now = high_resolution_clock::now();
