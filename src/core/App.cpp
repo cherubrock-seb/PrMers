@@ -4029,6 +4029,165 @@ int App::runPM1Stage2Marin() {
     return found ? 0 : 1;
 }
 
+/* ===== n^K Stage-2 (Topics in advanced scientific computation. by: Crandall, Richard E) ===== */
+/* Fast b^{n^K} (Stirling init + z-chain); product of differences; GCD. */
+int App::runPM1Stage2MarinNKVersion() {
+    using namespace std::chrono;
+    const uint32_t pexp  = (uint32_t)options.exponent;
+    const uint32_t K     = (uint32_t)options.K;
+    const uint64_t nmax  = (uint64_t)options.nmax;
+    if (K == 0 || nmax == 0) { std::cout << "Nothing to do (K=0 or nmax=0)\n"; return 0; }
+    if (guiServer_) { std::ostringstream oss; oss << "P-1 Stage 2 (n^K) — K=" << K << ", nmax=" << nmax; guiServer_->setStatus(oss.str()); }
+
+    const size_t RSTATE=0, RACC=1, RTMP=2, RPOW=3, RDIFF=4, RONE=5;
+    size_t regCount = 6 + (size_t)K + 1 + (size_t)nmax;
+
+    engine* eng_s1 = engine::create_gpu(pexp, 11, (size_t)options.device_id, options.debug);
+    std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+    auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 3) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != pexp) return -2;
+        uint32_t ri = 0; double et = 0.0;
+        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = e->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!e->set_checkpoint(data)) return -2;
+        uint64_t tmp64;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+        uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+        if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
+        uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+        if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+        uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
+        if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+    int rr = read_ckpt_s1(eng_s1, ck.str());
+    if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
+    if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return -2; }
+    mpz_t H; mpz_init(H); eng_s1->get_mpz(H, (engine::Reg)0); delete eng_s1;
+
+    engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, options.debug);
+    eng->set_mpz((engine::Reg)RSTATE, H);
+    mpz_clear(H);
+
+    auto pow_big_mpz = [&](size_t dst, size_t baseReg, const mpz_class& e)->bool{
+        eng->set((engine::Reg)dst, 1);
+        if (mpz_sgn(e.get_mpz_t()) == 0) return true;
+        eng->set_multiplicand((engine::Reg)RTMP, (engine::Reg)baseReg);
+        size_t nb = mpz_sizeinbase(e.get_mpz_t(), 2);
+        const size_t chunk = 4096;
+        for (size_t k = 0; k < nb; ++k) {
+            eng->square_mul((engine::Reg)dst);
+            size_t bit = nb - 1 - k;
+            if (mpz_tstbit(e.get_mpz_t(), bit)) eng->mul((engine::Reg)dst, (engine::Reg)RTMP);
+            if ((k % chunk) == 0 && interrupted) return false;
+        }
+        return true;
+    };
+
+    std::vector<std::vector<mpz_class>> S(K+1, std::vector<mpz_class>(K+1));
+    S[0][0] = 1;
+    for (uint32_t n = 1; n <= K; ++n) { S[n][0] = mpz_class(0); for (uint32_t j = 1; j <= n; ++j) S[n][j] = mpz_class(j) * S[n-1][j] + S[n-1][j-1]; }
+    std::vector<mpz_class> fact(K+1); fact[0] = 1; for (uint32_t j = 1; j <= K; ++j) fact[j] = fact[j-1] * j;
+
+    size_t Z0 = 6, VAL0 = Z0 + (size_t)K + 1;
+    eng->set((engine::Reg)(Z0 + 0), 1);
+    for (uint32_t j = 1; j <= K; ++j) { mpz_class e = fact[j] * S[K][j]; if (!pow_big_mpz(Z0 + j, RSTATE, e)) { delete eng; std::cout << "Interrupted during initialization\n"; return 0; } }
+
+    eng->set((engine::Reg)RACC, 1);
+    eng->set((engine::Reg)RONE, 1);
+
+    auto t0 = high_resolution_clock::now();
+    auto last = high_resolution_clock::now();
+
+    for (uint64_t m = 1; m <= nmax; ++m) {
+        for (uint32_t q = 0; q < K; ++q) { 
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)(Z0 + q + 1)); 
+            eng->mul((engine::Reg)(Z0 + q), (engine::Reg)RPOW); 
+            }
+        eng->copy((engine::Reg)(VAL0 + (m-1)), (engine::Reg)(Z0 + 0));
+        auto now = high_resolution_clock::now();
+        if (duration_cast<milliseconds>(now - last).count() >= 300) {
+            double done = double(m), total = double(nmax);
+            double elapsed = duration<double>(now - t0).count();
+            double ips = done / std::max(1e-9, elapsed);
+            double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+            std::cout << "build " << m << "/" << nmax << " | " << std::fixed << std::setprecision(2) << (done*100.0/total) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
+            last = now;
+        }
+        if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+    }
+    std::cout << "\nAccumulating pairwise differences on GPU\n";
+
+    uint64_t totalPairs = (nmax > 1) ? (nmax * (nmax - 1)) / 2 : 0, pairsDone = 0;
+    for (uint64_t i = 0; i < nmax; ++i) {
+        for (uint64_t j = i + 1; j < nmax; ++j) {
+            eng->copy((engine::Reg)RDIFF, (engine::Reg)(VAL0 + j));
+            eng->sub_reg((engine::Reg)RDIFF, (engine::Reg)(VAL0 + i));
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)RDIFF);
+            eng->mul((engine::Reg)RACC, (engine::Reg)RPOW);
+            ++pairsDone;
+            /* Verification correct pour sub reg
+            mpz_class Mpx = (mpz_class(1) << pexp) - 1; 
+            mpz_t za, zb, zd_gpu, zd_exp;
+            mpz_inits(za, zb, zd_gpu, zd_exp, nullptr);
+            eng->get_mpz(za, (engine::Reg)(VAL0 + j));
+            eng->get_mpz(zb, (engine::Reg)(VAL0 + i));
+            eng->get_mpz(zd_gpu, (engine::Reg)RDIFF);
+            mpz_sub(zd_exp, za, zb);
+            mpz_mod(zd_exp, zd_exp, Mpx.get_mpz_t());
+            if (mpz_cmp(zd_gpu, zd_exp) != 0) {
+                std::cerr << "sub_reg mismatch at i=" << i << " j=" << j << std::endl;
+                std::cerr << "gpu=" << mpz_class(zd_gpu).get_str() << std::endl;
+                std::cerr << "exp=" << mpz_class(zd_exp).get_str() << std::endl;
+                std::abort();
+            }*/
+            
+            mpz_clears(za, zb, zd_gpu, zd_exp, nullptr);
+            auto now = high_resolution_clock::now();
+            if (duration_cast<milliseconds>(now - last).count() >= 400) {
+                double done = double(pairsDone), total = double(totalPairs);
+                double elapsed = duration<double>(now - t0).count();
+                double ips = done / std::max(1e-9, elapsed);
+                double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                std::cout << "pairs " << pairsDone << "/" << totalPairs << " | " << std::fixed << std::setprecision(2) << (total ? (done*100.0/total) : 100.0) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
+                last = now;
+            }
+            if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+        }
+    }
+    std::cout << "\nComputing GCD...\n";
+
+    mpz_t Xz; mpz_init(Xz); eng->get_mpz(Xz, (engine::Reg)RACC); mpz_class Mp = (mpz_class(1) << pexp) - 1; mpz_class X; mpz_set(X.get_mpz_t(), Xz); mpz_clear(Xz);
+    mpz_class g; mpz_gcd(g.get_mpz_t(), X.get_mpz_t(), Mp.get_mpz_t());
+
+    bool found = (g > 1 && g < Mp);
+    if (found) { std::cout << "Stage 2 n^K Factor found : " << g.get_str() << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 n^K Factor found : " << g.get_str(); guiServer_->appendLog(oss.str()); } }
+    else { std::cout << "No factor" << std::endl; if (guiServer_) { std::ostringstream oss; oss << "No factor"; guiServer_->appendLog(oss.str()); } }
+
+    double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
+    std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
+    delete eng;
+    return found ? 0 : 1;
+}
+
+
 
 
 int App::runPM1Marin() {
@@ -4416,7 +4575,7 @@ int App::runPM1Marin() {
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
     wm.appendToResultsTxt(json);
 
-    if(options.B2 >= 0){
+    if(options.B2 > 0){
         {
             const double elapsed_time_ck =
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
@@ -4441,6 +4600,34 @@ int App::runPM1Marin() {
         }
         //options.B2 = 214439;
         factorFound = runPM1Stage2Marin() || factorFound;
+    }
+   if(options.nmax > 0 && options.K > 0){
+        {
+            std::cout << "P-1 STAGE 2 IN **** n^K variant  n=" << options.nmax << " K=" << options.K << "******\n";
+    
+            const double elapsed_time_ck =
+                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                + restored_time;
+
+            save_ckpt(
+                0,                 // i
+                elapsed_time_ck,   // et
+                0,                 // chk
+                0,                 // blks
+                0,                 // bib
+                0,                 // cbl
+                0,                 // inlot
+                mpz_class(0),      // ceacc
+                mpz_class(0),      // cwbits
+                chunkIndex,        // chunkIdx
+                startPrime,        // startP
+                firstChunk ? 1 : 0,// first
+                processed_total_bits, // processedBits
+                0                  // bitsInChunk
+            );
+        }
+        //options.B2 = 214439;
+        factorFound = runPM1Stage2MarinNKVersion() || factorFound;
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
@@ -4802,7 +4989,7 @@ int App::run() {
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
             bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
 
-            if (haveS2 || haveS1) {
+            if ((haveS2 || haveS1) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "
                     << (haveS2 ? "[Stage 2] " : "")

@@ -49,6 +49,7 @@ public:
     int runPM1Marin();
     int runPM1Stage2();
     int runPM1Stage2Marin();
+    int runPM1Stage2MarinNKVersion();
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);

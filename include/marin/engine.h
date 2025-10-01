@@ -42,6 +42,8 @@ public:
 	virtual void sub(const Reg src, const uint32 a) const = 0;
 	// dst = dst + src
 	virtual void add(const Reg dst, const Reg src) const = 0;
+	// dst = dst - src
+	virtual void sub_reg(const Reg dst, const Reg src) const = 0;
 
 	// get size in bytes of a register
 	virtual size_t get_register_data_size() const = 0;

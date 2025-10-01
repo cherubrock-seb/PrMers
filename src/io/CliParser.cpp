@@ -58,6 +58,8 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
     std::cout << "  -b2                  : (Optional) B2 for factoring P-1" << std::endl;
+    std::cout << "  -K <value>           : Exponent K for the n^K variant of P-1 stage 2" << std::endl;
+    std::cout << "  -nmax <value>        : Maximum value of n for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
     std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
@@ -229,6 +231,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
             opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-K") == 0 && i + 1 < argc) {
+            opts.K = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-nmax") == 0 && i + 1 < argc) {
+            opts.nmax = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {
