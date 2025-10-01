@@ -4157,9 +4157,9 @@ int App::runPM1Stage2MarinNKVersion() {
                 std::cerr << "gpu=" << mpz_class(zd_gpu).get_str() << std::endl;
                 std::cerr << "exp=" << mpz_class(zd_exp).get_str() << std::endl;
                 std::abort();
-            }*/
+            }
             
-            mpz_clears(za, zb, zd_gpu, zd_exp, nullptr);
+            mpz_clears(za, zb, zd_gpu, zd_exp, nullptr);*/
             auto now = high_resolution_clock::now();
             if (duration_cast<milliseconds>(now - last).count() >= 400) {
                 double done = double(pairsDone), total = double(totalPairs);
