@@ -13,8 +13,8 @@ FLAGS_CPU   := -O3
 FLAGS_GPU   := -O2 -DGPU
 
 CXX         := g++
-CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto -I$(INC_DIR)/marin $(CFLAGS) $(FLAGS_GPU) $(FLAGS_CPU)
-LDFLAGS     := -flto=8
+CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto=auto -I$(INC_DIR)/marin $(CFLAGS) $(FLAGS_GPU) $(FLAGS_CPU)
+LDFLAGS     := -flto=auto
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
