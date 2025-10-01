@@ -27,3 +27,8 @@ logs/
 stage1_result_*.txt
 worktodo*.txt
 *.save
+/vcpkg
+/prmers.exe
+/*.zip
+/package
+/.vscode
