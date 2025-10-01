@@ -23,6 +23,9 @@ ifeq ($(UNAME_S),Darwin)
 else
   LDFLAGS  += -lOpenCL
 endif
+ifeq ($(shell case $(UNAME_S) in (*NT*) echo 1;; esac),1)
+  LDFLAGS  += -lWs2_32
+endif
 
 LDFLAGS += -lgmpxx -lgmp
 
