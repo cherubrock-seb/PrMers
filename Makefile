@@ -1,6 +1,5 @@
 PREFIX      ?= /usr/local
 TARGET      := prmers
-KERNEL_PATH ?= $(PREFIX)/share/$(TARGET)/
 
 SRC_DIR     := src
 INC_DIR     := include
@@ -11,20 +10,31 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 CFLAGS      := -Wall -Wextra -Wsign-conversion -ffinite-math-only
 FLAGS_CPU   := -O3
 FLAGS_GPU   := -O2 -DGPU
+MARCH       := native
 
 CXX         := g++
-CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=native -flto=auto -I$(INC_DIR)/marin $(CFLAGS) $(FLAGS_GPU) $(FLAGS_CPU)
+CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=$(MARCH) -flto=auto -I$(INC_DIR)/marin $(CFLAGS) $(FLAGS_GPU) $(FLAGS_CPU)
 LDFLAGS     := -flto=auto
 
 UNAME_S := $(shell uname -s)
+
+VERSION := $(shell git describe --tags --always)
+PACKAGE := prmers-$(VERSION)
+
+# Mac
 ifeq ($(UNAME_S),Darwin)
   CXXFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
   LDFLAGS  += -framework OpenCL
 else
   LDFLAGS  += -lOpenCL
 endif
-ifeq ($(shell case $(UNAME_S) in (*NT*) echo 1;; esac),1)
+
+# Windows
+ifeq ($(shell case $(UNAME_S) in (*_NT*) echo 1;; esac),1)
   LDFLAGS  += -lWs2_32
+  KERNEL_PATH ?= ./kernels/
+else
+  KERNEL_PATH ?= $(PREFIX)/share/$(TARGET)/
 endif
 
 LDFLAGS += -lgmpxx -lgmp
@@ -39,7 +49,7 @@ endif
 
 CPPFLAGS   := -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install uninstall package
 
 all: $(TARGET)
 
@@ -51,12 +61,27 @@ $(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c $< -o $@
 
 install: $(TARGET)
+	@if [ "$(KERNEL_PATH)" = "./kernels/" ]; then \
+		echo "Installation not supported with portable kernel path."; \
+		exit 1; \
+	fi
 	@echo "Installation de $(TARGET) dans $(PREFIX)/bin"
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -m 755 $(TARGET) $(DESTDIR)$(PREFIX)/bin/
 	@echo "Installation des kernels dans $(KERNEL_PATH)"
 	install -d $(DESTDIR)$(KERNEL_PATH)
 	install -m 644 kernels/*.cl $(DESTDIR)$(KERNEL_PATH)
+
+package: $(TARGET)
+	@if [ "$(KERNEL_PATH)" != "./kernels/" ]; then \
+		echo "Packaging only supported with portable kernel path."; \
+		exit 1; \
+	fi
+	mkdir -p package/$(PACKAGE)
+	cp $(TARGET) package/$(PACKAGE)
+	cp -r kernels package/$(PACKAGE)
+	ldd $(TARGET) | grep "=> /.[^/]" | awk '{print $$3}' | xargs -- cp -t package/$(PACKAGE)
+	bsdtar -czvf $(PACKAGE).zip -C package $(PACKAGE)
 
 uninstall:
 	@echo "Désinstallation de $(TARGET)"
