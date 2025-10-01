@@ -45,6 +45,10 @@ target_link_libraries(prmers PRIVATE
   PkgConfig::GMPXX
 )
 
+if (WIN32)
+  target_link_libraries(prmers PRIVATE ws2_32)
+endif()
+
 if (USE_CURL)
   target_link_libraries(prmers PRIVATE CURL::libcurl)
 endif()
