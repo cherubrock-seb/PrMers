@@ -35,6 +35,7 @@
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
+#include "core/Version.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -2999,7 +3000,7 @@ static uint32_t checksum_prime95_s1(uint64_t B1, const std::vector<uint8_t>& dat
     return (uint32_t)chk64;
 }
 
-static bool write_prime95_s1_from_bytes(const std::string& outPath, uint32_t p, uint64_t B1, const std::vector<uint8_t>& data){
+static bool write_prime95_s1_from_bytes(const std::string& outPath, uint32_t p, uint64_t B1, const std::vector<uint8_t>& data, const std::string& date_start, const std::string& date_end){
     std::ofstream out(outPath, std::ios::binary);
     if(!out) return false;
     uint32_t chk = checksum_prime95_s1(B1, data);
@@ -3021,10 +3022,80 @@ static bool write_prime95_s1_from_bytes(const std::string& outPath, uint32_t p, 
     write_i32(out, 1);
     write_i32(out, (int32_t)(data.size()>>2));
     out.write(reinterpret_cast<const char*>(data.data()), (std::streamsize)data.size());
+
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::time_t tt = std::chrono::system_clock::to_time_t(now);
+    std::tm tmv{};
+    #if defined(_WIN32)
+    gmtime_s(&tmv, &tt);
+    #else
+    std::tm* tmp = std::gmtime(&tt);
+    if (tmp) tmv = *tmp;
+    #endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+    std::ostringstream ts;
+    ts << buf << '.' << std::setw(3) << std::setfill('0') << (int)ms.count();
+    std::string ds = date_start.empty() ? ts.str() : date_start;
+    std::string de = date_end.empty() ? ts.str() : date_end;
+
+    std::string os_str;
+    #if defined(_WIN32)
+    os_str = "Windows";
+    #elif defined(__APPLE__)
+    os_str = "macOS";
+    #elif defined(__linux__)
+    os_str = "Linux";
+    #else
+    os_str = "Unknown";
+    #endif
+
+    std::string arch_str;
+    #if defined(__x86_64__) || defined(_M_X64)
+    arch_str = "x86_64";
+    #elif defined(i386) || defined(__i386__) || defined(__i386) || defined(_M_IX86)
+    arch_str = "x86_32";
+    #elif defined(__aarch64__) || defined(_M_ARM64)
+    arch_str = "ARM64";
+    #elif defined(__arm__) || defined(_M_ARM)
+    arch_str = "ARM";
+    #else
+    arch_str = "unknown";
+    #endif
+
+    std::string json = std::string("{\"programs\":[{\"work\":{\"type\":\"PM1\",\"stage\":\"1\"},\"program\":{\"name\":\"prmers\",\"version\":\"" + core::PRMERS_VERSION + "\"},\"os\":{\"os\":\"") + os_str + "\",\"architecture\":\"" + arch_str + "\"},\"date_start\":\"" + ds + "\",\"date_end\":\"" + de + "\"}]}";
+
+    auto crc32 = [](const uint8_t* d, size_t n){
+        uint32_t crc = 0xFFFFFFFFu;
+        for (size_t i = 0; i < n; ++i) {
+            crc ^= d[i];
+            for (int k = 0; k < 8; ++k) {
+                uint32_t mask = -(crc & 1u);
+                crc = (crc >> 1) ^ (0xEDB88320u & mask);
+            }
+        }
+        return ~crc;
+    };
+
+    const char magic[16] = {'M','O','R','E','I','N','F','O','J','S','O','N','D','A','T','A'};
+    uint32_t version = 1u;
+    std::vector<uint8_t> json_bytes(json.begin(), json.end());
+    uint32_t crc = crc32(json_bytes.data(), json_bytes.size());
+    uint32_t chunk_size = 8u + (uint32_t)json_bytes.size();
+
+    out.write(magic, 16);
+    write_u32(out, chunk_size);
+    write_u32(out, version);
+    write_u32(out, crc);
+    if (!json_bytes.empty())
+        out.write(reinterpret_cast<const char*>(json_bytes.data()), (std::streamsize)json_bytes.size());
+
     return (bool)out;
 }
 
-int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath){
+
+int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath, const std::string& date_start, const std::string& date_end){
     std::string txt;
     if(!read_text_file(ecmPath, txt)) return -1;
     uint64_t B1=0; uint32_t p=0; std::string hexX;
@@ -3036,15 +3107,16 @@ int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string
         std::filesystem::path outp = std::filesystem::path(ecmPath).parent_path() / name.str();
         out = outp.string();
     }
-    if(!write_prime95_s1_from_bytes(out, p, B1, data)) return -3;
+    if(!write_prime95_s1_from_bytes(out, p, B1, data, date_start, date_end)) return -3;
     std::cout << "Prime95 S1 file written to: " << out << std::endl;
     if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "Prime95 S1 file written to: " << out << std::endl;
-                      guiServer_->appendLog(oss.str());
+        std::ostringstream oss;
+        oss << "Prime95 S1 file written to: " << out << std::endl;
+        guiServer_->appendLog(oss.str());
     }
     return 0;
 }
+
 
 
 int App::runPM1() {
@@ -3107,6 +3179,7 @@ int App::runPM1() {
                     "", 
                     guiServer_ ? guiServer_.get() : nullptr
                 );
+    auto start_sys = std::chrono::system_clock::now();
     for (mp_bitcnt_t i = resumeIter; i > 0; --i) {
         lastIter = i;
         if (interrupted) {
@@ -3222,6 +3295,27 @@ int App::runPM1() {
             }
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X = util::vectToMpz(hostData, precompute.getDigitWidth(), Mp);
+    auto fmt = [](const std::chrono::system_clock::time_point& tp){
+        using namespace std::chrono;
+        auto ms = duration_cast<milliseconds>(tp.time_since_epoch()) % 1000;
+        std::time_t tt = system_clock::to_time_t(tp);
+        std::tm tmv{};
+        #if defined(_WIN32)
+        gmtime_s(&tmv, &tt);
+        #else
+        std::tm* tmp = std::gmtime(&tt);
+        if (tmp) tmv = *tmp;
+        #endif
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+        std::ostringstream s;
+        s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
+        return s.str();
+    };
+    auto end_sys = std::chrono::system_clock::now();
+    
+    std::string ds = fmt(start_sys);
+    std::string de = fmt(end_sys);
     if(options.resume){
         
         writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" +
@@ -3229,7 +3323,7 @@ int App::runPM1() {
                     options.B1, options.exponent, X);
         convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" +
                     std::to_string(options.B1) + ".save","resume_p" + std::to_string(options.exponent) + "_B1_" +
-                    std::to_string(options.B1) + ".p95");
+                    std::to_string(options.B1) + ".p95", ds, de);
                     
     }
     
@@ -3808,6 +3902,8 @@ int App::runPM1Stage2Marin() {
     eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
     eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
     mpz_class blockStartP = p;
+    auto start_sys = std::chrono::system_clock::now();
+
     for (;; ++idx) {
         if (p > B2) break;
         eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
@@ -3860,11 +3956,32 @@ int App::runPM1Stage2Marin() {
             return 0;
         }
     }
+    auto end_sys = std::chrono::system_clock::now();
+    auto fmt = [](const std::chrono::system_clock::time_point& tp){
+        using namespace std::chrono;
+        auto ms = duration_cast<milliseconds>(tp.time_since_epoch()) % 1000;
+        std::time_t tt = system_clock::to_time_t(tp);
+        std::tm tmv{};
+        #if defined(_WIN32)
+        gmtime_s(&tmv, &tt);
+        #else
+        std::tm* tmp = std::gmtime(&tt);
+        if (tmp) tmv = *tmp;
+        #endif
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+        std::ostringstream s;
+        s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
+        return s.str();
+    };
+    
+    std::string ds = fmt(start_sys);
+    std::string de = fmt(end_sys);
     auto t1 = high_resolution_clock::now();
     double elapsed = duration<double>(t1 - t0).count();
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RACC_L), Mp);
-    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".p95"); }
+    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) +  "_B2_" + std::to_string(options.B2) + ".p95", ds, de); }
     mpz_class g = gcd_with_dots(X, Mp);
     bool found = g != 1 && g != Mp;
     std::cout << "\nElapsed time (stage 2) = " << std::fixed << std::setprecision(2) << elapsed << " s." << std::endl;
@@ -3995,6 +4112,7 @@ int App::runPM1Marin() {
     int rr = read_ckpt(ckpt_file, resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
     if (rr < 0) rr = read_ckpt(ckpt_file + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
     if (rr == 0) { restored = true; firstChunk = (firstChunk_ck != 0); }
+    auto start_sys = std::chrono::system_clock::now();
     while (true) {
         bool errordone = false;
         bool useFast3Candidate = firstChunk;
@@ -4254,7 +4372,27 @@ int App::runPM1Marin() {
     //engine::digit d(eng, RSTATE);
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RSTATE), Mp);
-    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95"); }
+    auto end_sys = std::chrono::system_clock::now();
+    auto fmt = [](const std::chrono::system_clock::time_point& tp){
+        using namespace std::chrono;
+        auto ms = duration_cast<milliseconds>(tp.time_since_epoch()) % 1000;
+        std::time_t tt = system_clock::to_time_t(tp);
+        std::tm tmv{};
+        #if defined(_WIN32)
+        gmtime_s(&tmv, &tt);
+        #else
+        std::tm* tmp = std::gmtime(&tt);
+        if (tmp) tmv = *tmp;
+        #endif
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+        std::ostringstream s;
+        s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
+        return s.str();
+    };
+    std::string ds = fmt(start_sys);
+    std::string de = fmt(end_sys);
+    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95", ds, de); }
     X -= 1;
     mpz_class g = gcd_with_dots(X, Mp);
     bool factorFound = (g != 1) && (g != Mp);

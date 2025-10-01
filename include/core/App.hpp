@@ -55,7 +55,7 @@ public:
     int runGpuBenchmarkMarin();
     int exportResumeFromMersFile(const std::string& mersPath,
                                   const std::string& savePath);
-    int convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath);
+    int convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath,const std::string& date_start, const std::string& date_end);
 private:
   int    argc_;
   char** argv_;
