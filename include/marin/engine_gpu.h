@@ -60,7 +60,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_sub_p1 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_p2 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -314,8 +314,7 @@ public:
 
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1);
 		CREATE_KERNEL_CARRY(carry_weight_add_p1);
-		CREATE_KERNEL_CARRY(carry_weight_sub_p1);
-		CREATE_KERNEL_CARRY(carry_weight_sub_p2);
+		CREATE_KERNEL_CARRY(carry_weight_add_neg_p1);
 		CREATE_KERNEL_CARRY(carry_weight_p2);
 
 		_copy = _create_kernel("copy");
@@ -484,14 +483,14 @@ public:
 	void carry_weight_sub(const size_t dst, const size_t src)
 	{
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
-		_set_kernel_arg(_carry_weight_sub_p1, 4, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_sub_p1, 5, sizeof(uint32), &offset_x);
-		_execute_kernel(_carry_weight_sub_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_sub_p2, 4, sizeof(uint32), &offset_y);
-		_execute_kernel(_carry_weight_sub_p2, (_n / 4) >> _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
+		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
+		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
+
 	}
-
-
+	
 	void copy(const size_t dst, const size_t src)
 	{
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);

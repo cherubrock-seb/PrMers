@@ -152,6 +152,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             //opts.marin = false;
             opts.proof = false;
         }
+        else if (std::strcmp(argv[i], "-ecm") == 0) {
+            opts.mode = "ecm";
+            //opts.marin = false;
+            //opts.proof = false;
+        }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             opts.profiling = true;
         }

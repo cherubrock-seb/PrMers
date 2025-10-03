@@ -134,26 +134,23 @@ INLINE uint64_4 adc4(const uint64_4 lhs, const uint_8_4 width, const uint64 carr
 	return r;
 }
 
-inline uint64_4 subc4(uint64_4 u, uint64_4 v, uint_8_4 wd, uint64* bout)
-{
-    uint64 b = 0; uint64_4 r;
-    uint64 B0 = (uint64)1 << wd.s0; uint64 a0 = u.s0 & (B0 - 1ul); uint64 v0 = v.s0 & (B0 - 1ul); uint64 s0 = v0 + b; uint64 ex0 = (s0 >= B0); if (ex0) s0 -= B0; uint64 bo0 = (a0 < s0); r.s0 = bo0 ? (a0 + B0 - s0) : (a0 - s0); b = ex0 | bo0;
-    uint64 B1 = (uint64)1 << wd.s1; uint64 a1 = u.s1 & (B1 - 1ul); uint64 v1 = v.s1 & (B1 - 1ul); uint64 s1 = v1 + b; uint64 ex1 = (s1 >= B1); if (ex1) s1 -= B1; uint64 bo1 = (a1 < s1); r.s1 = bo1 ? (a1 + B1 - s1) : (a1 - s1); b = ex1 | bo1;
-    uint64 B2 = (uint64)1 << wd.s2; uint64 a2 = u.s2 & (B2 - 1ul); uint64 v2 = v.s2 & (B2 - 1ul); uint64 s2 = v2 + b; uint64 ex2 = (s2 >= B2); if (ex2) s2 -= B2; uint64 bo2 = (a2 < s2); r.s2 = bo2 ? (a2 + B2 - s2) : (a2 - s2); b = ex2 | bo2;
-    uint64 B3 = (uint64)1 << wd.s3; uint64 a3 = u.s3 & (B3 - 1ul); uint64 v3 = v.s3 & (B3 - 1ul); uint64 s3 = v3 + b; uint64 ex3 = (s3 >= B3); if (ex3) s3 -= B3; uint64 bo3 = (a3 < s3); r.s3 = bo3 ? (a3 + B3 - s3) : (a3 - s3); b = ex3 | bo3;
-    *bout = b; return r;
+INLINE uint64 mask_w(const uint w) {
+    // évite le shift de 64
+    return (w >= 64) ? (uint64)(~(uint64)0) : (((uint64)1 << w) - 1ul);
 }
 
-inline uint64_4 sbb4(uint64_4 u, uint_8_4 wd, uint64 bin)
-{
-    uint64 b = bin; uint64_4 r;
-    uint64 B0 = (uint64)1 << wd.s0; uint64 a0 = u.s0 & (B0 - 1ul); uint64 bo0 = (a0 < b); r.s0 = bo0 ? (a0 + B0 - b) : (a0 - b); b = bo0;
-    uint64 B1 = (uint64)1 << wd.s1; uint64 a1 = u.s1 & (B1 - 1ul); uint64 bo1 = (a1 < b); r.s1 = bo1 ? (a1 + B1 - b) : (a1 - b); b = bo1;
-    uint64 B2 = (uint64)1 << wd.s2; uint64 a2 = u.s2 & (B2 - 1ul); uint64 bo2 = (a2 < b); r.s2 = bo2 ? (a2 + B2 - b) : (a2 - b); b = bo2;
-    uint64 B3 = (uint64)1 << wd.s3; uint64 a3 = u.s3 & (B3 - 1ul); uint64 bo3 = (a3 < b); r.s3 = bo3 ? (a3 + B3 - b) : (a3 - b);
+INLINE uint64_4 neg_mp4(const uint64_4 v, const uint_8_4 wd) {
+    const uint64 m0 = mask_w(wd.s0);
+    const uint64 m1 = mask_w(wd.s1);
+    const uint64 m2 = mask_w(wd.s2);
+    const uint64 m3 = mask_w(wd.s3);
+    uint64_4 r;
+    r.s0 = (m0 - (v.s0 & m0));
+    r.s1 = (m1 - (v.s1 & m1));
+    r.s2 = (m2 - (v.s2 & m2));
+    r.s3 = (m3 - (v.s3 & m3));
     return r;
 }
-
 
 INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 width, uint64 * const carry)
 {
@@ -1598,6 +1595,42 @@ void carry_weight_mul_p1(__global uint64 * restrict const reg, __global uint64 *
 	}
 }
 
+__kernel
+__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
+void carry_weight_add_neg_p1(__global uint64 * restrict reg, __global uint64 * restrict carry,
+    __global const uint64 * restrict weight, __global const uint_8 * restrict width,
+    const sz_t offset_y, const sz_t offset_x)
+{
+    __global uint64_4 * restrict y = (__global uint64_4 *)(&reg[offset_y]);
+    __global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);
+    __global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);
+    __global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);
+    __local  uint64 cl[CWM_WG_SZ];
+
+    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;
+
+    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
+    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
+    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
+    const uint_8_4  wd = width4[gid];
+
+    uint64 c = 0;
+    uint64_4 u  = mod_mul4(y[gid], wi);
+    uint64_4 vx = mod_mul4(x[gid], wi);
+    uint64_4 vn = neg_mp4(vx, wd);               // vn = Mp - X
+
+    u = addc4(u, vn, wd, &c);                    
+    cl[lid] = c;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);
+    y[gid] = mod_mul4(u, w);
+    if (lid == CWM_WG_SZ - 1) {
+        carry[(gid != N_SZ/4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;
+    }
+}
+
+
 // Unweight, add, carry (pass 1)
 __kernel
 __attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
@@ -1636,71 +1669,6 @@ void carry_weight_add_p1(__global uint64 * restrict const reg, __global uint64 *
 		carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;
 	}
 }
-
-__kernel
-__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
-void carry_weight_sub_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,
-	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,
-	const sz_t offset_y, const sz_t offset_x)
-{
-	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);
-	__global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);
-	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);
-	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);
-	__local uint64 bl[CWM_WG_SZ];
-
-	const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;
-
-	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
-	const uint64_4 w = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
-	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
-	const uint_8_4 wd = width4[gid];
-
-	uint64 b = 0;
-	uint64_4 u = mod_mul4(y[gid], wi);
-	const uint64_4 v = mod_mul4(x[gid], wi);
-	u = subc4(u, v, wd, &b);
-	bl[lid] = b;
-
-	barrier(CLK_LOCAL_MEM_FENCE);
-
-	u = sbb4(u, wd, (lid == 0) ? 0 : bl[lid - 1]);
-	y[gid] = mod_mul4(u, w);
-
-	if (lid == CWM_WG_SZ - 1)
-	{
-		carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = b;
-	}
-}
-
-__kernel
-void carry_weight_sub_p2(__global uint64 * restrict const reg, __global uint64 * restrict const carry,
-	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,
-	const sz_t offset_y)
-{
-	const sz_t grp = (sz_t)get_global_id(0);
-	uint64 bsum = 0;
-	for (sz_t k = 0; k <= grp; ++k) bsum += carry[k];
-	if (bsum == 0) return;
-
-	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);
-	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);
-	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);
-
-	for (sz_t lid = 0; lid < CWM_WG_SZ; ++lid)
-	{
-		const sz_t gid = grp * CWM_WG_SZ + lid;
-		uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
-		const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
-		const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
-		const uint_8_4 wd = width4[gid];
-		uint64_4 u = mod_mul4(y[gid], wi);
-		u = sbb4(u, wd, bsum);
-		y[gid] = mod_mul4(u, w);
-		bsum = 0;
-	}
-}
-
 
 // Carry, weight (pass 2)
 __kernel
