@@ -27,3 +27,4 @@ logs/
 stage1_result_*.txt
 worktodo*.txt
 *.save
+*.ckpt
