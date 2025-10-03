@@ -4214,9 +4214,7 @@ int App::runECMMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const uint64_t B1 = options.B1 ? options.B1 : 1000000ULL;
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
-    //const bool verbose = options.debug;
     const bool verbose = options.debug;
-    
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
 
     auto splitmix64 = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
@@ -4235,22 +4233,50 @@ int App::runECMMarin()
     mpz_class K = 1;
     uint32_t primesB1 = 0;
     {
+        std::atomic<bool> done{false};
+        std::thread ticker([&]{
+            const char* msg = "[ECM] Stage1 prep: building K up to B1 ";
+            std::cout<<msg<<std::flush;
+            size_t dots=0, wrap=60;
+            while(!done.load(std::memory_order_relaxed)){
+                std::cout<<'.'<<std::flush;
+                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+            std::cout<<" done\n";
+        });
         uint64_t b = B1;
         vector<uint8_t> sieve(b/2+1, 1);
         for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
         auto apply_prime = [&](uint64_t q){ uint64_t pw=q; while (pw <= b / q) pw *= q; mpz_class t; mpz_set_ui(t.get_mpz_t(), (unsigned long)pw); K *= t; ++primesB1; };
         apply_prime(2);
         for (uint64_t q=3;q<=b;q+=2) if (sieve[q>>1]) apply_prime(q);
+        done.store(true, std::memory_order_relaxed);
+        ticker.join();
     }
     size_t nb = mpz_sizeinbase(K.get_mpz_t(), 2);
 
     std::vector<uint32_t> primesS2;
     if (B2 > B1) {
+        std::atomic<bool> done{false};
+        std::thread ticker([&]{
+            const char* msg = "[ECM] Stage2 prep: sieving primes in (B1,B2] ";
+            std::cout<<msg<<std::flush;
+            size_t dots=0, wrap=60;
+            while(!done.load(std::memory_order_relaxed)){
+                std::cout<<'.'<<std::flush;
+                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+            std::cout<<" done\n";
+        });
         uint64_t b = B2;
         vector<uint8_t> sieve(b/2+1, 1);
         for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
         if (B1 < 2 && 2 <= B2) primesS2.push_back(2);
         for (uint64_t q=3;q<=B2;q+=2) if (sieve[q>>1] && q > B1) primesS2.push_back((uint32_t)q);
+        done.store(true, std::memory_order_relaxed);
+        ticker.join();
     }
 
     {
@@ -4412,8 +4438,7 @@ int App::runECMMarin()
 
         auto t0 = high_resolution_clock::now();
         auto last_save = t0;
-        size_t step_bits = std::max<size_t>(nb/20, 1);
-        size_t next_mark = start_i + step_bits;
+        auto last_ui = t0;
 
         for (size_t i = start_i; i < nb; ++i){
             size_t bit = nb - 1 - i;
@@ -4423,7 +4448,7 @@ int App::runECMMarin()
             else      { xADD(RX0,RZ0,RX1,RZ1,RXD,RZD,RT0,RT1); eng->copy((engine::Reg)RX0,(engine::Reg)RT0); eng->copy((engine::Reg)RZ0,(engine::Reg)RT1); xDBL(RX1,RZ1,RT0,RT1); eng->copy((engine::Reg)RX1,(engine::Reg)RT0); eng->copy((engine::Reg)RZ1,(engine::Reg)RT1); }
 
             auto now = high_resolution_clock::now();
-            if (i + 1 >= next_mark || i + 1 == nb) {
+            if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == nb) {
                 double done = double(i + 1), total = double(nb);
                 double elapsed = duration<double>(now - t0).count() + saved_et;
                 double ips = done / std::max(1e-9, elapsed);
@@ -4433,7 +4458,7 @@ int App::runECMMarin()
                     <<" | ETA "<<fmt_hms(eta)
                     <<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;
                 std::cout<<line.str()<<std::flush;
-                next_mark += step_bits;
+                last_ui = now;
             }
             if (duration_cast<seconds>(now - last_save).count() >= 10) {
                 double elapsed = duration<double>(now - t0).count() + saved_et;
@@ -4452,10 +4477,8 @@ int App::runECMMarin()
         std::cout<<std::endl;
 
         std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage1..."<<std::endl;
-        mpz_t Zk; mpz_init(Zk); eng->get_mpz(Zk, (engine::Reg)RZ0);
-        mpz_class Zfin; mpz_set(Zfin.get_mpz_t(), Zk); mpz_clear(Zk);
-        Zfin %= N; if (Zfin < 0) Zfin += N;
-        mpz_class gg; mpz_gcd(gg.get_mpz_t(), Zfin.get_mpz_t(), N.get_mpz_t());
+        mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)RZ0, N);
+        mpz_class gg = gcd_with_dots(Zfin, N);
         bool found = (gg > 1 && gg < N);
 
         double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
@@ -4531,8 +4554,7 @@ int App::runECMMarin()
 
             auto t2_0 = high_resolution_clock::now();
             auto last2_save = t2_0;
-            size_t step_p = std::max<size_t>(primesS2.size()/20, 1);
-            size_t next_p = s2_idx + step_p;
+            auto last2_ui = t2_0;
 
             size_t Xcur = RX0, Zcur = RZ0;
 
@@ -4542,19 +4564,19 @@ int App::runECMMarin()
                 eng->copy((engine::Reg)Xcur, (engine::Reg)RT0);
                 eng->copy((engine::Reg)Zcur, (engine::Reg)RT1);
 
-                if (i + 1 >= next_p || i + 1 == primesS2.size()) {
+                auto now2 = high_resolution_clock::now();
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2.size()) {
                     double done = double(i + 1), total = double(primesS2.size());
-                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + s2_et;
+                    double elapsed = duration<double>(now2 - t2_0).count() + s2_et;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
                     line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2.size()<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%)"
                         <<" | ETA "<<fmt_hms(eta);
                     std::cout<<line.str()<<std::flush;
-                    next_p += step_p;
+                    last2_ui = now2;
                 }
 
-                auto now2 = high_resolution_clock::now();
                 if (duration_cast<seconds>(now2 - last2_save).count() >= 10) {
                     double elapsed = duration<double>(now2 - t2_0).count() + s2_et;
                     save_ckpt2((uint32_t)(i + 1), elapsed);
@@ -4572,10 +4594,8 @@ int App::runECMMarin()
             std::cout<<std::endl;
 
             std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage2..."<<std::endl;
-            mpz_t Zk2; mpz_init(Zk2); eng->get_mpz(Zk2, (engine::Reg)Xcur==RX0?(engine::Reg)RZ0:(engine::Reg)Zcur);
-            mpz_class Zfin2; mpz_set(Zfin2.get_mpz_t(), Zk2); mpz_clear(Zk2);
-            Zfin2 %= N; if (Zfin2 < 0) Zfin2 += N;
-            mpz_class gg2; mpz_gcd(gg2.get_mpz_t(), Zfin2.get_mpz_t(), N.get_mpz_t());
+            mpz_class Zfin2 = compute_X_with_dots(eng, (engine::Reg)Zcur, N);
+            mpz_class gg2 = gcd_with_dots(Zfin2, N);
             bool found2 = (gg2 > 1 && gg2 < N);
 
             std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
@@ -4608,8 +4628,6 @@ int App::runECMMarin()
     std::cout<<"[ECM] No factor found"<<std::endl;
     return 1;
 }
-
-
 
 
 
