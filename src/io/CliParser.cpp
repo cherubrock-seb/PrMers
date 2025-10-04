@@ -83,6 +83,8 @@ void printUsage(const char* progName) {
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
+    std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
+    std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
     //std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
@@ -157,6 +159,13 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.mode = "ecm";
             //opts.marin = false;
             //opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-bsgs") == 0) {
+            opts.bsgs = true;
+        }
+        else if (std::strcmp(argv[i], "-brent") == 0 && i + 1 < argc) {
+            opts.brent = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
         }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             opts.profiling = true;

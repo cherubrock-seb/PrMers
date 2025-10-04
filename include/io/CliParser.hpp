@@ -39,6 +39,8 @@ struct CliOptions {
     uint64_t chunk256 = 4;
     uint64_t K = 0;
     uint64_t nmax = 0;
+    bool bsgs = false;
+    uint64_t brent = 0; 
     int localCarryPropagationDepth = 8;
     int enqueue_max = 0;
     int backup_interval = 300;

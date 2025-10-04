@@ -17,10 +17,12 @@ Key Features
 - OpenCL GPU acceleration (OpenCL 1.2+; 2.0 recommended)
 - LL and PRP for Mersenne (and PRP of cofactors with known factors)
 - P-1 factoring (stage-1 and stage-2)
+- ECM
 - Gerbicz–Li timed validation checkpoints (PRP)
 - Automatic disk checkpoints with deterministic resume
 - PrimeNet result submission (JSON + optional auto-submit)
 - Cross-platform builds (Linux, macOS, Windows)
+- Web-based GUI
 
 Google Colab (demo)
 -------------------
@@ -89,7 +91,7 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
 
 </div>
 
-Performance (as measured)
+Performance (as measured in PRP mode)
 -------------------------
 GeForce RTX 5090
   | Exponent  | Iter/s  | ETA            |
@@ -202,6 +204,34 @@ P-1 Factoring (overview)
   choose B1, build E=lcm(1..B1), compute x=3^(E·2p) mod (2^p-1), factor=gcd(x-1,2^p-1)
 * Stage-2:
   search primes q in (B1,B2] using cached powers; final gcd reveals a factor if present.
+
+ECM on Mersenne numbers
+------------------------
+ECM is a probabilistic generalization of P−1/P+1: it succeeds when the group order on a random curve has a cofactor that’s B1,B2-smooth, so B1/B2 should be chosen for the target factor size.
+
+ECM on Mersenne numbers N = 2^p - 1. Stage 1 multiplies by all prime powers <= B1; Stage 2 scans primes in (B1, B2]. Without flags you get the plain prime-by-prime Stage 2. "-brent d" enables a simplified Brent-Suyama extension by using q^d (a bit more extra reach beyond B2). "-bsgs" batches several multipliers into one ladder call to reduce overhead. Both flags are complementary and can be combined. You can pass pre-known factors via "-factors <list>" (decimal or 0x hex); they are divided out (with multiplicities) before ECM. For p=701, 796337 is a known factor. Runs are checkpointed periodically; re-running the same command resumes safely.
+
+# Plain ECM on M_p (here p=701)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
+
+# ECM + batching only (same primes, fewer ladder calls)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -bsgs
+
+# ECM + simplified Brent-Suyama only (q -> q^3 here)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3
+
+# ECM + both (complementary: q -> q^3 and batched multipliers)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs
+
+# Provide known factors (e.g., for p=701, factor 796337)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -factors 796337
+
+# Combine known factors with brent+bsgs
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs -factors 796337
+
+# Resume after interrupt (same command; auto-checkpointed)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs -factors 796337
+
 
 worktodo.txt and Config
 -----------------------

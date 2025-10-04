@@ -4239,7 +4239,6 @@ int App::runECMMarin()
         return false;
     };
 
-
     mpz_class N = (mpz_class(1) << p) - 1;
     {
         std::vector<std::string> kf = options.knownFactors;
@@ -4277,14 +4276,13 @@ int App::runECMMarin()
             if (C == 1) { std::cout << "[ECM] Fully factored from known factors\n"; return 0; }
             if (pr) {
                 std::ostringstream os2; os2 << "[ECM] Cofactor appears prime: " << C.get_str();
-                std::cout << os2.str() << std::endl;
+                std::cout << os2.str()<<std::endl;
                 if (guiServer_) guiServer_->appendLog(os2.str());
             }
         } else {
             std::cout << "[ECM] No usable known factors provided\n";
         }
     }
-
 
     mpz_class K = 1;
     uint32_t primesB1 = 0;
@@ -4560,8 +4558,7 @@ int App::runECMMarin()
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             {
                 std::ostringstream s1;
-                s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"
-                  <<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;
+                s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s";
                 std::cout<<s1.str()<<std::endl;
                 if (guiServer_) guiServer_->appendLog(s1.str());
             }
@@ -4570,9 +4567,8 @@ int App::runECMMarin()
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) return 0;
+                if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); delete eng; return 0; }
             }
-
         }
         else
         {
@@ -4581,7 +4577,9 @@ int App::runECMMarin()
         }
 
         if (B2 > B1) {
-            if (!resume_stage2) { std::ostringstream s2h; s2h<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 start, primes="<<primesS2.size(); std::cout<<s2h.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2h.str()); }
+            bool use_bsgs = options.bsgs ? true : false;
+            uint32_t brent_deg = 1; if (options.brent > 1) brent_deg = (uint32_t)options.brent; else if (options.brent) brent_deg = 2;
+            if (!resume_stage2) { std::ostringstream s2h; s2h<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 start, primes="<<primesS2.size(); if (use_bsgs) s2h<<" | bsgs"; if (brent_deg>1) s2h<<" | brent_deg="<<brent_deg; std::cout<<s2h.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2h.str()); }
 
             auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
                 eng->set((engine::Reg)0, 1u);
@@ -4652,11 +4650,72 @@ int App::runECMMarin()
             uint32_t start_idx = resume_stage2 ? s2_idx : 0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
 
+            auto mul_ov = [](uint64_t a, uint64_t b, uint64_t& out)->bool{
+                if (a==0 || b==0){ out = 0; return false; }
+                const uint64_t U = ~uint64_t(0);
+                if (a > U / b) return true;
+                out = a * b;
+                return false;
+            };
+            auto pow_ov = [&](uint64_t base, uint32_t exp, uint64_t& out)->bool{
+                out = 1;
+                for (uint32_t k=0;k<exp;k++){
+                    uint64_t t=0;
+                    if (mul_ov(out, base, t)) return true;
+                    out = t;
+                }
+                return false;
+            };
+
+            const uint32_t block_cap = options.bsgs ? 8u : 1u;
+            uint64_t Macc = 1;
+            uint32_t in_block = 0;
+
             for (uint32_t i = start_idx; i < (uint32_t)primesS2.size(); ++i) {
                 uint64_t q = primesS2[i];
-                ladder_mul_small(Xcur, Zcur, q, 7, 8);
-                eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                uint64_t mexp = q;
+                bool big = false;
+                if (brent_deg > 1) {
+                    if (pow_ov(q, brent_deg, mexp)) big = true;
+                }
+
+                if (!big && options.bsgs && in_block < block_cap) {
+                    uint64_t tmp=0;
+                    if (!mul_ov(Macc, mexp, tmp)) {
+                        Macc = tmp;
+                        ++in_block;
+                    } else {
+                        if (Macc > 1) {
+                            ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                            Macc = 1;
+                            in_block = 0;
+                        }
+                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                    }
+                } else {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
+                    if (big) {
+                        for (uint32_t k=0;k<brent_deg;k++){
+                            ladder_mul_small(Xcur, Zcur, q, 7, 8);
+                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        }
+                    } else {
+                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                    }
+                }
 
                 auto now2 = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2.size()) {
@@ -4672,11 +4731,25 @@ int App::runECMMarin()
                 }
 
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     save_ckpt2((uint32_t)(i + 1), elapsed);
                     last2_save = now2;
                 }
                 if (interrupted) {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
                     double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
                     save_ckpt2((uint32_t)(i + 1), elapsed);
                     std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2.size()<<"\n";
@@ -4684,6 +4757,11 @@ int App::runECMMarin()
                     delete eng;
                     return 0;
                 }
+            }
+            if (Macc > 1) {
+                ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                eng->copy((engine::Reg)Zcur, (engine::Reg)8);
             }
             std::cout<<std::endl;
 
@@ -4701,14 +4779,15 @@ int App::runECMMarin()
                 bool known = is_known(gg2);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) return 0;
+                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); delete eng; return 0; }
             }
-
         }
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
-        double elapsed = duration<double>(high_resolution_clock::now() - high_resolution_clock::now()).count();
+        static thread_local std::chrono::high_resolution_clock::time_point curve_t0 = high_resolution_clock::now();
+        double elapsed = duration<double>(high_resolution_clock::now() - curve_t0).count();
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
+        curve_t0 = high_resolution_clock::now();
 
         delete eng;
     }
