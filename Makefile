@@ -7,23 +7,23 @@ INC_DIR     := include
 SRCS        := $(shell find $(SRC_DIR) -type f -name '*.cpp')
 OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 
-CFLAGS      := -Wall -Wextra -Wsign-conversion -ffinite-math-only
-FLAGS_CPU   := -O3
-FLAGS_GPU   := -O2 -DGPU
-MARCH       := native
-
-CXX         := g++
-CXXFLAGS    := -std=c++20 -O3 -Wall -I$(INC_DIR) -march=$(MARCH) -flto=auto -I$(INC_DIR)/marin $(CFLAGS) $(FLAGS_GPU) $(FLAGS_CPU)
-LDFLAGS     := -flto=auto
-
 UNAME_S := $(shell uname -s)
-
 VERSION := $(shell git describe --tags --always)
 PACKAGE := prmers-$(VERSION)
 
+WARN        := -Wall -Wextra -Wsign-conversion
+CPPFLAGS    := -I$(INC_DIR) -I$(INC_DIR)/marin -DGPU
+MARCH       := native
+OPT         := -O3 -ffinite-math-only -march=$(MARCH)
+
+CXX         := g++
+CXXFLAGS    := -std=c++20 $(WARN) $(OPT) -flto=auto
+LDFLAGS     := -flto=auto
+
+
 # Mac
 ifeq ($(UNAME_S),Darwin)
-  CXXFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
+  CPPFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
   LDFLAGS  += -framework OpenCL
 else
   LDFLAGS  += -lOpenCL
@@ -41,13 +41,13 @@ LDFLAGS += -lgmpxx -lgmp
 
 USE_CURL ?= 1
 ifeq ($(USE_CURL),1)
-  CXXFLAGS += -DHAS_CURL=1
+  CPPFLAGS += -DHAS_CURL=1
   LDFLAGS  += -lcurl
 else
-  CXXFLAGS += -DNO_CURL=1
+  CPPFLAGS += -DNO_CURL=1
 endif
 
-CPPFLAGS   := -DKERNEL_PATH=\"$(KERNEL_PATH)\"
+CPPFLAGS   += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package
 
