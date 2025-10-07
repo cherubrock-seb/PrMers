@@ -1474,7 +1474,7 @@ int App::runLlSafeMarin()
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = true;//options.debug;
+    const bool verbose = true;
     engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
     if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using Marin engine with " << eng->get_size() << " words" << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "LL-SAFE on 2^" << p << " - 1"; guiServer_->setStatus(oss.str()); }
@@ -1482,15 +1482,22 @@ int App::runLlSafeMarin()
     std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
 
-    auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, double& et)->int{
+    auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, uint64_t& itersave, uint64_t& jsave, double& et)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 1; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 1) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
         if (!f.read(reinterpret_cast<char*>(&iter_done), sizeof(iter_done))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        if (version >= 2) {
+            if (!f.read(reinterpret_cast<char*>(&itersave), sizeof(itersave))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&jsave), sizeof(jsave))) return -2;
+        } else {
+            const uint64_t T = (p > 1) ? (uint64_t)(p - 1) : 0ull;
+            itersave = iter_done ? iter_done - 1 : 0;
+            jsave = (T > iter_done) ? (T - iter_done - 1) : 0;
+        }
         const size_t cksz = eng->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
@@ -1499,15 +1506,17 @@ int App::runLlSafeMarin()
         return 0;
     };
 
-    auto save_ckpt = [&](uint64_t iter_done, double et){
+    auto save_ckpt = [&](uint64_t iter_done, uint64_t itersave, uint64_t jsave, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 1;
+            int version = 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
             if (!f.write(reinterpret_cast<const char*>(&iter_done), sizeof(iter_done))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            if (!f.write(reinterpret_cast<const char*>(&itersave), sizeof(itersave))) return;
+            if (!f.write(reinterpret_cast<const char*>(&jsave), sizeof(jsave))) return;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!eng->get_checkpoint(data)) return;
@@ -1571,8 +1580,9 @@ int App::runLlSafeMarin()
     };
 
     uint64_t iter_done = 0; double restored_time = 0.0;
-    int r = read_ckpt(ckpt_file, iter_done, restored_time);
-    if (r < 0) r = read_ckpt(ckpt_file + ".old", iter_done, restored_time);
+    uint64_t itersave_meta = 0, jsave_meta = 0;
+    int r = read_ckpt(ckpt_file, iter_done, itersave_meta, jsave_meta, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", iter_done, itersave_meta, jsave_meta, restored_time);
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Resuming from a checkpoint."; guiServer_->appendLog(oss.str()); }
@@ -1583,12 +1593,12 @@ int App::runLlSafeMarin()
         eng->set(static_cast<engine::Reg>(RRES_B), static_cast<uint32_t>(1));
         eng->set(static_cast<engine::Reg>(RACC_A), static_cast<uint32_t>(1));
         eng->set(static_cast<engine::Reg>(RACC_B), static_cast<uint32_t>(0));
+        eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+        eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+        eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+        eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
     }
 
-    eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
-    eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
-    eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
-    eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
     eng->set(static_cast<engine::Reg>(RBASE_A), static_cast<uint32_t>(2));
     eng->set(static_cast<engine::Reg>(RBASE_B), static_cast<uint32_t>(1));
 
@@ -1615,18 +1625,17 @@ int App::runLlSafeMarin()
 
     uint64_t resumeIter = iter_done;
     uint64_t startIter  = iter_done;
-    uint64_t itersave = resumeIter ? resumeIter - 1 : 0;
-    uint64_t jsave = totalIters - resumeIter - 1;
+    uint64_t itersave = (r==0) ? itersave_meta : (resumeIter ? resumeIter - 1 : 0);
+    uint64_t jsave = (r==0) ? jsave_meta : (totalIters - resumeIter - 1);
     std::string res64_x; res64_pair(res64_x);
     spinner.displayProgress((uint32_t)resumeIter, (uint32_t)totalIters, 0.0, 0.0, p, (uint32_t)resumeIter, (uint32_t)startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
 
     bool errordone = false;
-   // std::cout << "\n jstart=" << totalIters - resumeIter - 1 << "\n";
     for (uint64_t iter = resumeIter, j = totalIters - resumeIter - 1; iter < totalIters; ++iter, --j)
     {
         if (interrupted) {
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-            save_ckpt(iter, elapsed_time);
+            save_ckpt(iter, itersave, jsave, elapsed_time);
             std::cout << "\nInterrupted by user, state saved at iteration " << iter << " j=" << j << std::endl;
             if (guiServer_) { std::ostringstream oss; oss << "Interrupted by user, state saved at iteration " << iter << " j=" << j; guiServer_->appendLog(oss.str()); }
             spinner.displayBackupInfo((uint32_t)iter, (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
@@ -1640,7 +1649,7 @@ int App::runLlSafeMarin()
         {
             const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
             std::cout << "\nBackup point done at iter + 1=" << iter + 1 << " start...." << std::endl;
-            save_ckpt(iter, elapsed_time);
+            save_ckpt(iter, itersave, jsave, elapsed_time);
             lastBackup = now0;
             std::cout << "Backup point done at iter + 1=" << iter + 1 << " done." << std::endl;
             spinner.displayBackupInfo((uint32_t)(iter + 1), (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
@@ -1701,7 +1710,6 @@ int App::runLlSafeMarin()
             checkpass = 0;
             resumeIter = (itersave == 0) ? 0 : (itersave + 1);
             if (itersave == 0) { iter = (uint64_t)-1; j = jsave+1; } else { iter = itersave; j = jsave; }
-            //if (iter == 0) { iter = iter - 1; j = j + 1; }
             std::cout << "[Gerbicz-Li] Restore iter=" << iter + 1 << std::endl;
             std::cout << "[Gerbicz-Li] Restore j=" << j - 1 << std::endl;
             continue;
@@ -1772,7 +1780,6 @@ int App::runLlSafeMarin()
     delete eng;
     return is_prime ? 0 : 1;
 }
-
 
 
 
