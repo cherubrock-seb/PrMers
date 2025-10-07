@@ -210,7 +210,7 @@ ECM on Mersenne numbers
 ECM is a probabilistic generalization of P−1/P+1: it succeeds when the group order on a random curve has a cofactor that’s B1,B2-smooth, so B1/B2 should be chosen for the target factor size.
 
 ECM on Mersenne numbers N = 2^p - 1. Stage 1 multiplies by all prime powers <= B1; Stage 2 scans primes in (B1, B2]. Without flags you get the plain prime-by-prime Stage 2. "-brent d" enables a simplified Brent-Suyama extension by using q^d (a bit more extra reach beyond B2). "-bsgs" batches several multipliers into one ladder call to reduce overhead. Both flags are complementary and can be combined. You can pass pre-known factors via "-factors <list>" (decimal or 0x hex); they are divided out (with multiplicities) before ECM. For p=701, 796337 is a known factor. Runs are checkpointed periodically; re-running the same command resumes safely.
-
+```
 # Plain ECM on M_p (here p=701)
 ./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
 
@@ -231,7 +231,10 @@ ECM on Mersenne numbers N = 2^p - 1. Stage 1 multiplies by all prime powers <= B
 
 # Resume after interrupt (same command; auto-checkpointed)
 ./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs -factors 796337
+```
 
+```
+```
 
 worktodo.txt and Config
 -----------------------

@@ -44,6 +44,7 @@ public:
     int runPrpOrLl();
     int runPrpOrLlMarin();
     int runLlSafeMarin();
+    int runLlSafeMarinDoubling();
     int runLlSafeCpu();
     int runPM1();
     int runPM1Marin();

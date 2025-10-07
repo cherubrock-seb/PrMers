@@ -1180,7 +1180,7 @@ int App::runPrpOrLlMarin()
     return is_prp_prime ? 0 : 1;
 }
 
-int App::runLlSafeMarin()
+int App::runLlSafeMarinDoubling()
 {
     Printer::banner(options);
     std::cout << "[Lucas Lehmer GPU SAFE Mode with error detection]\n";
@@ -1466,6 +1466,313 @@ int App::runLlSafeMarin()
     delete eng;
     return is_prime ? 0 : 1;
 }
+
+int App::runLlSafeMarin()
+{
+    if (guiServer_) { guiServer_->setProgress(0, 100, "Started"); guiServer_->setStatus("LL-SAFE"); }
+    Printer::banner(options);
+    if (auto code = QuickChecker::run(options.exponent)) return *code;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = true;//options.debug;
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
+    if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using Marin engine with " << eng->get_size() << " words" << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "LL-SAFE on 2^" << p << " - 1"; guiServer_->setStatus(oss.str()); }
+
+    std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
+    const std::string ckpt_file = ck.str();
+
+    auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, double& et)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 1; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 1) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&iter_done), sizeof(iter_done))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = eng->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!eng->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt = [&](uint64_t iter_done, double et){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        {
+            File f(newf, "wb");
+            int version = 1;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&iter_done), sizeof(iter_done))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!eng->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file.c_str());
+    };
+
+    const size_t RRES_A=0, RRES_B=1, RACC_A=2, RACC_B=3, RCHK_A=4, RCHK_B=5, RSAVE_R_A=6, RSAVE_R_B=7, RSAVE_F_A=8, RSAVE_F_B=9, RBASE_A=10, RBASE_B=11, RTa=12, RTb=13, RM0=14, RM1=15, RPREV_A=16, RPREV_B=17;
+
+    auto pair_square = [&](size_t A, size_t B){
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(A));
+        eng->copy(static_cast<engine::Reg>(RTb), static_cast<engine::Reg>(B));
+        eng->square_mul(static_cast<engine::Reg>(A));
+        eng->square_mul(static_cast<engine::Reg>(B), static_cast<uint32_t>(3));
+        eng->add(static_cast<engine::Reg>(A), static_cast<engine::Reg>(B));
+        eng->copy(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+        eng->set_multiplicand(static_cast<engine::Reg>(RM0), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RM0), static_cast<uint32_t>(2));
+    };
+
+    auto pair_mul_by = [&](size_t A, size_t B, size_t C, size_t D){
+        eng->set_multiplicand(static_cast<engine::Reg>(RM0), static_cast<engine::Reg>(C));
+        eng->set_multiplicand(static_cast<engine::Reg>(RM1), static_cast<engine::Reg>(D));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(A));
+        eng->copy(static_cast<engine::Reg>(RTb), static_cast<engine::Reg>(B));
+        eng->copy(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RTa));
+        eng->mul(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RM0));
+        eng->copy(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+        eng->mul(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RM1));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RM1), static_cast<uint32_t>(3));
+        eng->add(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RTa));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RM0));
+        eng->add(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+    };
+
+    auto pair_equal = [&](size_t A1, size_t B1, size_t A2, size_t B2)->bool{
+        mpz_t z1a,z1b,z2a,z2b; mpz_inits(z1a,z1b,z2a,z2b,nullptr);
+        eng->get_mpz(z1a, static_cast<engine::Reg>(A1));
+        eng->get_mpz(z1b, static_cast<engine::Reg>(B1));
+        eng->get_mpz(z2a, static_cast<engine::Reg>(A2));
+        eng->get_mpz(z2b, static_cast<engine::Reg>(B2));
+        bool ok = (mpz_cmp(z1a,z2a) == 0) && (mpz_cmp(z1b,z2b) == 0);
+        mpz_clears(z1a,z1b,z2a,z2b,nullptr);
+        return ok;
+    };
+
+    auto res64_pair = [&](std::string& out){
+        engine::digit dA(eng, static_cast<engine::Reg>(RRES_A));
+        engine::digit dB(eng, static_cast<engine::Reg>(RRES_B));
+        std::vector<uint32_t> WA = pack_words_from_eng_digits(dA, p);
+        std::vector<uint32_t> WB = pack_words_from_eng_digits(dB, p);
+        std::string ha = format_res64_hex(WA), hb = format_res64_hex(WB);
+        std::ostringstream os; os << "A:" << ha << " B:" << hb; out = os.str();
+    };
+
+    uint64_t iter_done = 0; double restored_time = 0.0;
+    int r = read_ckpt(ckpt_file, iter_done, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", iter_done, restored_time);
+    if (r == 0) {
+        std::cout << "Resuming from a checkpoint." << std::endl;
+        if (guiServer_) { std::ostringstream oss; oss << "Resuming from a checkpoint."; guiServer_->appendLog(oss.str()); }
+    } else {
+        iter_done = 0;
+        restored_time = 0.0;
+        eng->set(static_cast<engine::Reg>(RRES_A), static_cast<uint32_t>(2));
+        eng->set(static_cast<engine::Reg>(RRES_B), static_cast<uint32_t>(1));
+        eng->set(static_cast<engine::Reg>(RACC_A), static_cast<uint32_t>(1));
+        eng->set(static_cast<engine::Reg>(RACC_B), static_cast<uint32_t>(0));
+    }
+
+    eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+    eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+    eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+    eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+    eng->set(static_cast<engine::Reg>(RBASE_A), static_cast<uint32_t>(2));
+    eng->set(static_cast<engine::Reg>(RBASE_B), static_cast<uint32_t>(1));
+
+    logger.logStart(options);
+    timer.start();
+    timer2.start();
+
+    const uint64_t totalIters = (p > 1) ? (uint64_t)(p - 1) : 0ull;
+    uint64_t L = options.exponent;
+    uint64_t B = std::sqrt((double)L);
+    if (B < 1) B = 1;
+    if (B > totalIters && totalIters > 0) B = totalIters;
+
+    double desiredIntervalSeconds = 600.0;
+    uint64_t checkpass = 0;
+    uint64_t checkpasslevel_auto = (uint64_t)((1000.0 * desiredIntervalSeconds) / (double)B);
+    if (checkpasslevel_auto == 0 && B > 0) checkpasslevel_auto = (totalIters / std::max<uint64_t>(B,1)) / std::max<uint64_t>(1,(uint64_t)std::sqrt((double)B));
+    uint64_t checkpasslevel = options.checklevel > 0 ? (uint64_t)options.checklevel : checkpasslevel_auto;
+    if (checkpasslevel == 0) checkpasslevel = 1;
+
+    auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastBackup = start_clock;
+    auto lastDisplay = start_clock;
+
+    uint64_t resumeIter = iter_done;
+    uint64_t startIter  = iter_done;
+    uint64_t itersave = resumeIter ? resumeIter - 1 : 0;
+    uint64_t jsave = totalIters - resumeIter - 1;
+    std::string res64_x; res64_pair(res64_x);
+    spinner.displayProgress((uint32_t)resumeIter, (uint32_t)totalIters, 0.0, 0.0, p, (uint32_t)resumeIter, (uint32_t)startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
+
+    bool errordone = false;
+   // std::cout << "\n jstart=" << totalIters - resumeIter - 1 << "\n";
+    for (uint64_t iter = resumeIter, j = totalIters - resumeIter - 1; iter < totalIters; ++iter, --j)
+    {
+        if (interrupted) {
+            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+            save_ckpt(iter, elapsed_time);
+            std::cout << "\nInterrupted by user, state saved at iteration " << iter << " j=" << j << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Interrupted by user, state saved at iteration " << iter << " j=" << j; guiServer_->appendLog(oss.str()); }
+            spinner.displayBackupInfo((uint32_t)iter, (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
+            logger.logEnd(elapsed_time);
+            delete eng;
+            return 0;
+        }
+
+        auto now0 = std::chrono::high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval))
+        {
+            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            std::cout << "\nBackup point done at iter + 1=" << iter + 1 << " start...." << std::endl;
+            save_ckpt(iter, elapsed_time);
+            lastBackup = now0;
+            std::cout << "Backup point done at iter + 1=" << iter + 1 << " done." << std::endl;
+            spinner.displayBackupInfo((uint32_t)(iter + 1), (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
+        }
+
+        if (options.erroriter > 0 && (iter + 1) == (uint64_t)options.erroriter && !errordone) {
+            errordone = true;
+            eng->sub(static_cast<engine::Reg>(RRES_A), static_cast<uint32_t>(2));
+            std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (iter + 1); guiServer_->appendLog(oss.str()); }
+        }
+
+        if (iter + 1 == totalIters) {
+            eng->copy(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RRES_A));
+            eng->copy(static_cast<engine::Reg>(RPREV_B), static_cast<engine::Reg>(RRES_B));
+        }
+        pair_square(RRES_A, RRES_B);
+
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+            spinner.displayProgress((uint32_t)(iter + 1), (uint32_t)totalIters, timer.elapsed(), timer2.elapsed(), p, (uint32_t)resumeIter, (uint32_t)startIter, "", guiServer_ ? guiServer_.get() : nullptr);
+            timer2.start();
+            lastDisplay = now;
+            resumeIter = iter + 1;
+        }
+
+        bool boundary = ((j != 0 && (j % B == 0)) || (iter == totalIters - 1));
+        if (!boundary) continue;
+
+        checkpass += 1;
+        eng->copy(static_cast<engine::Reg>(RCHK_A), static_cast<engine::Reg>(RACC_A));
+        eng->copy(static_cast<engine::Reg>(RCHK_B), static_cast<engine::Reg>(RACC_B));
+        pair_mul_by(RACC_A, RACC_B, RRES_A, RRES_B);
+
+        bool do_check = (checkpass >= checkpasslevel) || (iter == totalIters - 1);
+        if (!do_check) continue;
+
+        const uint64_t T = totalIters;
+        const uint64_t modB = (T % B == 0 ? B : T % B);
+        uint64_t loop_count = (B > modB ? B - modB - 1 : 0);
+        for (uint64_t z = 0; z < loop_count; ++z) pair_square(RCHK_A, RCHK_B);
+        if (modB == B) { pair_mul_by(RCHK_A, RCHK_B, RBASE_A, RBASE_B); }
+        else { pair_square(RCHK_A, RCHK_B); pair_mul_by(RCHK_A, RCHK_B, RBASE_A, RBASE_B); }
+        for (uint64_t z = 0; z < modB; ++z) pair_square(RCHK_A, RCHK_B);
+
+        if (!pair_equal(RCHK_A, RCHK_B, RACC_A, RACC_B)) {
+            uint64_t blk_start = (itersave + 1);
+            uint64_t blk_end = (iter + 1);
+            std::cout << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
+            options.gerbicz_error_count += 1;
+
+            eng->copy(static_cast<engine::Reg>(RRES_A), static_cast<engine::Reg>(RSAVE_R_A));
+            eng->copy(static_cast<engine::Reg>(RRES_B), static_cast<engine::Reg>(RSAVE_R_B));
+            eng->copy(static_cast<engine::Reg>(RACC_A), static_cast<engine::Reg>(RSAVE_F_A));
+            eng->copy(static_cast<engine::Reg>(RACC_B), static_cast<engine::Reg>(RSAVE_F_B));
+
+            checkpass = 0;
+            resumeIter = (itersave == 0) ? 0 : (itersave + 1);
+            if (itersave == 0) { iter = (uint64_t)-1; j = jsave+1; } else { iter = itersave; j = jsave; }
+            //if (iter == 0) { iter = iter - 1; j = j + 1; }
+            std::cout << "[Gerbicz-Li] Restore iter=" << iter + 1 << std::endl;
+            std::cout << "[Gerbicz-Li] Restore j=" << j - 1 << std::endl;
+            continue;
+        } else {
+            uint64_t blk_start = (itersave + 1);
+            uint64_t blk_end = (iter + 1);
+            std::cout << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
+            eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+            eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+            eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+            eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+            itersave = iter;
+            jsave = j;
+            checkpass = 0;
+        }
+    }
+
+    mpz_class Mp = (mpz_class(1) << p) - 1;
+    mpz_class Mp_minus_1 = Mp - 1;
+
+    mpz_t za, zb; mpz_inits(za, zb, nullptr);
+    eng->get_mpz(za, static_cast<engine::Reg>(RRES_A));
+    eng->get_mpz(zb, static_cast<engine::Reg>(RRES_B));
+    bool okA = (mpz_cmp(za, Mp_minus_1.get_mpz_t()) == 0);
+    bool okB = (mpz_cmp_ui(zb, 0) == 0);
+    bool is_prime = okA && okB;
+    mpz_clears(za, zb, nullptr);
+
+    eng->copy(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RPREV_A));
+    eng->add(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RPREV_A));
+    engine::digit dLL(eng, static_cast<engine::Reg>(RPREV_A));
+    std::vector<uint32_t> WLL = pack_words_from_eng_digits(dLL, p);
+    std::string ll_res64   = format_res64_hex(WLL);
+    std::string ll_res2048 = format_res2048_hex(WLL);
+
+    auto end_clock = std::chrono::high_resolution_clock::now();
+    const double elapsed_time = std::chrono::duration<double>(end_clock - start_clock).count() + restored_time;
+
+    spinner.displayProgress((uint64_t)totalIters, (uint64_t)totalIters, timer.elapsed(), timer2.elapsed(), p, (uint64_t)totalIters, (uint64_t)iter_done, ll_res64, guiServer_ ? guiServer_.get() : nullptr);
+
+    std::cout << "LL residue s_{p-2} res64=0x" << ll_res64 << std::endl;
+    std::cout << "LL residue s_{p-2} res2048=0x" << ll_res2048 << std::endl;
+    std::cout << "2^" << p << " - 1 is " << (is_prime ? "prime" : "composite") << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "LL residue s_{p-2} res64=0x" << ll_res64 << "\n";
+        oss << "LL residue s_{p-2} res2048=0x" << ll_res2048 << "\n";
+        oss << "2^" << p << " - 1 is " << (is_prime ? "prime" : "composite") << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s.";
+        guiServer_->appendLog(oss.str());
+    }
+
+    std::string json = io::JsonBuilder::generate(
+        options,
+        static_cast<int>(context.getTransformSize()),
+        is_prime,
+        ll_res64,
+        ll_res2048
+    );
+    Printer::finalReport(options, elapsed_time, json, is_prime);
+
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, "llsafe", json);
+    wm.appendToResultsTxt(json);
+
+    delete_checkpoints(p, options.wagstaff, false, true);
+    logger.logEnd(elapsed_time);
+    delete eng;
+    return is_prime ? 0 : 1;
+}
+
 
 
 
@@ -5587,7 +5894,12 @@ int App::run() {
     if (options.mode == "llsafe") {
         rc = runLlSafeMarin();
         ran = true;
-    } else if (options.mode == "pm1" && options.marin /*&& options.B2 <= 0*/) {
+    } 
+    if (options.mode == "llsafe2") {
+        rc = runLlSafeMarinDoubling();
+        ran = true;
+    }
+    else if (options.mode == "pm1" && options.marin /*&& options.B2 <= 0*/) {
         if (options.exponent > 89) {
             int rc_local = 0;
             bool ran_local = false;
