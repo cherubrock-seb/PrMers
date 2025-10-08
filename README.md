@@ -98,7 +98,7 @@ PrMers includes a GPU VRAM tester (OpenCL) inspired by CUDA memtests. It allocat
 
 ### Usage
 
-```bash
+```
 # Show help and the list of OpenCL devices
 ./prmers -h
 
@@ -109,7 +109,8 @@ PrMers includes a GPU VRAM tester (OpenCL) inspired by CUDA memtests. It allocat
 ./prmers -memtest -d 2
 
 -d N selects the N-th GPU as listed by ./prmers -h.
-```bash
+
+```
 
 What it tests
 
@@ -121,7 +122,7 @@ Modulo-stride pattern: writes repeating 0xAA.. / 0x55.. stripes with 20 differen
 
 VRAM is segmented into large sectors (e.g., 256 MB) and covered across multiple buffers up to the driver’s CL_DEVICE_MAX_MEM_ALLOC_SIZE. The final coverage line shows how much VRAM was actually tested.
 
-```bash
+```
 ./prmers -memtest -d 2
 No valid entry found in worktodo.txt
 Transform Size = 8
@@ -141,7 +142,7 @@ Address  W 18.626 GB/s (15.953 GB in 0.857 s)  R 20.846 GB/s (15.953 GB in 0.765
 Invert   W 18.619 GB/s (15.953 GB in 0.857 s)  RW 31.982 GB/s (4084.000 GB in 127.697 s)  R 20.877 GB/s (15.953 GB in 0.764 s)  Err 0
 Modulo   W 18.627 GB/s (319.062 GB in 17.129 s)  R 20.558 GB/s (319.062 GB in 15.520 s)  Err 0
 Totals:  Errors 0  |  Err/GB 0.0000
-```bash
+```
 
 No sample errors captured.
 ==============================
