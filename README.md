@@ -142,11 +142,9 @@ Address  W 18.626 GB/s (15.953 GB in 0.857 s)  R 20.846 GB/s (15.953 GB in 0.765
 Invert   W 18.619 GB/s (15.953 GB in 0.857 s)  RW 31.982 GB/s (4084.000 GB in 127.697 s)  R 20.877 GB/s (15.953 GB in 0.764 s)  Err 0
 Modulo   W 18.627 GB/s (319.062 GB in 17.129 s)  R 20.558 GB/s (319.062 GB in 15.520 s)  Err 0
 Totals:  Errors 0  |  Err/GB 0.0000
-```
-
 No sample errors captured.
 ==============================
-
+```
 
 Performance (as measured in PRP mode)
 -------------------------
