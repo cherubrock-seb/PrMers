@@ -51,6 +51,7 @@ public:
     int runPM1Stage2();
     int runPM1Stage2Marin();
     int runPM1Stage2MarinNKVersion();
+    int runMemtestOpenCL();
     int runECMMarin();
     int run();
     void tuneIterforce();

@@ -23,6 +23,7 @@ Key Features
 - PrimeNet result submission (JSON + optional auto-submit)
 - Cross-platform builds (Linux, macOS, Windows)
 - Web-based GUI
+- GPU VRAM Tester
 
 Google Colab (demo)
 -------------------
@@ -90,6 +91,61 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
   </div>
 
 </div>
+
+## GPU Memory Test (`-memtest`)
+
+PrMers includes a GPU VRAM tester (OpenCL) inspired by CUDA memtests. It allocates buffers to cover ~100% of the available VRAM (minus a small safety margin and driver limits) and scans them sector-by-sector with several stress patterns to reveal flaky cells, lanes, or address-decoding issues.
+
+### Usage
+
+```bash
+# Show help and the list of OpenCL devices
+./prmers -h
+
+# Run the memtest on device 0 (default)
+./prmers -memtest
+
+# Select a specific device (e.g., device 2)
+./prmers -memtest -d 2
+
+-d N selects the N-th GPU as listed by ./prmers -h.
+```bash
+
+What it tests
+
+Address pattern: writes the address-derived value and reads it back to catch addressing/bank/aliasing faults.
+
+Inversion toggles: alternates a random 64-bit pattern and its bitwise complement (~x) across many passes to expose unstable bits.
+
+Modulo-stride pattern: writes repeating 0xAA.. / 0x55.. stripes with 20 different offsets to exercise periodic layout interactions.
+
+VRAM is segmented into large sectors (e.g., 256 MB) and covered across multiple buffers up to the driver’s CL_DEVICE_MAX_MEM_ALLOC_SIZE. The final coverage line shows how much VRAM was actually tested.
+
+```bash
+./prmers -memtest -d 2
+No valid entry found in worktodo.txt
+Transform Size = 8
+No valid entry found in worktodo.txt
+OpenCL GPU Advanced Micro Devices, Inc. gfx906:sramecc+:xnack- | Driver: 3635.0 (HSA1.1,LC) | OpenCL 2.0  | CUs: 60 | Freq: 1801 MHz | VRAM: 16368 MB | MaxAlloc: 13912 MB | GCache: 16 KB | Local: 64 KB | ECC: no
+Buffer 1/2 sectors: 55 x 256 MB
+[84.6%] buf 1/2 sec 55/55 mod R 20/20 ETA 00:00:01   Buffer 2/2 sectors: 10 x 256 MB
+[100.0%] buf 2/2 sec 10/10 mod R 20/20 ETA 00:00:00     
+
+===== GPU Memtest Report =====
+Device: Advanced Micro Devices, Inc. gfx906:sramecc+:xnack- | Driver 3635.0 (HSA1.1,LC) | OpenCL 2.0  | CUs 60 | 1801 MHz | ECC no
+VRAM: 16368 MB | MaxAlloc: 13912 MB
+Coverage: 16336 MB (99.8% of VRAM) across 2 buffers
+Plan: address pattern, inversion toggles x128, modulo-stride pattern/20 offsets
+Traffic: Read 2392.97 GB, Write 2392.97 GB, Total 4785.94 GB
+Address  W 18.626 GB/s (15.953 GB in 0.857 s)  R 20.846 GB/s (15.953 GB in 0.765 s)  Err 0
+Invert   W 18.619 GB/s (15.953 GB in 0.857 s)  RW 31.982 GB/s (4084.000 GB in 127.697 s)  R 20.877 GB/s (15.953 GB in 0.764 s)  Err 0
+Modulo   W 18.627 GB/s (319.062 GB in 17.129 s)  R 20.558 GB/s (319.062 GB in 15.520 s)  Err 0
+Totals:  Errors 0  |  Err/GB 0.0000
+```bash
+
+No sample errors captured.
+==============================
+
 
 Performance (as measured in PRP mode)
 -------------------------

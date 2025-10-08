@@ -62,9 +62,8 @@ void printUsage(const char* progName) {
     std::cout << "  -nmax <value>        : Maximum value of n for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
-    std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
-    std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
-     
+    //std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
+    //std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  -submit              : (Optional) activate the possibility to send results to PrimeNet (prompt or autosend)" << std::endl;
@@ -99,6 +98,7 @@ void printUsage(const char* progName) {
     //std::cout << "  -ipv4                 : (Optional) Set the HTTP host to the first IPv4 interface" << std::endl;
     
     std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 → 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
+    std::cout << "  -memtest              : GPU Memory & Stability test (OpenCL)" << std::endl;
 
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
@@ -182,6 +182,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-submit") == 0) {
             opts.submit = true;
+        }
+        else if (std::strcmp(argv[i], "-memtest") == 0) {
+            opts.mode = "memtest";
+            opts.exponent = 127;
         }
         else if (std::strcmp(argv[i], "-bench") == 0) {
             opts.bench = true;
