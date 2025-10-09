@@ -556,7 +556,7 @@ int App::runPrpOrLlMarin()
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
 
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
 
@@ -1193,7 +1193,7 @@ int App::runLlSafeMarinDoubling()
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     if (guiServer_) {
         std::ostringstream oss;
         oss << "Testing 2^" << p << " - 1";
@@ -4041,7 +4041,7 @@ done:
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
-    bool debug = options.debug;
+    bool debug = true;//options.debug;
     uint64_t B1u = options.B1, B2u = options.B2;
     mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
     if (B2 <= B1) {
@@ -4052,7 +4052,7 @@ int App::runPM1Stage2Marin() {
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl; guiServer_->appendLog(oss.str()); }
     uint32_t pexp = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     const size_t baseRegs = 11;
     const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5;
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
@@ -4528,7 +4528,7 @@ int App::runECMMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const uint64_t B1 = options.B1 ? options.B1 : 1000000ULL;
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
 
     auto splitmix64 = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
@@ -5123,7 +5123,7 @@ int App::runPM1Marin() {
     std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     engine* eng = engine::create_gpu(p, static_cast<size_t>(11), static_cast<size_t>(options.device_id), verbose);
     const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9, RBASE=10;
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
