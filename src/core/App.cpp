@@ -556,7 +556,7 @@ int App::runPrpOrLlMarin()
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
 
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
 
@@ -1180,7 +1180,7 @@ int App::runPrpOrLlMarin()
     return is_prp_prime ? 0 : 1;
 }
 
-int App::runLlSafeMarin()
+int App::runLlSafeMarinDoubling()
 {
     Printer::banner(options);
     std::cout << "[Lucas Lehmer GPU SAFE Mode with error detection]\n";
@@ -1193,7 +1193,7 @@ int App::runLlSafeMarin()
     if (auto code = QuickChecker::run(options.exponent)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     if (guiServer_) {
         std::ostringstream oss;
         oss << "Testing 2^" << p << " - 1";
@@ -1463,6 +1463,320 @@ int App::runLlSafeMarin()
     }
 
     delete_checkpoints(options.exponent, options.wagstaff, true, true);
+    delete eng;
+    return is_prime ? 0 : 1;
+}
+
+int App::runLlSafeMarin()
+{
+    if (guiServer_) { guiServer_->setProgress(0, 100, "Started"); guiServer_->setStatus("LL-SAFE"); }
+    Printer::banner(options);
+    if (auto code = QuickChecker::run(options.exponent)) return *code;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const bool verbose = true;
+    engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
+    if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using Marin engine with " << eng->get_size() << " words" << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "LL-SAFE on 2^" << p << " - 1"; guiServer_->setStatus(oss.str()); }
+
+    std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
+    const std::string ckpt_file = ck.str();
+
+    auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, uint64_t& itersave, uint64_t& jsave, double& et)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 1; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&iter_done), sizeof(iter_done))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        if (version >= 2) {
+            if (!f.read(reinterpret_cast<char*>(&itersave), sizeof(itersave))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&jsave), sizeof(jsave))) return -2;
+        } else {
+            const uint64_t T = (p > 1) ? (uint64_t)(p - 1) : 0ull;
+            itersave = iter_done ? iter_done - 1 : 0;
+            jsave = (T > iter_done) ? (T - iter_done - 1) : 0;
+        }
+        const size_t cksz = eng->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!eng->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt = [&](uint64_t iter_done, uint64_t itersave, uint64_t jsave, double et){
+        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        {
+            File f(newf, "wb");
+            int version = 2;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&iter_done), sizeof(iter_done))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            if (!f.write(reinterpret_cast<const char*>(&itersave), sizeof(itersave))) return;
+            if (!f.write(reinterpret_cast<const char*>(&jsave), sizeof(jsave))) return;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!eng->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file.c_str());
+    };
+
+    const size_t RRES_A=0, RRES_B=1, RACC_A=2, RACC_B=3, RCHK_A=4, RCHK_B=5, RSAVE_R_A=6, RSAVE_R_B=7, RSAVE_F_A=8, RSAVE_F_B=9, RBASE_A=10, RBASE_B=11, RTa=12, RTb=13, RM0=14, RM1=15, RPREV_A=16, RPREV_B=17;
+
+    auto pair_square = [&](size_t A, size_t B){
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(A));
+        eng->copy(static_cast<engine::Reg>(RTb), static_cast<engine::Reg>(B));
+        eng->square_mul(static_cast<engine::Reg>(A));
+        eng->square_mul(static_cast<engine::Reg>(B), static_cast<uint32_t>(3));
+        eng->add(static_cast<engine::Reg>(A), static_cast<engine::Reg>(B));
+        eng->copy(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+        eng->set_multiplicand(static_cast<engine::Reg>(RM0), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RM0), static_cast<uint32_t>(2));
+    };
+
+    auto pair_mul_by = [&](size_t A, size_t B, size_t C, size_t D){
+        eng->set_multiplicand(static_cast<engine::Reg>(RM0), static_cast<engine::Reg>(C));
+        eng->set_multiplicand(static_cast<engine::Reg>(RM1), static_cast<engine::Reg>(D));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(A));
+        eng->copy(static_cast<engine::Reg>(RTb), static_cast<engine::Reg>(B));
+        eng->copy(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RTa));
+        eng->mul(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RM0));
+        eng->copy(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+        eng->mul(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RM1));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RM1), static_cast<uint32_t>(3));
+        eng->add(static_cast<engine::Reg>(A), static_cast<engine::Reg>(RTa));
+        eng->copy(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RTb));
+        eng->mul(static_cast<engine::Reg>(RTa), static_cast<engine::Reg>(RM0));
+        eng->add(static_cast<engine::Reg>(B), static_cast<engine::Reg>(RTa));
+    };
+
+    auto pair_equal = [&](size_t A1, size_t B1, size_t A2, size_t B2)->bool{
+        mpz_t z1a,z1b,z2a,z2b; mpz_inits(z1a,z1b,z2a,z2b,nullptr);
+        eng->get_mpz(z1a, static_cast<engine::Reg>(A1));
+        eng->get_mpz(z1b, static_cast<engine::Reg>(B1));
+        eng->get_mpz(z2a, static_cast<engine::Reg>(A2));
+        eng->get_mpz(z2b, static_cast<engine::Reg>(B2));
+        bool ok = (mpz_cmp(z1a,z2a) == 0) && (mpz_cmp(z1b,z2b) == 0);
+        mpz_clears(z1a,z1b,z2a,z2b,nullptr);
+        return ok;
+    };
+
+    auto res64_pair = [&](std::string& out){
+        engine::digit dA(eng, static_cast<engine::Reg>(RRES_A));
+        engine::digit dB(eng, static_cast<engine::Reg>(RRES_B));
+        std::vector<uint32_t> WA = pack_words_from_eng_digits(dA, p);
+        std::vector<uint32_t> WB = pack_words_from_eng_digits(dB, p);
+        std::string ha = format_res64_hex(WA), hb = format_res64_hex(WB);
+        std::ostringstream os; os << "A:" << ha << " B:" << hb; out = os.str();
+    };
+
+    uint64_t iter_done = 0; double restored_time = 0.0;
+    uint64_t itersave_meta = 0, jsave_meta = 0;
+    int r = read_ckpt(ckpt_file, iter_done, itersave_meta, jsave_meta, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", iter_done, itersave_meta, jsave_meta, restored_time);
+    if (r == 0) {
+        std::cout << "Resuming from a checkpoint." << std::endl;
+        if (guiServer_) { std::ostringstream oss; oss << "Resuming from a checkpoint."; guiServer_->appendLog(oss.str()); }
+    } else {
+        iter_done = 0;
+        restored_time = 0.0;
+        eng->set(static_cast<engine::Reg>(RRES_A), static_cast<uint32_t>(2));
+        eng->set(static_cast<engine::Reg>(RRES_B), static_cast<uint32_t>(1));
+        eng->set(static_cast<engine::Reg>(RACC_A), static_cast<uint32_t>(1));
+        eng->set(static_cast<engine::Reg>(RACC_B), static_cast<uint32_t>(0));
+        eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+        eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+        eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+        eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+    }
+
+    eng->set(static_cast<engine::Reg>(RBASE_A), static_cast<uint32_t>(2));
+    eng->set(static_cast<engine::Reg>(RBASE_B), static_cast<uint32_t>(1));
+
+    logger.logStart(options);
+    timer.start();
+    timer2.start();
+
+    const uint64_t totalIters = (p > 1) ? (uint64_t)(p - 1) : 0ull;
+    uint64_t L = options.exponent;
+    uint64_t B = std::sqrt((double)L);
+    if (B < 1) B = 1;
+    if (B > totalIters && totalIters > 0) B = totalIters;
+
+    double desiredIntervalSeconds = 600.0;
+    uint64_t checkpass = 0;
+    uint64_t checkpasslevel_auto = (uint64_t)((1000.0 * desiredIntervalSeconds) / (double)B);
+    if (checkpasslevel_auto == 0 && B > 0) checkpasslevel_auto = (totalIters / std::max<uint64_t>(B,1)) / std::max<uint64_t>(1,(uint64_t)std::sqrt((double)B));
+    uint64_t checkpasslevel = options.checklevel > 0 ? (uint64_t)options.checklevel : checkpasslevel_auto;
+    if (checkpasslevel == 0) checkpasslevel = 1;
+
+    auto start_clock = std::chrono::high_resolution_clock::now();
+    auto lastBackup = start_clock;
+    auto lastDisplay = start_clock;
+
+    uint64_t resumeIter = iter_done;
+    uint64_t startIter  = iter_done;
+    uint64_t itersave = (r==0) ? itersave_meta : (resumeIter ? resumeIter - 1 : 0);
+    uint64_t jsave = (r==0) ? jsave_meta : (totalIters - resumeIter - 1);
+    std::string res64_x; res64_pair(res64_x);
+    spinner.displayProgress((uint32_t)resumeIter, (uint32_t)totalIters, 0.0, 0.0, p, (uint32_t)resumeIter, (uint32_t)startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
+
+    bool errordone = false;
+    for (uint64_t iter = resumeIter, j = totalIters - resumeIter - 1; iter < totalIters; ++iter, --j)
+    {
+        if (interrupted) {
+            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+            save_ckpt(iter, itersave, jsave, elapsed_time);
+            std::cout << "\nInterrupted by user, state saved at iteration " << iter << " j=" << j << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Interrupted by user, state saved at iteration " << iter << " j=" << j; guiServer_->appendLog(oss.str()); }
+            spinner.displayBackupInfo((uint32_t)iter, (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
+            logger.logEnd(elapsed_time);
+            delete eng;
+            return 0;
+        }
+
+        auto now0 = std::chrono::high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval))
+        {
+            const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
+            std::cout << "\nBackup point done at iter + 1=" << iter + 1 << " start...." << std::endl;
+            save_ckpt(iter, itersave, jsave, elapsed_time);
+            lastBackup = now0;
+            std::cout << "Backup point done at iter + 1=" << iter + 1 << " done." << std::endl;
+            spinner.displayBackupInfo((uint32_t)(iter + 1), (uint32_t)totalIters, timer.elapsed(), res64_x, guiServer_ ? guiServer_.get() : nullptr);
+        }
+
+        if (options.erroriter > 0 && (iter + 1) == (uint64_t)options.erroriter && !errordone) {
+            errordone = true;
+            eng->sub(static_cast<engine::Reg>(RRES_A), static_cast<uint32_t>(2));
+            std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (iter + 1); guiServer_->appendLog(oss.str()); }
+        }
+
+        if (iter + 1 == totalIters) {
+            eng->copy(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RRES_A));
+            eng->copy(static_cast<engine::Reg>(RPREV_B), static_cast<engine::Reg>(RRES_B));
+        }
+        pair_square(RRES_A, RRES_B);
+
+        auto now = std::chrono::high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+            spinner.displayProgress((uint32_t)(iter + 1), (uint32_t)totalIters, timer.elapsed(), timer2.elapsed(), p, (uint32_t)resumeIter, (uint32_t)startIter, "", guiServer_ ? guiServer_.get() : nullptr);
+            timer2.start();
+            lastDisplay = now;
+            resumeIter = iter + 1;
+        }
+
+        bool boundary = ((j != 0 && (j % B == 0)) || (iter == totalIters - 1));
+        if (!boundary) continue;
+
+        checkpass += 1;
+        eng->copy(static_cast<engine::Reg>(RCHK_A), static_cast<engine::Reg>(RACC_A));
+        eng->copy(static_cast<engine::Reg>(RCHK_B), static_cast<engine::Reg>(RACC_B));
+        pair_mul_by(RACC_A, RACC_B, RRES_A, RRES_B);
+
+        bool do_check = (checkpass >= checkpasslevel) || (iter == totalIters - 1);
+        if (!do_check) continue;
+
+        const uint64_t T = totalIters;
+        const uint64_t modB = (T % B == 0 ? B : T % B);
+        uint64_t loop_count = (B > modB ? B - modB - 1 : 0);
+        for (uint64_t z = 0; z < loop_count; ++z) pair_square(RCHK_A, RCHK_B);
+        if (modB == B) { pair_mul_by(RCHK_A, RCHK_B, RBASE_A, RBASE_B); }
+        else { pair_square(RCHK_A, RCHK_B); pair_mul_by(RCHK_A, RCHK_B, RBASE_A, RBASE_B); }
+        for (uint64_t z = 0; z < modB; ++z) pair_square(RCHK_A, RCHK_B);
+
+        if (!pair_equal(RCHK_A, RCHK_B, RACC_A, RACC_B)) {
+            uint64_t blk_start = (itersave + 1);
+            uint64_t blk_end = (iter + 1);
+            std::cout << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
+            options.gerbicz_error_count += 1;
+
+            eng->copy(static_cast<engine::Reg>(RRES_A), static_cast<engine::Reg>(RSAVE_R_A));
+            eng->copy(static_cast<engine::Reg>(RRES_B), static_cast<engine::Reg>(RSAVE_R_B));
+            eng->copy(static_cast<engine::Reg>(RACC_A), static_cast<engine::Reg>(RSAVE_F_A));
+            eng->copy(static_cast<engine::Reg>(RACC_B), static_cast<engine::Reg>(RSAVE_F_B));
+
+            checkpass = 0;
+            resumeIter = (itersave == 0) ? 0 : (itersave + 1);
+            if (itersave == 0) { iter = (uint64_t)-1; j = jsave+1; } else { iter = itersave; j = jsave; }
+            std::cout << "[Gerbicz-Li] Restore iter=" << iter + 1 << std::endl;
+            std::cout << "[Gerbicz-Li] Restore j=" << j - 1 << std::endl;
+            continue;
+        } else {
+            uint64_t blk_start = (itersave + 1);
+            uint64_t blk_end = (iter + 1);
+            std::cout << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check OK at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
+            eng->copy(static_cast<engine::Reg>(RSAVE_R_A), static_cast<engine::Reg>(RRES_A));
+            eng->copy(static_cast<engine::Reg>(RSAVE_R_B), static_cast<engine::Reg>(RRES_B));
+            eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
+            eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
+            itersave = iter;
+            jsave = j;
+            checkpass = 0;
+        }
+    }
+
+    mpz_class Mp = (mpz_class(1) << p) - 1;
+    mpz_class Mp_minus_1 = Mp - 1;
+
+    mpz_t za, zb; mpz_inits(za, zb, nullptr);
+    eng->get_mpz(za, static_cast<engine::Reg>(RRES_A));
+    eng->get_mpz(zb, static_cast<engine::Reg>(RRES_B));
+    bool okA = (mpz_cmp(za, Mp_minus_1.get_mpz_t()) == 0);
+    bool okB = (mpz_cmp_ui(zb, 0) == 0);
+    bool is_prime = okA && okB;
+    mpz_clears(za, zb, nullptr);
+
+    eng->copy(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RPREV_A));
+    eng->add(static_cast<engine::Reg>(RPREV_A), static_cast<engine::Reg>(RPREV_A));
+    engine::digit dLL(eng, static_cast<engine::Reg>(RPREV_A));
+    std::vector<uint32_t> WLL = pack_words_from_eng_digits(dLL, p);
+    std::string ll_res64   = format_res64_hex(WLL);
+    std::string ll_res2048 = format_res2048_hex(WLL);
+
+    auto end_clock = std::chrono::high_resolution_clock::now();
+    const double elapsed_time = std::chrono::duration<double>(end_clock - start_clock).count() + restored_time;
+
+    spinner.displayProgress((uint64_t)totalIters, (uint64_t)totalIters, timer.elapsed(), timer2.elapsed(), p, (uint64_t)totalIters, (uint64_t)iter_done, ll_res64, guiServer_ ? guiServer_.get() : nullptr);
+
+    std::cout << "LL residue s_{p-2} res64=0x" << ll_res64 << std::endl;
+    std::cout << "LL residue s_{p-2} res2048=0x" << ll_res2048 << std::endl;
+    std::cout << "2^" << p << " - 1 is " << (is_prime ? "prime" : "composite") << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "LL residue s_{p-2} res64=0x" << ll_res64 << "\n";
+        oss << "LL residue s_{p-2} res2048=0x" << ll_res2048 << "\n";
+        oss << "2^" << p << " - 1 is " << (is_prime ? "prime" : "composite") << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s.";
+        guiServer_->appendLog(oss.str());
+    }
+
+    std::string json = io::JsonBuilder::generate(
+        options,
+        static_cast<int>(context.getTransformSize()),
+        is_prime,
+        ll_res64,
+        ll_res2048
+    );
+    Printer::finalReport(options, elapsed_time, json, is_prime);
+
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, "llsafe", json);
+    wm.appendToResultsTxt(json);
+
+    delete_checkpoints(p, options.wagstaff, false, true);
+    logger.logEnd(elapsed_time);
     delete eng;
     return is_prime ? 0 : 1;
 }
@@ -3727,7 +4041,7 @@ done:
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
-    bool debug = options.debug;
+    bool debug = true;//options.debug;
     uint64_t B1u = options.B1, B2u = options.B2;
     mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
     if (B2 <= B1) {
@@ -3738,7 +4052,7 @@ int App::runPM1Stage2Marin() {
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl; guiServer_->appendLog(oss.str()); }
     uint32_t pexp = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     const size_t baseRegs = 11;
     const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5;
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
@@ -4029,6 +4343,773 @@ int App::runPM1Stage2Marin() {
     return found ? 0 : 1;
 }
 
+/* ===== n^K Stage-2 (Topics in advanced scientific computation. by: Crandall, Richard E) ===== */
+/* Fast b^{n^K} (Stirling init + z-chain); product of differences; GCD. */
+int App::runPM1Stage2MarinNKVersion() {
+    using namespace std::chrono;
+    const uint32_t pexp  = (uint32_t)options.exponent;
+    const uint32_t K     = (uint32_t)options.K;
+    const uint64_t nmax  = (uint64_t)options.nmax;
+    if (K == 0 || nmax == 0) { std::cout << "Nothing to do (K=0 or nmax=0)\n"; return 0; }
+    if (guiServer_) { std::ostringstream oss; oss << "P-1 Stage 2 (n^K) — K=" << K << ", nmax=" << nmax; guiServer_->setStatus(oss.str()); }
+
+    const size_t RSTATE=0, RACC=1, RTMP=2, RPOW=3, RDIFF=4, RONE=5;
+    size_t regCount = 6 + (size_t)K + 1 + (size_t)nmax;
+
+    engine* eng_s1 = engine::create_gpu(pexp, 11, (size_t)options.device_id, options.debug);
+    std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+    auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 3) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != pexp) return -2;
+        uint32_t ri = 0; double et = 0.0;
+        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = e->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!e->set_checkpoint(data)) return -2;
+        uint64_t tmp64;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+        uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+        uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+        if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
+        uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+        if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+        uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
+        if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+    int rr = read_ckpt_s1(eng_s1, ck.str());
+    if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
+    if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return -2; }
+    mpz_t H; mpz_init(H); eng_s1->get_mpz(H, (engine::Reg)0); delete eng_s1;
+
+    engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, options.debug);
+    eng->set_mpz((engine::Reg)RSTATE, H);
+    mpz_clear(H);
+
+    auto pow_big_mpz = [&](size_t dst, size_t baseReg, const mpz_class& e)->bool{
+        eng->set((engine::Reg)dst, 1);
+        if (mpz_sgn(e.get_mpz_t()) == 0) return true;
+        eng->set_multiplicand((engine::Reg)RTMP, (engine::Reg)baseReg);
+        size_t nb = mpz_sizeinbase(e.get_mpz_t(), 2);
+        const size_t chunk = 4096;
+        for (size_t k = 0; k < nb; ++k) {
+            eng->square_mul((engine::Reg)dst);
+            size_t bit = nb - 1 - k;
+            if (mpz_tstbit(e.get_mpz_t(), bit)) eng->mul((engine::Reg)dst, (engine::Reg)RTMP);
+            if ((k % chunk) == 0 && interrupted) return false;
+        }
+        return true;
+    };
+
+    std::vector<std::vector<mpz_class>> S(K+1, std::vector<mpz_class>(K+1));
+    S[0][0] = 1;
+    for (uint32_t n = 1; n <= K; ++n) { S[n][0] = mpz_class(0); for (uint32_t j = 1; j <= n; ++j) S[n][j] = mpz_class(j) * S[n-1][j] + S[n-1][j-1]; }
+    std::vector<mpz_class> fact(K+1); fact[0] = 1; for (uint32_t j = 1; j <= K; ++j) fact[j] = fact[j-1] * j;
+
+    size_t Z0 = 6, VAL0 = Z0 + (size_t)K + 1;
+    eng->set((engine::Reg)(Z0 + 0), 1);
+    for (uint32_t j = 1; j <= K; ++j) { mpz_class e = fact[j] * S[K][j]; if (!pow_big_mpz(Z0 + j, RSTATE, e)) { delete eng; std::cout << "Interrupted during initialization\n"; return 0; } }
+
+    eng->set((engine::Reg)RACC, 1);
+    eng->set((engine::Reg)RONE, 1);
+
+    auto t0 = high_resolution_clock::now();
+    auto last = high_resolution_clock::now();
+
+    for (uint64_t m = 1; m <= nmax; ++m) {
+        for (uint32_t q = 0; q < K; ++q) { 
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)(Z0 + q + 1)); 
+            eng->mul((engine::Reg)(Z0 + q), (engine::Reg)RPOW); 
+            }
+        eng->copy((engine::Reg)(VAL0 + (m-1)), (engine::Reg)(Z0 + 0));
+        auto now = high_resolution_clock::now();
+        if (duration_cast<milliseconds>(now - last).count() >= 300) {
+            double done = double(m), total = double(nmax);
+            double elapsed = duration<double>(now - t0).count();
+            double ips = done / std::max(1e-9, elapsed);
+            double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+            std::cout << "build " << m << "/" << nmax << " | " << std::fixed << std::setprecision(2) << (done*100.0/total) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
+            last = now;
+        }
+        if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+    }
+    std::cout << "\nAccumulating pairwise differences on GPU\n";
+
+    uint64_t totalPairs = (nmax > 1) ? (nmax * (nmax - 1)) / 2 : 0, pairsDone = 0;
+    for (uint64_t i = 0; i < nmax; ++i) {
+        for (uint64_t j = i + 1; j < nmax; ++j) {
+            eng->copy((engine::Reg)RDIFF, (engine::Reg)(VAL0 + j));
+            eng->sub_reg((engine::Reg)RDIFF, (engine::Reg)(VAL0 + i));
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)RDIFF);
+            eng->mul((engine::Reg)RACC, (engine::Reg)RPOW);
+            ++pairsDone;
+            /* Verification correct pour sub reg
+            mpz_class Mpx = (mpz_class(1) << pexp) - 1; 
+            mpz_t za, zb, zd_gpu, zd_exp;
+            mpz_inits(za, zb, zd_gpu, zd_exp, nullptr);
+            eng->get_mpz(za, (engine::Reg)(VAL0 + j));
+            eng->get_mpz(zb, (engine::Reg)(VAL0 + i));
+            eng->get_mpz(zd_gpu, (engine::Reg)RDIFF);
+            mpz_sub(zd_exp, za, zb);
+            mpz_mod(zd_exp, zd_exp, Mpx.get_mpz_t());
+            if (mpz_cmp(zd_gpu, zd_exp) != 0) {
+                std::cerr << "sub_reg mismatch at i=" << i << " j=" << j << std::endl;
+                std::cerr << "gpu=" << mpz_class(zd_gpu).get_str() << std::endl;
+                std::cerr << "exp=" << mpz_class(zd_exp).get_str() << std::endl;
+                std::abort();
+            }
+            
+            mpz_clears(za, zb, zd_gpu, zd_exp, nullptr);*/
+            auto now = high_resolution_clock::now();
+            if (duration_cast<milliseconds>(now - last).count() >= 400) {
+                double done = double(pairsDone), total = double(totalPairs);
+                double elapsed = duration<double>(now - t0).count();
+                double ips = done / std::max(1e-9, elapsed);
+                double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                std::cout << "pairs " << pairsDone << "/" << totalPairs << " | " << std::fixed << std::setprecision(2) << (total ? (done*100.0/total) : 100.0) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
+                last = now;
+            }
+            if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+        }
+    }
+    std::cout << "\nComputing GCD...\n";
+
+    mpz_t Xz; mpz_init(Xz); eng->get_mpz(Xz, (engine::Reg)RACC); mpz_class Mp = (mpz_class(1) << pexp) - 1; mpz_class X; mpz_set(X.get_mpz_t(), Xz); mpz_clear(Xz);
+    mpz_class g; mpz_gcd(g.get_mpz_t(), X.get_mpz_t(), Mp.get_mpz_t());
+
+    bool found = (g > 1 && g < Mp);
+    if (found) { std::cout << "Stage 2 n^K Factor found : " << g.get_str() << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 n^K Factor found : " << g.get_str(); guiServer_->appendLog(oss.str()); } }
+    else { std::cout << "No factor" << std::endl; if (guiServer_) { std::ostringstream oss; oss << "No factor"; guiServer_->appendLog(oss.str()); } }
+
+    double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
+    std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
+    delete eng;
+    return found ? 0 : 1;
+}
+
+static inline unsigned u64_bits(uint64_t x){
+#if defined(__cpp_lib_bitops) && __cpp_lib_bitops >= 201907L
+    return x ? 64u - static_cast<unsigned>(std::countl_zero(x)) : 0u;
+#elif defined(_MSC_VER)
+    if (!x) return 0u;
+    unsigned long idx;
+#if defined(_M_X64) || defined(_M_ARM64)
+    _BitScanReverse64(&idx, x);
+    return idx + 1u;
+#else
+    if (x >> 32) { _BitScanReverse(&idx, static_cast<unsigned long>(x >> 32)); return idx + 33u; }
+    _BitScanReverse(&idx, static_cast<unsigned long>(x));
+    return idx + 1u;
+#endif
+#else
+    return x ? 64u - static_cast<unsigned>(__builtin_clzll(x)) : 0u;
+#endif
+}
+
+int App::runECMMarin()
+{
+    using namespace std;
+    using namespace std::chrono;
+
+    const uint32_t p = static_cast<uint32_t>(options.exponent);
+    const uint64_t B1 = options.B1 ? options.B1 : 1000000ULL;
+    const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
+    const bool verbose = true;//options.debug;
+    uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
+
+    auto splitmix64 = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
+    auto rnd_mpz = [&](const mpz_class& N, uint64_t& seed, uint64_t bits)->mpz_class{
+        mpz_class z=0; for (size_t i=0;i<bits;i+=64){ z <<= 64; z += (unsigned long)splitmix64(seed); } z %= N; if (z<=2) z+=3; return z;
+    };
+    auto hex64 = [&](const mpz_class& z)->string{
+        std::ostringstream ss; ss<<std::uppercase<<std::hex<<std::setw(16)<<std::setfill('0')<<static_cast<uint64_t>(mpz_get_ui(z.get_mpz_t())); return ss.str();
+    };
+    auto fmt_hms = [&](double s)->string{
+        uint64_t u = (uint64_t)(s + 0.5); uint64_t h=u/3600, m=(u%3600)/60, se=u%60; std::ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str();
+    };
+    auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
+    auto is_known = [&](const mpz_class& f)->bool{
+        for (const auto& s : options.knownFactors) {
+            if (s.empty()) continue;
+            mpz_class z;
+            if (mpz_set_str(z.get_mpz_t(), s.c_str(), 0) != 0) continue;
+            if (z < 0) z = -z;
+            if (f == z) return true;
+        }
+        return false;
+    };
+
+    mpz_class N = (mpz_class(1) << p) - 1;
+    {
+        std::vector<std::string> kf = options.knownFactors;
+        std::vector<std::pair<mpz_class,unsigned>> accepted;
+        mpz_class C = N;
+        for (const auto& s : kf) {
+            if (s.empty()) continue;
+            mpz_class f;
+            if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) {
+                std::ostringstream os; os << "[ECM] Ignoring invalid known factor string: " << s;
+                std::cout << os.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(os.str());
+                continue;
+            }
+            if (f < 0) f = -f;
+            if (f <= 1) continue;
+            mpz_class g; mpz_gcd(g.get_mpz_t(), f.get_mpz_t(), N.get_mpz_t());
+            if (g > 1) {
+                unsigned m = 0;
+                while (mpz_divisible_p(C.get_mpz_t(), g.get_mpz_t())) { C /= g; ++m; }
+                if (m) accepted.push_back({g, m});
+            }
+        }
+        if (!accepted.empty()) {
+            std::ostringstream oss;
+            oss << "[ECM] Known factors accepted: ";
+            for (size_t i=0;i<accepted.size();++i) {
+                if (i) oss << " * ";
+                oss << accepted[i].first.get_str() << "^" << accepted[i].second;
+            }
+            oss << "\n[ECM] Remaining cofactor: " << C.get_str();
+            std::cout << oss.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(oss.str());
+            int pr = mpz_probab_prime_p(C.get_mpz_t(), 25);
+            if (C == 1) { std::cout << "[ECM] Fully factored from known factors\n"; return 0; }
+            if (pr) {
+                std::ostringstream os2; os2 << "[ECM] Cofactor appears prime: " << C.get_str();
+                std::cout << os2.str()<<std::endl;
+                if (guiServer_) guiServer_->appendLog(os2.str());
+            }
+        } else {
+            std::cout << "[ECM] No usable known factors provided\n";
+        }
+    }
+
+    mpz_class K = 1;
+    uint32_t primesB1 = 0;
+    {
+        std::atomic<bool> done{false};
+        std::thread ticker([&]{
+            const char* msg = "[ECM] Stage1 prep: building K up to B1 ";
+            std::cout<<msg<<std::flush;
+            size_t dots=0, wrap=60;
+            while(!done.load(std::memory_order_relaxed)){
+                std::cout<<'.'<<std::flush;
+                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+            std::cout<<" done\n";
+        });
+        uint64_t b = B1;
+        vector<uint8_t> sieve(b/2+1, 1);
+        for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
+        auto apply_prime = [&](uint64_t q){ uint64_t pw=q; while (pw <= b / q) pw *= q; mpz_class t; mpz_set_ui(t.get_mpz_t(), (unsigned long)pw); K *= t; ++primesB1; };
+        apply_prime(2);
+        for (uint64_t q=3;q<=b;q+=2) if (sieve[q>>1]) apply_prime(q);
+        done.store(true, std::memory_order_relaxed);
+        ticker.join();
+    }
+    size_t nb = mpz_sizeinbase(K.get_mpz_t(), 2);
+
+    std::vector<uint32_t> primesS2;
+    if (B2 > B1) {
+        std::atomic<bool> done{false};
+        std::thread ticker([&]{
+            const char* msg = "[ECM] Stage2 prep: sieving primes in (B1,B2] ";
+            std::cout<<msg<<std::flush;
+            size_t dots=0, wrap=60;
+            while(!done.load(std::memory_order_relaxed)){
+                std::cout<<'.'<<std::flush;
+                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+            std::cout<<" done\n";
+        });
+        uint64_t b = B2;
+        vector<uint8_t> sieve(b/2+1, 1);
+        for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
+        if (B1 < 2 && 2 <= B2) primesS2.push_back(2);
+        for (uint64_t q=3;q<=B2;q+=2) if (sieve[q>>1] && q > B1) primesS2.push_back((uint32_t)q);
+        done.store(true, std::memory_order_relaxed);
+        ticker.join();
+    }
+
+    {
+        std::ostringstream hdr;
+        hdr<<"[ECM] N=M_"<<p<<"  B1="<<B1<<"  B2="<<B2<<"  curves="<<curves<<"\n";
+        hdr<<"[ECM] Stage1: product of prime powers up to B1, primes used="<<primesB1<<", K_bits="<<nb<<"\n";
+        if (!primesS2.empty()) {
+            hdr<<"[ECM] Stage2: primes in ("<<B1<<","<<B2<<"], count="<<primesS2.size();
+            hdr<<", first="<<(primesS2.size()?primesS2.front():0)<<", last="<<(primesS2.size()?primesS2.back():0)<<"\n";
+        } else {
+            hdr<<"[ECM] Stage2: disabled\n";
+        }
+        std::cout<<hdr.str();
+        if (guiServer_) guiServer_->appendLog(hdr.str());
+    }
+
+    auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+    uint64_t seed0 = now_ns ^ ((uint64_t)p<<32) ^ B1;
+
+    size_t transform_size_once = 0;
+    const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
+
+    for (uint64_t c = 0; c < curves; ++c)
+    {
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
+        if (transform_size_once == 0) {
+            transform_size_once = eng->get_size();
+            std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id;
+            std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str());
+        }
+
+        std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
+        std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
+        const std::string ckpt_file = ck.str();
+        const std::string ckpt2     = ck2.str();
+
+        auto save_ckpt = [&](uint32_t i, double et){
+            const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)nb; if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            std::error_code ec; fs::remove(ckpt_file + ".old", ec); fs::rename(ckpt_file, ckpt_file + ".old", ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(ckpt_file + ".old", ec);
+        };
+        auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 1) return -2;
+            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != p) return -2;
+            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
+            uint64_t rB1 = 0; if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data)) return -2;
+            if (!f.check_crc32()) return -2;
+            if (rnb != nb || rB1 != B1) return -2;
+            return 0;
+        };
+
+        auto save_ckpt2 = [&](uint32_t idx, double et){
+            const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
+            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; uint32_t cnt = (uint32_t)primesS2.size(); if (!f.write(reinterpret_cast<const char*>(&cnt), sizeof(cnt))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
+        };
+        auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 2) return -2;
+            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != p) return -2;
+            if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&cnt), sizeof(cnt))) return -2;
+            uint64_t b1s=0,b2s=0; if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2; if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data)) return -2;
+            if (!f.check_crc32()) return -2;
+            if (cnt != primesS2.size() || b1s != B1 || b2s != B2) return -2;
+            return 0;
+        };
+
+        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+        bool resume_stage2 = false;
+        {
+            int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et);
+            if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et);
+            resume_stage2 = (rr2 == 0);
+        }
+
+        uint64_t seed = seed0 + c*0xD1342543DE82EF95ULL;
+        mpz_class sigma, u, v, A, A24, x0;
+
+        if (!resume_stage2)
+        {
+            sigma = rnd_mpz(N, seed, 128);
+            u = (sigma*sigma - 5) % N; if (u < 0) u += N;
+            v = (4*sigma) % N;
+
+            mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t());
+            if (g > 1 && g < N) { std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found at curve "<<(c+1)<<": "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
+            mpz_class invv; if (!mpz_invert(invv.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t())) { mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found (invert v failed): "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
+            mpz_class t = (u * invv) % N; x0 = (t*t - 2) % N; if (x0 < 0) x0 += N;
+
+            mpz_class t1 = (v - u) % N; if (t1 < 0) t1 += N; mpz_class t1_3 = (t1*t1) % N; t1_3 = (t1_3 * t1) % N;
+            mpz_class t2 = (3*u + v) % N; if (t2 < 0) t2 += N; mpz_class num = (t1_3 * t2) % N;
+            mpz_class den = 0; { mpz_class u3 = (u*u) % N; u3 = (u3*u) % N; den = (4 * u3) % N; den = (den * v) % N; }
+            mpz_gcd(g.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found in parameterization: "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
+            mpz_class invden; if (!mpz_invert(invden.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t())) { mpz_gcd(g.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()); std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found (invert den failed): "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
+            A = (num * invden) % N; A = (A - 2) % N; if (A < 0) A += N;
+            mpz_class inv4; mpz_invert(inv4.get_mpz_t(), mpz_class(4).get_mpz_t(), N.get_mpz_t());
+            A24 = ((A + 2) % N) * inv4 % N;
+
+            const size_t RX0=0, RZ0=1, RX1=2, RZ1=3, RXD=4, RZD=5, RA24=6, RT0=7, RT1=8, RT2=9, RT3=10, RU=11, RV=12, RM=13;
+
+            eng->set((engine::Reg)RZ0, 0u);
+            eng->set((engine::Reg)RX0, 1u);
+            eng->set((engine::Reg)RZ1, 1u);
+            { mpz_t z; mpz_init(z); mpz_set(z, x0.get_mpz_t()); eng->set_mpz((engine::Reg)RX1, z); mpz_set(z, x0.get_mpz_t()); eng->set_mpz((engine::Reg)RXD, z); mpz_set_ui(z, 1); eng->set_mpz((engine::Reg)RZD, z); mpz_set(z, A24.get_mpz_t()); eng->set_mpz((engine::Reg)RA24, z); mpz_clear(z); }
+
+            uint64_t cnt_xdbl=0, cnt_xadd=0, cnt_mul=0, cnt_sqr=0;
+
+            auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)RM, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)RM); ++cnt_mul; };
+            auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+                eng->copy((engine::Reg)RT0, (engine::Reg)X1);
+                eng->add((engine::Reg)RT0, (engine::Reg)Z1);
+                eng->copy((engine::Reg)RT1, (engine::Reg)RT0);
+                eng->square_mul((engine::Reg)RT1); ++cnt_sqr;
+                eng->copy((engine::Reg)RT2, (engine::Reg)X1);
+                eng->sub_reg((engine::Reg)RT2, (engine::Reg)Z1);
+                eng->copy((engine::Reg)RT3, (engine::Reg)RT2);
+                eng->square_mul((engine::Reg)RT3); ++cnt_sqr;
+                eng->copy((engine::Reg)X2, (engine::Reg)RT1);
+                mul_inplace(X2, RT3);
+                eng->copy((engine::Reg)RT0, (engine::Reg)RT1);
+                eng->sub_reg((engine::Reg)RT0, (engine::Reg)RT3);
+                eng->copy((engine::Reg)RT2, (engine::Reg)RT0);
+                mul_inplace(RT2, RA24);
+                eng->add((engine::Reg)RT2, (engine::Reg)RT3);
+                eng->copy((engine::Reg)Z2, (engine::Reg)RT2);
+                mul_inplace(Z2, RT0);
+                ++cnt_xdbl;
+            };
+            auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t XD,size_t ZD,size_t X3,size_t Z3){
+                eng->copy((engine::Reg)RT0, (engine::Reg)X1);
+                eng->add((engine::Reg)RT0, (engine::Reg)Z1);
+                eng->copy((engine::Reg)RT1, (engine::Reg)X1);
+                eng->sub_reg((engine::Reg)RT1, (engine::Reg)Z1);
+                eng->copy((engine::Reg)RT2, (engine::Reg)X2);
+                eng->add((engine::Reg)RT2, (engine::Reg)Z2);
+                eng->copy((engine::Reg)RT3, (engine::Reg)X2);
+                eng->sub_reg((engine::Reg)RT3, (engine::Reg)Z2);
+                eng->copy((engine::Reg)RU, (engine::Reg)RT3);
+                mul_inplace(RU, RT0);
+                eng->copy((engine::Reg)RV, (engine::Reg)RT2);
+                mul_inplace(RV, RT1);
+                eng->copy((engine::Reg)X3, (engine::Reg)RU);
+                eng->add((engine::Reg)X3, (engine::Reg)RV);
+                eng->square_mul((engine::Reg)X3); ++cnt_sqr;
+                mul_inplace(X3, ZD);
+                eng->copy((engine::Reg)Z3, (engine::Reg)RU);
+                eng->sub_reg((engine::Reg)Z3, (engine::Reg)RV);
+                eng->square_mul((engine::Reg)Z3); ++cnt_sqr;
+                mul_inplace(Z3, XD);
+                ++cnt_xadd;
+            };
+
+            std::ostringstream head;
+            head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | sigma64=0x"<<hex64(sigma)<<" x0_64=0x"<<hex64(x0)<<" A_64=0x"<<hex64(A)<<" A24_64=0x"<<hex64(A24)<<" | K_bits="<<nb;
+            std::cout<<head.str()<<std::endl;
+            if (guiServer_) guiServer_->appendLog(head.str());
+
+            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0;
+            (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+
+            auto t0 = high_resolution_clock::now();
+            auto last_save = t0;
+            auto last_ui = t0;
+
+            for (size_t i = start_i; i < nb; ++i){
+                size_t bit = nb - 1 - i;
+                mp_bitcnt_t mb = static_cast<mp_bitcnt_t>(bit);
+                int b = mpz_tstbit(K.get_mpz_t(), mb) ? 1 : 0;
+                if (b==0) { xADD(2,3,0,1,4,5,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
+                else      { xADD(0,1,2,3,4,5,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+
+                auto now = high_resolution_clock::now();
+                if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == nb) {
+                    double done = double(i + 1), total = double(nb);
+                    double elapsed = duration<double>(now - t0).count() + saved_et;
+                    double ips = done / std::max(1e-9, elapsed);
+                    double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                    std::ostringstream line;
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<nb<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%)"
+                        <<" | ETA "<<fmt_hms(eta)
+                        <<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;
+                    std::cout<<line.str()<<std::flush;
+                    last_ui = now;
+                }
+                if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
+                    double elapsed = duration<double>(now - t0).count() + saved_et;
+                    save_ckpt((uint32_t)(i + 1), elapsed);
+                    last_save = now;
+                }
+                if (interrupted) {
+                    double elapsed = duration<double>(now - t0).count() + saved_et;
+                    save_ckpt((uint32_t)(i + 1), elapsed);
+                    std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<nb<<"\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<nb; guiServer_->appendLog(oss.str()); }
+                    delete eng;
+                    return 0;
+                }
+            }
+            std::cout<<std::endl;
+
+            std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage1..."<<std::endl;
+            mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
+            mpz_class gg = gcd_with_dots(Zfin, N);
+            bool found = (gg > 1 && gg < N);
+
+            double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
+            {
+                std::ostringstream s1;
+                s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s";
+                std::cout<<s1.str()<<std::endl;
+                if (guiServer_) guiServer_->appendLog(s1.str());
+            }
+
+            if (found) {
+                bool known = is_known(gg);
+                std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
+                if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
+                if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); delete eng; return 0; }
+            }
+        }
+        else
+        {
+            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx<<"/"<<primesS2.size()<<" ("<<fixed<<setprecision(2)<<(primesS2.empty()?0.0: (100.0*double(s2_idx)/double(primesS2.size())))<<"%)";
+            std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
+        }
+
+        if (B2 > B1) {
+            bool use_bsgs = options.bsgs ? true : false;
+            uint32_t brent_deg = 1; if (options.brent > 1) brent_deg = (uint32_t)options.brent; else if (options.brent) brent_deg = 2;
+            if (!resume_stage2) { std::ostringstream s2h; s2h<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 start, primes="<<primesS2.size(); if (use_bsgs) s2h<<" | bsgs"; if (brent_deg>1) s2h<<" | brent_deg="<<brent_deg; std::cout<<s2h.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2h.str()); }
+
+            auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
+                eng->set((engine::Reg)0, 1u);
+                eng->set((engine::Reg)1, 0u);
+                eng->copy((engine::Reg)2, (engine::Reg)Xin);
+                eng->copy((engine::Reg)3, (engine::Reg)Zin);
+                eng->copy((engine::Reg)4, (engine::Reg)Xin);
+                eng->copy((engine::Reg)5, (engine::Reg)Zin);
+                size_t nbq = u64_bits(m);
+                auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)13, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)13); };
+                auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+                    eng->copy((engine::Reg)7, (engine::Reg)X1);
+                    eng->add((engine::Reg)7, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)8, (engine::Reg)7);
+                    eng->square_mul((engine::Reg)8);
+                    eng->copy((engine::Reg)9, (engine::Reg)X1);
+                    eng->sub_reg((engine::Reg)9, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)10, (engine::Reg)9);
+                    eng->square_mul((engine::Reg)10);
+                    eng->copy((engine::Reg)X2, (engine::Reg)8);
+                    mul_inplace(X2, 10);
+                    eng->copy((engine::Reg)7, (engine::Reg)8);
+                    eng->sub_reg((engine::Reg)7, (engine::Reg)10);
+                    eng->copy((engine::Reg)9, (engine::Reg)7);
+                    mul_inplace(9, 6);
+                    eng->add((engine::Reg)9, (engine::Reg)10);
+                    eng->copy((engine::Reg)Z2, (engine::Reg)9);
+                    mul_inplace(Z2, 7);
+                };
+                auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t XD,size_t ZD,size_t X3,size_t Z3){
+                    eng->copy((engine::Reg)7, (engine::Reg)X1);
+                    eng->add((engine::Reg)7, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)8, (engine::Reg)X1);
+                    eng->sub_reg((engine::Reg)8, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)9, (engine::Reg)X2);
+                    eng->add((engine::Reg)9, (engine::Reg)Z2);
+                    eng->copy((engine::Reg)10, (engine::Reg)X2);
+                    eng->sub_reg((engine::Reg)10, (engine::Reg)Z2);
+                    eng->copy((engine::Reg)11, (engine::Reg)10);
+                    mul_inplace(11, 7);
+                    eng->copy((engine::Reg)12, (engine::Reg)9);
+                    mul_inplace(12, 8);
+                    eng->copy((engine::Reg)X3, (engine::Reg)11);
+                    eng->add((engine::Reg)X3, (engine::Reg)12);
+                    eng->square_mul((engine::Reg)X3);
+                    mul_inplace(X3, ZD);
+                    eng->copy((engine::Reg)Z3, (engine::Reg)11);
+                    eng->sub_reg((engine::Reg)Z3, (engine::Reg)12);
+                    eng->square_mul((engine::Reg)Z3);
+                    mul_inplace(Z3, XD);
+                };
+                for (size_t bi=0; bi<nbq; ++bi){
+                    size_t bit = nbq - 1 - bi;
+                    int b = ((m >> bit) & 1ULL) ? 1 : 0;
+                    if (b==0) { xADD(2,3,0,1,4,5,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
+                    else      { xADD(0,1,2,3,4,5,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+                }
+                eng->copy((engine::Reg)Xout, (engine::Reg)0);
+                eng->copy((engine::Reg)Zout, (engine::Reg)1);
+            };
+
+            auto t2_0 = high_resolution_clock::now();
+            auto last2_save = t2_0;
+            auto last2_ui = t2_0;
+
+            size_t Xcur = 0, Zcur = 1;
+
+            uint32_t start_idx = resume_stage2 ? s2_idx : 0;
+            double saved_et2 = resume_stage2 ? s2_et : 0.0;
+
+            auto mul_ov = [](uint64_t a, uint64_t b, uint64_t& out)->bool{
+                if (a==0 || b==0){ out = 0; return false; }
+                const uint64_t U = ~uint64_t(0);
+                if (a > U / b) return true;
+                out = a * b;
+                return false;
+            };
+            auto pow_ov = [&](uint64_t base, uint32_t exp, uint64_t& out)->bool{
+                out = 1;
+                for (uint32_t k=0;k<exp;k++){
+                    uint64_t t=0;
+                    if (mul_ov(out, base, t)) return true;
+                    out = t;
+                }
+                return false;
+            };
+
+            const uint32_t block_cap = options.bsgs ? 8u : 1u;
+            uint64_t Macc = 1;
+            uint32_t in_block = 0;
+
+            for (uint32_t i = start_idx; i < (uint32_t)primesS2.size(); ++i) {
+                uint64_t q = primesS2[i];
+                uint64_t mexp = q;
+                bool big = false;
+                if (brent_deg > 1) {
+                    if (pow_ov(q, brent_deg, mexp)) big = true;
+                }
+
+                if (!big && options.bsgs && in_block < block_cap) {
+                    uint64_t tmp=0;
+                    if (!mul_ov(Macc, mexp, tmp)) {
+                        Macc = tmp;
+                        ++in_block;
+                    } else {
+                        if (Macc > 1) {
+                            ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                            Macc = 1;
+                            in_block = 0;
+                        }
+                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                    }
+                } else {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
+                    if (big) {
+                        for (uint32_t k=0;k<brent_deg;k++){
+                            ladder_mul_small(Xcur, Zcur, q, 7, 8);
+                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        }
+                    } else {
+                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                    }
+                }
+
+                auto now2 = high_resolution_clock::now();
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2.size()) {
+                    double done = double(i + 1), total = double(primesS2.size());
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    double ips = done / std::max(1e-9, elapsed);
+                    double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                    std::ostringstream line;
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2.size()<<" ("<<fixed<<setprecision(2)<<(total? (done*100.0/total):100.0)<<"%)"
+                        <<" | ETA "<<fmt_hms(eta);
+                    std::cout<<line.str()<<std::flush;
+                    last2_ui = now2;
+                }
+
+                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed);
+                    last2_save = now2;
+                }
+                if (interrupted) {
+                    if (Macc > 1) {
+                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+                        Macc = 1;
+                        in_block = 0;
+                    }
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed);
+                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2.size()<<"\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2.size(); guiServer_->appendLog(oss.str()); }
+                    delete eng;
+                    return 0;
+                }
+            }
+            if (Macc > 1) {
+                ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
+                eng->copy((engine::Reg)Xcur, (engine::Reg)7);
+                eng->copy((engine::Reg)Zcur, (engine::Reg)8);
+            }
+            std::cout<<std::endl;
+
+            std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage2..."<<std::endl;
+            mpz_class Zfin2 = compute_X_with_dots(eng, (engine::Reg)Zcur, N);
+            mpz_class gg2 = gcd_with_dots(Zfin2, N);
+            bool found2 = (gg2 > 1 && gg2 < N);
+
+            std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+
+            double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+            { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<fixed<<setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
+
+            if (found2) {
+                bool known = is_known(gg2);
+                std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
+                if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
+                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); delete eng; return 0; }
+            }
+        }
+
+        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+        static thread_local std::chrono::high_resolution_clock::time_point curve_t0 = high_resolution_clock::now();
+        double elapsed = duration<double>(high_resolution_clock::now() - curve_t0).count();
+        { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
+        curve_t0 = high_resolution_clock::now();
+
+        delete eng;
+    }
+
+    std::cout<<"[ECM] No factor found"<<std::endl;
+    return 1;
+}
+
 
 
 int App::runPM1Marin() {
@@ -4042,7 +5123,7 @@ int App::runPM1Marin() {
     std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     const uint32_t p = static_cast<uint32_t>(options.exponent);
-    const bool verbose = options.debug;
+    const bool verbose = true;//options.debug;
     engine* eng = engine::create_gpu(p, static_cast<size_t>(11), static_cast<size_t>(options.device_id), verbose);
     const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9, RBASE=10;
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
@@ -4416,7 +5497,7 @@ int App::runPM1Marin() {
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
     wm.appendToResultsTxt(json);
 
-    if(options.B2 >= 0){
+    if(options.B2 > 0){
         {
             const double elapsed_time_ck =
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
@@ -4441,6 +5522,34 @@ int App::runPM1Marin() {
         }
         //options.B2 = 214439;
         factorFound = runPM1Stage2Marin() || factorFound;
+    }
+   if(options.nmax > 0 && options.K > 0){
+        {
+            std::cout << "P-1 STAGE 2 IN **** n^K variant  n=" << options.nmax << " K=" << options.K << "******\n";
+    
+            const double elapsed_time_ck =
+                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                + restored_time;
+
+            save_ckpt(
+                0,                 // i
+                elapsed_time_ck,   // et
+                0,                 // chk
+                0,                 // blks
+                0,                 // bib
+                0,                 // cbl
+                0,                 // inlot
+                mpz_class(0),      // ceacc
+                mpz_class(0),      // cwbits
+                chunkIndex,        // chunkIdx
+                startPrime,        // startP
+                firstChunk ? 1 : 0,// first
+                processed_total_bits, // processedBits
+                0                  // bitsInChunk
+            );
+        }
+        //options.B2 = 214439;
+        factorFound = runPM1Stage2MarinNKVersion() || factorFound;
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
@@ -4696,6 +5805,363 @@ int App::runGpuBenchmarkMarin() {
     return 0;
 }
 
+int core::App::runMemtestOpenCL() {
+    if (guiServer_) { std::ostringstream oss; oss << "MEMTEST"; guiServer_->setStatus(oss.str()); }
+    cl_uint np = 0; clGetPlatformIDs(0, nullptr, &np);
+    std::vector<cl_platform_id> plats(np); if (np) clGetPlatformIDs(np, plats.data(), nullptr);
+    std::vector<cl_device_id> devs; std::vector<cl_platform_id> dev_plats;
+    for (auto pid : plats) { cl_uint nd = 0; clGetDeviceIDs(pid, CL_DEVICE_TYPE_GPU, 0, nullptr, &nd); if (!nd) continue; size_t old = devs.size(); devs.resize(old + nd); dev_plats.resize(old + nd); clGetDeviceIDs(pid, CL_DEVICE_TYPE_GPU, nd, devs.data() + old, nullptr); for (cl_uint i=0;i<nd;i++) dev_plats[old+i]=pid; }
+    if (devs.empty()) { std::cerr << "No OpenCL GPU device found\n"; return -1; }
+    size_t idx = (size_t)options.device_id; if (idx >= devs.size()) idx = 0;
+    cl_device_id dev = devs[idx]; cl_platform_id plat = dev_plats[idx];
+    auto get_str = [&](cl_device_info p){ size_t sz=0; clGetDeviceInfo(dev,p,0,nullptr,&sz); std::string s(sz,'\0'); if(sz) clGetDeviceInfo(dev,p,sz,s.data(),nullptr); if(!s.empty()&&s.back()=='\0') s.pop_back(); return s; };
+    std::string gpu_name=get_str(CL_DEVICE_NAME), gpu_vendor=get_str(CL_DEVICE_VENDOR), driver_ver=get_str(CL_DRIVER_VERSION), ver=get_str(CL_DEVICE_VERSION);
+    cl_bool ecc_b = CL_FALSE; clGetDeviceInfo(dev, CL_DEVICE_ERROR_CORRECTION_SUPPORT, sizeof(ecc_b), &ecc_b, nullptr);
+    cl_uint cu=0, freq=0; cl_ulong vram=0, maxalloc=0, gcache=0, lmem=0;
+    clGetDeviceInfo(dev, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(cu), &cu, nullptr);
+    clGetDeviceInfo(dev, CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(freq), &freq, nullptr);
+    clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(vram), &vram, nullptr);
+    clGetDeviceInfo(dev, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(maxalloc), &maxalloc, nullptr);
+    clGetDeviceInfo(dev, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(gcache), &gcache, nullptr);
+    clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(lmem), &lmem, nullptr);
+    std::cout << "OpenCL GPU " << gpu_vendor << " " << gpu_name << " | Driver: " << driver_ver << " | " << ver << " | CUs: " << cu << " | Freq: " << freq << " MHz | VRAM: " << (vram/(1024*1024)) << " MB | MaxAlloc: " << (maxalloc/(1024*1024)) << " MB | GCache: " << (gcache/1024) << " KB | Local: " << (lmem/1024) << " KB | ECC: " << (ecc_b? "yes":"no") << "\n";
+    if (guiServer_) { std::ostringstream oss; oss << "OpenCL GPU " << gpu_vendor << " " << gpu_name << " | Driver: " << driver_ver << " | " << ver << " | CUs: " << cu << " | Freq: " << freq << " MHz | VRAM: " << (vram/(1024*1024)) << " MB | MaxAlloc: " << (maxalloc/(1024*1024)) << " MB | GCache: " << (gcache/1024) << " KB | Local: " << (lmem/1024) << " KB | ECC: " << (ecc_b? "yes":"no"); guiServer_->appendLog(oss.str()); }
+    cl_context_properties props[] = { CL_CONTEXT_PLATFORM, (cl_context_properties)plat, 0 };
+    cl_int err = CL_SUCCESS;
+    cl_context ctx = clCreateContext(props, 1, &dev, nullptr, nullptr, &err); if (err != CL_SUCCESS) { std::cerr << "clCreateContext failed: " << err << "\n"; return -1; }
+#if defined(CL_VERSION_2_0)
+    cl_command_queue queue = clCreateCommandQueueWithProperties(ctx, dev, nullptr, &err);
+#else
+    cl_command_queue queue = clCreateCommandQueue(ctx, dev, 0, &err);
+#endif
+    if (err != CL_SUCCESS) { std::cerr << "clCreateCommandQueue failed: " << err << "\n"; clReleaseContext(ctx); return -1; }
+    const char* src = R"CLC(
+#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
+#define TYPE ulong
+#define MAX_ERR_RECORD_COUNT 64
+#define MOD_SZ 20
+inline uint atomic_inc_u32(volatile __global uint* p){ return atomic_inc((volatile __global int*)p); }
+#define RECORD_ERR(errc, p, expect, current) do{ uint idx = atomic_inc_u32(errc); idx = idx % MAX_ERR_RECORD_COUNT; err_addr[idx] = (ulong)(p); err_expect[idx] = (ulong)(expect); err_current[idx] = (ulong)(current); err_second_read[idx] = (ulong)(*(p)); }while(0)
+__kernel void kernel_write(__global char* ptr, ulong memsize, TYPE p1){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride) buf[i]=p1;
+}
+__kernel void kernel_readwrite(__global char* ptr, ulong memsize, TYPE p1, TYPE p2, volatile __global uint* err_count, __global ulong* err_addr, __global ulong* err_expect, __global ulong* err_current, __global ulong* err_second_read){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ TYPE v = buf[i]; if (v!=p1) RECORD_ERR(err_count, &buf[i], p1, v); buf[i]=p2; }
+}
+__kernel void kernel_read(__global char* ptr, ulong memsize, TYPE p1, volatile __global uint* err_count, __global ulong* err_addr, __global ulong* err_expect, __global ulong* err_current, __global ulong* err_second_read){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ TYPE v = buf[i]; if (v!=p1) RECORD_ERR(err_count, &buf[i], p1, v); }
+}
+__kernel void kernel1_write(__global char* ptr, ulong memsize){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ buf[i]=(TYPE)(i*sizeof(TYPE)); }
+}
+__kernel void kernel1_read(__global char* ptr, ulong memsize, volatile __global uint* err_count, __global ulong* err_addr, __global ulong* err_expect, __global ulong* err_current, __global ulong* err_second_read){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ TYPE e=(TYPE)(i*sizeof(TYPE)); TYPE v=buf[i]; if (v!=e) RECORD_ERR(err_count,&buf[i],e,v); }
+}
+__kernel void kernel_modtest_write(__global char* ptr, ulong memsize, uint offset, TYPE p1, TYPE p2){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ if (((i+MOD_SZ-offset)%MOD_SZ)==0) buf[i]=p1; else buf[i]=p2; }
+}
+__kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset, TYPE p1, TYPE p2, volatile __global uint* err_count, __global ulong* err_addr, __global ulong* err_expect, __global ulong* err_current, __global ulong* err_second_read){
+  __global TYPE* buf = (__global TYPE*)ptr; ulong n = memsize/sizeof(TYPE); size_t idx=get_global_id(0), stride=get_global_size(0);
+  for (ulong i=idx;i<n;i+=stride){ TYPE v=buf[i]; int m=((i+MOD_SZ-offset)%MOD_SZ)==0; TYPE e=m?p1:p2; if (v!=e) RECORD_ERR(err_count,&buf[i],e,v); }
+}
+)CLC";
+    cl_program prog = clCreateProgramWithSource(ctx, 1, &src, nullptr, &err); if (err != CL_SUCCESS) { std::cerr << "clCreateProgramWithSource failed: " << err << "\n"; clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1; }
+    const char* opts = "-cl-std=CL1.2";
+    err = clBuildProgram(prog, 1, &dev, opts, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        size_t logsz=0; clGetProgramBuildInfo(prog, dev, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logsz);
+        std::string log(logsz,'\0'); if(logsz) clGetProgramBuildInfo(prog, dev, CL_PROGRAM_BUILD_LOG, logsz, log.data(), nullptr);
+        std::cerr << "clBuildProgram failed: " << err << "\n" << log << "\n";
+        clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1;
+    }
+    cl_mem err_count = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
+    cl_mem err_addr = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
+    cl_mem err_expect = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
+    cl_mem err_current = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
+    cl_mem err_second = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
+    if (err != CL_SUCCESS) { std::cerr << "error buffers alloc failed\n"; clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1; }
+    auto zero_err = [&](){ cl_uint z=0; clEnqueueWriteBuffer(queue, err_count, CL_TRUE, 0, sizeof(z), &z, 0, nullptr, nullptr); };
+    cl_kernel k_write = clCreateKernel(prog, "kernel_write", &err);
+    cl_kernel k_rw = clCreateKernel(prog, "kernel_readwrite", &err);
+    cl_kernel k_read = clCreateKernel(prog, "kernel_read", &err);
+    cl_kernel k_a_w = clCreateKernel(prog, "kernel1_write", &err);
+    cl_kernel k_a_r = clCreateKernel(prog, "kernel1_read", &err);
+    cl_kernel k_m_w = clCreateKernel(prog, "kernel_modtest_write", &err);
+    cl_kernel k_m_r = clCreateKernel(prog, "kernel_modtest_read", &err);
+    size_t gws[1] = { 64*1024 }, lws[1] = { 64 };
+    auto now = std::chrono::high_resolution_clock::now;
+    auto dur = [&](auto t0, auto t1){ return std::chrono::duration<double>(t1-t0).count(); };
+    auto fmt_time = [&](double s){ int h=(int)(s/3600.0); s-=h*3600.0; int m=(int)(s/60.0); s-=m*60.0; std::ostringstream o; o<<std::setfill('0')<<std::setw(2)<<h<<":"<<std::setw(2)<<m<<":"<<std::setw(2)<<(int)s; return o.str(); };
+    uint64_t total_read=0, total_write=0;
+    double addr_w_time=0.0, addr_r_time=0.0, inv_w_time=0.0, inv_rw_time=0.0, inv_r_time=0.0, mod_w_time=0.0, mod_r_time=0.0;
+    uint64_t addr_err_total=0, inv_err_total=0, mod_err_total=0;
+    size_t addr_bytes_w=0, addr_bytes_r=0, inv_bytes_w=0, inv_bytes_rw_r=0, inv_bytes_rw_w=0, inv_bytes_r=0, mod_bytes_w=0, mod_bytes_r=0;
+    const size_t align = 1024*1024;
+    std::vector<cl_mem> bufs;
+    std::vector<size_t> bsz;
+    size_t covered = 0;
+    size_t target = (size_t)vram;
+    size_t margin = 32ull*1024*1024;
+    if (target > margin) target -= margin;
+    size_t remain = target;
+    size_t chunk = (size_t)maxalloc;
+    if (chunk == 0) chunk = remain;
+    while (remain > 0) {
+        size_t try_sz = std::min(remain, chunk);
+        try_sz = (try_sz/align)*align;
+        if (try_sz == 0) break;
+        cl_int e2 = CL_SUCCESS;
+        cl_mem m = clCreateBuffer(ctx, CL_MEM_READ_WRITE, try_sz, nullptr, &e2);
+        if (e2 == CL_SUCCESS && m) { bufs.push_back(m); bsz.push_back(try_sz); covered += try_sz; remain -= try_sz; }
+        else {
+            if (chunk <= align) break;
+            chunk = (chunk/2/align)*align;
+            if (chunk == 0) chunk = align;
+        }
+    }
+    uint64_t seed = (uint64_t)std::chrono::high_resolution_clock::now().time_since_epoch().count() ^ 0x9E3779B97F4A7C15ull;
+    auto splitmix64 = [&](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
+    auto rnd64 = [&](){ return (cl_ulong)splitmix64(seed); };
+    const uint32_t MOD_SZ_HOST = 20;
+    const int iters = 128;
+    size_t total_sectors_all = 0;
+    for (size_t bi = 0; bi < bufs.size(); ++bi) {
+        size_t want = bsz[bi];
+        size_t sector = 256ull*1024*1024; if (sector > want) sector = want; sector = (sector/align)*align; if (sector == 0) sector = align;
+        size_t sectors = (want + sector - 1) / sector;
+        total_sectors_all += sectors;
+    }
+    uint64_t ops_per_sector = (uint64_t)iters + 4 + 2*MOD_SZ_HOST;
+    uint64_t total_ops = total_sectors_all * ops_per_sector;
+    uint64_t steps_done = 0;
+    auto t_start = now();
+    auto show = [&](const std::string& phase, size_t bi, size_t sectors, size_t sidx, int inner, int innerMax){
+        double pct = total_ops ? (100.0 * (double)steps_done / (double)total_ops) : 0.0;
+        double elapsed = dur(t_start, now());
+        double eta = pct>0.0 ? elapsed * (100.0/pct - 1.0) : 0.0;
+        std::ostringstream line;
+        line << "\r[" << std::fixed << std::setprecision(1) << pct << "%] buf " << (bi+1) << "/" << bufs.size() << " sec " << (sidx+1) << "/" << sectors << " " << phase;
+        if (innerMax>0) line << " " << inner << "/" << innerMax;
+        line << " ETA " << fmt_time(eta) << "   ";
+        std::cout << line.str() << std::flush;
+        if (guiServer_) guiServer_->setStatus(line.str());
+    };
+    struct ErrRec { uint32_t test; uint32_t buf; uint32_t sec; uint32_t offmod; cl_ulong addr, exp, cur, reread; };
+    std::vector<ErrRec> samples; samples.reserve(128);
+    static volatile std::sig_atomic_t stop_flag = 0;
+    auto onint = +[](int){ stop_flag = 1; };
+    std::signal(SIGINT, onint);
+#ifdef SIGTERM
+    std::signal(SIGTERM, onint);
+#endif
+    bool interrupted = false;
+    for (size_t bi = 0; bi < bufs.size() && !interrupted; ++bi) {
+        cl_mem parent = bufs[bi];
+        size_t want = bsz[bi];
+        size_t sector = 256ull*1024*1024; if (sector > want) sector = want; sector = (sector/align)*align; if (sector == 0) sector = align;
+        size_t sectors = (want + sector - 1) / sector;
+        std::cout << "Buffer " << (bi+1) << "/" << bufs.size() << " sectors: " << sectors << " x " << (sector/(1024*1024)) << " MB\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Buffer " << (bi+1) << "/" << bufs.size() << " sectors: " << sectors << " x " << (sector/(1024*1024)) << " MB"; guiServer_->appendLog(oss.str()); }
+        for (size_t s=0; s<sectors && !interrupted; ++s) {
+            size_t off = s*sector; size_t sz = std::min(sector, want - off);
+            cl_buffer_region reg; reg.origin = off; reg.size = sz;
+            cl_int err2=CL_SUCCESS;
+            cl_mem sub = clCreateSubBuffer(parent, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &reg, &err2);
+            if (err2 != CL_SUCCESS) { std::cerr << "clCreateSubBuffer failed: " << err2 << "\n"; break; }
+            zero_err();
+            auto t0 = now();
+            err = clSetKernelArg(k_a_w, 0, sizeof(cl_mem), &sub); err|=clSetKernelArg(k_a_w,1,sizeof(cl_ulong),&sz);
+            show("addr W", bi, sectors, s, -1, 0);
+            err|=clEnqueueNDRangeKernel(queue,k_a_w,1,nullptr,gws,lws,0,nullptr,nullptr);
+            err|=clFinish(queue);
+            auto t1 = now();
+            addr_w_time += dur(t0,t1);
+            total_write += sz; addr_bytes_w += sz;
+            steps_done++; show("addr W", bi, sectors, s, -1, 0);
+            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            err|=clSetKernelArg(k_a_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_a_r,1,sizeof(cl_ulong),&sz);
+            err|=clSetKernelArg(k_a_r,2,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_a_r,3,sizeof(cl_mem),&err_addr);
+            err|=clSetKernelArg(k_a_r,4,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_a_r,5,sizeof(cl_mem),&err_current);
+            err|=clSetKernelArg(k_a_r,6,sizeof(cl_mem),&err_second);
+            show("addr R", bi, sectors, s, -1, 0);
+            err|=clEnqueueNDRangeKernel(queue,k_a_r,1,nullptr,gws,lws,0,nullptr,nullptr);
+            err|=clFinish(queue);
+            auto t2 = now();
+            addr_r_time += dur(t1,t2);
+            total_read += sz; addr_bytes_r += sz;
+            cl_uint ec=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec), &ec, 0, nullptr, nullptr);
+            addr_err_total += ec;
+            if (ec) {
+                std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
+                clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                for (size_t i=0;i<std::min<size_t>(ec,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({0,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
+            }
+            steps_done++; show("addr R", bi, sectors, s, -1, 0);
+            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            zero_err();
+            cl_ulong p1 = rnd64(); cl_ulong p2 = ~p1;
+            err = clSetKernelArg(k_write,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_write,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_write,2,sizeof(cl_ulong),&p1);
+            auto t3 = now();
+            show("inv W", bi, sectors, s, -1, 0);
+            err|=clEnqueueNDRangeKernel(queue,k_write,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+            auto t4 = now();
+            inv_w_time += dur(t3,t4);
+            total_write += sz; inv_bytes_w += sz;
+            steps_done++; show("inv W", bi, sectors, s, -1, 0);
+            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            for (int it=0; it<iters; ++it) {
+                auto trw0 = now();
+                err|=clSetKernelArg(k_rw,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_rw,1,sizeof(cl_ulong),&sz);
+                err|=clSetKernelArg(k_rw,2,sizeof(cl_ulong),&p1); err|=clSetKernelArg(k_rw,3,sizeof(cl_ulong),&p2);
+                err|=clSetKernelArg(k_rw,4,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_rw,5,sizeof(cl_mem),&err_addr);
+                err|=clSetKernelArg(k_rw,6,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_rw,7,sizeof(cl_mem),&err_current);
+                err|=clSetKernelArg(k_rw,8,sizeof(cl_mem),&err_second);
+                if ((it & 7) == 0) show("inv RW", bi, sectors, s, it, iters);
+                err|=clEnqueueNDRangeKernel(queue,k_rw,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                auto trw1 = now();
+                inv_rw_time += dur(trw0,trw1);
+                total_read += sz; total_write += sz; inv_bytes_rw_r += sz; inv_bytes_rw_w += sz;
+                cl_uint ec_it=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec_it), &ec_it, 0, nullptr, nullptr);
+                if (ec_it) {
+                    inv_err_total += ec_it;
+                    std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
+                    clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                    for (size_t i=0;i<std::min<size_t>(ec_it,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({1,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
+                    zero_err();
+                }
+                cl_ulong t = p1; p1 = p2; p2 = t;
+                steps_done++; if ((it & 7) == 7) show("inv RW", bi, sectors, s, it+1, iters);
+                if (stop_flag) { interrupted = true; break; }
+            }
+            if (interrupted) { clReleaseMemObject(sub); break; }
+            err|=clSetKernelArg(k_read,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_read,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_read,2,sizeof(cl_ulong),&p1);
+            err|=clSetKernelArg(k_read,3,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_read,4,sizeof(cl_mem),&err_addr);
+            err|=clSetKernelArg(k_read,5,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_read,6,sizeof(cl_mem),&err_current);
+            err|=clSetKernelArg(k_read,7,sizeof(cl_mem),&err_second);
+            auto t5 = now();
+            show("inv R", bi, sectors, s, -1, 0);
+            err|=clEnqueueNDRangeKernel(queue,k_read,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+            auto t6 = now();
+            inv_r_time += dur(t5,t6);
+            total_read += sz; inv_bytes_r += sz;
+            cl_uint ec2=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec2), &ec2, 0, nullptr, nullptr);
+            inv_err_total += ec2;
+            if (ec2) {
+                std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
+                clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
+                clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                for (size_t i=0;i<std::min<size_t>(ec2,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({1,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
+            }
+            steps_done++; show("inv R", bi, sectors, s, -1, 0);
+            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            zero_err();
+            cl_ulong mp1 = 0xAAAAAAAAAAAAAAAAull, mp2 = 0x5555555555555555ull;
+            for (uint32_t offmod=0; offmod<MOD_SZ_HOST && !interrupted; ++offmod) {
+                err = clSetKernelArg(k_m_w,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_w,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_w,2,sizeof(cl_uint),&offmod); err|=clSetKernelArg(k_m_w,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_w,4,sizeof(cl_ulong),&mp2);
+                auto t7 = now();
+                show("mod W", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                err|=clEnqueueNDRangeKernel(queue,k_m_w,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                auto t8 = now();
+                mod_w_time += dur(t7,t8);
+                total_write += sz; mod_bytes_w += sz;
+                steps_done++; show("mod W", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                if (stop_flag) { interrupted = true; break; }
+                err|=clSetKernelArg(k_m_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_r,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_r,2,sizeof(cl_uint),&offmod);
+                err|=clSetKernelArg(k_m_r,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_r,4,sizeof(cl_ulong),&mp2);
+                err|=clSetKernelArg(k_m_r,5,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_m_r,6,sizeof(cl_mem),&err_addr);
+                err|=clSetKernelArg(k_m_r,7,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_m_r,8,sizeof(cl_mem),&err_current);
+                err|=clSetKernelArg(k_m_r,9,sizeof(cl_mem),&err_second);
+                auto t9 = now();
+                show("mod R", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                err|=clEnqueueNDRangeKernel(queue,k_m_r,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                auto t10 = now();
+                mod_r_time += dur(t9,t10);
+                total_read += sz; mod_bytes_r += sz;
+                cl_uint ec3=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec3), &ec3, 0, nullptr, nullptr);
+                mod_err_total += ec3;
+                if (ec3) {
+                    std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
+                    clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
+                    clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                    for (size_t i=0;i<std::min<size_t>(ec3,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({2,(uint32_t)bi,(uint32_t)s,offmod,addr[i],ex[i],cuv[i],sec2[i]});
+                    zero_err();
+                }
+                steps_done++; show("mod R", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                if (stop_flag) { interrupted = true; break; }
+                zero_err();
+            }
+            clReleaseMemObject(sub);
+        }
+    }
+    std::cout << "\n";
+    double read_time = addr_r_time + inv_rw_time + inv_r_time + mod_r_time;
+    double write_time = addr_w_time + inv_w_time + inv_rw_time + mod_w_time;
+    auto gb = [&](double bytes){ return bytes/1073741824.0; };
+    double addr_w_bw = addr_w_time>0 ? gb((double)addr_bytes_w)/addr_w_time : 0.0;
+    double addr_r_bw = addr_r_time>0 ? gb((double)addr_bytes_r)/addr_r_time : 0.0;
+    double inv_w_bw  = inv_w_time>0  ? gb((double)inv_bytes_w)/inv_w_time   : 0.0;
+    double inv_rw_bw = inv_rw_time>0 ? gb((double)inv_bytes_rw_r + (double)inv_bytes_rw_w)/inv_rw_time : 0.0;
+    double inv_r_bw  = inv_r_time>0  ? gb((double)inv_bytes_r)/inv_r_time   : 0.0;
+    double mod_w_bw  = mod_w_time>0  ? gb((double)mod_bytes_w)/mod_w_time   : 0.0;
+    double mod_r_bw  = mod_r_time>0  ? gb((double)mod_bytes_r)/mod_r_time   : 0.0;
+    size_t tested_mb = covered/(1024*1024);
+    size_t vram_mb = (size_t)(vram/(1024*1024));
+    double coverage_pct = vram_mb ? (100.0 * (double)tested_mb / (double)vram_mb) : 0.0;
+    uint64_t total_err = addr_err_total + inv_err_total + mod_err_total;
+    double traffic_gb = gb((double)(total_read + total_write));
+    double err_per_gb = traffic_gb>0 ? (double)total_err/traffic_gb : 0.0;
+    std::ostringstream rpt;
+    rpt << "\n===== GPU Memtest Report =====\n";
+    rpt << "Device: " << gpu_vendor << " " << gpu_name << " | Driver " << driver_ver << " | " << ver << " | CUs " << cu << " | " << freq << " MHz | ECC " << (ecc_b? "yes":"no") << "\n";
+    rpt << "VRAM: " << vram_mb << " MB | MaxAlloc: " << (size_t)(maxalloc/(1024*1024)) << " MB\n";
+    rpt << "Coverage: " << tested_mb << " MB (" << std::fixed << std::setprecision(1) << coverage_pct << "% of VRAM) across " << bufs.size() << " buffers\n";
+    rpt << "Plan: address pattern, inversion toggles x" << iters << ", modulo-stride pattern/" << MOD_SZ_HOST << " offsets\n";
+    rpt << "Traffic: Read " << std::fixed << std::setprecision(2) << gb((double)total_read) << " GB, Write " << gb((double)total_write) << " GB, Total " << gb((double)(total_read+total_write)) << " GB\n";
+    rpt << "Address  W " << std::setprecision(3) << addr_w_bw << " GB/s (" << gb((double)addr_bytes_w) << " GB in " << addr_w_time << " s)  R " << addr_r_bw << " GB/s (" << gb((double)addr_bytes_r) << " GB in " << addr_r_time << " s)  Err " << addr_err_total << "\n";
+    rpt << "Invert   W " << inv_w_bw  << " GB/s (" << gb((double)inv_bytes_w)    << " GB in " << inv_w_time  << " s)  RW " << inv_rw_bw << " GB/s (" << gb((double)(inv_bytes_rw_r+inv_bytes_rw_w)) << " GB in " << inv_rw_time << " s)  R " << inv_r_bw << " GB/s (" << gb((double)inv_bytes_r) << " GB in " << inv_r_time << " s)  Err " << inv_err_total << "\n";
+    rpt << "Modulo   W " << mod_w_bw  << " GB/s (" << gb((double)mod_bytes_w)    << " GB in " << mod_w_time  << " s)  R " << mod_r_bw  << " GB/s (" << gb((double)mod_bytes_r) << " GB in " << mod_r_time << " s)  Err " << mod_err_total << "\n";
+    rpt << "Totals:  Errors " << total_err << "  |  Err/GB " << std::setprecision(4) << err_per_gb << "\n";
+    if (!samples.empty()) {
+        rpt << "Sample errors (" << samples.size() << "):\n";
+        for (size_t i=0;i<std::min<size_t>(samples.size(),16);++i) {
+            const auto& e = samples[i];
+            const char* t = (e.test==0?"ADDR":(e.test==1?"INVT":"MOD "));
+            rpt << "  [" << t;
+            if (e.test==2) rpt << " off=" << e.offmod;
+            rpt << " buf=" << (e.buf+1) << " sec=" << (e.sec+1) << "] addr=0x" << std::hex << e.addr << " exp=0x" << e.exp << " cur=0x" << e.cur << " reread=0x" << e.reread << std::dec << "\n";
+        }
+    } else {
+        rpt << "No sample errors captured.\n";
+    }
+    if (stop_flag || interrupted) rpt << "Status: interrupted by signal, partial results shown above.\n";
+    rpt << "==============================\n";
+    std::cout << rpt.str();
+    if (guiServer_) guiServer_->appendLog(rpt.str());
+    for (auto m : bufs) clReleaseMemObject(m);
+    clReleaseKernel(k_write); clReleaseKernel(k_rw); clReleaseKernel(k_read); clReleaseKernel(k_a_w); clReleaseKernel(k_a_r); clReleaseKernel(k_m_w); clReleaseKernel(k_m_r);
+    clReleaseMemObject(err_count); clReleaseMemObject(err_addr); clReleaseMemObject(err_expect); clReleaseMemObject(err_current); clReleaseMemObject(err_second);
+    clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx);
+    return interrupted ? 1 : 0;
+}
+
+
+
 static std::atomic<bool> g_stop{false};
 static void handle_signal(int) noexcept { g_stop = true; interrupted = true; }
 
@@ -4742,6 +6208,7 @@ static bool file_non_empty(const std::string& p) {
     return !f.eof();
 }
 
+
 int App::run() {
 
     //std::cout << "host : " << options.http_host << "\n";
@@ -4785,11 +6252,23 @@ int App::run() {
 
     int rc = 1;
     bool ran = false;
-
+    if(options.mode == "ecm"){
+        rc = runECMMarin();
+        ran = true;
+    }
+    if(options.mode == "memtest"){
+        rc = runMemtestOpenCL();
+        ran = true;
+    }
     if (options.mode == "llsafe") {
         rc = runLlSafeMarin();
         ran = true;
-    } else if (options.mode == "pm1" && options.marin /*&& options.B2 <= 0*/) {
+    } 
+    if (options.mode == "llsafe2") {
+        rc = runLlSafeMarinDoubling();
+        ran = true;
+    }
+    else if (options.mode == "pm1" && options.marin /*&& options.B2 <= 0*/) {
         if (options.exponent > 89) {
             int rc_local = 0;
             bool ran_local = false;
@@ -4802,7 +6281,7 @@ int App::run() {
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
             bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
 
-            if (haveS2 || haveS1) {
+            if ((haveS2 || haveS1) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "
                     << (haveS2 ? "[Stage 2] " : "")

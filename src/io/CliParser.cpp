@@ -49,20 +49,21 @@ void printUsage(const char* progName) {
     std::cout << "  -c <depth>           : (Optional) Set local carry propagation depth (default: 8)" << std::endl;
     //std::cout << "  -profile             : (Optional) Enable kernel execution profiling" << std::endl;
     std::cout << "  -prp                 : (Optional) Run in PRP mode (default). Uses initial value 3; final result must equal 9" << std::endl;
-    std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer mode. Uses initial value 4 and p-2 iterations" << std::endl;
-    std::cout << "  -llsafe              : (Optional) Run on GPU in Lucas-Lehmer Safe mode ( LL Doubling error check by block)" << std::endl;
-    std::cout << "  -llsafeb             : (Optional) override length for block verification in llsafe mode by default exponent/sqrt(exponent) " << std::endl;
-    
+    std::cout << "  -ll                  : (Optional) Run in Lucas-Lehmer SAFE mode (with Gerbicz-Li). Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -llunsafe            : (Optional) Run in Lucas-Lehmer UNSAFE mode (no Gerbicz-Li). Uses initial value 4 and p-2 iterations" << std::endl;
+    std::cout << "  -llsafe2             : (Optional) Run on GPU in Lucas-Lehmer Doubling Safe mode ( LL Doubling error check by block)" << std::endl;
+    std::cout << "  -llsafeb             : (Optional) override length for block verification in llsafe Doubling mode by default exponent/sqrt(exponent) " << std::endl;
     //std::cout << "  -llsafecpu           : (Optional) Run on CPU in Lucas-Lehmer Safe mode (matrix squaring with Gerbicz-Li check)" << std::endl;
     std::cout << "  -factors <factor1,factor2,...> : (Optional) Specify known factors to run PRP test on the Mersenne cofactor" << std::endl;
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
     std::cout << "  -b2                  : (Optional) B2 for factoring P-1" << std::endl;
+    std::cout << "  -K <value>           : Exponent K for the n^K variant of P-1 stage 2" << std::endl;
+    std::cout << "  -nmax <value>        : Maximum value of n for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
     std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
-    std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
-    std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
-     
+    //std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
+    //std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
     std::cout << "  -submit              : (Optional) activate the possibility to send results to PrimeNet (prompt or autosend)" << std::endl;
@@ -80,6 +81,9 @@ void printUsage(const char* progName) {
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
+    std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
+    std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
+    std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
     //std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
@@ -94,6 +98,7 @@ void printUsage(const char* progName) {
     //std::cout << "  -ipv4                 : (Optional) Set the HTTP host to the first IPv4 interface" << std::endl;
     
     std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 → 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
+    std::cout << "  -memtest              : GPU Memory & Stability test (OpenCL)" << std::endl;
 
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
@@ -133,7 +138,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-prp") == 0) {
             opts.mode = "prp";
         }
-        else if (std::strcmp(argv[i], "-ll") == 0) {
+        else if (std::strcmp(argv[i], "-llunsafe") == 0) {
             opts.mode = "ll";
             opts.proof = false;
         }
@@ -141,14 +146,30 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.mode = "llsafecpu";
             opts.proof = false;
         }*/
-        else if (std::strcmp(argv[i], "-llsafe") == 0) {
+        else if (std::strcmp(argv[i], "-ll") == 0) {
             opts.mode = "llsafe";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-llsafe2") == 0) {
+            opts.mode = "llsafe2";
             opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-pm1") == 0) {
             opts.mode = "pm1";
             //opts.marin = false;
             opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-ecm") == 0) {
+            opts.mode = "ecm";
+            //opts.marin = false;
+            //opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-bsgs") == 0) {
+            opts.bsgs = true;
+        }
+        else if (std::strcmp(argv[i], "-brent") == 0 && i + 1 < argc) {
+            opts.brent = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
         }
         else if (std::strcmp(argv[i], "-profile") == 0) {
             opts.profiling = true;
@@ -161,6 +182,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-submit") == 0) {
             opts.submit = true;
+        }
+        else if (std::strcmp(argv[i], "-memtest") == 0) {
+            opts.mode = "memtest";
+            opts.exponent = 127;
         }
         else if (std::strcmp(argv[i], "-bench") == 0) {
             opts.bench = true;
@@ -229,6 +254,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
             opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-K") == 0 && i + 1 < argc) {
+            opts.K = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-nmax") == 0 && i + 1 < argc) {
+            opts.nmax = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {

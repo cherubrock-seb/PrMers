@@ -17,10 +17,13 @@ Key Features
 - OpenCL GPU acceleration (OpenCL 1.2+; 2.0 recommended)
 - LL and PRP for Mersenne (and PRP of cofactors with known factors)
 - P-1 factoring (stage-1 and stage-2)
+- ECM
 - Gerbicz–Li timed validation checkpoints (PRP)
 - Automatic disk checkpoints with deterministic resume
 - PrimeNet result submission (JSON + optional auto-submit)
 - Cross-platform builds (Linux, macOS, Windows)
+- Web-based GUI
+- GPU VRAM Tester
 
 Google Colab (demo)
 -------------------
@@ -89,7 +92,8 @@ PrMers includes a built-in, responsive web interface to manage and monitor prima
 
 </div>
 
-Performance (as measured)
+
+Performance (as measured in PRP mode)
 -------------------------
 GeForce RTX 5090
   | Exponent  | Iter/s  | ETA            |
@@ -223,6 +227,88 @@ P-1 Factoring (overview)
 * Stage-2:
   search primes q in (B1,B2] using cached powers; final gcd reveals a factor if present.
 
+ECM on Mersenne numbers
+------------------------
+ECM is a probabilistic generalization of P−1/P+1: it succeeds when the group order on a random curve has a cofactor that’s B1,B2-smooth, so B1/B2 should be chosen for the target factor size.
+
+ECM on Mersenne numbers N = 2^p - 1. Stage 1 multiplies by all prime powers <= B1; Stage 2 scans primes in (B1, B2]. Without flags you get the plain prime-by-prime Stage 2. "-brent d" enables a simplified Brent-Suyama extension by using q^d (a bit more extra reach beyond B2). "-bsgs" batches several multipliers into one ladder call to reduce overhead. Both flags are complementary and can be combined. You can pass pre-known factors via "-factors <list>" (decimal or 0x hex); they are divided out (with multiplicities) before ECM. For p=701, 796337 is a known factor. Runs are checkpointed periodically; re-running the same command resumes safely.
+```
+# Plain ECM on M_p (here p=701)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
+
+# ECM + batching only (same primes, fewer ladder calls)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -bsgs
+
+# ECM + simplified Brent-Suyama only (q -> q^3 here)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3
+
+# ECM + both (complementary: q -> q^3 and batched multipliers)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs
+
+# Provide known factors (e.g., for p=701, factor 796337)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -factors 796337
+
+# Combine known factors with brent+bsgs
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs -factors 796337
+
+# Resume after interrupt (same command; auto-checkpointed)
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8 -brent 3 -bsgs -factors 796337
+```
+
+
+## GPU Memory Test (`-memtest`)
+
+PrMers includes a GPU VRAM tester (OpenCL) inspired by CUDA memtests. It allocates buffers to cover ~100% of the available VRAM (minus a small safety margin and driver limits) and scans them sector-by-sector with several stress patterns to reveal flaky cells, lanes, or address-decoding issues.
+
+### Usage
+
+```
+# Show help and the list of OpenCL devices
+./prmers -h
+
+# Run the memtest on device 0 (default)
+./prmers -memtest
+
+# Select a specific device (e.g., device 2)
+./prmers -memtest -d 2
+
+-d N selects the N-th GPU as listed by ./prmers -h.
+
+```
+
+What it tests
+
+Address pattern: writes the address-derived value and reads it back to catch addressing/bank/aliasing faults.
+
+Inversion toggles: alternates a random 64-bit pattern and its bitwise complement (~x) across many passes to expose unstable bits.
+
+Modulo-stride pattern: writes repeating 0xAA.. / 0x55.. stripes with 20 different offsets to exercise periodic layout interactions.
+
+VRAM is segmented into large sectors (e.g., 256 MB) and covered across multiple buffers up to the driver’s CL_DEVICE_MAX_MEM_ALLOC_SIZE. The final coverage line shows how much VRAM was actually tested.
+
+```
+./prmers -memtest -d 2
+No valid entry found in worktodo.txt
+Transform Size = 8
+No valid entry found in worktodo.txt
+OpenCL GPU Advanced Micro Devices, Inc. gfx906:sramecc+:xnack- | Driver: 3635.0 (HSA1.1,LC) | OpenCL 2.0  | CUs: 60 | Freq: 1801 MHz | VRAM: 16368 MB | MaxAlloc: 13912 MB | GCache: 16 KB | Local: 64 KB | ECC: no
+Buffer 1/2 sectors: 55 x 256 MB
+[84.6%] buf 1/2 sec 55/55 mod R 20/20 ETA 00:00:01   Buffer 2/2 sectors: 10 x 256 MB
+[100.0%] buf 2/2 sec 10/10 mod R 20/20 ETA 00:00:00     
+
+===== GPU Memtest Report =====
+Device: Advanced Micro Devices, Inc. gfx906:sramecc+:xnack- | Driver 3635.0 (HSA1.1,LC) | OpenCL 2.0  | CUs 60 | 1801 MHz | ECC no
+VRAM: 16368 MB | MaxAlloc: 13912 MB
+Coverage: 16336 MB (99.8% of VRAM) across 2 buffers
+Plan: address pattern, inversion toggles x128, modulo-stride pattern/20 offsets
+Traffic: Read 2392.97 GB, Write 2392.97 GB, Total 4785.94 GB
+Address  W 18.626 GB/s (15.953 GB in 0.857 s)  R 20.846 GB/s (15.953 GB in 0.765 s)  Err 0
+Invert   W 18.619 GB/s (15.953 GB in 0.857 s)  RW 31.982 GB/s (4084.000 GB in 127.697 s)  R 20.877 GB/s (15.953 GB in 0.764 s)  Err 0
+Modulo   W 18.627 GB/s (319.062 GB in 17.129 s)  R 20.558 GB/s (319.062 GB in 15.520 s)  Err 0
+Totals:  Errors 0  |  Err/GB 0.0000
+No sample errors captured.
+==============================
+```
 worktodo.txt and Config
 -----------------------
 - worktodo.txt: supports PRP= lines; the program extracts n (the Mersenne exponent).

@@ -44,11 +44,15 @@ public:
     int runPrpOrLl();
     int runPrpOrLlMarin();
     int runLlSafeMarin();
+    int runLlSafeMarinDoubling();
     int runLlSafeCpu();
     int runPM1();
     int runPM1Marin();
     int runPM1Stage2();
     int runPM1Stage2Marin();
+    int runPM1Stage2MarinNKVersion();
+    int runMemtestOpenCL();
+    int runECMMarin();
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);

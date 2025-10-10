@@ -32,3 +32,4 @@ worktodo*.txt
 /*.zip
 /package
 /.vscode
+*.ckpt

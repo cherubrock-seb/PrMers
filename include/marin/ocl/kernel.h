@@ -144,6 +144,24 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
+"INLINE uint64 mask_w(const uint w) {\n" \
+"    // évite le shift de 64\n" \
+"    return (w >= 64) ? (uint64)(~(uint64)0) : (((uint64)1 << w) - 1ul);\n" \
+"}\n" \
+"\n" \
+"INLINE uint64_4 neg_mp4(const uint64_4 v, const uint_8_4 wd) {\n" \
+"    const uint64 m0 = mask_w(wd.s0);\n" \
+"    const uint64 m1 = mask_w(wd.s1);\n" \
+"    const uint64 m2 = mask_w(wd.s2);\n" \
+"    const uint64 m3 = mask_w(wd.s3);\n" \
+"    uint64_4 r;\n" \
+"    r.s0 = (m0 - (v.s0 & m0));\n" \
+"    r.s1 = (m1 - (v.s1 & m1));\n" \
+"    r.s2 = (m2 - (v.s2 & m2));\n" \
+"    r.s3 = (m3 - (v.s3 & m3));\n" \
+"    return r;\n" \
+"}\n" \
+"\n" \
 "INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 width, uint64 * const carry)\n" \
 "{\n" \
 "	uint64_4 r;\n" \
@@ -1586,6 +1604,42 @@ static const char * const src_ocl_kernel = \
 "		carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
 "	}\n" \
 "}\n" \
+"\n" \
+"__kernel\n" \
+"__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
+"void carry_weight_add_neg_p1(__global uint64 * restrict reg, __global uint64 * restrict carry,\n" \
+"    __global const uint64 * restrict weight, __global const uint_8 * restrict width,\n" \
+"    const sz_t offset_y, const sz_t offset_x)\n" \
+"{\n" \
+"    __global uint64_4 * restrict y = (__global uint64_4 *)(&reg[offset_y]);\n" \
+"    __global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
+"    __global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);\n" \
+"    __global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);\n" \
+"    __local  uint64 cl[CWM_WG_SZ];\n" \
+"\n" \
+"    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"\n" \
+"    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
+"    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"    const uint_8_4  wd = width4[gid];\n" \
+"\n" \
+"    uint64 c = 0;\n" \
+"    uint64_4 u  = mod_mul4(y[gid], wi);\n" \
+"    uint64_4 vx = mod_mul4(x[gid], wi);\n" \
+"    uint64_4 vn = neg_mp4(vx, wd);               // vn = Mp - X\n" \
+"\n" \
+"    u = addc4(u, vn, wd, &c);                    \n" \
+"    cl[lid] = c;\n" \
+"    barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
+"    y[gid] = mod_mul4(u, w);\n" \
+"    if (lid == CWM_WG_SZ - 1) {\n" \
+"        carry[(gid != N_SZ/4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
+"    }\n" \
+"}\n" \
+"\n" \
 "\n" \
 "// Unweight, add, carry (pass 1)\n" \
 "__kernel\n" \
