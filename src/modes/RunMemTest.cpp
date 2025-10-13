@@ -361,12 +361,12 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
             for (uint32_t offmod=0; offmod<MOD_SZ_HOST && !interrupted; ++offmod) {
                 err = clSetKernelArg(k_m_w,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_w,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_w,2,sizeof(cl_uint),&offmod); err|=clSetKernelArg(k_m_w,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_w,4,sizeof(cl_ulong),&mp2);
                 auto t7 = now();
-                show("mod W", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                show("mod W", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 err|=clEnqueueNDRangeKernel(queue,k_m_w,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
                 auto t8 = now();
                 mod_w_time += dur(t7,t8);
                 total_write += sz; mod_bytes_w += sz;
-                steps_done++; show("mod W", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                steps_done++; show("mod W", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 if (stop_flag) { interrupted = true; break; }
                 err|=clSetKernelArg(k_m_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_r,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_r,2,sizeof(cl_uint),&offmod);
                 err|=clSetKernelArg(k_m_r,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_r,4,sizeof(cl_ulong),&mp2);
@@ -374,7 +374,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                 err|=clSetKernelArg(k_m_r,7,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_m_r,8,sizeof(cl_mem),&err_current);
                 err|=clSetKernelArg(k_m_r,9,sizeof(cl_mem),&err_second);
                 auto t9 = now();
-                show("mod R", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                show("mod R", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 err|=clEnqueueNDRangeKernel(queue,k_m_r,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
                 auto t10 = now();
                 mod_r_time += dur(t9,t10);
@@ -390,7 +390,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                     for (size_t i=0;i<std::min<size_t>(ec3,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({2,(uint32_t)bi,(uint32_t)s,offmod,addr[i],ex[i],cuv[i],sec2[i]});
                     zero_err();
                 }
-                steps_done++; show("mod R", bi, sectors, s, offmod+1, MOD_SZ_HOST);
+                steps_done++; show("mod R", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 if (stop_flag) { interrupted = true; break; }
                 zero_err();
             }
@@ -398,8 +398,8 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
         }
     }
     std::cout << "\n";
-    double read_time = addr_r_time + inv_rw_time + inv_r_time + mod_r_time;
-    double write_time = addr_w_time + inv_w_time + inv_rw_time + mod_w_time;
+    //double read_time = addr_r_time + inv_rw_time + inv_r_time + mod_r_time;
+    //double write_time = addr_w_time + inv_w_time + inv_rw_time + mod_w_time;
     auto gb = [&](double bytes){ return bytes/1073741824.0; };
     double addr_w_bw = addr_w_time>0 ? gb((double)addr_bytes_w)/addr_w_time : 0.0;
     double addr_r_bw = addr_r_time>0 ? gb((double)addr_bytes_r)/addr_r_time : 0.0;

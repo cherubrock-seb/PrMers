@@ -402,8 +402,11 @@ int App::runPrpOrLl() {
             }
         }
         
-        queued += nttEngine->forward(buffers->input, iter);
-        queued += nttEngine->inverse(buffers->input, iter);
+        queued += static_cast<std::size_t>(
+              nttEngine->forward(buffers->input, static_cast<std::size_t>(iter)));
+        queued += static_cast<std::size_t>(
+                    nttEngine->inverse(buffers->input, static_cast<std::size_t>(iter)));
+
         carry.carryGPU(
             buffers->input,
             buffers->blockCarryBuf,
@@ -411,7 +414,8 @@ int App::runPrpOrLl() {
         );
         queued += 2;
         
-        if ((options.res64_display_interval != 0)&& ( ((iter+1) % options.res64_display_interval) == 0 )) {
+        const uint64_t interval = static_cast<uint64_t>(options.res64_display_interval);
+        if (interval != 0 && (((static_cast<uint64_t>(iter) + 1ULL) % interval) == 0ULL)) {
 
             std::vector<uint64_t> hostData(precompute.getN());
             std::string res64_x;  
@@ -563,7 +567,7 @@ int App::runPrpOrLl() {
         if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
             // See: An Efficient Modular Exponentiation Proof Scheme, 
             //§2, Darren Li, Yves Gallot, https://arxiv.org/abs/2209.15623
-            auto printLine = [&](cl_mem& bufz, const std::string& name) {
+            /*auto printLine = [&](cl_mem& bufz, const std::string& name) {
                 std::vector<uint64_t> buf(precompute.getN());
                 clEnqueueReadBuffer(context.getQueue(), bufz, CL_TRUE, 0, limbBytes, buf.data(), 0, nullptr, nullptr);
                 std::ostringstream oss;
@@ -578,7 +582,7 @@ int App::runPrpOrLl() {
                                 //oss << "Iter: " << iterCopy + 1 << "| Res64: " << localRes64 << std::endl;
                                 guiServer_->appendLog(oss.str());
                 }
-            };
+            };*/
 
             checkpass += 1;
             bool condcheck = !(checkpass != checkpasslevel && (iter != totalIters - 1));
@@ -897,7 +901,9 @@ int App::runPrpOrLl() {
                     guiServer_->appendLog(oss.str());
                 }
                 options.proofPower = static_cast<decltype(options.proof)>(proofPower);
-                auto proofFilePath = proofManager.proof(context, *nttEngine, carry, proofPower, options.verify);
+                auto proofFilePath = proofManager.proof(context, *nttEngine, carry,
+                                        static_cast<uint32_t>(proofPower),
+                                        options.verify);
                 options.proofFile = proofFilePath.string();
                 std::cout << "Proof file saved: " << proofFilePath << std::endl;
                 if (guiServer_) {
