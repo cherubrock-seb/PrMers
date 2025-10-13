@@ -83,7 +83,7 @@ private:
   std::shared_ptr<ui::WebGuiServer> guiServer_;
 };
 
-mpz_class buildE(uint64_t B1);
+//mpz_class buildE(uint64_t B1);
 void readGpuBufferWithProgress(cl_command_queue q,
                                cl_mem            deviceBuf,
                                void*             hostPtr,
