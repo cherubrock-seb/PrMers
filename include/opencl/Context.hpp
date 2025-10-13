@@ -62,7 +62,7 @@ private:
     std::size_t localSizeCarry_;
     std::size_t localSize5_;
     std::size_t workersCarry_;
-    int localCarryPropagationDepth_;
+    std::size_t localCarryPropagationDepth_{1};
     int exponent_;
     bool evenExponent_;
     bool debug_;

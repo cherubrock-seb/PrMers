@@ -485,7 +485,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
         { ArgKind::BufX },0},
       { RadixOp::First,  4, 4,
         k_i_m1,        ls0, "kernel_inverse_ntt_radix4_m1",
-        [](auto m0, auto nn){ return m0==1; },
+        [](auto m0, auto ){ return m0==1; },
         { ArgKind::BufX },0},
       /*{ RadixOp::First,    16, 16,
         k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",
@@ -609,7 +609,7 @@ inline std::vector<NttStage> buildInversePipeline(
     std::vector<RadixOp> allInv = {
       { RadixOp::First,  4, 4,
         k_i_m1,        ls0, "kernel_inverse_ntt_radix4_m1",
-        [](auto m0, auto nn){ return m0==1; },
+        [](auto m0, auto ){ return m0==1; },
         { ArgKind::BufX },0},
       /*{ RadixOp::First,    16, 16,
         k_i_mm_2,      ls2, "kernel_ntt_inverse_mm_2_steps",

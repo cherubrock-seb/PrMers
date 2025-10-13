@@ -343,7 +343,7 @@ void Context::computeOptimalSizes(std::size_t n,
                                   int localMaxSize,
                                   int localMaxSize5)
 {
-
+    (void)debug; (void)localMaxSize;
     transformSize_ = static_cast<cl_uint>(n);
     if (n < 4) n = 4;
     cl_uint mm =  static_cast<cl_uint>(n / 4);
@@ -400,18 +400,20 @@ void Context::computeOptimalSizes(std::size_t n,
     }
     if (debug_)
         std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
-    if (workers % localCarryPropagationDepth_ == 0) {
-        workersCarry_ = workers / localCarryPropagationDepth_;
-    } else {
-        int trial = 8;
+    const std::size_t lcd = std::max<std::size_t>(std::size_t(1), localCarryPropagationDepth_);
+    if (workers % lcd == 0) {
+        workersCarry_ = workers / lcd;
+    }
+    else {
+        std::size_t trial = 8;
         std::size_t wc = 1;
-        while (workers % trial == 0) {
+        while (trial != 0 && (workers % trial == 0)) {
             wc = workers / trial;
             trial *= 2;
         }
         workersCarry_ = static_cast<cl_uint>((wc > 1 ? wc : 1));
         if (workersCarry_ == 1)
-            localCarryPropagationDepth_ = static_cast<cl_uint>(n);
+            localCarryPropagationDepth_ = static_cast<std::size_t>(n);
     }
     localSize4_ = localSize_;
     if(n%5==0){
@@ -426,10 +428,10 @@ void Context::computeOptimalSizes(std::size_t n,
     localSize3_ = localSize_;
 
     size_t maxWork5Temp = localMemSize_ / (16 * sizeof(cl_ulong));
-    size_t localMaxSize5Temp = localMaxSize5;
+    size_t localMaxSize5Temp = static_cast<size_t>(localMaxSize5);
 
     if (localMaxSize5 > 0 && localMaxSize5Temp <= maxWork5Temp) {
-        maxWork5Temp = localMaxSize5;
+        maxWork5Temp = static_cast<size_t>(localMaxSize5);
     } else if (maxWork5Temp > 256) {
         maxWork5Temp = 256;
     }
