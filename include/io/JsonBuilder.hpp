@@ -64,8 +64,7 @@ public:
     
     static std::vector<uint64_t> expandBits(
         const std::vector<uint32_t>& compactWords,
-        const std::vector<int>& digit_width,
-        uint32_t E);
+        const std::vector<int>& digit_width);
 };
 
 } // namespace io

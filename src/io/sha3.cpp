@@ -366,7 +366,7 @@ static void KeccakF1600Step(SHA3Context *p){
 void SHA3Init(SHA3Context *p, int iSize) {
   memset(p, 0, sizeof(*p));
   if( iSize>=128 && iSize<=512 ){
-    p->nRate = (1600 - ((iSize + 31)&~31)*2)/8;
+    p->nRate = static_cast<unsigned>((1600 - ((iSize + 31)&~31)*2)/8);
   }else{
     p->nRate = (1600 - 2*256)/8;
   }

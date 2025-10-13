@@ -37,7 +37,7 @@
 #ifndef CL_DEVICE_UUID_KHR
 #  define CL_DEVICE_UUID_KHR 0x106A
 #endif
-namespace opencl {
+namespace prmers::ocl {
 
 Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug, bool marin)
     : platform_(nullptr), device_(nullptr),

@@ -26,7 +26,7 @@
 
 namespace opencl {
 
-Buffers::Buffers(const opencl::Context& ctx, const math::Precompute& pre)
+Buffers::Buffers(const prmers::ocl::Context& ctx, const math::Precompute& pre)
   : input(nullptr), twiddle5Buf(nullptr), invTwiddle5Buf(nullptr),Hbuf(nullptr),Hq(nullptr),Qbuf(nullptr),tmp(nullptr),r2(nullptr),save(nullptr),bufd(nullptr),buf3(nullptr),last_correct_state(nullptr),last_correct_bufd(nullptr)
 {
     const size_t n = pre.getN();
@@ -123,7 +123,7 @@ Buffers::~Buffers() {
 
 }
 
-cl_mem Buffers::createBuffer(const opencl::Context&  ctx, cl_mem_flags flags,
+cl_mem Buffers::createBuffer(const prmers::ocl::Context&  ctx, cl_mem_flags flags,
                              size_t size, const void* ptr,
                              const std::string& name)
 {

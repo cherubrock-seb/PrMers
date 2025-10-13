@@ -16,7 +16,7 @@
 
 namespace opencl {
 
-NttEngine::NttEngine(const Context& ctx,
+NttEngine::NttEngine(const prmers::ocl::Context& ctx,
                      Kernels& kernels,
                      Buffers& buffers,
                      const math::Precompute& precompute, bool pm1, bool debug)
@@ -43,7 +43,7 @@ NttEngine::NttEngine(const Context& ctx,
         cl_mem buf_w5 = buffers_.twiddle5Buf;
         forward_pipeline = buildForwardPipeline(
             n,
-            queue_,
+            /*queue_,*/
             nullptr,                                    
             kernels_.getKernel("kernel_ntt_radix4_mm_first"),
             kernels_.getKernel("kernel_ntt_radix4_mm_2steps"),
@@ -84,7 +84,7 @@ NttEngine::NttEngine(const Context& ctx,
         int lastOutputInv = forward_pipeline.back().outputInverse;
         inverse_pipeline = buildInversePipeline(
             n,
-            queue_,
+            /*queue_,*/
             nullptr,                                     
             kernels_.getKernel("kernel_inverse_ntt_radix4_m1_n4"),
             kernels_.getKernel("kernel_inverse_ntt_radix4_m1"),
@@ -124,7 +124,7 @@ NttEngine::NttEngine(const Context& ctx,
             cl_mem buf_w5 = buffers_.twiddle5Buf;
             forward_simple_pipeline = buildForwardSimplePipeline(
                 n,
-                queue_,
+                /*queue_,*/
                 nullptr,                                    
                 kernels_.getKernel("kernel_ntt_radix4_mm_first"),
                 kernels_.getKernel("kernel_ntt_radix4_mm_2steps"),
@@ -135,7 +135,7 @@ NttEngine::NttEngine(const Context& ctx,
                 kernels_.getKernel("kernel_ntt_radix4_mm_m32"),
                 kernels_.getKernel("kernel_ntt_radix4_last_m1_nosquare"),
                 kernels_.getKernel("kernel_ntt_radix4_last_m1_n4_nosquare"),
-                kernels_.getKernel("kernel_ntt_radix4_radix2_square_radix2_radix4"),
+                /*kernels_.getKernel("kernel_ntt_radix4_radix2_square_radix2_radix4"),*/
                 kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
                 kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
                 kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
@@ -146,7 +146,7 @@ NttEngine::NttEngine(const Context& ctx,
                 buf_w5,
                 ls0,
                 ls2,
-                ls3,
+                /*ls3,*/
                 ls5,
                 debug
             );
@@ -166,7 +166,7 @@ NttEngine::NttEngine(const Context& ctx,
             int lastOutputInv = forward_simple_pipeline.back().outputInverse;
             inverse_simple_pipeline = buildInverseSimplePipeline(
                 n,
-                queue_,
+                /*queue_,*/
                 nullptr,                                     
                 kernels_.getKernel("kernel_inverse_ntt_radix4_m1_n4"),
                 kernels_.getKernel("kernel_inverse_ntt_radix4_m1"),

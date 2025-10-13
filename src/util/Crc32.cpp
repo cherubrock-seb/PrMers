@@ -98,9 +98,9 @@ static const uint32_t crctable[256] = {
 
 uint32_t computeCRC32(const std::string &data) {
     uint32_t crc = CRC32_INIT_VALUE;
-    for (unsigned char c : data) {
-        crc = crctable[(crc ^ c) & 0xFF] ^ (crc >> 8);
-    }
+	for (char ch : data) {
+    	crc = crctable[(crc ^ static_cast<uint8_t>(ch)) & 0xFF] ^ (crc >> 8);
+	}
     return static_cast<unsigned int>(crc ^ CRC32_XOR_VALUE);
 }
 

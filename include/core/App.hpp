@@ -66,9 +66,9 @@ private:
   std::unique_ptr<io::WorktodoParser> worktodoParser_;
   bool hasWorktodoEntry_{false};
   io::CliOptions                     options;
-  opencl::Context                    context;
+  prmers::ocl::Context                    context;
   math::Precompute                   precompute;
-  std::optional<opencl::Program>     program;
+  std::optional<prmers::ocl::Program>     program;
   std::optional<opencl::Buffers>     buffers;
   std::optional<opencl::Kernels>     kernels;
   std::optional<opencl::NttEngine>   nttEngine;

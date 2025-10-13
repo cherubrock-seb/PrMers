@@ -28,7 +28,7 @@
 
 namespace math {
 
-Carry::Carry(const opencl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf)
+Carry::Carry(const prmers::ocl::Context& ctx, cl_command_queue queue, cl_program program, size_t vectorSize, std::vector<int> digitWidth, cl_mem digitWidthMaskBuf)
     : context_(ctx)
     , queue_(queue)
     , digitWidth_(digitWidth)

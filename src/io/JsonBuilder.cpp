@@ -205,7 +205,7 @@ std::vector<uint32_t> JsonBuilder::compactBits(
     if (haveBits > 0 || carry) {
         out[o++] = outWord;
         for (uint32_t i = 1; carry && i < o; ++i) {
-            uint64_t sum = uint64_t(out[i]) + carry;
+            uint64_t sum = static_cast<uint64_t>(out[i]) + carry;
             out[i]       = uint32_t(sum & 0xFFFFFFFFu);
             carry        = int(sum >> 32);
         }
@@ -216,8 +216,8 @@ std::vector<uint32_t> JsonBuilder::compactBits(
 
 std::vector<uint64_t> JsonBuilder::expandBits(
     const std::vector<uint32_t>& compactWords,
-    const std::vector<int>&      digit_width,
-    uint32_t                     E
+    const std::vector<int>&      digit_width/*,
+    uint32_t [[maybe_unused]] E*/
 ) {
     uint32_t digitCount = static_cast<uint32_t>(digit_width.size());
     std::vector<uint64_t> out(digitCount, 0);
@@ -306,7 +306,7 @@ static std::string generatePrimeNetJson(
     const std::string &programVersion,
     unsigned int programPort,
     const std::string &osName,
-    const std::string &osVersion,
+    /*const std::string& osVersion,*/
     const std::string &osArchitecture,
     const std::string &user,
     const std::string &aid,
@@ -487,16 +487,16 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         res2048,
         residueType,
         opts.gerbicz_error_count,
-        transform_size,
+        static_cast<unsigned>(transform_size),
         opts.proof ? 2 : 0,
-        opts.proof ? opts.proofPower : 0,
+        static_cast<int>(opts.proof ? opts.proofPower : 0u),
         opts.proof ? 64 : 0,
         opts.proof ? fileMD5(opts.proofFile) : "",
         "prmers",
         core::PRMERS_VERSION,
-        opts.portCode,
+        static_cast<unsigned>(opts.portCode),
         opts.osName,
-        opts.osVersion,
+        //opts.osVersion,
         opts.osArch,
         opts.user.empty() ? "prmers" : opts.user,
         opts.aid,
@@ -554,7 +554,7 @@ std::string JsonBuilder::computeRes2048(
     std::ostringstream oss;
     for (int i = 63; i >= 0; --i) {
         oss << std::hex << std::nouppercase << std::setw(8) << std::setfill('0')
-            << words[i];
+            << words[static_cast<size_t>(i)];
     }
     return oss.str();
 }

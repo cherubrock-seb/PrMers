@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
-namespace opencl {
+namespace prmers::ocl {
 
 class Context {
 public:

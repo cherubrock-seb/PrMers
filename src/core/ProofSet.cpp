@@ -387,7 +387,7 @@ double ProofSet::diskUsageGB(uint32_t E, uint32_t power) {
 }
 
 void GpuContext::write(cl_mem buffer, const std::vector<uint32_t>& data) const {
-  std::vector<uint64_t> gpu_data = io::JsonBuilder::expandBits(data, digitWidth, exponent);
+  std::vector<uint64_t> gpu_data = io::JsonBuilder::expandBits(data, digitWidth);
   
   // Ensure we have the correct size for the GPU buffer
   size_t numWords = limbBytes / sizeof(uint64_t);

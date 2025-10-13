@@ -44,9 +44,9 @@
 #include <filesystem>
 #include <algorithm>
 
-namespace opencl {
+namespace prmers::ocl {
 
-Program::Program(const opencl::Context& context, cl_device_id device,
+Program::Program(const prmers::ocl::Context& context, cl_device_id device,
                  const std::string& filePath,const math::Precompute& pre,
                  const std::string& buildOptions, bool debug
                  )
@@ -77,9 +77,10 @@ Program::Program(const opencl::Context& context, cl_device_id device,
     cl_uint ls5        = static_cast<cl_uint>(context.getLocalSize5());
 
     cl_uint div4       = static_cast<cl_uint>(lpd / 4);
-    cl_uint div4_min = std::max<cl_uint>(1, (lpd - 4) / 4);
+    cl_uint div4_min = std::max<cl_uint>(1u, static_cast<cl_uint>(std::max(0, lpd - 4) / 4));
     cl_uint div2       = static_cast<cl_uint>(lpd / 4);
-    cl_uint div2_min = std::max<cl_uint>(1, (lpd - 2) / 2);
+    cl_uint div2_min = std::max<cl_uint>(1u, static_cast<cl_uint>(std::max(0, lpd - 2) / 2));
+
     
 
     if(div4==0){

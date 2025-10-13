@@ -15,7 +15,7 @@ namespace opencl {
 
 class Buffers {
 public:
-    Buffers(const opencl::Context& ctx, const math::Precompute& pre);
+    Buffers(const prmers::ocl::Context& ctx, const math::Precompute& pre);
     ~Buffers();
     
     cl_mem input;             // main data buffer
@@ -33,7 +33,7 @@ public:
     cl_mem tmp; 
     cl_mem r2,save,bufd,buf3,last_correct_state,last_correct_bufd;
     std::vector<cl_mem> evenPow;
-    static cl_mem createBuffer(const opencl::Context& ctx, cl_mem_flags flags,
+    static cl_mem createBuffer(const prmers::ocl::Context& ctx, cl_mem_flags flags,
                                size_t size, const void* ptr,
                                const std::string& name);
 };

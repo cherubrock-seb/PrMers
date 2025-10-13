@@ -6,9 +6,12 @@
 #include <filesystem>
 
 // Forward declarations for GPU types
+namespace prmers::ocl {
+    class Context;
+}
+
 namespace opencl {
     class NttEngine;
-    class Context;
 }
 
 namespace math {
@@ -23,13 +26,13 @@ namespace core {
 class GpuContext {
 public:
     uint32_t exponent;
-    const opencl::Context& ctx;
+    const prmers::ocl::Context& ctx;
     opencl::NttEngine& ntt;
     math::Carry& carry;
     const std::vector<int>& digitWidth;
     size_t limbBytes;
     
-    GpuContext(uint32_t exponent_, const opencl::Context& ctx_, opencl::NttEngine& ntt_, 
+    GpuContext(uint32_t exponent_, const prmers::ocl::Context& ctx_, opencl::NttEngine& ntt_, 
                math::Carry& carry_, const std::vector<int>& digitWidth_, size_t limbBytes_)
         : exponent(exponent_), ctx(ctx_), ntt(ntt_), carry(carry_), digitWidth(digitWidth_), limbBytes(limbBytes_) {}
     

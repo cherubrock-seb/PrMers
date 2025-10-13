@@ -127,7 +127,7 @@ inline NttStage makeStage(const RadixOp& op,
 
 inline std::vector<NttStage> buildForwardPipeline(
     cl_uint n,
-    cl_command_queue queue,
+    /*cl_command_queue queue,*/
     cl_mem buf_x,
     cl_kernel k_first,
     cl_kernel k_mm_2,
@@ -155,12 +155,12 @@ inline std::vector<NttStage> buildForwardPipeline(
     std::vector<RadixOp> all = {
     { RadixOp::First,   5, 5,
         k_r5_first,        ls5, "kernel_ntt_radix5_mm_first",
-         [](auto m0, auto nn){ return nn%5==0; },
+         [](auto , auto nn){ return nn%5==0; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW } , 0},
       
      { RadixOp::First,   16, 16,
         k_mm_2_first,        ls2, "kernel_ntt_radix4_mm_2steps_first",
-         [](auto m0, auto nn){ return m0>32; },
+         [](auto m0, auto ){ return m0>32; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
       
       { RadixOp::First,   4, 8,
@@ -293,7 +293,7 @@ inline std::vector<NttStage> buildForwardPipeline(
 
 inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_uint n,
-    cl_command_queue queue,
+    /*cl_command_queue queue,*/
     cl_mem buf_x,
     cl_kernel k_first,
     cl_kernel k_mm_2,
@@ -304,7 +304,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_kernel k_m32,
     cl_kernel k_last_m1,
     cl_kernel k_last_m1_n4,
-    cl_kernel k_r2_s_r2_r4,
+    /*cl_kernel k_r2_s_r2_r4,*/
     cl_kernel k_radix2_square_radix2,
     cl_kernel k_mm_2_first,
     cl_kernel k_r4_s_r4,
@@ -315,7 +315,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_mem buf_w5,
     const size_t* ls0,
     const size_t* ls2,
-    const size_t* ls3,
+    /*const size_t* ls3,*/
     const size_t* ls5,
     bool debug
 ) {
@@ -454,7 +454,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
 
 inline std::vector<NttStage> buildInverseSimplePipeline(
     cl_uint n,
-    cl_command_queue queue,
+    /*cl_command_queue queue,*/
     cl_mem buf_x,
     cl_kernel k_i_m1_n4,
     cl_kernel k_i_m1,
@@ -587,7 +587,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
 
 inline std::vector<NttStage> buildInversePipeline(
     cl_uint n,
-    cl_command_queue queue,
+    /*cl_command_queue queue,*/
     cl_mem buf_x,
     cl_kernel k_i_m1_n4,
     cl_kernel k_i_m1,

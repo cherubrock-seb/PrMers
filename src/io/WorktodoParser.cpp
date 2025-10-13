@@ -252,7 +252,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                       << (aid.empty() ? "" : " (AID=" + aid + ")")
                       << "\n";
 
-            int prpBase = 0;
+            [[maybe_unused]] int prpBase = 0;
             int residueType = 0;
             if (idx < parts.size() && !isQuoted(parts[idx]) && isIntegerToken(parts[idx])) {
                 /* how_far_factored */ idx++;
@@ -275,7 +275,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
                     entry.knownFactors = std::move(factors);
                     // If residue_type not explicitly given, force cofactor type
-                    entry.residueType = (residueType != 0) ? residueType : 5;
+                    entry.residueType = static_cast<uint32_t>((residueType != 0) ? residueType : 5);
                     std::cout << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
                         if (i > 0) std::cout << ", ";
@@ -287,7 +287,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     continue;
                 }
             } else if (residueType != 0) {
-                entry.residueType = residueType;
+                entry.residueType = static_cast<uint32_t>(residueType);
             }
 
             if (entry.llTest && !entry.knownFactors.empty()) {

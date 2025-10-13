@@ -106,7 +106,15 @@ void printUsage(const char* progName) {
     std::cout << "Example:\n  " << progName << " 127 mad -c 16 -profile -ll -t 120 -f /my/backup/path \\\n"
               << "            -l1 256 -l2 128 -l3 64 --noask -user myaccountname -enqueue_max 65536 \\\n"
               << "            -worktodo ./mydir/worktodo.txt -config ./mydir/settings.cfg -proof" << std::endl;
-    opencl::Context::listAllOpenCLDevices();
+    prmers::ocl::Context::listAllOpenCLDevices();
+}
+
+static uint64_t to_u64(const char* s){
+    char* end=nullptr;
+    errno=0;
+    unsigned long long v = std::strtoull(s, &end, 10);
+    if(errno || end==s) return 0ULL;
+    return static_cast<uint64_t>(v);
 }
 
 CliOptions CliParser::parse(int argc, char** argv ) {
@@ -133,7 +141,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
-            opts.device_id = std::atoi(argv[++i]);
+            opts.device_id = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-prp") == 0) {
             opts.mode = "prp";
@@ -195,7 +203,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.gui = true;
         }
         else if (std::strcmp(argv[i], "-http") == 0 && i + 1 < argc) {
-            opts.http_port = std::atoi(argv[++i]);
+            opts.http_port = to_u64(argv[++i]);
             opts.gui = true;
         }
         else if (std::strcmp(argv[i], "-host") == 0) {
@@ -213,11 +221,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.cl_queue_throttle_active = true;
         }
         else if (std::strcmp(argv[i], "-proof") == 0 && i + 1 < argc) {
-            int level = std::atoi(argv[++i]);
+            int level = to_u64(argv[++i]);
             if (level == 0) {
                 opts.proof = false;
             } else if (1 <= level && level <= 12) {
-                opts.proofPower = level;
+                opts.proofPower = static_cast<uint32_t>(level);
                 opts.manual_proofPower = true;
             } else {
                 std::cerr << "Error: -proof level must be between 0 and 12. Given: " << level << std::endl;
@@ -225,10 +233,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             }
         }
         else if (std::strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-            opts.localCarryPropagationDepth = std::atoi(argv[++i]);
+            opts.localCarryPropagationDepth = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
-            opts.backup_interval = std::atoi(argv[++i]);
+            opts.backup_interval = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             opts.save_path = argv[++i];
@@ -273,22 +281,22 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             ++i;
         }
         else if (std::strcmp(argv[i], "-l1") == 0 && i + 1 < argc) {
-            opts.max_local_size1 = std::atoi(argv[++i]);
+            opts.max_local_size1 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-checklevel") == 0 && i + 1 < argc) {
-            opts.checklevel = std::atoi(argv[++i]);
+            opts.checklevel = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-chunk256") == 0 && i + 1 < argc) {
-            opts.chunk256 = std::atoi(argv[++i]);
+            opts.chunk256 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l5") == 0 && i + 1 < argc) {
-            opts.max_local_size5 = std::atoi(argv[++i]);
+            opts.max_local_size5 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-iterforce") == 0 && i + 1 < argc) {
-            opts.iterforce = std::atoi(argv[++i]);
+            opts.iterforce = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-iterforce2") == 0 && i + 1 < argc) {
-            opts.iterforce2 = std::atoi(argv[++i]);
+            opts.iterforce2 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-maxe") == 0 && i + 1 < argc) {
             uint64_t mb = std::strtoull(argv[i + 1], nullptr, 10);
@@ -296,16 +304,16 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             ++i;
         }
         else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
-            opts.max_local_size2 = std::atoi(argv[++i]);
+            opts.max_local_size2 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-l3") == 0 && i + 1 < argc) {
-            opts.max_local_size3 = std::atoi(argv[++i]);
+            opts.max_local_size3 = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-enqueue_max") == 0 && i + 1 < argc) {
-            opts.enqueue_max = std::atoi(argv[++i]);
+            opts.enqueue_max = to_u64(argv[++i]);
         }
         else if (std::strcmp(argv[i], "-res64_display_interval") == 0 && i + 1 < argc) {
-            int v = std::atoi(argv[++i]);
+            int v = to_u64(argv[++i]);
             if (v < 0) {
                 std::cerr << "Error: -res64_display_interval must be 0 (to disable) or > 0\n";
                 std::exit(EXIT_FAILURE);

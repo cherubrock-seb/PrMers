@@ -109,7 +109,7 @@ void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
     }
 }
 
-std::filesystem::path ProofManager::proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify) const {
+std::filesystem::path ProofManager::proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify) const {
     try {
         //proofSet_.power = proofPower;
         // Calculate limbBytes for GPU proof generation

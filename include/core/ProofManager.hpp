@@ -14,7 +14,7 @@
 #include "core/ProofSet.hpp"
 
 // Forward declarations
-namespace opencl {
+namespace prmers::ocl {
     class NttEngine;
     class Context;
 }
@@ -33,7 +33,7 @@ public:
                  const std::vector<std::string>& knownFactors = {});
     void checkpoint(cl_mem buf, uint32_t iter);  
     void checkpointMarin(std::vector<uint64_t> host, uint32_t iter);
-    std::filesystem::path proof(const opencl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify=true) const;
+    std::filesystem::path proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify=true) const;
 
 private:
     ProofSet           proofSet_;

@@ -20,7 +20,7 @@ namespace opencl {
 
 class NttEngine {
 public:
-    NttEngine(const Context& ctx,
+    NttEngine(const prmers::ocl::Context& ctx,
               Kernels& kernels,
               Buffers& buffers,
               const math::Precompute& precompute, bool pm1, bool debug=false);
@@ -43,7 +43,7 @@ public:
 private:
     size_t ls0_val_, ls2_val_, ls3_val_, ls5_val_;
     size_t ls0_vali_, ls2_vali_, ls5_vali_;
-    const Context& ctx_;
+    const prmers::ocl::Context& ctx_;
     std::vector<NttStage> forward_pipeline;
     std::vector<NttStage> inverse_pipeline;    
     std::vector<NttStage> forward_simple_pipeline;

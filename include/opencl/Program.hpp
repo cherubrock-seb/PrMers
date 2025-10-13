@@ -12,11 +12,11 @@
 #include "opencl/Context.hpp"
 #include "math/Precompute.hpp"
 
-namespace opencl {
+namespace prmers::ocl {
 
 class Program {
 public:
-    Program(const opencl::Context& context, cl_device_id device,
+    Program(const prmers::ocl::Context& context, cl_device_id device,
             const std::string& filePath, const math::Precompute& pre,
             const std::string& buildOptions = "", bool debug = false);
 
@@ -26,7 +26,7 @@ public:
 
 private:
     cl_program program_;
-    const opencl::Context&    context_;
+    const prmers::ocl::Context&    context_;
 
     std::string loadKernelSource(const std::string& filePath) const;
     void checkBuildError(cl_program program, cl_device_id device) const;

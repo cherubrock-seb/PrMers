@@ -124,11 +124,11 @@ mpz_class vectToMpz(const std::vector<uint64_t>& v,
         threads[t] = std::thread([&, start, end, t]() {
             mpz_class acc = 0;
             for (ptrdiff_t i = ptrdiff_t(end) - 1; i >= ptrdiff_t(start); --i) {
-                acc <<= widths[i];
-                add_ui64(acc, v[i]);
+                acc <<= static_cast<mp_bitcnt_t>(widths[static_cast<size_t>(i)]);
+                add_ui64(acc, v[static_cast<size_t>(i)]);
                 if (acc >= Mp) acc -= Mp;
 
-                total_width[t] += widths[i];
+                total_width[t] += static_cast<unsigned>(widths[static_cast<size_t>(i)]);
 
                 size_t count = ++global_count;
                 if (count % 10000 == 0 || count == n) {
@@ -145,11 +145,12 @@ mpz_class vectToMpz(const std::vector<uint64_t>& v,
     printf("\n");
 
     mpz_class result = 0;
-    for (int t = T - 1; t >= 0; --t) {
+    for (unsigned t = T; t-- > 0;) {
         result <<= total_width[t];
         result += partial[t];
         if (result >= Mp) result -= Mp;
     }
+
 
     return result;
 }
