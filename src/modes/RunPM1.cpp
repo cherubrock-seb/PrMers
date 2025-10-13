@@ -199,7 +199,7 @@ int App::runPM1Stage2() {
         nttEngine->forward(buffers->input, 0);
         nttEngine->inverse(buffers->input, 0);
         carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
-        if (mpz_tstbit(p.get_mpz_t(), i)) {
+        if (mpz_tstbit(p.get_mpz_t(), static_cast<mp_bitcnt_t>(i))) {
             nttEngine->mulInPlace(buffers->input, buffers->Hbuf, carry, limbBytes);
         }
     }
@@ -234,7 +234,7 @@ int App::runPM1Stage2() {
     timer.start(); timer2.start();
     auto start = high_resolution_clock::now();
     auto lastDisplay = start;
-    auto lastBackup  = start;
+    //auto lastBackup  = start;
 
     for (; p <= B2; ++idx) {
         if (idx) {
@@ -734,7 +734,7 @@ int App::runPM1Stage2Marin() {
     uint32_t pexp = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;//options.debug;
     const size_t baseRegs = 11;
-    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5;
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, /*RCHK=3,*/ RPOW=4, RTMP=5;
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
     const std::string ckpt_file_s2 = ck2.str();
     auto read_ckpt_s2 = [&](engine* e, const std::string& file, uint64_t& saved_p, uint64_t& saved_idx, double& et, uint64_t& sB1, uint64_t& sB2)->int{
@@ -892,7 +892,7 @@ int App::runPM1Stage2Marin() {
     size_t totalPrimes = primeCountApprox(B1, B2);
     auto start = high_resolution_clock::now();
     uint64_t primes_since_check = 0;
-    uint64_t checkpasslevel = options.checklevel > 0 ? options.checklevel : std::max<uint64_t>(1, (uint64_t)std::sqrt((double)std::max<size_t>(1, totalPrimes)));
+    //uint64_t checkpasslevel = options.checklevel > 0 ? options.checklevel : std::max<uint64_t>(1, (uint64_t)std::sqrt((double)std::max<size_t>(1, totalPrimes)));
     eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
     eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
     mpz_class blockStartP = p;
@@ -1205,7 +1205,7 @@ static inline unsigned u64_bits(uint64_t x){
 
 int App::runPM1Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 1"; guiServer_->setStatus(oss.str()); }
-    bool debug = false;
+    //bool debug = false;
     uint64_t B1 = options.B1;
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl; guiServer_->appendLog(oss.str()); }
@@ -1318,8 +1318,8 @@ int App::runPM1Marin() {
         if(checkpasslevel==0)
             checkpasslevel=1;
         //uint64_t checkpass = (options.checklevel > 0) ? options.checklevel : 1;
-        auto chunkStart = std::chrono::high_resolution_clock::now();
-        bool tunedCheckpass = false;
+        //auto chunkStart = std::chrono::high_resolution_clock::now();
+        //bool tunedCheckpass = false;
         uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
         uint64_t lastIter = resumeI;
         uint64_t blocks_since_check = restored ? gl_blocks_since_check_ck : 0;

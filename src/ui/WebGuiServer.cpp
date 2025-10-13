@@ -279,10 +279,15 @@ bool WebGuiServer::readRequest(int fd, std::string& method, std::string& path, s
         std::string more;
         while (need > 0) {
 #ifdef _WIN32
-            int n = recv(fd, buf, (int)std::min(need,(size_t)sizeof(buf)), 0);
+            const std::size_t need_sz = (need > 0) ? static_cast<std::size_t>(need) : 0u;
+            const int to_read = static_cast<int>(std::min(need_sz, sizeof(buf)));
+            int n = ::recv(fd, reinterpret_cast<char*>(buf), to_read, 0);
 #else
-            int n = (int)::recv(fd, buf, (int)std::min(need,(size_t)sizeof(buf)), 0);
+            const std::size_t need_sz = (need > 0) ? static_cast<std::size_t>(need) : 0u;
+            const std::size_t to_read = std::min(need_sz, sizeof(buf));
+            ssize_t n = ::recv(fd, buf, to_read, 0);
 #endif
+
             if (n <= 0) break;
             more.append(buf, buf + n);
             need -= (size_t)n;

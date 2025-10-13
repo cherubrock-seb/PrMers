@@ -124,6 +124,9 @@ void precalc_for_p(uint64_t p,
 
                    )
 {
+    (void)twiddles;
+    (void)invTwiddles;
+
     uint32_t n = transformsize(p);
     std::cout << "Transform Size = " << n << std::endl;
     

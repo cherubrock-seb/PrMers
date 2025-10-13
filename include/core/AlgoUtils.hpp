@@ -217,7 +217,7 @@ static inline std::string format_res64_hex(const std::vector<uint32_t>& W) {
 static inline std::string format_res2048_hex(const std::vector<uint32_t>& W) {
     std::ostringstream oss; oss << std::hex << std::nouppercase << std::setfill('0');
     for (int i = 63; i >= 0; --i) {
-        uint32_t w = (i < int(W.size())) ? W[i] : 0u;
+        uint32_t w = (static_cast<std::size_t>(i) < W.size()) ? W[static_cast<std::size_t>(i)] : 0u;
         oss << std::setw(8) << w;
     }
     return oss.str();

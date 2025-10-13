@@ -34,6 +34,7 @@ Carry::Carry(const prmers::ocl::Context& ctx, cl_command_queue queue, cl_program
     , digitWidth_(digitWidth)
     , digitWidthMaskBuf_(digitWidthMaskBuf)
 {
+    (void)vectorSize;
     cl_int err;
     carryKernel_ = clCreateKernel(program, "kernel_carry", &err);
     if (err != CL_SUCCESS) {
@@ -58,6 +59,7 @@ Carry::Carry(const prmers::ocl::Context& ctx, cl_command_queue queue, cl_program
 
 void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 {
+    (void)bufferSize;
     cl_int err;
     size_t workersCarry = context_.getWorkersCarry();
 
@@ -111,7 +113,7 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
                   << "` ===\n";
             std::cout << "[";
             for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
-                std::cout << host_x[j] << ",";
+                std::cout << host_x[static_cast<std::size_t>(j)] << ",";
             }
             std::cout << "]\n";
         
@@ -122,6 +124,7 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 
 void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 {
+    (void)bufferSize;
     cl_int err;
     size_t workersCarry = context_.getWorkersCarry();
 
@@ -173,7 +176,7 @@ void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
                   << "` ===\n";
             std::cout << "[";
             for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
-                std::cout << host_x[j] << ",";
+                std::cout << host_x[static_cast<std::size_t>(j)] << ",";
             }
             std::cout << "]\n";
         
@@ -186,6 +189,7 @@ void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 
 void Carry::carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
 {
+    (void)bufferSize;
     cl_int err;
     size_t workersCarry = context_.getWorkersCarry();
     //std::cout << "Launching kernel CARRY workers=" << workersCarry << std::endl;
