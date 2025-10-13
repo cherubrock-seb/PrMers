@@ -36,6 +36,9 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <limits>
+#include <ios>
+
 namespace core {
 
 BackupManager::BackupManager(cl_command_queue queue,
@@ -86,6 +89,13 @@ BackupManager::BackupManager(cl_command_queue queue,
     
 }
 
+static inline std::streamsize ss_from_size(size_t n) {
+    using S = std::streamsize;
+    const size_t Smax = static_cast<size_t>(std::numeric_limits<S>::max());
+    return static_cast<S>(n > Smax ? Smax : n);
+}
+
+
 uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
                                        cl_mem qBuf,
                                        size_t bytes)
@@ -100,13 +110,13 @@ uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
 
             std::ifstream hqIn(hqFilename_, std::ios::binary);
             if (hqIn) {
-                hqIn.read(reinterpret_cast<char*>(tmp.data()), bytes);
+                hqIn.read(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
                 clEnqueueWriteBuffer(queue_, hqBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
             }
 
             std::ifstream qIn(qFilename_, std::ios::binary);
             if (qIn) {
-                qIn.read(reinterpret_cast<char*>(tmp.data()), bytes);
+                qIn.read(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
                 clEnqueueWriteBuffer(queue_, qBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
             }
             std::cout << "Stage-2 buffers restored" << std::endl;
@@ -119,7 +129,7 @@ void BackupManager::loadGerbiczLiBufDState(std::vector<uint64_t>& x) {
     if(!marin_){
         std::ifstream in(GerbiczLiBufDFilename_, std::ios::binary);
         if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
             std::cout << "Loaded GerbiczLiBufD from " << std::filesystem::absolute(GerbiczLiBufDFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -134,7 +144,7 @@ void BackupManager::loadGerbiczLiCorrectState(std::vector<uint64_t>& x) {
     if(!marin_){
         std::ifstream in(GerbiczLiCorrectBufFilename_, std::ios::binary);
         if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
             std::cout << "Loaded GerbiczLiCorrectBuf from " << std::filesystem::absolute(GerbiczLiCorrectBufFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -148,7 +158,7 @@ void BackupManager::loadGerbiczLiCorrectBufDState(std::vector<uint64_t>& x) {
     if(!marin_){
         std::ifstream in(GerbiczLiLastBufDFilename_, std::ios::binary);
         if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), x.size() * sizeof(uint64_t));
+            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
             std::cout << "Loaded GerbiczLiLastBufD from " << std::filesystem::absolute(GerbiczLiLastBufDFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -196,11 +206,11 @@ void BackupManager::saveStatePM1S2(cl_mem hqBuf,
 
         clEnqueueReadBuffer(queue_, hqBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
         std::ofstream hqOut(hqFilename_, std::ios::binary);
-        if (hqOut) hqOut.write(reinterpret_cast<char*>(tmp.data()), bytes);
+        if (hqOut) hqOut.write(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
 
         clEnqueueReadBuffer(queue_, qBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
         std::ofstream qOut(qFilename_, std::ios::binary);
-        if (qOut) qOut.write(reinterpret_cast<char*>(tmp.data()), bytes);
+        if (qOut)  qOut.write(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
 
         std::ofstream loopOut(loop2Filename_);
         if (loopOut) loopOut << (idx + 1);
@@ -227,7 +237,7 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
         std::ifstream mersIn(mersFilename_, std::ios::binary);
         if (mersIn) {
             mersIn.read(reinterpret_cast<char*>(x.data()),
-                        x.size() * sizeof(uint64_t));
+            ss_from_size(x.size() * sizeof(uint64_t)));
             std::cout << "Loaded state from "
                       << std::filesystem::absolute(mersFilename_)
                       << std::endl;
@@ -258,7 +268,8 @@ void BackupManager::saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_p
     std::ofstream mersOut(mersFilename_, std::ios::binary);
     if (mersOut) {
         mersOut.write(reinterpret_cast<const char*>(x.data()),
-                      vectorSize_ * sizeof(uint64_t));
+                    ss_from_size(vectorSize_ * sizeof(uint64_t)));
+
         std::cout << "\nState saved to " << mersFilename_ << std::endl;
     } else {
         std::cerr << "Error saving state to " << mersFilename_ << std::endl;
@@ -301,6 +312,7 @@ void BackupManager::saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_p
 }
 
 void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_mem last_correctbufferd, uint64_t itersave, uint64_t jsave, const mpz_class* E_ptr) {
+    (void)E_ptr;
     std::vector<uint64_t> x(vectorSize_);
     clEnqueueReadBuffer(queue_, bufferd, CL_TRUE,
                         0, vectorSize_ * sizeof(uint64_t),
@@ -308,7 +320,7 @@ void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_me
     std::ofstream mersOut(GerbiczLiBufDFilename_, std::ios::binary);
     if (mersOut) {
         mersOut.write(reinterpret_cast<const char*>(x.data()),
-                      vectorSize_ * sizeof(uint64_t));
+          ss_from_size(vectorSize_ * sizeof(uint64_t)));
         std::cout << "\nGerbiczLiBufD saved to " << GerbiczLiBufDFilename_ << std::endl;
     } else {
         std::cerr << "Error saving GerbiczLiBufD to " << GerbiczLiBufDFilename_ << std::endl;
@@ -319,7 +331,7 @@ void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_me
     std::ofstream mersOut3(GerbiczLiLastBufDFilename_, std::ios::binary);
     if (mersOut3) {
         mersOut3.write(reinterpret_cast<const char*>(x.data()),
-                      vectorSize_ * sizeof(uint64_t));
+          ss_from_size(vectorSize_ * sizeof(uint64_t)));
         std::cout << "\nGerbiczLiLastBufD saved to " << GerbiczLiLastBufDFilename_ << std::endl;
     } else {
         std::cerr << "Error saving GerbiczLiLastBufD to " << GerbiczLiLastBufDFilename_ << std::endl;
@@ -332,7 +344,7 @@ void BackupManager::saveGerbiczLiState(cl_mem correctbuffer,cl_mem bufferd,cl_me
     
     if (mersOut2) {
         mersOut2.write(reinterpret_cast<const char*>(x.data()),
-                      vectorSize_ * sizeof(uint64_t));
+          ss_from_size(vectorSize_ * sizeof(uint64_t)));
         std::cout << "\nGerbiczLiCorrectBuf saved to " << GerbiczLiCorrectBufFilename_ << std::endl;
     } else {
         std::cerr << "Error saving GerbiczLiCorrectBuf to " << GerbiczLiCorrectBufFilename_ << std::endl;

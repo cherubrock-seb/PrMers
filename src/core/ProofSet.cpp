@@ -124,8 +124,8 @@ void ProofSet::save(uint32_t iter, const std::vector<uint32_t>& words) {
   // Write CRC32 first, then the data
   uint32_t crc = computeCRC32(words.data(), words.size() * sizeof(uint32_t));
   file.write(reinterpret_cast<const char*>(&crc), sizeof(crc));
-  file.write(reinterpret_cast<const char*>(words.data()), 
-             words.size() * sizeof(uint32_t));
+  file.write(reinterpret_cast<const char*>(words.data()),
+          static_cast<std::streamsize>(words.size() * sizeof(uint32_t)));
   
   if (!file.good()) {
     throw std::runtime_error("Error writing proof checkpoint file: " + filePath.string());

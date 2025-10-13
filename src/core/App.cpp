@@ -75,7 +75,7 @@
 
 namespace {
 std::atomic<bool> g_stop{false};
-void g_onSig(int){ g_stop = true; }
+//void g_onSig(int){ g_stop = true; }
 }
 
 namespace fs = std::filesystem;
@@ -291,18 +291,21 @@ App::App(int argc, char** argv)
                   
         
         if (!options.gui) {
-            o.exponent = askExponentInteractively();
+            o.exponent = static_cast<uint64_t>(askExponentInteractively());
         }
         o.mode = "prp";
         //std::exit(-1);
       }
       return o;
   }())
-  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug/*,options.marin*/)
+  , context(options.device_id,
+        static_cast<std::size_t>(options.enqueue_max),
+        options.cl_queue_throttle_active,
+        options.debug /*, options.marin */)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),
-        options.backup_interval,
+        static_cast<unsigned>(options.backup_interval),
         precompute.getN(),
         options.save_path,
         options.exponent,
@@ -314,11 +317,11 @@ App::App(int argc, char** argv)
     )
   , proofManager(
         options.exponent,
-        [this]() -> uint32_t {
-            if (!this->options.proof) return 0;
+        static_cast<int>([this]() -> uint32_t {
+            if (!this->options.proof) return 0u;
             if (this->options.manual_proofPower) return this->options.proofPower;
             return ProofSet::bestPower(this->options.exponent);
-        }(),
+        }()),
         context.getQueue(),
         precompute.getN(),
         precompute.getDigitWidth(),
@@ -326,11 +329,11 @@ App::App(int argc, char** argv)
     ),
     proofManagerMarin(
         options.exponent,
-        [this]() -> uint32_t {
-            if (!this->options.proof) return 0;
+        static_cast<int>([this]() -> uint32_t {
+            if (!this->options.proof) return 0u;
             if (this->options.manual_proofPower) return this->options.proofPower;
             return ProofSet::bestPower(this->options.exponent);
-        }(),
+        }()),
         context.getQueue(),
         precompute.getN(),
         precompute.getDigitWidth(),

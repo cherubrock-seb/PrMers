@@ -160,7 +160,7 @@ int App::runLlSafeMarinDoubling()
         std::rename(newf.c_str(), ckpt_file.c_str());
     };
 
-    const size_t RV = 0, RU = 1, RVC = 2, RUC = 3, RTMP = 4, RVCHK = 5, RUCHK = 6, RSCR = 7;
+    const size_t RV = 0, RU = 1, RVC = 2, RUC = 3, RTMP = 4, RVCHK = 5, RUCHK = 6, RSCR [[maybe_unused]] = 7;
 
     uint32_t ri = 0; double restored_time = 0.0;
     int r = read_ckpt(ckpt_file, ri, restored_time);

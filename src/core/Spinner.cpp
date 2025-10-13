@@ -58,6 +58,8 @@ void Spinner::displayProgress(uint64_t iter,
                               std::string res64,
                               ui::WebGuiServer* gui)
 {
+    (void) startIter;
+    (void) resumeIter;
     double pct = totalIters
                ? (100.0 * iter) / totalIters
                : 100.0;
@@ -140,6 +142,8 @@ void Spinner::displayProgress2(uint64_t iter,
                                uint64_t chunkTotal,
                                bool reset)
 {
+    (void) startIter;
+    (void) resumeIter;
     double pctTotal = totalIters ? (100.0 * (double)iter) / (double)totalIters : 100.0;
     double pctChunk = chunkTotal ? (100.0 * (double)chunkIter) / (double)chunkTotal : 100.0;
 
@@ -152,7 +156,7 @@ void Spinner::displayProgress2(uint64_t iter,
         first = false;
         prevIter = iter;
         prevChunkIndex = chunkIndex;
-        static double sm = 0.0; sm = 0.0;
+        //static double sm = 0.0; sm = 0.0;
     } else {
         deltaIter = iter - prevIter;
         prevIter = iter;

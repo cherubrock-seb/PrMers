@@ -111,7 +111,7 @@ int App::runPrpOrLlMarin()
 
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
 
-    auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
+    //auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
     if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
     if (guiServer_) {
@@ -207,7 +207,7 @@ int App::runPrpOrLlMarin()
     timer.start();
     timer2.start();
 
-    const uint32_t B_GL = std::max<uint32_t>(uint32_t(std::sqrt(p)), 2u);
+    //const uint32_t B_GL = std::max<uint32_t>(uint32_t(std::sqrt(p)), 2u);
     const auto start_clock = std::chrono::high_resolution_clock::now();
     auto lastBackup = start_clock;
     auto lastDisplay = start_clock;
@@ -241,7 +241,8 @@ int App::runPrpOrLlMarin()
     uint64_t lastIter   = ri ? ri - 1 : 0;
     uint64_t lastJ      = p - 1 - ri;
     std::string res64_x;
-    
+    (void) lastIter;
+    (void) lastJ;
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, options.wagstaff ? p / 2 : p, resumeIter, startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
     bool errordone = false;
     if(options.wagstaff){
@@ -373,7 +374,7 @@ int App::runPrpOrLlMarin()
                         eng->copy(R5, R1);//Last correct bufd
                         itersave = iter;
                         jsave = j;
-                        cl_event postEvt;
+                        //cl_event postEvt;
                     }
             }
             
@@ -555,7 +556,7 @@ int App::runPrpOrLlMarin()
             buffers->digitWidthMaskBuf
         );
         uint32_t proofPower = (options.proofPower);
-        while (proofPower >= 0) {
+        for (uint32_t k = proofPower; /*no-cond*/; ) {
             try {
                 std::cout << "\nGenerating PRP proof file..." << std::endl;
                 if (guiServer_) {
@@ -589,6 +590,8 @@ int App::runPrpOrLlMarin()
                     guiServer_->appendLog(oss.str());
                 }
             }
+            if (k == 0) break;
+            --k;
         }
     }
 

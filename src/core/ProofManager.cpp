@@ -31,7 +31,7 @@ ProofManager::ProofManager(uint32_t exponent, int proofLevel,
                            cl_command_queue queue, uint32_t n,
                            const std::vector<int>& digitWidth,
                            const std::vector<std::string>& knownFactors)
-  : proofSet_(exponent, proofLevel, knownFactors)
+  : proofSet_(exponent, static_cast<uint32_t>(proofLevel), knownFactors)
   , queue_(queue)
   , n_(n)
   , exponent_(exponent)

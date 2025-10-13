@@ -672,7 +672,7 @@ int App::runECMMarin()
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         static thread_local std::chrono::high_resolution_clock::time_point curve_t0 = high_resolution_clock::now();
-        double elapsed = duration<double>(high_resolution_clock::now() - curve_t0).count();
+        //double elapsed = duration<double>(high_resolution_clock::now() - curve_t0).count();
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         curve_t0 = high_resolution_clock::now();
 
