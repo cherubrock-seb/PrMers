@@ -298,7 +298,7 @@ App::App(int argc, char** argv)
       }
       return o;
   }())
-  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug,options.marin)
+  , context(options.device_id,options.enqueue_max,options.cl_queue_throttle_active, options.debug/*,options.marin*/)
   , precompute(options.exponent)
   , backupManager(
         context.getQueue(),

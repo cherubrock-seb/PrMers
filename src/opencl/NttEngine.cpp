@@ -116,7 +116,7 @@ NttEngine::NttEngine(const prmers::ocl::Context& ctx,
             //std::cout << "ls0_val_" << ls0_val_ << std::endl;
             const size_t* ls0 = nullptr;
             const size_t* ls2 = &ls2_val_;
-            const size_t* ls3 = &ls3_val_;
+            //const size_t* ls3 = &ls3_val_;
             const size_t* ls5 = &ls5_val_;
 
             cl_mem buf_dw = buffers_.digitWeightBuf;
@@ -136,9 +136,9 @@ NttEngine::NttEngine(const prmers::ocl::Context& ctx,
                 kernels_.getKernel("kernel_ntt_radix4_last_m1_nosquare"),
                 kernels_.getKernel("kernel_ntt_radix4_last_m1_n4_nosquare"),
                 /*kernels_.getKernel("kernel_ntt_radix4_radix2_square_radix2_radix4"),*/
-                kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
+                //kernels_.getKernel("kernel_ntt_radix2_square_radix2"),
                 kernels_.getKernel("kernel_ntt_radix4_mm_2steps_first"),
-                kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
+                //kernels_.getKernel("kernel_ntt_radix4_square_radix4"),
                 kernels_.getKernel("kernel_ntt_radix5_mm_first"),
                 kernels_.getKernel("kernel_ntt_radix2"),
                 buf_dw,
@@ -256,7 +256,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
                   << " workers = " << workers << "` ===\n";
         std::cout << "[";
             for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
-                std::cout << host_x[j] << ",";
+                std::cout << host_x[static_cast<size_t>(j)] << ",";
             }
             std::cout << "]\n";
         std::cout << "============================================\n";

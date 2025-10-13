@@ -205,7 +205,7 @@ std::vector<uint32_t> JsonBuilder::compactBits(
     if (haveBits > 0 || carry) {
         out[o++] = outWord;
         for (uint32_t i = 1; carry && i < o; ++i) {
-            uint64_t sum = static_cast<uint64_t>(out[i]) + carry;
+            uint64_t sum = static_cast<uint64_t>(out[i]) + static_cast<uint64_t>(carry);
             out[i]       = uint32_t(sum & 0xFFFFFFFFu);
             carry        = int(sum >> 32);
         }

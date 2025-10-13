@@ -27,7 +27,7 @@ enum class ArgKind {
 };
 struct RadixOp {
     enum Position { First, Any, Last } position;
-    int            localFactor;
+    cl_uint       localFactor;
     int           globalScale;
     cl_kernel      kernel;
     const size_t*  localSize;
@@ -305,9 +305,9 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     cl_kernel k_last_m1,
     cl_kernel k_last_m1_n4,
     /*cl_kernel k_r2_s_r2_r4,*/
-    cl_kernel k_radix2_square_radix2,
+    //cl_kernel k_radix2_square_radix2,
     cl_kernel k_mm_2_first,
-    cl_kernel k_r4_s_r4,
+    //cl_kernel k_r4_s_r4,
     cl_kernel k_r5_first,
     cl_kernel k_radix2,
     cl_mem buf_dw,
@@ -323,12 +323,12 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
     std::vector<RadixOp> all = {
     { RadixOp::First,   5, 5,
         k_r5_first,        ls5, "kernel_ntt_radix5_mm_first",
-         [](auto m0, auto nn){ return nn%5==0; },
+         [](auto , auto nn){ return nn%5==0; },
         { ArgKind::BufX,ArgKind::BufW5, ArgKind::BufDW } , 0},
       
      { RadixOp::First,   16, 16,
         k_mm_2_first,        ls2, "kernel_ntt_radix4_mm_2steps_first",
-         [](auto m0, auto nn){ return m0>=32; },
+         [](auto m0, auto ){ return m0>=32; },
         { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 1},
       
       { RadixOp::First,   4, 8,
@@ -546,7 +546,8 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
     }
     else{
 
-        unsigned m0 = lastOutputInv;
+        cl_uint m0 = static_cast<cl_uint>(lastOutputInv);
+
         
         auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                         return op.position == RadixOp::First
@@ -562,7 +563,7 @@ inline std::vector<NttStage> buildInverseSimplePipeline(
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
-                    && (m0 * op.localFactor) <= (unsigned)(n/4);
+                    && (m0 * op.localFactor) <= static_cast<cl_uint>(n / 4);
             });
             if (it == allInv.end()) break;
             v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));
@@ -669,8 +670,7 @@ inline std::vector<NttStage> buildInversePipeline(
     }
     else{
 
-        unsigned m0 = lastOutputInv;
-        
+        cl_uint m0 = static_cast<cl_uint>(lastOutputInv);        
         auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                         return op.position == RadixOp::First
                             && op.condition(m0,n);
@@ -685,7 +685,7 @@ inline std::vector<NttStage> buildInversePipeline(
             auto it = std::find_if(allInv.begin(), allInv.end(), [&](auto& op){
                 return op.position == RadixOp::Any
                     && op.condition(m0,n)
-                    && (m0 * op.localFactor) <= (unsigned)(n/4);
+                    && (m0 * op.localFactor) <= static_cast<cl_uint>(n / 4);
             });
             if (it == allInv.end()) break;
             v.push_back(makeStage(*it, m0, buf_x, buf_wi4, buf_wi5, buf_diw, debug));

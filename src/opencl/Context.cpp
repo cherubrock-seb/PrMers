@@ -39,7 +39,7 @@
 #endif
 namespace prmers::ocl {
 
-Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug, bool marin)
+Context::Context(int deviceIndex, std::size_t enqueueMax, bool cl_queue_throttle_active, bool debug /*,bool marin*/)
     : platform_(nullptr), device_(nullptr),
       context_(nullptr), queue_(nullptr),
       queueSize_(0),
@@ -90,8 +90,8 @@ void Context::pickPlatformAndDevice(int globalIndex) {
                   << globalIndex << ", using device 0\n";
         globalIndex = 0;
     }
-    platform_ = allDevices[globalIndex].plat;
-    device_   = allDevices[globalIndex].dev;
+    platform_ = allDevices[static_cast<size_t>(globalIndex)].plat;
+    device_   = allDevices[static_cast<size_t>(globalIndex)].dev;
 }
 
 void Context::listAllOpenCLDevices() {

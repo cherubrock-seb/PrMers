@@ -16,7 +16,7 @@ namespace prmers::ocl {
 
 class Context {
 public:
-    Context(int deviceIndex = 0, std::size_t enqueueMax = 0, bool cl_queue_throttle_active = false, bool debug = false, bool marin = false);
+    Context(int deviceIndex = 0, std::size_t enqueueMax = 0, bool cl_queue_throttle_active = false, bool debug = false/*, bool marin = false*/);
     ~Context();
 
     cl_context        getContext()  const noexcept;
