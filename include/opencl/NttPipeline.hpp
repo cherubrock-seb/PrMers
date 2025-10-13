@@ -34,7 +34,7 @@ struct RadixOp {
     std::string    name;
     std::function<bool(unsigned m, unsigned n)> condition;
     std::vector<ArgKind> argKinds;
-    int                      outputInverse;
+    int                      outputInverse = 0;
 };
 struct NttStage {
     cl_kernel                kernel;
@@ -47,7 +47,7 @@ struct NttStage {
     int                      globalScale;
     const size_t*            localSize;
     std::string              name;
-    int                      outputInverse;
+    int                      outputInverse = 0;
 };
 
 inline void setStageArgs2(NttStage& s, cl_mem buf_x) {

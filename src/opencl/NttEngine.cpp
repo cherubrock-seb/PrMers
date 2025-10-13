@@ -19,7 +19,7 @@ namespace opencl {
 NttEngine::NttEngine(const prmers::ocl::Context& ctx,
                      Kernels& kernels,
                      Buffers& buffers,
-                     const math::Precompute& precompute, bool pm1, bool debug)
+                     const math::Precompute& precompute, /*bool pm1,*/ bool debug)
     : ctx_(ctx)
     , queue_(ctx_.getQueue())
     , kernels_(kernels)
@@ -220,7 +220,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
                   << "` ===\n";
             std::cout << "[";
             for (int j = 0; static_cast<size_t>(j) < numElems; ++j) {
-                std::cout << host_x[j] << ",";
+                std::cout << host_x[static_cast<size_t>(j)] << ",";
             }
             std::cout << "]\n";
         
@@ -248,7 +248,7 @@ static void executeKernelAndDisplay(cl_command_queue queue,
                                   host_x.data(), 0, nullptr, nullptr);
         if (err != CL_SUCCESS) {
             std::cerr << "Error reading buf_x: " << n  << util::getCLErrorString(err)
-                      << " (" << err << ")\n";
+                      << " (" << err << ")" << profiling << "\n";
             return;
         }
 
@@ -449,7 +449,7 @@ void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBy
     clReleaseMemObject(temp);
 }
 
-void NttEngine::mulInPlace2(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
+void NttEngine::mulInPlace2(/*cl_mem A,*/ cl_mem B, math::Carry& carry, size_t limbBytes) {
     forward_simple(buffers_.input, 0);
     pointwiseMul(buffers_.input, B);
     inverse_simple(buffers_.input, 0);

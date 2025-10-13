@@ -397,7 +397,7 @@ App::App(int argc, char** argv)
         for (auto& name : kernelNames) {
             kernels->createKernel(name);
         }
-        nttEngine.emplace(context, *kernels, *buffers, precompute, options.mode == "pm1", options.debug);
+        nttEngine.emplace(context, *kernels, *buffers, precompute, /*options.mode == "pm1",*/ options.debug);
     //}
 
     std::signal(SIGINT, handle_sigint);

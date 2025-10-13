@@ -23,7 +23,7 @@ public:
     NttEngine(const prmers::ocl::Context& ctx,
               Kernels& kernels,
               Buffers& buffers,
-              const math::Precompute& precompute, bool pm1, bool debug=false);
+              const math::Precompute& precompute, /*bool pm1,*/ bool debug=false);
 
     int forward(cl_mem buf_x, uint64_t iter);
     int inverse(cl_mem buf_x, uint64_t iter);
@@ -32,7 +32,7 @@ public:
     int pointwiseMul(cl_mem a, cl_mem b);
     
     void mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
-    void mulInPlace2(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
+    void mulInPlace2(/*cl_mem A,*/ cl_mem B, math::Carry& carry, size_t limbBytes);
     void mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
     void mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes);
     void squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes);
