@@ -336,6 +336,9 @@ int App::runECMMarin()
             A24 = ((A + 2) % N) * inv4 % N;
 
             const size_t RX0=0, RZ0=1, RX1=2, RZ1=3, RXD=4, RZD=5, RA24=6, RT0=7, RT1=8, RT2=9, RT3=10, RU=11, RV=12, RM=13;
+            const size_t RA24M = 14;
+            const size_t XDM   = 15;
+            const size_t ZDM   = 16;
 
             eng->set((engine::Reg)RZ0, 0u);
             eng->set((engine::Reg)RX0, 1u);
@@ -344,50 +347,70 @@ int App::runECMMarin()
 
             uint64_t cnt_xdbl=0, cnt_xadd=0, cnt_mul=0, cnt_sqr=0;
 
-            auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)RM, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)RM); ++cnt_mul; };
+            //auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)RM, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)RM); ++cnt_mul; };
             auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-                eng->copy((engine::Reg)RT0, (engine::Reg)X1);
-                eng->add((engine::Reg)RT0, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT1, (engine::Reg)RT0);
+                eng->copy((engine::Reg)RT0, (engine::Reg)X1);       // RT0 = X1+Z1
+                eng->add ((engine::Reg)RT0, (engine::Reg)Z1);
+                eng->copy((engine::Reg)RT1, (engine::Reg)RT0);      // RT1 = U
                 eng->square_mul((engine::Reg)RT1); ++cnt_sqr;
-                eng->copy((engine::Reg)RT2, (engine::Reg)X1);
+
+                eng->copy((engine::Reg)RT2, (engine::Reg)X1);       // RT2 = X1-Z1
                 eng->sub_reg((engine::Reg)RT2, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT3, (engine::Reg)RT2);
+                eng->copy((engine::Reg)RT3, (engine::Reg)RT2);      // RT3 = V
                 eng->square_mul((engine::Reg)RT3); ++cnt_sqr;
+
+                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT3);
                 eng->copy((engine::Reg)X2, (engine::Reg)RT1);
-                mul_inplace(X2, RT3);
-                eng->copy((engine::Reg)RT0, (engine::Reg)RT1);
+                eng->mul ((engine::Reg)X2, (engine::Reg)RM);        // 1er mul
+
+                eng->copy((engine::Reg)RT0, (engine::Reg)RT1);      // RT0 = W
                 eng->sub_reg((engine::Reg)RT0, (engine::Reg)RT3);
-                eng->copy((engine::Reg)RT2, (engine::Reg)RT0);
-                mul_inplace(RT2, RA24);
-                eng->add((engine::Reg)RT2, (engine::Reg)RT3);
-                eng->copy((engine::Reg)Z2, (engine::Reg)RT2);
-                mul_inplace(Z2, RT0);
+
+                eng->copy((engine::Reg)RT2, (engine::Reg)RT0);      // RT2 = C*W
+                eng->mul ((engine::Reg)RT2, (engine::Reg)RA24M);    // 2e mul (pas de set_multiplicand ici)
+                eng->add ((engine::Reg)RT2, (engine::Reg)RT3);      // RT2 = T
+
+                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT2);
+                eng->copy((engine::Reg)Z2, (engine::Reg)RT0);
+                eng->mul ((engine::Reg)Z2, (engine::Reg)RM);        // 3e mul
+
                 ++cnt_xdbl;
             };
+
+
             auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t XD,size_t ZD,size_t X3,size_t Z3){
+                (void) XD;(void) ZD;
                 eng->copy((engine::Reg)RT0, (engine::Reg)X1);
-                eng->add((engine::Reg)RT0, (engine::Reg)Z1);
+                eng->add ((engine::Reg)RT0, (engine::Reg)Z1);
                 eng->copy((engine::Reg)RT1, (engine::Reg)X1);
                 eng->sub_reg((engine::Reg)RT1, (engine::Reg)Z1);
                 eng->copy((engine::Reg)RT2, (engine::Reg)X2);
-                eng->add((engine::Reg)RT2, (engine::Reg)Z2);
+                eng->add ((engine::Reg)RT2, (engine::Reg)Z2);
                 eng->copy((engine::Reg)RT3, (engine::Reg)X2);
                 eng->sub_reg((engine::Reg)RT3, (engine::Reg)Z2);
+
                 eng->copy((engine::Reg)RU, (engine::Reg)RT3);
-                mul_inplace(RU, RT0);
+                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT0);
+                eng->mul ((engine::Reg)RU, (engine::Reg)RM);
+
                 eng->copy((engine::Reg)RV, (engine::Reg)RT2);
-                mul_inplace(RV, RT1);
+                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT1);
+                eng->mul ((engine::Reg)RV, (engine::Reg)RM);
+
                 eng->copy((engine::Reg)X3, (engine::Reg)RU);
-                eng->add((engine::Reg)X3, (engine::Reg)RV);
+                eng->add ((engine::Reg)X3, (engine::Reg)RV);
                 eng->square_mul((engine::Reg)X3); ++cnt_sqr;
-                mul_inplace(X3, ZD);
+                eng->mul ((engine::Reg)X3, (engine::Reg)ZDM);
+
                 eng->copy((engine::Reg)Z3, (engine::Reg)RU);
                 eng->sub_reg((engine::Reg)Z3, (engine::Reg)RV);
                 eng->square_mul((engine::Reg)Z3); ++cnt_sqr;
-                mul_inplace(Z3, XD);
+                eng->mul ((engine::Reg)Z3, (engine::Reg)XDM);
+
                 ++cnt_xadd;
             };
+
+
 
             std::ostringstream head;
             head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | sigma64=0x"<<hex64(sigma)<<" x0_64=0x"<<hex64(x0)<<" A_64=0x"<<hex64(A)<<" A24_64=0x"<<hex64(A24)<<" | K_bits="<<nb;
@@ -400,7 +423,9 @@ int App::runECMMarin()
             auto t0 = high_resolution_clock::now();
             auto last_save = t0;
             auto last_ui = t0;
-
+            eng->set_multiplicand((engine::Reg)RA24M, (engine::Reg)RA24); // A24 once
+            eng->set_multiplicand((engine::Reg)XDM,   (engine::Reg)RXD);  // XD  once
+            eng->set_multiplicand((engine::Reg)ZDM,   (engine::Reg)RZD);  // ZD  once
             for (size_t i = start_i; i < nb; ++i){
                 size_t bit = nb - 1 - i;
                 mp_bitcnt_t mb = static_cast<mp_bitcnt_t>(bit);

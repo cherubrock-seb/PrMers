@@ -61,8 +61,8 @@ namespace fs = std::filesystem;
 
 namespace core::algo {
 
-inline static std::atomic<bool> interrupted{false};
-inline static void handle_sigint(int) { interrupted = true; }
+extern std::atomic<bool> interrupted;
+void handle_sigint(int) noexcept;  
 
 inline static std::vector<std::string> parseConfigFile(const std::string& config_path) {
     std::ifstream config(config_path);

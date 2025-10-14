@@ -73,10 +73,10 @@
 #include <filesystem>
 #include <set>
 
-namespace {
-std::atomic<bool> g_stop{false};
+//namespace {
+//std::atomic<bool> g_stop{false};
 //void g_onSig(int){ g_stop = true; }
-}
+//}
 
 namespace fs = std::filesystem;
 
@@ -694,9 +694,14 @@ int App::runGpuBenchmarkMarin() {
     return 0;
 }
 
+namespace {
+  std::atomic<bool> g_stop{false};
+  void handle_signal(int) noexcept {
+    g_stop.store(true, std::memory_order_relaxed);
+    core::algo::interrupted.store(true, std::memory_order_relaxed);
+  }
+}
 
-static std::atomic<bool> g_stop{false};
-static void handle_signal(int) noexcept { g_stop = true; interrupted = true; }
 
 #if defined(_WIN32)
 #include <windows.h>
