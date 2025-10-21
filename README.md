@@ -136,29 +136,49 @@ Requirements
 
 Quick Start
 -----------
-Build from source
+4. Build from source
    * Linux/macOS (example):
      ```sh
-     make
+     make -j$(nproc)
      ```
    * Windows (recommended): CMake + vcpkg + Visual Studio
      ```cmd
      cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
      cmake --build build --config Release
      ```
+   * Windows: MSYS2 UCRT64
+     * Install MSYS2
+     * Click open "MSYS2 UCRT64"
+      * Install dependencies:
+        ```sh
+        pacman -Syu
+        pacman -S --noconfirm make mingw-w64-ucrt-x86_64-{gcc,opencl-headers,gmp,curl,opencl-icd}
+        ```
+      * Build:
+        ```sh
+        make -j$(nproc)
+        ```
+        (Hint: add `MARCH=xxx` after `make` to select the CPU architecture to optimize for. The default is `MARCH=native`, which is good for
+        your current CPU but may not work when you want to build for others.)
+      * Package:
+        ```sh
+        make package
+        ```
+        (This takes care of copying the required DLLs next to the executable.)
 
-Run a PRP test
+
+5. Run a PRP test
    ```sh
    ./prmers 136279841
    ```
    (Default: PRP mode, Marin backend on)
 
-4. Disable Marin (use legacy internal backend)
+6. Disable Marin (use legacy internal backend)
    ```sh
    ./prmers 136279841 -marin
    ```
 
-6. P-1 stage-1 + stage-2
+7. P-1 stage-1 + stage-2
    ```sh
    ./prmers 367 -pm1 -b1 11981 -b2 38971
    ```
