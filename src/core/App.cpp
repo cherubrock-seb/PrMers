@@ -819,7 +819,7 @@ int App::run() {
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
             bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
 
-            if ((haveS2 || haveS1) && options.nmax == 0  && options.K == 0) {
+            if ((haveS2) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "
                     << (haveS2 ? "[Stage 2] " : "")
@@ -831,6 +831,14 @@ int App::run() {
                 rc_local = runPM1Stage2Marin();
                 ran_local = true;
             } else {
+                if(haveS1){
+                    std::ostringstream msg;
+                    msg << "Detected P-1 checkpoint(s): "
+                    << (haveS2 ? "[Stage 2] " : "")
+                    << (haveS1 ? "[Stage 1] " : "")
+                    << "→ jumping to Stage1()";
+                    std::cout << msg.str() << std::endl;
+                }
                 std::string msg = "No P-1 checkpoints found → running Stage 1 (runPM1Marin)";
                 std::cout << msg << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg); guiServer_->setStatus("Running P-1 Stage 1"); }
