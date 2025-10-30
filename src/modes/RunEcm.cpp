@@ -121,9 +121,58 @@ int App::runECMMarin()
         z %= N; if (z <= 2) z += 3; return z;
     };
     auto fmt_hms = [&](double s)->string{ uint64_t u=(uint64_t)(s+0.5); uint64_t h=u/3600,m=(u%3600)/60,se=u%60; ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str(); };
+    auto mpz_from_u64 = [](uint64_t v)->mpz_class{ mpz_class z; mpz_import(z.get_mpz_t(), 1, 1, sizeof(v), 0, 0, &v); return z; };
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
-    mpz_class N = (mpz_class(1) << p) - 1;
+    auto run_start = high_resolution_clock::now();
+    mpz_class N_full = (mpz_class(1) << p) - 1;
+    mpz_class N = N_full;
+    uint32_t mersenne_digits = (uint32_t)mpz_sizeinbase(N_full.get_mpz_t(), 10);
+    uint64_t bits_B1 = (uint64_t)u64_bits(B1);
+    uint64_t bits_B2 = B2 ? (uint64_t)u64_bits(B2) : 0;
+
+    string mode_name = "";
+    string torsion_name = "";
+    int pm_effective = -1;
+    if (forceSigma || options.notorsion) pm_effective = options.edwards ? 3 : 0;
+    else if (options.torsion16) pm_effective = options.edwards ? 4 : 1;
+    else pm_effective = options.edwards ? 5 : 2;
+    mode_name = ((pm_effective==0||pm_effective==1||pm_effective==2) ? "montgomery" : "edwards");
+    if (pm_effective==0 || pm_effective==3) torsion_name = "none";
+    else if (pm_effective==1 || pm_effective==4) torsion_name = "16";
+    else torsion_name = "8";
+
+    bool wrote_result = false;
+    string result_status = "not_found";
+    mpz_class result_factor = 0;
+    uint64_t curves_tested_for_found = 0;
+
+    auto write_result = [&](){
+        if (wrote_result) return;
+        double tot = duration<double>(high_resolution_clock::now() - run_start).count();
+        uint64_t tested = curves_tested_for_found ? curves_tested_for_found : ((result_status=="found") ? curves_tested_for_found : curves);
+        ofstream jf("ecm_result.json", ios::app);
+        ostringstream js;
+        js<<"{";
+        js<<"\"exponent\":"<<p<<",";
+        js<<"\"mode\":\""<<mode_name<<"\",";
+        js<<"\"torsion\":\""<<torsion_name<<"\",";
+        js<<"\"B1\":"<<B1<<",";
+        js<<"\"B2\":"<<B2<<",";
+        js<<"\"bits_B1\":"<<bits_B1<<",";
+        js<<"\"bits_B2\":"<<bits_B2<<",";
+        js<<"\"factor\":\""<<(result_factor>0? result_factor.get_str() : string("0"))<<"\",";
+        js<<"\"factor_digits\":"<<(result_factor>0? (int)mpz_sizeinbase(result_factor.get_mpz_t(),10) : 0)<<",";
+        js<<"\"mersenne_digits\":"<<mersenne_digits<<",";
+        js<<fixed<<setprecision(6);
+        js<<"\"elapsed_total_s\":"<<tot<<",";
+        js<<"\"elapsed_avg_per_curve_s\":"<<(tested? (tot/double(tested)) : 0.0)<<",";
+        js<<"\"curves_tested\":"<<tested<<",";
+        js<<"\"status\":\""<<result_status<<"\"";
+        js<<"}";
+        jf<<js.str()<<"\n";
+        wrote_result = true;
+    };
 
     auto is_known = [&](const mpz_class& g)->bool{
         for (auto &s: options.knownFactors){
@@ -149,7 +198,7 @@ int App::runECMMarin()
         }
         if (!acc.empty()) {
             for (auto& kv: acc) while (mpz_divisible_p(N.get_mpz_t(), kv.first.get_mpz_t())) N /= kv.first;
-            if (N == 1) { std::cout << "[ECM] Trivial after removing known factors." << std::endl; return 0; }
+            if (N == 1) { std::cout << "[ECM] Trivial after removing known factors." << std::endl; write_result(); return 0; }
         }
     }
 
@@ -186,7 +235,7 @@ int App::runECMMarin()
     for (uint64_t c = 0; c < curves; ++c)
     {
         engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
-        if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; return 1; }
+        if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
         std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
@@ -301,11 +350,16 @@ int App::runECMMarin()
             if (mpz_sgn(a.get_mpz_t())==0) return -1;
             if (mpz_invert(inv.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t())) return 0;
             mpz_class g; mpz_gcd(g.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t());
-            if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; return 1; }
+            if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor = g; result_status = "found"; return 1; }
             return -1;
         };
 
         mpz_class A24, x0;
+
+        if (resume_stage2) {
+            if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards";
+            if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
+        }
 
         if (!resume_stage2)
         {
@@ -316,21 +370,22 @@ int App::runECMMarin()
 
             if (picked_mode == 0)
             {
+                mode_name="montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceSigma) { sigma_mpz = mpz_class(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
                 else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
-                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; delete eng; return 0; }
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
                 mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
-                mpz_class invt; { int r = invm(t0, invt); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invt; { int r = invm(t0, invt); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
                 mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
                 Araw = mulm(Araw, invt);
                 mpz_class A = subm(Araw, mpz_class(2));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
-                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class num = sqrm(subm(v,u));
                 x0 = mulm(num, den);
                 std::ostringstream head;
@@ -340,11 +395,12 @@ int App::runECMMarin()
             }
             else if (picked_mode == 1)
             {
+                mode_name="montgomery"; torsion_name="16";
                 auto ec_add = [&](const mpz_class& x1, const mpz_class& y1, const mpz_class& x2, const mpz_class& y2, mpz_class& xr, mpz_class& yr)->int{
                     if (x1==x2 && (y1+ y2)%N==0) return -1;
                     mpz_class num = subm(y2, y1);
                     mpz_class den = subm(x2, x1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); return 1; } if (r<0) { curves_tested_for_found=c+1; write_result(); return -1; }
                     mpz_class lam = mulm(num, inv);
                     xr = subm(subm(sqrm(lam), x1), x2);
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -353,7 +409,7 @@ int App::runECMMarin()
                 auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
                     mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
                     mpz_class den = mulm(mpz_class(2), y1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); return 1; } if (r<0) { curves_tested_for_found=c+1; write_result(); return -1; }
                     mpz_class lam = mulm(num, inv);
                     xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -376,12 +432,12 @@ int App::runECMMarin()
                 int rmul = ec_mul(k, s, t, s, t); if (rmul==1){ delete eng; return 0; } if (rmul<0){ delete eng; return 0; }
 
                 mpz_class den = subm(s, mpz_class(4));
-                mpz_class inv; { int r = invm(den, inv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv; { int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
 
                 mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
                 mpz_class denr = subm(mpz_class(8), sqrm(alpha));
-                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class rpar = mulm(numr, invdenr);
 
                 mpz_class r2 = sqrm(rpar);
@@ -389,12 +445,12 @@ int App::runECMMarin()
                 mpz_class r4 = sqrm(r2);
                 mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
                 mpz_class A_den = mulm(mpz_class(4), r2);
-                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class A = mulm(A_num, invAden);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
 
-                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 x0 = subm(inv2, r2);
 
                 std::ostringstream head;
@@ -404,15 +460,16 @@ int App::runECMMarin()
             }
             else if (picked_mode == 2)
             {
+                mode_name="montgomery"; torsion_name="8";
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
                 mpz_class a2 = sqrm(a);
                 mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
                 mpz_class fourv = mulm(mpz_class(4), v);
                 mpz_class one = mpz_class(1);
                 mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
 
@@ -423,21 +480,22 @@ int App::runECMMarin()
             }
             else if (picked_mode == 3)
             {
+                mode_name="edwards"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceSigma) { sigma_mpz = mpz_class(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
                 else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
-                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; delete eng; return 0; }
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
                 mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
-                mpz_class invt; { int r = invm(t0, invt); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invt; { int r = invm(t0, invt); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
                 mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
                 Araw = mulm(Araw, invt);
                 mpz_class A = subm(Araw, mpz_class(2));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
-                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class num = sqrm(subm(v,u));
                 x0 = mulm(num, den);
                 mpz_class aE = addm(A, mpz_class(2));
@@ -449,11 +507,12 @@ int App::runECMMarin()
             }
             else if (picked_mode == 4)
             {
+                mode_name="edwards"; torsion_name="16";
                 auto ec_add = [&](const mpz_class& x1, const mpz_class& y1, const mpz_class& x2, const mpz_class& y2, mpz_class& xr, mpz_class& yr)->int{
                     if (x1==x2 && (y1+ y2)%N==0) return -1;
                     mpz_class num = subm(y2, y1);
                     mpz_class den = subm(x2, x1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); return 1; } if (r<0) { curves_tested_for_found=c+1; write_result(); return -1; }
                     mpz_class lam = mulm(num, inv);
                     xr = subm(subm(sqrm(lam), x1), x2);
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -462,7 +521,7 @@ int App::runECMMarin()
                 auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
                     mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
                     mpz_class den = mulm(mpz_class(2), y1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); return 1; } if (r<0) { curves_tested_for_found=c+1; write_result(); return -1; }
                     mpz_class lam = mulm(num, inv);
                     xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -485,12 +544,12 @@ int App::runECMMarin()
                 int rmul = ec_mul(k, s, t, s, t); if (rmul==1){ delete eng; return 0; } if (rmul<0){ delete eng; return 0; }
 
                 mpz_class den = subm(s, mpz_class(4));
-                mpz_class inv; { int r = invm(den, inv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv; { int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
 
                 mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
                 mpz_class denr = subm(mpz_class(8), sqrm(alpha));
-                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class rpar = mulm(numr, invdenr);
 
                 mpz_class r2 = sqrm(rpar);
@@ -498,12 +557,12 @@ int App::runECMMarin()
                 mpz_class r4 = sqrm(r2);
                 mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
                 mpz_class A_den = mulm(mpz_class(4), r2);
-                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class A = mulm(A_num, invAden);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
 
-                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 x0 = subm(inv2, r2);
 
                 mpz_class aE = addm(A, mpz_class(2));
@@ -515,15 +574,16 @@ int App::runECMMarin()
             }
             else
             {
+                mode_name="edwards"; torsion_name="8";
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
                 mpz_class a2 = sqrm(a);
                 mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
                 mpz_class fourv = mulm(mpz_class(4), v);
                 mpz_class one = mpz_class(1);
                 mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; write_result(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
                 mpz_class aE = addm(A, mpz_class(2));
@@ -617,7 +677,7 @@ int App::runECMMarin()
                     std::cout<<line.str()<<std::flush; last_ui = now;
                 }
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
             }
             std::cout<<std::endl;
 
@@ -633,8 +693,11 @@ int App::runECMMarin()
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
                 std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+                std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
+                
+                
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); delete eng; return 0; }
+                if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); result_factor=gg; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
             }
         }
         else
@@ -643,7 +706,8 @@ int App::runECMMarin()
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
         std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
-
+        std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
+               
 
         if (B2 > B1) {
             auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
@@ -736,7 +800,7 @@ int App::runECMMarin()
                     double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed);
                     std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size()<<"\n";
                     if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size(); guiServer_->appendLog(oss.str()); }
-                    delete eng; return 0;
+                    curves_tested_for_found=c+1; write_result(); delete eng; return 0;
                 }
             }
             if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); }
@@ -756,7 +820,7 @@ int App::runECMMarin()
                 bool known = is_known(gg2);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); delete eng; return 0; }
+                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); result_factor=gg2; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
         }
         }
 
@@ -765,8 +829,8 @@ int App::runECMMarin()
         delete eng;
     }
 
-    //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
     std::cout<<"[ECM] No factor found"<<std::endl;
-    
+    write_result();
     return 1;
 }
+
