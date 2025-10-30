@@ -85,8 +85,8 @@ void printUsage(const char* progName) {
     std::cout << "  -montgomery          : (Optional) use Montgomery instead of twisted Edwards curve" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16 instead of default torsion-8" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-8" << std::endl;
-    std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
-    std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
+    //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
+    //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
     //std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
