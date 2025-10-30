@@ -101,141 +101,84 @@ int App::runECMMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const uint64_t B1 = options.B1 ? options.B1 : 1000000ULL;
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
-    const bool verbose = true;//options.debug;
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
+    const bool verbose = true;
+    const bool forceSigma = (options.sigma != 0ULL);
+    if (forceSigma) curves = 1ULL;
 
-    auto splitmix64 = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
-    auto rnd_mpz = [&](const mpz_class& N, uint64_t& seed, uint64_t bits)->mpz_class{
-        mpz_class z=0; for (size_t i=0;i<bits;i+=64){ z <<= 64; z += (unsigned long)splitmix64(seed); } z %= N; if (z<=2) z+=3; return z;
+    auto splitmix64_step = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
+    auto splitmix64_u64 = [&](uint64_t seed0)->uint64_t{ uint64_t s=seed0; return splitmix64_step(s); };
+    auto mix64 = [&](uint64_t seed, uint64_t idx)->uint64_t{
+        uint64_t x = seed ^ 0x9E3779B97f4A7C15ULL;
+        x ^= (idx+1) * 0xBF58476D1CE4E5B9ULL;
+        x ^= (idx+0x100) * 0x94D049BB133111EBULL;
+        return splitmix64_u64(x);
     };
-    auto hex64 = [&](const mpz_class& z)->string{
-        std::ostringstream ss; ss<<std::uppercase<<std::hex<<std::setw(16)<<std::setfill('0')<<static_cast<uint64_t>(mpz_get_ui(z.get_mpz_t())); return ss.str();
+    auto rnd_mpz_bits = [&](const mpz_class& N, uint64_t seed0, unsigned bits)->mpz_class{
+        mpz_class z = 0;
+        uint64_t s = seed0;
+        for (unsigned i=0;i<bits;i+=64){ z <<= 64; z += (unsigned long)splitmix64_step(s); }
+        z %= N; if (z <= 2) z += 3; return z;
     };
-    auto fmt_hms = [&](double s)->string{
-        uint64_t u = (uint64_t)(s + 0.5); uint64_t h=u/3600, m=(u%3600)/60, se=u%60; std::ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str();
-    };
+    auto fmt_hms = [&](double s)->string{ uint64_t u=(uint64_t)(s+0.5); uint64_t h=u/3600,m=(u%3600)/60,se=u%60; ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str(); };
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
-    auto is_known = [&](const mpz_class& f)->bool{
-        for (const auto& s : options.knownFactors) {
+
+    mpz_class N = (mpz_class(1) << p) - 1;
+
+    auto is_known = [&](const mpz_class& g)->bool{
+        for (auto &s: options.knownFactors){
             if (s.empty()) continue;
-            mpz_class z;
-            if (mpz_set_str(z.get_mpz_t(), s.c_str(), 0) != 0) continue;
-            if (z < 0) z = -z;
-            if (f == z) return true;
+            mpz_class f; if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
+            if (f < 0) f = -f;
+            if (f > 1 && g == f) return true;
         }
         return false;
     };
 
-    mpz_class N = (mpz_class(1) << p) - 1;
     {
-        std::vector<std::string> kf = options.knownFactors;
-        std::vector<std::pair<mpz_class,unsigned>> accepted;
+        vector<string> kf = options.knownFactors;
+        vector<pair<mpz_class,unsigned>> acc;
         mpz_class C = N;
-        for (const auto& s : kf) {
+        for (auto& s : kf) {
             if (s.empty()) continue;
-            mpz_class f;
-            if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) {
-                std::ostringstream os; os << "[ECM] Ignoring invalid known factor string: " << s;
-                std::cout << os.str() << std::endl;
-                if (guiServer_) guiServer_->appendLog(os.str());
-                continue;
-            }
+            mpz_class f; if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
             if (f < 0) f = -f;
             if (f <= 1) continue;
             mpz_class g; mpz_gcd(g.get_mpz_t(), f.get_mpz_t(), N.get_mpz_t());
-            if (g > 1) {
-                unsigned m = 0;
-                while (mpz_divisible_p(C.get_mpz_t(), g.get_mpz_t())) { C /= g; ++m; }
-                if (m) accepted.push_back({g, m});
-            }
+            if (g > 1) { unsigned m=0; while (mpz_divisible_p(C.get_mpz_t(), g.get_mpz_t())) { C /= g; ++m; } if (m) acc.push_back({g,m}); }
         }
-        if (!accepted.empty()) {
-            std::ostringstream oss;
-            oss << "[ECM] Known factors accepted: ";
-            for (size_t i=0;i<accepted.size();++i) {
-                if (i) oss << " * ";
-                oss << accepted[i].first.get_str() << "^" << accepted[i].second;
-            }
-            oss << "\n[ECM] Remaining cofactor: " << C.get_str();
-            std::cout << oss.str() << std::endl;
-            if (guiServer_) guiServer_->appendLog(oss.str());
-            int pr = mpz_probab_prime_p(C.get_mpz_t(), 25);
-            if (C == 1) { std::cout << "[ECM] Fully factored from known factors\n"; return 0; }
-            if (pr) {
-                std::ostringstream os2; os2 << "[ECM] Cofactor appears prime: " << C.get_str();
-                std::cout << os2.str()<<std::endl;
-                if (guiServer_) guiServer_->appendLog(os2.str());
-            }
-        } else {
-            std::cout << "[ECM] No usable known factors provided\n";
+        if (!acc.empty()) {
+            for (auto& kv: acc) while (mpz_divisible_p(N.get_mpz_t(), kv.first.get_mpz_t())) N /= kv.first;
+            if (N == 1) { std::cout << "[ECM] Trivial after removing known factors." << std::endl; return 0; }
         }
     }
 
-    mpz_class K = 1;
-    uint32_t primesB1 = 0;
+    vector<uint32_t> primesB1_v, primesS2_v;
     {
-        std::atomic<bool> done{false};
-        std::thread ticker([&]{
-            const char* msg = "[ECM] Stage1 prep: building K up to B1 ";
-            std::cout<<msg<<std::flush;
-            size_t dots=0, wrap=60;
-            while(!done.load(std::memory_order_relaxed)){
-                std::cout<<'.'<<std::flush;
-                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-            std::cout<<" done\n";
-        });
-        uint64_t b = B1;
-        vector<uint8_t> sieve(b/2+1, 1);
-        for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
-        auto apply_prime = [&](uint64_t q){ uint64_t pw=q; while (pw <= b / q) pw *= q; mpz_class t; mpz_set_ui(t.get_mpz_t(), (unsigned long)pw); K *= t; ++primesB1; };
-        apply_prime(2);
-        for (uint64_t q=3;q<=b;q+=2) if (sieve[q>>1]) apply_prime(q);
-        done.store(true, std::memory_order_relaxed);
-        ticker.join();
+        uint64_t Pmax = B2 ? B2 : B1;
+        vector<char> sieve(Pmax + 1, 1);
+        sieve[0]=0; if (Pmax >= 1) sieve[1]=0;
+        for (uint64_t q=2;q*q<=Pmax;++q) if (sieve[q]) for (uint64_t k=q*q;k<=Pmax;k+=q) sieve[k]=0;
+        for (uint64_t q=2;q<=B1;++q) if (sieve[q]) primesB1_v.push_back((uint32_t)q);
+        if (B2 > B1) for (uint64_t q=B1+1;q<=B2;++q) if (sieve[q]) primesS2_v.push_back((uint32_t)q);
+        std::cout<<"[ECM] Prime counts: B1="<<primesB1_v.size()<<", S2="<<primesS2_v.size()<<std::endl;
     }
-    size_t nb = mpz_sizeinbase(K.get_mpz_t(), 2);
 
-    std::vector<uint32_t> primesS2;
-    if (B2 > B1) {
-        std::atomic<bool> done{false};
-        std::thread ticker([&]{
-            const char* msg = "[ECM] Stage2 prep: sieving primes in (B1,B2] ";
-            std::cout<<msg<<std::flush;
-            size_t dots=0, wrap=60;
-            while(!done.load(std::memory_order_relaxed)){
-                std::cout<<'.'<<std::flush;
-                if(++dots % wrap == 0) std::cout<<'\n'<<msg<<std::flush;
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            }
-            std::cout<<" done\n";
-        });
-        uint64_t b = B2;
-        vector<uint8_t> sieve(b/2+1, 1);
-        for (uint64_t i=3;i*i<=b;i+=2) if (sieve[i>>1]) for (uint64_t j=i*i;j<=b;j+=i<<1) sieve[j>>1]=0;
-        if (B1 < 2 && 2 <= B2) primesS2.push_back(2);
-        for (uint64_t q=3;q<=B2;q+=2) if (sieve[q>>1] && q > B1) primesS2.push_back((uint32_t)q);
-        done.store(true, std::memory_order_relaxed);
-        ticker.join();
-    }
+    vector<uint64_t> s1_factors;
+    mpz_class K(1);
+    for (uint32_t q : primesB1_v) { uint64_t m = q; while (m <= B1 / q) m *= q; s1_factors.push_back(m); mpz_mul_ui(K.get_mpz_t(), K.get_mpz_t(), m); }
 
     {
         std::ostringstream hdr;
         hdr<<"[ECM] N=M_"<<p<<"  B1="<<B1<<"  B2="<<B2<<"  curves="<<curves<<"\n";
-        hdr<<"[ECM] Stage1: product of prime powers up to B1, primes used="<<primesB1<<", K_bits="<<nb<<"\n";
-        if (!primesS2.empty()) {
-            hdr<<"[ECM] Stage2: primes in ("<<B1<<","<<B2<<"], count="<<primesS2.size();
-            hdr<<", first="<<(primesS2.size()?primesS2.front():0)<<", last="<<(primesS2.size()?primesS2.back():0)<<"\n";
-        } else {
-            hdr<<"[ECM] Stage2: disabled\n";
-        }
-        std::cout<<hdr.str();
-        if (guiServer_) guiServer_->appendLog(hdr.str());
+        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<"\n";
+        if (!primesS2_v.empty()) hdr<<"[ECM] Stage2 primes ("<<B1<<","<<B2<<"] count="<<primesS2_v.size()<<"\n"; else hdr<<"[ECM] Stage2: disabled\n";
+        std::cout<<hdr.str(); if (guiServer_) guiServer_->appendLog(hdr.str());
     }
 
     auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    uint64_t seed0 = now_ns ^ ((uint64_t)p<<32) ^ B1;
+    uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
+    std::cout << "[ECM] seed=" << base_seed << std::endl;
 
     size_t transform_size_once = 0;
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
@@ -243,266 +186,473 @@ int App::runECMMarin()
     for (uint64_t c = 0; c < curves; ++c)
     {
         engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
-        if (transform_size_once == 0) {
-            transform_size_once = eng->get_size();
-            std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id;
-            std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str());
-        }
+        if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; return 1; }
+        if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
         std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
         std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
-        const std::string ckpt_file = ck.str();
-        const std::string ckpt2     = ck2.str();
+        const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)nb; if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2); if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
             std::error_code ec; fs::remove(ckpt_file + ".old", ec); fs::rename(ckpt_file, ckpt_file + ".old", ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(ckpt_file + ".old", ec);
         };
         auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
-            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
             if (version != 1) return -2;
-            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
             if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
             if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
-            uint64_t rB1 = 0; if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
+            uint64_t rB1 = 0;
+            if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
             if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (rnb != nb || rB1 != B1) return -2;
+            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
             return 0;
         };
 
         auto save_ckpt2 = [&](uint32_t idx, double et){
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
-            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; uint32_t cnt = (uint32_t)primesS2.size(); if (!f.write(reinterpret_cast<const char*>(&cnt), sizeof(cnt))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; uint32_t cnt = (uint32_t)primesS2_v.size(); if (!f.write(reinterpret_cast<const char*>(&cnt), sizeof(cnt))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
             std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
         };
         auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
-            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
             if (version != 2) return -2;
-            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
             if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
             if (!f.read(reinterpret_cast<char*>(&cnt), sizeof(cnt))) return -2;
-            uint64_t b1s=0,b2s=0; if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2; if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
+            uint64_t b1s = 0, b2s = 0;
+            if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (cnt != primesS2.size() || b1s != B1 || b2s != B2) return -2;
+            if (cnt != primesS2_v.size() || b1s != B1 || b2s != B2) return -2;
             return 0;
         };
 
-        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
-        bool resume_stage2 = false;
-        {
-            int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et);
-            if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et);
-            resume_stage2 = (rr2 == 0);
-        }
+        auto write_gp = [&](const std::string& mode, const std::string& tors, const mpz_class& Nref, uint32_t pe, uint64_t b1e, uint64_t b2e, uint64_t seed_base, uint64_t seed_curve, const mpz_class* sigma_opt, const mpz_class* r_opt, const mpz_class* v_opt, const mpz_class* aE_opt, const mpz_class* dE_opt, const mpz_class& A24_ref, const mpz_class& x0_ref)->void{
+            (void) A24_ref;
+            (void) Nref;
+            std::ofstream gp("lastcurve.gp");
+            gp<<"p="<<pe<<"; N=2^p-1;\n";
+            gp<<"B1="<<b1e<<"; B2="<<b2e<<";\n";
+            gp<<"seed_base="<<seed_base<<"; seed_curve="<<seed_curve<<";\n";
+            gp<<"default(parisize, 64*10^6);\n";
+            gp<<"modN(x)=Mod(x,N);\n";
+            if (mode=="montgomery" && tors=="none") {
+                gp<<"sigma="<<(sigma_opt? sigma_opt->get_str() : "0")<<";\n";
+                gp<<"u=modN(sigma^2-5); v=modN(4*sigma);\n";
+                gp<<"x=u^3; t0=modN(4*x*v);\n";
+                gp<<"A=lift(modN(((v-u)^2*(v-u)*(3*u+v))/t0 - 2));\n";
+                gp<<"A24=lift(modN((A+2)/4));\n";
+                gp<<"x0=lift(modN(((v-u)^2)/(4*u*v)));\n";
+            } else if (mode=="montgomery" && tors=="16") {
+                gp<<"r="<<(r_opt? r_opt->get_str() : "0")<<";\n";
+                gp<<"A=lift(modN((8*r^4-16*r^3+16*r^2-8*r+1)/(4*r^2)));\n";
+                gp<<"A24=lift(modN((A+2)/4));\n";
+                gp<<"x0=lift(modN(modN(1)/2 - r^2));\n";
+            } else if (mode=="montgomery" && tors=="8") {
+                gp<<"v="<<(v_opt? v_opt->get_str() : "0")<<";\n";
+                gp<<"A=lift(modN(-((4*v+1)^2+16*v)));\n";
+                gp<<"A24=lift(modN((A+2)/4));\n";
+                gp<<"x0=lift(modN(4*v+1));\n";
+            } else if (mode=="edwards") {
+                gp<<"aE="<<(aE_opt? aE_opt->get_str() : "0")<<"; dE="<<(dE_opt? dE_opt->get_str() : "0")<<";\n";
+                gp<<"A=lift(modN(2*(aE+dE)/(aE-dE)));\n";
+                gp<<"A24=lift(modN((A+2)/4));\n";
+                gp<<"x0="<<x0_ref.get_str()<<";\n";
+            }
+            gp<<"\\print(\"A24=\",A24);\n";
+            gp<<"\\print(\"x0=\",x0);\n";
+            gp.close();
+        };
 
-        uint64_t seed = seed0 + c*0xD1342543DE82EF95ULL;
-        mpz_class sigma, u, v, A, A24, x0;
+        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
+
+        uint64_t curve_seed = mix64(base_seed, c);
+        std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
+
+        auto addm = [&](mpz_class a, mpz_class b)->mpz_class{ mpz_class r=a+b; r%=N; if (r<0) r+=N; return r; };
+        auto subm = [&](mpz_class a, mpz_class b)->mpz_class{ mpz_class r=a-b; r%=N; if (r<0) r+=N; return r; };
+        auto mulm = [&](const mpz_class& a, const mpz_class& b)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
+        auto sqrm = [&](const mpz_class& a)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), a.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
+        auto invm = [&](const mpz_class& a, mpz_class& inv)->int{
+            if (mpz_sgn(a.get_mpz_t())==0) return -1;
+            if (mpz_invert(inv.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t())) return 0;
+            mpz_class g; mpz_gcd(g.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t());
+            if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; return 1; }
+            return -1;
+        };
+
+        mpz_class A24, x0;
 
         if (!resume_stage2)
         {
-            sigma = rnd_mpz(N, seed, 128);
-            u = (sigma*sigma - 5) % N; if (u < 0) u += N;
-            v = (4*sigma) % N;
+            int picked_mode = -1;
+            if (forceSigma || options.notorsion) picked_mode = options.edwards ? 3 : 0;
+            else if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
+            else picked_mode = options.edwards ? 5 : 2;
 
-            mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t());
-            if (g > 1 && g < N) { std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found at curve "<<(c+1)<<": "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
-            mpz_class invv; if (!mpz_invert(invv.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t())) { mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found (invert v failed): "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
-            mpz_class t = (u * invv) % N; x0 = (t*t - 2) % N; if (x0 < 0) x0 += N;
+            if (picked_mode == 0)
+            {
+                mpz_class sigma_mpz;
+                if (forceSigma) { sigma_mpz = mpz_class(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
+                mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
+                mpz_class v = (mpz_class(4) * sigma_mpz) % N;
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; delete eng; return 0; }
+                mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
+                mpz_class invt; { int r = invm(t0, invt); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
+                mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
+                Araw = mulm(Araw, invt);
+                mpz_class A = subm(Araw, mpz_class(2));
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
+                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class num = sqrm(subm(v,u));
+                x0 = mulm(num, den);
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("montgomery","none", N, p, B1, B2, base_seed, curve_seed, &sigma_mpz, nullptr, nullptr, nullptr, nullptr, A24, x0);
+            }
+            else if (picked_mode == 1)
+            {
+                auto ec_add = [&](const mpz_class& x1, const mpz_class& y1, const mpz_class& x2, const mpz_class& y2, mpz_class& xr, mpz_class& yr)->int{
+                    if (x1==x2 && (y1+ y2)%N==0) return -1;
+                    mpz_class num = subm(y2, y1);
+                    mpz_class den = subm(x2, x1);
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class lam = mulm(num, inv);
+                    xr = subm(subm(sqrm(lam), x1), x2);
+                    yr = subm(mulm(lam, subm(x1, xr)), y1);
+                    return 0;
+                };
+                auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
+                    mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
+                    mpz_class den = mulm(mpz_class(2), y1);
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class lam = mulm(num, inv);
+                    xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
+                    yr = subm(mulm(lam, subm(x1, xr)), y1);
+                    return 0;
+                };
+                auto ec_mul = [&](uint64_t k, mpz_class x, mpz_class y, mpz_class& xr, mpz_class& yr)->int{
+                    bool init=false; mpz_class X=x, Y=y, RX=0, RY=0;
+                    for (int i=(int)u64_bits(k)-1;i>=0;--i){
+                        if (init){ int r = ec_dbl(RX, RY, RX, RY); if (r) return r; }
+                        if ((k>>i)&1ULL){
+                            if (!init){ RX=X; RY=Y; init=true; }
+                            else { int r = ec_add(RX, RY, X, Y, RX, RY); if (r) return r; }
+                        }
+                    }
+                    xr = RX; yr=RY; return 0;
+                };
 
-            mpz_class t1 = (v - u) % N; if (t1 < 0) t1 += N; mpz_class t1_3 = (t1*t1) % N; t1_3 = (t1_3 * t1) % N;
-            mpz_class t2 = (3*u + v) % N; if (t2 < 0) t2 += N; mpz_class num = (t1_3 * t2) % N;
-            mpz_class den = 0; { mpz_class u3 = (u*u) % N; u3 = (u3*u) % N; den = (4 * u3) % N; den = (den * v) % N; }
-            mpz_gcd(g.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found in parameterization: "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
-            mpz_class invden; if (!mpz_invert(invden.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t())) { mpz_gcd(g.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()); std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" factor="<<g.get_str()<<std::endl; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Factor found (invert den failed): "<<g.get_str(); guiServer_->appendLog(oss.str()); } delete eng; return 0; }
-            A = (num * invden) % N; A = (A - 2) % N; if (A < 0) A += N;
-            mpz_class inv4; mpz_invert(inv4.get_mpz_t(), mpz_class(4).get_mpz_t(), N.get_mpz_t());
-            A24 = ((A + 2) % N) * inv4 % N;
+                uint64_t k = 2 + (mix64(base_seed, c ^ 0xA5A5A5A5ULL) % 64ULL);
+                mpz_class s = mpz_class(4), t = mpz_class(8);
+                int rmul = ec_mul(k, s, t, s, t); if (rmul==1){ delete eng; return 0; } if (rmul<0){ delete eng; return 0; }
 
-            const size_t RX0=0, RZ0=1, RX1=2, RZ1=3, RXD=4, RZD=5, RA24=6, RT0=7, RT1=8, RT2=9, RT3=10, RU=11, RV=12, RM=13;
-            const size_t RA24M = 14;
-            const size_t XDM   = 15;
-            const size_t ZDM   = 16;
+                mpz_class den = subm(s, mpz_class(4));
+                mpz_class inv; { int r = invm(den, inv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
 
-            eng->set((engine::Reg)RZ0, 0u);
-            eng->set((engine::Reg)RX0, 1u);
-            eng->set((engine::Reg)RZ1, 1u);
-            { mpz_t z; mpz_init(z); mpz_set(z, x0.get_mpz_t()); eng->set_mpz((engine::Reg)RX1, z); mpz_set(z, x0.get_mpz_t()); eng->set_mpz((engine::Reg)RXD, z); mpz_set_ui(z, 1); eng->set_mpz((engine::Reg)RZD, z); mpz_set(z, A24.get_mpz_t()); eng->set_mpz((engine::Reg)RA24, z); mpz_clear(z); }
+                mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
+                mpz_class denr = subm(mpz_class(8), sqrm(alpha));
+                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class rpar = mulm(numr, invdenr);
 
-            uint64_t cnt_xdbl=0, cnt_xadd=0, cnt_mul=0, cnt_sqr=0;
+                mpz_class r2 = sqrm(rpar);
+                mpz_class r3 = mulm(r2, rpar);
+                mpz_class r4 = sqrm(r2);
+                mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
+                mpz_class A_den = mulm(mpz_class(4), r2);
+                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class A = mulm(A_num, invAden);
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
 
-            //auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)RM, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)RM); ++cnt_mul; };
+                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                x0 = subm(inv2, r2);
+
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=16 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("montgomery","16", N, p, B1, B2, base_seed, curve_seed, nullptr, &rpar, nullptr, nullptr, nullptr, A24, x0);
+            }
+            else if (picked_mode == 2)
+            {
+                mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
+                mpz_class a2 = sqrm(a);
+                mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
+                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
+                mpz_class fourv = mulm(mpz_class(4), v);
+                mpz_class one = mpz_class(1);
+                mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
+                x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
+
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, nullptr, nullptr, A24, x0);
+            }
+            else if (picked_mode == 3)
+            {
+                mpz_class sigma_mpz;
+                if (forceSigma) { sigma_mpz = mpz_class(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
+                mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
+                mpz_class v = (mpz_class(4) * sigma_mpz) % N;
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; delete eng; return 0; }
+                mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
+                mpz_class invt; { int r = invm(t0, invt); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
+                mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
+                Araw = mulm(Araw, invt);
+                mpz_class A = subm(Araw, mpz_class(2));
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
+                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class num = sqrm(subm(v,u));
+                x0 = mulm(num, den);
+                mpz_class aE = addm(A, mpz_class(2));
+                mpz_class dE = subm(A, mpz_class(2));
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("edwards","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
+            }
+            else if (picked_mode == 4)
+            {
+                auto ec_add = [&](const mpz_class& x1, const mpz_class& y1, const mpz_class& x2, const mpz_class& y2, mpz_class& xr, mpz_class& yr)->int{
+                    if (x1==x2 && (y1+ y2)%N==0) return -1;
+                    mpz_class num = subm(y2, y1);
+                    mpz_class den = subm(x2, x1);
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class lam = mulm(num, inv);
+                    xr = subm(subm(sqrm(lam), x1), x2);
+                    yr = subm(mulm(lam, subm(x1, xr)), y1);
+                    return 0;
+                };
+                auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
+                    mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
+                    mpz_class den = mulm(mpz_class(2), y1);
+                    mpz_class inv; int r = invm(den, inv); if (r==1){ return 1; } if (r<0) return -1;
+                    mpz_class lam = mulm(num, inv);
+                    xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
+                    yr = subm(mulm(lam, subm(x1, xr)), y1);
+                    return 0;
+                };
+                auto ec_mul = [&](uint64_t k, mpz_class x, mpz_class y, mpz_class& xr, mpz_class& yr)->int{
+                    bool init=false; mpz_class X=x, Y=y, RX=0, RY=0;
+                    for (int i=(int)u64_bits(k)-1;i>=0;--i){
+                        if (init){ int r = ec_dbl(RX, RY, RX, RY); if (r) return r; }
+                        if ((k>>i)&1ULL){
+                            if (!init){ RX=X; RY=Y; init=true; }
+                            else { int r = ec_add(RX, RY, X, Y, RX, RY); if (r) return r; }
+                        }
+                    }
+                    xr = RX; yr=RY; return 0;
+                };
+
+                uint64_t k = 2 + (mix64(base_seed, c ^ 0xA5A5A5A5ULL) % 64ULL);
+                mpz_class s = mpz_class(4), t = mpz_class(8);
+                int rmul = ec_mul(k, s, t, s, t); if (rmul==1){ delete eng; return 0; } if (rmul<0){ delete eng; return 0; }
+
+                mpz_class den = subm(s, mpz_class(4));
+                mpz_class inv; { int r = invm(den, inv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
+
+                mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
+                mpz_class denr = subm(mpz_class(8), sqrm(alpha));
+                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class rpar = mulm(numr, invdenr);
+
+                mpz_class r2 = sqrm(rpar);
+                mpz_class r3 = mulm(r2, rpar);
+                mpz_class r4 = sqrm(r2);
+                mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
+                mpz_class A_den = mulm(mpz_class(4), r2);
+                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class A = mulm(A_num, invAden);
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
+
+                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                x0 = subm(inv2, r2);
+
+                mpz_class aE = addm(A, mpz_class(2));
+                mpz_class dE = subm(A, mpz_class(2));
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards | torsion=16 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("edwards","16", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
+            }
+            else
+            {
+                mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
+                mpz_class a2 = sqrm(a);
+                mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
+                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
+                mpz_class fourv = mulm(mpz_class(4), v);
+                mpz_class one = mpz_class(1);
+                mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ delete eng; return 0; } if (r<0){ delete eng; return 0; } }
+                A24 = mulm(addm(A, mpz_class(2)), inv4);
+                x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
+                mpz_class aE = addm(A, mpz_class(2));
+                mpz_class dE = subm(A, mpz_class(2));
+                std::ostringstream head;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
+                write_gp("edwards","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
+            }
+
+            mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
+            eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
+
+            eng->set((engine::Reg)0, 1u);
+            eng->set((engine::Reg)1, 0u);
+            eng->set((engine::Reg)3, 1u);
+            mpz_t zx0; mpz_init(zx0); mpz_set(zx0, x0.get_mpz_t()); eng->set_mpz((engine::Reg)2, zx0); mpz_clear(zx0);
+            mpz_t zxd; mpz_init(zxd); mpz_set(zxd, x0.get_mpz_t()); eng->set_mpz((engine::Reg)4, zxd); mpz_clear(zxd);
+            eng->set((engine::Reg)5, 1u);
+            eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
+
+            uint64_t cnt_xdbl=0,cnt_xadd=0,cnt_sqr=0,cnt_mul=0;
+
             auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-                eng->copy((engine::Reg)RT0, (engine::Reg)X1);       // RT0 = X1+Z1
-                eng->add ((engine::Reg)RT0, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT1, (engine::Reg)RT0);      // RT1 = U
-                eng->square_mul((engine::Reg)RT1); ++cnt_sqr;
-
-                eng->copy((engine::Reg)RT2, (engine::Reg)X1);       // RT2 = X1-Z1
-                eng->sub_reg((engine::Reg)RT2, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT3, (engine::Reg)RT2);      // RT3 = V
-                eng->square_mul((engine::Reg)RT3); ++cnt_sqr;
-
-                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT3);
-                eng->copy((engine::Reg)X2, (engine::Reg)RT1);
-                eng->mul ((engine::Reg)X2, (engine::Reg)RM);        // 1er mul
-
-                eng->copy((engine::Reg)RT0, (engine::Reg)RT1);      // RT0 = W
-                eng->sub_reg((engine::Reg)RT0, (engine::Reg)RT3);
-
-                eng->copy((engine::Reg)RT2, (engine::Reg)RT0);      // RT2 = C*W
-                eng->mul ((engine::Reg)RT2, (engine::Reg)RA24M);    // 2e mul (pas de set_multiplicand ici)
-                eng->add ((engine::Reg)RT2, (engine::Reg)RT3);      // RT2 = T
-
-                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT2);
-                eng->copy((engine::Reg)Z2, (engine::Reg)RT0);
-                eng->mul ((engine::Reg)Z2, (engine::Reg)RM);        // 3e mul
-
+                eng->copy((engine::Reg)7,(engine::Reg)X1);
+                eng->add((engine::Reg)7,(engine::Reg)Z1);
+                eng->copy((engine::Reg)8,(engine::Reg)7);
+                eng->square_mul((engine::Reg)8); ++cnt_sqr;
+                eng->copy((engine::Reg)9,(engine::Reg)X1);
+                eng->sub_reg((engine::Reg)9,(engine::Reg)Z1);
+                eng->copy((engine::Reg)10,(engine::Reg)9);
+                eng->square_mul((engine::Reg)10); ++cnt_sqr;
+                eng->copy((engine::Reg)X2,(engine::Reg)8);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)10);
+                eng->mul((engine::Reg)X2,(engine::Reg)11); ++cnt_mul;
+                eng->copy((engine::Reg)9,(engine::Reg)8);
+                eng->sub_reg((engine::Reg)9,(engine::Reg)10);
+                eng->copy((engine::Reg)Z2,(engine::Reg)9);
+                eng->mul((engine::Reg)Z2,(engine::Reg)12); ++cnt_mul;
+                eng->add((engine::Reg)Z2,(engine::Reg)10);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
+                eng->mul((engine::Reg)Z2,(engine::Reg)11); ++cnt_mul;
                 ++cnt_xdbl;
             };
-
-
-            auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t XD,size_t ZD,size_t X3,size_t Z3){
-                (void) XD;(void) ZD;
-                eng->copy((engine::Reg)RT0, (engine::Reg)X1);
-                eng->add ((engine::Reg)RT0, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT1, (engine::Reg)X1);
-                eng->sub_reg((engine::Reg)RT1, (engine::Reg)Z1);
-                eng->copy((engine::Reg)RT2, (engine::Reg)X2);
-                eng->add ((engine::Reg)RT2, (engine::Reg)Z2);
-                eng->copy((engine::Reg)RT3, (engine::Reg)X2);
-                eng->sub_reg((engine::Reg)RT3, (engine::Reg)Z2);
-
-                eng->copy((engine::Reg)RU, (engine::Reg)RT3);
-                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT0);
-                eng->mul ((engine::Reg)RU, (engine::Reg)RM);
-
-                eng->copy((engine::Reg)RV, (engine::Reg)RT2);
-                eng->set_multiplicand((engine::Reg)RM, (engine::Reg)RT1);
-                eng->mul ((engine::Reg)RV, (engine::Reg)RM);
-
-                eng->copy((engine::Reg)X3, (engine::Reg)RU);
-                eng->add ((engine::Reg)X3, (engine::Reg)RV);
+            auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
+                eng->copy((engine::Reg)7,(engine::Reg)X1);
+                eng->sub_reg((engine::Reg)7,(engine::Reg)Z1);
+                eng->copy((engine::Reg)8,(engine::Reg)X2);
+                eng->add((engine::Reg)8,(engine::Reg)Z2);
+                eng->copy((engine::Reg)9,(engine::Reg)7);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+                eng->mul((engine::Reg)9,(engine::Reg)11); ++cnt_mul;
+                eng->copy((engine::Reg)8,(engine::Reg)X1);
+                eng->add((engine::Reg)8,(engine::Reg)Z1);
+                eng->copy((engine::Reg)7,(engine::Reg)X2);
+                eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);
+                eng->copy((engine::Reg)10,(engine::Reg)8);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+                eng->mul((engine::Reg)10,(engine::Reg)11); ++cnt_mul;
+                eng->copy((engine::Reg)X3,(engine::Reg)9);
+                eng->add((engine::Reg)X3,(engine::Reg)10);
                 eng->square_mul((engine::Reg)X3); ++cnt_sqr;
-                eng->mul ((engine::Reg)X3, (engine::Reg)ZDM);
-
-                eng->copy((engine::Reg)Z3, (engine::Reg)RU);
-                eng->sub_reg((engine::Reg)Z3, (engine::Reg)RV);
+                eng->mul((engine::Reg)X3,(engine::Reg)14); ++cnt_mul;
+                eng->copy((engine::Reg)Z3,(engine::Reg)9);
+                eng->sub_reg((engine::Reg)Z3,(engine::Reg)10);
                 eng->square_mul((engine::Reg)Z3); ++cnt_sqr;
-                eng->mul ((engine::Reg)Z3, (engine::Reg)XDM);
-
+                eng->mul((engine::Reg)Z3,(engine::Reg)13); ++cnt_mul;
                 ++cnt_xadd;
             };
 
+            std::ostringstream head2;
+            head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
+            std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
 
-
-            std::ostringstream head;
-            head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | sigma64=0x"<<hex64(sigma)<<" x0_64=0x"<<hex64(x0)<<" A_64=0x"<<hex64(A)<<" A24_64=0x"<<hex64(A24)<<" | K_bits="<<nb;
-            std::cout<<head.str()<<std::endl;
-            if (guiServer_) guiServer_->appendLog(head.str());
-
-            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0;
-            (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
-
-            auto t0 = high_resolution_clock::now();
-            auto last_save = t0;
-            auto last_ui = t0;
-            eng->set_multiplicand((engine::Reg)RA24M, (engine::Reg)RA24); // A24 once
-            eng->set_multiplicand((engine::Reg)XDM,   (engine::Reg)RXD);  // XD  once
-            eng->set_multiplicand((engine::Reg)ZDM,   (engine::Reg)RZD);  // ZD  once
-            for (size_t i = start_i; i < nb; ++i){
-                size_t bit = nb - 1 - i;
-                mp_bitcnt_t mb = static_cast<mp_bitcnt_t>(bit);
-                int b = mpz_tstbit(K.get_mpz_t(), mb) ? 1 : 0;
-                if (b==0) { xADD(2,3,0,1,4,5,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
-                else      { xADD(0,1,2,3,4,5,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
-
+            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+            auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
+            size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
+            for (size_t i = start_i; i < total_bits; ++i){
+                size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
+                if (b==0) { xADD(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
+                else      { xADD(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
                 auto now = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == nb) {
-                    double done = double(i + 1), total = double(nb);
+                if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_bits) {
+                    double done = double(i + 1), total = double(total_bits);
                     double elapsed = duration<double>(now - t0).count() + saved_et;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<nb<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%)"
-                        <<" | ETA "<<fmt_hms(eta)
-                        <<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;
-                    std::cout<<line.str()<<std::flush;
-                    last_ui = now;
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<total_bits<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%) | ETA "<<fmt_hms(eta)<<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;
+                    std::cout<<line.str()<<std::flush; last_ui = now;
                 }
-                if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
-                    double elapsed = duration<double>(now - t0).count() + saved_et;
-                    save_ckpt((uint32_t)(i + 1), elapsed);
-                    last_save = now;
-                }
-                if (interrupted) {
-                    double elapsed = duration<double>(now - t0).count() + saved_et;
-                    save_ckpt((uint32_t)(i + 1), elapsed);
-                    std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<nb<<"\n";
-                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<nb; guiServer_->appendLog(oss.str()); }
-                    delete eng;
-                    return 0;
-                }
+                if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } delete eng; return 0; }
             }
             std::cout<<std::endl;
 
-            std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage1..."<<std::endl;
             mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
             mpz_class gg = gcd_with_dots(Zfin, N);
+            if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
             bool found = (gg > 1 && gg < N);
 
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
-            {
-                std::ostringstream s1;
-                s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s";
-                std::cout<<s1.str()<<std::endl;
-                if (guiServer_) guiServer_->appendLog(s1.str());
-            }
+            { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
             if (found) {
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
+                std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); delete eng; return 0; }
             }
         }
         else
         {
-            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx<<"/"<<primesS2.size()<<" ("<<fixed<<setprecision(2)<<(primesS2.empty()?0.0: (100.0*double(s2_idx)/double(primesS2.size())))<<"%)";
+            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<(primesS2_v.empty()?0.0: (100.0*double(s2_idx)/double(primesS2_v.size())))<<"%)";
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
+        std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+
 
         if (B2 > B1) {
-            bool use_bsgs = options.bsgs ? true : false;
-            uint32_t brent_deg = 1; if (options.brent > 1) brent_deg = (uint32_t)options.brent; else if (options.brent) brent_deg = 2;
-            if (!resume_stage2) { std::ostringstream s2h; s2h<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 start, primes="<<primesS2.size(); if (use_bsgs) s2h<<" | bsgs"; if (brent_deg>1) s2h<<" | brent_deg="<<brent_deg; std::cout<<s2h.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2h.str()); }
-
             auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
                 eng->set((engine::Reg)0, 1u);
                 eng->set((engine::Reg)1, 0u);
                 eng->copy((engine::Reg)2, (engine::Reg)Xin);
                 eng->copy((engine::Reg)3, (engine::Reg)Zin);
-                eng->copy((engine::Reg)4, (engine::Reg)Xin);
-                eng->copy((engine::Reg)5, (engine::Reg)Zin);
                 size_t nbq = u64_bits(m);
-                auto mul_inplace = [&](size_t dst, size_t src){ eng->set_multiplicand((engine::Reg)13, (engine::Reg)src); eng->mul((engine::Reg)dst, (engine::Reg)13); };
-                auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+                auto xDBLq = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
                     eng->copy((engine::Reg)7, (engine::Reg)X1);
                     eng->add((engine::Reg)7, (engine::Reg)Z1);
                     eng->copy((engine::Reg)8, (engine::Reg)7);
@@ -512,174 +662,89 @@ int App::runECMMarin()
                     eng->copy((engine::Reg)10, (engine::Reg)9);
                     eng->square_mul((engine::Reg)10);
                     eng->copy((engine::Reg)X2, (engine::Reg)8);
-                    mul_inplace(X2, 10);
-                    eng->copy((engine::Reg)7, (engine::Reg)8);
-                    eng->sub_reg((engine::Reg)7, (engine::Reg)10);
-                    eng->copy((engine::Reg)9, (engine::Reg)7);
-                    mul_inplace(9, 6);
-                    eng->add((engine::Reg)9, (engine::Reg)10);
+                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)10);
+                    eng->mul((engine::Reg)X2, (engine::Reg)11);
+                    eng->copy((engine::Reg)9, (engine::Reg)8);
+                    eng->sub_reg((engine::Reg)9, (engine::Reg)10);
                     eng->copy((engine::Reg)Z2, (engine::Reg)9);
-                    mul_inplace(Z2, 7);
+                    eng->mul((engine::Reg)Z2, (engine::Reg)12);
+                    eng->add((engine::Reg)Z2, (engine::Reg)10);
+                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)9);
+                    eng->mul((engine::Reg)Z2, (engine::Reg)11);
                 };
-                auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t XD,size_t ZD,size_t X3,size_t Z3){
+                auto xADDq = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
                     eng->copy((engine::Reg)7, (engine::Reg)X1);
-                    eng->add((engine::Reg)7, (engine::Reg)Z1);
+                    eng->sub_reg((engine::Reg)7, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)8, (engine::Reg)X2);
+                    eng->add((engine::Reg)8, (engine::Reg)Z2);
+                    eng->copy((engine::Reg)9, (engine::Reg)7);
+                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)8);
+                    eng->mul((engine::Reg)9, (engine::Reg)11);
                     eng->copy((engine::Reg)8, (engine::Reg)X1);
-                    eng->sub_reg((engine::Reg)8, (engine::Reg)Z1);
-                    eng->copy((engine::Reg)9, (engine::Reg)X2);
-                    eng->add((engine::Reg)9, (engine::Reg)Z2);
-                    eng->copy((engine::Reg)10, (engine::Reg)X2);
-                    eng->sub_reg((engine::Reg)10, (engine::Reg)Z2);
-                    eng->copy((engine::Reg)11, (engine::Reg)10);
-                    mul_inplace(11, 7);
-                    eng->copy((engine::Reg)12, (engine::Reg)9);
-                    mul_inplace(12, 8);
-                    eng->copy((engine::Reg)X3, (engine::Reg)11);
-                    eng->add((engine::Reg)X3, (engine::Reg)12);
+                    eng->add((engine::Reg)8, (engine::Reg)Z1);
+                    eng->copy((engine::Reg)7, (engine::Reg)X2);
+                    eng->sub_reg((engine::Reg)7, (engine::Reg)Z2);
+                    eng->copy((engine::Reg)10, (engine::Reg)8);
+                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)7);
+                    eng->mul((engine::Reg)10, (engine::Reg)11);
+                    eng->copy((engine::Reg)X3, (engine::Reg)9);
+                    eng->add((engine::Reg)X3, (engine::Reg)10);
                     eng->square_mul((engine::Reg)X3);
-                    mul_inplace(X3, ZD);
-                    eng->copy((engine::Reg)Z3, (engine::Reg)11);
-                    eng->sub_reg((engine::Reg)Z3, (engine::Reg)12);
+                    eng->mul((engine::Reg)X3, (engine::Reg)14);
+                    eng->copy((engine::Reg)Z3, (engine::Reg)9);
+                    eng->sub_reg((engine::Reg)Z3, (engine::Reg)10);
                     eng->square_mul((engine::Reg)Z3);
-                    mul_inplace(Z3, XD);
+                    eng->mul((engine::Reg)Z3, (engine::Reg)13);
                 };
-                for (size_t bi=0; bi<nbq; ++bi){
-                    size_t bit = nbq - 1 - bi;
-                    int b = ((m >> bit) & 1ULL) ? 1 : 0;
-                    if (b==0) { xADD(2,3,0,1,4,5,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
-                    else      { xADD(0,1,2,3,4,5,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+                for (size_t i = 0; i < nbq; ++i){
+                    size_t bit = nbq - 1 - i;
+                    int b = int((m >> bit) & 1ULL);
+                    if (b==0){ xADDq(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBLq(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
+                    else     { xADDq(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBLq(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
                 }
                 eng->copy((engine::Reg)Xout, (engine::Reg)0);
                 eng->copy((engine::Reg)Zout, (engine::Reg)1);
             };
 
-            auto t2_0 = high_resolution_clock::now();
-            auto last2_save = t2_0;
-            auto last2_ui = t2_0;
+            uint32_t Xcur = 0, Zcur = 1;
+            uint32_t start_i = 0; double saved = 0.0; if (resume_stage2) { start_i = s2_idx; saved = s2_et; }
+            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = saved;
+            uint64_t Macc = 1; size_t in_block = 0;
 
-            size_t Xcur = 0, Zcur = 1;
-
-            uint32_t start_idx = resume_stage2 ? s2_idx : 0;
-            double saved_et2 = resume_stage2 ? s2_et : 0.0;
-
-            auto mul_ov = [](uint64_t a, uint64_t b, uint64_t& out)->bool{
-                if (a==0 || b==0){ out = 0; return false; }
-                const uint64_t U = ~uint64_t(0);
-                if (a > U / b) return true;
-                out = a * b;
-                return false;
-            };
-            auto pow_ov = [&](uint64_t base, uint32_t exp, uint64_t& out)->bool{
-                out = 1;
-                for (uint32_t k=0;k<exp;k++){
-                    uint64_t t=0;
-                    if (mul_ov(out, base, t)) return true;
-                    out = t;
-                }
-                return false;
-            };
-
-            const uint32_t block_cap = options.bsgs ? 8u : 1u;
-            uint64_t Macc = 1;
-            uint32_t in_block = 0;
-
-            for (uint32_t i = start_idx; i < (uint32_t)primesS2.size(); ++i) {
-                uint64_t q = primesS2[i];
-                uint64_t mexp = q;
-                bool big = false;
-                if (brent_deg > 1) {
-                    if (pow_ov(q, brent_deg, mexp)) big = true;
-                }
-
-                if (!big && options.bsgs && in_block < block_cap) {
-                    uint64_t tmp=0;
-                    if (!mul_ov(Macc, mexp, tmp)) {
-                        Macc = tmp;
-                        ++in_block;
-                    } else {
-                        if (Macc > 1) {
-                            ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
-                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                            Macc = 1;
-                            in_block = 0;
-                        }
-                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
-                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                    }
-                } else {
-                    if (Macc > 1) {
-                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
-                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                        Macc = 1;
-                        in_block = 0;
-                    }
-                    if (big) {
-                        for (uint32_t k=0;k<brent_deg;k++){
-                            ladder_mul_small(Xcur, Zcur, q, 7, 8);
-                            eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                            eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                        }
-                    } else {
-                        ladder_mul_small(Xcur, Zcur, mexp, 7, 8);
-                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                    }
-                }
+            for (size_t i = start_i; i < primesS2_v.size(); ++i){
+                uint32_t q = primesS2_v[i];
+                if (Macc == 1) { Macc = q; in_block = 1; }
+                else if ((in_block < 64) && (Macc <= (UINT64_MAX / q))) { Macc *= q; ++in_block; }
+                else { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = q; in_block = 1; }
 
                 auto now2 = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2.size()) {
-                    double done = double(i + 1), total = double(primesS2.size());
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2_v.size()) {
+                    double done = double(i + 1), total = double(primesS2_v.size());
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2.size()<<" ("<<fixed<<setprecision(2)<<(total? (done*100.0/total):100.0)<<"%)"
-                        <<" | ETA "<<fmt_hms(eta);
-                    std::cout<<line.str()<<std::flush;
-                    last2_ui = now2;
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<(total? (done*100.0/total):100.0)<<"%) | ETA "<<fmt_hms(eta);
+                    std::cout<<line.str()<<std::flush; last2_ui = now2;
                 }
-
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
-                    if (Macc > 1) {
-                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
-                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                        Macc = 1;
-                        in_block = 0;
-                    }
-                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                    save_ckpt2((uint32_t)(i + 1), elapsed);
-                    last2_save = now2;
+                    if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = 1; in_block = 0; }
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed); last2_save = now2;
                 }
                 if (interrupted) {
-                    if (Macc > 1) {
-                        ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
-                        eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                        eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-                        Macc = 1;
-                        in_block = 0;
-                    }
-                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
-                    save_ckpt2((uint32_t)(i + 1), elapsed);
-                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2.size()<<"\n";
-                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2.size(); guiServer_->appendLog(oss.str()); }
-                    delete eng;
-                    return 0;
+                    if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = 1; in_block = 0; }
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed);
+                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size()<<"\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size(); guiServer_->appendLog(oss.str()); }
+                    delete eng; return 0;
                 }
             }
-            if (Macc > 1) {
-                ladder_mul_small(Xcur, Zcur, Macc, 7, 8);
-                eng->copy((engine::Reg)Xcur, (engine::Reg)7);
-                eng->copy((engine::Reg)Zcur, (engine::Reg)8);
-            }
+            if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); }
             std::cout<<std::endl;
 
-            std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | GCD after Stage2..."<<std::endl;
             mpz_class Zfin2 = compute_X_with_dots(eng, (engine::Reg)Zcur, N);
             mpz_class gg2 = gcd_with_dots(Zfin2, N);
+            if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
             bool found2 = (gg2 > 1 && gg2 < N);
 
             std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
@@ -692,18 +757,16 @@ int App::runECMMarin()
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); delete eng; return 0; }
-            }
+        }
         }
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
-        static thread_local std::chrono::high_resolution_clock::time_point curve_t0 = high_resolution_clock::now();
-        //double elapsed = duration<double>(high_resolution_clock::now() - curve_t0).count();
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
-        curve_t0 = high_resolution_clock::now();
-
         delete eng;
     }
 
+    //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
     std::cout<<"[ECM] No factor found"<<std::endl;
+    
     return 1;
 }
