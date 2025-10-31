@@ -67,12 +67,12 @@ static void trim_inplace(std::string& s){
     if (a == std::string::npos) { s.clear(); return; }
     s = s.substr(a, b - a + 1);
 }
-
+/*
 static uint64_t mul_sat_u64(uint64_t a, uint64_t b){
     if (a == 0 || b == 0) return 0;
     if (a > std::numeric_limits<uint64_t>::max() / b) return std::numeric_limits<uint64_t>::max();
     return a * b;
-}
+}*/
 
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
@@ -215,7 +215,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 uint64_t curves = static_cast<uint64_t>(std::stoull(parts[6]));
                 if (curves == 0) curves = 1;
 
-                if (B2 == 0 || B2 == B1) B2 = mul_sat_u64(B1, 100);
+                if (B2 == 0 || B2 == B1) B2 = 0;//mul_sat_u64(B1, 100);
 
                 WorktodoEntry entry;
                 entry.ecmTest   = true;
