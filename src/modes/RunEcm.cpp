@@ -50,6 +50,7 @@
 #include <deque>
 #include <filesystem>
 #include <set>
+#include <unordered_set>
 
 using namespace core;
 using namespace std::chrono;
@@ -92,6 +93,7 @@ using core::algo::product_prefix_fit_u64;
 using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
+
 
 int App::runECMMarin()
 {
@@ -361,6 +363,51 @@ int App::runECMMarin()
             if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
         }
 
+        auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+            eng->copy((engine::Reg)7,(engine::Reg)X1);
+            eng->add((engine::Reg)7,(engine::Reg)Z1);
+            eng->copy((engine::Reg)8,(engine::Reg)7);
+            eng->square_mul((engine::Reg)8);
+            eng->copy((engine::Reg)9,(engine::Reg)X1);
+            eng->sub_reg((engine::Reg)9,(engine::Reg)Z1);
+            eng->copy((engine::Reg)10,(engine::Reg)9);
+            eng->square_mul((engine::Reg)10);
+            eng->copy((engine::Reg)X2,(engine::Reg)8);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)10);
+            eng->mul((engine::Reg)X2,(engine::Reg)11);
+            eng->copy((engine::Reg)9,(engine::Reg)8);
+            eng->sub_reg((engine::Reg)9,(engine::Reg)10);
+            eng->copy((engine::Reg)Z2,(engine::Reg)9);
+            eng->mul((engine::Reg)Z2,(engine::Reg)12);
+            eng->add((engine::Reg)Z2,(engine::Reg)10);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
+            eng->mul((engine::Reg)Z2,(engine::Reg)11);
+        };
+        auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
+            eng->copy((engine::Reg)7,(engine::Reg)X1);
+            eng->sub_reg((engine::Reg)7,(engine::Reg)Z1);
+            eng->copy((engine::Reg)8,(engine::Reg)X2);
+            eng->add((engine::Reg)8,(engine::Reg)Z2);
+            eng->copy((engine::Reg)9,(engine::Reg)7);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)9,(engine::Reg)11);
+            eng->copy((engine::Reg)8,(engine::Reg)X1);
+            eng->add((engine::Reg)8,(engine::Reg)Z1);
+            eng->copy((engine::Reg)7,(engine::Reg)X2);
+            eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);
+            eng->copy((engine::Reg)10,(engine::Reg)8);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)10,(engine::Reg)11);
+            eng->copy((engine::Reg)X3,(engine::Reg)9);
+            eng->add((engine::Reg)X3,(engine::Reg)10);
+            eng->square_mul((engine::Reg)X3);
+            eng->mul((engine::Reg)X3,(engine::Reg)14);
+            eng->copy((engine::Reg)Z3,(engine::Reg)9);
+            eng->sub_reg((engine::Reg)Z3,(engine::Reg)10);
+            eng->square_mul((engine::Reg)Z3);
+            eng->mul((engine::Reg)Z3,(engine::Reg)13);
+        };
+
         if (!resume_stage2)
         {
             int picked_mode = -1;
@@ -608,53 +655,6 @@ int App::runECMMarin()
 
             uint64_t cnt_xdbl=0,cnt_xadd=0,cnt_sqr=0,cnt_mul=0;
 
-            auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-                eng->copy((engine::Reg)7,(engine::Reg)X1);
-                eng->add((engine::Reg)7,(engine::Reg)Z1);
-                eng->copy((engine::Reg)8,(engine::Reg)7);
-                eng->square_mul((engine::Reg)8); ++cnt_sqr;
-                eng->copy((engine::Reg)9,(engine::Reg)X1);
-                eng->sub_reg((engine::Reg)9,(engine::Reg)Z1);
-                eng->copy((engine::Reg)10,(engine::Reg)9);
-                eng->square_mul((engine::Reg)10); ++cnt_sqr;
-                eng->copy((engine::Reg)X2,(engine::Reg)8);
-                eng->set_multiplicand((engine::Reg)11,(engine::Reg)10);
-                eng->mul((engine::Reg)X2,(engine::Reg)11); ++cnt_mul;
-                eng->copy((engine::Reg)9,(engine::Reg)8);
-                eng->sub_reg((engine::Reg)9,(engine::Reg)10);
-                eng->copy((engine::Reg)Z2,(engine::Reg)9);
-                eng->mul((engine::Reg)Z2,(engine::Reg)12); ++cnt_mul;
-                eng->add((engine::Reg)Z2,(engine::Reg)10);
-                eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-                eng->mul((engine::Reg)Z2,(engine::Reg)11); ++cnt_mul;
-                ++cnt_xdbl;
-            };
-            auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
-                eng->copy((engine::Reg)7,(engine::Reg)X1);
-                eng->sub_reg((engine::Reg)7,(engine::Reg)Z1);
-                eng->copy((engine::Reg)8,(engine::Reg)X2);
-                eng->add((engine::Reg)8,(engine::Reg)Z2);
-                eng->copy((engine::Reg)9,(engine::Reg)7);
-                eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-                eng->mul((engine::Reg)9,(engine::Reg)11); ++cnt_mul;
-                eng->copy((engine::Reg)8,(engine::Reg)X1);
-                eng->add((engine::Reg)8,(engine::Reg)Z1);
-                eng->copy((engine::Reg)7,(engine::Reg)X2);
-                eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);
-                eng->copy((engine::Reg)10,(engine::Reg)8);
-                eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-                eng->mul((engine::Reg)10,(engine::Reg)11); ++cnt_mul;
-                eng->copy((engine::Reg)X3,(engine::Reg)9);
-                eng->add((engine::Reg)X3,(engine::Reg)10);
-                eng->square_mul((engine::Reg)X3); ++cnt_sqr;
-                eng->mul((engine::Reg)X3,(engine::Reg)14); ++cnt_mul;
-                eng->copy((engine::Reg)Z3,(engine::Reg)9);
-                eng->sub_reg((engine::Reg)Z3,(engine::Reg)10);
-                eng->square_mul((engine::Reg)Z3); ++cnt_sqr;
-                eng->mul((engine::Reg)Z3,(engine::Reg)13); ++cnt_mul;
-                ++cnt_xadd;
-            };
-
             std::ostringstream head2;
             head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
             std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
@@ -694,8 +694,6 @@ int App::runECMMarin()
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
                 std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
                 std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
-                
-                
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); result_factor=gg; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
             }
@@ -707,7 +705,6 @@ int App::runECMMarin()
         }
         std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
         std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
-               
 
         if (B2 > B1) {
             auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
@@ -717,72 +714,30 @@ int App::runECMMarin()
                 eng->copy((engine::Reg)3, (engine::Reg)Zin);
                 eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
                 eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
-
                 size_t nbq = u64_bits(m);
-                auto xDBLq = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-                    eng->copy((engine::Reg)7, (engine::Reg)X1);
-                    eng->add((engine::Reg)7, (engine::Reg)Z1);
-                    eng->copy((engine::Reg)8, (engine::Reg)7);
-                    eng->square_mul((engine::Reg)8);
-                    eng->copy((engine::Reg)9, (engine::Reg)X1);
-                    eng->sub_reg((engine::Reg)9, (engine::Reg)Z1);
-                    eng->copy((engine::Reg)10, (engine::Reg)9);
-                    eng->square_mul((engine::Reg)10);
-                    eng->copy((engine::Reg)X2, (engine::Reg)8);
-                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)10);
-                    eng->mul((engine::Reg)X2, (engine::Reg)11);
-                    eng->copy((engine::Reg)9, (engine::Reg)8);
-                    eng->sub_reg((engine::Reg)9, (engine::Reg)10);
-                    eng->copy((engine::Reg)Z2, (engine::Reg)9);
-                    eng->mul((engine::Reg)Z2, (engine::Reg)12);
-                    eng->add((engine::Reg)Z2, (engine::Reg)10);
-                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)9);
-                    eng->mul((engine::Reg)Z2, (engine::Reg)11);
-                };
-                auto xADDq = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
-                    eng->copy((engine::Reg)7, (engine::Reg)X1);
-                    eng->sub_reg((engine::Reg)7, (engine::Reg)Z1);
-                    eng->copy((engine::Reg)8, (engine::Reg)X2);
-                    eng->add((engine::Reg)8, (engine::Reg)Z2);
-                    eng->copy((engine::Reg)9, (engine::Reg)7);
-                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)8);
-                    eng->mul((engine::Reg)9, (engine::Reg)11);
-                    eng->copy((engine::Reg)8, (engine::Reg)X1);
-                    eng->add((engine::Reg)8, (engine::Reg)Z1);
-                    eng->copy((engine::Reg)7, (engine::Reg)X2);
-                    eng->sub_reg((engine::Reg)7, (engine::Reg)Z2);
-                    eng->copy((engine::Reg)10, (engine::Reg)8);
-                    eng->set_multiplicand((engine::Reg)11, (engine::Reg)7);
-                    eng->mul((engine::Reg)10, (engine::Reg)11);
-                    eng->copy((engine::Reg)X3, (engine::Reg)9);
-                    eng->add((engine::Reg)X3, (engine::Reg)10);
-                    eng->square_mul((engine::Reg)X3);
-                    eng->mul((engine::Reg)X3, (engine::Reg)14);
-                    eng->copy((engine::Reg)Z3, (engine::Reg)9);
-                    eng->sub_reg((engine::Reg)Z3, (engine::Reg)10);
-                    eng->square_mul((engine::Reg)Z3);
-                    eng->mul((engine::Reg)Z3, (engine::Reg)13);
-                };
                 for (size_t i = 0; i < nbq; ++i){
                     size_t bit = nbq - 1 - i;
                     int b = int((m >> bit) & 1ULL);
-                    if (b==0){ xADDq(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBLq(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
-                    else     { xADDq(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBLq(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+                    if (b==0){ xADD(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
+                    else     { xADD(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
                 }
                 eng->copy((engine::Reg)Xout, (engine::Reg)0);
                 eng->copy((engine::Reg)Zout, (engine::Reg)1);
             };
 
-            uint32_t Xcur = 0, Zcur = 1;
             uint32_t start_i = 0; double saved = 0.0; if (resume_stage2) { start_i = s2_idx; saved = s2_et; }
             auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = saved;
-            uint64_t Macc = 1; size_t in_block = 0;
+
+            if (!resume_stage2) eng->set((engine::Reg)15, 1u);
+
+            const uint32_t baseX = 4, baseZ = 5;
+            if (!resume_stage2) { eng->copy((engine::Reg)baseX, (engine::Reg)0); eng->copy((engine::Reg)baseZ, (engine::Reg)1); }
 
             for (size_t i = start_i; i < primesS2_v.size(); ++i){
                 uint32_t q = primesS2_v[i];
-                if (Macc == 1) { Macc = q; in_block = 1; }
-                else if ((in_block < 64) && (Macc <= (UINT64_MAX / q))) { Macc *= q; ++in_block; }
-                else { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = q; in_block = 1; }
+                ladder_mul_small(baseX, baseZ, q, 7, 8);
+                eng->set_multiplicand((engine::Reg)11, (engine::Reg)8);
+                eng->mul((engine::Reg)15, (engine::Reg)11);
 
                 auto now2 = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2_v.size()) {
@@ -791,26 +746,23 @@ int App::runECMMarin()
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<(total? (done*100.0/total):100.0)<<"%) | ETA "<<fmt_hms(eta);
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<((primesS2_v.size()? (done*100.0/total):100.0))<<"%) | ETA "<<fmt_hms(eta);
                     std::cout<<line.str()<<std::flush; last2_ui = now2;
                 }
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
-                    if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = 1; in_block = 0; }
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed); last2_save = now2;
                 }
                 if (interrupted) {
-                    if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); Macc = 1; in_block = 0; }
                     double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed);
                     std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size()<<"\n";
                     if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size(); guiServer_->appendLog(oss.str()); }
                     curves_tested_for_found=c+1; write_result(); delete eng; return 0;
                 }
             }
-            if (Macc > 1) { ladder_mul_small(Xcur, Zcur, Macc, 7, 8); eng->copy((engine::Reg)Xcur, (engine::Reg)7); eng->copy((engine::Reg)Zcur, (engine::Reg)8); }
             std::cout<<std::endl;
 
-            mpz_class Zfin2 = compute_X_with_dots(eng, (engine::Reg)Zcur, N);
-            mpz_class gg2 = gcd_with_dots(Zfin2, N);
+            mpz_class Acc = compute_X_with_dots(eng, (engine::Reg)15, N);
+            mpz_class gg2 = gcd_with_dots(Acc, N);
             if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
             bool found2 = (gg2 > 1 && gg2 < N);
 
@@ -824,7 +776,7 @@ int App::runECMMarin()
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); result_factor=gg2; result_status="found"; curves_tested_for_found=c+1; write_result(); delete eng; return 0; }
-        }
+            }
         }
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
@@ -836,4 +788,3 @@ int App::runECMMarin()
     write_result();
     return 1;
 }
-
