@@ -71,6 +71,9 @@ struct CliOptions {
     std::string osVersion = "14.0";
     std::string osArch = "x86_64";
     std::string aid = "";
+    std::string sigma_hex = "";
+    uint64_t curve_seed = 0ULL;
+    uint64_t base_seed = 0ULL;
     std::string uid = "";
     int res64_display_interval = 0;
     bool cl_queue_throttle_active = false;

@@ -425,12 +425,15 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery")
             << ",\"torsion-subgroup\":" << torsion;
-        if (isEdw) {
+        /*if (isEdw) {
             if (opts.sigma) oss << ",\"Edwards\":{\"sigma\":" << opts.sigma << "}";
             else oss << ",\"Edwards\":{}";
         } else {
             if (opts.sigma) oss << ",\"sigma\":" << opts.sigma;
-        }
+        }*/
+        oss << ",\"sigma_hex\":" << opts.sigma_hex;
+        oss << ",\"curve_seed\":" << opts.curve_seed;
+        oss << ",\"base_seed\":" << opts.curve_seed;
         std::string prefix = oss.str();
         std::ostringstream canon;
         canon << opts.exponent << ";ECM;";
