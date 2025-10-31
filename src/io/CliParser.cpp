@@ -83,6 +83,7 @@ void printUsage(const char* progName) {
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
     std::cout << "  -montgomery          : (Optional) use Montgomery instead of twisted Edwards curve" << std::endl;
+    std::cout << "  -edwards             : (Optional) use twisted Edwards curve" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16 instead of default torsion-8" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-8" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
@@ -193,6 +194,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-montgomery") == 0) {
             opts.edwards = false;
+        }
+        else if (std::strcmp(argv[i], "-edwards") == 0) {
+            opts.edwards = true;
         }
         else if (std::strcmp(argv[i], "-torsion16") == 0) {
             opts.torsion16 = true;

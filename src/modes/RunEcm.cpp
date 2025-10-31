@@ -715,6 +715,9 @@ int App::runECMMarin()
                 eng->set((engine::Reg)1, 0u);
                 eng->copy((engine::Reg)2, (engine::Reg)Xin);
                 eng->copy((engine::Reg)3, (engine::Reg)Zin);
+                eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
+                eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
+
                 size_t nbq = u64_bits(m);
                 auto xDBLq = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
                     eng->copy((engine::Reg)7, (engine::Reg)X1);

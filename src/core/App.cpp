@@ -253,50 +253,63 @@ App::App(int argc, char** argv)
   : argc_(argc)
   , argv_(argv)
   ,options([&]{
-     std::vector<std::string> merged;
-      merged.push_back(argv[0]);
-      for (int i = 1; i < argc; ++i) {
-          if (std::strcmp(argv[i], "-config") == 0 && i+1 < argc) {
-              auto cfg_args = parseConfigFile(argv[i+1]);
-              merged.insert(merged.end(), cfg_args.begin(), cfg_args.end());
-              i++;
-          } else {
-              merged.emplace_back(argv[i]);
-          }
-      }
-
-      std::vector<char*> c_argv;
-      for (auto& s : merged)
-          c_argv.push_back(const_cast<char*>(s.c_str()));
-      c_argv.push_back(nullptr);
-      auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
-
-      io::WorktodoParser wp{o.worktodo_path};
-      if (auto e = wp.parse()) {
-            o.exponent     = e->exponent;
-            o.mode         = e->prpTest ? "prp" : (e->llTest ? "ll" : (e->pm1Test ? "pm1" : ""));
-            o.aid          = e->aid;
-            o.knownFactors = e->knownFactors;
-            if (e->pm1Test) {
-                o.B1 = e->B1;
-                o.B2 = e->B2;
-            }
-            hasWorktodoEntry_ = true;
-      }
-
-      if (!hasWorktodoEntry_ && o.exponent == 0) {
-        std::cerr << "Error: no valid entry in " 
-                  << options.worktodo_path 
-                  << " and no exponent provided on the command line\n";
-                  
-        
-        if (!options.gui) {
-            o.exponent = static_cast<uint64_t>(askExponentInteractively());
+    std::vector<std::string> merged;
+    merged.push_back(argv[0]);
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "-config") == 0 && i+1 < argc) {
+            auto cfg_args = parseConfigFile(argv[i+1]);
+            merged.insert(merged.end(), cfg_args.begin(), cfg_args.end());
+            i++;
+        } else {
+            merged.emplace_back(argv[i]);
         }
-        o.mode = "prp";
-        //std::exit(-1);
-      }
-      return o;
+    }
+
+    std::vector<char*> c_argv;
+    for (auto& s : merged)
+        c_argv.push_back(const_cast<char*>(s.c_str()));
+    c_argv.push_back(nullptr);
+    auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
+
+    io::WorktodoParser wp{o.worktodo_path};
+    if (auto e = wp.parse()) {
+        o.exponent     = e->exponent;
+        o.mode         = e->ecmTest ? "ecm"
+                        : (e->prpTest ? "prp"
+                        : (e->llTest ? "ll"
+                        : (e->pm1Test ? "pm1" : "")));
+        o.aid          = e->aid;
+        o.knownFactors = e->knownFactors;
+
+        if (e->pm1Test) {
+            o.B1 = e->B1;
+            o.B2 = e->B2;
+        }
+
+        if (e->ecmTest) {
+            o.B1  = e->B1;
+            o.B2  = e->B2;
+            o.nmax = e->curves;
+            o.K    = e->curves;
+        }
+
+        hasWorktodoEntry_ = true;
+    }
+
+
+    if (!hasWorktodoEntry_ && o.exponent == 0) {
+    std::cerr << "Error: no valid entry in " 
+                << options.worktodo_path 
+                << " and no exponent provided on the command line\n";
+                
+    
+    if (!options.gui) {
+        o.exponent = static_cast<uint64_t>(askExponentInteractively());
+    }
+    o.mode = "prp";
+    //std::exit(-1);
+    }
+    return o;
   }())
   , context(options.device_id,
         static_cast<std::size_t>(options.enqueue_max),
