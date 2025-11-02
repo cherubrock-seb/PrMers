@@ -26,7 +26,7 @@ target_include_directories(prmers PRIVATE
 
 target_compile_options(prmers PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
-    -Wall -Wextra -Wsign-conversion -ffinite-math-only -O2 -O3>
+    -Wall -Wextra -Wsign-conversion -ffinite-math-only -O3>
 )
 
 target_compile_definitions(prmers PRIVATE
@@ -44,6 +44,10 @@ target_link_libraries(prmers PRIVATE
   PkgConfig::GMP
   PkgConfig::GMPXX
 )
+
+if (WIN32)
+  target_link_libraries(prmers PRIVATE ws2_32)
+endif()
 
 if (USE_CURL)
   target_link_libraries(prmers PRIVATE CURL::libcurl)
