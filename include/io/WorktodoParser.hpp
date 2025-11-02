@@ -11,6 +11,7 @@ struct WorktodoEntry {
     bool prpTest   = false;
     bool llTest    = false;
     bool pm1Test   = false; 
+    bool ecmTest   = false; 
     uint32_t exponent = 0;
     std::string aid;
     std::string rawLine;  
@@ -18,6 +19,7 @@ struct WorktodoEntry {
     uint32_t residueType = 1;               
     uint64_t B1 = 0;                       
     uint64_t B2 = 0;
+    uint64_t curves = 0;
 };
 
 class WorktodoParser {

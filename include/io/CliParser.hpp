@@ -34,6 +34,11 @@ struct CliOptions {
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;
     bool proof = true;
+    bool edwards = true;
+    bool torsion16 = false;
+    bool notorsion = false;
+    uint64_t sigma = 0ULL;
+    uint64_t seed = 0ULL;
     bool resume = true;
     bool submit = false;
     uint64_t chunk256 = 4;
@@ -66,6 +71,9 @@ struct CliOptions {
     std::string osVersion = "14.0";
     std::string osArch = "x86_64";
     std::string aid = "";
+    std::string sigma_hex = "";
+    uint64_t curve_seed = 0ULL;
+    uint64_t base_seed = 0ULL;
     std::string uid = "";
     int res64_display_interval = 0;
     bool cl_queue_throttle_active = false;
@@ -75,6 +83,7 @@ struct CliOptions {
     std::string http_host = "localhost";
     bool ipv4 = true;
     uint64_t max_e_bits = 268'435'456ULL;
+    uint64_t curves_tested_for_found = 0;
 
 };
 

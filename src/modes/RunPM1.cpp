@@ -882,10 +882,10 @@ int App::runPM1Stage2Marin() {
             eng->get_mpz(zh, static_cast<engine::Reg>(RSTATE));
             eng->get_mpz(zhq, static_cast<engine::Reg>(RACC_R));
             eng->get_mpz(zq, static_cast<engine::Reg>(RACC_L));
-            std::cout << "[DEBUG S2] H=" << mpz_class(zh) << std::endl;
-            std::cout << "[DEBUG S2] p0=" << p0.get_ui() << std::endl;
-            std::cout << "[DEBUG S2] H^p0=" << mpz_class(zhq) << std::endl;
-            std::cout << "[DEBUG S2] Q0=" << mpz_class(zq) << std::endl;
+            //std::cout << "[DEBUG S2] H=" << mpz_class(zh) << std::endl;
+            //std::cout << "[DEBUG S2] p0=" << p0.get_ui() << std::endl;
+            //std::cout << "[DEBUG S2] H^p0=" << mpz_class(zhq) << std::endl;
+            //std::cout << "[DEBUG S2] Q0=" << mpz_class(zq) << std::endl;
             mpz_clears(zh, zhq, zq, nullptr);
         }
     }
