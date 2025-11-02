@@ -27,13 +27,10 @@ logs/
 stage1_result_*.txt
 worktodo*.txt
 *.save
-<<<<<<< HEAD
 *.ckpt
-||||||| parent of 7a412ca (gitignore)
-=======
+lastcurve.gp
 /vcpkg
 /prmers.exe
 /*.zip
 /package
 /.vscode
->>>>>>> 7a412ca (gitignore)
