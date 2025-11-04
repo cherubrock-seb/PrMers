@@ -203,10 +203,10 @@ int App::runECMMarin()
                 std::cout << "Entry removed from " << options.worktodo_path
                         << " and saved to worktodo_save.txt\n";
                 if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Entry removed from " << options.worktodo_path
+                    std::ostringstream oss;
+                    oss  << "Entry removed from " << options.worktodo_path
                         << " and saved to worktodo_save.txt\n";
-                        guiServer_->appendLog(oss.str());
+                    guiServer_->appendLog(oss.str());
                 }
                 std::ifstream f(options.worktodo_path);
                 std::string    l;
@@ -222,17 +222,17 @@ int App::runECMMarin()
                 if (more) {
                     std::cout << "Restarting for next entry in worktodo.txt\n";
                     if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Entry removed from " << options.worktodo_path
-                        << " and saved to worktodo_save.txt\n";
+                        std::ostringstream oss;
+                        oss  << "Entry removed from " << options.worktodo_path
+                            << " and saved to worktodo_save.txt\n";
                         guiServer_->appendLog(oss.str());
                     }
                     restart_self(argc_, argv_);
                 } else {
                     std::cout << "No more entries in worktodo.txt, exiting.\n";
                     if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "No more entries in worktodo.txt, exiting.\n";
+                        std::ostringstream oss;
+                        oss  << "No more entries in worktodo.txt, exiting.\n";
                         guiServer_->appendLog(oss.str());
                     }
                     if (!options.gui) {
@@ -242,10 +242,10 @@ int App::runECMMarin()
             } else {
                 std::cerr << "Failed to update " << options.worktodo_path << "\n";
                 if (guiServer_) {
-                                    std::ostringstream oss;
-                                    oss  << "Failed to update " << options.worktodo_path << "\n";
-                        guiServer_->appendLog(oss.str());
-                    }
+                    std::ostringstream oss;
+                    oss  << "Failed to update " << options.worktodo_path << "\n";
+                    guiServer_->appendLog(oss.str());
+                }
                 if (!options.gui) {
                     std::exit(-1);
                 }
@@ -302,7 +302,7 @@ int App::runECMMarin()
 
     for (uint64_t c = 0; c < curves; ++c)
     {
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(32), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
@@ -409,8 +409,8 @@ int App::runECMMarin()
        
         uint64_t curve_seed = mix64(base_seed, c);
         if (forceSigma){
-                    curve_seed = options.curve_seed;
-                    base_seed = curve_seed;
+            curve_seed = options.curve_seed;
+            base_seed = curve_seed;
         }
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
@@ -482,7 +482,6 @@ int App::runECMMarin()
         if (!resume_stage2)
         {
             int picked_mode = -1;
-            //if (forceSigma || options.notorsion) picked_mode = options.edwards ? 3 : 0;
             if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
             else picked_mode = options.edwards ? 5 : 2;
 
@@ -490,13 +489,10 @@ int App::runECMMarin()
             {
                 mode_name="montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
-                //if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
-                /*else            { */
                 if (forceSigma){
                     curve_seed = options.curve_seed;
                 }
                 sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
-                //}
                 options.sigma_hex = sigma_mpz.get_str(16);
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
@@ -620,11 +616,7 @@ int App::runECMMarin()
                 if (forceSigma){
                     curve_seed = options.curve_seed;
                 }
-                //if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
-                /*else            { */
                 sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
-                //}
-                
                 options.sigma_hex = sigma_mpz.get_str(16);
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
@@ -650,7 +642,6 @@ int App::runECMMarin()
             else
             {
                 mode_name="edwards"; torsion_name="8";
-                //curve_seed = 7276695960312011518ULL;
                 if (forceSigma){
                     curve_seed = options.curve_seed;
                 }
@@ -686,8 +677,6 @@ int App::runECMMarin()
             eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
             eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
 
-            uint64_t cnt_xdbl=0,cnt_xadd=0,cnt_sqr=0,cnt_mul=0;
-
             std::ostringstream head2;
             head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
             std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
@@ -697,8 +686,8 @@ int App::runECMMarin()
             size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
             for (size_t i = start_i; i < total_bits; ++i){
                 size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
-                if (b==0) { xADD(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
-                else      { xADD(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+                if (b==0) { xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
+                else      { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
                 auto now = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_bits) {
                     double done = double(i + 1), total = double(total_bits);
@@ -706,11 +695,11 @@ int App::runECMMarin()
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<total_bits<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%) | ETA "<<fmt_hms(eta); /*<<" | xDBL="<<cnt_xdbl<<" xADD="<<cnt_xadd<<" sqr="<<cnt_sqr<<" mul="<<cnt_mul;*/
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<total_bits<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%) | ETA "<<fmt_hms(eta);
                     std::cout<<line.str()<<std::flush; last_ui = now;
                 }
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); /*publish_json();*/ delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0; }
             }
             std::cout<<std::endl;
 
@@ -751,8 +740,8 @@ int App::runECMMarin()
                 for (size_t i = 0; i < nbq; ++i){
                     size_t bit = nbq - 1 - i;
                     int b = int((m >> bit) & 1ULL);
-                    if (b==0){ xADD(2,3,0,1,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); xDBL(0,1,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); }
-                    else     { xADD(0,1,2,3,7,8); eng->copy((engine::Reg)0,(engine::Reg)7); eng->copy((engine::Reg)1,(engine::Reg)8); xDBL(2,3,7,8); eng->copy((engine::Reg)2,(engine::Reg)7); eng->copy((engine::Reg)3,(engine::Reg)8); }
+                    if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
+                    else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
                 }
                 eng->copy((engine::Reg)Xout, (engine::Reg)0);
                 eng->copy((engine::Reg)Zout, (engine::Reg)1);
@@ -789,7 +778,7 @@ int App::runECMMarin()
                     double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed);
                     std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size()<<"\n";
                     if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size(); guiServer_->appendLog(oss.str()); }
-                    curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); /*publish_json();*/ delete eng; return 0;
+                    curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0;
                 }
             }
             std::cout<<std::endl;
