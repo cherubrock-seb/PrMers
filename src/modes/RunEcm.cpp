@@ -104,7 +104,7 @@ int App::runECMMarin()
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
-    const bool forceSigma = (options.sigma != 0ULL);
+    const bool forceSigma = (options.curve_seed != 0ULL);
     if (forceSigma) curves = 1ULL;
 
     auto splitmix64_step = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
@@ -406,8 +406,12 @@ int App::runECMMarin()
 
         uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
-
+       
         uint64_t curve_seed = mix64(base_seed, c);
+        if (forceSigma){
+                    curve_seed = options.curve_seed;
+                    base_seed = curve_seed;
+        }
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
         options.base_seed = base_seed;
@@ -478,16 +482,21 @@ int App::runECMMarin()
         if (!resume_stage2)
         {
             int picked_mode = -1;
-            if (forceSigma || options.notorsion) picked_mode = options.edwards ? 3 : 0;
-            else if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
+            //if (forceSigma || options.notorsion) picked_mode = options.edwards ? 3 : 0;
+            if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
             else picked_mode = options.edwards ? 5 : 2;
 
             if (picked_mode == 0)
             {
                 mode_name="montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
-                else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
+                //if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                /*else            { */
+                if (forceSigma){
+                    curve_seed = options.curve_seed;
+                }
+                sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
+                //}
                 options.sigma_hex = sigma_mpz.get_str(16);
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
@@ -542,6 +551,10 @@ int App::runECMMarin()
                     xr = RX; yr=RY; return 0;
                 };
 
+                if (forceSigma){
+                    base_seed = options.curve_seed;
+                }
+                curve_seed = base_seed;
                 uint64_t k = 2 + (mix64(base_seed, c ^ 0xA5A5A5A5ULL) % 64ULL);
                 std::stringstream ss;
                 ss << std::hex << std::setw(16) << std::setfill('0') << k;
@@ -578,6 +591,9 @@ int App::runECMMarin()
             }
             else if (picked_mode == 2)
             {
+                if (forceSigma){
+                    curve_seed = options.curve_seed;
+                }
                 mode_name="montgomery"; torsion_name="8";
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
                 options.sigma_hex = a.get_str(16);
@@ -601,8 +617,14 @@ int App::runECMMarin()
             {
                 mode_name="edwards"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
-                else            { sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); }
+                if (forceSigma){
+                    curve_seed = options.curve_seed;
+                }
+                //if (forceSigma) { sigma_mpz = mpz_from_u64(options.sigma); sigma_mpz %= N; if (sigma_mpz<=2) sigma_mpz+=3; }
+                /*else            { */
+                sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
+                //}
+                
                 options.sigma_hex = sigma_mpz.get_str(16);
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
@@ -628,6 +650,10 @@ int App::runECMMarin()
             else
             {
                 mode_name="edwards"; torsion_name="8";
+                //curve_seed = 7276695960312011518ULL;
+                if (forceSigma){
+                    curve_seed = options.curve_seed;
+                }
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
                 options.sigma_hex = a.get_str(16);
                 mpz_class a2 = sqrm(a);

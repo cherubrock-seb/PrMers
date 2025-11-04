@@ -84,6 +84,7 @@ void printUsage(const char* progName) {
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
     std::cout << "  -montgomery          : (Optional) use Montgomery instead of twisted Edwards curve" << std::endl;
     std::cout << "  -edwards             : (Optional) use twisted Edwards curve" << std::endl;
+    std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16 instead of default torsion-8" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-8" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
@@ -286,6 +287,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-nmax") == 0 && i + 1 < argc) {
             opts.nmax = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-seed") == 0 && i + 1 < argc) {
+            opts.curve_seed = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {
