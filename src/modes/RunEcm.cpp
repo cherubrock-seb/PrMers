@@ -271,14 +271,14 @@ int App::runECMMarin()
         }
     }
 
-    vector<uint32_t> primesB1_v, primesS2_v;
+    vector<uint64_t> primesB1_v, primesS2_v;
     {
         uint64_t Pmax = B2 ? B2 : B1;
         vector<char> sieve(Pmax + 1, 1);
         sieve[0]=0; if (Pmax >= 1) sieve[1]=0;
         for (uint64_t q=2;q*q<=Pmax;++q) if (sieve[q]) for (uint64_t k=q*q;k<=Pmax;k+=q) sieve[k]=0;
         for (uint64_t q=2;q<=B1;++q) if (sieve[q]) primesB1_v.push_back((uint32_t)q);
-        if (B2 > B1) for (uint64_t q=B1+1;q<=B2;++q) if (sieve[q]) primesS2_v.push_back((uint32_t)q);
+        if (B2 > B1) for (uint64_t q=B1+1;q<=B2;++q) if (sieve[q]) primesS2_v.push_back((uint64_t)q);
         std::cout<<"[ECM] Prime counts: B1="<<primesB1_v.size()<<", S2="<<primesS2_v.size()<<std::endl;
     }
 
@@ -338,12 +338,12 @@ int App::runECMMarin()
             return 0;
         };
 
-        auto save_ckpt2 = [&](uint32_t idx, double et){
+        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
-            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; uint32_t cnt = (uint32_t)primesS2_v.size(); if (!f.write(reinterpret_cast<const char*>(&cnt), sizeof(cnt))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
             std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
         };
-        auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt, double& et)->int{
+        auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
@@ -353,7 +353,7 @@ int App::runECMMarin()
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
             if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&cnt), sizeof(cnt))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return -2;
             uint64_t b1s = 0, b2s = 0;
             if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
@@ -363,7 +363,7 @@ int App::runECMMarin()
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (cnt != primesS2_v.size() || b1s != B1 || b2s != B2) return -2;
+            if (b1s != B1 || b2s != B2) return -2;
             return 0;
         };
 
@@ -433,52 +433,24 @@ int App::runECMMarin()
             if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards";
             if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
         }
-        /*
-        auto xDBL_old = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+        auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
             eng->copy((engine::Reg)7,(engine::Reg)X1);
-            eng->add((engine::Reg)7,(engine::Reg)Z1);
-            eng->copy((engine::Reg)8,(engine::Reg)7);
-            eng->square_mul((engine::Reg)8);
+            eng->add ((engine::Reg)7,(engine::Reg)Z1);
             eng->copy((engine::Reg)9,(engine::Reg)X1);
             eng->sub_reg((engine::Reg)9,(engine::Reg)Z1);
-            eng->copy((engine::Reg)10,(engine::Reg)9);
-            eng->square_mul((engine::Reg)10);
-            eng->copy((engine::Reg)X2,(engine::Reg)8);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)10);
-            eng->mul((engine::Reg)X2,(engine::Reg)11);
-            eng->copy((engine::Reg)9,(engine::Reg)8);
-            eng->sub_reg((engine::Reg)9,(engine::Reg)10);
-            eng->copy((engine::Reg)Z2,(engine::Reg)9);
-            eng->mul((engine::Reg)Z2,(engine::Reg)12);
-            eng->add((engine::Reg)Z2,(engine::Reg)10);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)Z2,(engine::Reg)11);
-        };*/
-        auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-            eng->copy((engine::Reg)7,(engine::Reg)X1);          // t1 = X1+Z1
-            eng->add ((engine::Reg)7,(engine::Reg)Z1);
-            eng->copy((engine::Reg)9,(engine::Reg)X1);          // t2 = X1-Z1
-            eng->sub_reg((engine::Reg)9,(engine::Reg)Z1);
-
-            //eng->copy((engine::Reg)8,(engine::Reg)7);           // A = t1^2
             eng->square_mul((engine::Reg)7);
-            //eng->copy((engine::Reg)10,(engine::Reg)9);          // B = t2^2
             eng->square_mul((engine::Reg)9);
-
-            eng->copy((engine::Reg)11,(engine::Reg)7);          // C = A - B (on réutilise 11 comme C)
+            eng->copy((engine::Reg)11,(engine::Reg)7);
             eng->sub_reg((engine::Reg)11,(engine::Reg)9);
-
-            eng->copy((engine::Reg)X2,(engine::Reg)7);          // X2 = A * B
+            eng->copy((engine::Reg)X2,(engine::Reg)7);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);
             eng->mul((engine::Reg)X2,(engine::Reg)15);
-
-            eng->copy((engine::Reg)Z2,(engine::Reg)11);         // Z2 = (B + A24*C) * C
-            eng->mul((engine::Reg)Z2,(engine::Reg)12);          // A24 est déjà set en multiplicand(12)
+            eng->copy((engine::Reg)Z2,(engine::Reg)11);
+            eng->mul((engine::Reg)Z2,(engine::Reg)12);
             eng->add((engine::Reg)Z2,(engine::Reg)9);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)11);
             eng->mul((engine::Reg)Z2,(engine::Reg)15);
         };
-
         auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
             eng->copy((engine::Reg)7,(engine::Reg)X1);
             eng->sub_reg((engine::Reg)7,(engine::Reg)Z1);
@@ -503,74 +475,44 @@ int App::runECMMarin()
             eng->square_mul((engine::Reg)Z3);
             eng->mul((engine::Reg)Z3,(engine::Reg)13);
         };
-        // xDBLADD_strict : strictement équivalent à (xADD puis xDBL)
-        // mettre en cache (X1o-Z1o) et (X1o+Z1o) pour utiliser dans xDBL.
         auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            // ----- snapshots pour R0 uniquement -----
-            eng->copy((engine::Reg)20,(engine::Reg)X1); // X1o
-            eng->copy((engine::Reg)21,(engine::Reg)Z1); // Z1o
-
-            // t_minus = X1o - Z1o  (on le garde pour xDBL)
+            eng->copy((engine::Reg)20,(engine::Reg)X1);
+            eng->copy((engine::Reg)21,(engine::Reg)Z1);
             eng->copy((engine::Reg)24,(engine::Reg)20);
-            eng->sub_reg((engine::Reg)24,(engine::Reg)21);           // 24 = X1o - Z1o
-
-            // ================== xADD(R1, R0o) -> (X2,Z2) ==================
-            // C = X2 + Z2  (direct, sans snapshot 22/23)
+            eng->sub_reg((engine::Reg)24,(engine::Reg)21);
             eng->copy((engine::Reg)8,(engine::Reg)X2);
-            eng->add ((engine::Reg)8,(engine::Reg)Z2);               // 8 = C
-
-            // t3 = (X1o - Z1o)*C
+            eng->add ((engine::Reg)8,(engine::Reg)Z2);
             eng->copy((engine::Reg)9,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t3
-
-            // t_plus = X1o + Z1o  (on le garde pour xDBL)
+            eng->mul((engine::Reg)9,(engine::Reg)11);
             eng->copy((engine::Reg)25,(engine::Reg)20);
-            eng->add ((engine::Reg)25,(engine::Reg)21);              // 25 = X1o + Z1o
-
-            // D = X2 - Z2  (direct)
+            eng->add ((engine::Reg)25,(engine::Reg)21);
             eng->copy((engine::Reg)7,(engine::Reg)X2);
-            eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);            // 7 = D
-
-            // t4 = (X1o + Z1o)*D
+            eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);
             eng->copy((engine::Reg)10,(engine::Reg)25);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t4
-
-            // X2 = (t3 + t4)^2 * Zdiff ; Z2 = (t3 - t4)^2 * Xdiff
+            eng->mul((engine::Reg)10,(engine::Reg)11);
             eng->copy((engine::Reg)X2,(engine::Reg)9);
             eng->add ((engine::Reg)X2,(engine::Reg)10);
             eng->square_mul((engine::Reg)X2);
-            eng->mul((engine::Reg)X2,(engine::Reg)14);               // *Zdiff
-
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
             eng->copy((engine::Reg)Z2,(engine::Reg)9);
             eng->sub_reg((engine::Reg)Z2,(engine::Reg)10);
             eng->square_mul((engine::Reg)Z2);
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);               // *Xdiff
-
-            // ================== xDBL(R0o) -> (X1,Z1) ==================
-            // AA = (X1o + Z1o)^2 ; BB = (X1o - Z1o)^2   (in-place sur 25 et 24)
-            eng->square_mul((engine::Reg)25);                        // 25 = AA
-            eng->square_mul((engine::Reg)24);                        // 24 = BB
-
-            // E = AA - BB  -> reg11
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
+            eng->square_mul((engine::Reg)25);
+            eng->square_mul((engine::Reg)24);
             eng->copy((engine::Reg)11,(engine::Reg)25);
-            eng->sub_reg((engine::Reg)11,(engine::Reg)24);           // 11 = E
-
-            // X1 = AA * BB
+            eng->sub_reg((engine::Reg)11,(engine::Reg)24);
             eng->copy((engine::Reg)X1,(engine::Reg)25);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
             eng->mul((engine::Reg)X1,(engine::Reg)15);
-
-            // Z1 = (BB + A24*E) * E
-            eng->copy((engine::Reg)Z1,(engine::Reg)11);              // = E
-            eng->mul((engine::Reg)Z1,(engine::Reg)12);               // A24*E
-            eng->add((engine::Reg)Z1,(engine::Reg)24);               // BB + A24*E
+            eng->copy((engine::Reg)Z1,(engine::Reg)11);
+            eng->mul((engine::Reg)Z1,(engine::Reg)12);
+            eng->add((engine::Reg)Z1,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)11);
             eng->mul((engine::Reg)Z1,(engine::Reg)15);
         };
-
-
 
         if (!resume_stage2)
         {
@@ -780,10 +722,8 @@ int App::runECMMarin()
 
             for (size_t i = start_i; i < total_bits; ++i){
                 size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
-               // if (b==0) { xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
-               // else      { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
-               if (b==0) { xDBLADD_strict(0,1, 2,3); }  // (R0,R1) -> (2R0, R0+R1)
-               else      { xDBLADD_strict(2,3, 0,1); }  // (R1,R0) -> (2R1, R0+R1)
+                if (b==0) { xDBLADD_strict(0,1, 2,3); }
+                else      { xDBLADD_strict(2,3, 0,1); }
 
                 auto now = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_bits) {
@@ -819,77 +759,71 @@ int App::runECMMarin()
         }
         else
         {
-            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<(primesS2_v.empty()?0.0: (100.0*double(s2_idx)/double(primesS2_v.size())))<<"%)";
+            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx;
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
         std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
         std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
 
         if (B2 > B1) {
-            auto ladder_mul_small = [&](size_t Xin,size_t Zin, uint64_t m, size_t Xout,size_t Zout){
-                eng->set((engine::Reg)0, 1u);
-                eng->set((engine::Reg)1, 0u);
-                eng->copy((engine::Reg)2, (engine::Reg)Xin);
-                eng->copy((engine::Reg)3, (engine::Reg)Zin);
-                eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
-                eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
-                size_t nbq = u64_bits(m);
-                for (size_t i = 0; i < nbq; ++i){
-                    size_t bit = nbq - 1 - i;
-                    int b = int((m >> bit) & 1ULL);
-                    if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
-                    else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
-                }
-                eng->copy((engine::Reg)Xout, (engine::Reg)0);
-                eng->copy((engine::Reg)Zout, (engine::Reg)1);
-            };
-
-            uint32_t start_i = 0; double saved = 0.0; if (resume_stage2) { start_i = s2_idx; saved = s2_et; }
-            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = saved;
-
-            if (!resume_stage2) eng->set((engine::Reg)15, 1u);
-
             const uint32_t baseX = 4, baseZ = 5;
             if (!resume_stage2) { eng->copy((engine::Reg)baseX, (engine::Reg)0); eng->copy((engine::Reg)baseZ, (engine::Reg)1); }
+            mpz_class M(1);
+            for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
+            uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
+            if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
 
-            for (size_t i = start_i; i < primesS2_v.size(); ++i){
-                uint32_t q = primesS2_v[i];
-                ladder_mul_small(baseX, baseZ, q, 7, 8);
-                eng->set_multiplicand((engine::Reg)11, (engine::Reg)8);
-                eng->mul((engine::Reg)15, (engine::Reg)11);
+            uint32_t start_bit = resume_stage2 ? s2_idx : 0;
+            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = s2_et;
+
+            if (!resume_stage2) {
+                eng->set((engine::Reg)0, 1u);
+                eng->set((engine::Reg)1, 0u);
+                eng->copy((engine::Reg)2, (engine::Reg)baseX);
+                eng->copy((engine::Reg)3, (engine::Reg)baseZ);
+                eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
+                eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
+            }
+
+            for (uint32_t i = start_bit; i < stage2_bits; ++i){
+                uint32_t bit = stage2_bits - 1 - i;
+                int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
+                if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
+                else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
 
                 auto now2 = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == primesS2_v.size()) {
-                    double done = double(i + 1), total = double(primesS2_v.size());
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == stage2_bits) {
+                    double done = double(i + 1), total = double(stage2_bits);
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<primesS2_v.size()<<" ("<<fixed<<setprecision(2)<<((primesS2_v.size()? (done*100.0/total):100.0))<<"%) | ETA "<<fmt_hms(eta);
+                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<stage2_bits<<" ("<<fixed<<setprecision(2)<<((stage2_bits? (done*100.0/total):100.0))<<"%) | ETA "<<fmt_hms(eta);
                     std::cout<<line.str()<<std::flush; last2_ui = now2;
                 }
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
-                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed); last2_save = now2;
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits); last2_save = now2;
                 }
                 if (interrupted) {
-                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed);
-                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size()<<"\n";
-                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" index "<<(i+1)<<"/"<<primesS2_v.size(); guiServer_->appendLog(oss.str()); }
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
+                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits<<"\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
                     curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0;
                 }
             }
             std::cout<<std::endl;
 
-            mpz_class Acc = compute_X_with_dots(eng, (engine::Reg)15, N);
-            mpz_class gg2 = gcd_with_dots(Acc, N);
+            eng->copy((engine::Reg)7,(engine::Reg)1);
+            mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
+            mpz_class gg2 = gcd_with_dots(Zres, N);
             if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
-            bool found2 = (gg2 > 1 && gg2 < N);
 
             std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
 
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
             { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<fixed<<setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
 
+            bool found2 = (gg2 > 1 && gg2 < N);
             if (found2) {
                 bool known = is_known(gg2);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
