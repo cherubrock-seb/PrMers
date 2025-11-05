@@ -506,40 +506,38 @@ int App::runECMMarin()
         // xDBLADD_strict : strictement équivalent à (xADD puis xDBL)
         // mettre en cache (X1o-Z1o) et (X1o+Z1o) pour utiliser dans xDBL.
         auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            // ----- snapshots des entrées -----
+            // ----- snapshots pour R0 uniquement -----
             eng->copy((engine::Reg)20,(engine::Reg)X1); // X1o
             eng->copy((engine::Reg)21,(engine::Reg)Z1); // Z1o
-            eng->copy((engine::Reg)22,(engine::Reg)X2); // X2o
-            eng->copy((engine::Reg)23,(engine::Reg)Z2); // Z2o
 
-            // ================== xADD(R1o, R0o) -> (X2,Z2) ==================
             // t_minus = X1o - Z1o  (on le garde pour xDBL)
             eng->copy((engine::Reg)24,(engine::Reg)20);
             eng->sub_reg((engine::Reg)24,(engine::Reg)21);           // 24 = X1o - Z1o
 
-            // C = X2o + Z2o
-            eng->copy((engine::Reg)8,(engine::Reg)22);
-            eng->add ((engine::Reg)8,(engine::Reg)23);               // 8 = C
+            // ================== xADD(R1, R0o) -> (X2,Z2) ==================
+            // C = X2 + Z2  (direct, sans snapshot 22/23)
+            eng->copy((engine::Reg)8,(engine::Reg)X2);
+            eng->add ((engine::Reg)8,(engine::Reg)Z2);               // 8 = C
 
-            // 9 = (X1o - Z1o)*C
+            // t3 = (X1o - Z1o)*C
             eng->copy((engine::Reg)9,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = (X1o-Z1o)*(X2o+Z2o)
+            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t3
 
-            // t_plus = X1o + Z1o   (on le garde pour xDBL)
+            // t_plus = X1o + Z1o  (on le garde pour xDBL)
             eng->copy((engine::Reg)25,(engine::Reg)20);
             eng->add ((engine::Reg)25,(engine::Reg)21);              // 25 = X1o + Z1o
 
-            // D = X2o - Z2o
-            eng->copy((engine::Reg)7,(engine::Reg)22);
-            eng->sub_reg((engine::Reg)7,(engine::Reg)23);            // 7 = D
+            // D = X2 - Z2  (direct)
+            eng->copy((engine::Reg)7,(engine::Reg)X2);
+            eng->sub_reg((engine::Reg)7,(engine::Reg)Z2);            // 7 = D
 
-            // 10 = (X1o + Z1o)*D
+            // t4 = (X1o + Z1o)*D
             eng->copy((engine::Reg)10,(engine::Reg)25);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = (X1o+Z1o)*(X2o-Z2o)
+            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t4
 
-            // X2 = (9 + 10)^2 * Zdiff ; Z2 = (9 - 10)^2 * Xdiff
+            // X2 = (t3 + t4)^2 * Zdiff ; Z2 = (t3 - t4)^2 * Xdiff
             eng->copy((engine::Reg)X2,(engine::Reg)9);
             eng->add ((engine::Reg)X2,(engine::Reg)10);
             eng->square_mul((engine::Reg)X2);
@@ -551,29 +549,26 @@ int App::runECMMarin()
             eng->mul((engine::Reg)Z2,(engine::Reg)13);               // *Xdiff
 
             // ================== xDBL(R0o) -> (X1,Z1) ==================
-            // AA = (X1o + Z1o)^2 ; BB = (X1o - Z1o)^2
-            eng->copy((engine::Reg)7,(engine::Reg)25);               // 7  = X1o+Z1o
-            eng->square_mul((engine::Reg)7);                         // 7  = AA
-            eng->copy((engine::Reg)9,(engine::Reg)24);               // 9  = X1o-Z1o
-            eng->square_mul((engine::Reg)9);                         // 9  = BB
+            // AA = (X1o + Z1o)^2 ; BB = (X1o - Z1o)^2   (in-place sur 25 et 24)
+            eng->square_mul((engine::Reg)25);                        // 25 = AA
+            eng->square_mul((engine::Reg)24);                        // 24 = BB
 
-            // E = AA - BB
-            eng->copy((engine::Reg)11,(engine::Reg)7);
-            eng->sub_reg((engine::Reg)11,(engine::Reg)9);            // 11 = E
+            // E = AA - BB  -> reg11
+            eng->copy((engine::Reg)11,(engine::Reg)25);
+            eng->sub_reg((engine::Reg)11,(engine::Reg)24);           // 11 = E
 
-            // X1 = AA*BB
-            eng->copy((engine::Reg)X1,(engine::Reg)7);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);
+            // X1 = AA * BB
+            eng->copy((engine::Reg)X1,(engine::Reg)25);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
             eng->mul((engine::Reg)X1,(engine::Reg)15);
 
             // Z1 = (BB + A24*E) * E
-            eng->copy((engine::Reg)Z1,(engine::Reg)11);
+            eng->copy((engine::Reg)Z1,(engine::Reg)11);              // = E
             eng->mul((engine::Reg)Z1,(engine::Reg)12);               // A24*E
-            eng->add((engine::Reg)Z1,(engine::Reg)9);                // BB + A24*E
+            eng->add((engine::Reg)Z1,(engine::Reg)24);               // BB + A24*E
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)11);
             eng->mul((engine::Reg)Z1,(engine::Reg)15);
         };
-
 
 
 
