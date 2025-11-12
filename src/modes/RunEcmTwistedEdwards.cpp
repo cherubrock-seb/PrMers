@@ -172,7 +172,7 @@ int App::runECMMarinTwistedEdwards()
     {
         if (core::algo::interrupted) { status = "interrupted"; write_result(); return 2; }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(32), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(34), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
