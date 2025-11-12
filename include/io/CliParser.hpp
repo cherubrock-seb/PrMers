@@ -35,6 +35,7 @@ struct CliOptions {
     uint64_t erroriter = 0;
     bool proof = true;
     bool edwards = true;
+    bool compute_edwards = false;
     bool torsion16 = false;
     bool notorsion = false;
     uint64_t sigma = 0ULL;

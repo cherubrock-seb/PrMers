@@ -53,6 +53,7 @@ public:
     int runPM1Stage2MarinNKVersion();
     int runMemtestOpenCL();
     int runECMMarin();
+    int runECMMarinTwistedEdwards();
     int run();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);

@@ -804,7 +804,12 @@ int App::run() {
     int rc = 1;
     bool ran = false;
     if(options.mode == "ecm"){
-        rc = runECMMarin();
+        if(options.compute_edwards){
+            rc = runECMMarinTwistedEdwards();
+        }
+        else{
+            rc = runECMMarin();
+        }
         ran = true;
     }
     if(options.mode == "memtest"){
