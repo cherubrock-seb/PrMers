@@ -60,7 +60,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr;;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -320,6 +320,8 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_p2x2);
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1_copy);
 		CREATE_KERNEL_CARRY(carry_weight_p2_copy);
+		CREATE_KERNEL_CARRY(carry_weight_addsub_p1_copy);
+		CREATE_KERNEL_CARRY(carry_weight_p2x2_copy);
 
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
@@ -526,7 +528,31 @@ public:
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
 	}
 
-	
+	void addsub_copy(const size_t sum, const size_t diff, const size_t sum_copy, const size_t diff_copy,
+					const size_t a, const size_t b)
+	{
+		const uint32 offS  = (uint32)(sum  * _n);
+		const uint32 offD  = (uint32)(diff * _n);
+		const uint32 offSc = (uint32)(sum_copy  * _n);
+		const uint32 offDc = (uint32)(diff_copy * _n);
+		const uint32 offA  = (uint32)(a * _n);
+		const uint32 offB  = (uint32)(b * _n);
+
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 6, sizeof(uint32), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 7, sizeof(uint32), &offDc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 8, sizeof(uint32), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, 9, sizeof(uint32), &offB);
+		_execute_kernel(_carry_weight_addsub_p1_copy, _n / 4, 1u << _lcwm_wg_size);
+
+		_set_kernel_arg(_carry_weight_p2x2_copy, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_p2x2_copy, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_p2x2_copy, 6, sizeof(uint32), &offSc);
+		_set_kernel_arg(_carry_weight_p2x2_copy, 7, sizeof(uint32), &offDc);
+		_execute_kernel(_carry_weight_p2x2_copy, (_n / 4) >> _lcwm_wg_size);
+	}
+
 	void copy(const size_t dst, const size_t src)
 	{
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
@@ -1007,6 +1033,12 @@ public:
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
 		_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
+	}
+
+	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
+					const Reg a, const Reg b) const override
+	{
+		_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
 	}
 
 	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
