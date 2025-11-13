@@ -44,7 +44,29 @@ public:
 	virtual void add(const Reg dst, const Reg src) const = 0;
 	// dst = dst - src
 	virtual void sub_reg(const Reg dst, const Reg src) const = 0;
+	virtual void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const
+	{
+		copy(sum_out, a);
+		add(sum_out, b);
+		copy(diff_out, a);
+		sub_reg(diff_out, b);
+	}
 
+	virtual void addsub_inplace(const Reg a, const Reg b) const
+	{
+		addsub(a, b, a, b);
+	}
+	virtual void square_mul_copy(const Reg src, const Reg dst_copy, const uint32 a = 1) const
+	{
+		square_mul(src, a);
+		copy(dst_copy, src);
+	}
+
+	virtual void mul_copy(const Reg dst, const Reg src, const Reg dst_copy, const uint32 a = 1) const
+	{
+		mul(dst, src, a);
+		copy(dst_copy, dst);
+	}
 	// get size in bytes of a register
 	virtual size_t get_register_data_size() const = 0;
 	// copy the content of src to data. The size of data must be equal to get_register_data_size().

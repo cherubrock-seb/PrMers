@@ -60,7 +60,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -316,6 +316,10 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_add_p1);
 		CREATE_KERNEL_CARRY(carry_weight_add_neg_p1);
 		CREATE_KERNEL_CARRY(carry_weight_p2);
+		CREATE_KERNEL_CARRY(carry_weight_addsub_p1);
+		CREATE_KERNEL_CARRY(carry_weight_p2x2);
+		CREATE_KERNEL_CARRY(carry_weight_mul_p1_copy);
+		CREATE_KERNEL_CARRY(carry_weight_p2_copy);
 
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
@@ -469,6 +473,20 @@ public:
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
+	void carry_weight_mul_copy(const size_t src, const size_t dst, const uint32 a)
+	{
+		uint32 offS = (uint32)(src * _n);
+		uint32 offD = (uint32)(dst * _n);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, 4, sizeof(uint32), &a);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, 5, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, 6, sizeof(uint32), &offD);
+		_execute_kernel(_carry_weight_mul_p1_copy, _n / 4, 1u << _lcwm_wg_size);
+
+		_set_kernel_arg(_carry_weight_p2_copy, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_p2_copy, 5, sizeof(uint32), &offD);
+		_execute_kernel(_carry_weight_p2_copy, (_n / 4) >> _lcwm_wg_size);
+	}
+
 	void carry_weight_add(const size_t dst, const size_t src)
 	{
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
@@ -490,6 +508,24 @@ public:
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
+
+	
+	void carry_weight_addsub(const size_t sum, const size_t diff, const size_t a, const size_t b)
+	{
+		uint32 offS = (uint32)(sum * _n);
+		uint32 offD = (uint32)(diff * _n);
+		uint32 offA = (uint32)(a   * _n);
+		uint32 offB = (uint32)(b   * _n);
+		_set_kernel_arg(_carry_weight_addsub_p1, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1, 6, sizeof(uint32), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1, 7, sizeof(uint32), &offB);
+		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_p2x2, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_p2x2, 5, sizeof(uint32), &offD);
+		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
+	}
+
 	
 	void copy(const size_t dst, const size_t src)
 	{
@@ -712,6 +748,67 @@ public:
 		_gpu->carry_weight_mul(src, a);
 	}
 
+	void square_mul_copy(const Reg rsrc, const Reg rdst_copy, const uint32 a = 1) const override
+	{
+		const size_t n = _n, src = size_t(rsrc), dcopy = size_t(rdst_copy);
+
+		switch (n)
+		{
+			case 1u <<  2:	_gpu->sqr4x1(src); break;
+			case 1u <<  3:	_gpu->sqr8(src); break;
+			case 1u <<  4:	_gpu->forward4_0(src); _gpu->sqr4(src); _gpu->backward4_0(src); break;
+			case 1u <<  5:	_gpu->forward4_0(src); _gpu->sqr8(src); _gpu->backward4_0(src); break;
+			case 1u <<  6:	_gpu->forward16_0(src); _gpu->sqr4(src); _gpu->backward16_0(src); break;
+			case 1u <<  7:	_gpu->forward16_0(src); _gpu->sqr8(src); _gpu->backward16_0(src); break;
+			case 1u <<  8:	_gpu->forward16_0(src); _gpu->sqr16(src); _gpu->backward16_0(src); break;
+			case 1u <<  9:	_gpu->forward16_0(src); _gpu->sqr32(src); _gpu->backward16_0(src); break;
+			case 1u << 10:	_gpu->forward16_0(src); _gpu->sqr64(src); _gpu->backward16_0(src); break;
+			case 1u << 11:	_gpu->forward16_0(src); _gpu->sqr128(src); _gpu->backward16_0(src); break;
+			case 1u << 12:	_gpu->forward64_0(src); _gpu->sqr64(src); _gpu->backward64_0(src); break;
+			case 1u << 13:	_gpu->forward64_0(src); _gpu->sqr128(src); _gpu->backward64_0(src); break;
+			case 1u << 14:	_gpu->forward64_0(src); _gpu->sqr256(src); _gpu->backward64_0(src); break;
+			case 1u << 15:	_gpu->forward64_0(src); _gpu->sqr512(src); _gpu->backward64_0(src); break;
+			case 1u << 16:	_gpu->forward64_0(src); _gpu->sqr1024(src); _gpu->backward64_0(src); break;
+			case 1u << 17:	_gpu->forward256_0(src); _gpu->sqr512(src); _gpu->backward256_0(src); break;
+			case 1u << 18:	_gpu->forward256_0(src); _gpu->sqr1024(src); _gpu->backward256_0(src); break;
+			case 1u << 19:	_gpu->forward1024_0(src); _gpu->sqr512(src); _gpu->backward1024_0(src); break;
+			case 1u << 20:	_gpu->forward1024_0(src); _gpu->sqr1024(src); _gpu->backward1024_0(src); break;
+			case 1u << 21:	_gpu->forward64_0(src); _gpu->forward64(src, 1024, 8); _gpu->sqr512(src); _gpu->backward64(src, 1024, 8); _gpu->backward64_0(src); break;
+			case 1u << 22:	_gpu->forward64_0(src); _gpu->forward64(src, 1024, 9); _gpu->sqr1024(src); _gpu->backward64(src, 1024, 9); _gpu->backward64_0(src); break;
+			case 1u << 23:	_gpu->forward64_0(src); _gpu->forward256(src, 4096, 8); _gpu->sqr512(src); _gpu->backward256(src, 4096, 8); _gpu->backward64_0(src); break;
+			case 1u << 24:	_gpu->forward64_0(src); _gpu->forward256(src, 4096, 9); _gpu->sqr1024(src); _gpu->backward256(src, 4096, 9); _gpu->backward64_0(src); break;
+			case 1u << 25:	_gpu->forward256_0(src); _gpu->forward256(src, 16384, 8); _gpu->sqr512(src); _gpu->backward256(src, 16384, 8); _gpu->backward256_0(src); break;
+			case 1u << 26:	_gpu->forward256_0(src); _gpu->forward256(src, 16384, 9); _gpu->sqr1024(src); _gpu->backward256(src, 16384, 9); _gpu->backward256_0(src); break;
+
+			case 5u <<  3: _gpu->forward5_0(src); _gpu->sqr8(src); _gpu->backward5_0(src); break;
+			case 5u <<  4: _gpu->forward20_0(src); _gpu->sqr4(src); _gpu->backward20_0(src); break;
+			case 5u <<  5: _gpu->forward20_0(src); _gpu->sqr8(src); _gpu->backward20_0(src); break;
+			case 5u <<  6: _gpu->forward20_0(src); _gpu->sqr16(src); _gpu->backward20_0(src); break;
+			case 5u <<  7: _gpu->forward20_0(src); _gpu->sqr32(src); _gpu->backward20_0(src); break;
+			case 5u <<  8: _gpu->forward20_0(src); _gpu->sqr64(src); _gpu->backward20_0(src); break;
+			case 5u <<  9: _gpu->forward20_0(src); _gpu->sqr128(src); _gpu->backward20_0(src); break;
+			case 5u << 10: _gpu->forward80_0(src); _gpu->sqr64(src); _gpu->backward80_0(src); break;
+			case 5u << 11: _gpu->forward80_0(src); _gpu->sqr128(src); _gpu->backward80_0(src); break;
+			case 5u << 12: _gpu->forward80_0(src); _gpu->sqr256(src); _gpu->backward80_0(src); break;
+			case 5u << 13: _gpu->forward80_0(src); _gpu->sqr512(src); _gpu->backward80_0(src); break;
+			case 5u << 14: _gpu->forward320_0(src); _gpu->sqr256(src); _gpu->backward320_0(src); break;
+			case 5u << 15: _gpu->forward320_0(src); _gpu->sqr512(src); _gpu->backward320_0(src); break;
+			case 5u << 16: _gpu->forward320_0(src); _gpu->sqr1024(src); _gpu->backward320_0(src); break;
+			case 5u << 17: _gpu->forward80_0(src); _gpu->forward64(src, 1280, 6); _gpu->sqr128(src); _gpu->backward64(src, 1280, 6); _gpu->backward80_0(src); break;
+			case 5u << 18: _gpu->forward80_0(src); _gpu->forward64(src, 1280, 7); _gpu->sqr256(src); _gpu->backward64(src, 1280, 7); _gpu->backward80_0(src); break;
+			case 5u << 19: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 6); _gpu->sqr128(src); _gpu->backward256(src, 5120, 6); _gpu->backward80_0(src); break;
+			case 5u << 20: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 7); _gpu->sqr256(src); _gpu->backward256(src, 5120, 7); _gpu->backward80_0(src); break;
+			case 5u << 21: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 8); _gpu->sqr512(src); _gpu->backward256(src, 5120, 8); _gpu->backward80_0(src); break;
+			case 5u << 22: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 9); _gpu->sqr1024(src); _gpu->backward256(src, 5120, 9); _gpu->backward80_0(src); break;
+			case 5u << 23: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 8); _gpu->sqr512(src); _gpu->backward256(src, 20480, 8); _gpu->backward320_0(src); break;
+			case 5u << 24: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 9); _gpu->sqr1024(src); _gpu->backward256(src, 20480, 9); _gpu->backward320_0(src); break;
+
+			default: throw std::runtime_error("An unexpected error has occurred.");
+		}
+
+		_gpu->carry_weight_mul_copy(src, dcopy, a);
+	}
+
 	void set_multiplicand(const Reg rdst, const Reg rsrc) const override
 	{
 		if (rsrc != rdst) copy(rdst, rsrc);
@@ -834,6 +931,67 @@ public:
 		_gpu->carry_weight_mul(dst, a);
 	}
 
+	void mul_copy(const Reg rdst, const Reg rsrc, const Reg rdst_copy, const uint32 a = 1) const override
+	{
+		const size_t n = _n, dst = size_t(rdst), src = size_t(rsrc), dcopy = size_t(rdst_copy);
+
+		switch (n)
+		{
+			case 1u <<  2:	_gpu->mul4x1(dst, src); break;
+			case 1u <<  3:	_gpu->mul8(dst, src); break;
+			case 1u <<  4:	_gpu->forward4_0(dst); _gpu->mul4(dst, src); _gpu->backward4_0(dst); break;
+			case 1u <<  5:	_gpu->forward4_0(dst); _gpu->mul8(dst, src); _gpu->backward4_0(dst); break;
+			case 1u <<  6:	_gpu->forward16_0(dst); _gpu->mul4(dst, src); _gpu->backward16_0(dst); break;
+			case 1u <<  7:	_gpu->forward16_0(dst); _gpu->mul8(dst, src); _gpu->backward16_0(dst); break;
+			case 1u <<  8:	_gpu->forward16_0(dst); _gpu->mul16(dst, src); _gpu->backward16_0(dst); break;
+			case 1u <<  9:	_gpu->forward16_0(dst); _gpu->mul32(dst, src); _gpu->backward16_0(dst); break;
+			case 1u << 10:	_gpu->forward16_0(dst); _gpu->mul64(dst, src); _gpu->backward16_0(dst); break;
+			case 1u << 11:	_gpu->forward16_0(dst); _gpu->mul128(dst, src); _gpu->backward16_0(dst); break;
+			case 1u << 12:	_gpu->forward64_0(dst); _gpu->mul64(dst, src); _gpu->backward64_0(dst); break;
+			case 1u << 13:	_gpu->forward64_0(dst); _gpu->mul128(dst, src); _gpu->backward64_0(dst); break;
+			case 1u << 14:	_gpu->forward64_0(dst); _gpu->mul256(dst, src); _gpu->backward64_0(dst); break;
+			case 1u << 15:	_gpu->forward64_0(dst); _gpu->mul512(dst, src); _gpu->backward64_0(dst); break;
+			case 1u << 16:	_gpu->forward64_0(dst); _gpu->mul1024(dst, src); _gpu->backward64_0(dst); break;
+			case 1u << 17:	_gpu->forward256_0(dst); _gpu->mul512(dst, src); _gpu->backward256_0(dst); break;
+			case 1u << 18:	_gpu->forward256_0(dst); _gpu->mul1024(dst, src); _gpu->backward256_0(dst); break;
+			case 1u << 19:	_gpu->forward1024_0(dst); _gpu->mul512(dst, src); _gpu->backward1024_0(dst); break;
+			case 1u << 20:	_gpu->forward1024_0(dst); _gpu->mul1024(dst, src); _gpu->backward1024_0(dst); break;
+			case 1u << 21:	_gpu->forward64_0(dst); _gpu->forward64(dst, 1024, 8); _gpu->mul512(dst, src); _gpu->backward64(dst, 1024, 8); _gpu->backward64_0(dst); break;
+			case 1u << 22:	_gpu->forward64_0(dst); _gpu->forward64(dst, 1024, 9); _gpu->mul1024(dst, src); _gpu->backward64(dst, 1024, 9); _gpu->backward64_0(dst); break;
+			case 1u << 23:	_gpu->forward64_0(dst); _gpu->forward256(dst, 4096, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 4096, 8); _gpu->backward64_0(dst); break;
+			case 1u << 24:	_gpu->forward64_0(dst); _gpu->forward256(dst, 4096, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 4096, 9); _gpu->backward64_0(dst); break;
+			case 1u << 25:	_gpu->forward256_0(dst); _gpu->forward256(dst, 16384, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 16384, 8); _gpu->backward256_0(dst); break;
+			case 1u << 26:	_gpu->forward256_0(dst); _gpu->forward256(dst, 16384, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 16384, 9); _gpu->backward256_0(dst); break;
+
+			case 5u <<  3: _gpu->forward5_0(dst); _gpu->mul8(dst, src); _gpu->backward5_0(dst); break;
+			case 5u <<  4: _gpu->forward20_0(dst); _gpu->mul4(dst, src); _gpu->backward20_0(dst); break;
+			case 5u <<  5: _gpu->forward20_0(dst); _gpu->mul8(dst, src); _gpu->backward20_0(dst); break;
+			case 5u <<  6: _gpu->forward20_0(dst); _gpu->mul16(dst, src); _gpu->backward20_0(dst); break;
+			case 5u <<  7: _gpu->forward20_0(dst); _gpu->mul32(dst, src); _gpu->backward20_0(dst); break;
+			case 5u <<  8: _gpu->forward20_0(dst); _gpu->mul64(dst, src); _gpu->backward20_0(dst); break;
+			case 5u <<  9: _gpu->forward20_0(dst); _gpu->mul128(dst, src); _gpu->backward20_0(dst); break;
+			case 5u << 10: _gpu->forward80_0(dst); _gpu->mul64(dst, src); _gpu->backward80_0(dst); break;
+			case 5u << 11: _gpu->forward80_0(dst); _gpu->mul128(dst, src); _gpu->backward80_0(dst); break;
+			case 5u << 12: _gpu->forward80_0(dst); _gpu->mul256(dst, src); _gpu->backward80_0(dst); break;
+			case 5u << 13: _gpu->forward80_0(dst); _gpu->mul512(dst, src); _gpu->backward80_0(dst); break;
+			case 5u << 14: _gpu->forward320_0(dst); _gpu->mul256(dst, src); _gpu->backward320_0(dst); break;
+			case 5u << 15: _gpu->forward320_0(dst); _gpu->mul512(dst, src); _gpu->backward320_0(dst); break;
+			case 5u << 16: _gpu->forward320_0(dst); _gpu->mul1024(dst, src); _gpu->backward320_0(dst); break;
+			case 5u << 17: _gpu->forward80_0(dst); _gpu->forward64(dst, 1280, 6); _gpu->mul128(dst, src); _gpu->backward64(dst, 1280, 6); _gpu->backward80_0(dst); break;
+			case 5u << 18: _gpu->forward80_0(dst); _gpu->forward64(dst, 1280, 7); _gpu->mul256(dst, src); _gpu->backward64(dst, 1280, 7); _gpu->backward80_0(dst); break;
+			case 5u << 19: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 6); _gpu->mul128(dst, src); _gpu->backward256(dst, 5120, 6); _gpu->backward80_0(dst); break;
+			case 5u << 20: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 7); _gpu->mul256(dst, src); _gpu->backward256(dst, 5120, 7); _gpu->backward80_0(dst); break;
+			case 5u << 21: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 5120, 8); _gpu->backward80_0(dst); break;
+			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
+			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
+			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
+
+			default: throw std::runtime_error("An unexpected error has occurred.");
+		}
+
+		_gpu->carry_weight_mul_copy(dst, dcopy, a);
+	}
+
 	void sub(const Reg src, const uint32 a) const override { _gpu->subtract(size_t(src), a); }
 
 	void add(const Reg dst, const Reg src) const override
@@ -844,6 +1002,11 @@ public:
 	void sub_reg(const Reg dst, const Reg src) const override 
 	{ 
 		_gpu->carry_weight_sub(size_t(dst), size_t(src)); 
+	}
+
+	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
+	{
+		_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
 	}
 
 	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
