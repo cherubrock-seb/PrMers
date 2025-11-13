@@ -785,8 +785,13 @@ int App::runECMMarin()
             for (uint32_t i = start_bit; i < stage2_bits; ++i){
                 uint32_t bit = stage2_bits - 1 - i;
                 int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
-                if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
-                else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
+                //if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
+                //else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
+                if (b == 0) {
+                    xDBLADD_strict(0,1, 2,3); 
+                } else {
+                    xDBLADD_strict(2,3, 0,1);  
+                }
 
                 auto now2 = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == stage2_bits) {
