@@ -275,7 +275,17 @@ int App::runECMMarinTwistedEdwards()
         }
 
         mpz_t za; mpz_init(za); mpz_set(za, aE.get_mpz_t()); eng->set_mpz((engine::Reg)16, za); mpz_clear(za);
-        mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t()); eng->set_mpz((engine::Reg)17, zd); mpz_clear(zd);
+        //mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t()); eng->set_mpz((engine::Reg)17, zd); mpz_clear(zd);
+// 2*dE (mod N) via ta lambda mulm
+static const mpz_class TWO = 2;
+mpz_class two_dE = mulm(dE, TWO);
+
+// convertit mpz_class -> mpz_t pour set_mpz
+mpz_t tmp;
+mpz_init_set(tmp, two_dE.get_mpz_t());   // tmp = two_dE
+eng->set_mpz((engine::Reg)17, tmp);
+mpz_clear(tmp);
+
 
         eng->set((engine::Reg)0, 0u);
         eng->set((engine::Reg)1, 1u);
@@ -288,11 +298,10 @@ int App::runECMMarinTwistedEdwards()
         eng->copy((engine::Reg)9,(engine::Reg)6);
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
         eng->mul((engine::Reg)9,(engine::Reg)11);
-        eng->set((engine::Reg)30, 1u);
+        eng->set((engine::Reg)1, 1u);
 
         eng->copy((engine::Reg)3,(engine::Reg)6);
         eng->copy((engine::Reg)4,(engine::Reg)7);
-        eng->copy((engine::Reg)1,(engine::Reg)30);
         eng->copy((engine::Reg)5,(engine::Reg)9);
         eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
@@ -316,7 +325,7 @@ int App::runECMMarinTwistedEdwards()
             eng->set_multiplicand((engine::Reg)13,(engine::Reg)9);//
             eng->mul((engine::Reg)22,(engine::Reg)13);            // T1*T2
             //eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
-            eng->mul((engine::Reg)22,(engine::Reg)17,2u);         // D = 2*d*T1*T2
+            eng->mul((engine::Reg)22,(engine::Reg)17);         // D = 2*d*T1*T2
             eng->copy((engine::Reg)23,(engine::Reg)1);            // Z1
             //eng->set_multiplicand((engine::Reg)15,(engine::Reg)8);
             eng->mul((engine::Reg)23,(engine::Reg)8);         // C = 2*Z1*Z2
