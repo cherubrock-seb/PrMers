@@ -341,7 +341,6 @@ int App::runECMMarinTwistedEdwards()
             eng->set_multiplicand((engine::Reg)12,(engine::Reg)27);
             eng->mul((engine::Reg)4,(engine::Reg)12);             // Y3 = G*H
             eng->copy((engine::Reg)5,(engine::Reg)24);
-            //eng->set_multiplicand((engine::Reg)13,(engine::Reg)27);
             eng->mul((engine::Reg)5,(engine::Reg)12);             // T3 = E*H
             eng->copy((engine::Reg)1,(engine::Reg)25);
             eng->set_multiplicand((engine::Reg)14,(engine::Reg)26);
@@ -378,8 +377,8 @@ int App::runECMMarinTwistedEdwards()
             eng->set_multiplicand((engine::Reg)13,(engine::Reg)25);
             eng->mul((engine::Reg)RY,(engine::Reg)13);            // Y3 = (D+B)*(D-B)
             eng->copy((engine::Reg)RT,(engine::Reg)22);
-            eng->set_multiplicand((engine::Reg)14,(engine::Reg)25);
-            eng->mul((engine::Reg)RT,(engine::Reg)14);            // T3 = E*H
+            //eng->set_multiplicand((engine::Reg)14,(engine::Reg)25);
+            eng->mul((engine::Reg)RT,(engine::Reg)13);            // T3 = E*H
             eng->copy((engine::Reg)RZ,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)23);
             eng->mul((engine::Reg)RZ,(engine::Reg)15);            // Z3 = F*(D+B)
