@@ -354,10 +354,9 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)19,(engine::Reg)RY);
             eng->square_mul((engine::Reg)19);                     // B = Y1^2
             eng->copy((engine::Reg)20,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20);
-            eng->add((engine::Reg)20,(engine::Reg)20);            // C = 2*Z1^2
+            eng->square_mul((engine::Reg)20, 2u);
+            //eng->add((engine::Reg)20,(engine::Reg)20);            // C = 2*Z1^2
             eng->copy((engine::Reg)21,(engine::Reg)18);
-            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
             eng->mul((engine::Reg)21,(engine::Reg)16);            // D = a*A
             eng->copy((engine::Reg)22,(engine::Reg)RX);
             eng->add((engine::Reg)22,(engine::Reg)RY);
