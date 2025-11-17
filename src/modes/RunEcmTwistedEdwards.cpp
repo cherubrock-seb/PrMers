@@ -276,15 +276,13 @@ int App::runECMMarinTwistedEdwards()
 
         mpz_t za; mpz_init(za); mpz_set(za, aE.get_mpz_t()); eng->set_mpz((engine::Reg)16, za); mpz_clear(za);
         //mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t()); eng->set_mpz((engine::Reg)17, zd); mpz_clear(zd);
-// 2*dE (mod N) via ta lambda mulm
-static const mpz_class TWO = 2;
-mpz_class two_dE = mulm(dE, TWO);
-
-// convertit mpz_class -> mpz_t pour set_mpz
-mpz_t tmp;
-mpz_init_set(tmp, two_dE.get_mpz_t());   // tmp = two_dE
-eng->set_mpz((engine::Reg)17, tmp);
-mpz_clear(tmp);
+        // 2*dE (mod N) via ta lambda mulm
+        static const mpz_class TWO = 2;
+        mpz_class two_dE = mulm(dE, TWO);
+        mpz_t tmp;
+        mpz_init_set(tmp, two_dE.get_mpz_t());  
+        eng->set_mpz((engine::Reg)17, tmp);
+        mpz_clear(tmp);
 
 
         eng->set((engine::Reg)0, 0u);
