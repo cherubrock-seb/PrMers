@@ -281,7 +281,10 @@ int App::runECMMarinTwistedEdwards()
         eng->set((engine::Reg)1, 1u);
         mpz_t zx; mpz_init(zx); mpz_set(zx, X0.get_mpz_t()); eng->set_mpz((engine::Reg)6, zx); mpz_clear(zx);
         mpz_t zy; mpz_init(zy); mpz_set(zy, Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
-        eng->set((engine::Reg)8, 1u);
+        eng->set((engine::Reg)8, 2u);
+        eng->set_multiplicand((engine::Reg)15,(engine::Reg)8);
+        eng->copy((engine::Reg)8,(engine::Reg)15);
+
         eng->copy((engine::Reg)9,(engine::Reg)6);
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
         eng->mul((engine::Reg)9,(engine::Reg)11);
@@ -289,9 +292,12 @@ int App::runECMMarinTwistedEdwards()
 
         eng->copy((engine::Reg)3,(engine::Reg)6);
         eng->copy((engine::Reg)4,(engine::Reg)7);
-        eng->copy((engine::Reg)1,(engine::Reg)8);
+        eng->copy((engine::Reg)1,(engine::Reg)30);
         eng->copy((engine::Reg)5,(engine::Reg)9);
-
+        eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
+        eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
+        eng->copy((engine::Reg)17,(engine::Reg)14);
+        eng->copy((engine::Reg)16,(engine::Reg)11);
         // Twisted Edwards addition: A=(Y1-X1)(Y2-X2), B=(Y1+X1)(Y2+X2), C=2Z1Z2, D=2dT1T2, X3=(B-A)(C-D), Y3=(B+A)(C+D), T3=(B-A)(B+A), Z3=(C-D)(C+D)
         auto eADD_RP = [&](){
             eng->copy((engine::Reg)18,(engine::Reg)4);            // Y1
@@ -309,11 +315,11 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)22,(engine::Reg)5);            // T1
             eng->set_multiplicand((engine::Reg)13,(engine::Reg)9);//
             eng->mul((engine::Reg)22,(engine::Reg)13);            // T1*T2
-            eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
-            eng->mul((engine::Reg)22,(engine::Reg)14,2u);         // D = 2*d*T1*T2
+            //eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
+            eng->mul((engine::Reg)22,(engine::Reg)17,2u);         // D = 2*d*T1*T2
             eng->copy((engine::Reg)23,(engine::Reg)1);            // Z1
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)8);
-            eng->mul((engine::Reg)23,(engine::Reg)15,2u);         // C = 2*Z1*Z2
+            //eng->set_multiplicand((engine::Reg)15,(engine::Reg)8);
+            eng->mul((engine::Reg)23,(engine::Reg)8);         // C = 2*Z1*Z2
             eng->copy((engine::Reg)24,(engine::Reg)20);
             eng->sub_reg((engine::Reg)24,(engine::Reg)18);        // E = B-A
             eng->copy((engine::Reg)25,(engine::Reg)23);
@@ -334,10 +340,6 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)1,(engine::Reg)25);
             eng->set_multiplicand((engine::Reg)14,(engine::Reg)26);
             eng->mul((engine::Reg)1,(engine::Reg)14);             // Z3 = F*G
-            eng->set_multiplicand((engine::Reg)31,(engine::Reg)25);
-            eng->mul((engine::Reg)30,(engine::Reg)31);            // acc *= F
-            eng->set_multiplicand((engine::Reg)32,(engine::Reg)26);
-            eng->mul((engine::Reg)30,(engine::Reg)32);            // acc *= G
         };
 
         // Twisted Edwards doubling: A=X1^2, B=Y1^2, C=2Z1^2, D=a*A, E=(X1+Y1)^2-A-B, F=D+C, G=D-B, H=F, X3=E*(F-C), Y3=H*G, T3=E*G, Z3=(F-C)*H
@@ -350,8 +352,8 @@ int App::runECMMarinTwistedEdwards()
             eng->square_mul((engine::Reg)20);
             eng->add((engine::Reg)20,(engine::Reg)20);            // C = 2*Z1^2
             eng->copy((engine::Reg)21,(engine::Reg)18);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)21,(engine::Reg)11);            // D = a*A
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
+            eng->mul((engine::Reg)21,(engine::Reg)16);            // D = a*A
             eng->copy((engine::Reg)22,(engine::Reg)RX);
             eng->add((engine::Reg)22,(engine::Reg)RY);
             eng->square_mul((engine::Reg)22);
@@ -375,10 +377,6 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)RZ,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)23);
             eng->mul((engine::Reg)RZ,(engine::Reg)15);            // Z3 = F*(D+B)
-            eng->set_multiplicand((engine::Reg)31,(engine::Reg)24);
-            eng->mul((engine::Reg)30,(engine::Reg)31);            // acc *= F
-            eng->set_multiplicand((engine::Reg)32,(engine::Reg)23);
-            eng->mul((engine::Reg)30,(engine::Reg)32);            // acc *= (D+B)
         };
 
         auto t0 = high_resolution_clock::now();
@@ -407,7 +405,7 @@ int App::runECMMarinTwistedEdwards()
         }
         std::cout<<std::endl;
 
-        mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)30, N);
+        mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
         mpz_class g = gcd_with_dots(Zacc, N);
         std::cout<<"[ECM] gcd(acc,N)="<<g.get_str()<<std::endl;
 
