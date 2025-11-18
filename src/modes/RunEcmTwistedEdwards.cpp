@@ -304,7 +304,6 @@ int App::runECMMarinTwistedEdwards()
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
         eng->copy((engine::Reg)17,(engine::Reg)14);
         eng->copy((engine::Reg)16,(engine::Reg)11);
-        // Twisted Edwards addition: A=(Y1-X1)(Y2-X2), B=(Y1+X1)(Y2+X2), C=2Z1Z2, D=2dT1T2, X3=(B-A)(C-D), Y3=(B+A)(C+D), T3=(B-A)(B+A), Z3=(C-D)(C+D)
         // Twisted Edwards addition: A=(Y1-X1)(Y2-X2), B=(Y1+X1)(Y2+X2), C=2Z1Z2, D=2dT1T2,
         // X3=(B-A)(C-D), Y3=(B+A)(C+D), T3=(B-A)(B+A), Z3=(C-D)(C+D)
         auto eADD_RP = [&](){
