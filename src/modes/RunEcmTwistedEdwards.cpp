@@ -100,7 +100,78 @@ using core::algo::product_prefix_fit_u64;
 using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
-//using core::algo::u64_bits;
+namespace ecm_local {
+
+struct EC_mod4 {
+    struct Pt { mpz_class x, y; bool inf=false; };
+
+    static inline void norm(mpz_class& z, const mpz_class& N) {
+        mpz_mod(z.get_mpz_t(), z.get_mpz_t(), N.get_mpz_t());
+        if (z < 0) z += N;
+    }
+
+    // y^2 = x^3 + 4x - 16  (a=4, b=-16)
+    static Pt dbl(const Pt& P, const mpz_class& N) {
+        if (P.inf) return P;
+        // lambda = (3*x^2 + 4) / (2*y)
+        mpz_class num = 3 * P.x * P.x + 4;
+        mpz_class den = 2 * P.y, inv;
+        norm(num, N); norm(den, N);
+        if (mpz_sgn(den.get_mpz_t()) == 0) return Pt{{}, {}, true};        // point d'ordre 2
+        if (!mpz_invert(inv.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()))   // non-inversible -> "inf"
+            return Pt{{}, {}, true};
+        mpz_class lambda = (num * inv) % N; if (lambda < 0) lambda += N;
+
+        // x3 = lambda^2 - 2*x1
+        mpz_class x3 = (lambda * lambda - 2 * P.x) % N; if (x3 < 0) x3 += N;
+        // y3 = lambda*(x1 - x3) - y1
+        mpz_class y3 = (lambda * (P.x - x3) - P.y) % N; if (y3 < 0) y3 += N;
+        return Pt{x3, y3, false};
+    }
+
+    static Pt add(const Pt& P, const Pt& Q, const mpz_class& N) {
+        if (P.inf) return Q;
+        if (Q.inf) return P;
+        if (P.x == Q.x) {
+            // P == ±Q
+            mpz_class ysum = (P.y + Q.y) % N; if (ysum < 0) ysum += N;
+            if (ysum == 0) return Pt{{}, {}, true};        // P + (-P) = O
+            return dbl(P, N);                              // P == Q
+        }
+        // lambda = (y2 - y1) / (x2 - x1)
+        mpz_class num = Q.y - P.y; norm(num, N);
+        mpz_class den = Q.x - P.x; norm(den, N);
+        mpz_class inv;
+        if (!mpz_invert(inv.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()))
+            return Pt{{}, {}, true};                       // non-inversible -> "inf"
+        mpz_class lambda = (num * inv) % N; if (lambda < 0) lambda += N;
+
+        // x3 = lambda^2 - x1 - x2
+        mpz_class x3 = (lambda * lambda - P.x - Q.x) % N; if (x3 < 0) x3 += N;
+        // y3 = lambda*(x1 - x3) - y1
+        mpz_class y3 = (lambda * (P.x - x3) - P.y) % N; if (y3 < 0) y3 += N;
+        return Pt{x3, y3, false};
+    }
+
+    // (s,t) = n * (s1,t1) mod N on t^2 = s^3 + 4s - 16
+    static void get(uint64_t n, int s1, int t1, const mpz_class& N, mpz_class& s, mpz_class& t) {
+        Pt P0, P;
+        P0.x = s1; if (s1 < 0) P0.x += N; P0.x %= N;
+        P0.y = t1; if (t1 < 0) P0.y += N; P0.y %= N;
+        P    = P0;
+
+        // Exclut le bit de poids fort (schéma "R = 2R; if(bit) R += P0")
+        int msb = 63 - __builtin_clzll(n);
+        for (int b = msb - 1; b >= 0; --b) {
+            P = dbl(P, N);
+            if (((n >> b) & 1ULL) != 0) P = add(P, P0, N);
+            if (P.inf) { s = 0; t = 0; return; }
+        }
+        s = P.x; t = P.y;
+    }
+};
+
+} // namespace ecm_local
 
 namespace core {
 
@@ -432,8 +503,47 @@ int App::runECMMarinTwistedEdwards()
             }
             return -1;
         };
+        
+        auto sqrQ = [](const mpq_class& z)->mpq_class { return z*z; };
+        auto pow4Q = [&](const mpq_class& z)->mpq_class { mpq_class t=sqrQ(z); return t*t; };
+
+        auto mpq_to_mod = [&](const mpq_class& q, mpz_class& out)->int{
+            mpz_class num(q.get_num()), den(q.get_den());
+            mpz_class inv;
+            int r = invm(den, inv);
+            if (r==1) return 1;    
+            if (r<0)  return -1;   
+            out = mulm(num, inv);
+            return 0;
+        };
+
+        // Rational EC over Q: y^2 = x^3 + 4x - 16
+        struct QPt { mpq_class x, y; bool inf=false; };
+        auto q_add = [&](const QPt& P, const QPt& Q)->QPt{
+            if (P.inf) return Q; if (Q.inf) return P;
+            if (P.x==Q.x && P.y==-Q.y) return QPt{{}, {}, true};
+            mpq_class lambda;
+            if (P.x==Q.x && P.y==Q.y) {
+                lambda = (3*sqrQ(P.x) + mpq_class(4)) / (mpq_class(2)*P.y);
+            } else {
+                lambda = (Q.y - P.y) / (Q.x - P.x);
+            }
+            mpq_class x3 = sqrQ(lambda) - P.x - Q.x;
+            mpq_class y3 = lambda*(P.x - x3) - P.y;
+            return QPt{x3,y3,false};
+        };
+        auto q_mul = [&](QPt P, uint32_t k)->QPt{
+            QPt R{{}, {}, true};
+            while (k){
+                if (k&1u) R = q_add(R,P);
+                P = q_add(P,P);
+                k >>= 1u;
+            }
+            return R;
+        };
 
         mpz_class aE, dE, X0, Y0;
+        
         string torsion_used = options.notorsion ? string("none") :
                               (options.torsion16 ? string("16") : string("8"));
         bool built = false;
@@ -453,68 +563,81 @@ int App::runECMMarinTwistedEdwards()
             dE_ref = mulm(subm(addm(mulm(aE_ref, X2), Y2), mpz_class(1)), invXY2);
             return true;
         };
-
-        // aE = -1 pour toutes les variantes, dE choisi pour que le point soit sur la courbe
-        if (!options.notorsion) {
+        // ---- torsion 16 (Gallot / Theorem 2.5) : a = 1 ----
+        if (!options.notorsion && options.torsion16) {
             bool ok = false;
-            for (int tries=0; tries<64 && !ok; ++tries){
-                mpz_class w = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xA5A5u) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x9E37u)), 128);
-                mpz_class u1 = subm(mulm(mpz_class(2), w), mpz_class(1));
-                mpz_class u2 = addm(mulm(mpz_class(2), w), mpz_class(1));
-                mpz_class inv_u1, inv_u2;
-                int r1 = invm(u1, inv_u1);
-                int r2 = invm(u2, inv_u2);
-                if (r1==1 || r2==1) {
-                    curves_tested_for_found = c+1;
-                    options.curves_tested_for_found = (uint32_t)(c+1);
-                    write_result();
-                    publish_json();
-                    delete eng;
-                    return 0;
-                }
-                if (r1<0 || r2<0) continue;
-                mpz_class inv_u1_4 = sqrm(sqrm(inv_u1));
-                mpz_class u2_4 = sqrm(sqrm(u2));
-                aE = subm(N, mpz_class(1));
-                dE = mulm(inv_u1_4, u2_4);
-                X0 = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xB4B4u) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x94D0u)), 192);
-                Y0 = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xC3C3u) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x8BADF00Dull)), 192);
-                if (X0==0 || Y0==0) continue;
-                if (!force_on_curve(aE, dE, X0, Y0)) {
-                    if (result_factor>0) {
-                        curves_tested_for_found = c+1;
-                        options.curves_tested_for_found = (uint32_t)(c+1);
-                        write_result();
-                        publish_json();
-                        delete eng;
-                        return 0;
+            for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
+                // m pseudo-aléatoire et non nul
+                uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
+                if (m < 2) m = 2;
+
+                // (s,t) = m*(4,8) sur t^2 = s^3 + 4 s - 16  (mod N)
+                mpz_class s, t;
+                // EC_modular<4>::get(m, 4, 8, N, s, t);
+                ecm_local::EC_mod4::get(m, 4, 8, N, s, t);
+
+
+                // a = 1
+                aE = mpz_class(1);
+
+                // Helpers locaux mod N
+                auto inv_or_gcd = [&](const mpz_class& den, mpz_class& inv)->bool {
+                    int r = invm(den, inv);                   // ton invm() retourne 1 si facteur trouvé
+                    if (r == 1) {
+                        curves_tested_for_found = c+1; options.curves_tested_for_found = (uint32_t)(c+1);
+                        write_result(); publish_json(); delete eng; return false; // exit courant
                     }
-                    continue;
-                }
-                ok = true;
+                    return (r == 0);
+                };
+
+                // alpha = (t+8)/(s-4)
+                mpz_class inv, alpha, alpha2, r, x, y;
+                mpz_class den = subm(s, mpz_class(4));
+                if (!inv_or_gcd(den, inv)) return 0;
+                alpha  = mulm(addm(t, mpz_class(8)), inv);
+                alpha2 = sqrm(alpha);
+
+                // r = (8 + 2 alpha) / (8 - alpha^2)
+                den = subm(mpz_class(8), alpha2);
+                if (!inv_or_gcd(den, inv)) return 0;
+                r = mulm(addm(mpz_class(8), mulm(mpz_class(2), alpha)), inv);
+
+                // t1 = (2r - 1)^2
+                mpz_class two_r_minus1 = subm(mulm(mpz_class(2), r), mpz_class(1));
+                mpz_class t1 = sqrm(two_r_minus1);
+
+                // d = (8 r^2 - 8 r + 1) / ( (2r - 1)^4 )
+                mpz_class numD = addm(subm(mulm(mpz_class(8), sqrm(r)), mulm(mpz_class(8), r)), mpz_class(1));
+                mpz_class t1sq = sqrm(t1);
+                if (!inv_or_gcd(t1sq, inv)) return 0;
+                dE = mulm(numD, inv);
+
+                // x = ((8 - alpha^2) * (2 r^2 - 1)) / (2 s - alpha^2 + 4)
+                mpz_class numX = mulm(subm(mpz_class(8), alpha2), subm(mulm(mpz_class(2), sqrm(r)), mpz_class(1)));
+                mpz_class denX = addm(subm(mulm(mpz_class(2), s), alpha2), mpz_class(4));
+                if (!inv_or_gcd(denX, inv)) return 0;
+                X0 = mulm(numX, inv);
+
+                // y = ( (2r - 1)^2 ) / (4 r - 3)
+                mpz_class denY = subm(mulm(mpz_class(4), r), mpz_class(3));
+                if (!inv_or_gcd(denY, inv)) return 0;
+                Y0 = mulm(t1, inv);
+
+                if (X0 == 0 || Y0 == 0) continue;
+
+                // Vérif point sur a=1 : X^2 + Y^2 = 1 + d X^2 Y^2
+                auto X2 = sqrm(X0), Y2 = sqrm(Y0);
+                auto L  = addm(X2, Y2);
+                auto R  = addm(mpz_class(1), mulm(dE, mulm(X2, Y2)));
+                if (subm(L, R) != 0) continue;
+
+                built = ok = true;
+                torsion_used = "16";
             }
-            if (!ok) {
-                aE = subm(N, mpz_class(1));
-                for (int tries=0; tries<256 && !built; ++tries){
-                    X0 = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xDEADu) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x9E37u)), 256);
-                    Y0 = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xBEEFull) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x94D0u)), 256);
-                    if (X0==0 || Y0==0) continue;
-                    if (!force_on_curve(aE, dE, X0, Y0)) {
-                        if (result_factor>0){
-                            curves_tested_for_found = c+1;
-                            options.curves_tested_for_found = (uint32_t)(c+1);
-                            write_result();
-                            publish_json();
-                            delete eng;
-                            return 0;
-                        }
-                        continue;
-                    }
-                    torsion_used += "-fallback";
-                    built = true;
-                }
-            } else built = true;
-        } else {
+
+        }
+
+        if(!built){
             aE = subm(N, mpz_class(1));
             for (int tries=0; tries<256 && !built; ++tries){
                 X0 = rnd_mpz_bits(N, curve_seed ^ (static_cast<uint64_t>(0xC0FFEEull) + static_cast<uint64_t>(tries)*static_cast<uint64_t>(0x9E37u)), 256);
@@ -534,7 +657,21 @@ int App::runECMMarinTwistedEdwards()
                 built = true;
             }
         }
-
+        auto check_invariant = [&](){
+            auto Xv = compute_X_with_dots(eng,(engine::Reg)3,N);
+            auto Yv = compute_X_with_dots(eng,(engine::Reg)4,N);
+            auto Zv = compute_X_with_dots(eng,(engine::Reg)1,N);
+            auto Tv = compute_X_with_dots(eng,(engine::Reg)5,N);
+            auto lhs = addm(mulm(aE, sqrm(Xv)), sqrm(Yv));     // a*X^2 + Y^2
+            auto rhs = addm(sqrm(Zv), mulm(dE, sqrm(Tv)));     // Z^2 + d*T^2
+            auto rel = subm(lhs, rhs);
+            if (rel != 0){std::cout << "[ECM] invariant FAIL (a="
+                                    << aE << ")\n";}
+                                    else{
+                        std::cout << "[ECM] check invariant OK (a="
+                                    << aE << ")\n";
+                                    }
+        };
         torsion_last = torsion_used;
         torsion_name = torsion_used;
 
@@ -587,117 +724,133 @@ int App::runECMMarinTwistedEdwards()
         eng->set((engine::Reg)1, 1u);
         mpz_t zx; mpz_init(zx); mpz_set(zx, X0.get_mpz_t()); eng->set_mpz((engine::Reg)6, zx); mpz_clear(zx);
         mpz_t zy; mpz_init(zy); mpz_set(zy, Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
-        eng->set((engine::Reg)8, 2u);
-        eng->set_multiplicand((engine::Reg)15,(engine::Reg)8);
-        eng->copy((engine::Reg)8,(engine::Reg)15);
-
-        eng->copy((engine::Reg)9,(engine::Reg)6);
+        eng->set((engine::Reg)8, 2u);              // constante 2 en registre 8
+        eng->copy((engine::Reg)9,(engine::Reg)6);  // 9 = X0
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-        eng->mul((engine::Reg)9,(engine::Reg)11);
-        eng->set((engine::Reg)1, 1u);
+        eng->mul((engine::Reg)9,(engine::Reg)11);  // 9 = T2 = X0*Y0
+        eng->set((engine::Reg)1, 1u);              // Z1 = 1
+        eng->copy((engine::Reg)3,(engine::Reg)6);  // X1 = X0
+        eng->copy((engine::Reg)4,(engine::Reg)7);  // Y1 = Y0
+        eng->copy((engine::Reg)5,(engine::Reg)9);  // T1 = T0
 
-        eng->copy((engine::Reg)3,(engine::Reg)6);
-        eng->copy((engine::Reg)4,(engine::Reg)7);
-        eng->copy((engine::Reg)5,(engine::Reg)9);
-        eng->set_multiplicand((engine::Reg)14,(engine::Reg)17);
-        eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-        eng->copy((engine::Reg)17,(engine::Reg)14);
-        eng->copy((engine::Reg)16,(engine::Reg)11);
 
-        auto eADD_RP = [&](){
-            eng->addsub(
-                (engine::Reg)20, (engine::Reg)18,
-                (engine::Reg)4,  (engine::Reg)3
-            ); // S1, D1
-            eng->addsub(
-                (engine::Reg)21, (engine::Reg)19,
-                (engine::Reg)7,  (engine::Reg)6
-            ); // S2, D2
+// A=(Y1−X1)(Y2−X2), B=(Y1+X1)(Y2+X2)
+// C=2*Z1*Z2 (Z2=1), D=2*d*T1*T2
+// E=B−A, F=C−D, G=C+D, H=B+A
+// X3=E*F, Y3=G*H, T3=E*H, Z3=F*G
+auto eADD_RP = [&](){
+    // S1 = Y1+X1, D1 = Y1−X1
+    eng->addsub((engine::Reg)20,(engine::Reg)18, (engine::Reg)4,(engine::Reg)3);
+    // S2 = Y2+X2, D2 = Y2−X2
+    eng->addsub((engine::Reg)21,(engine::Reg)19, (engine::Reg)7,(engine::Reg)6);
 
-            eng->set_multiplicand((engine::Reg)11, (engine::Reg)19);
-            eng->mul((engine::Reg)18, (engine::Reg)11);   // A
+    // A = D1 * D2
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)19);
+    eng->mul((engine::Reg)18,(engine::Reg)11); // 18 = A
 
-            eng->set_multiplicand((engine::Reg)12, (engine::Reg)21);
-            eng->mul((engine::Reg)20, (engine::Reg)12);   // B
+    // B = S1 * S2
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)21);
+    eng->mul((engine::Reg)20,(engine::Reg)11); // 20 = B
 
-            eng->copy((engine::Reg)22, (engine::Reg)5);   // T1
-            eng->set_multiplicand((engine::Reg)13, (engine::Reg)9);
-            eng->mul((engine::Reg)22, (engine::Reg)13);   // T1*T2
-            eng->mul((engine::Reg)22, (engine::Reg)17);   // D = 2*d*T1*T2
+    // D = 2*d*T1*T2   (T1=5, T2=9, 2d=17)
+    eng->copy((engine::Reg)22,(engine::Reg)5);               // 22=T1
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);   // *T2
+    eng->mul((engine::Reg)22,(engine::Reg)11);               // 22=T1*T2
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)17);  // *2d
+    eng->mul((engine::Reg)22,(engine::Reg)11);               // 22=D
 
-            eng->copy((engine::Reg)23, (engine::Reg)1);
-            eng->mul((engine::Reg)23, (engine::Reg)8);    // C = 2*Z1*Z2
+    // C = 2*Z1*Z2, Z2=1 => C=2*Z1
+    eng->copy((engine::Reg)23,(engine::Reg)1);               // 23=Z1
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *2
+    eng->mul((engine::Reg)23,(engine::Reg)11);               // 23=C
 
-            eng->copy((engine::Reg)24, (engine::Reg)20);
-            eng->sub_reg((engine::Reg)24, (engine::Reg)18); // E = B-A
+    // E=B−A, H=B+A, F=C−D, G=C+D
+    eng->copy((engine::Reg)24,(engine::Reg)20); eng->sub_reg((engine::Reg)24,(engine::Reg)18); // 24=E
+    eng->copy((engine::Reg)27,(engine::Reg)20); eng->add    ((engine::Reg)27,(engine::Reg)18); // 27=H
+    eng->copy((engine::Reg)25,(engine::Reg)23); eng->sub_reg((engine::Reg)25,(engine::Reg)22); // 25=F
+    eng->copy((engine::Reg)26,(engine::Reg)23); eng->add    ((engine::Reg)26,(engine::Reg)22); // 26=G
 
-            eng->copy((engine::Reg)25, (engine::Reg)23);
-            eng->sub_reg((engine::Reg)25, (engine::Reg)22); // F = C-D
+    // X3 = E*F
+    eng->copy((engine::Reg)3,(engine::Reg)24);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+    eng->mul((engine::Reg)3,(engine::Reg)11);
 
-            eng->copy((engine::Reg)26, (engine::Reg)23);
-            eng->add((engine::Reg)26, (engine::Reg)22);     // G = C+D
+    // Y3 = G*H
+    eng->copy((engine::Reg)4,(engine::Reg)26);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)27);
+    eng->mul((engine::Reg)4,(engine::Reg)11);
 
-            eng->copy((engine::Reg)27, (engine::Reg)20);
-            eng->add((engine::Reg)27, (engine::Reg)18);     // H = B+A
+    // T3 = E*H
+    eng->copy((engine::Reg)5,(engine::Reg)24);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)27);
+    eng->mul((engine::Reg)5,(engine::Reg)11);
 
-            eng->copy((engine::Reg)3, (engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)11, (engine::Reg)25);
-            eng->mul((engine::Reg)3, (engine::Reg)11);      // X3 = E*F
+    // Z3 = F*G
+    eng->copy((engine::Reg)1,(engine::Reg)25);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)26);
+    eng->mul((engine::Reg)1,(engine::Reg)11);
+};
 
-            eng->copy((engine::Reg)4, (engine::Reg)26);
-            eng->set_multiplicand((engine::Reg)12, (engine::Reg)27);
-            eng->mul((engine::Reg)4, (engine::Reg)12);      // Y3 = G*H
 
-            eng->copy((engine::Reg)5, (engine::Reg)24);
-            eng->mul((engine::Reg)5, (engine::Reg)12);      // T3 = E*H
 
-            eng->copy((engine::Reg)1, (engine::Reg)25);
-            eng->set_multiplicand((engine::Reg)14, (engine::Reg)26);
-            eng->mul((engine::Reg)1, (engine::Reg)14);      // Z3 = F*G
-        };
 
-        auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
-            eng->copy((engine::Reg)18, (engine::Reg)RX);
-            eng->square_mul((engine::Reg)18);              // A
+// A=X1^2, B=Y1^2, C=2*Z1^2, D=a*A,
+// E=(X1+Y1)^2−A−B, G=D+B, F=G−C, H=D−B,
+// X3=E*F, Y3=G*H, T3=E*H, Z3=F*G
+auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
+    // A = X1^2
+    eng->copy((engine::Reg)18,(engine::Reg)RX);
+    eng->square_mul((engine::Reg)18);                       // 18=A
 
-            eng->copy((engine::Reg)19, (engine::Reg)RY);
-            eng->square_mul((engine::Reg)19);              // B
+    // B = Y1^2
+    eng->copy((engine::Reg)19,(engine::Reg)RY);
+    eng->square_mul((engine::Reg)19);                       // 19=B
 
-            eng->copy((engine::Reg)20, (engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20, 2u);          // C = 2*Z1^2
+    // C = 2*Z1^2  (square puis *2 explicite)
+    eng->copy((engine::Reg)20,(engine::Reg)RZ);
+    eng->square_mul((engine::Reg)20);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);  // *2
+    eng->mul((engine::Reg)20,(engine::Reg)11);              // 20=C
 
-            eng->copy((engine::Reg)21, (engine::Reg)0);
-            eng->sub_reg((engine::Reg)21, (engine::Reg)18); // D = -A
+    // D = a*A
+    eng->copy((engine::Reg)21,(engine::Reg)18);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)16); // *a
+    eng->mul((engine::Reg)21,(engine::Reg)11);              // 21=D
 
-            eng->copy((engine::Reg)22, (engine::Reg)RX);
-            eng->add((engine::Reg)22, (engine::Reg)RY);
-            eng->square_mul((engine::Reg)22);
-            eng->sub_reg((engine::Reg)22, (engine::Reg)18);
-            eng->sub_reg((engine::Reg)22, (engine::Reg)19); // E
+    // E = (X1+Y1)^2 − A − B
+    eng->copy((engine::Reg)22,(engine::Reg)RX);
+    eng->add((engine::Reg)22,(engine::Reg)RY);
+    eng->square_mul((engine::Reg)22);
+    eng->sub_reg((engine::Reg)22,(engine::Reg)18);
+    eng->sub_reg((engine::Reg)22,(engine::Reg)19);          // 22=E
 
-            eng->addsub(
-                (engine::Reg)23, (engine::Reg)25,
-                (engine::Reg)21, (engine::Reg)19
-            ); // D+B, D-B
+    // G = D+B ; H = D−B ; F = G−C
+    eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19); // 23=G
+    eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19); // 25=H
+    eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24=F
 
-            eng->copy((engine::Reg)24, (engine::Reg)23);
-            eng->sub_reg((engine::Reg)24, (engine::Reg)20); // F
+    // X3 = E*F
+    eng->copy((engine::Reg)RX,(engine::Reg)22);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
+    eng->mul((engine::Reg)RX,(engine::Reg)11);
 
-            eng->copy((engine::Reg)RX, (engine::Reg)22);
-            eng->set_multiplicand((engine::Reg)12, (engine::Reg)24);
-            eng->mul((engine::Reg)RX, (engine::Reg)12);     // X3 = E*F
+    // Y3 = G*H
+    eng->copy((engine::Reg)RY,(engine::Reg)23);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+    eng->mul((engine::Reg)RY,(engine::Reg)11);
 
-            eng->copy((engine::Reg)RY, (engine::Reg)23);
-            eng->set_multiplicand((engine::Reg)13, (engine::Reg)25);
-            eng->mul((engine::Reg)RY, (engine::Reg)13);     // Y3 = (D+B)*(D-B)
+    // T3 = E*H
+    eng->copy((engine::Reg)RT,(engine::Reg)22);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+    eng->mul((engine::Reg)RT,(engine::Reg)11);
 
-            eng->copy((engine::Reg)RT, (engine::Reg)22);
-            eng->mul((engine::Reg)RT, (engine::Reg)13);     // T3 = E*(D-B)
+    // Z3 = F*G
+    eng->copy((engine::Reg)RZ,(engine::Reg)24);
+    eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
+    eng->mul((engine::Reg)RZ,(engine::Reg)11);
+};
 
-            eng->copy((engine::Reg)RZ, (engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)15, (engine::Reg)23);
-            eng->mul((engine::Reg)RZ, (engine::Reg)15);     // Z3 = F*(D+B)
-        };
+
 
         auto t0 = high_resolution_clock::now();
         auto last_ui = t0;
@@ -718,6 +871,8 @@ int App::runECMMarinTwistedEdwards()
             int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
             eDBL_XYTZ(3,4,1,5);
             if (b) eADD_RP();
+            //if (i == 0) { check_invariant(); }
+
 
             auto now = high_resolution_clock::now();
             if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_steps) {
@@ -732,6 +887,7 @@ int App::runECMMarinTwistedEdwards()
                 last_ui = now;
             }
         }
+        //check_invariant();
         std::cout<<std::endl;
 
         mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
