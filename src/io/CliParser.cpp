@@ -86,9 +86,8 @@ void printUsage(const char* progName) {
     std::cout << "  -edwards             : (Optional) use twisted Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
     std::cout << "  -ced                 : (Optional) use twisted Edwards compute (notorsion or torsion 2x8 possible) " << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
-    std::cout << "  -torsion16           : (Optional) use torsion-16 instead of default torsion-8" << std::endl;
-    std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-8" << std::endl;
-    std::cout << "  -usecompute           : (Optional) use no torsion instead of default torsion-8" << std::endl;
+    std::cout << "  -torsion8            : (Optional) use torsion-8 instead of default torsion-16" << std::endl;
+    std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
     
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
@@ -205,8 +204,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-ced") == 0) {
             opts.compute_edwards = true;
         }
-        else if (std::strcmp(argv[i], "-torsion16") == 0) {
-            opts.torsion16 = true;
+        else if (std::strcmp(argv[i], "-torsion8") == 0) {
+            opts.torsion16 = false;
         }
         else if (std::strcmp(argv[i], "-notorsion") == 0) {
             opts.notorsion = true;

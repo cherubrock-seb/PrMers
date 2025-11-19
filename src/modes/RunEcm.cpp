@@ -539,7 +539,7 @@ int App::runECMMarin()
                 mpz_class num = sqrm(subm(v,u));
                 x0 = mulm(num, den);
                 std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
                 write_gp("montgomery","none", N, p, B1, B2, base_seed, curve_seed, &sigma_mpz, nullptr, nullptr, nullptr, nullptr, A24, x0);
             }

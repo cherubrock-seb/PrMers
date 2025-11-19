@@ -548,8 +548,8 @@ int App::runECMMarinTwistedEdwards()
 
         mpz_class aE, dE, X0, Y0;
         
-        string torsion_used = options.notorsion ? string("none") :
-                              (options.torsion16 ? string("16") : string("8"));
+        string torsion_used = options.notorsion ? string("none") : string("16");
+                             // (options.torsion16 ? string("16") : string("8"));
         bool built = false;
 
         auto force_on_curve = [&](mpz_class& aE_ref,
