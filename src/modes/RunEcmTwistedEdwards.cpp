@@ -100,6 +100,8 @@ using core::algo::product_prefix_fit_u64;
 using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
+namespace fs = std::filesystem;
+
 namespace ecm_local {
 
 struct EC_mod4 {
@@ -110,57 +112,47 @@ struct EC_mod4 {
         if (z < 0) z += N;
     }
 
-    // y^2 = x^3 + 4x - 16  (a=4, b=-16)
     static Pt dbl(const Pt& P, const mpz_class& N) {
         if (P.inf) return P;
-        // lambda = (3*x^2 + 4) / (2*y)
         mpz_class num = 3 * P.x * P.x + 4;
         mpz_class den = 2 * P.y, inv;
         norm(num, N); norm(den, N);
-        if (mpz_sgn(den.get_mpz_t()) == 0) return Pt{{}, {}, true};        // point d'ordre 2
-        if (!mpz_invert(inv.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()))   // non-inversible -> "inf"
+        if (mpz_sgn(den.get_mpz_t()) == 0) return Pt{{}, {}, true};
+        if (!mpz_invert(inv.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()))
             return Pt{{}, {}, true};
         mpz_class lambda = (num * inv) % N; if (lambda < 0) lambda += N;
 
-        // x3 = lambda^2 - 2*x1
         mpz_class x3 = (lambda * lambda - 2 * P.x) % N; if (x3 < 0) x3 += N;
-        // y3 = lambda*(x1 - x3) - y1
         mpz_class y3 = (lambda * (P.x - x3) - P.y) % N; if (y3 < 0) y3 += N;
         return Pt{x3, y3, false};
     }
 
     static Pt add(const Pt& P, const Pt& Q, const mpz_class& N) {
-        if (P.inf) return Q;
-        if (Q.inf) return P;
+        if (P.inf) {return Q;}
+        if (Q.inf) {return P;}
         if (P.x == Q.x) {
-            // P == ±Q
             mpz_class ysum = (P.y + Q.y) % N; if (ysum < 0) ysum += N;
-            if (ysum == 0) return Pt{{}, {}, true};        // P + (-P) = O
-            return dbl(P, N);                              // P == Q
+            if (ysum == 0) return Pt{{}, {}, true};
+            return dbl(P, N);
         }
-        // lambda = (y2 - y1) / (x2 - x1)
         mpz_class num = Q.y - P.y; norm(num, N);
         mpz_class den = Q.x - P.x; norm(den, N);
         mpz_class inv;
         if (!mpz_invert(inv.get_mpz_t(), den.get_mpz_t(), N.get_mpz_t()))
-            return Pt{{}, {}, true};                       // non-inversible -> "inf"
+            return Pt{{}, {}, true};
         mpz_class lambda = (num * inv) % N; if (lambda < 0) lambda += N;
 
-        // x3 = lambda^2 - x1 - x2
         mpz_class x3 = (lambda * lambda - P.x - Q.x) % N; if (x3 < 0) x3 += N;
-        // y3 = lambda*(x1 - x3) - y1
         mpz_class y3 = (lambda * (P.x - x3) - P.y) % N; if (y3 < 0) y3 += N;
         return Pt{x3, y3, false};
     }
 
-    // (s,t) = n * (s1,t1) mod N on t^2 = s^3 + 4s - 16
     static void get(uint64_t n, int s1, int t1, const mpz_class& N, mpz_class& s, mpz_class& t) {
         Pt P0, P;
         P0.x = s1; if (s1 < 0) P0.x += N; P0.x %= N;
         P0.y = t1; if (t1 < 0) P0.y += N; P0.y %= N;
         P    = P0;
 
-        // Exclut le bit de poids fort (schéma "R = 2R; if(bit) R += P0")
         int msb = 63 - __builtin_clzll(n);
         for (int b = msb - 1; b >= 0; --b) {
             P = dbl(P, N);
@@ -350,58 +342,6 @@ int App::runECMMarinTwistedEdwards()
         }
     };
 
-    auto write_gp = [&](const std::string& mode,
-                        const std::string& tors,
-                        const mpz_class& Nref,
-                        uint32_t pe,
-                        uint64_t b1e,
-                        uint64_t b2e,
-                        uint64_t seed_base,
-                        uint64_t seed_curve,
-                        const mpz_class* sigma_opt,
-                        const mpz_class* r_opt,
-                        const mpz_class* v_opt,
-                        const mpz_class* aE_opt,
-                        const mpz_class* dE_opt,
-                        const mpz_class& A24_ref,
-                        const mpz_class& x0_ref)->void
-    {
-        (void) A24_ref;
-        (void) Nref;
-        std::ofstream gp("lastcurve.gp");
-        gp<<"p="<<pe<<"; N=2^p-1;\n";
-        gp<<"B1="<<b1e<<"; B2="<<b2e<<";\n";
-        gp<<"seed_base="<<seed_base<<"; seed_curve="<<seed_curve<<";\n";
-        gp<<"default(parisize, 64*10^6);\n";
-        gp<<"modN(x)=Mod(x,N);\n";
-        if (mode=="montgomery" && tors=="none") {
-            gp<<"sigma="<<(sigma_opt? sigma_opt->get_str() : "0")<<";\n";
-            gp<<"u=modN(sigma^2-5); v=modN(4*sigma);\n";
-            gp<<"x=u^3; t0=modN(4*x*v);\n";
-            gp<<"A=lift(modN(((v-u)^2*(v-u)*(3*u+v))/t0 - 2));\n";
-            gp<<"A24=lift(modN((A+2)/4));\n";
-            gp<<"x0=lift(modN(((v-u)^2)/(4*u*v)));\n";
-        } else if (mode=="montgomery" && tors=="16") {
-            gp<<"r="<<(r_opt? r_opt->get_str() : "0")<<";\n";
-            gp<<"A=lift(modN((8*r^4-16*r^3+16*r^2-8*r+1)/(4*r^2)));\n";
-            gp<<"A24=lift(modN((A+2)/4));\n";
-            gp<<"x0=lift(modN(modN(1)/2 - r^2));\n";
-        } else if (mode=="montgomery" && tors=="8") {
-            gp<<"v="<<(v_opt? v_opt->get_str() : "0")<<";\n";
-            gp<<"A=lift(modN(-((4*v+1)^2+16*v)));\n";
-            gp<<"A24=lift(modN((A+2)/4));\n";
-            gp<<"x0=lift(modN(4*v+1));\n";
-        } else if (mode=="edwards") {
-            gp<<"aE="<<(aE_opt? aE_opt->get_str() : "0")<<"; dE="<<(dE_opt? dE_opt->get_str() : "0")<<";\n";
-            gp<<"A=lift(modN(2*(aE+dE)/(aE-dE)));\n";
-            gp<<"A24=lift(modN((A+2)/4));\n";
-            gp<<"x0="<<x0_ref.get_str()<<";\n";
-        }
-        gp<<"\\print(\"A24=\",A24);\n";
-        gp<<"\\print(\"x0=\",x0);\n";
-        gp.close();
-    };
-
     vector<uint64_t> primesB1_v, primesS2_v;
     {
         uint64_t Pmax = B2 ? B2 : B1;
@@ -429,6 +369,8 @@ int App::runECMMarinTwistedEdwards()
     uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
     std::cout << "[ECM] seed=" << base_seed << std::endl;
 
+    const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
+
     string torsion_last = torsion_name;
 
     for (uint64_t c = 0; c < curves; ++c)
@@ -441,7 +383,7 @@ int App::runECMMarinTwistedEdwards()
             return 2;
         }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(34), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(44), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
             std::cout<<"[ECM] GPU engine unavailable\n";
             result_status = "error";
@@ -455,6 +397,69 @@ int App::runECMMarinTwistedEdwards()
             std::cout<<os.str()<<std::endl;
             if (guiServer_) guiServer_->appendLog(os.str());
         }
+
+        std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
+        std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
+        const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
+
+        auto save_ckpt = [&](uint32_t i, double et){
+            const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2); if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            std::error_code ec; fs::remove(ckpt_file + ".old", ec); fs::rename(ckpt_file, ckpt_file + ".old", ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(ckpt_file + ".old", ec);
+        };
+        auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 1) return -2;
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != p) return -2;
+            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
+            uint64_t rB1 = 0;
+            if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data)) return -2;
+            if (!f.check_crc32()) return -2;
+            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
+            return 0;
+        };
+        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+            const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
+            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
+            std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
+        };
+        auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 2) return -2;
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != p) return -2;
+            if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return -2;
+            uint64_t b1s = 0, b2s = 0;
+            if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data)) return -2;
+            if (!f.check_crc32()) return -2;
+            if (b1s != B1 || b2s != B2) return -2;
+            return 0;
+        };
+
+        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
 
         uint64_t curve_seed = mix64(base_seed, c);
         if (forceSeed) {
@@ -504,8 +509,8 @@ int App::runECMMarinTwistedEdwards()
             return -1;
         };
         
-        auto sqrQ = [](const mpq_class& z)->mpq_class { return z*z; };
-        auto pow4Q = [&](const mpq_class& z)->mpq_class { mpq_class t=sqrQ(z); return t*t; };
+       // auto sqrQ = [](const mpq_class& z)->mpq_class { return z*z; };
+        /*auto pow4Q = [&](const mpq_class& z)->mpq_class { mpq_class t=sqrQ(z); return t*t; };
 
         auto mpq_to_mod = [&](const mpq_class& q, mpz_class& out)->int{
             mpz_class num(q.get_num()), den(q.get_den());
@@ -515,12 +520,11 @@ int App::runECMMarinTwistedEdwards()
             if (r<0)  return -1;   
             out = mulm(num, inv);
             return 0;
-        };
+        };*/
 
-        // Rational EC over Q: y^2 = x^3 + 4x - 16
         struct QPt { mpq_class x, y; bool inf=false; };
-        auto q_add = [&](const QPt& P, const QPt& Q)->QPt{
-            if (P.inf) return Q; if (Q.inf) return P;
+        /*auto q_add = [&](const QPt& P, const QPt& Q)->QPt{
+            if (P.inf) {return Q;} if (Q.inf) {return P;}
             if (P.x==Q.x && P.y==-Q.y) return QPt{{}, {}, true};
             mpq_class lambda;
             if (P.x==Q.x && P.y==Q.y) {
@@ -531,8 +535,8 @@ int App::runECMMarinTwistedEdwards()
             mpq_class x3 = sqrQ(lambda) - P.x - Q.x;
             mpq_class y3 = lambda*(P.x - x3) - P.y;
             return QPt{x3,y3,false};
-        };
-        auto q_mul = [&](QPt P, uint32_t k)->QPt{
+        };*/
+        /*auto q_mul = [&](QPt P, uint32_t k)->QPt{
             QPt R{{}, {}, true};
             while (k){
                 if (k&1u) R = q_add(R,P);
@@ -540,7 +544,7 @@ int App::runECMMarinTwistedEdwards()
                 k >>= 1u;
             }
             return R;
-        };
+        };*/
 
         mpz_class aE, dE, X0, Y0;
         
@@ -567,65 +571,52 @@ int App::runECMMarinTwistedEdwards()
         if (!options.notorsion && options.torsion16) {
             bool ok = false;
             for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
-                // m pseudo-aléatoire et non nul
                 uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
                 if (m < 2) m = 2;
 
-                // (s,t) = m*(4,8) sur t^2 = s^3 + 4 s - 16  (mod N)
                 mpz_class s, t;
-                // EC_modular<4>::get(m, 4, 8, N, s, t);
                 ecm_local::EC_mod4::get(m, 4, 8, N, s, t);
 
-
-                // a = 1
                 aE = mpz_class(1);
 
-                // Helpers locaux mod N
                 auto inv_or_gcd = [&](const mpz_class& den, mpz_class& inv)->bool {
-                    int r = invm(den, inv);                   // ton invm() retourne 1 si facteur trouvé
+                    int r = invm(den, inv);
                     if (r == 1) {
                         curves_tested_for_found = c+1; options.curves_tested_for_found = (uint32_t)(c+1);
-                        write_result(); publish_json(); delete eng; return false; // exit courant
+                        write_result(); publish_json(); delete eng; return false;
                     }
                     return (r == 0);
                 };
 
-                // alpha = (t+8)/(s-4)
                 mpz_class inv, alpha, alpha2, r, x, y;
                 mpz_class den = subm(s, mpz_class(4));
                 if (!inv_or_gcd(den, inv)) return 0;
                 alpha  = mulm(addm(t, mpz_class(8)), inv);
                 alpha2 = sqrm(alpha);
 
-                // r = (8 + 2 alpha) / (8 - alpha^2)
                 den = subm(mpz_class(8), alpha2);
                 if (!inv_or_gcd(den, inv)) return 0;
                 r = mulm(addm(mpz_class(8), mulm(mpz_class(2), alpha)), inv);
 
-                // t1 = (2r - 1)^2
                 mpz_class two_r_minus1 = subm(mulm(mpz_class(2), r), mpz_class(1));
                 mpz_class t1 = sqrm(two_r_minus1);
 
-                // d = (8 r^2 - 8 r + 1) / ( (2r - 1)^4 )
                 mpz_class numD = addm(subm(mulm(mpz_class(8), sqrm(r)), mulm(mpz_class(8), r)), mpz_class(1));
                 mpz_class t1sq = sqrm(t1);
                 if (!inv_or_gcd(t1sq, inv)) return 0;
                 dE = mulm(numD, inv);
 
-                // x = ((8 - alpha^2) * (2 r^2 - 1)) / (2 s - alpha^2 + 4)
                 mpz_class numX = mulm(subm(mpz_class(8), alpha2), subm(mulm(mpz_class(2), sqrm(r)), mpz_class(1)));
                 mpz_class denX = addm(subm(mulm(mpz_class(2), s), alpha2), mpz_class(4));
                 if (!inv_or_gcd(denX, inv)) return 0;
                 X0 = mulm(numX, inv);
 
-                // y = ( (2r - 1)^2 ) / (4 r - 3)
                 mpz_class denY = subm(mulm(mpz_class(4), r), mpz_class(3));
                 if (!inv_or_gcd(denY, inv)) return 0;
                 Y0 = mulm(t1, inv);
 
                 if (X0 == 0 || Y0 == 0) continue;
 
-                // Vérif point sur a=1 : X^2 + Y^2 = 1 + d X^2 Y^2
                 auto X2 = sqrm(X0), Y2 = sqrm(Y0);
                 auto L  = addm(X2, Y2);
                 auto R  = addm(mpz_class(1), mulm(dE, mulm(X2, Y2)));
@@ -657,13 +648,14 @@ int App::runECMMarinTwistedEdwards()
                 built = true;
             }
         }
+        /*
         auto check_invariant = [&](){
             auto Xv = compute_X_with_dots(eng,(engine::Reg)3,N);
             auto Yv = compute_X_with_dots(eng,(engine::Reg)4,N);
             auto Zv = compute_X_with_dots(eng,(engine::Reg)1,N);
             auto Tv = compute_X_with_dots(eng,(engine::Reg)5,N);
-            auto lhs = addm(mulm(aE, sqrm(Xv)), sqrm(Yv));     // a*X^2 + Y^2
-            auto rhs = addm(sqrm(Zv), mulm(dE, sqrm(Tv)));     // Z^2 + d*T^2
+            auto lhs = addm(mulm(aE, sqrm(Xv)), sqrm(Yv));
+            auto rhs = addm(sqrm(Zv), mulm(dE, sqrm(Tv)));
             auto rel = subm(lhs, rhs);
             if (rel != 0){std::cout << "[ECM] invariant FAIL (a="
                                     << aE << ")\n";}
@@ -671,7 +663,7 @@ int App::runECMMarinTwistedEdwards()
                         std::cout << "[ECM] check invariant OK (a="
                                     << aE << ")\n";
                                     }
-        };
+        };*/
         torsion_last = torsion_used;
         torsion_name = torsion_used;
 
@@ -699,7 +691,7 @@ int App::runECMMarinTwistedEdwards()
             std::ostringstream head;
             head<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                 <<" | twisted_edwards | torsion="<<torsion_used
-                <<" | K_bits="<<Kbits<<" | seed="<<base_seed;
+                <<" | K_bits="<<Kbits<<" | seed="<<curve_seed;
             std::cout<<head.str()<<std::endl;
             if (guiServer_) guiServer_->appendLog(head.str());
         }
@@ -707,10 +699,6 @@ int App::runECMMarinTwistedEdwards()
         {
             mpz_class dummyA24(0);
             mpz_class x0_ref = X0;
-            write_gp("edwards", torsion_used, N, p, B1, B2,
-                     base_seed, curve_seed,
-                     nullptr, nullptr, nullptr,
-                     &aE, &dE, dummyA24, x0_ref);
         }
 
         mpz_t za; mpz_init(za); mpz_set(za, aE.get_mpz_t()); eng->set_mpz((engine::Reg)16, za); mpz_clear(za);
@@ -719,176 +707,154 @@ int App::runECMMarinTwistedEdwards()
         mpz_t tmp; mpz_init_set(tmp, two_dE.get_mpz_t());
         eng->set_mpz((engine::Reg)17, tmp);
         mpz_clear(tmp);
-        // ➕ add this: keep plain d in reg 29 for the generic addition
         mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t());
-        eng->set_mpz((engine::Reg)29, zd);   // 29 = d
+        eng->set_mpz((engine::Reg)29, zd);
         mpz_clear(zd);
         eng->set((engine::Reg)0, 0u);
         eng->set((engine::Reg)1, 1u);
         mpz_t zx; mpz_init(zx); mpz_set(zx, X0.get_mpz_t()); eng->set_mpz((engine::Reg)6, zx); mpz_clear(zx);
         mpz_t zy; mpz_init(zy); mpz_set(zy, Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
-        eng->set((engine::Reg)8, 2u);              // constante 2 en registre 8
-        eng->copy((engine::Reg)9,(engine::Reg)6);  // 9 = X0
+        eng->set((engine::Reg)8, 2u);
+        eng->copy((engine::Reg)9,(engine::Reg)6);
         eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-        eng->mul((engine::Reg)9,(engine::Reg)11);  // 9 = T2 = X0*Y0
-        eng->set((engine::Reg)1, 1u);              // Z1 = 1
-        eng->copy((engine::Reg)3,(engine::Reg)6);  // X1 = X0
-        eng->copy((engine::Reg)4,(engine::Reg)7);  // Y1 = Y0
-        eng->copy((engine::Reg)5,(engine::Reg)9);  // T1 = T0
+        eng->mul((engine::Reg)9,(engine::Reg)11);
+        eng->set((engine::Reg)1, 1u);
+        eng->copy((engine::Reg)3,(engine::Reg)6);
+        eng->copy((engine::Reg)4,(engine::Reg)7);
+        eng->copy((engine::Reg)5,(engine::Reg)9);
 
-
-
-        // Generic extended twisted-Edwards addition (works for any a):
-        // A = X1*X2
-        // B = Y1*Y2
+        // eADD_RP: Twisted Edwards extended coordinates (X,Y,Z,T)
+        // Formulas:
+        // E = X1*Y2 + Y1*X2
+        // H = Y1*Y2 - a*X1*X2
         // C = d*T1*T2
-        // D = Z1*Z2  (Z2=1 here)
-        // E = (X1+Y1)*(X2+Y2) - A - B
-        // F = D - C
-        // G = D + C
-        // H = B - a*A
+        // D = Z1*Z2  (here Z2 = 1)
+        // X3 = E*(D - C)
+        // Y3 = H*(D + C)
+        // T3 = E*H
+        // Z3 = (D - C)*(D + C)
+        auto eADD_RP = [&](){
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);
+            eng->mul((engine::Reg)30,(engine::Reg)11);
+
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)31,(engine::Reg)11);
+
+            eng->copy((engine::Reg)32,(engine::Reg)5);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
+            eng->mul((engine::Reg)32,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
+            eng->mul((engine::Reg)32,(engine::Reg)11);
+
+            eng->copy((engine::Reg)33,(engine::Reg)1);
+
+            eng->addsub((engine::Reg)34,(engine::Reg)35,
+                        (engine::Reg)4,(engine::Reg)3);
+            eng->addsub((engine::Reg)36,(engine::Reg)37,
+                        (engine::Reg)7,(engine::Reg)6);
+
+            eng->copy((engine::Reg)38,(engine::Reg)34);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
+            eng->mul((engine::Reg)38,(engine::Reg)11);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);
+
+            eng->copy((engine::Reg)41,(engine::Reg)33);
+            eng->sub_reg((engine::Reg)41,(engine::Reg)32);
+            eng->copy((engine::Reg)42,(engine::Reg)33);
+            eng->add    ((engine::Reg)42,(engine::Reg)32);
+
+            eng->copy((engine::Reg)39,(engine::Reg)30);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
+            eng->mul((engine::Reg)39,(engine::Reg)11);
+            eng->copy((engine::Reg)40,(engine::Reg)31);
+            eng->sub_reg((engine::Reg)40,(engine::Reg)39);
+
+            eng->copy((engine::Reg)3,(engine::Reg)38);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
+            eng->mul((engine::Reg)3,(engine::Reg)11);
+
+            eng->copy((engine::Reg)4,(engine::Reg)42);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            eng->mul((engine::Reg)4,(engine::Reg)11);
+
+            eng->copy((engine::Reg)5,(engine::Reg)38);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            eng->mul((engine::Reg)5,(engine::Reg)11);
+
+            eng->copy((engine::Reg)1,(engine::Reg)41);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)42);
+            eng->mul((engine::Reg)1,(engine::Reg)11);
+        };
+
+        // eDBL_XYTZ: Doubling in Twisted Edwards extended coordinates (X,Y,Z,T)
+        // Formulas:
+        // A = X^2
+        // B = Y^2
+        // C = 2*Z^2
+        // D = a*A
+        // E = 2*X*Y  (computed as 2*T*Z since T = X*Y/Z)
+        // G = D + B
+        // H = D - B
+        // F = G - C
         // X3 = E*F
         // Y3 = G*H
         // T3 = E*H
         // Z3 = F*G
-        auto eADD_RP = [&](){
-            // A = X1*X2
-            eng->copy((engine::Reg)30,(engine::Reg)3);                 // 30 = X1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);     // *X2
-            eng->mul((engine::Reg)30,(engine::Reg)11);                 // 30 = A
-
-            // B = Y1*Y2
-            eng->copy((engine::Reg)31,(engine::Reg)4);                 // 31 = Y1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);     // *Y2
-            eng->mul((engine::Reg)31,(engine::Reg)11);                 // 31 = B
-
-            // C = d*T1*T2
-            eng->copy((engine::Reg)32,(engine::Reg)5);                 // 32 = T1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);     // *T2
-            eng->mul((engine::Reg)32,(engine::Reg)11);                 // 32 = T1*T2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);    // *d
-            eng->mul((engine::Reg)32,(engine::Reg)11);                 // 32 = C
-
-            // D = Z1*Z2, but Z2=1 => D = Z1
-            eng->copy((engine::Reg)33,(engine::Reg)1);                 // 33 = D
-
-            // S1 = X1+Y1, S2 = X2+Y2
-            eng->addsub((engine::Reg)34,(engine::Reg)35,               // 34=S1, 35=Y1-X1 (unused)
-                        (engine::Reg)4,(engine::Reg)3);                // Y1, X1
-            eng->addsub((engine::Reg)36,(engine::Reg)37,               // 36=S2, 37=Y2-X2 (unused)
-                        (engine::Reg)7,(engine::Reg)6);                // Y2, X2
-
-            // E = (X1+Y1)*(X2+Y2) - A - B
-            eng->copy((engine::Reg)38,(engine::Reg)34);                // 38 = S1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);    // *S2
-            eng->mul((engine::Reg)38,(engine::Reg)11);                 // 38 = S1*S2
-            eng->sub_reg((engine::Reg)38,(engine::Reg)30);             // -A
-            eng->sub_reg((engine::Reg)38,(engine::Reg)31);             // -B  => 38 = E
-
-            // F = D - C ; G = D + C
-            eng->copy((engine::Reg)41,(engine::Reg)33);                // 41 = D
-            eng->sub_reg((engine::Reg)41,(engine::Reg)32);             // 41 = F
-            eng->copy((engine::Reg)42,(engine::Reg)33);                // 42 = D
-            eng->add    ((engine::Reg)42,(engine::Reg)32);             // 42 = G
-
-            // H = B - a*A
-            eng->copy((engine::Reg)39,(engine::Reg)30);                // 39 = A
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);    // *a
-            eng->mul((engine::Reg)39,(engine::Reg)11);                 // 39 = a*A
-            eng->copy((engine::Reg)40,(engine::Reg)31);                // 40 = B
-            eng->sub_reg((engine::Reg)40,(engine::Reg)39);             // 40 = H
-
-            // X3 = E*F
-            eng->copy((engine::Reg)3,(engine::Reg)38);                 // X3 = E
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);    // *F
-            eng->mul((engine::Reg)3,(engine::Reg)11);
-
-            // Y3 = G*H
-            eng->copy((engine::Reg)4,(engine::Reg)42);                 // Y3 = G
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);    // *H
-            eng->mul((engine::Reg)4,(engine::Reg)11);
-
-            // T3 = E*H
-            eng->copy((engine::Reg)5,(engine::Reg)38);                 // T3 = E
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);    // *H
-            eng->mul((engine::Reg)5,(engine::Reg)11);
-
-            // Z3 = F*G
-            eng->copy((engine::Reg)1,(engine::Reg)41);                 // Z3 = F
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)42);    // *G
-            eng->mul((engine::Reg)1,(engine::Reg)11);
-        };
-
-
-
-
-
-        // A=X1^2, B=Y1^2, C=2*Z1^2, D=a*A,
-        // E=2*T1*Z1      (== 2*X1*Y1)
-        // G=D+B, F=G-C, H=D-B,
-        // X3=E*F, Y3=G*H, T3=E*H, Z3=F*G
         auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
-            // A = X1^2
             eng->copy((engine::Reg)18,(engine::Reg)RX);
-            eng->square_mul((engine::Reg)18);                       // 18=A
+            eng->square_mul((engine::Reg)18);
 
-            // B = Y1^2
             eng->copy((engine::Reg)19,(engine::Reg)RY);
-            eng->square_mul((engine::Reg)19);                       // 19=B
+            eng->square_mul((engine::Reg)19);
 
-            // C = 2*Z1^2
             eng->copy((engine::Reg)20,(engine::Reg)RZ);
             eng->square_mul((engine::Reg)20);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);  // *2
-            eng->mul((engine::Reg)20,(engine::Reg)11);              // 20=C
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)20,(engine::Reg)11);
 
-            // D = a*A
             eng->copy((engine::Reg)21,(engine::Reg)18);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16); // *a
-            eng->mul((engine::Reg)21,(engine::Reg)11);              // 21=D
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
+            eng->mul((engine::Reg)21,(engine::Reg)11);
 
-            // E = 2*T1*Z1  (== 2*X1*Y1)
-            eng->copy((engine::Reg)22,(engine::Reg)RT);             // 22 = T1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ); // *Z1
-            eng->mul((engine::Reg)22,(engine::Reg)11);              // 22 = T1*Z1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);  // *2
-            eng->mul((engine::Reg)22,(engine::Reg)11);              // 22 = E
+            eng->copy((engine::Reg)22,(engine::Reg)RT);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
+            eng->mul((engine::Reg)22,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)22,(engine::Reg)11);
 
-            // G = D + B ; H = D - B ; F = G - C
-            eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19); // 23=G
-            eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19); // 25=H
-            eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24=F
+            eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19);
+            eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19);
+            eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20);
 
-            // X3 = E * F
             eng->copy((engine::Reg)RX,(engine::Reg)22);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
 
-            // Y3 = G * H
             eng->copy((engine::Reg)RY,(engine::Reg)23);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RY,(engine::Reg)11);
 
-            // T3 = E * H
             eng->copy((engine::Reg)RT,(engine::Reg)22);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
-            // Z3 = F * G
             eng->copy((engine::Reg)RZ,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
             eng->mul((engine::Reg)RZ,(engine::Reg)11);
         };
 
 
-        auto t0 = high_resolution_clock::now();
-        auto last_ui = t0;
+        uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+        auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
         size_t total_steps = (Kbits>=1? Kbits-1 : 0);
 
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
-        //check_invariant();
-        for (size_t i = 0; i < total_steps; ++i){
+        for (size_t i = start_i; i < total_steps; ++i){
             if (core::algo::interrupted) {
+                double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed);
                 result_status = "interrupted";
                 curves_tested_for_found = c+1;
                 options.curves_tested_for_found = (uint32_t)(c+1);
@@ -900,13 +866,11 @@ int App::runECMMarinTwistedEdwards()
             int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
             eDBL_XYTZ(3,4,1,5);
             if (b) eADD_RP();
-            //if (i == 0) { check_invariant(); }
-
 
             auto now = high_resolution_clock::now();
             if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_steps) {
                 double done = double(i + 1), total = double(total_steps? total_steps:1);
-                double elapsed = duration<double>(now - t0).count();
+                double elapsed = duration<double>(now - t0).count() + saved_et;
                 double ips = done / std::max(1e-9, elapsed);
                 double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                 std::ostringstream line;
@@ -915,8 +879,12 @@ int App::runECMMarinTwistedEdwards()
                 std::cout<<line.str()<<std::flush;
                 last_ui = now;
             }
+            if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
+                double elapsed = duration<double>(now - t0).count() + saved_et;
+                save_ckpt((uint32_t)(i + 1), elapsed);
+                last_save = now;
+            }
         }
-        //check_invariant();
         std::cout<<std::endl;
 
         mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
@@ -929,7 +897,7 @@ int App::runECMMarinTwistedEdwards()
 
         bool found = (g > 1 && g < N);
 
-        double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
+        double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
         {
             std::ostringstream s1;
             s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves
@@ -942,7 +910,6 @@ int App::runECMMarinTwistedEdwards()
             bool known = is_known(g);
             std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                      <<(known?" | known factor=":" | factor=")<<g.get_str()<<std::endl;
-            std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
             std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
             if (guiServer_) {
                 std::ostringstream oss;
@@ -950,6 +917,7 @@ int App::runECMMarinTwistedEdwards()
                 guiServer_->appendLog(oss.str());
             }
             if (!known) {
+                std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                 result_factor = g;
                 result_status = "found";
                 curves_tested_for_found = c+1;
@@ -961,6 +929,136 @@ int App::runECMMarinTwistedEdwards()
             }
         }
 
+        if (B2 > B1) {
+            mpz_class M(1);
+            for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
+            uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
+            if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
+            uint32_t start_bit = resume_stage2 ? s2_idx : 0;
+            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = s2_et;
+
+            mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
+            mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
+
+            auto addm = [&](mpz_class a, mpz_class b){ mpz_class r=a+b; r%=N; if (r<0) r+=N; return r; };
+            auto subm = [&](mpz_class a, mpz_class b){ mpz_class r=a-b; r%=N; if (r<0) r+=N; return r; };
+            auto mulm = [&](const mpz_class& a, const mpz_class& b){ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
+            auto invm = [&](const mpz_class& a, mpz_class& inv)->int{
+                if (mpz_sgn(a.get_mpz_t())==0) return -1;
+                if (mpz_invert(inv.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t())) return 0;
+                mpz_class g; mpz_gcd(g.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t());
+                if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; return 1; }
+                return -1;
+            };
+
+            mpz_class den = subm(Zv, Yv), invden;
+            { int r = invm(den, invden); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+            mpz_class u = mulm(addm(Zv, Yv), invden);
+
+            // A = 2*(aE+dE)/(aE-dE), A24 = (A+2)/4
+            mpz_class numA = mulm(mpz_class(2), addm(aE, dE));
+            mpz_class denA = subm(aE, dE), invDenA;
+            { int r = invm(denA, invDenA); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+            mpz_class A = mulm(numA, invDenA);
+            mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+            mpz_class A24 = mulm(addm(A, mpz_class(2)), inv4);
+
+            mpz_t zA24; mpz_init_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
+            eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
+
+            const uint32_t baseX = 4, baseZ = 5;
+            mpz_t zu; mpz_init_set(zu, u.get_mpz_t()); eng->set_mpz((engine::Reg)baseX, zu); mpz_clear(zu);
+            eng->set((engine::Reg)baseZ, 1u);
+
+            if (!resume_stage2) {
+                eng->set((engine::Reg)0, 1u);
+                eng->set((engine::Reg)1, 0u);
+                eng->copy((engine::Reg)2, (engine::Reg)baseX);
+                eng->copy((engine::Reg)3, (engine::Reg)baseZ);
+                eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
+                eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
+            }
+
+            auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
+                eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b);
+            };
+            auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t sc, size_t dc){
+                eng->addsub_copy((engine::Reg)s,(engine::Reg)d,(engine::Reg)sc,(engine::Reg)dc,(engine::Reg)a,(engine::Reg)b);
+            };
+            auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+                hadamard_copy(X1, Z1, 25, 24, 10, 9);
+                hadamard(X2, Z2, 8, 7);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);  eng->mul((engine::Reg)9,(engine::Reg)11);
+                eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);  eng->mul((engine::Reg)10,(engine::Reg)11);
+                hadamard(9, 10, X2, Z2);
+                eng->square_mul((engine::Reg)X2);
+                eng->square_mul((engine::Reg)Z2); eng->mul((engine::Reg)Z2,(engine::Reg)13);
+                eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+                eng->square_mul((engine::Reg)24);
+                eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+                eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+                eng->mul((engine::Reg)X1,(engine::Reg)15);
+                eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
+                eng->mul((engine::Reg)25,(engine::Reg)12);
+                eng->add((engine::Reg)25,(engine::Reg)24);
+                eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
+            };
+
+            for (uint32_t i = start_bit; i < stage2_bits; ++i){
+                uint32_t bit = stage2_bits - 1 - i;
+                int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
+                if (b==0) xDBLADD_strict(0,1, 2,3);
+                else      xDBLADD_strict(2,3, 0,1);
+
+                auto now2 = high_resolution_clock::now();
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1==stage2_bits){
+                    double done = double(i+1), total = double(stage2_bits);
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    double ips = done / std::max(1e-9, elapsed);
+                    double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                    std::ostringstream line;
+                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                        << " | Stage2 " << (i+1) << "/" << stage2_bits
+                        << " (" << std::fixed << std::setprecision(2) << (total? (done*100.0/total):100.0)
+                        << "%) | ETA " << fmt_hms(eta);
+                    std::cout << line.str() << std::flush; last2_ui = now2;
+                }
+                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period){
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits); last2_save = now2;
+                }
+                if (interrupted){
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i+1), elapsed, stage2_bits);
+                    std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
+                            << " bit " << (i+1) << "/" << stage2_bits << "\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
+                    curves_tested_for_found=c+1; options.curves_tested_for_found=(uint32_t)(c+1); write_result(); delete eng; return 0;
+                }
+            }
+            std::cout << std::endl;
+
+            eng->copy((engine::Reg)7,(engine::Reg)1);
+            mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
+            mpz_class gg2 = gcd_with_dots(Zres, N);
+            if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
+
+            std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+            double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+            { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
+            bool found2 = (gg2 > 1 && gg2 < N);
+            if (found2) 
+            {
+                        bool known = is_known(gg2);
+                        std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
+                        if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
+                        if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); result_factor=gg2; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+            }
+        }
+
+
+        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+        { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
     }
 
