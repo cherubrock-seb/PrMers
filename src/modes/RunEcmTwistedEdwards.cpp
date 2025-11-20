@@ -981,12 +981,12 @@ int App::runECMMarinTwistedEdwards()
             eng->square_mul((engine::Reg)RX);                       // RX = A
             eng->square_mul((engine::Reg)RY);                       // RY = B
 
-            // --- G = A + B ; H = A - B  (Hadamard)
-            hadamard((engine::Reg)RX,(engine::Reg)RY,               // RX,RY non conservés
-                    (engine::Reg)23,(engine::Reg)25);              // 23=G, 25=H
+            // --- G = A + B ; H = A - B  + copie de G en 24 (économise un copy)
+            // 23=G, 25=H, 24=G (copie), 22=d_copy (scratch, ignoré)
+            eng->addsub_copy((engine::Reg)23,(engine::Reg)25,(engine::Reg)24,(engine::Reg)22,
+                            (engine::Reg)RX,(engine::Reg)RY);
 
-            // --- F = G - C
-            eng->copy((engine::Reg)24,(engine::Reg)23);             // 24 = G
+            // --- F = G - C  (F en 24, G reste en 23)
             eng->sub_reg((engine::Reg)24,(engine::Reg)RZ);          // 24 = F = G - C
 
             // --- X3 = E*F ; Z3 = F*G
@@ -1002,6 +1002,7 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)RY,(engine::Reg)11);              // Y3 = G*H
             eng->mul((engine::Reg)RT,(engine::Reg)11);              // T3 = E*H
         };
+
         // eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
         // Formulas:
         // E = X1*Y2 + Y1*X2
@@ -1117,11 +1118,19 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
         };
 
+        uint32_t start_i = 0, nb_ck = 0;
+        double   saved_et = 0.0;
 
+        int rr = read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
 
-        uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
-        auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
-        //size_t total_steps = (Kbits>=1? Kbits-1 : 0);
+        if (rr != 0 || start_i == 0) {
+            saved_et = 0.0;
+            nb_ck = 0;
+        }
+
+        auto t0 = high_resolution_clock::now();
+        auto last_save = t0;
+        auto last_ui   = t0;
 
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
         std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
@@ -1275,7 +1284,7 @@ int App::runECMMarinTwistedEdwards()
             uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
             if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
             uint32_t start_bit = resume_stage2 ? s2_idx : 0;
-            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = s2_et;
+            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = resume_stage2 ? s2_et : 0.0;
 
             mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
             mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
