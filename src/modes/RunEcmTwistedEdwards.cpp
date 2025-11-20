@@ -781,7 +781,7 @@ int App::runECMMarinTwistedEdwards()
             // 30 = X1*X2
             eng->copy((engine::Reg)30,(engine::Reg)3);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);   // multiplicand <- X2
-            eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
+            eng->mul_copy((engine::Reg)30,(engine::Reg)11, (engine::Reg)39);               // 30 = X1*X2
 
             // 31 = Y1*Y2
             eng->copy((engine::Reg)31,(engine::Reg)4);
@@ -806,7 +806,7 @@ int App::runECMMarinTwistedEdwards()
             eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
 
             // 39 = a*X1*X2 ; 40 = H = Y1*Y2 - a*X1*X2
-            eng->copy((engine::Reg)39,(engine::Reg)30);              // 39 <- X1*X2
+            //eng->copy((engine::Reg)39,(engine::Reg)30);              // 39 <- X1*X2
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);  // multiplicand <- a   
             eng->mul((engine::Reg)39,(engine::Reg)43);               // 39 = a*X1*X2
             eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
@@ -854,7 +854,7 @@ int App::runECMMarinTwistedEdwards()
             // 31 = Y1*Y2
             eng->copy((engine::Reg)31,(engine::Reg)4);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // multiplicand <- Y2
-            eng->mul((engine::Reg)31,(engine::Reg)11);               // 31 = Y1*Y2
+            eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40);               // 31 = Y1*Y2
 
             // 32 = C = d*T1*T2
             eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
@@ -874,7 +874,7 @@ int App::runECMMarinTwistedEdwards()
             eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
 
             // 40 = H = Y1*Y2 - X1*X2
-            eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
+            //eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
             eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
 
             // X3 = E*(D - C)
