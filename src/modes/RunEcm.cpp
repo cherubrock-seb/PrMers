@@ -138,7 +138,7 @@ int App::runECMMarin()
     if (forceSigma || options.notorsion) pm_effective = options.edwards ? 3 : 0;
     else if (options.torsion16) pm_effective = options.edwards ? 4 : 1;
     else pm_effective = options.edwards ? 5 : 2;
-    mode_name = ((pm_effective==0||pm_effective==1||pm_effective==2) ? "montgomery" : "edwards");
+    mode_name = ((pm_effective==0||pm_effective==1||pm_effective==2) ? "montgomery" : "edwards--conv-->montgomery");
     if (pm_effective==0 || pm_effective==3) torsion_name = "none";
     else if (pm_effective==1 || pm_effective==4) torsion_name = "16";
     else torsion_name = "8";
@@ -393,7 +393,7 @@ int App::runECMMarin()
                 gp<<"A=lift(modN(-((4*v+1)^2+16*v)));\n";
                 gp<<"A24=lift(modN((A+2)/4));\n";
                 gp<<"x0=lift(modN(4*v+1));\n";
-            } else if (mode=="edwards") {
+            } else if (mode=="edwards--conv-->montgomery") {
                 gp<<"aE="<<(aE_opt? aE_opt->get_str() : "0")<<"; dE="<<(dE_opt? dE_opt->get_str() : "0")<<";\n";
                 gp<<"A=lift(modN(2*(aE+dE)/(aE-dE)));\n";
                 gp<<"A24=lift(modN((A+2)/4));\n";
@@ -430,7 +430,7 @@ int App::runECMMarin()
         mpz_class A24, x0;
 
         if (resume_stage2) {
-            if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards";
+            if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards--conv-->montgomery";
             if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
         }
         //test case ./prmers 127913 -ecm -b1 50000 -seed 15236911113677539612
@@ -641,7 +641,7 @@ int App::runECMMarin()
             }
             else if (picked_mode == 3)
             {
-                mode_name="edwards"; torsion_name="none";
+                mode_name="edwards--conv-->montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
                 if (forceSigma){
                     curve_seed = options.curve_seed;
@@ -665,13 +665,13 @@ int App::runECMMarin()
                 mpz_class aE = addm(A, mpz_class(2));
                 mpz_class dE = subm(A, mpz_class(2));
                 std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("edwards","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
+                write_gp("edwards--conv-->montgomery","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
             }
             else
             {
-                mode_name="edwards"; torsion_name="8";
+                mode_name="edwards--conv-->montgomery"; torsion_name="8";
                 if (forceSigma){
                     curve_seed = options.curve_seed;
                 }
@@ -690,9 +690,9 @@ int App::runECMMarin()
                 mpz_class aE = addm(A, mpz_class(2));
                 mpz_class dE = subm(A, mpz_class(2));
                 std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("edwards","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
+                write_gp("edwards--conv-->montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
             }
 
             mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);

@@ -82,11 +82,12 @@ void printUsage(const char* progName) {
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
-    std::cout << "  -montgomery          : (Optional) use Montgomery instead of twisted Edwards curve (compute done in montgomery)" << std::endl;
-    std::cout << "  -edwards             : (Optional) use twisted Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
-    std::cout << "  -ced                 : (Optional) use twisted Edwards compute (notorsion or torsion 2x8 possible) " << std::endl;
+    std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
+    std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
+    std::cout << "  -ced                 : (Optional) compute in Edwards and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
-    std::cout << "  -torsion8            : (Optional) use torsion-8 instead of default torsion-16" << std::endl;
+    std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
+    std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
     
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
@@ -203,9 +204,13 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-ced") == 0) {
             opts.compute_edwards = true;
+            opts.torsion16 = true;
         }
         else if (std::strcmp(argv[i], "-torsion8") == 0) {
             opts.torsion16 = false;
+        }
+        else if (std::strcmp(argv[i], "-torsion16") == 0) {
+            opts.torsion16 = true;
         }
         else if (std::strcmp(argv[i], "-notorsion") == 0) {
             opts.notorsion = true;

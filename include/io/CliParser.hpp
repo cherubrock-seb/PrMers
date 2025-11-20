@@ -34,9 +34,9 @@ struct CliOptions {
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;
     bool proof = true;
-    bool edwards = true;
+    bool edwards = false;
     bool compute_edwards = false;
-    bool torsion16 = true;
+    bool torsion16 = false;
     bool notorsion = false;
     uint64_t sigma = 0ULL;
     uint64_t seed = 0ULL;
