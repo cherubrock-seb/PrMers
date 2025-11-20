@@ -747,6 +747,7 @@ int App::runECMMarinTwistedEdwards()
         eng->copy((engine::Reg)5,(engine::Reg)9);
         eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
         eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
+        eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
         auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
             eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b); // s=a+b, d=a-b
         };
@@ -788,8 +789,8 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
             eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = T1*T2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
-            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = d*T1*T2 = C
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
+            eng->mul((engine::Reg)32,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
             // 33 = D = Z1 (since Z2 = 1)
             eng->copy((engine::Reg)33,(engine::Reg)1);
@@ -810,7 +811,7 @@ int App::runECMMarinTwistedEdwards()
             //eng->copy((engine::Reg)42,(engine::Reg)33);
             //eng->add    ((engine::Reg)42,(engine::Reg)32);       // 42 = D + C
             hadamard(1,32,42,41);
-            
+
             // 39 = a*X1*X2
             eng->copy((engine::Reg)39,(engine::Reg)3);          // 39 = X1*X2
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
@@ -876,8 +877,8 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
             eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = T1*T2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
-            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = d*T1*T2 = C
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
+            eng->mul((engine::Reg)32,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
             // 33 = D = Z1 (since Z2 = 1)
             //eng->copy((engine::Reg)33,(engine::Reg)1);
