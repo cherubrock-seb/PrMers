@@ -1003,131 +1003,131 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)RT,(engine::Reg)11);              // T3 = E*H
         };
 
-// eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
-// Formulas:
-// E = X1*Y2 + Y1*X2
-// H = Y1*Y2 - a*X1*X2 (ici a=1)
-// C = d*T1*T2
-// D = Z1
-// X3 = E*(D - C)
-// Y3 = H*(D + C)
-// T3 = E*H
-// Z3 = (D - C)*(D + C)
-auto eADD_RP_notwist = [&](){
-    // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
-    eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1=Y1+X1, 35=D1=Y1-X1
-    eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)7,(engine::Reg)6); // 36=S2=Y2+X2, 37=D2=Y2-X2
+        // eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
+        // Formulas:
+        // E = X1*Y2 + Y1*X2
+        // H = Y1*Y2 - a*X1*X2 (ici a=1)
+        // C = d*T1*T2
+        // D = Z1
+        // X3 = E*(D - C)
+        // Y3 = H*(D + C)
+        // T3 = E*H
+        // Z3 = (D - C)*(D + C)
+        auto eADD_RP_notwist = [&](){
+            // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1=Y1+X1, 35=D1=Y1-X1
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)7,(engine::Reg)6); // 36=S2=Y2+X2, 37=D2=Y2-X2
 
-    // 30 = X1*X2
-    eng->copy((engine::Reg)30,(engine::Reg)3);
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);   // multiplicand <- X2
-    eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
+            // 30 = X1*X2
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);   // multiplicand <- X2
+            eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
 
-    // 31 = Y1*Y2  (et on garde une copie directe pour H)
-    eng->copy((engine::Reg)31,(engine::Reg)4);
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // multiplicand <- Y2
-    eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40); // 31 = Y1*Y2 ; 40 <- Y1*Y2
+            // 31 = Y1*Y2  (et on garde une copie directe pour H)
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // multiplicand <- Y2
+            eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40); // 31 = Y1*Y2 ; 40 <- Y1*Y2
 
-    // 32 = C = d*T1*T2  (optim: multiplicands pré-bindés 46=T2, 45=d)
-    eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
-    eng->mul((engine::Reg)32,(engine::Reg)46);               // 32 = T1*T2
-    eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
+            // 32 = C = d*T1*T2  (optim: multiplicands pré-bindés 46=T2, 45=d)
+            eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
+            eng->mul((engine::Reg)32,(engine::Reg)46);               // 32 = T1*T2
+            eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
 
-    // 42 = D + C, 41 = D - C  (D = Z1)
-    eng->addsub((engine::Reg)42,(engine::Reg)41, (engine::Reg)1,(engine::Reg)32);
+            // 42 = D + C, 41 = D - C  (D = Z1)
+            eng->addsub((engine::Reg)42,(engine::Reg)41, (engine::Reg)1,(engine::Reg)32);
 
-    // 38 = E = S1*S2 - X1X2 - Y1Y2
-    eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
-    eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
-    eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
-    eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
+            // 38 = E = S1*S2 - X1X2 - Y1Y2
+            eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
+            eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
 
-    // 40 = H = Y1*Y2 - X1*X2  (on part de la copie 40 = Y1*Y2)
-    eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
+            // 40 = H = Y1*Y2 - X1*X2  (on part de la copie 40 = Y1*Y2)
+            eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
 
-    // X3 = E*(D - C)
-    eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
-    eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
+            // X3 = E*(D - C)
+            eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
+            eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
 
-    // Z3 = (D - C)*(D + C)
-    eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
-    eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
+            eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
 
-    // Y3 = H*(D + C)
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
-    eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
-    eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
+            // Y3 = H*(D + C)
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
+            eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
+            eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
 
-    // T3 = E*H
-    eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
-    eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
-};
+            // T3 = E*H
+            eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
+            eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
+        };
 
-// eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
-// Formulas:
-// E = X1*Y2 + Y1*X2
-// H = Y1*Y2 - a*X1*X2 (ici a=1)
-// C = d*T1*T2
-// D = Z1
-// X3 = E*(D - C)
-// Y3 = H*(D + C)
-// T3 = E*H
-// Z3 = (D - C)*(D + C)
-auto eADD_RP_notwist_2 = [&](){
-    // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
-    eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1=Y1+X1, 35=D1=Y1-X1
-    eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)48,(engine::Reg)47); // 36=S2=Y2+X2, 37=D2=Y2-X2
+        // eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
+        // Formulas:
+        // E = X1*Y2 + Y1*X2
+        // H = Y1*Y2 - a*X1*X2 (ici a=1)
+        // C = d*T1*T2
+        // D = Z1
+        // X3 = E*(D - C)
+        // Y3 = H*(D + C)
+        // T3 = E*H
+        // Z3 = (D - C)*(D + C)
+        auto eADD_RP_notwist_2 = [&](){
+            // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1=Y1+X1, 35=D1=Y1-X1
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)48,(engine::Reg)47); // 36=S2=Y2+X2, 37=D2=Y2-X2
 
-    // 30 = X1*X2
-    eng->copy((engine::Reg)30,(engine::Reg)3);
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)47);  // multiplicand <- X2
-    eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
+            // 30 = X1*X2
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)47);  // multiplicand <- X2
+            eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
 
-    // 31 = Y1*Y2  (et copie directe pour H)
-    eng->copy((engine::Reg)31,(engine::Reg)4);
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)48);  // multiplicand <- Y2
-    eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40); // 31 = Y1*Y2 ; 40 <- Y1*Y2
+            // 31 = Y1*Y2  (et copie directe pour H)
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)48);  // multiplicand <- Y2
+            eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40); // 31 = Y1*Y2 ; 40 <- Y1*Y2
 
-    // 32 = C = d*T1*T2  (T2 = R49 ici, on garde set_multiplicand)
-    eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2 (voie négative)
-    eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
-    eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = d*T1*T2 = C
+            // 32 = C = d*T1*T2  (T2 = R49 ici, on garde set_multiplicand)
+            eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2 (voie négative)
+            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
+            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = d*T1*T2 = C
 
-    // 42 = D + C, 41 = D - C  (D = Z1)
-    eng->addsub((engine::Reg)42,(engine::Reg)41, (engine::Reg)1,(engine::Reg)32);
+            // 42 = D + C, 41 = D - C  (D = Z1)
+            eng->addsub((engine::Reg)42,(engine::Reg)41, (engine::Reg)1,(engine::Reg)32);
 
-    // 38 = E = S1*S2 - X1X2 - Y1Y2
-    eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
-    eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
-    eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
-    eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
+            // 38 = E = S1*S2 - X1X2 - Y1Y2
+            eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
+            eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
 
-    // 40 = H = Y1*Y2 - X1*X2  (on part de 40 = Y1*Y2)
-    eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
+            // 40 = H = Y1*Y2 - X1*X2  (on part de 40 = Y1*Y2)
+            eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
 
-    // X3 = E*(D - C)
-    eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
-    eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
+            // X3 = E*(D - C)
+            eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
+            eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
 
-    // Z3 = (D - C)*(D + C)
-    eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
-    eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
+            eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
 
-    // Y3 = H*(D + C)
-    eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
-    eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
-    eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
+            // Y3 = H*(D + C)
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
+            eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
+            eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
 
-    // T3 = E*H
-    eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
-    eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
-};
+            // T3 = E*H
+            eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
+            eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
+        };
 
         uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
         auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
