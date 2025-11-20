@@ -761,7 +761,7 @@ int App::runECMMarinTwistedEdwards()
         // Inputs/outputs mapping :
         // X1=R3, Y1=R4, Z1=R1, T1=R5
         // X2=R6, Y2=R7, Z2=1 (affine), T2=R9
-        // constants: a=R16, d=R29  (si tu utilises a=R43 au runtime, remplace R16→R43 ci-dessous)
+        // constants: a=R16, d=R29
 
         // eADD_RP: Twisted Edwards extended coordinates (X,Y,Z,T)
         // Formulas:
