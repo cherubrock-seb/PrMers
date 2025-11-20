@@ -406,7 +406,7 @@ int App::runECMMarinTwistedEdwards()
             return 2;
         }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(48), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
             std::cout<<"[ECM] GPU engine unavailable\n";
             result_status = "error";
@@ -897,6 +897,145 @@ int App::runECMMarinTwistedEdwards()
         };
 
         
+//Swap 6,7,9 by 47,48,49
+
+        // Inputs/outputs mapping :
+        // X1=R3, Y1=R4, Z1=R1, T1=R5
+        // X2=R6, Y2=R7, Z2=1 (affine), T2=R9
+        // constants: a=R16, d=R29
+
+        // eADD_RP: Twisted Edwards extended coordinates (X,Y,Z,T)
+        // Formulas:
+        // E = X1*Y2 + Y1*X2
+        // H = Y1*Y2 - a*X1*X2
+        // C = d*T1*T2
+        // D = Z1*Z2 (here Z2 = 1 so D = Z1)
+        // X3 = E*(D - C)
+        // Y3 = H*(D + C)
+        // T3 = E*H
+        // Z3 = (D - C)*(D + C)
+        auto eADD_RP_2 = [&](){
+            // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1, 35=D1
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)48,(engine::Reg)47); // 36=S2, 37=D2
+
+            // 30 = X1*X2
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)47);   // multiplicand <- X2
+            eng->mul_copy((engine::Reg)30,(engine::Reg)11, (engine::Reg)39);               // 30 = X1*X2
+
+            // 31 = Y1*Y2
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)48);   // multiplicand <- Y2
+            eng->mul((engine::Reg)31,(engine::Reg)11);               // 31 = Y1*Y2
+
+            // 32 = C = d*T1*T2
+            eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2
+            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
+            eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
+
+            // 42 = D + C, 41 = D - C  (D = Z1)
+            hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
+
+            // 38 = E = S1*S2 - X1X2 - Y1Y2
+            eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
+            eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
+
+            // 39 = a*X1*X2 ; 40 = H = Y1*Y2 - a*X1*X2
+            //eng->copy((engine::Reg)39,(engine::Reg)30);              // 39 <- X1*X2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);  // multiplicand <- a   
+            eng->mul((engine::Reg)39,(engine::Reg)43);               // 39 = a*X1*X2
+            eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
+            eng->sub_reg((engine::Reg)40,(engine::Reg)39);           // 40 = H
+
+            // X3 = E*(D - C)
+            eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
+            eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
+
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
+            eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
+
+            // Y3 = H*(D + C)
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
+            eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
+            eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
+
+            // T3 = E*H
+            eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
+            eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
+        };
+
+        // eADD_RP_notwist : Twisted Edwards addition (a = 1, Z2 = 1)
+        // Formulas:
+        // E = X1*Y2 + Y1*X2
+        // H = Y1*Y2 - a*X1*X2 (ici a=1)
+        // C = d*T1*T2
+        // D = Z1
+        // X3 = E*(D - C)
+        // Y3 = H*(D + C)
+        // T3 = E*H
+        // Z3 = (D - C)*(D + C)
+        auto eADD_RP_notwist_2 = [&](){
+            // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3); // 34=S1=Y1+X1, 35=D1=Y1-X1
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)48,(engine::Reg)47); // 36=S2=Y2+X2, 37=D2=Y2-X2
+
+            // 30 = X1*X2
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)47);   // multiplicand <- X2
+            eng->mul((engine::Reg)30,(engine::Reg)11);               // 30 = X1*X2
+
+            // 31 = Y1*Y2
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)48);   // multiplicand <- Y2
+            eng->mul_copy((engine::Reg)31,(engine::Reg)11, (engine::Reg)40);               // 31 = Y1*Y2
+
+            // 32 = C = d*T1*T2
+            eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);   // multiplicand <- T2
+            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
+            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = d*T1*T2 = C
+
+            // 42 = D + C, 41 = D - C  (D = Z1)
+            hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
+
+            // 38 = E = S1*S2 - X1X2 - Y1Y2
+            eng->copy((engine::Reg)38,(engine::Reg)34);              // 38 <- S1
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);  // multiplicand <- S2
+            eng->mul((engine::Reg)38,(engine::Reg)11);               // 38 = S1*S2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);           // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);           // 38 -= Y1*Y2  => E
+
+            // 40 = H = Y1*Y2 - X1*X2
+            //eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
+            eng->sub_reg((engine::Reg)40,(engine::Reg)30);           // 40 = H
+
+            // X3 = E*(D - C)
+            eng->copy((engine::Reg)3,(engine::Reg)38);               // X3 <- E
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);  // multiplicand <- (D - C)
+            eng->mul((engine::Reg)3,(engine::Reg)11);                // X3 = E*(D - C)
+
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);               // Z3 <- (D + C)
+            eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
+
+            // Y3 = H*(D + C)
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);  // multiplicand <- H
+            eng->copy((engine::Reg)4,(engine::Reg)42);               // Y3 <- (D + C)
+            eng->mul((engine::Reg)4,(engine::Reg)11);                // Y3 = (D + C)*H
+
+            // T3 = E*H
+            eng->copy((engine::Reg)5,(engine::Reg)38);               // T3 <- E
+            eng->mul((engine::Reg)5,(engine::Reg)11);                // T3 = E*H
+        };
+
 
         // eDBL_XYTZ: Twisted Edwards doubling (X,Y,Z,T) with general a (a in R43)
         // Formulas:
@@ -995,10 +1134,59 @@ int App::runECMMarinTwistedEdwards()
 
         uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
         auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
-        size_t total_steps = (Kbits>=1? Kbits-1 : 0);
+        //size_t total_steps = (Kbits>=1? Kbits-1 : 0);
 
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
-        for (size_t i = start_i; i < total_steps; ++i){
+        std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
+        {
+            mpz_class ec = K;
+            mpz_ptr e = ec.get_mpz_t();
+            for (; mpz_size(e) != 0; )
+            {
+                short di = 0;
+                if (mpz_odd_p(e))
+                {
+                    unsigned long limb0 = (mpz_size(e) > 0) ? mpz_getlimbn(e, 0) : 0ul;
+                    short mod4 = short(limb0 & 3u);
+                    di = (mod4 == 1) ? 1 : -1;
+                    if (di > 0) mpz_sub_ui(e, e, 1u); else mpz_add_ui(e, e, 1u);
+                }
+                naf_vec.push_back(di);
+                mpz_fdiv_q_2exp(e, e, 1);
+            }
+            while (!naf_vec.empty() && naf_vec.back()==0) naf_vec.pop_back();
+        }
+        size_t naf_len = naf_vec.size();
+        if (naf_len == 0) { std::cout<<std::endl; }
+        if (naf_len == 0) { }
+        mpz_class T0_mpz = mulm(X0, Y0);
+        mpz_class X0_neg = subm(N, X0);
+        mpz_class T0_neg = subm(N, T0_mpz);
+        mpz_t zXpos; mpz_init_set(zXpos, X0.get_mpz_t());
+        mpz_t zYpos; mpz_init_set(zYpos, Y0.get_mpz_t());
+        mpz_t zTpos; mpz_init_set(zTpos, T0_mpz.get_mpz_t());
+        mpz_t zXneg; mpz_init_set(zXneg, X0_neg.get_mpz_t());
+        mpz_t zYneg; mpz_init_set(zYneg, Y0.get_mpz_t());
+        mpz_t zTneg; mpz_init_set(zTneg, T0_neg.get_mpz_t());
+        if (naf_len)
+        {
+            short top = naf_vec[naf_len - 1];
+            if (top < 0)
+            {
+                eng->set_mpz((engine::Reg)3, zXneg);
+                eng->set_mpz((engine::Reg)4, zYneg);
+                eng->set_mpz((engine::Reg)5, zTneg);
+            }
+        }
+        size_t total_steps = (naf_len>=1? naf_len-1 : 0);
+        uint32_t i = 0;
+        eng->set_mpz((engine::Reg)6, zXpos);
+        eng->set_mpz((engine::Reg)7, zYpos);
+        eng->set_mpz((engine::Reg)9, zTpos);
+        eng->set_mpz((engine::Reg)47, zXneg);
+        eng->set_mpz((engine::Reg)48, zYneg);
+        eng->set_mpz((engine::Reg)49, zTneg);
+        for (i = 0; i < total_steps; ++i){
             if (core::algo::interrupted) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed);
                 result_status = "interrupted";
@@ -1008,17 +1196,26 @@ int App::runECMMarinTwistedEdwards()
                 delete eng;
                 return 2;
             }
-            size_t bit = Kbits - 2 - i;
-            int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
             if((!options.notorsion && options.torsion16)){
                 eDBL_XYTZ_notwist(3,4,1,5);
-                if (b) eADD_RP_notwist();
             }
             else{
                 eDBL_XYTZ(3,4,1,5);
-                if (b) eADD_RP();
             }
-            
+            short di = naf_vec[naf_len - 2 - i];
+            if (di != 0){
+                if (di > 0){
+                    /*eng->set_mpz((engine::Reg)6, zXpos);
+                    eng->set_mpz((engine::Reg)7, zYpos);
+                    eng->set_mpz((engine::Reg)9, zTpos);*/
+                    if((!options.notorsion && options.torsion16)) eADD_RP_notwist(); else eADD_RP();
+                } else {
+                    //eng->set_mpz((engine::Reg)6, zXneg);
+                    //eng->set_mpz((engine::Reg)7, zYneg);
+                    //eng->set_mpz((engine::Reg)9, zTneg);
+                    if((!options.notorsion && options.torsion16)) eADD_RP_notwist_2(); else eADD_RP_2();
+                }
+            }
 
             auto now = high_resolution_clock::now();
             if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_steps) {
@@ -1039,6 +1236,8 @@ int App::runECMMarinTwistedEdwards()
             }
         }
         std::cout<<std::endl;
+        mpz_clear(zXpos); mpz_clear(zYpos); mpz_clear(zTpos);
+        mpz_clear(zXneg); mpz_clear(zYneg); mpz_clear(zTneg);
 
         mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
         mpz_class g = gcd_with_dots(Zacc, N);
