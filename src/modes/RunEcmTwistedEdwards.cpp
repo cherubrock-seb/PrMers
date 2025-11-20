@@ -146,6 +146,29 @@ struct EC_mod4 {
         mpz_class y3 = (lambda * (P.x - x3) - P.y) % N; if (y3 < 0) y3 += N;
         return Pt{x3, y3, false};
     }
+    #ifdef _MSC_VER
+    #  include <intrin.h>
+    #endif
+
+    static inline int msb_index_u64(uint64_t n) {
+        if (!n) return -1;
+    #if defined(_MSC_VER) && !defined(__clang__)
+        unsigned long idx;
+    #if defined(_M_X64) || defined(_M_ARM64)
+        _BitScanReverse64(&idx, n);
+        return (int)idx;
+    #else
+        // 32-bit MSVC fallback
+        unsigned long hi = (unsigned long)(n >> 32);
+        if (hi) { _BitScanReverse(&idx, hi); return (int)idx + 32; }
+        _BitScanReverse(&idx, (unsigned long)(n & 0xFFFFFFFFu));
+        return (int)idx;
+    #endif
+    #else
+        // GCC/Clang
+        return 63 - __builtin_clzll(n);
+    #endif
+    }
 
     static void get(uint64_t n, int s1, int t1, const mpz_class& N, mpz_class& s, mpz_class& t) {
         Pt P0, P;
@@ -153,7 +176,7 @@ struct EC_mod4 {
         P0.y = t1; if (t1 < 0) P0.y += N; P0.y %= N;
         P    = P0;
 
-        int msb = 63 - __builtin_clzll(n);
+        int msb = msb_index_u64(n);
         for (int b = msb - 1; b >= 0; --b) {
             P = dbl(P, N);
             if (((n >> b) & 1ULL) != 0) P = add(P, P0, N);
@@ -727,10 +750,10 @@ int App::runECMMarinTwistedEdwards()
         auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
             eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b); // s=a+b, d=a-b
         };
-        auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t s_copy, size_t d_copy){
+        /*auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t s_copy, size_t d_copy){
             eng->addsub_copy((engine::Reg)s,(engine::Reg)d,(engine::Reg)s_copy,(engine::Reg)d_copy,
                             (engine::Reg)a,(engine::Reg)b);
-        };
+        };*/
         // Inputs/outputs mapping :
         // X1=R3, Y1=R4, Z1=R1, T1=R5
         // X2=R6, Y2=R7, Z2=1 (affine), T2=R9
@@ -854,8 +877,8 @@ int App::runECMMarinTwistedEdwards()
             //eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
             //eng->copy((engine::Reg)25,(engine::Reg)RX); 
             //eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
-            hadamard_copy(RX,RY,23,25,24,RX);
-            //eng->copy((engine::Reg)24,(engine::Reg)23); 
+            hadamard(RX,RY,23,25);
+            eng->copy((engine::Reg)24,(engine::Reg)23); 
             eng->sub_reg((engine::Reg)24,(engine::Reg)RZ); // 24 = F
 
             
@@ -920,8 +943,8 @@ int App::runECMMarinTwistedEdwards()
             //eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
             //eng->copy((engine::Reg)25,(engine::Reg)RX); 
             //eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
-            hadamard_copy(RX,RY,23,25,24,RX);
-            //eng->copy((engine::Reg)24,(engine::Reg)23); 
+            hadamard(RX,RY,23,25);
+            eng->copy((engine::Reg)24,(engine::Reg)23); 
             eng->sub_reg((engine::Reg)24,(engine::Reg)RZ); // 24 = F
 
             
