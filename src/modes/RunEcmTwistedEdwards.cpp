@@ -1119,14 +1119,14 @@ int App::runECMMarinTwistedEdwards()
 
 
 
-                uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
-                auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
-                //size_t total_steps = (Kbits>=1? Kbits-1 : 0);
+        uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+        auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
+        //size_t total_steps = (Kbits>=1? Kbits-1 : 0);
 
-                std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
-                std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
-                {
-                    mpz_class ec = K;
+        std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
+        std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
+        {
+            mpz_class ec = K;
             mpz_ptr e = ec.get_mpz_t();
             for (; mpz_size(e) != 0; )
             {
