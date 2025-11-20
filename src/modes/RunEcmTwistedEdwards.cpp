@@ -818,8 +818,8 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)39,(engine::Reg)11);           // 39 = a*X1*X2
 
             // 40 = H = Y1*Y2 - a*X1*X2
-            eng->copy((engine::Reg)40,(engine::Reg)4);          // 40 = Y1*Y2
-            eng->sub_reg((engine::Reg)40,(engine::Reg)39);       // 40 = Y1*Y2 - a*X1*X2 = H
+            //eng->copy((engine::Reg)40,(engine::Reg)4);          // 40 = Y1*Y2
+            eng->sub_reg((engine::Reg)4,(engine::Reg)39);       // 40 = Y1*Y2 - a*X1*X2 = H
 
             // X3 = E*(D - C)
             eng->copy((engine::Reg)3,(engine::Reg)34);           // X3 <- E
@@ -830,14 +830,14 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)1,(engine::Reg)42);           // Z3 <- D - C
             eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
             
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)4);
             // Y3 = H*(D + C)
             eng->copy((engine::Reg)4,(engine::Reg)42);           // temp = D + C
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)4,(engine::Reg)11);            // Y3 = (D + C)*H
 
             // T3 = E*H
             eng->copy((engine::Reg)5,(engine::Reg)34);           // T3 <- E
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)4);
             eng->mul((engine::Reg)5,(engine::Reg)11);            // T3 = E*H
 
         };
@@ -905,8 +905,8 @@ int App::runECMMarinTwistedEdwards()
             //eng->mul((engine::Reg)39,(engine::Reg)11);           // 39 = a*X1*X2
 
             // 40 = H = Y1*Y2 - a*X1*X2
-            eng->copy((engine::Reg)40,(engine::Reg)4);          // 40 = Y1*Y2
-            eng->sub_reg((engine::Reg)40,(engine::Reg)3);       // 40 = Y1*Y2 - a*X1*X2 = H
+            //eng->copy((engine::Reg)40,(engine::Reg)4);          // 40 = Y1*Y2
+            eng->sub_reg((engine::Reg)4,(engine::Reg)3);       // 40 = Y1*Y2 - a*X1*X2 = H
 
             // X3 = E*(D - C)
             eng->copy((engine::Reg)3,(engine::Reg)34);           // X3 <- E
@@ -918,13 +918,14 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
             
             // Y3 = H*(D + C)
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)4);
             eng->copy((engine::Reg)4,(engine::Reg)42);           // temp = D + C
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)4,(engine::Reg)11);            // Y3 = (D + C)*H
 
             // T3 = E*H
             eng->copy((engine::Reg)5,(engine::Reg)34);           // T3 <- E
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)5,(engine::Reg)11);            // T3 = E*H
 
             
