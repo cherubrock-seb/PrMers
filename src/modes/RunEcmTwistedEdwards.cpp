@@ -406,7 +406,7 @@ int App::runECMMarinTwistedEdwards()
             return 2;
         }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(47), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(48), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
             std::cout<<"[ECM] GPU engine unavailable\n";
             result_status = "error";
@@ -748,6 +748,7 @@ int App::runECMMarinTwistedEdwards()
         eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
         eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
         eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
+        eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
         auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
             eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b); // s=a+b, d=a-b
         };
@@ -787,8 +788,8 @@ int App::runECMMarinTwistedEdwards()
 
             // 32 = d*T1*T2 = C
             //eng->copy((engine::Reg)32,(engine::Reg)5);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)5,(engine::Reg)11);           // 32 = T1*T2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
+            eng->mul((engine::Reg)5,(engine::Reg)46);           // 32 = T1*T2
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
             eng->mul((engine::Reg)5,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
@@ -874,8 +875,8 @@ int App::runECMMarinTwistedEdwards()
 
             // 32 = d*T1*T2 = C
             //eng->copy((engine::Reg)32,(engine::Reg)5);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)5,(engine::Reg)11);           // 32 = T1*T2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
+            eng->mul((engine::Reg)5,(engine::Reg)46);           // 32 = T1*T2
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
             eng->mul((engine::Reg)5,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
@@ -1020,7 +1021,7 @@ int App::runECMMarinTwistedEdwards()
 
             // C = 2*Z^2 (mul by constant 2 via reg 8)
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)RZ, 2u);                    // Z^2
+            eng->square_mul((engine::Reg)RZ, 2u);                    // 2Z^2
             
             // D = a*A ici a = 1
             //eng->mul((engine::Reg)RX,(engine::Reg)43);           // D = a*A
@@ -1057,11 +1058,6 @@ int App::runECMMarinTwistedEdwards()
             // T3 = E*H
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
-
-
-            
-
-
         };
 
         uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
