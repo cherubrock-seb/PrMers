@@ -406,7 +406,7 @@ int App::runECMMarinTwistedEdwards()
             return 2;
         }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(45), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(47), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
             std::cout<<"[ECM] GPU engine unavailable\n";
             result_status = "error";
@@ -798,11 +798,11 @@ int App::runECMMarinTwistedEdwards()
             
 
             // 38 = S1*S2 - X1X2 - Y1Y2 = (Y1+X1)(Y2+X2) - X1X2 - Y1Y2 = E
-            eng->copy((engine::Reg)38,(engine::Reg)34);
+            //eng->copy((engine::Reg)38,(engine::Reg)34);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
-            eng->mul((engine::Reg)38,(engine::Reg)11);           // 38 = S1*S2
-            eng->sub_reg((engine::Reg)38,(engine::Reg)3);       // 38 -= X1*X2
-            eng->sub_reg((engine::Reg)38,(engine::Reg)4);       // 38 -= Y1*Y2  -> E
+            eng->mul((engine::Reg)34,(engine::Reg)11);           // 38 = S1*S2
+            eng->sub_reg((engine::Reg)34,(engine::Reg)3);       // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)34,(engine::Reg)4);       // 38 -= Y1*Y2  -> E
 
 
             // 41 = D - C ; 42 = D + C
@@ -822,24 +822,24 @@ int App::runECMMarinTwistedEdwards()
             eng->sub_reg((engine::Reg)40,(engine::Reg)39);       // 40 = Y1*Y2 - a*X1*X2 = H
 
             // X3 = E*(D - C)
-            eng->copy((engine::Reg)3,(engine::Reg)38);           // X3 <- E
+            eng->copy((engine::Reg)3,(engine::Reg)34);           // X3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
             eng->mul((engine::Reg)3,(engine::Reg)11);            // X3 = E*(D - C)
-
+            
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);           // Z3 <- D - C
+            eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
+            
             // Y3 = H*(D + C)
             eng->copy((engine::Reg)4,(engine::Reg)42);           // temp = D + C
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)4,(engine::Reg)11);            // Y3 = (D + C)*H
 
             // T3 = E*H
-            eng->copy((engine::Reg)5,(engine::Reg)38);           // T3 <- E
+            eng->copy((engine::Reg)5,(engine::Reg)34);           // T3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)5,(engine::Reg)11);            // T3 = E*H
 
-            // Z3 = (D - C)*(D + C)
-            eng->copy((engine::Reg)1,(engine::Reg)41);           // Z3 <- D - C
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)42);
-            eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
         };
 
         // Inputs/outputs mapping :
@@ -886,11 +886,11 @@ int App::runECMMarinTwistedEdwards()
             
 
             // 38 = S1*S2 - X1X2 - Y1Y2 = (Y1+X1)(Y2+X2) - X1X2 - Y1Y2 = E
-            eng->copy((engine::Reg)38,(engine::Reg)34);
+            //eng->copy((engine::Reg)38,(engine::Reg)34);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
-            eng->mul((engine::Reg)38,(engine::Reg)11);           // 38 = S1*S2
-            eng->sub_reg((engine::Reg)38,(engine::Reg)3);       // 38 -= X1*X2
-            eng->sub_reg((engine::Reg)38,(engine::Reg)4);       // 38 -= Y1*Y2  -> E
+            eng->mul((engine::Reg)34,(engine::Reg)11);           // 38 = S1*S2
+            eng->sub_reg((engine::Reg)34,(engine::Reg)3);       // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)34,(engine::Reg)4);       // 38 -= Y1*Y2  -> E
 
             // 41 = D - C ; 42 = D + C
             //eng->copy((engine::Reg)41,(engine::Reg)33);
@@ -909,24 +909,25 @@ int App::runECMMarinTwistedEdwards()
             eng->sub_reg((engine::Reg)40,(engine::Reg)3);       // 40 = Y1*Y2 - a*X1*X2 = H
 
             // X3 = E*(D - C)
-            eng->copy((engine::Reg)3,(engine::Reg)38);           // X3 <- E
+            eng->copy((engine::Reg)3,(engine::Reg)34);           // X3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
             eng->mul((engine::Reg)3,(engine::Reg)11);            // X3 = E*(D - C)
-
+            
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)42);           // Z3 <- D - C
+            eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
+            
             // Y3 = H*(D + C)
             eng->copy((engine::Reg)4,(engine::Reg)42);           // temp = D + C
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)4,(engine::Reg)11);            // Y3 = (D + C)*H
 
             // T3 = E*H
-            eng->copy((engine::Reg)5,(engine::Reg)38);           // T3 <- E
+            eng->copy((engine::Reg)5,(engine::Reg)34);           // T3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
             eng->mul((engine::Reg)5,(engine::Reg)11);            // T3 = E*H
 
-            // Z3 = (D - C)*(D + C)
-            eng->copy((engine::Reg)1,(engine::Reg)41);           // Z3 <- D - C
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)42);
-            eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
+            
         };
         // eDBL_XYTZ: Doubling in Twisted Edwards extended coordinates (X,Y,Z,T)
         // Formulas:
