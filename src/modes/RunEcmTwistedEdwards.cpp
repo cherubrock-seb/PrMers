@@ -864,6 +864,10 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)RX,(engine::Reg)RT);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
+            // Z3 = F*G
+            eng->copy((engine::Reg)RZ,(engine::Reg)23);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
+            eng->mul((engine::Reg)RZ,(engine::Reg)11);
 
             // Y3 = G*H
             eng->copy((engine::Reg)RY,(engine::Reg)23);
@@ -874,10 +878,6 @@ int App::runECMMarinTwistedEdwards()
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
-            // Z3 = F*G
-            eng->copy((engine::Reg)RZ,(engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
-            eng->mul((engine::Reg)RZ,(engine::Reg)11);
         };
 
         // eDBL_XYTZ: Doubling in Twisted Edwards extended coordinates (X,Y,Z,T)
