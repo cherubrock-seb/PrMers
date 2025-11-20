@@ -814,8 +814,7 @@ int App::runECMMarinTwistedEdwards()
 
             // 39 = a*X1*X2
             eng->copy((engine::Reg)39,(engine::Reg)3);          // 39 = X1*X2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)39,(engine::Reg)11);           // 39 = a*X1*X2
+            eng->mul((engine::Reg)39,(engine::Reg)43);           // 39 = a*X1*X2
 
             // 40 = H = Y1*Y2 - a*X1*X2
             //eng->copy((engine::Reg)40,(engine::Reg)4);          // 40 = Y1*Y2
