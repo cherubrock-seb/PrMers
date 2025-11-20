@@ -383,7 +383,7 @@ int App::runECMMarinTwistedEdwards()
             return 2;
         }
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(44), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(45), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
             std::cout<<"[ECM] GPU engine unavailable\n";
             result_status = "error";
@@ -722,7 +722,15 @@ int App::runECMMarinTwistedEdwards()
         eng->copy((engine::Reg)3,(engine::Reg)6);
         eng->copy((engine::Reg)4,(engine::Reg)7);
         eng->copy((engine::Reg)5,(engine::Reg)9);
-
+        eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
+        eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
+        auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
+            eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b); // s=a+b, d=a-b
+        };
+        auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t s_copy, size_t d_copy){
+            eng->addsub_copy((engine::Reg)s,(engine::Reg)d,(engine::Reg)s_copy,(engine::Reg)d_copy,
+                            (engine::Reg)a,(engine::Reg)b);
+        };
         // Inputs/outputs mapping :
         // X1=R3, Y1=R4, Z1=R1, T1=R5
         // X2=R6, Y2=R7, Z2=1 (affine), T2=R9
@@ -831,27 +839,29 @@ int App::runECMMarinTwistedEdwards()
             eng->square_mul((engine::Reg)RY);
 
             // C = 2*Z^2 (mul by constant 2 via reg 8)
-            eng->copy((engine::Reg)20,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20, 2u);                    // Z^2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
+            eng->square_mul((engine::Reg)RZ, 2u);                    // Z^2
             
             // D = a*A
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)RX,(engine::Reg)11);           // D = a*A
+            eng->mul((engine::Reg)RX,(engine::Reg)43);           // D = a*A
 
             // E = 2*T*Z  (since T = X*Y/Z)
-            eng->copy((engine::Reg)22,(engine::Reg)RT);          // T
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
-            eng->mul((engine::Reg)22,(engine::Reg)11);           // T*Z = X*Y
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)22,(engine::Reg)11);           // E = 2*X*Y
+            eng->mul((engine::Reg)RT,(engine::Reg)11);           // T*Z = X*Y
+            eng->mul((engine::Reg)RT,(engine::Reg)44);           // E = 2*X*Y
 
             // G = D + B ; H = D - B ; F = G - C
-            eng->copy((engine::Reg)23,(engine::Reg)RX); eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
-            eng->copy((engine::Reg)25,(engine::Reg)RX); eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
-            eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24 = F
+            //eng->copy((engine::Reg)23,(engine::Reg)RX); 
+            //eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
+            //eng->copy((engine::Reg)25,(engine::Reg)RX); 
+            //eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
+            hadamard_copy(RX,RY,23,25,24,RX);
+            //eng->copy((engine::Reg)24,(engine::Reg)23); 
+            eng->sub_reg((engine::Reg)24,(engine::Reg)RZ); // 24 = F
+
+            
 
             // X3 = E*F
-            eng->copy((engine::Reg)RX,(engine::Reg)22);
+            eng->copy((engine::Reg)RX,(engine::Reg)RT);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
 
@@ -861,8 +871,7 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)RY,(engine::Reg)11);
 
             // T3 = E*H
-            eng->copy((engine::Reg)RT,(engine::Reg)22);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
             // Z3 = F*G
@@ -892,35 +901,33 @@ int App::runECMMarinTwistedEdwards()
             eng->square_mul((engine::Reg)RX);
 
             // B = Y^2
-            //eng->copy((engine::Reg)19,(engine::Reg)RY);
+            // eng->copy((engine::Reg)19,(engine::Reg)RY);
             eng->square_mul((engine::Reg)RY);
 
             // C = 2*Z^2 (mul by constant 2 via reg 8)
-            eng->copy((engine::Reg)20,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20, 2u);
-
-            // D = a*A : a = 1
-            //eng->copy((engine::Reg)21,(engine::Reg)18);
-            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            //eng->mul((engine::Reg)21,(engine::Reg)11);           // D = a*A
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
+            eng->square_mul((engine::Reg)RZ, 2u);                    // Z^2
+            
+            // D = a*A
+            //eng->mul((engine::Reg)RX,(engine::Reg)43);           // D = a*A
 
             // E = 2*T*Z  (since T = X*Y/Z)
-            eng->copy((engine::Reg)22,(engine::Reg)RT);          // T
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
-            eng->mul((engine::Reg)22,(engine::Reg)11);           // T*Z = X*Y
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)22,(engine::Reg)11);           // E = 2*X*Y
+            eng->mul((engine::Reg)RT,(engine::Reg)11);           // T*Z = X*Y
+            eng->mul((engine::Reg)RT,(engine::Reg)44);           // E = 2*X*Y
 
             // G = D + B ; H = D - B ; F = G - C
-            eng->copy((engine::Reg)23,(engine::Reg)RX); 
-            eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
-            eng->copy((engine::Reg)25,(engine::Reg)RX); 
-            eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
-            eng->copy((engine::Reg)24,(engine::Reg)23); 
-            eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24 = F
+            //eng->copy((engine::Reg)23,(engine::Reg)RX); 
+            //eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
+            //eng->copy((engine::Reg)25,(engine::Reg)RX); 
+            //eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
+            hadamard_copy(RX,RY,23,25,24,RX);
+            //eng->copy((engine::Reg)24,(engine::Reg)23); 
+            eng->sub_reg((engine::Reg)24,(engine::Reg)RZ); // 24 = F
+
+            
 
             // X3 = E*F
-            eng->copy((engine::Reg)RX,(engine::Reg)22);
+            eng->copy((engine::Reg)RX,(engine::Reg)RT);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
 
@@ -930,8 +937,7 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)RY,(engine::Reg)11);
 
             // T3 = E*H
-            eng->copy((engine::Reg)RT,(engine::Reg)22);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
             // Z3 = F*G
