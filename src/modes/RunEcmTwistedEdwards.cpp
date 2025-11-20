@@ -786,11 +786,11 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)4,(engine::Reg)11);
 
             // 32 = d*T1*T2 = C
-            eng->copy((engine::Reg)32,(engine::Reg)5);
+            //eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = T1*T2
+            eng->mul((engine::Reg)5,(engine::Reg)11);           // 32 = T1*T2
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
-            eng->mul((engine::Reg)32,(engine::Reg)45);           // 32 = d*T1*T2 = C
+            eng->mul((engine::Reg)5,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
             // 33 = D = Z1 (since Z2 = 1)
             eng->copy((engine::Reg)33,(engine::Reg)1);
@@ -810,7 +810,7 @@ int App::runECMMarinTwistedEdwards()
             //eng->sub_reg((engine::Reg)41,(engine::Reg)32);       // 41 = D - C
             //eng->copy((engine::Reg)42,(engine::Reg)33);
             //eng->add    ((engine::Reg)42,(engine::Reg)32);       // 42 = D + C
-            hadamard(1,32,42,41);
+            hadamard(1,5,42,41);
 
             // 39 = a*X1*X2
             eng->copy((engine::Reg)39,(engine::Reg)3);          // 39 = X1*X2
@@ -874,11 +874,11 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)4,(engine::Reg)11);
 
             // 32 = d*T1*T2 = C
-            eng->copy((engine::Reg)32,(engine::Reg)5);
+            //eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = T1*T2
+            eng->mul((engine::Reg)5,(engine::Reg)11);           // 32 = T1*T2
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
-            eng->mul((engine::Reg)32,(engine::Reg)45);           // 32 = d*T1*T2 = C
+            eng->mul((engine::Reg)5,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
             // 33 = D = Z1 (since Z2 = 1)
             //eng->copy((engine::Reg)33,(engine::Reg)1);
@@ -897,7 +897,7 @@ int App::runECMMarinTwistedEdwards()
             //eng->sub_reg((engine::Reg)41,(engine::Reg)32);       // 41 = D - C
             //eng->copy((engine::Reg)42,(engine::Reg)33);
             //eng->add    ((engine::Reg)42,(engine::Reg)32);       // 42 = D + C
-            hadamard(1,32,42,41);
+            hadamard(1,5,42,41);
 
             // 39 = a*X1*X2
             //eng->copy((engine::Reg)39,(engine::Reg)3);          // 39 = X1*X2
