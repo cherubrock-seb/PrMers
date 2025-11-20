@@ -867,8 +867,8 @@ int App::runECMMarinTwistedEdwards()
 
             // 32 = C = d*T1*T2
             eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2
-            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2
+            eng->mul((engine::Reg)32,(engine::Reg)50);               // 32 = T1*T2
             eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
 
             // 42 = D + C, 41 = D - C  (D = Z1)
@@ -1088,10 +1088,10 @@ int App::runECMMarinTwistedEdwards()
 
             // 32 = C = d*T1*T2  (T2- via 49, puis d)
             eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2-
-            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
-            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = d*T1*T2 = C
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)49);  // multiplicand <- T2-
+            eng->mul((engine::Reg)32,(engine::Reg)50);               // 32 = T1*T2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
+            eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
 
             // 42 = D + C, 41 = D - C  (D = Z1)
             eng->addsub((engine::Reg)42,(engine::Reg)41, (engine::Reg)1,(engine::Reg)32);
@@ -1173,6 +1173,7 @@ int App::runECMMarinTwistedEdwards()
         eng->set_mpz((engine::Reg)47, zXneg);
         eng->set_mpz((engine::Reg)48, zYneg);
         eng->set_mpz((engine::Reg)49, zTneg);
+        eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);  
         for (i = 0; i < total_steps; ++i){
             if (core::algo::interrupted) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed);
