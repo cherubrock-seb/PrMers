@@ -790,10 +790,10 @@ int App::runECMMarinTwistedEdwards()
 
             // 32 = C = d*T1*T2
             eng->copy((engine::Reg)32,(engine::Reg)5);               // 32 <- T1
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);   // multiplicand <- T2
-            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = T1*T2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
-            eng->mul((engine::Reg)32,(engine::Reg)11);               // 32 = d*T1*T2 = C
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);   // multiplicand <- T2
+            eng->mul((engine::Reg)32,(engine::Reg)46);               // 32 = T1*T2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);  // multiplicand <- d
+            eng->mul((engine::Reg)32,(engine::Reg)45);               // 32 = d*T1*T2 = C
 
             // 42 = D + C, 41 = D - C  (D = Z1)
             hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
@@ -807,8 +807,8 @@ int App::runECMMarinTwistedEdwards()
 
             // 39 = a*X1*X2 ; 40 = H = Y1*Y2 - a*X1*X2
             eng->copy((engine::Reg)39,(engine::Reg)30);              // 39 <- X1*X2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);  // multiplicand <- a   (remplace R16 par R43 si tu l’utilises)
-            eng->mul((engine::Reg)39,(engine::Reg)11);               // 39 = a*X1*X2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);  // multiplicand <- a   
+            eng->mul((engine::Reg)39,(engine::Reg)43);               // 39 = a*X1*X2
             eng->copy((engine::Reg)40,(engine::Reg)31);              // 40 <- Y1*Y2
             eng->sub_reg((engine::Reg)40,(engine::Reg)39);           // 40 = H
 
