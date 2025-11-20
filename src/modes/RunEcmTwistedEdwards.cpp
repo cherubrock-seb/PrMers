@@ -930,6 +930,10 @@ int App::runECMMarinTwistedEdwards()
             eng->copy((engine::Reg)RX,(engine::Reg)RT);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
+            // Z3 = F*G
+            eng->copy((engine::Reg)RZ,(engine::Reg)23);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
+            eng->mul((engine::Reg)RZ,(engine::Reg)11);
 
             // Y3 = G*H
             eng->copy((engine::Reg)RY,(engine::Reg)23);
@@ -940,10 +944,10 @@ int App::runECMMarinTwistedEdwards()
             //eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
-            // Z3 = F*G
-            eng->copy((engine::Reg)RZ,(engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
-            eng->mul((engine::Reg)RZ,(engine::Reg)11);
+
+            
+
+
         };
 
         uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
