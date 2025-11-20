@@ -908,7 +908,7 @@ int App::runECMMarinTwistedEdwards()
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
             eng->square_mul((engine::Reg)RZ, 2u);                    // Z^2
             
-            // D = a*A
+            // D = a*A ici a = 1
             //eng->mul((engine::Reg)RX,(engine::Reg)43);           // D = a*A
 
             // E = 2*T*Z  (since T = X*Y/Z)
