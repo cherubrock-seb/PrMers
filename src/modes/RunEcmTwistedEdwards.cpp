@@ -723,70 +723,88 @@ int App::runECMMarinTwistedEdwards()
         eng->copy((engine::Reg)4,(engine::Reg)7);
         eng->copy((engine::Reg)5,(engine::Reg)9);
 
+        // Inputs/outputs mapping :
+        // X1=R3, Y1=R4, Z1=R1, T1=R5
+        // X2=R6, Y2=R7, Z2=1 (affine), T2=R9
+        // constants: a=R16, d=R29, two=R8
         // eADD_RP: Twisted Edwards extended coordinates (X,Y,Z,T)
         // Formulas:
         // E = X1*Y2 + Y1*X2
         // H = Y1*Y2 - a*X1*X2
         // C = d*T1*T2
-        // D = Z1*Z2  (here Z2 = 1)
+        // D = Z1*Z2 (here Z2 = 1 so D = Z1)
         // X3 = E*(D - C)
         // Y3 = H*(D + C)
         // T3 = E*H
         // Z3 = (D - C)*(D + C)
         auto eADD_RP = [&](){
+            // 30 = X1*X2 (will be used to form E via (X1+Y1)(X2+Y2) - X1X2 - Y1Y2)
             eng->copy((engine::Reg)30,(engine::Reg)3);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);
             eng->mul((engine::Reg)30,(engine::Reg)11);
 
+            // 31 = Y1*Y2 (will be used to form E and H)
             eng->copy((engine::Reg)31,(engine::Reg)4);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
             eng->mul((engine::Reg)31,(engine::Reg)11);
 
+            // 32 = d*T1*T2 = C
             eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)9);
-            eng->mul((engine::Reg)32,(engine::Reg)11);
+            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = T1*T2
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)29);
-            eng->mul((engine::Reg)32,(engine::Reg)11);
+            eng->mul((engine::Reg)32,(engine::Reg)11);           // 32 = d*T1*T2 = C
 
+            // 33 = D = Z1 (since Z2 = 1)
             eng->copy((engine::Reg)33,(engine::Reg)1);
 
-            eng->addsub((engine::Reg)34,(engine::Reg)35,
+            // Hadamards: S1,D1 = Y1±X1 ; S2,D2 = Y2±X2
+            eng->addsub((engine::Reg)34,(engine::Reg)35,          // 34=S1=Y1+X1, 35=D1=Y1-X1
                         (engine::Reg)4,(engine::Reg)3);
-            eng->addsub((engine::Reg)36,(engine::Reg)37,
+            eng->addsub((engine::Reg)36,(engine::Reg)37,          // 36=S2=Y2+X2, 37=D2=Y2-X2
                         (engine::Reg)7,(engine::Reg)6);
 
+            // 38 = S1*S2 - X1X2 - Y1Y2 = (Y1+X1)(Y2+X2) - X1X2 - Y1Y2 = E
             eng->copy((engine::Reg)38,(engine::Reg)34);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
-            eng->mul((engine::Reg)38,(engine::Reg)11);
-            eng->sub_reg((engine::Reg)38,(engine::Reg)30);
-            eng->sub_reg((engine::Reg)38,(engine::Reg)31);
+            eng->mul((engine::Reg)38,(engine::Reg)11);           // 38 = S1*S2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);       // 38 -= X1*X2
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);       // 38 -= Y1*Y2  -> E
 
+            // 41 = D - C ; 42 = D + C
             eng->copy((engine::Reg)41,(engine::Reg)33);
-            eng->sub_reg((engine::Reg)41,(engine::Reg)32);
+            eng->sub_reg((engine::Reg)41,(engine::Reg)32);       // 41 = D - C
             eng->copy((engine::Reg)42,(engine::Reg)33);
-            eng->add    ((engine::Reg)42,(engine::Reg)32);
+            eng->add    ((engine::Reg)42,(engine::Reg)32);       // 42 = D + C
 
-            eng->copy((engine::Reg)39,(engine::Reg)30);
+            // 39 = a*X1*X2
+            eng->copy((engine::Reg)39,(engine::Reg)30);          // 39 = X1*X2
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)39,(engine::Reg)11);
-            eng->copy((engine::Reg)40,(engine::Reg)31);
-            eng->sub_reg((engine::Reg)40,(engine::Reg)39);
+            eng->mul((engine::Reg)39,(engine::Reg)11);           // 39 = a*X1*X2
 
-            eng->copy((engine::Reg)3,(engine::Reg)38);
+            // 40 = H = Y1*Y2 - a*X1*X2
+            eng->copy((engine::Reg)40,(engine::Reg)31);          // 40 = Y1*Y2
+            eng->sub_reg((engine::Reg)40,(engine::Reg)39);       // 40 = Y1*Y2 - a*X1*X2 = H
+
+            // X3 = E*(D - C)
+            eng->copy((engine::Reg)3,(engine::Reg)38);           // X3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
-            eng->mul((engine::Reg)3,(engine::Reg)11);
+            eng->mul((engine::Reg)3,(engine::Reg)11);            // X3 = E*(D - C)
 
-            eng->copy((engine::Reg)4,(engine::Reg)42);
+            // Y3 = H*(D + C)
+            eng->copy((engine::Reg)4,(engine::Reg)42);           // temp = D + C
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
-            eng->mul((engine::Reg)4,(engine::Reg)11);
+            eng->mul((engine::Reg)4,(engine::Reg)11);            // Y3 = (D + C)*H
 
-            eng->copy((engine::Reg)5,(engine::Reg)38);
+            // T3 = E*H
+            eng->copy((engine::Reg)5,(engine::Reg)38);           // T3 <- E
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
-            eng->mul((engine::Reg)5,(engine::Reg)11);
+            eng->mul((engine::Reg)5,(engine::Reg)11);            // T3 = E*H
 
-            eng->copy((engine::Reg)1,(engine::Reg)41);
+            // Z3 = (D - C)*(D + C)
+            eng->copy((engine::Reg)1,(engine::Reg)41);           // Z3 <- D - C
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)42);
-            eng->mul((engine::Reg)1,(engine::Reg)11);
+            eng->mul((engine::Reg)1,(engine::Reg)11);            // Z3 = (D - C)*(D + C)
         };
 
         // eDBL_XYTZ: Doubling in Twisted Edwards extended coordinates (X,Y,Z,T)
@@ -795,7 +813,7 @@ int App::runECMMarinTwistedEdwards()
         // B = Y^2
         // C = 2*Z^2
         // D = a*A
-        // E = 2*X*Y  (computed as 2*T*Z since T = X*Y/Z)
+        // E = 2*X*Y  (implemented as 2*T*Z since T = X*Y/Z)
         // G = D + B
         // H = D - B
         // F = G - C
@@ -804,43 +822,53 @@ int App::runECMMarinTwistedEdwards()
         // T3 = E*H
         // Z3 = F*G
         auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
+            // A = X^2
             eng->copy((engine::Reg)18,(engine::Reg)RX);
             eng->square_mul((engine::Reg)18);
 
+            // B = Y^2
             eng->copy((engine::Reg)19,(engine::Reg)RY);
             eng->square_mul((engine::Reg)19);
 
+            // C = 2*Z^2 (mul by constant 2 via reg 8)
             eng->copy((engine::Reg)20,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20);
+            eng->square_mul((engine::Reg)20);                    // Z^2
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)20,(engine::Reg)11);
+            eng->mul((engine::Reg)20,(engine::Reg)11);           // C = 2*Z^2
 
+            // D = a*A
             eng->copy((engine::Reg)21,(engine::Reg)18);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)21,(engine::Reg)11);
+            eng->mul((engine::Reg)21,(engine::Reg)11);           // D = a*A
 
-            eng->copy((engine::Reg)22,(engine::Reg)RT);
+            // E = 2*T*Z  (since T = X*Y/Z)
+            eng->copy((engine::Reg)22,(engine::Reg)RT);          // T
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
-            eng->mul((engine::Reg)22,(engine::Reg)11);
+            eng->mul((engine::Reg)22,(engine::Reg)11);           // T*Z = X*Y
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)22,(engine::Reg)11);
+            eng->mul((engine::Reg)22,(engine::Reg)11);           // E = 2*X*Y
 
-            eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19);
-            eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19);
-            eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20);
+            // G = D + B ; H = D - B ; F = G - C
+            eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19); // 23 = G
+            eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19); // 25 = H
+            eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24 = F
 
+            // X3 = E*F
             eng->copy((engine::Reg)RX,(engine::Reg)22);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
             eng->mul((engine::Reg)RX,(engine::Reg)11);
 
+            // Y3 = G*H
             eng->copy((engine::Reg)RY,(engine::Reg)23);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RY,(engine::Reg)11);
 
+            // T3 = E*H
             eng->copy((engine::Reg)RT,(engine::Reg)22);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
             eng->mul((engine::Reg)RT,(engine::Reg)11);
 
+            // Z3 = F*G
             eng->copy((engine::Reg)RZ,(engine::Reg)24);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
             eng->mul((engine::Reg)RZ,(engine::Reg)11);
