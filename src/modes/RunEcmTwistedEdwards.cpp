@@ -823,23 +823,20 @@ int App::runECMMarinTwistedEdwards()
         // Z3 = F*G
         auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
             // A = X^2
-            eng->copy((engine::Reg)18,(engine::Reg)RX);
-            eng->square_mul((engine::Reg)18);
+            //eng->copy((engine::Reg)18,(engine::Reg)RX);
+            eng->square_mul((engine::Reg)RX);
 
             // B = Y^2
-            eng->copy((engine::Reg)19,(engine::Reg)RY);
-            eng->square_mul((engine::Reg)19);
+            // eng->copy((engine::Reg)19,(engine::Reg)RY);
+            eng->square_mul((engine::Reg)RY);
 
             // C = 2*Z^2 (mul by constant 2 via reg 8)
             eng->copy((engine::Reg)20,(engine::Reg)RZ);
-            eng->square_mul((engine::Reg)20);                    // Z^2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)20,(engine::Reg)11);           // C = 2*Z^2
-
+            eng->square_mul((engine::Reg)20, 2u);                    // Z^2
+            
             // D = a*A
-            eng->copy((engine::Reg)21,(engine::Reg)18);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
-            eng->mul((engine::Reg)21,(engine::Reg)11);           // D = a*A
+            eng->mul((engine::Reg)RX,(engine::Reg)11);           // D = a*A
 
             // E = 2*T*Z  (since T = X*Y/Z)
             eng->copy((engine::Reg)22,(engine::Reg)RT);          // T
@@ -849,8 +846,8 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)22,(engine::Reg)11);           // E = 2*X*Y
 
             // G = D + B ; H = D - B ; F = G - C
-            eng->copy((engine::Reg)23,(engine::Reg)21); eng->add    ((engine::Reg)23,(engine::Reg)19); // 23 = G
-            eng->copy((engine::Reg)25,(engine::Reg)21); eng->sub_reg((engine::Reg)25,(engine::Reg)19); // 25 = H
+            eng->copy((engine::Reg)23,(engine::Reg)RX); eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
+            eng->copy((engine::Reg)25,(engine::Reg)RX); eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
             eng->copy((engine::Reg)24,(engine::Reg)23); eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24 = F
 
             // X3 = E*F
@@ -874,6 +871,74 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)RZ,(engine::Reg)11);
         };
 
+        // eDBL_XYTZ: Doubling in Twisted Edwards extended coordinates (X,Y,Z,T)
+        // NO TWIST (a = 1 used in torsion 16)
+        // Formulas:
+        // A = X^2
+        // B = Y^2
+        // C = 2*Z^2
+        // D = a*A
+        // E = 2*X*Y  (implemented as 2*T*Z since T = X*Y/Z)
+        // G = D + B
+        // H = D - B
+        // F = G - C
+        // X3 = E*F
+        // Y3 = G*H
+        // T3 = E*H
+        // Z3 = F*G
+        auto eDBL_XYTZ_notwist = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
+            // A = X^2
+            //eng->copy((engine::Reg)18,(engine::Reg)RX);
+            eng->square_mul((engine::Reg)RX);
+
+            // B = Y^2
+            //eng->copy((engine::Reg)19,(engine::Reg)RY);
+            eng->square_mul((engine::Reg)RY);
+
+            // C = 2*Z^2 (mul by constant 2 via reg 8)
+            eng->copy((engine::Reg)20,(engine::Reg)RZ);
+            eng->square_mul((engine::Reg)20, 2u);
+
+            // D = a*A : a = 1
+            //eng->copy((engine::Reg)21,(engine::Reg)18);
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)16);
+            //eng->mul((engine::Reg)21,(engine::Reg)11);           // D = a*A
+
+            // E = 2*T*Z  (since T = X*Y/Z)
+            eng->copy((engine::Reg)22,(engine::Reg)RT);          // T
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
+            eng->mul((engine::Reg)22,(engine::Reg)11);           // T*Z = X*Y
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)22,(engine::Reg)11);           // E = 2*X*Y
+
+            // G = D + B ; H = D - B ; F = G - C
+            eng->copy((engine::Reg)23,(engine::Reg)RX); 
+            eng->add    ((engine::Reg)23,(engine::Reg)RY); // 23 = G
+            eng->copy((engine::Reg)25,(engine::Reg)RX); 
+            eng->sub_reg((engine::Reg)25,(engine::Reg)RY); // 25 = H
+            eng->copy((engine::Reg)24,(engine::Reg)23); 
+            eng->sub_reg((engine::Reg)24,(engine::Reg)20); // 24 = F
+
+            // X3 = E*F
+            eng->copy((engine::Reg)RX,(engine::Reg)22);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
+            eng->mul((engine::Reg)RX,(engine::Reg)11);
+
+            // Y3 = G*H
+            eng->copy((engine::Reg)RY,(engine::Reg)23);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+            eng->mul((engine::Reg)RY,(engine::Reg)11);
+
+            // T3 = E*H
+            eng->copy((engine::Reg)RT,(engine::Reg)22);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+            eng->mul((engine::Reg)RT,(engine::Reg)11);
+
+            // Z3 = F*G
+            eng->copy((engine::Reg)RZ,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)23);
+            eng->mul((engine::Reg)RZ,(engine::Reg)11);
+        };
 
         uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
         auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
@@ -892,7 +957,12 @@ int App::runECMMarinTwistedEdwards()
             }
             size_t bit = Kbits - 2 - i;
             int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
-            eDBL_XYTZ(3,4,1,5);
+            if((!options.notorsion && options.torsion16)){
+                eDBL_XYTZ_notwist(3,4,1,5);
+            }
+            else{
+                eDBL_XYTZ(3,4,1,5);
+            }
             if (b) eADD_RP();
 
             auto now = high_resolution_clock::now();
