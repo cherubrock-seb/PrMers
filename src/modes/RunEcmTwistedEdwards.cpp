@@ -793,7 +793,7 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)5,(engine::Reg)45);           // 32 = d*T1*T2 = C
 
             // 33 = D = Z1 (since Z2 = 1)
-            eng->copy((engine::Reg)33,(engine::Reg)1);
+            //eng->copy((engine::Reg)33,(engine::Reg)1);
 
             
 
