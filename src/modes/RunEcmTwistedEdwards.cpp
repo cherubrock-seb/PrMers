@@ -456,7 +456,7 @@ int App::runECMMarinTwistedEdwards()
         const std::string ckpt_legacy    = "ecm_m_"     + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2_legacy   = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
-        // ---- Stage 1 ckpt: version 1 with curve_seed + torsion16 (as you intended)
+        
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
@@ -470,7 +470,6 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&B1),      sizeof(B1)))      return;
                 if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
 
-                // NEW: bind curve identity to ckpt
                 if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
                 uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
@@ -1427,7 +1426,8 @@ int App::runECMMarinTwistedEdwards()
             std::cout<<s1.str()<<std::endl;
             if (guiServer_) guiServer_->appendLog(s1.str());
         }
-
+        std::cout<<"[ECM] Error check ...."<<std::endl;
+        
         if (found) {
             bool known = is_known(g);
             std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves
@@ -1449,6 +1449,13 @@ int App::runECMMarinTwistedEdwards()
                 delete eng;
                 return 0;
             }
+        }
+        if(check_invariant()){
+            std::cout<<"[ECM] Error check Done and OK! ...."<<std::endl;
+        }
+        else{
+            std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
+            continue;
         }
         if (B2 > B1) {
             mpz_class M(1);
