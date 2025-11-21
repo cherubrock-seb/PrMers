@@ -369,7 +369,7 @@ int App::runECMMarinTwistedEdwards()
     vector<uint64_t> primesB1_v, primesS2_v;
     {
         uint64_t Pmax = B1;
-        if (B2 > B1) Pmax = B2;  // on a besoin de max(B1,B2)
+        if (B2 > B1) Pmax = B2;
 
         vector<char> sieve(Pmax + 1, 1);
         sieve[0] = 0;

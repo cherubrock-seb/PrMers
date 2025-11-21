@@ -273,14 +273,31 @@ int App::runECMMarin()
 
     vector<uint64_t> primesB1_v, primesS2_v;
     {
-        uint64_t Pmax = B2 ? B2 : B1;
+        uint64_t Pmax = B1;
+        if (B2 > B1) Pmax = B2;
+
         vector<char> sieve(Pmax + 1, 1);
-        sieve[0]=0; if (Pmax >= 1) sieve[1]=0;
-        for (uint64_t q=2;q*q<=Pmax;++q) if (sieve[q]) for (uint64_t k=q*q;k<=Pmax;k+=q) sieve[k]=0;
-        for (uint64_t q=2;q<=B1;++q) if (sieve[q]) primesB1_v.push_back((uint32_t)q);
-        if (B2 > B1) for (uint64_t q=B1+1;q<=B2;++q) if (sieve[q]) primesS2_v.push_back((uint64_t)q);
-        std::cout<<"[ECM] Prime counts: B1="<<primesB1_v.size()<<", S2="<<primesS2_v.size()<<std::endl;
+        sieve[0] = 0;
+        if (Pmax >= 1) sieve[1] = 0;
+
+        for (uint64_t q = 2; q*q <= Pmax; ++q)
+            if (sieve[q])
+                for (uint64_t k = q*q; k <= Pmax; k += q)
+                    sieve[k] = 0;
+
+        for (uint64_t q = 2; q <= B1; ++q)
+            if (sieve[q])
+                primesB1_v.push_back((uint32_t)q);
+
+        if (B2 > B1)
+            for (uint64_t q = B1 + 1; q <= B2; ++q)
+                if (sieve[q])
+                    primesS2_v.push_back((uint64_t)q);
+
+        std::cout << "[ECM] Prime counts: B1=" << primesB1_v.size()
+                << ", S2=" << primesS2_v.size() << std::endl;
     }
+
 
     vector<uint64_t> s1_factors;
     mpz_class K(1);
