@@ -1207,7 +1207,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last_check).count() >= 30) {
+            if (duration_cast<seconds>(now - last_check).count() >= 150) {
 
                 std::cout<<"[ECM] Error check ...."<<std::endl;
                 if(check_invariant()){
