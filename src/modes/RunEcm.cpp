@@ -294,27 +294,60 @@ int App::runECMMarin()
         std::cout<<hdr.str(); if (guiServer_) guiServer_->appendLog(hdr.str());
     }
 
-    auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
-    std::cout << "[ECM] seed=" << base_seed << std::endl;
+    //auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+   // uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
+   // std::cout << "[ECM] seed=" << base_seed << std::endl;
 
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
+    //const std::string ckpt2 = "ecm2_m_p" + std::to_string(p) + "_curve" + std::to_string(curve_seed) + ".ckpt2";
 
     for (uint64_t c = 0; c < curves; ++c)
     {
+        auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+   
+        uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
+        uint64_t curve_seed = mix64(base_seed, c);
+        if (forceSigma) { curve_seed = options.curve_seed; base_seed = curve_seed; }
+        const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+
         engine* eng = engine::create_gpu(p, static_cast<size_t>(32), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
-        std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
-        std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
-        const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
+        //std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
+        //std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
+        //const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2); if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
-            std::error_code ec; fs::remove(ckpt_file + ".old", ec); fs::rename(ckpt_file, ckpt_file + ".old", ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(ckpt_file + ".old", ec);
+            {
+                File f(newf, "wb");
+                int version = 1;
+                if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+                if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
+                if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
+                uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2);
+                if (!f.write(reinterpret_cast<const char*>(&nbb),     sizeof(nbb)))     return;
+                if (!f.write(reinterpret_cast<const char*>(&B1),      sizeof(B1)))      return;
+                if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
+                if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
+                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+                const size_t cksz = eng->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!eng->get_checkpoint(data)) return;
+                if (!f.write(data.data(), cksz)) return;
+                f.write_crc32();
+            }
+            std::error_code ec;
+            fs::remove(ckpt_file + ".old", ec);
+            fs::rename(ckpt_file,         ckpt_file + ".old", ec);
+            fs::rename(ckpt_file + ".new",ckpt_file,          ec);
+            fs::remove(ckpt_file + ".old", ec);
         };
+//./prmers 193 -ecm -b1 400 -b2 4020 -seed 13515957324328859655
+
         auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
@@ -328,7 +361,13 @@ int App::runECMMarin()
             if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
             uint64_t rB1 = 0;
             if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et),  sizeof(et)))  return -2;
+            uint64_t saved_curve_seed = 0;
+            uint8_t  saved_torsion16  = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
+            uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+            if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
@@ -340,32 +379,68 @@ int App::runECMMarin()
 
         auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
-            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
-            std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
+            {
+                File f(newf, "wb");
+                int version = 3;
+                if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return -1;
+                if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return -1;
+                if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return -1;
+                if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return -1;
+                if (!f.write(reinterpret_cast<const char*>(&B1),       sizeof(B1)))       return -1;
+                if (!f.write(reinterpret_cast<const char*>(&B2),       sizeof(B2)))       return -1;
+                if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return -1;
+                uint64_t seed64 = (uint64_t)curve_seed;
+                if (!f.write(reinterpret_cast<const char*>(&seed64),   sizeof(seed64)))   return -1;
+                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return -1;
+                const size_t cksz = eng->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!eng->get_checkpoint(data)) return -1;
+                if (!f.write(data.data(), cksz)) return -1;
+                f.write_crc32();
+            }
+            std::error_code ec;
+            fs::remove(ckpt2 + ".old", ec);
+            if (fs::exists(ckpt2)) fs::rename(ckpt2, ckpt2 + ".old", ec);
+            fs::rename(ckpt2 + ".new", ckpt2, ec);
+            fs::remove(ckpt2 + ".new", ec);
+            return 0;
         };
+
+
         auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2) return -2;
+            if (version != 2 && version != 3) return -2;
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
-            if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&idx),      sizeof(idx)))      return -2;
             if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return -2;
             uint64_t b1s = 0, b2s = 0;
             if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
+            if (version == 3) {
+                uint64_t saved_seed = 0;
+                uint8_t  saved_tor  = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
+                uint8_t current_tor = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (saved_seed != (uint64_t)curve_seed || saved_tor != current_tor) return -2;
+            }
             if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            if (b1s != B1 || b2s != B2) return -2;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (b1s != B1 || b2s != B2) return -2;
             return 0;
         };
+
+
 
         auto write_gp = [&](const std::string& mode, const std::string& tors, const mpz_class& Nref, uint32_t pe, uint64_t b1e, uint64_t b2e, uint64_t seed_base, uint64_t seed_curve, const mpz_class* sigma_opt, const mpz_class* r_opt, const mpz_class* v_opt, const mpz_class* aE_opt, const mpz_class* dE_opt, const mpz_class& A24_ref, const mpz_class& x0_ref)->void{
             (void) A24_ref;
@@ -407,11 +482,11 @@ int App::runECMMarin()
         uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
        
-        uint64_t curve_seed = mix64(base_seed, c);
+        /*uint64_t curve_seed = mix64(base_seed, c);
         if (forceSigma){
             curve_seed = options.curve_seed;
             base_seed = curve_seed;
-        }
+        }*/
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
         options.base_seed = base_seed;
@@ -508,6 +583,28 @@ int App::runECMMarin()
             eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
         };
 
+        auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+            hadamard_copy(X1, Z1, 25, 24, 10, 9);
+            hadamard(X2, Z2, 8, 7);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)9,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)10,(engine::Reg)11);
+            hadamard(9, 10, X2, Z2);
+            eng->square_mul((engine::Reg)X2);
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+            eng->square_mul((engine::Reg)24);
+            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+            eng->mul((engine::Reg)X1,(engine::Reg)15);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
+            eng->mul((engine::Reg)25,(engine::Reg)12);
+            eng->add((engine::Reg)25,(engine::Reg)24);
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
+        };
 
         if (!resume_stage2)
         {
@@ -759,78 +856,107 @@ int App::runECMMarin()
         }
         std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
         std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
-
         if (B2 > B1) {
             const uint32_t baseX = 4, baseZ = 5;
-            if (!resume_stage2) { eng->copy((engine::Reg)baseX, (engine::Reg)0); eng->copy((engine::Reg)baseZ, (engine::Reg)1); }
+
             mpz_class M(1);
             for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
             uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
-            if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
 
+            uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+            bool resume_stage2 = false; {
+                int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et);
+                if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et);
+                resume_stage2 = (rr2 == 0);
+            }
+            if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
             uint32_t start_bit = resume_stage2 ? s2_idx : 0;
-            auto t2_0 = high_resolution_clock::now(); auto last2_save = t2_0; auto last2_ui = t2_0; double saved_et2 = s2_et;
+
+            eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
 
             if (!resume_stage2) {
+                eng->copy((engine::Reg)baseX, (engine::Reg)0);
+                eng->copy((engine::Reg)baseZ, (engine::Reg)1);
                 eng->set((engine::Reg)0, 1u);
                 eng->set((engine::Reg)1, 0u);
                 eng->copy((engine::Reg)2, (engine::Reg)baseX);
                 eng->copy((engine::Reg)3, (engine::Reg)baseZ);
-                eng->set_multiplicand((engine::Reg)13, (engine::Reg)2);
-                eng->set_multiplicand((engine::Reg)14, (engine::Reg)3);
             }
+            eng->set_multiplicand((engine::Reg)13, (engine::Reg)baseX);
+            eng->set_multiplicand((engine::Reg)14, (engine::Reg)baseZ);
 
-            for (uint32_t i = start_bit; i < stage2_bits; ++i){
+            auto t2_0 = high_resolution_clock::now();
+            auto last2_save = t2_0, last2_ui = t2_0;
+            double saved_et2 = resume_stage2 ? s2_et : 0.0;
+
+            for (uint32_t i = start_bit; i < stage2_bits; ++i) {
                 uint32_t bit = stage2_bits - 1 - i;
                 int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
-                //if (b==0){ xADD(2,3,0,1,2,3); xDBL(0,1,0,1); }
-                //else     { xADD(0,1,2,3,0,1); xDBL(2,3,2,3); }
-                if (b == 0) {
-                    xDBLADD_strict(0,1, 2,3); 
-                } else {
-                    xDBLADD_strict(2,3, 0,1);  
-                }
+                if (b == 0) xDBLADD_strict2(0,1, 2,3);
+                else        xDBLADD_strict2(2,3, 0,1);
 
                 auto now2 = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == stage2_bits) {
-                    double done = double(i + 1), total = double(stage2_bits);
+                    double done = double(i+1), total = double(stage2_bits);
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 "<<(i+1)<<"/"<<stage2_bits<<" ("<<fixed<<setprecision(2)<<((stage2_bits? (done*100.0/total):100.0))<<"%) | ETA "<<fmt_hms(eta);
-                    std::cout<<line.str()<<std::flush; last2_ui = now2;
+                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                        << " | Stage2 " << (i+1) << "/" << stage2_bits
+                        << " (" << std::fixed << std::setprecision(2)
+                        << (total ? (done*100.0/total) : 100.0)
+                        << "%) | ETA " << fmt_hms(eta);
+                    std::cout << line.str() << std::flush;
+                    last2_ui = now2;
                 }
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
-                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits); last2_save = now2;
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
+                    last2_save = now2;
                 }
                 if (interrupted) {
-                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2; save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
-                    std::cout<<"\n[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits<<"\n";
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
+                    std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
+                            << " bit " << (i+1) << "/" << stage2_bits << "\n";
                     if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
-                    curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0;
+                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
+                    write_result(); delete eng; return 0;
                 }
             }
-            std::cout<<std::endl;
+            std::cout << std::endl;
 
-            eng->copy((engine::Reg)7,(engine::Reg)1);
+            eng->copy((engine::Reg)7, (engine::Reg)1);
             mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
-            mpz_class gg2 = gcd_with_dots(Zres, N);
-            if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
+            mpz_class gg2  = gcd_with_dots(Zres, N);
+            if (gg2 == N) { std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n"; delete eng; continue; }
 
-            std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+            std::error_code ec2;
+            fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
 
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
-            { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<fixed<<setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
+            { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
 
             bool found2 = (gg2 > 1 && gg2 < N);
             if (found2) {
                 bool known = is_known(gg2);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); result_factor=gg2; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+                if (!known) {
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+                    result_factor = gg2; result_status = "found"; curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
+                    write_result(); publish_json(); delete eng; return 0;
+                }
             }
         }
+
+
+
+
+
+
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
