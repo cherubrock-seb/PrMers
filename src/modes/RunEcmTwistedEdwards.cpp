@@ -200,8 +200,9 @@ int App::runECMMarinTwistedEdwards()
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
-    const bool forceSeed = (options.curve_seed != 0ULL);
-    if (forceSeed) curves = 1ULL;
+    const bool forceCurve = (options.curve_seed != 0ULL);
+    if (forceCurve) curves =1ULL;
+
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
     auto splitmix64_step = [](uint64_t& x)->uint64_t{
@@ -388,13 +389,15 @@ int App::runECMMarinTwistedEdwards()
     }
     size_t Kbits = mpz_sizeinbase(K.get_mpz_t(),2);
 
-    auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
-    std::cout << "[ECM] seed=" << base_seed << std::endl;
+
 
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
 
     string torsion_last = torsion_name;
+    auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+    uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
+    std::cout << "[ECM] seed=" << base_seed << std::endl;
+
 
     for (uint64_t c = 0; c < curves; ++c)
     {
@@ -421,77 +424,177 @@ int App::runECMMarinTwistedEdwards()
             if (guiServer_) guiServer_->appendLog(os.str());
         }
 
-        std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
-        std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
-        const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
+        uint32_t s2_idx = 0, s2_cnt = 0; 
+        double   s2_et  = 0.0;
+        bool     resume_stage2 = false;
 
-        auto save_ckpt = [&](uint32_t i, double et){
-            const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-            { File f(newf, "wb"); int version = 1; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2); if (!f.write(reinterpret_cast<const char*>(&nbb), sizeof(nbb))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
-            std::error_code ec; fs::remove(ckpt_file + ".old", ec); fs::rename(ckpt_file, ckpt_file + ".old", ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(ckpt_file + ".old", ec);
-        };
-        auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
-            File f(file);
-            if (!f.exists()) return -1;
-            int version = 0;
-            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 1) return -2;
-            uint32_t rp = 0;
-            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-            if (rp != p) return -2;
-            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
-            uint64_t rB1 = 0;
-            if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
-            const size_t cksz = eng->get_checkpoint_size();
-            std::vector<char> data(cksz);
-            if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data)) return -2;
-            if (!f.check_crc32()) return -2;
-            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
-            return 0;
-        };
-        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
-            const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
-            { File f(newf, "wb"); int version = 2; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&idx), sizeof(idx))) return; if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return; if (!f.write(reinterpret_cast<const char*>(&B1), sizeof(B1))) return; if (!f.write(reinterpret_cast<const char*>(&B2), sizeof(B2))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; f.write_crc32(); }
-            std::error_code ec; fs::remove(ckpt2 + ".old", ec); fs::rename(ckpt2, ckpt2 + ".old", ec); fs::rename(ckpt2 + ".new", ckpt2, ec); fs::remove(ckpt2 + ".old", ec);
-        };
-        auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
-            File f(file);
-            if (!f.exists()) return -1;
-            int version = 0;
-            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2) return -2;
-            uint32_t rp = 0;
-            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-            if (rp != p) return -2;
-            if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return -2;
-            uint64_t b1s = 0, b2s = 0;
-            if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
-            const size_t cksz = eng->get_checkpoint_size();
-            std::vector<char> data(cksz);
-            if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data)) return -2;
-            if (!f.check_crc32()) return -2;
-            if (b1s != B1 || b2s != B2) return -2;
-            return 0;
-        };
-
-        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
-        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
 
         uint64_t curve_seed = mix64(base_seed, c);
-        if (forceSeed) {
+        if (forceCurve){
             curve_seed = options.curve_seed;
             base_seed = curve_seed;
         }
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
         options.base_seed = base_seed;
+
+        const std::string ckpt_file      = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        const std::string ckpt2_file     = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        const std::string ckpt_legacy    = "ecm_m_"     + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        const std::string ckpt2_legacy   = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+
+        // ---- Stage 1 ckpt: version 1 with curve_seed + torsion16 (as you intended)
+        auto save_ckpt = [&](uint32_t i, double et){
+            const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+            {
+                File f(newf, "wb");
+                int version = 1;
+                if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+                if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
+                if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
+                uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2);
+                if (!f.write(reinterpret_cast<const char*>(&nbb),     sizeof(nbb)))     return;
+                if (!f.write(reinterpret_cast<const char*>(&B1),      sizeof(B1)))      return;
+                if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
+
+                // NEW: bind curve identity to ckpt
+                if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
+                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+
+                const size_t cksz = eng->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!eng->get_checkpoint(data)) return;
+                if (!f.write(data.data(), cksz)) return;
+
+                f.write_crc32();
+            }
+            std::error_code ec;
+            fs::remove(ckpt_file + ".old", ec);
+            fs::rename(ckpt_file,         ckpt_file + ".old", ec);
+            fs::rename(ckpt_file + ".new",ckpt_file,          ec);
+            fs::remove(ckpt_file + ".old", ec);
+        };
+
+        auto read_ckpt_one = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 1) return -2;
+
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp),  sizeof(rp)))  return -2;
+            if (rp != p) return -2;
+
+            if (!f.read(reinterpret_cast<char*>(&ri),  sizeof(ri)))  return -2;
+            if (!f.read(reinterpret_cast<char*>(&rnb), sizeof(rnb))) return -2;
+
+            uint64_t rB1 = 0;
+            if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et),  sizeof(et)))  return -2;
+
+            uint64_t saved_curve_seed = 0;
+            uint8_t  saved_torsion16  = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
+            uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+            if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
+
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data))  return -2;
+            if (!f.check_crc32())            return -2;
+
+            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
+            return 0;
+        };
+        auto read_ckpt = [&](uint32_t& ri, uint32_t& rnb, double& et)->int{
+            int rr = read_ckpt_one(ckpt_file, ri, rnb, et);
+            if (rr < 0) rr = read_ckpt_one(ckpt_file + ".old", ri, rnb, et);
+            if (rr < 0) rr = read_ckpt_one(ckpt_legacy, ri, rnb, et);         
+            if (rr < 0) rr = read_ckpt_one(ckpt_legacy + ".old", ri, rnb, et);
+            return rr;
+        };
+
+        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+            const std::string oldf = ckpt2_file + ".old", newf = ckpt2_file + ".new";
+            {
+                File f(newf, "wb");
+                int version = 3;
+                if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return;
+                if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return;
+                if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return;
+                if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return;
+                if (!f.write(reinterpret_cast<const char*>(&B1),       sizeof(B1)))       return;
+                if (!f.write(reinterpret_cast<const char*>(&B2),       sizeof(B2)))       return;
+                if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return;
+
+                if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
+                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+
+                const size_t cksz = eng->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!eng->get_checkpoint(data)) return;
+                if (!f.write(data.data(), cksz)) return;
+
+                f.write_crc32();
+            }
+            std::error_code ec;
+            fs::remove(ckpt2_file + ".old", ec);
+            fs::rename(ckpt2_file,         ckpt2_file + ".old", ec);
+            fs::rename(ckpt2_file + ".new",ckpt2_file,          ec);
+            fs::remove(ckpt2_file + ".old", ec);
+        };
+
+        auto read_ckpt2_one = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+
+            int version = 0;
+            if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 2 && version != 3) return -2;
+
+            uint32_t rp = 0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != p) return -2;
+
+            if (!f.read(reinterpret_cast<char*>(&idx),      sizeof(idx)))      return -2;
+            if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return -2;
+
+            uint64_t b1s = 0, b2s = 0;
+            if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et),   sizeof(et)))  return -2;
+
+            if (version == 3) {
+                uint64_t saved_curve_seed = 0;
+                uint8_t  saved_torsion16  = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
+                uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
+            }
+
+            const size_t cksz = eng->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!eng->set_checkpoint(data)) return -2;
+            if (!f.check_crc32())           return -2;
+
+            if (b1s != B1 || b2s != B2) return -2;
+            return 0;
+        };
+        auto read_ckpt2 = [&](uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
+            int rr = read_ckpt2_one(ckpt2_file, idx, cnt_bits, et);
+            if (rr < 0) rr = read_ckpt2_one(ckpt2_file + ".old", idx, cnt_bits, et);
+            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy, idx, cnt_bits, et);        // legacy filename (v2)
+            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy + ".old", idx, cnt_bits, et);
+            return rr;
+        };
 
         auto addm = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
             mpz_class r=a+b;
@@ -594,7 +697,8 @@ int App::runECMMarinTwistedEdwards()
         if (!options.notorsion && options.torsion16) {
             bool ok = false;
             for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
-                uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
+                //uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
+                uint64_t m = (mix64(curve_seed, tries) | 1ULL) % 1000000ULL;
                 if (m < 2) m = 2;
 
                 mpz_class s, t;
@@ -718,7 +822,8 @@ int App::runECMMarinTwistedEdwards()
             std::ostringstream head;
             head<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                 <<" | twisted_edwards | torsion="<<torsion_used
-                <<" | K_bits="<<Kbits<<" | seed="<<curve_seed;
+                <<" | K_bits="<<Kbits<<
+                "| curve="<<curve_seed;
             std::cout<<head.str()<<std::endl;
             if (guiServer_) guiServer_->appendLog(head.str());
         }
@@ -1120,13 +1225,18 @@ int App::runECMMarinTwistedEdwards()
         eng->copy((engine::Reg)3,(engine::Reg)6);
         eng->copy((engine::Reg)4,(engine::Reg)7);
         eng->copy((engine::Reg)5,(engine::Reg)9);
-        eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
-        eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
-        eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
-        eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
+        eng->set_multiplicand((engine::Reg)43,(engine::Reg)16); // a
+        eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);  // 2
+        eng->set_multiplicand((engine::Reg)45,(engine::Reg)29); // d
+        eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 (will be T_pos)
         uint32_t start_i = 0, nb_ck = 0;
         double   saved_et = 0.0;
-        int rr = read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+        int rr = read_ckpt(start_i, nb_ck, saved_et);
+        {
+            int rr2 = read_ckpt2(s2_idx, s2_cnt, s2_et); // uses ckpt2_file + legacy inside
+            resume_stage2 = (rr2 == 0);
+        }
+
         bool resumed = (rr == 0 && start_i > 0);
         if (!resumed) { saved_et = 0.0; nb_ck = 0; }
 
@@ -1167,28 +1277,37 @@ int App::runECMMarinTwistedEdwards()
         mpz_t zXneg; mpz_init_set(zXneg, X0_neg.get_mpz_t());
         mpz_t zYneg; mpz_init_set(zYneg, Y0.get_mpz_t());
         mpz_t zTneg; mpz_init_set(zTneg, T0_neg.get_mpz_t());
-        if (naf_len)
-        {
+
+        size_t total_steps = (naf_len>=1 ? naf_len-1 : 0);
+
+        eng->set_mpz((engine::Reg)6,  zXpos);   // X2 =  +P.x
+        eng->set_mpz((engine::Reg)7,  zYpos);   // Y2 =  +P.y
+        eng->set_mpz((engine::Reg)9,  zTpos);   // T2 =  +P.t
+        eng->set_mpz((engine::Reg)47, zXneg);   // cache −P.x
+        eng->set_mpz((engine::Reg)48, zYneg);   // cache −P.y
+        eng->set_mpz((engine::Reg)49, zTneg);   // cache −P.t
+        eng->set_multiplicand((engine::Reg)43,(engine::Reg)16); // a
+        eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);  // 2
+        eng->set_multiplicand((engine::Reg)45,(engine::Reg)29); // d
+        eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 = +P.t
+        eng->set_multiplicand((engine::Reg)50,(engine::Reg)49); // T2neg = −P.t
+
+        if (!resumed && naf_len) {
             short top = naf_vec[naf_len - 1];
-            if (top < 0)
-            {
+            if (top < 0) {
                 eng->set_mpz((engine::Reg)3, zXneg);
                 eng->set_mpz((engine::Reg)4, zYneg);
                 eng->set_mpz((engine::Reg)5, zTneg);
+            } else {
+                eng->set_mpz((engine::Reg)3, zXpos);
+                eng->set_mpz((engine::Reg)4, zYpos);
+                eng->set_mpz((engine::Reg)5, zTpos);
             }
         }
-        size_t total_steps = (naf_len>=1? naf_len-1 : 0);
-        uint32_t i = 0;
-        eng->set_mpz((engine::Reg)6, zXpos);
-        eng->set_mpz((engine::Reg)7, zYpos);
-        eng->set_mpz((engine::Reg)9, zTpos);
-        eng->set_mpz((engine::Reg)47, zXneg);
-        eng->set_mpz((engine::Reg)48, zYneg);
-        eng->set_mpz((engine::Reg)49, zTneg);
-        eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);  
-        for (i = 0; i < total_steps; ++i){
+        for (uint32_t i = start_i; i < total_steps; ++i) {
             if (core::algo::interrupted) {
-                double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed);
+                double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
+                save_ckpt((uint32_t)i, elapsed);
                 result_status = "interrupted";
                 curves_tested_for_found = c+1;
                 options.curves_tested_for_found = (uint32_t)(c+1);
@@ -1196,6 +1315,7 @@ int App::runECMMarinTwistedEdwards()
                 delete eng;
                 return 2;
             }
+
             
             if((!options.notorsion && options.torsion16)){
                 eDBL_XYTZ_notwist(3,4,1,5);
@@ -1411,7 +1531,7 @@ int App::runECMMarinTwistedEdwards()
                     save_ckpt2((uint32_t)(i+1), elapsed, stage2_bits);
                     std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
                             << " bit " << (i+1) << "/" << stage2_bits << "\n";
-                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1) <<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
                     curves_tested_for_found=c+1; options.curves_tested_for_found=(uint32_t)(c+1); write_result(); delete eng; return 0;
                 }
             }
@@ -1422,7 +1542,11 @@ int App::runECMMarinTwistedEdwards()
             mpz_class gg2 = gcd_with_dots(Zres, N);
             if (gg2 == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": Stage2 gcd=N, retrying\n"; delete eng; continue; }
 
-            std::error_code ec2; fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+            std::error_code ec2;
+            fs::remove(ckpt2_file, ec2);
+            fs::remove(ckpt2_file + ".old", ec2);
+            fs::remove(ckpt2_file + ".new", ec2);
+
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
             { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
             bool found2 = (gg2 > 1 && gg2 < N);
