@@ -1538,6 +1538,13 @@ int App::runECMMarinTwistedEdwards()
             continue;
         }*/
         if (B2 > B1) {
+            if(check_invariant()){
+                std::cout<<"[ECM] Error check Done and OK! ...."<<std::endl;
+            }
+            else{
+                std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
+                continue;
+            }
             mpz_class M(1);
             for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
             uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
