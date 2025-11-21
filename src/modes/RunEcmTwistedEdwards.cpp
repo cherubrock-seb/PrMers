@@ -1363,7 +1363,7 @@ int App::runECMMarinTwistedEdwards()
             auto now = high_resolution_clock::now();
             if (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval) {
 
-                std::cout<<"[ECM] Error check ...."<<std::endl;
+                std::cout<<"\n[ECM] Error check ...."<<std::endl;
                 if(check_invariant()){
                     std::cout<<"[ECM] Error check Done ! ...."<<std::endl;
                 }
@@ -1426,7 +1426,7 @@ int App::runECMMarinTwistedEdwards()
             std::cout<<s1.str()<<std::endl;
             if (guiServer_) guiServer_->appendLog(s1.str());
         }
-        std::cout<<"[ECM] Error check ...."<<std::endl;
+        std::cout<<"\n[ECM] Error check ...."<<std::endl;
         
         if (found) {
             bool known = is_known(g);
