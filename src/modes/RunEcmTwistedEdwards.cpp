@@ -368,18 +368,31 @@ int App::runECMMarinTwistedEdwards()
 
     vector<uint64_t> primesB1_v, primesS2_v;
     {
-        uint64_t Pmax = B2 ? B2 : B1;
+        uint64_t Pmax = B1;
+        if (B2 > B1) Pmax = B2;  // on a besoin de max(B1,B2)
+
         vector<char> sieve(Pmax + 1, 1);
-        sieve[0]=0;
-        if (Pmax >= 1) sieve[1]=0;
-        for (uint64_t q=2;q*q<=Pmax;++q)
+        sieve[0] = 0;
+        if (Pmax >= 1) sieve[1] = 0;
+
+        for (uint64_t q = 2; q*q <= Pmax; ++q)
             if (sieve[q])
-                for (uint64_t k=q*q;k<=Pmax;k+=q) sieve[k]=0;
-        for (uint64_t q=2;q<=B1;++q) if (sieve[q]) primesB1_v.push_back((uint32_t)q);
+                for (uint64_t k = q*q; k <= Pmax; k += q)
+                    sieve[k] = 0;
+
+        for (uint64_t q = 2; q <= B1; ++q)
+            if (sieve[q])
+                primesB1_v.push_back((uint32_t)q);
+
         if (B2 > B1)
-            for (uint64_t q=B1+1;q<=B2;++q) if (sieve[q]) primesS2_v.push_back((uint64_t)q);
-        std::cout<<"[ECM] Prime counts: B1="<<primesB1_v.size()<<", S2="<<primesS2_v.size()<<std::endl;
+            for (uint64_t q = B1 + 1; q <= B2; ++q)
+                if (sieve[q])
+                    primesS2_v.push_back((uint64_t)q);
+
+        std::cout << "[ECM] Prime counts: B1=" << primesB1_v.size()
+                << ", S2=" << primesS2_v.size() << std::endl;
     }
+
 
     mpz_class K(1);
     for (uint32_t q : primesB1_v) {
@@ -426,8 +439,8 @@ int App::runECMMarinTwistedEdwards()
 
         uint32_t s2_idx = 0, s2_cnt = 0; 
         double   s2_et  = 0.0;
-        bool     resume_stage2 = false;
-
+        bool     resume_stage2 = false; 
+        (void) resume_stage2;
 
         uint64_t curve_seed = mix64(base_seed, c);
         if (forceCurve){
@@ -1230,10 +1243,10 @@ int App::runECMMarinTwistedEdwards()
         uint32_t start_i = 0, nb_ck = 0;
         double   saved_et = 0.0;
         int rr = read_ckpt(start_i, nb_ck, saved_et);
-        {
-            int rr2 = read_ckpt2(s2_idx, s2_cnt, s2_et); // uses ckpt2_file + legacy inside
-            resume_stage2 = (rr2 == 0);
-        }
+        
+        int rr2 = read_ckpt2(s2_idx, s2_cnt, s2_et); 
+        resume_stage2 = (rr2 == 0);
+        
         
 
         bool resumed = (rr == 0 && start_i > 0);
@@ -1303,6 +1316,7 @@ int App::runECMMarinTwistedEdwards()
                 eng->set_mpz((engine::Reg)5, zTpos);
             }
         }
+        bool errordone = false;
         for (uint32_t i = start_i; i < total_steps; ++i) {
             if (core::algo::interrupted) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
@@ -1336,9 +1350,19 @@ int App::runECMMarinTwistedEdwards()
                     if((!options.notorsion && options.torsion16)) eADD_RP_notwist_2(); else eADD_RP_2();
                 }
             }
-
+            if (options.erroriter > 0 && (i + 1) == options.erroriter && !errordone) {
+                errordone = true;
+                //eng->error();
+                eng->sub(1, 2);
+                std::cout << "Injected error at iteration " << (i + 1) << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Injected error at iteration " << (i + 1);
+                    guiServer_->appendLog(oss.str());
+                }
+            }
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last_check).count() >= 300) {
+            if (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval) {
 
                 std::cout<<"[ECM] Error check ...."<<std::endl;
                 if(check_invariant()){

@@ -291,11 +291,19 @@ static std::string generatePrimeNetJson(
     std::string canonWT = worktype;
     if      (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
     else if (canonWT.rfind("LL",  0) == 0) canonWT = "LL";
+    
     canon << exponent << ";" << canonWT << ";";
     canon << "" << ";";
     canon << "" << ";";
     if (canonWT == "LL" || canonWT == "PRP") canon << toLower(res64);
     canon << ";";
+    std::string knownFactorStr;
+    if (!knownFactors.empty()) {
+        knownFactorStr = knownFactors[0];
+        for (size_t i = 1; i < knownFactors.size(); ++i)
+            knownFactorStr += "," + knownFactors[i];
+        canon << knownFactorStr << ";";
+    }
     if (canonWT == "PRP") canon << toLower(res2048);
     canon << ";";
     canon << "0_3_1;";

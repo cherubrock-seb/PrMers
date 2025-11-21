@@ -35,6 +35,7 @@ struct CliOptions {
     uint64_t erroriter = 0;
     bool proof = true;
     bool edwards = false;
+    uint32_t ecm_check_interval = 300;
     bool compute_edwards = false;
     bool torsion16 = false;
     bool notorsion = false;
