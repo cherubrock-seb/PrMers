@@ -1098,26 +1098,43 @@ int App::runECMMarinTwistedEdwards()
             eng->mul((engine::Reg)1,(engine::Reg)11);                // Z3 = (D + C)*(D - C)
         };
 
+
         mpz_t za; mpz_init(za); mpz_set(za, aE.get_mpz_t()); eng->set_mpz((engine::Reg)16, za); mpz_clear(za);
         static const mpz_class TWO = 2;
         mpz_class two_dE = mulm(dE, TWO);
-        mpz_t tmp; mpz_init_set(tmp, two_dE.get_mpz_t()); eng->set_mpz((engine::Reg)17, tmp); mpz_clear(tmp);
-        mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t()); eng->set_mpz((engine::Reg)29, zd); mpz_clear(zd);
+        mpz_t tmp; mpz_init_set(tmp, two_dE.get_mpz_t());
+        eng->set_mpz((engine::Reg)17, tmp);
+        mpz_clear(tmp);
+        mpz_t zd; mpz_init(zd); mpz_set(zd, dE.get_mpz_t());
+        eng->set_mpz((engine::Reg)29, zd);
+        mpz_clear(zd);
         eng->set((engine::Reg)0, 0u);
         eng->set((engine::Reg)1, 1u);
+        mpz_t zx; mpz_init(zx); mpz_set(zx, X0.get_mpz_t()); eng->set_mpz((engine::Reg)6, zx); mpz_clear(zx);
+        mpz_t zy; mpz_init(zy); mpz_set(zy, Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
         eng->set((engine::Reg)8, 2u);
+        eng->copy((engine::Reg)9,(engine::Reg)6);
+        eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+        eng->mul((engine::Reg)9,(engine::Reg)11);
+        eng->set((engine::Reg)1, 1u);
+        eng->copy((engine::Reg)3,(engine::Reg)6);
+        eng->copy((engine::Reg)4,(engine::Reg)7);
+        eng->copy((engine::Reg)5,(engine::Reg)9);
         eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
         eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
         eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
+        eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
         uint32_t start_i = 0, nb_ck = 0;
-        double saved_et = 0.0;
+        double   saved_et = 0.0;
         int rr = read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
         bool resumed = (rr == 0 && start_i > 0);
         if (!resumed) { saved_et = 0.0; nb_ck = 0; }
+
         auto t0 = high_resolution_clock::now();
         auto last_save = t0;
-        auto last_ui = t0;
+        auto last_ui   = t0;
         auto last_check = t0;
+
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
         std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
         {
@@ -1149,32 +1166,27 @@ int App::runECMMarinTwistedEdwards()
         mpz_t zTpos; mpz_init_set(zTpos, T0_mpz.get_mpz_t());
         mpz_t zXneg; mpz_init_set(zXneg, X0_neg.get_mpz_t());
         mpz_t zYneg; mpz_init_set(zYneg, Y0.get_mpz_t());
-        mpz_t zTneg; mpz_init_set(zTneg, T0_mpz.get_mpz_t());
-        if (!resumed)
+        mpz_t zTneg; mpz_init_set(zTneg, T0_neg.get_mpz_t());
+        if (naf_len)
         {
-            if (naf_len)
+            short top = naf_vec[naf_len - 1];
+            if (top < 0)
             {
-                short top = naf_vec[naf_len - 1];
-                if (top < 0)
-                {
-                    eng->set_mpz((engine::Reg)3, zXneg);
-                    eng->set_mpz((engine::Reg)4, zYneg);
-                    eng->set_mpz((engine::Reg)5, zTneg);
-                }
+                eng->set_mpz((engine::Reg)3, zXneg);
+                eng->set_mpz((engine::Reg)4, zYneg);
+                eng->set_mpz((engine::Reg)5, zTneg);
             }
-            eng->set_mpz((engine::Reg)6, zXpos);
-            eng->set_mpz((engine::Reg)7, zYpos);
-            eng->set_mpz((engine::Reg)9, zTpos);
-            eng->set_mpz((engine::Reg)47, zXneg);
-            eng->set_mpz((engine::Reg)48, zYneg);
-            eng->set_mpz((engine::Reg)49, zTneg);
-            eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
-            eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);
         }
         size_t total_steps = (naf_len>=1? naf_len-1 : 0);
-        uint32_t i = resumed ? start_i : 0;
-
-        for (; i < total_steps; ++i) {
+        uint32_t i = 0;
+        eng->set_mpz((engine::Reg)6, zXpos);
+        eng->set_mpz((engine::Reg)7, zYpos);
+        eng->set_mpz((engine::Reg)9, zTpos);
+        eng->set_mpz((engine::Reg)47, zXneg);
+        eng->set_mpz((engine::Reg)48, zYneg);
+        eng->set_mpz((engine::Reg)49, zTneg);
+        eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);  
+        for (i = 0; i < total_steps; ++i){
             if (core::algo::interrupted) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed);
                 result_status = "interrupted";
@@ -1207,7 +1219,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last_check).count() >= 150) {
+            if (duration_cast<seconds>(now - last_check).count() >= 300) {
 
                 std::cout<<"[ECM] Error check ...."<<std::endl;
                 if(check_invariant()){
