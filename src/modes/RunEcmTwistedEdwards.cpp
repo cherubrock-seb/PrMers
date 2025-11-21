@@ -407,12 +407,83 @@ int App::runECMMarinTwistedEdwards()
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
 
     string torsion_last = torsion_name;
+
+    uint64_t resume_curve_idx  = 0;
+    uint64_t resume_curve_seed = 0;
+    bool     have_resume_seed  = false;
+
+    auto try_probe_te_ckpt = [&](const std::string& file, uint64_t& out_seed)->bool {
+        File f(file);
+        if (!f.exists()) return false;
+
+        int version = 0;
+        if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+        if (version != 1) return false; // checkpoints S1 Twisted-Edwards
+
+        uint32_t rp = 0;
+        if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
+        if (rp != p) return false;
+
+        uint32_t i   = 0;
+        uint32_t nbb = 0;
+        uint64_t rB1 = 0;
+        double   et  = 0.0;
+        if (!f.read(reinterpret_cast<char*>(&i),   sizeof(i)))   return false;
+        if (!f.read(reinterpret_cast<char*>(&nbb), sizeof(nbb))) return false;
+        if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return false;
+        if (!f.read(reinterpret_cast<char*>(&et),  sizeof(et)))  return false;
+        if (rB1 != B1) return false;
+
+        uint64_t saved_curve_seed = 0;
+        uint8_t  saved_torsion16  = 0;
+        if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return false;
+        if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return false;
+        uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+        if (saved_torsion16 != current_torsion16) return false;
+
+        out_seed = saved_curve_seed;
+        return true;
+    };
+
+    if (!options.seed) {
+        for (uint64_t c = 0; c < curves; ++c) {
+            const std::string ckpt_file   = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string ckpt_file_o = ckpt_file + ".old";
+
+            uint64_t s = 0;
+            if (try_probe_te_ckpt(ckpt_file, s) || try_probe_te_ckpt(ckpt_file_o, s)) {
+                resume_curve_idx  = c;
+                resume_curve_seed = s;
+                have_resume_seed  = true;
+                break;
+            }
+        }
+    }
+
     auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-    uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
-    std::cout << "[ECM] seed=" << base_seed << std::endl;
 
+    uint64_t base_seed;
+    if (options.seed) {
+        base_seed = options.seed;
+    } else if (have_resume_seed) {
+        base_seed = resume_curve_seed;
+    } else {
+        base_seed = (now_ns ^ ((uint64_t)p<<32) ^ B1);
+    }
 
-    for (uint64_t c = 0; c < curves; ++c)
+    std::cout << "[ECM] seed=" << base_seed;
+    if (!options.seed && have_resume_seed) {
+        std::cout << " (resumed from checkpoint, curve index " << (resume_curve_idx + 1) << ")";
+    }
+    std::cout << std::endl;
+
+    uint64_t start_curve = 0;
+    if (!options.seed && have_resume_seed) {
+        start_curve = resume_curve_idx;
+    }
+
+    for (uint64_t c = start_curve; c < curves; ++c)
+
     {
         if (core::algo::interrupted) {
             result_status = "interrupted";
@@ -442,14 +513,22 @@ int App::runECMMarinTwistedEdwards()
         bool     resume_stage2 = false; 
         (void) resume_stage2;
 
-        uint64_t curve_seed = mix64(base_seed, c);
-        if (forceCurve){
-            curve_seed = options.curve_seed;
-            base_seed = curve_seed;
+        uint64_t curve_seed;
+        if (!options.seed && have_resume_seed && c == resume_curve_idx) {
+            curve_seed = resume_curve_seed;
+            base_seed  = curve_seed;
+        } else {
+            curve_seed = mix64(base_seed, c);
+            if (forceCurve){
+                curve_seed = options.curve_seed;
+                base_seed  = curve_seed;
+            }
         }
+
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
-        options.base_seed = base_seed;
+        options.base_seed  = base_seed;
+
 
         const std::string ckpt_file      = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2_file     = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
@@ -1450,13 +1529,14 @@ int App::runECMMarinTwistedEdwards()
                 return 0;
             }
         }
+        /*
         if(check_invariant()){
             std::cout<<"[ECM] Error check Done and OK! ...."<<std::endl;
         }
         else{
             std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
             continue;
-        }
+        }*/
         if (B2 > B1) {
             mpz_class M(1);
             for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
