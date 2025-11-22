@@ -767,6 +767,13 @@ int App::runECMMarinTwistedEdwards()
                              // (options.torsion16 ? string("16") : string("8"));
         bool built = false;
 
+        // In-memory checkpoint of the last known good state for fast recovery on errors
+        std::vector<char> last_good_state;
+        bool have_last_good_state = false;
+        uint32_t last_good_iter = 0;
+        uint32_t current_iter_for_invariant = 0;
+        const size_t ctx_ckpt_size = eng->get_checkpoint_size();
+
         auto force_on_curve = [&](mpz_class& aE_ref,
                                   mpz_class& dE_ref,
                                   const mpz_class& X,
@@ -873,15 +880,24 @@ int App::runECMMarinTwistedEdwards()
             auto lhs = addm(mulm(aE, sqrm(Xv)), sqrm(Yv));
             auto rhs = addm(sqrm(Zv), mulm(dE, sqrm(Tv)));
             auto rel = subm(lhs, rhs);
-            if (rel != 0){std::cout << "[ECM] invariant FAIL (a="
-                                    << aE << ")\n";
-                                    return false;
-                                    }
-                                    else{
-                        std::cout << "[ECM] check invariant OK (a="
-                                    << aE << ")\n";
-                                    return true;
-                                    }
+            if (rel != 0){
+                std::cout << "[ECM] invariant FAIL (a="
+                          << aE << ")\n";
+                return false;
+            }
+            else{
+                std::cout << "[ECM] check invariant OK (a="
+                          << aE << ")\n";
+                // Save an in-memory checkpoint of this good state
+                if (ctx_ckpt_size > 0) {
+                    last_good_state.resize(ctx_ckpt_size);
+                    if (eng->get_checkpoint(last_good_state)) {
+                        have_last_good_state = true;
+                        last_good_iter = current_iter_for_invariant;
+                    }
+                }
+                return true;
+            }
         };
 
         torsion_last = torsion_used;
@@ -1328,7 +1344,20 @@ int App::runECMMarinTwistedEdwards()
         
 
         bool resumed = (rr == 0 && start_i > 0);
-        if (!resumed) { saved_et = 0.0; nb_ck = 0; }
+        if (!resumed) {
+            saved_et = 0.0;
+            nb_ck = 0;
+        } else {
+            // Treat the resumed state as a valid last-good checkpoint
+            if (ctx_ckpt_size > 0) {
+                last_good_state.resize(ctx_ckpt_size);
+                if (eng->get_checkpoint(last_good_state)) {
+                    have_last_good_state = true;
+                    last_good_iter = start_i;
+                    current_iter_for_invariant = start_i;
+                }
+            }
+        }
 
         auto t0 = high_resolution_clock::now();
         auto last_save = t0;
@@ -1395,6 +1424,10 @@ int App::runECMMarinTwistedEdwards()
             }
         }
         bool errordone = false;
+        bool fatal_error = false;
+        if(resume_stage2){
+            start_i = total_steps;
+        }
         for (uint32_t i = start_i; i < total_steps; ++i) {
             if (core::algo::interrupted) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
@@ -1440,14 +1473,32 @@ int App::runECMMarinTwistedEdwards()
                 }
             }
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval) {
+            if (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval || i+1 == total_steps) {
 
                 std::cout<<"\n[ECM] Error check ...."<<std::endl;
+                // remember which iteration this invariant corresponds to
+                current_iter_for_invariant = i + 1;
                 if(check_invariant()){
                     std::cout<<"[ECM] Error check Done ! ...."<<std::endl;
                 }
                 else{
                     std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
+                    if (have_last_good_state) {
+                        std::cout << "[ECM] Restoring last known good state at iteration "
+                                  << last_good_iter << " and retrying from there." << std::endl;
+                        if (eng->set_checkpoint(last_good_state)) {
+                            // rewind loop to last_good_iter so it will be processed again
+                            i = (last_good_iter > 0) ? (last_good_iter - 1) : 0;
+                            last_check = now;
+                            last_save  = now;
+                            continue;
+                        } else {
+                            std::cout << "[ECM] Failed to restore last good state, aborting curve." << std::endl;
+                        }
+                    } else {
+                        std::cout << "[ECM] No saved good state available, aborting curve." << std::endl;
+                    }
+                    fatal_error = true;
                     break;
                 }
                     /*std::cout<<"[ECM] Check if factored ...."<<std::endl;
@@ -1486,6 +1537,12 @@ int App::runECMMarinTwistedEdwards()
         std::cout<<std::endl;
         mpz_clear(zXpos); mpz_clear(zYpos); mpz_clear(zTpos);
         mpz_clear(zXneg); mpz_clear(zYneg); mpz_clear(zTneg);
+
+        if (fatal_error) {
+            std::cout << "[ECM] Curve " << (c+1) << " aborted after unrecoverable error, skipping.\n";
+            delete eng;
+            continue;
+        }
 
         mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
         mpz_class g = gcd_with_dots(Zacc, N);
@@ -1538,13 +1595,6 @@ int App::runECMMarinTwistedEdwards()
             continue;
         }*/
         if (B2 > B1) {
-            if(check_invariant()){
-                std::cout<<"[ECM] Error check Done and OK! ...."<<std::endl;
-            }
-            else{
-                std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
-                continue;
-            }
             mpz_class M(1);
             for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
             uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
