@@ -270,8 +270,11 @@ static std::string generatePrimeNetJson(
         << ",\"version\":"  << jsonEscape(programVersion)
         << ",\"port\":"     << programPort << "},"
         << "\"os\":{"
-        << "\"os\":"        << jsonEscape(osName)
-        << ",\"architecture\":" << jsonEscape(osArchitecture)
+        << "\"os\":"        << jsonEscape(osName);
+        if(!osArchitecture.empty()){
+          oss  << ",\"architecture\":" << jsonEscape(osArchitecture);
+        }
+        oss
         << "},"
         << "\"user\":"      << jsonEscape(user);
     if (!computer.empty()) oss << ",\"computer\":" << jsonEscape(computer);
@@ -306,7 +309,7 @@ static std::string generatePrimeNetJson(
     canon << ";";
     if (canonWT == "PRP") canon << toLower(res2048);
     canon << ";";
-    canon << "0_3_1;";
+    canon << "0_3_" << residueType << ";";
     canon << fftLength << ";";
     canon << "gerbicz:" << gerbiczError << ";";
     canon << programName << ";";
@@ -367,7 +370,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
                 << "\"port\":" << opts.portCode
             << "},"
             << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
-            << "\"user\":" << jsonEscape(opts.user.empty() ? "prmers" : opts.user);
+            << "\"user\":" << jsonEscape(opts.user.empty() ? "" : opts.user);
         if (!opts.computer_name.empty())
             oss << ",\"computer\":" << jsonEscape(opts.computer_name);
         if (!opts.aid.empty())

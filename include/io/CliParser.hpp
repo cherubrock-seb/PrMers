@@ -29,6 +29,8 @@ struct CliOptions {
     bool verify = true;
     bool gerbiczli = true;
     uint64_t B1 = 10000;
+    uint64_t B1old = 0;
+    uint64_t B1_new = 0;
     uint64_t B2 = 0;
     uint64_t checklevel = 0;
     uint64_t gerbicz_error_count = 0;
@@ -57,6 +59,7 @@ struct CliOptions {
     std::string computer_name;
     std::string config_path;
     std::string worktodo_path = "worktodo.txt";
+    std::string pm1_extend_save_path = "";
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;

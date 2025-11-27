@@ -58,6 +58,9 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1                 : (Optional) Run factoring P-1" << std::endl;
     std::cout << "  -b1                  : (Optional) B1 for factoring P-1" << std::endl;
     std::cout << "  -b2                  : (Optional) B2 for factoring P-1" << std::endl;
+    std::cout << "  -b1old               : (Optional) Continue P-1 factoring stage 1 from a previous run. "
+             "Loads a file named 'resume_p[Exponent]_B1_[oldB1].save (GMP-ECM) or .p95 (if .save not found) '. "
+             "Use -b1 to specify the new B1 bound for extension." << std::endl;
     std::cout << "  -K <value>           : Exponent K for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -nmax <value>        : Maximum value of n for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
@@ -82,6 +85,7 @@ void printUsage(const char* progName) {
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
+    
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
     std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
     std::cout << "  -ced                 : (Optional) compute in Edwards and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
@@ -287,6 +291,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.B1 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
+        else if (std::strcmp(argv[i], "-b1old") == 0 && i + 1 < argc) {
+            opts.B1old = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
         else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
             opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
@@ -398,6 +406,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (strcmp(argv[i], "-factors") == 0 && i + 1 < argc) {
             opts.knownFactors = util::split(argv[++i], ',');
         }
+        
         else if (argv[i][0] != '-') {
             if (opts.exponent == 0) {
                 opts.exponent = std::strtoull(argv[i], nullptr, 10);

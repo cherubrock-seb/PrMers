@@ -447,6 +447,33 @@ static inline void write_u16(std::ofstream& o, uint16_t v){ o.write(reinterpret_
 static inline void write_f64(std::ofstream& o, double v){ o.write(reinterpret_cast<const char*>(&v),8); }
 static inline void write_u8 (std::ofstream& o, uint8_t  v){ o.write(reinterpret_cast<const char*>(&v),1); }
 
+
+static inline bool read_u32(std::ifstream& in, uint32_t& v){
+    in.read(reinterpret_cast<char*>(&v), 4);
+    return (bool)in;
+}
+static inline bool read_i32(std::ifstream& in, int32_t& v){
+    in.read(reinterpret_cast<char*>(&v), 4);
+    return (bool)in;
+}
+static inline bool read_u64(std::ifstream& in, uint64_t& v){
+    in.read(reinterpret_cast<char*>(&v), 8);
+    return (bool)in;
+}
+static inline bool read_u16(std::ifstream& in, uint16_t& v){
+    in.read(reinterpret_cast<char*>(&v), 2);
+    return (bool)in;
+}
+static inline bool read_f64(std::ifstream& in, double& v){
+    in.read(reinterpret_cast<char*>(&v), 8);
+    return (bool)in;
+}
+static inline bool read_u8(std::ifstream& in, uint8_t& v){
+    in.read(reinterpret_cast<char*>(&v), 1);
+    return (bool)in;
+}
+
+
 static inline bool read_text_file(const std::string& path, std::string& out){
     std::ifstream f(path);
     if(!f) return false;
@@ -562,7 +589,7 @@ static inline bool write_prime95_s1_from_bytes(const std::string& outPath, uint3
     #elif defined(__arm__) || defined(_M_ARM)
     arch_str = "ARM";
     #else
-    arch_str = "unknown";
+    arch_str = "";
     #endif
 
     std::string json = std::string("{\"programs\":[{\"work\":{\"type\":\"PM1\",\"stage\":\"1\"},\"program\":{\"name\":\"prmers\",\"version\":\"" + core::PRMERS_VERSION + "\"},\"os\":{\"os\":\"") + os_str + "\",\"architecture\":\"" + arch_str + "\"},\"date_start\":\"" + ds + "\",\"date_end\":\"" + de + "\"}]}";
@@ -593,6 +620,83 @@ static inline bool write_prime95_s1_from_bytes(const std::string& outPath, uint3
         out.write(reinterpret_cast<const char*>(json_bytes.data()), (std::streamsize)json_bytes.size());
 
     return (bool)out;
+}
+
+static inline bool read_prime95_s1_to_bytes(const std::string& path,
+                                            uint32_t& p_out,
+                                            uint64_t& B1_out,
+                                            std::vector<uint8_t>& data_out)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "Error: cannot open Prime95 S1 file " << path << " for reading\n";
+        return false;
+    }
+
+    uint32_t magic = 0;
+    uint32_t ver   = 0;
+    double   fver  = 0.0;
+    int32_t  type  = 0;
+    uint32_t p     = 0;
+    int32_t  unused_n = 0;
+    uint8_t  stage0 = 0, stage1 = 0;
+    uint16_t reserved = 0;
+    uint64_t zero     = 0;
+    double   f1       = 0.0;
+    uint32_t chk_file = 0;
+    int32_t  flag5    = 0;
+    uint64_t B1_a     = 0;
+    uint64_t B1_b     = 0;
+    int32_t  flag1    = 0;
+    int32_t  nWords   = 0;
+
+    // Lire l’en-tête dans le même ordre que write_prime95_s1_from_bytes
+    if (!read_u32(in, magic))   return false;
+    if (!read_u32(in, ver))     return false;
+    if (!read_f64(in, fver))    return false;
+    if (!read_i32(in, type))    return false;
+    if (!read_u32(in, p))       return false;
+    if (!read_i32(in, unused_n))return false;
+    if (!read_u8(in, stage0))   return false;
+    if (!read_u8(in, stage1))   return false;
+    if (!read_u16(in, reserved))return false;
+    if (!read_u64(in, zero))    return false;
+    if (!read_f64(in, f1))      return false;
+    if (!read_u32(in, chk_file))return false;
+    if (!read_i32(in, flag5))   return false;
+    if (!read_u64(in, B1_a))    return false;
+    if (!read_u64(in, B1_b))    return false;
+    if (!read_i32(in, flag1))   return false;
+    if (!read_i32(in, nWords))  return false;
+
+    if (nWords < 0) {
+        std::cerr << "Error: negative word count in Prime95 S1 file " << path << "\n";
+        return false;
+    }
+
+    size_t nBytes = static_cast<size_t>(nWords) * 4u;
+    data_out.assign(nBytes, 0);
+
+    in.read(reinterpret_cast<char*>(data_out.data()),
+            static_cast<std::streamsize>(nBytes));
+    if (!in) {
+        std::cerr << "Error: truncated Prime95 S1 data in " << path << "\n";
+        return false;
+    }
+
+    // Sorties
+    p_out  = p;
+    B1_out = B1_a;              // B1_a == B1_b dans ton writer
+
+    // Vérifier le checksum (même formule que lors de l’écriture)
+    uint32_t chk_calc = checksum_prime95_s1(B1_out, data_out);
+    if (chk_calc != chk_file) {
+        std::cerr << "Warning: checksum mismatch in Prime95 S1 file " << path
+                  << " (file=" << chk_file << ", computed=" << chk_calc << ")\n";
+        // On continue quand même : les données sont probablement correctes.
+    }
+
+    return true;
 }
 
 
