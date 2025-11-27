@@ -1528,6 +1528,7 @@ int App::runPM1Marin() {
     if (rr < 0) rr = read_ckpt(ckpt_file + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
     if (rr == 0) { restored = true; firstChunk = (firstChunk_ck != 0); }
     auto start_sys = std::chrono::system_clock::now();
+
     if (doExtend) {
         mpz_class E_diff = buildE_incremental(B1_old, B1_new);
         mp_bitcnt_t bits = mpz_sizeinbase(E_diff.get_mpz_t(), 2);
@@ -1542,8 +1543,13 @@ int App::runPM1Marin() {
         if (bits == 0) {
             std::cout << "Nothing to extend (E_diff = 1)\n";
         } else {
-            auto start_clock = std::chrono::high_resolution_clock::now();
-            auto lastDisplay  = start_clock;
+            // Si reprise depuis un checkpoint d’extension, on force bits à bits_in_chunk_ck
+            if (restored && bits_in_chunk_ck) {
+                bits = (mp_bitcnt_t)bits_in_chunk_ck;
+            }
+
+            auto ext_start_clock = std::chrono::high_resolution_clock::now();
+            auto ext_lastDisplay  = ext_start_clock;
 
             uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
             double desiredIntervalSeconds = 600.0;
@@ -1559,24 +1565,93 @@ int App::runPM1Marin() {
                 : checkpasslevel_auto;
             if (checkpasslevel == 0) checkpasslevel = 1;
 
-            uint64_t blocks_since_check = 0;
-            uint64_t bits_in_block      = 0;
-            uint64_t current_block_len  = 0;
-            mpz_class eacc              = 0;
-            mpz_class wbits             = 0;
-            uint64_t gl_checkpass       = 0;
-            bool in_lot                 = false;
+            chunkIndex = std::max<uint64_t>(chunkIndex, 1);
 
-            for (mp_bitcnt_t i = bits; i > 0; --i) {
+            uint64_t resumeI = restored ? (uint64_t)resumeI_ck : (uint64_t)bits;
+            uint64_t lastIter = resumeI;
+
+            uint64_t blocks_since_check = restored ? gl_blocks_since_check_ck : 0;
+            uint64_t bits_in_block      = restored ? gl_bits_in_block_ck      : 0;
+            uint64_t current_block_len  = restored && gl_current_block_len_ck
+                                          ? gl_current_block_len_ck
+                                          : (((uint64_t)((resumeI - 1) % B)) + 1);
+            mpz_class eacc              = restored ? eacc_ck : 0;
+            mpz_class wbits             = restored ? wbits_ck : 0;
+            uint64_t gl_checkpass       = restored ? gl_checkpass_ck : 0;
+            bool in_lot                 = restored ? (in_lot_ck != 0) : false;
+
+            // Barre de progression similaire au Stage 1 normal
+            spinner.displayProgress2(
+                processed_total_bits + (restored ? (bits - resumeI) : 0),
+                processed_total_bits + bits,
+                timer.elapsed() + restored_time,
+                timer2.elapsed(),
+                options.exponent,
+                processed_total_bits + (restored ? (bits - resumeI) : 0),
+                processed_total_bits,
+                "",
+                guiServer_ ? guiServer_.get() : nullptr,
+                chunkIndex,
+                1, // une seule "chunk" pour E_diff
+                (restored ? (bits - resumeI) : 0),
+                bits,
+                true
+            );
+
+            for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
+                lastIter = i;
+
                 if (interrupted) {
-                    std::cout << "\nInterrupted during extension.\n";
+                    std::cout << "\nInterrupted during extension at iteration " << i << std::endl;
                     if (guiServer_) {
                         std::ostringstream oss;
-                        oss << "\nInterrupted during extension.\n";
+                        oss << "\nInterrupted during extension at iteration " << i << std::endl;
                         guiServer_->appendLog(oss.str());
                     }
+                    auto now = std::chrono::high_resolution_clock::now();
+                    double et = std::chrono::duration<double>(now - ext_start_clock).count() + restored_time;
+                    save_ckpt(
+                        (uint32_t)lastIter,
+                        et,
+                        gl_checkpass,
+                        blocks_since_check,
+                        bits_in_block,
+                        current_block_len,
+                        in_lot ? 1 : 0,
+                        eacc,
+                        wbits,
+                        chunkIndex,
+                        0,              // startPrime non utilisé en extension
+                        1,              // firstChunk = 1 pour cette extension
+                        processed_total_bits + (bits - i),
+                        (uint64_t)bits
+                    );
                     delete eng;
                     return 0;
+                }
+
+                auto now = std::chrono::high_resolution_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= options.backup_interval) {
+                    std::cout << "\nBackup point done at i=" << i << " start...." << std::endl;
+                    double et = std::chrono::duration<double>(now - ext_start_clock).count() + restored_time;
+                    save_ckpt(
+                        (uint32_t)lastIter,
+                        et,
+                        gl_checkpass,
+                        blocks_since_check,
+                        bits_in_block,
+                        current_block_len,
+                        in_lot ? 1 : 0,
+                        eacc,
+                        wbits,
+                        chunkIndex,
+                        0,              // startPrime placeholder
+                        1,              // firstChunk
+                        processed_total_bits + (bits - i),
+                        (uint64_t)bits
+                    );
+                    std::cout << "\nBackup point done at i=" << i << " done...." << std::endl;
+                    lastBackup = now;
                 }
 
                 if (bits_in_block == 0) {
@@ -1620,8 +1695,7 @@ int App::runPM1Marin() {
                 wbits <<= 1;
                 if (b) wbits += 1;
                 bits_in_block += 1;
-                //if (options.erroriter > 0 && (resumeI - i + 1) == options.erroriter && !errordone) { errordone = true; eng->sub(RSTATE, 2); std::cout << "Injected error at iteration " << (resumeI - i + 1) << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (resumeI - i + 1); guiServer_->appendLog(oss.str()); } }
-                
+
                 bool end_block = (bits_in_block == current_block_len);
                 if (end_block) {
                     if (current_block_len == B) {
@@ -1759,11 +1833,11 @@ int App::runPM1Marin() {
                     wbits = 0;
                 }
 
-                auto now = std::chrono::high_resolution_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 10) {
+                auto now2 = std::chrono::high_resolution_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(now2 - ext_lastDisplay).count() >= 10) {
                     double done   = (double)(bits - i + 1);
                     double total  = (double)bits;
-                    double elapsed = std::chrono::duration<double>(now - start_clock).count();
+                    double elapsed = std::chrono::duration<double>(now2 - ext_start_clock).count();
                     double ips    = done / std::max(1e-9, elapsed);
                     double eta    = (total > done && ips > 0.0)
                                     ? (total - done) / ips
@@ -1774,7 +1848,7 @@ int App::runPM1Marin() {
                               << (int(eta) / 3600) << "h "
                               << (int(eta) % 3600) / 60 << "m\r"
                               << std::flush;
-                    lastDisplay = now;
+                    ext_lastDisplay = now2;
                 }
             }
 
@@ -1821,6 +1895,9 @@ int App::runPM1Marin() {
                     eng->mul(RSTATE, RTMP);
                 }
             }
+
+            processed_total_bits += bits;
+            restored = false;
 
             std::cout << "\nExtension exponentiation done.\n";
         }
@@ -2290,4 +2367,5 @@ int App::runPM1Marin() {
     //delete eng;
     return factorFound ? 0 : 1;
 }
+
 
