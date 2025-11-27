@@ -1344,7 +1344,6 @@ static mpz_class buildE_incremental(uint64_t B1_old, uint64_t B1_new)
 }
 
 
-
 int App::runPM1Marin() {
    if (guiServer_) {
         std::ostringstream oss;
