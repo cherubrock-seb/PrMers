@@ -1,3 +1,8 @@
+# chainpm1old.sh
+# Extend P-1 stage 1 from existing .save/.p95 at <old_B1>: <RESUME_FLAG> <old_B1> -b1 <old_B1+step>.
+# Stop if "P-1 factor stage 1 found:" appears.
+# Usage: ./chainpm1old.sh <exp> <old_B1> <step>
+
 #!/usr/bin/env bash
 set -euo pipefail
 

@@ -1,3 +1,8 @@
+# chainpm1.sh
+# Chain P-1 stage 1 by B1 steps. First: -b1 <start>, then: <RESUME_FLAG> <curr> -b1 <next>.
+# Stop if "P-1 factor stage 1 found:" appears.
+# Usage: ./chainpm1.sh <exp> <start_B1> <step> [max_B1]
+
 #!/usr/bin/env bash
 set -euo pipefail
 
