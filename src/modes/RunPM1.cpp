@@ -721,7 +721,7 @@ int App::runPM1() {
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
-    bool debug = true;//options.debug;
+    //bool debug = true;
     uint64_t B1u = options.B1, B2u = options.B2;
     mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
     if (B2 <= B1) {
@@ -732,9 +732,9 @@ int App::runPM1Stage2Marin() {
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl; guiServer_->appendLog(oss.str()); }
     uint32_t pexp = static_cast<uint32_t>(options.exponent);
-    const bool verbose = true;//options.debug;
+    const bool verbose = true;
     const size_t baseRegs = 11;
-    const size_t RSTATE=0, RACC_L=1, RACC_R=2, /*RCHK=3,*/ RPOW=4, RTMP=5;
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RPOW=4, RTMP=5;
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
     const std::string ckpt_file_s2 = ck2.str();
     auto read_ckpt_s2 = [&](engine* e, const std::string& file, uint64_t& saved_p, uint64_t& saved_idx, double& et, uint64_t& sB1, uint64_t& sB2)->int{
@@ -858,64 +858,83 @@ int App::runPM1Stage2Marin() {
         std::cout << "\n";
         eng->set(static_cast<engine::Reg>(RACC_L), 1);
     }
+    mpz_class p0; mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
+    if (p0 > B2) {
+        delete eng;
+        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
+        return 1;
+    }
+    std::vector<uint32_t> idxGap;
+    {
+        mpz_class p = p0;
+        for (;;) {
+            mpz_class nextp = p; mpz_nextprime(nextp.get_mpz_t(), nextp.get_mpz_t());
+            if (nextp > B2) break;
+            mpz_class dgap = nextp - p;
+            uint64_t gap = mpz_get_ui(dgap.get_mpz_t());
+            uint64_t ig = (gap >> 1) - 1;
+            idxGap.push_back((uint32_t)ig);
+            p = nextp;
+        }
+    }
     auto t0 = high_resolution_clock::now();
-    auto start_clock = high_resolution_clock::now();
-    auto lastBackup = start_clock;
-    auto lastDisplay = start_clock;
-    mpz_class p_prev; mpz_nextprime(p_prev.get_mpz_t(), B1.get_mpz_t());
-    mpz_class p = p_prev;
+    //auto start_clock = t0;
+    auto lastBackup = t0;
+    auto lastDisplay = t0;
+    mpz_class p = p0;
     uint64_t idx = 0;
     if (resumed_s2) {
-        mpz_set_ui(p.get_mpz_t(), static_cast<unsigned long>(resume_p_u64));
+        mpz_class rp; mpz_set_ui(rp.get_mpz_t(), static_cast<unsigned long>(resume_p_u64));
+        size_t iStart = 0;
+        mpz_class cur = p0;
+        while (iStart < idxGap.size() && cur < rp) {
+            unsigned long add = (unsigned long)(2ull * (static_cast<uint64_t>(idxGap[iStart]) + 1ull));
+            mpz_add_ui(cur.get_mpz_t(), cur.get_mpz_t(), add);
+            ++iStart;
+        }
+        if (cur != rp) { delete eng; std::cerr << "Stage 2: resume prime not found in precomputed sequence.\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2: resume prime not found in precomputed sequence.\n"; guiServer_->appendLog(oss.str()); } return -3; }
+        p = cur;
         idx = resume_idx;
         std::cout << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")\n";
         if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")"; guiServer_->appendLog(oss.str()); }
         t0 = high_resolution_clock::now() - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
-        start_clock = high_resolution_clock::now();
-        lastBackup = start_clock;
-        lastDisplay = start_clock;
+        lastBackup = high_resolution_clock::now();
+        lastDisplay = lastBackup;
     } else {
-        mpz_class p0 = p_prev;
         eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), mpz_get_ui(p0.get_mpz_t()));
-        if (debug) {
-            mpz_t zh, zhq, zq; mpz_inits(zh, zhq, zq, nullptr);
-            eng->get_mpz(zh, static_cast<engine::Reg>(RSTATE));
-            eng->get_mpz(zhq, static_cast<engine::Reg>(RACC_R));
-            eng->get_mpz(zq, static_cast<engine::Reg>(RACC_L));
-            //std::cout << "[DEBUG S2] H=" << mpz_class(zh) << std::endl;
-            //std::cout << "[DEBUG S2] p0=" << p0.get_ui() << std::endl;
-            //std::cout << "[DEBUG S2] H^p0=" << mpz_class(zhq) << std::endl;
-            //std::cout << "[DEBUG S2] Q0=" << mpz_class(zq) << std::endl;
-            mpz_clears(zh, zhq, zq, nullptr);
-        }
     }
-    size_t totalPrimes = primeCountApprox(B1, B2);
-    auto start = high_resolution_clock::now();
+    size_t totalPrimes = idxGap.size() + 1;
+    auto start = t0;
     uint64_t primes_since_check = 0;
-    //uint64_t checkpasslevel = options.checklevel > 0 ? options.checklevel : std::max<uint64_t>(1, (uint64_t)std::sqrt((double)std::max<size_t>(1, totalPrimes)));
     eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
     eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
-    mpz_class blockStartP = p;
     auto start_sys = std::chrono::system_clock::now();
-
-    for (;; ++idx) {
-        if (p > B2) break;
-        eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
-        eng->sub(static_cast<engine::Reg>(RTMP), 1);
+    size_t iStartRun = 0;
+    if (resumed_s2) {
+        mpz_class cur = p0;
+        while (iStartRun < idxGap.size() && cur < p) {
+            unsigned long add = (unsigned long)(2ull * (static_cast<uint64_t>(idxGap[iStartRun]) + 1ull));
+            mpz_add_ui(cur.get_mpz_t(), cur.get_mpz_t(), add);
+            ++iStartRun;
+        }
+    }
+    eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
+    eng->sub(static_cast<engine::Reg>(RTMP), 1);
+    for (size_t i = iStartRun; ; ++i, ++idx) {
+        //if (p > B2) break;
+        
         eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RTMP));
         eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
-        mpz_class nextp = p; mpz_nextprime(nextp.get_mpz_t(), nextp.get_mpz_t());
-        if (nextp > B2) { ++idx; break; }
-        mpz_class dgap = nextp - p;
-        uint64_t gap = mpz_get_ui(dgap.get_mpz_t());
-        uint64_t idxGap = (gap >> 1) - 1;
-        //eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + idxGap));
-        eng->mul(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + idxGap));
-        p = nextp;
+        if (i >= idxGap.size()) { ++idx; break; }
+        uint64_t ig = idxGap[i];
+        eng->mul_copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + ig),static_cast<engine::Reg>(RTMP));
+        //unsigned long add = (unsigned long)(2ull * (ig + 1ull));
+        //mpz_add_ui(p.get_mpz_t(), p.get_mpz_t(), add);
         ++primes_since_check;
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
-            double done = static_cast<double>(idx + 1);
+            double done = static_cast<double>(i + 1);
             double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
             double elapsedSec = duration<double>(now - start).count();
             double ips = done > 0 ? done / elapsedSec : 0.0;
@@ -926,9 +945,7 @@ int App::runPM1Stage2Marin() {
             int minutes = (static_cast<int>(etaSec) % 3600) / 60;
             int seconds = static_cast<int>(etaSec) % 60;
             std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"; guiServer_->appendLog(oss.str()); 
-                              guiServer_->setProgress(done, totalPrimes, "");
-            }
+            if (guiServer_) { std::ostringstream oss; oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"; guiServer_->appendLog(oss.str()); guiServer_->setProgress(done, totalPrimes, ""); }
             lastDisplay = now;
         }
         auto now0 = high_resolution_clock::now();
@@ -968,7 +985,6 @@ int App::runPM1Stage2Marin() {
         s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
         return s.str();
     };
-    
     std::string ds = fmt(start_sys);
     std::string de = fmt(end_sys);
     auto t1 = high_resolution_clock::now();
@@ -993,35 +1009,19 @@ int App::runPM1Stage2Marin() {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
         if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
     }
-    
     std::remove(ckpt_file_s2.c_str());
     std::remove((ckpt_file_s2 + ".old").c_str());
     std::remove((ckpt_file_s2 + ".new").c_str());
-    
-    
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-   // wm.saveIndividualJson(options.exponent, options.mode, json);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
     wm.appendToResultsTxt(json);
-   /* if (hasWorktodoEntry_) {
-        if (worktodoParser_->removeFirstProcessed()) {
-            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
-            std::ifstream f(options.worktodo_path);
-            std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
-            f.close();
-            if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
-            else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
-        } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
-        }
-    }*/
-    
     delete eng;
     return found ? 0 : 1;
 }
+
+
 
 
 
