@@ -920,10 +920,10 @@ int App::runPM1Stage2Marin() {
         }
     }
     eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
-    eng->sub(static_cast<engine::Reg>(RTMP), 1);
+    
     for (size_t i = iStartRun; ; ++i, ++idx) {
         //if (p > B2) break;
-        
+        eng->sub(static_cast<engine::Reg>(RTMP), 1);
         eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RTMP));
         eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
         if (i >= idxGap.size()) { ++idx; break; }
