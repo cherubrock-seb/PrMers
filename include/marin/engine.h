@@ -36,6 +36,7 @@ public:
 	virtual void square_mul(const Reg src, const uint32 a = 1) const = 0;
 	// dst = multiplicand(src). A multiplicand is the src of the mul operation.
 	virtual void set_multiplicand(const Reg dst, const Reg src) const = 0;
+	virtual void set_multiplicand2(const Reg dst, const Reg src) const = 0;
 	// dst = dst * src * a. src must be a multiplicand, created with set_multiplicand.
 	virtual void mul(const Reg dst, const Reg src, const uint32 a = 1) const = 0;
 	// src = src - a
@@ -47,6 +48,7 @@ public:
 	virtual void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const = 0;
 
 	virtual void square_mul_copy(const Reg src, const Reg dst_copy, const uint32 a = 1) const = 0;
+	virtual void mul_new(const Reg dst, const Reg src, const uint32 a = 1) const = 0;
 
 	virtual void mul_copy(const Reg dst, const Reg src, const Reg dst_copy, const uint32 a = 1) const = 0;
 	virtual void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,

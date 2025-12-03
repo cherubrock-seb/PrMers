@@ -341,6 +341,117 @@ static inline unsigned long evenGapBound(const mpz_class& B2) {
     return bound < 2 ? 1 : static_cast<unsigned long>(bound);
 }
 
+#ifdef __APPLE__
+#  include <OpenCL/opencl.h>
+#else
+#  include <CL/cl.h>
+#endif
+#include <iomanip>
+#include <sstream>
+#include <vector>
+#include <cmath>
+
+static inline std::string fmt_bytes_u64(unsigned long long x){
+    static const char* u[] = {"B","KB","MB","GB","TB"};
+    int i=0; double d = (double)x;
+    while(d>=1024.0 && i<4){ d/=1024.0; ++i; }
+    std::ostringstream s; s<<std::fixed<<std::setprecision(d<10?2:(d<100?1:0))<<d<<' '<<u[i];
+    return s.str();
+}
+
+struct GpuMemProbe {
+    cl_ulong total_bytes = 0;
+    std::string name;
+    std::string vendor;
+    int picked_index = -1;
+};
+
+static inline GpuMemProbe gpu_probe_mem_by_index_verbose(int device_index){
+    GpuMemProbe out;
+    cl_uint np = 0;
+    cl_int st = clGetPlatformIDs(0,nullptr,&np);
+    if (st!=CL_SUCCESS || np==0){
+        std::cout << "[evenGapBound2] OpenCL: no platform found (code " << st << ")\n";
+        return out;
+    }
+    std::vector<cl_platform_id> plats(np);
+    clGetPlatformIDs(np, plats.data(), nullptr);
+
+    int seen = 0;
+    std::cout << "[evenGapBound2] OpenCL GPU inventory:\n";
+    for (cl_uint i=0;i<np;i++){
+        cl_uint nd=0;
+        if (clGetDeviceIDs(plats[i], CL_DEVICE_TYPE_GPU, 0, nullptr, &nd)!=CL_SUCCESS || nd==0) continue;
+        std::vector<cl_device_id> devs(nd);
+        if (clGetDeviceIDs(plats[i], CL_DEVICE_TYPE_GPU, nd, devs.data(), nullptr)!=CL_SUCCESS) continue;
+        for (cl_uint j=0;j<nd;j++,seen++){
+            char name[256]={0}, vendor[256]={0};
+            cl_ulong mem=0;
+            clGetDeviceInfo(devs[j], CL_DEVICE_NAME, sizeof(name), name, nullptr);
+            clGetDeviceInfo(devs[j], CL_DEVICE_VENDOR, sizeof(vendor), vendor, nullptr);
+            clGetDeviceInfo(devs[j], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(mem), &mem, nullptr);
+            std::cout << "  ["<<seen<<"] " << vendor << " | " << name
+                      << " | " << fmt_bytes_u64((unsigned long long)mem) << "\n";
+            if (seen==device_index){
+                out.total_bytes = mem;
+                out.name   = name;
+                out.vendor = vendor;
+                out.picked_index = seen;
+            }
+        }
+    }
+    if (out.picked_index<0){
+        std::cout << "[evenGapBound2] GPU index " << device_index << " not found, falling back.\n";
+    } else {
+        std::cout << "[evenGapBound2] Selected: ["<<out.picked_index<<"] " << out.vendor << " | " << out.name
+                  << " | " << fmt_bytes_u64((unsigned long long)out.total_bytes) << "\n";
+    }
+    return out;
+}
+
+
+static inline unsigned long evenGapBound2(const mpz_class& B2,
+                                          int device_index,
+                                          size_t transformSize,
+                                          size_t baseRegsTotal,
+                                          double fraction_use = 0.55)
+{
+    auto probe = gpu_probe_mem_by_index_verbose(device_index);
+    if (!probe.total_bytes){
+        std::cout << "[evenGapBound2] Could not query GPU memory. Falling back to evenGapBound(B2).\n";
+        return evenGapBound(B2);
+    }
+
+    if (fraction_use < 0.10) fraction_use = 0.10;
+    if (fraction_use > 0.80) fraction_use = 0.80;
+
+    const size_t bytes_per_coeff = 16;   // per-register footprint per transform slot
+    const size_t reg_bytes       = transformSize * bytes_per_coeff;
+
+    size_t budget = (size_t)((double)probe.total_bytes * fraction_use);
+    const size_t fixed_overhead = 256ull<<20; // 256 MB headroom
+    if (budget > fixed_overhead) budget -= fixed_overhead; else budget = 0;
+
+    std::cout << "[evenGapBound2] Memory budget: "
+              << fmt_bytes_u64((unsigned long long)budget)
+              << " | reg_bytes=" << fmt_bytes_u64((unsigned long long)reg_bytes)
+              << " | baseRegs=" << baseRegsTotal << "\n";
+
+    if (budget <= baseRegsTotal * reg_bytes){
+        std::cout << "[evenGapBound2] Not enough budget for extra REVEN registers. nbEven=1\n";
+        return 1ul;
+    }
+
+    const size_t avail = budget - baseRegsTotal * reg_bytes;
+    unsigned long nbEven_by_mem = (unsigned long)(avail / reg_bytes);
+
+    if (nbEven_by_mem < 1ul) nbEven_by_mem = 1ul;
+
+    std::cout << "[evenGapBound2] Using maximum memory-based nbEven=" << nbEven_by_mem << "\n";
+    return nbEven_by_mem;
+}
+
+
 static inline size_t primeCountApprox(const mpz_class& low, const mpz_class& high) {
     auto li = [](double x) {
         double l = std::log(x);

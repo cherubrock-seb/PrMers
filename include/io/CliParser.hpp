@@ -29,6 +29,7 @@ struct CliOptions {
     bool verify = true;
     bool gerbiczli = true;
     uint64_t B1 = 10000;
+    uint64_t memlim = 70;
     uint64_t B1old = 0;
     uint64_t B1_new = 0;
     uint64_t B2 = 0;
