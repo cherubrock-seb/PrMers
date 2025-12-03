@@ -228,11 +228,6 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.mode = "memtest";
             opts.exponent = 127;
         }
-        else if (std::strcmp(argv[i], "-checksum") == 0) {
-            opts.mode = "checksum";
-            opts.exponent = 127;
-        }
-        
         else if (std::strcmp(argv[i], "-bench") == 0) {
             opts.bench = true;
             opts.exponent = 127;
