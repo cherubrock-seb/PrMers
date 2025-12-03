@@ -58,6 +58,7 @@ struct CliOptions {
     std::string user;
     std::string password;
     std::string computer_name;
+    uint64_t sigma192 = 0ULL;
     std::string config_path;
     std::string worktodo_path = "worktodo.txt";
     std::string pm1_extend_save_path = "";
