@@ -748,11 +748,19 @@ std::string recomputeChecksumFromSubmittedJson(const std::string& json)
 std::string rewriteChecksumInSubmittedJson(const std::string& json)
 {
     const std::string newSum = recomputeChecksumFromSubmittedJson(json);
-    std::regex chk(R"("checksum"\s*:\s*\{\s*"version"\s*:\s*1\s*,\s*"checksum"\s*:\s*"[0-9A-Fa-f]{8}"\s*\})");
-    if (std::regex_search(json, chk)) {
-        return std::regex_replace(json, chk,
+
+    std::regex chkStrict(R"("checksum"\s*:\s*\{\s*"version"\s*:\s*\d+\s*,\s*"checksum"\s*:\s*"[^"]*"\s*\})");
+    if (std::regex_search(json, chkStrict)) {
+        return std::regex_replace(json, chkStrict,
                std::string("\"checksum\":{\"version\":1,\"checksum\":\"") + newSum + "\"}");
     }
+
+    std::regex chkAny(R"("checksum"\s*:\s*\{[^}]*\})");
+    if (std::regex_search(json, chkAny)) {
+        return std::regex_replace(json, chkAny,
+               std::string("\"checksum\":{\"version\":1,\"checksum\":\"") + newSum + "\"}");
+    }
+
     std::string out = json;
     auto pos = out.find_last_of('}');
     if (pos != std::string::npos) {
@@ -761,7 +769,6 @@ std::string rewriteChecksumInSubmittedJson(const std::string& json)
     }
     return out;
 }
-
 
 
 
