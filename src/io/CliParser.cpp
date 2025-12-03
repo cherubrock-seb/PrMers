@@ -112,8 +112,7 @@ void printUsage(const char* progName) {
     std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 → 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
     std::cout << "  -memtest              : GPU Memory & Stability test (OpenCL)" << std::endl;
     std::cout << "  -memlim <percent>     : (Optional) Fraction percentage of memory used (used precompute stage 2 p-1)" << std::endl;
-    std::cout << "  -checksum             : (Optional) Replace (or insert) the checksum field with the recomputed one." << std::endl;
-        
+
     //std::cout << "  -throttle_low        : (Optional) Enable CL_QUEUE_THROTTLE_LOW_KHR if OpenCL >= 2.2 (default: disabled)" << std::endl;
     //std::cout << "  -tune               : (Optional) Automatically determine the best pacing (iterForce) and how often to call clFinish() to synchronize kernels (default: disabled)" << std::endl;
     std::cout << std::endl;
