@@ -286,16 +286,16 @@ static std::string generatePrimeNetJson(
             << "}";
     }
     oss << ",\"program\":{"
-        <<    "\"name\":"                          << jsonEscape(programName)
-        <<   ",\"version\":"                       << jsonEscape(programVersion)
-        <<   ",\"port\":"                          <<            programPort
-        <<   ",\"os\":{"
-        <<      "\"os\":"                          << jsonEscape(osName);
-    if (!osArchitecture.empty()) {
-        oss << ",\"architecture\":"                << jsonEscape(osArchitecture);
+        <<    "\"name\":\"prmers\""
+        <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
+        <<   ",\"port\":"    <<            opts.portCode
+        << "}"; // close "program"
+    oss << ",\"os\":{"
+        <<   "\"os\":"            << jsonEscape(opts.osName);
+    if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
+        oss << ",\"architecture\":" << jsonEscape(opts.osArch);
     }
-    oss <<   "}"                                   // close "program.os"
-        << "}";                                    // close "program"
+    oss << "}"; // close "os"
     if (!user.empty())     oss << ",\"user\":"     << jsonEscape(user);
     if (!computer.empty()) oss << ",\"computer\":" << jsonEscape(computer);
     if (!aid.empty())      oss << ",\"aid\":"      << jsonEscape(aid);
@@ -385,15 +385,16 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         if (opts.B2 > 0) oss << ",\"b2\":" << opts.B2;
         oss << ",\"fft-length\":" << transform_size;
         oss << ",\"program\":{"
-            <<  "\"name\":\"prmers\""
-            <<  ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
-            <<  ",\"port\":"    <<            opts.portCode
-            <<  ",\"os\":{"
-            <<     "\"os\":"            << jsonEscape(opts.osName);
-        if (!opts.osArch.empty()){
+            <<    "\"name\":\"prmers\""
+            <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
+            <<   ",\"port\":"    <<            opts.portCode
+            << "}"; // close "program"
+        oss << ",\"os\":{"
+            <<   "\"os\":"            << jsonEscape(opts.osName);
+        if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
             oss << ",\"architecture\":" << jsonEscape(opts.osArch);
         }
-        oss << "}}"; // close program.os and program
+        oss << "}"; // close "os"
         if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
         if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
         if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
@@ -463,16 +464,18 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         oss << ",\"sigma_hex\":"        << jsonEscape(opts.sigma_hex);
         oss << ",\"curve_seed\":"       <<            opts.curve_seed;
         oss << ",\"base_seed\":"        <<            opts.curve_seed;
+
         oss << ",\"program\":{"
-            <<  "\"name\":\"prmers\""
-            <<  ",\"version\":"         << jsonEscape(core::PRMERS_VERSION)
-            <<  ",\"port\":"            <<            opts.portCode
-            <<  ",\"os\":{"
-            <<     "\"os\":"            << jsonEscape(opts.osName);
-        if (!opts.osArch.empty()){
+            <<    "\"name\":\"prmers\""
+            <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
+            <<   ",\"port\":"    <<            opts.portCode
+            << "}"; // close "program"
+        oss << ",\"os\":{"
+            <<   "\"os\":"            << jsonEscape(opts.osName);
+        if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
             oss << ",\"architecture\":" << jsonEscape(opts.osArch);
         }
-        oss << "}}"; // close program.os and program
+        oss << "}"; // close "os"
         if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
         if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
         if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
