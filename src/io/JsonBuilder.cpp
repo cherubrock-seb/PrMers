@@ -288,12 +288,12 @@ static std::string generatePrimeNetJson(
     oss << ",\"program\":{"
         <<    "\"name\":\"prmers\""
         <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
-        <<   ",\"port\":"    <<            opts.portCode
+        <<   ",\"port\":"    <<            programPort
         << "}"; // close "program"
     oss << ",\"os\":{"
-        <<   "\"os\":"            << jsonEscape(opts.osName);
-    if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
-        oss << ",\"architecture\":" << jsonEscape(opts.osArch);
+        <<   "\"os\":"            << jsonEscape(osName);
+    if (!osArchitecture.empty() && (osArchitecture != "unknown")) {
+        oss << ",\"architecture\":" << jsonEscape(osArchitecture);
     }
     oss << "}"; // close "os"
     if (!user.empty())     oss << ",\"user\":"     << jsonEscape(user);
