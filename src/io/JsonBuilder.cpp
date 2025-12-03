@@ -246,79 +246,118 @@ static std::string generatePrimeNetJson(
 {
     std::ostringstream oss;
     bool isPRP = (worktype.rfind("PRP", 0) == 0);
-    oss << "{"
-        << "\"status\":"       << jsonEscape(status)    << ","
-        << "\"exponent\":"     << exponent              << ","
-        << "\"worktype\":"     << jsonEscape(worktype)  << ","
-        << "\"res64\":"        << jsonEscape(res64)     << ",";
-    if (isPRP)
-        oss << "\"res2048\":" << jsonEscape(res2048) << ",";
-    oss << "\"residue-type\":" << residueType        << ","
-        << "\"errors\":{\"gerbicz\":" << gerbiczError << "},"
-        << "\"fft-length\":"  << fftLength            << ","
-        << "\"shift-count\":0,";
-    if (isPRP && !proofMd5.empty()) {
-        oss << "\"proof\":{"
-            << "\"version\":"   << proofVersion         << ","
-            << "\"power\":"     << proofPower           << ","
-            << "\"hashsize\":"  << proofHashSize        << ","
-            << "\"md5\":"       << jsonEscape(proofMd5)
-            << "},";
-    }
-    oss << "\"program\":{"
-        << "\"name\":"      << jsonEscape(programName)
-        << ",\"version\":"  << jsonEscape(programVersion)
-        << ",\"port\":"     << programPort << "},"
-        << "\"os\":{"
-        << "\"os\":"        << jsonEscape(osName);
-        if(!osArchitecture.empty()){
-          oss  << ",\"architecture\":" << jsonEscape(osArchitecture);
-        }
-        oss
-        << "},"
-        << "\"user\":"      << jsonEscape(user);
-    if (!computer.empty()) oss << ",\"computer\":" << jsonEscape(computer);
-    if (!aid.empty())      oss << ",\"aid\":"      << jsonEscape(aid);
-    if (!uid.empty())      oss << ",\"uid\":"      << jsonEscape(uid);
-    oss << ",\"timestamp\":" << jsonEscape(timestamp);
+    oss << "{";
+    oss <<  "\"status\":"                          << jsonEscape(status);
+    oss << ",\"exponent\":"                        <<            exponent;
+    oss << ",\"worktype\":"                        << jsonEscape(worktype);
     if (!knownFactors.empty()) {
         oss << ",\"known-factors\":[";
         for (size_t i = 0; i < knownFactors.size(); ++i) {
+            if (i) oss << ",";
             oss << jsonEscape(knownFactors[i]);
-            if (i + 1 < knownFactors.size()) oss << ",";
         }
         oss << "]";
     }
+    oss << ",\"res64\":"                           << jsonEscape(res64);
+    if (isPRP) {
+        oss << "\"res2048\":"                      << jsonEscape(res2048);
+    }
+    oss << ",\"residue-type\":"                    <<            residueType;
+    oss << ",\"errors\":{\"gerbicz\":"             <<            gerbiczError;
+    oss << ",\"fft-length\":"                      <<            fftLength;
+    oss << ",\"shift-count\":0";
+    if (isPRP && !proofMd5.empty()) {
+        oss << ",\"proof\":{"
+            <<    "\"version\":"                   <<            proofVersion
+            <<   ",\"power\":"                     <<            proofPower
+            <<   ",\"hashsize\":"                  <<            proofHashSize
+            <<   ",\"md5\":"                       << jsonEscape(proofMd5)
+            << "}";  // close "proof"
+    }
+    oss << ",\"program\":{"
+        <<    "\"name\":"                          << jsonEscape(programName)
+        <<   ",\"version\":"                       << jsonEscape(programVersion)
+        <<   ",\"port\":"                          <<            programPort
+        <<   ",\"os\":{"
+        <<     ",\"os\":"                          << jsonEscape(osName);
+    if (!osArchitecture.empty()) {
+        oss << ",\"architecture\":"                << jsonEscape(osArchitecture);
+    }
+    oss <<   "}"; // close "program.os"
+    oss << "}";   // close "program"
+    if (!user.empty())     oss << ",\"user\":"     << jsonEscape(user);
+    if (!computer.empty()) oss << ",\"computer\":" << jsonEscape(computer);
+    if (!aid.empty())      oss << ",\"aid\":"      << jsonEscape(aid);
+    oss << ",\"timestamp\":"                       << jsonEscape(timestamp);
     std::string prefix = oss.str();
     std::ostringstream canon;
     std::string canonWT = worktype;
     if      (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
     else if (canonWT.rfind("LL",  0) == 0) canonWT = "LL";
-    
-    canon << exponent << ";" << canonWT << ";";
-    canon << "" << ";";
+
+    canon << exponent << ";";                                    // exponent
+    canon << canonWT  << ";";                                    // worktype
+    canon << ""       << ";";                                    // factors
     std::string knownFactorStr;
     if (!knownFactors.empty()) {
         knownFactorStr = knownFactors[0];
         for (size_t i = 1; i < knownFactors.size(); ++i)
             knownFactorStr += "," + knownFactors[i];
-        canon << knownFactorStr;
+        canon << knownFactorStr;                                 // known-factors
     }
-    canon << "" << ";";
-    if (canonWT == "LL" || canonWT == "PRP") canon << toLower(res64);
-    canon << ";";
-    if (canonWT == "PRP") canon << toLower(res2048);
-    canon << ";";
-    canon << "0_3_" << residueType << ";";
-    canon << fftLength << ";";
-    canon << "gerbicz:" << gerbiczError << ";";
-    canon << programName << ";";
-    canon << programVersion << ";";
-    canon << "" << ";";
-    canon << "" << ";";
-    canon << osName << ";";
-    canon << osArchitecture << ";";
-    canon << timestamp;
+
+    if (canonWT == "TF") {
+        // not yet implemented
+        canon << "<BITLO>"         << ";";                       // bitlo (e.g. 68)
+        canon << "<BITHI>"         << ";";                       // bithi (e.g. 75)
+        canon << "<RANGECOMPLETE>" << ";";                       // rangecomplete (0 or 1)
+	} else if (canonWT == "PRP") {
+		canon << toLower(res64)    << ";";                       // res64
+		canon << toLower(res2048)  << ";";                       // res2048
+		canon << "0" << "_"                                      // shift-count
+              << "3" << "_"                                      // prp-base
+              << residueType       << ";";                       // residue-type
+    } else if (canonWT == "LL") {
+		canon << toLower(res64)    << ";";                       // res64
+		canon << ""                << ";";                       // unused
+		canon << "0"               << ";";                       // shift-count
+    } else if (canonWT == "ECM") {
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > 0) canon << opts.B2;                       // b2
+        canon << ";";
+
+        if (isEdw) canon << "E";                                 // sigma
+        if (opts.sigma192) {
+            canon << opts.sigma192;                             // *** TODO: not sure where this value comes from ***
+        } else if (opts.sigma)
+            canon << opts.sigma;
+        }
+        if (torsion > 0) {
+            canon << "_TSG" << torsion;                          // torsion-subgroup
+        }
+        canon << ";";
+    } else if (canonWT == "PM1") {
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > 0) canon << opts.B2;                       // b2
+        canon << ";";
+        canon << "" << ";";                                      // brent-suyama
+    } else if (canonWT == "PP1") {
+        // not yet implemented
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > 0) canon << opts.B2;                       // b2
+        canon << ";";
+        canon << "<START>" << ";";                               // start
+    }
+
+    canon << fftLength << ";";                                   // fft-length
+    canon << "gerbicz:" << gerbiczError << ";";                  // errorsObjectStringified
+    canon << programName << ";";                                 // program.name
+    canon << programVersion << ";";                              // program.version
+    canon << "" << ";";                                          // program.kernel|program.subversion
+    canon << "" << ";";                                          // program.details
+    canon << osName << ";";                                      // os.os
+    canon << osArchitecture << ";";                              // os.architecture
+    canon << timestamp;                                          // timestamp
     unsigned int crc = computeCRC32(canon.str());
     std::ostringstream hex;
     hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
@@ -350,50 +389,55 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         std::ostringstream oss;
         bool hasFactor = !opts.knownFactors.empty();
         oss << "{"
-            << "\"status\":\"" << (hasFactor ? "F" : "NF") << "\","
-            << "\"exponent\":" << opts.exponent << ","
-            << "\"worktype\":\"PM1\",";
+            <<  "\"status\":\"" << (hasFactor ? "F" : "NF")
+            << ",\"exponent\":" << opts.exponent
+            << ",\"worktype\":\"PM1\"";
         if (hasFactor) {
-            oss << "\"factors\":[";
+            oss << ",\"factors\":[";
             for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
                 if (i) oss << ",";
                 oss << jsonEscape(opts.knownFactors[i]);
             }
-            oss << "],";
+            oss << "]";
         }
-        oss << "\"b1\":" << opts.B1 << ",";
-        if (opts.B2 > 0) oss << "\"b2\":" << opts.B2 << ",";
-        oss << "\"fft-length\":" << transform_size << ","
-            << "\"program\":{"
-                << "\"name\":\"prmers\","
-                << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
-                << "\"port\":" << opts.portCode
-            << "},"
-            << "\"timestamp\":" << jsonEscape(timestampBuf) << ",";
-        if (!opts.user.empty())
-            oss << "\"user\":" << jsonEscape(opts.user.empty() ? "" : opts.user);
-        if (!opts.computer_name.empty())
-            oss << ",\"computer\":" << jsonEscape(opts.computer_name);
-        if (!opts.aid.empty())
-            oss << ",\"aid\":" << jsonEscape(opts.aid);
+        oss << ",\"b1\":" << opts.B1;
+        if (opts.B2 > 0) oss << ",\"b2\":" << opts.B2;
+        oss << ",\"fft-length\":" << transform_size;
+        oss << ",\"program\":{"
+            <<  "\"name\":\"prmers\""
+            <<  ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
+            <<  ",\"port\":"    <<            opts.portCode
+            <<  ",\"os\":{"
+            <<     "\"os\":"            << jsonEscape(opts.osName);
+        if (!osArchitecture.empty()){
+            oss << ",\"architecture\":" << jsonEscape(opts.osArch);
+        }
+        oss << "}";
+        if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
+        if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
+        if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
+        oss << ",\"timestamp\":" << jsonEscape(timestampBuf);
+
         std::string prefix = oss.str();
         std::ostringstream canon;
-        canon << opts.exponent << ";PM1;";
-        canon << "" << ";";
-        canon << "" << ";";
-        canon << opts.B1 << ";";
-        if (opts.B2 > 0) canon << opts.B2;
+        canon << opts.exponent << ";";         // exponent
+        canon << "PM1"         << ";";         // worktype
+        canon << ""            << ";";         // factors (new) *** TODO: this is broken ***
+        canon << ""            << ";";         // known-factors *** TODO: this is broken ***
+        canon << opts.B1 << ";";               // b1
+        if (opts.B2 > 0) canon << opts.B2;     // b2
         canon << ";";
-        canon << "" << ";";
-        canon << transform_size << ";";
-        canon << "" << ";";
-        canon << "prmers" << ";";
-        canon << core::PRMERS_VERSION << ";";
-        canon << "" << ";";
-        canon << "" << ";";
-        canon << "" << ";";
-        canon << "" << ";";
-        canon << timestampBuf;
+        canon << "" << ";";                    // brent-suyama
+
+        canon << transform_size << ";";        // fft-length
+        canon << "" << ";";                    // errorsObjectStringified *** TODO: this is broken ***
+        canon << "prmers" << ";";              // program.name
+        canon << core::PRMERS_VERSION << ";";  // program.version
+        canon << "" << ";";                    // program.kernel|program.subversion
+        canon << "" << ";";                    // program.details
+        canon << opts.osName << ";";           // os.os
+        canon << opts.osArch << ";";           // os.architecture
+        canon << timestampBuf;                 // timestamp
         unsigned int crc = computeCRC32(canon.str());
         std::ostringstream hex;
         hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
@@ -408,31 +452,23 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         std::ostringstream oss;
         bool hasFactor = !opts.knownFactors.empty();
         oss << "{"
-            << "\"status\":\"" << (hasFactor ? "F" : "NF") << "\","
-            << "\"exponent\":" << opts.exponent << ","
-            << "\"worktype\":\"ECM\",";
+            <<  "\"status\":\"" << (hasFactor ? "F" : "NF") << "\""
+            << ",\"exponent\":" << opts.exponent
+            << ",\"worktype\":\"ECM\"";
         if (hasFactor) {
-            oss << "\"factors\":[";
+            oss << ",\"factors\":[";
             for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
                 if (i) oss << ",";
                 oss << jsonEscape(opts.knownFactors[i]);
             }
-            oss << "],";
+            oss << "]";
         }
-        oss << "\"b1\":" << opts.B1 << ",";
-        if (opts.B2 > 0) oss << "\"b2\":" << opts.B2 << ",";
+        oss << ",\"b1\":" << opts.B1;
+        if (opts.B2 > 0) oss << ",\"b2\":" << opts.B2;
         //uint64_t curves = opts.nmax ? opts.nmax : (opts.K ? opts.K : 0ULL);
-        oss << "\"curves\":" << opts.curves_tested_for_found << ",";
-        oss << "\"fft-length\":" << transform_size << ",";
-        oss << "\"program\":{"
-            << "\"name\":\"prmers\","
-            << "\"version\":" << jsonEscape(core::PRMERS_VERSION) << ","
-            << "\"port\":" << opts.portCode
-            << "},"
-            << "\"timestamp\":" << jsonEscape(timestampBuf) << ","
-            << "\"user\":" << jsonEscape(opts.user.empty() ? "prmers" : opts.user);
-        if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
-        if (!opts.aid.empty()) oss << ",\"aid\":" << jsonEscape(opts.aid);
+        oss << ",\"curves\":" << opts.curves_tested_for_found;
+        oss << ",\"fft-length\":" << transform_size;
+
         bool isEdw = opts.edwards;
         int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery")
@@ -443,21 +479,57 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         } else {
             if (opts.sigma) oss << ",\"sigma\":" << opts.sigma;
         }*/
-        oss << ",\"sigma_hex\":" << opts.sigma_hex;
+        oss << ",\"sigma_hex\":"  << opts.sigma_hex;
         oss << ",\"curve_seed\":" << opts.curve_seed;
-        oss << ",\"base_seed\":" << opts.curve_seed;
+        oss << ",\"base_seed\":"  << opts.curve_seed;
+        oss << ",\"program\":{"
+            <<  "\"name\":\"prmers\""
+            <<  ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
+            <<  ",\"port\":"    <<            opts.portCode
+            <<  ",\"os\":{"
+            <<     "\"os\":"            << jsonEscape(opts.osName);
+        if (!osArchitecture.empty()){
+            oss << ",\"architecture\":" << jsonEscape(opts.osArch);
+        }
+        oss << "}";
+        if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
+        if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
+        if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
+        oss << ",\"timestamp\":" << jsonEscape(timestampBuf);
+
         std::string prefix = oss.str();
         std::ostringstream canon;
-        canon << opts.exponent << ";ECM;";
-        canon << "" << ";";
-        canon << "" << ";";
-        canon << opts.B1 << ";";
-        if (opts.B2 > 0) canon << opts.B2;
+
+        canon << opts.exponent << ";";         // exponent
+        canon << "ECM"         << ";";         // worktype
+        canon << ""            << ";";         // factors (new) *** TODO: this is broken ***
+        canon << ""            << ";";         // known-factors *** TODO: this is broken ***
+        canon << opts.B1 << ";";               // b1
+        if (opts.B2 > 0) canon << opts.B2;     // b2
         canon << ";";
-        if (isEdw) canon << "E";
-        if (opts.sigma) canon << opts.sigma;
+
+        if (isEdw) canon << "E";               // sigma
+        if (opts.sigma192) {
+             canon << opts.sigma192;           // *** TODO: not sure where this value comes from ***
+        } else if (opts.sigma)
+             canon << opts.sigma;
+        }
+        if (torsion > 0) {
+            canon << "_TSG" << torsion;        // torsion-subgroup
+        }
         canon << ";";
-        canon << transform_size << ";";
+
+        canon << transform_size << ";";        // fft-length
+        canon << "" << ";";                    // errorsObjectStringified *** TODO: this is broken ***
+        canon << "prmers" << ";";              // program.name
+        canon << core::PRMERS_VERSION << ";";  // program.version
+        canon << "" << ";";                    // program.kernel|program.subversion
+        canon << "" << ";";                    // program.details
+        canon << opts.osName << ";";           // os.os
+        canon << opts.osArch << ";";           // os.architecture
+        canon << timestampBuf;                 // timestamp
+
+        canon << transform_size << ";";        // fft-length
         canon << "" << ";";
         canon << "prmers" << ";";
         canon << core::PRMERS_VERSION << ";";
