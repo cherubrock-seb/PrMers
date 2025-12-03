@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <tuple>
 #include <cctype>
+#include <regex>
+#include <string>
 
 namespace io{
 
@@ -597,5 +599,170 @@ void JsonBuilder::write(const std::string& json,
     std::ofstream out(path);
     out << json;
 }
+
+
+
+static bool j_get_str(const std::string& s, const char* key, std::string& out){
+    std::string pat = "\\\"" + std::string(key) + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"";
+    std::regex re(pat);
+    std::smatch m;
+    if (std::regex_search(s, m, re)) { out = m[1].str(); return true; }
+    return false;
+}
+
+static bool j_get_uint(const std::string& s, const char* key, unsigned& out){
+    std::string pat = "\\\"" + std::string(key) + "\\\"\\s*:\\s*(\\d+)";
+    std::regex re(pat);
+    std::smatch m;
+    if (std::regex_search(s, m, re)) { out = (unsigned)std::stoul(m[1].str()); return true; }
+    return false;
+}
+
+static bool j_get_int(const std::string& s, const char* key, int& out){
+    std::string pat = "\\\"" + std::string(key) + "\\\"\\s*:\\s*(-?\\d+)";
+    std::regex re(pat);
+    std::smatch m;
+    if (std::regex_search(s, m, re)) { out = std::stoi(m[1].str()); return true; }
+    return false;
+}
+
+static void j_get_program(const std::string& s, std::string& name, std::string& version){
+    std::regex block(R"("program"\s*:\s*\{([^}]*)\})");
+    std::smatch m;
+    if (std::regex_search(s, m, block)) {
+        const std::string body = m[1].str();
+        j_get_str(body, "name", name);
+        j_get_str(body, "version", version);
+    }
+}
+
+static void j_get_os(const std::string& s, std::string& osName, std::string& osArch){
+    std::regex block(R"("os"\s*:\s*\{([^}]*)\})");
+    std::smatch m;
+    if (std::regex_search(s, m, block)) {
+        const std::string body = m[1].str();
+        j_get_str(body, "os", osName);
+        j_get_str(body, "architecture", osArch);
+    }
+}
+
+static void j_get_errors(const std::string& s, int& gerbicz){
+    std::regex block(R"("errors"\s*:\s*\{([^}]*)\})");
+    std::smatch m;
+    if (std::regex_search(s, m, block)) {
+        const std::string body = m[1].str();
+        j_get_int(body, "gerbicz", gerbicz);
+    }
+}
+
+static std::vector<std::string> j_get_known_factors(const std::string& s){
+    std::vector<std::string> out;
+    std::smatch m;
+    if (std::regex_search(s, m, std::regex(R"REGEX("known-factors"\s*:\s*\[([^]]*)\])REGEX"))) {
+        std::string arr = m[1].str();
+        std::regex item(R"ITEM("([^"]*)")ITEM");
+        for (auto it = std::sregex_iterator(arr.begin(), arr.end(), item);
+             it != std::sregex_iterator(); ++it) out.emplace_back((*it)[1].str());
+    }
+    return out;
+}
+
+
+static std::string buildCanonicalStringFromSubmitted(
+    unsigned exponent,
+    const std::string& worktype,
+    const std::string& res64,
+    const std::string& res2048,
+    int residueType,
+    int gerbiczError,
+    unsigned fftLength,
+    const std::string& programName,
+    const std::string& programVersion,
+    const std::string& osName,
+    const std::string& osArch,
+    const std::string& timestamp,
+    const std::vector<std::string>& knownFactors
+){
+    std::string canonWT = worktype;
+    if (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
+    else if (canonWT.rfind("LL", 0) == 0) canonWT = "LL";
+    std::ostringstream canon;
+    canon << exponent << ";";
+    canon << canonWT  << ";";
+    canon << ""       << ";";
+    if (!knownFactors.empty()){
+        std::string k = knownFactors[0];
+        for (size_t i = 1; i < knownFactors.size(); ++i) k += "," + knownFactors[i];
+        canon << k;
+    }
+    canon << ";";
+    if (canonWT == "PRP") {
+        canon << toLower(res64)   << ";";
+        canon << toLower(res2048) << ";";
+        canon << "0" << "_" << "3" << "_" << residueType << ";";
+    } else if (canonWT == "LL") {
+        canon << toLower(res64)   << ";";
+        canon << ""               << ";";
+        canon << "0"              << ";";
+    }
+    canon << fftLength << ";";
+    canon << "gerbicz:" << gerbiczError << ";";
+    canon << programName    << ";";
+    canon << programVersion << ";";
+    canon << "" << ";";
+    canon << "" << ";";
+    canon << osName << ";";
+    canon << osArch << ";";
+    canon << timestamp;
+    return canon.str();
+}
+
+std::string recomputeChecksumFromSubmittedJson(const std::string& json)
+{
+    unsigned exponent = 0, fftLen = 0;
+    int residueType = 0, gerbicz = 0;
+    std::string worktype, res64, res2048, programName, programVersion, osName, osArch, timestamp;
+    j_get_uint(json, "exponent", exponent);
+    j_get_str (json, "worktype", worktype);
+    j_get_str (json, "res64",    res64);
+    j_get_str (json, "res2048",  res2048);
+    j_get_int (json, "residue-type", residueType);
+    j_get_uint(json, "fft-length", fftLen);
+    j_get_str (json, "timestamp", timestamp);
+    j_get_program(json, programName, programVersion);
+    j_get_os(json, osName, osArch);
+    j_get_errors(json, gerbicz);
+    auto knownFactors = j_get_known_factors(json);
+    const std::string canon =
+        buildCanonicalStringFromSubmitted(exponent, worktype, res64, res2048,
+                                          residueType, gerbicz, fftLen,
+                                          programName, programVersion,
+                                          osName, osArch, timestamp,
+                                          knownFactors);
+    unsigned crc = computeCRC32(canon);
+    std::ostringstream hexss;
+    hexss << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
+    return hexss.str();
+}
+
+std::string rewriteChecksumInSubmittedJson(const std::string& json)
+{
+    const std::string newSum = recomputeChecksumFromSubmittedJson(json);
+    std::regex chk(R"("checksum"\s*:\s*\{\s*"version"\s*:\s*1\s*,\s*"checksum"\s*:\s*"[0-9A-Fa-f]{8}"\s*\})");
+    if (std::regex_search(json, chk)) {
+        return std::regex_replace(json, chk,
+               std::string("\"checksum\":{\"version\":1,\"checksum\":\"") + newSum + "\"}");
+    }
+    std::string out = json;
+    auto pos = out.find_last_of('}');
+    if (pos != std::string::npos) {
+        std::string ins = std::string(",\"checksum\":{\"version\":1,\"checksum\":\"") + newSum + "\"}";
+        out.insert(pos, ins);
+    }
+    return out;
+}
+
+
+
 
 } // namespace io

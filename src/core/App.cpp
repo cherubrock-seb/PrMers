@@ -816,6 +816,22 @@ int App::run() {
         rc = runMemtestOpenCL();
         ran = true;
     }
+    if (options.mode == "checksum") {
+        std::cout << "Checksum mode\n";
+        std::cout << "Paste the JSON to fix, then press Ctrl+D (Linux/macOS) or Ctrl+Z then Enter (Windows):\n";
+        std::ostringstream inbuf;
+        inbuf << std::cin.rdbuf();
+        std::string json = inbuf.str();
+        if (json.find('{') == std::string::npos) {
+            std::cerr << "No JSON received.\n";
+        } else {
+            std::string sum   = io::recomputeChecksumFromSubmittedJson(json);
+            std::string fixed = io::rewriteChecksumInSubmittedJson(json);
+            std::cout << "\nComputed checksum: " << sum << "\n";
+            std::cout << "\nUpdated JSON:\n" << fixed << "\n";
+        }
+        ran = true;
+    }
     if (options.mode == "llsafe") {
         rc = runLlSafeMarin();
         ran = true;

@@ -66,6 +66,8 @@ public:
         const std::vector<uint32_t>& compactWords,
         const std::vector<int>& digit_width);
 };
+    std::string recomputeChecksumFromSubmittedJson(const std::string& json);
+    std::string rewriteChecksumInSubmittedJson(const std::string& json);
 
 } // namespace io
 
