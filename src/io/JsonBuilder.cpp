@@ -370,7 +370,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         std::ostringstream oss;
         bool hasFactor = !opts.knownFactors.empty();
         oss << "{"
-            <<  "\"status\":\"" << (hasFactor ? "F" : "NF")
+            <<  "\"status\":\"" << (hasFactor ? "F" : "NF") << "\""
             << ",\"exponent\":" << opts.exponent
             << ",\"worktype\":\"PM1\"";
         if (hasFactor) {
@@ -460,13 +460,13 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         } else {
             if (opts.sigma) oss << ",\"sigma\":" << opts.sigma;
         }*/
-        oss << ",\"sigma_hex\":"  << opts.sigma_hex;
-        oss << ",\"curve_seed\":" << opts.curve_seed;
-        oss << ",\"base_seed\":"  << opts.curve_seed;
+        oss << ",\"sigma_hex\":"        << jsonEscape(opts.sigma_hex);
+        oss << ",\"curve_seed\":"       <<            opts.curve_seed;
+        oss << ",\"base_seed\":"        <<            opts.curve_seed;
         oss << ",\"program\":{"
             <<  "\"name\":\"prmers\""
-            <<  ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
-            <<  ",\"port\":"    <<            opts.portCode
+            <<  ",\"version\":"         << jsonEscape(core::PRMERS_VERSION)
+            <<  ",\"port\":"            <<            opts.portCode
             <<  ",\"os\":{"
             <<     "\"os\":"            << jsonEscape(opts.osName);
         if (!opts.osArch.empty()){
