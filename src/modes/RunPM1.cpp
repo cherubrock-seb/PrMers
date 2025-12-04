@@ -1809,6 +1809,8 @@ int App::runPM1Marin() {
 
             uint64_t lastIter_ext = (uint64_t)resumeI;
 
+            eng->copy(RTMP, RBASE);
+            eng->set_multiplicand(RBASE, RTMP);
             for (mp_bitcnt_t i = resumeI; i > 0; --i) {
                 lastIter_ext = (uint64_t)i;
 
@@ -1893,8 +1895,8 @@ int App::runPM1Marin() {
                 eng->square_mul(RSTATE);
                 int b = mpz_tstbit(E_diff.get_mpz_t(), i - 1) ? 1 : 0;
                 if (b) {
-                    eng->set_multiplicand(RTMP, RBASE);
-                    eng->mul(RSTATE, RTMP);
+                    //eng->set_multiplicand(RTMP, RBASE);
+                    eng->mul(RSTATE, RBASE);
                 }
 
                 // Injection d'erreur comme dans la branche normale
@@ -1947,8 +1949,8 @@ int App::runPM1Marin() {
                             for (size_t k = eb; k-- > 0;) {
                                 eng->square_mul(RPOW);
                                 if (mpz_tstbit(eacc.get_mpz_t(), k)) {
-                                    eng->set_multiplicand(RTMP, RBASE);
-                                    eng->mul(RPOW, RTMP);
+                                    //eng->set_multiplicand(RTMP, RBASE);
+                                    eng->mul(RPOW, RBASE);
                                 }
                             }
                             eng->set_multiplicand(RTMP, RPOW);
@@ -2012,8 +2014,8 @@ int App::runPM1Marin() {
                             for (size_t k = wb; k-- > 0;) {
                                 eng->square_mul(RPOW);
                                 if (mpz_tstbit(wbits.get_mpz_t(), k)) {
-                                    eng->set_multiplicand(RTMP, RBASE);
-                                    eng->mul(RPOW, RTMP);
+                                    //eng->set_multiplicand(RTMP, RBASE);
+                                    eng->mul(RPOW, RBASE);
                                 }
                             }
                             eng->set_multiplicand(RTMP, RPOW);
@@ -2096,8 +2098,8 @@ int App::runPM1Marin() {
                 for (size_t k = wbl; k-- > 0;) {
                     eng->square_mul(RPOW);
                     if (mpz_tstbit(wtail.get_mpz_t(), k)) {
-                        eng->set_multiplicand(RTMP, RBASE);
-                        eng->mul(RPOW, RTMP);
+                        //eng->set_multiplicand(RTMP, RBASE);
+                        eng->mul(RPOW, RBASE);
                     }
                 }
                 eng->set_multiplicand(RTMP, RPOW);
