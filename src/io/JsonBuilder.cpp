@@ -29,7 +29,6 @@
 #include <cctype>
 #include <regex>
 #include <string>
-#include "util/CodeHash.hpp"
 
 namespace io{
 
