@@ -29,6 +29,7 @@
 #include <cctype>
 #include <regex>
 #include <string>
+#include "util/CodeHash.hpp"
 
 namespace io{
 
@@ -346,6 +347,7 @@ static std::string generatePrimeNetJson(
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
         //<< " hash='" << canon.str() <<"' "
+        //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
 }
