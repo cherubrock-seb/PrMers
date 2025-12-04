@@ -960,7 +960,7 @@ int App::runPM1Stage2Marin() {
                 eng->mul(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RREF));
                 ++cur_k;
             }
-            size_t slot = REVEN + k2slot[target_k];
+            size_t slot = REVEN + static_cast<size_t>(k2slot[target_k]);
             eng->copy(static_cast<engine::Reg>(slot), static_cast<engine::Reg>(RTMP));
             ++produced;
             int newPct = int((produced * 100ull) / std::max<size_t>(1, usedSlots));
