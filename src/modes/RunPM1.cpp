@@ -50,6 +50,7 @@
 #include <deque>
 #include <filesystem>
 #include <set>
+#include <unordered_set>
 
 using namespace core;
 using namespace std::chrono;
@@ -722,7 +723,6 @@ int App::runPM1() {
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
-    //bool debug = true;
     uint64_t B1u = options.B1, B2u = options.B2;
     mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
     if (B2 <= B1) {
@@ -734,11 +734,9 @@ int App::runPM1Stage2Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl; guiServer_->appendLog(oss.str()); }
     uint32_t pexp = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
-    //const size_t baseRegs = 11;
     static constexpr size_t baseRegsStage2 = 13;
-    static constexpr size_t baseRegsStage1 = 11; 
-
-    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RPOW=4, RTMP=5,  RREF=6;
+    static constexpr size_t baseRegsStage1 = 11;
+    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RPOW=4, RTMP=5, RREF=6;
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
     const std::string ckpt_file_s2 = ck2.str();
     auto read_ckpt_s2 = [&](engine* e, const std::string& file, uint64_t& saved_p, uint64_t& saved_idx, double& et, uint64_t& sB1, uint64_t& sB2)->int{
@@ -783,7 +781,6 @@ int App::runPM1Stage2Marin() {
         if ((stat(ckpt_file_s2.c_str(), &s) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file_s2.c_str());
     };
-    //unsigned long nbEven = evenGapBound(B2);
     unsigned long nbEven = evenGapBound2(
         B2,
         (int)options.device_id,
@@ -792,12 +789,110 @@ int App::runPM1Stage2Marin() {
         static_cast<double>(options.memlim) / 100.0
     );
     if (nbEven == 0) nbEven = evenGapBound(B2);
-
     std::cout << "\nnbEven = " << nbEven << std::endl;
     if (nbEven == 0) nbEven = 1;
+    mpz_class p0; mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
+    if (p0 > B2) {
+        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
+        return 1;
+    }
+    std::vector<uint32_t> idxGap;
+    {
+        using clock = std::chrono::steady_clock;
+        auto t0 = clock::now(), last = t0;
+        if (B2u <= 3 || B2u <= B1u) { idxGap.clear(); }
+        std::vector<uint8_t> sieve((B2u >> 1) + 1, 1);
+        uint64_t r = (uint64_t)std::sqrt((long double)B2u);
+        uint64_t steps = (r >= 3) ? ((r - 3) / 2 + 1) : 0, done = 0;
+        std::cout << "Sieve primes:   0%  ETA  --:--:--" << std::flush;
+        for (uint64_t i = 3; i <= r; i += 2) {
+            if (sieve[i >> 1]) {
+                uint64_t ii = i * i;
+                for (uint64_t j = ii; j <= B2u; j += (i << 1)) sieve[j >> 1] = 0;
+            }
+            ++done;
+            auto now = clock::now();
+            if (now - last >= std::chrono::milliseconds(400)) {
+                double prog = steps ? double(done) / steps : 1.0;
+                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
+                long sec = long(eta + 0.5);
+                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
+                std::cout << "\rSieve primes: " << std::setw(3) << int(prog * 100)
+                        << "%  ETA "
+                        << std::setw(2) << std::setfill('0') << h << ':'
+                        << std::setw(2) << m << ':'
+                        << std::setw(2) << s << std::setfill(' ')
+                        << std::flush;
+                last = now;
+            }
+            if (interrupted) break;
+        }
+        std::cout << "\rSieve primes: 100%  ETA  00:00:00\n";
+        uint64_t start = (B1u >= 2) ? (B1u + 1) : 3;
+        if ((start & 1) == 0) ++start;
+        while (start <= B2u && !sieve[start >> 1]) start += 2;
+        if (start > B2u) { idxGap.clear(); }
+        uint64_t total_pr = 0;
+        for (uint64_t q = start; q <= B2u; q += 2) if (sieve[q >> 1]) ++total_pr;
+        if (total_pr <= 1) { idxGap.clear(); }
+        idxGap.reserve(total_pr ? (size_t)(total_pr - 1) : 0);
+        uint64_t processed = 0;
+        t0 = clock::now(); last = t0;
+        std::cout << "Build gaps:   0%  ETA  --:--:--" << std::flush;
+        uint64_t p = start;
+        for (uint64_t q = p + 2; q <= B2u; q += 2) {
+            if (!sieve[q >> 1]) continue;
+            uint64_t gap = q - p;
+            uint64_t ig = (gap >> 1) - 1;
+            idxGap.push_back((uint32_t)ig);
+            p = q;
+            ++processed;
+            auto now = clock::now();
+            if (now - last >= std::chrono::milliseconds(400)) {
+                double prog = total_pr ? double(processed) / double(total_pr) : 1.0;
+                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
+                long sec = long(eta + 0.5);
+                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
+                std::cout << "\rBuild gaps: " << std::setw(3) << int(prog * 100)
+                        << "%  ETA "
+                        << std::setw(2) << std::setfill('0') << h << ':'
+                        << std::setw(2) << m << ':'
+                        << std::setw(2) << s << std::setfill(' ')
+                        << std::flush;
+                last = now;
+            }
+            if (interrupted) break;
+        }
+        std::cout << "\rBuild gaps: 100%  ETA  00:00:00\n";
+    }
+    std::unordered_map<uint64_t,int> k2slot;
+    k2slot.reserve(nbEven*2);
+    std::vector<uint64_t> ks_order;
+    ks_order.reserve(nbEven);
+    {
+        uint64_t cum_m = 0;
+        for (size_t i = 0; i < idxGap.size() && k2slot.size() < nbEven; ++i) {
+            cum_m += (uint64_t)idxGap[i] + 1;
+            uint64_t k = cum_m - 1;
+            if (!k2slot.count(k)) {
+                k2slot.emplace(k, (int)k2slot.size());
+                ks_order.push_back(k);
+            }
+        }
+        if (k2slot.empty()) {
+            k2slot.emplace(0,0);
+            ks_order.push_back(0);
+        }
+    }
+    std::vector<uint64_t> ks_sorted = ks_order;
+    std::sort(ks_sorted.begin(), ks_sorted.end());
+    for (size_t i = 0; i < ks_sorted.size(); ++i) {
+        k2slot[ks_sorted[i]] = (int)i;
+    }
+    size_t usedSlots = ks_sorted.size();
     size_t regCount = baseRegsStage2 + nbEven + 2;
     engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
-
     const size_t REVEN = baseRegsStage2;
     const size_t RSAVE_Q = baseRegsStage2 + nbEven;
     const size_t RSAVE_HQ = baseRegsStage2 + nbEven + 1;
@@ -852,11 +947,28 @@ int App::runPM1Stage2Marin() {
         mpz_clear(H);
         std::cout << "Precomputing H even powers..." << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Precomputing H even powers..."; guiServer_->appendLog(oss.str()); }
-        eng->copy(static_cast<engine::Reg>(REVEN + 0), static_cast<engine::Reg>(RSTATE));
-        eng->square_mul(static_cast<engine::Reg>(REVEN + 0));
-        
+        eng->copy(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RSTATE));
+        eng->square_mul(static_cast<engine::Reg>(RPOW));
+        eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RPOW));
+        uint64_t cur_k = 0;
         int pct = -1;
-        for (unsigned long k = 1; k < nbEven; ++k) {
+        size_t produced = 0;
+        for (size_t t = 0; t < ks_sorted.size(); ++t) {
+            uint64_t target_k = ks_sorted[t];
+            while (cur_k < target_k) {
+                eng->set_multiplicand(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RPOW));
+                eng->mul(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RREF));
+                ++cur_k;
+            }
+            size_t slot = REVEN + k2slot[target_k];
+            eng->copy(static_cast<engine::Reg>(slot), static_cast<engine::Reg>(RTMP));
+            ++produced;
+            int newPct = int((produced * 100ull) / std::max<size_t>(1, usedSlots));
+            if (newPct > pct) {
+                pct = newPct;
+                std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush;
+                if (guiServer_) { std::ostringstream oss; oss << "Precomputing H powers: " << pct << "%"; guiServer_->appendLog(oss.str()); }
+            }
             if (interrupted) {
                 std::cout << "\nPrecomputation cancelled by user (Ctrl-C). You can reduce GPU memory usage by passing `-memlim <percent>` (e.g., -memlim 30) to precompute fewer even powers.\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Precomputation cancelled. Tip: use `-memlim <percent>` (e.g., -memlim 30) to precompute fewer values."; guiServer_->appendLog(oss.str()); }
@@ -864,114 +976,18 @@ int App::runPM1Stage2Marin() {
                 delete eng;
                 return 0;
             }
-            eng->copy(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(REVEN + k - 1));
-            eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + 0));
-            eng->mul(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(RTMP));
-            int newPct = int((k + 1) * 100 / nbEven);
-            if (newPct > pct) {
-                pct = newPct;
-                std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush;
-                if (guiServer_) { std::ostringstream oss; oss << "Precomputing H powers: " << pct << "%"; guiServer_->appendLog(oss.str()); }
-            }
         }
         std::cout << "\n";
-
-        for (unsigned long k = 0; k < nbEven; ++k) {
-            eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(REVEN + k));
-            eng->copy(static_cast<engine::Reg>(REVEN + k), static_cast<engine::Reg>(RTMP));
+        for (size_t j = 0; j < usedSlots; ++j) {
+            const size_t slot = REVEN + j;
+            eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(slot));
+            eng->copy(static_cast<engine::Reg>(slot), static_cast<engine::Reg>(RTMP));
         }
         std::cout << "\n";
         eng->set(static_cast<engine::Reg>(RACC_L), 1);
     }
-    mpz_class p0; mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
-    if (p0 > B2) {
-        delete eng;
-        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
-        if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
-        return 1;
-    }
-    std::vector<uint32_t> idxGap;
-    {
-        using clock = std::chrono::steady_clock;
-        auto t0 = clock::now(), last = t0;
-
-        const uint64_t B1u = options.B1;
-        const uint64_t B2u = options.B2;
-        if (B2u <= 3 || B2u <= B1u) { idxGap.clear(); }
-
-        std::vector<uint8_t> sieve((B2u >> 1) + 1, 1);
-        uint64_t r = (uint64_t)std::sqrt((long double)B2u);
-        uint64_t steps = (r >= 3) ? ((r - 3) / 2 + 1) : 0, done = 0;
-
-        std::cout << "Sieve primes:   0%  ETA  --:--:--" << std::flush;
-        for (uint64_t i = 3; i <= r; i += 2) {
-            if (sieve[i >> 1]) {
-                uint64_t ii = i * i;
-                for (uint64_t j = ii; j <= B2u; j += (i << 1)) sieve[j >> 1] = 0;
-            }
-            ++done;
-            auto now = clock::now();
-            if (now - last >= std::chrono::milliseconds(400)) {
-                double prog = steps ? double(done) / steps : 1.0;
-                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
-                long sec = long(eta + 0.5);
-                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
-                std::cout << "\rSieve primes: " << std::setw(3) << int(prog * 100)
-                        << "%  ETA "
-                        << std::setw(2) << std::setfill('0') << h << ':'
-                        << std::setw(2) << m << ':'
-                        << std::setw(2) << s << std::setfill(' ')
-                        << std::flush;
-                last = now;
-            }
-            if (interrupted) break;
-        }
-        std::cout << "\rSieve primes: 100%  ETA  00:00:00\n";
-
-        uint64_t start = (B1u >= 2) ? (B1u + 1) : 3;
-        if ((start & 1) == 0) ++start;
-        while (start <= B2u && !sieve[start >> 1]) start += 2;
-        if (start > B2u) { idxGap.clear(); }
-
-        uint64_t total_pr = 0;
-        for (uint64_t q = start; q <= B2u; q += 2) if (sieve[q >> 1]) ++total_pr;
-        if (total_pr <= 1) { idxGap.clear(); }
-
-        idxGap.reserve(total_pr ? (size_t)(total_pr - 1) : 0);
-
-        uint64_t processed = 0;
-        t0 = clock::now(); last = t0;
-        std::cout << "Build gaps:   0%  ETA  --:--:--" << std::flush;
-
-        uint64_t p = start;
-        for (uint64_t q = p + 2; q <= B2u; q += 2) {
-            if (!sieve[q >> 1]) continue;
-            uint64_t gap = q - p;
-            uint64_t ig = (gap >> 1) - 1;
-            idxGap.push_back((uint32_t)ig);
-            p = q;
-            ++processed;
-            auto now = clock::now();
-            if (now - last >= std::chrono::milliseconds(400)) {
-                double prog = total_pr ? double(processed) / double(total_pr) : 1.0;
-                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
-                long sec = long(eta + 0.5);
-                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
-                std::cout << "\rBuild gaps: " << std::setw(3) << int(prog * 100)
-                        << "%  ETA "
-                        << std::setw(2) << std::setfill('0') << h << ':'
-                        << std::setw(2) << m << ':'
-                        << std::setw(2) << s << std::setfill(' ')
-                        << std::flush;
-                last = now;
-            }
-            if (interrupted) break;
-        }
-        std::cout << "\rBuild gaps: 100%  ETA  00:00:00\n";
-    }
-
+    size_t totalPrimes = idxGap.size() + 1;
     auto t0 = high_resolution_clock::now();
-    //auto start_clock = t0;
     auto lastBackup = t0;
     auto lastDisplay = t0;
     mpz_class p = p0;
@@ -996,199 +1012,27 @@ int App::runPM1Stage2Marin() {
     } else {
         eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), mpz_get_ui(p0.get_mpz_t()));
     }
-    size_t totalPrimes = idxGap.size() + 1;
-
     uint64_t primes_since_check = 0;
     eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
     eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
-
     size_t iStartRun = 0;
-    uint64_t p_ui = mpz_get_ui(p0.get_mpz_t()); 
-    size_t base_done = 0;  
-    (void)   base_done;                   
-
+    uint64_t p_ui = mpz_get_ui(p0.get_mpz_t());
+    size_t base_done = 0;
+    (void)base_done;
     auto start_sys = std::chrono::system_clock::now();
-
-/*    if (resumed_s2) {
-        base_done = (size_t)resume_idx;
-
-        p_ui = resume_p_u64;
-
-        
-        t0 = high_resolution_clock::now()
-            - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
-        lastBackup  = high_resolution_clock::now();
-        lastDisplay = lastBackup;
-        iStartRun = resume_idx;
-    }*/
-iStartRun = resume_idx;
+    iStartRun = resume_idx;
     auto start = t0;
-
-
-    //eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R)); // forward ONCE
-    //eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RACC_R));
-    //eng->copy(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
     eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-           
     uint64_t cum_m = 0;
+    std::unordered_set<uint64_t> k_present;
+    k_present.reserve(ks_sorted.size()*2);
+    for (auto v: ks_sorted) k_present.insert(v);
+    size_t usedSlotsD = ks_sorted.size();
+    size_t storedEven = usedSlotsD;
+    std::cout << "Stored even powers: " << storedEven << "/" << nbEven << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "Stored even powers: " << storedEven << "/" << nbEven; guiServer_->appendLog(oss.str()); }
 
-for (size_t i = iStartRun; ; ++i, ++idx) {
-    if (interrupted) {
-            double et = duration<double>(high_resolution_clock::now() - t0).count();
-            save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
-            delete eng;
-            std::cout << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
-            return 0;
-    }
-    eng->sub(static_cast<engine::Reg>(RACC_R), 1);
-    eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RACC_R));
-    eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
-
-    if (i >= idxGap.size()) {break; }
-
-    const uint64_t m_i = (uint64_t)idxGap[i] + 1;  // gap = 2*m_i
-    cum_m += m_i;
-    const uint64_t k = cum_m - 1;
-
-    eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-    eng->mul_new(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + k));
-
-    p_ui += 2ull * m_i;
-
-    if ((i + 1) < idxGap.size()) {
-        const uint64_t m_next = (uint64_t)idxGap[i + 1] + 1;
-        if ((cum_m + m_next) >= nbEven) {
-            eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-            cum_m = 0;
-        }
-    }
-
-    ++primes_since_check;
-
-    // après ++primes_since_check;
-    auto now = high_resolution_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 3) {
-
-        const size_t done_abs  = idx + 1;
-        const double percent   = totalPrimes ? 100.0 * double(done_abs) / double(totalPrimes) : 100.0;
-        const double elapsedSec= std::chrono::duration<double>(now - start).count();
-        const double ips       = (elapsedSec > 0.0) ? double(done_abs) / elapsedSec : 0.0;
-        const double remaining = (totalPrimes > done_abs) ? double(totalPrimes - done_abs) : 0.0;
-        const double etaSec    = (ips > 0.0) ? remaining / ips : 0.0;
-
-        int days = int(etaSec) / 86400;
-        int hours = (int(etaSec) % 86400) / 3600;
-        int minutes = (int(etaSec) % 3600) / 60;
-        int seconds = int(etaSec) % 60;
-
-        std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
-                << "% | Iter: " << done_abs
-                << " | prime: " << p_ui
-                << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
-                << " | IPS: " << std::fixed << std::setprecision(2) << ips
-                << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
-                << std::endl;
-
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss << "Progress: " << std::fixed << std::setprecision(2) << percent
-                << "% | Iter: " << done_abs
-                << " | prime: " << p_ui
-                << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
-                << " | IPS: " << std::fixed << std::setprecision(2) << ips
-                << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r";
-            guiServer_->appendLog(oss.str());
-            guiServer_->setProgress(double(done_abs), double(totalPrimes), "");
-        }
-        lastDisplay = now;
-    }
-
-
-    auto now0 = high_resolution_clock::now();
-    if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
-        double et = duration<double>(now0 - t0).count();
-        std::cout << "\nBackup Stage 2 at prime " << p_ui << " idx=" << idx << " start...\n";
-        save_ckpt_s2(eng, p_ui, idx, et);
-        lastBackup = now0;
-        std::cout << "Backup Stage 2 done.\n";
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss << "Backup Stage 2 at prime " << p_ui << " idx=" << idx;
-            guiServer_->appendLog(oss.str());
-        }
-    }
-       // if ((i + 1) >= idxGap.size()) continue;
-
-        //const uint64_t m_next = (uint64_t)idxGap[i + 1];
-        //if ((cum_m + m_next) >= nbEven) {
-
-            //std::cout << "\nupd = " << cum_m + m_next << std::endl;
-            //eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-            //
-            
-            
-            //eng->copy(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-            //cum_m = 0;
-        //}
-
-        //unsigned long add = (unsigned long)(2ull * (ig + 1ull));
-        //mpz_add_ui(p.get_mpz_t(), p.get_mpz_t(), add);
-       
-        if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) { eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RSTATE)); }
-        
-    }
-/*    for (size_t i = iStartRun; ; ++i, ++idx) {
-        //if (p > B2) break;
-        eng->sub(static_cast<engine::Reg>(RTMP), 1);
-        eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RTMP));
-        eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
-        if (i >= idxGap.size()) { ++idx; break; }
-        uint64_t ig = idxGap[i];
-        cumulgap+=ig;
-        eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-        //eng->set_multiplicand(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-
-        eng->mul_copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + cumulgap),static_cast<engine::Reg>(RTMP));
-        if(((i+1) < idxGap.size()) && (cumulgap + idxGap[i+1]) > 2*nbEven){
-            std::cout << "Change " << idx << ")\n";
-            //eng->set_multiplicand(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-            //eng->mul_copy_new(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + cumulgap),static_cast<engine::Reg>(RREF));
-            //eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-            //eng->set_multiplicand(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-            //eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-            eng->mul(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(REVEN + cumulgap));
-            cumulgap = 0;
-        }
-        //unsigned long add = (unsigned long)(2ull * (ig + 1ull));
-        //mpz_add_ui(p.get_mpz_t(), p.get_mpz_t(), add);
-        ++primes_since_check;
-        auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
-            double done = static_cast<double>(i + 1);
-            double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
-            double elapsedSec = duration<double>(now - start).count();
-            double ips = done > 0 ? done / elapsedSec : 0.0;
-            double remaining = totalPrimes > done ? static_cast<double>(totalPrimes) - done : 0.0;
-            double etaSec = ips > 0.0 ? remaining / ips : 0.0;
-            int days = static_cast<int>(etaSec) / 86400;
-            int hours = (static_cast<int>(etaSec) % 86400) / 3600;
-            int minutes = (static_cast<int>(etaSec) % 3600) / 60;
-            int seconds = static_cast<int>(etaSec) % 60;
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | prime: " << p.get_ui() << " | Iter: " << (idx + 1) << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | IPS: " << std::fixed << std::setprecision(2) << ips << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"; guiServer_->appendLog(oss.str()); guiServer_->setProgress(done, totalPrimes, ""); }
-            lastDisplay = now;
-        }
-        auto now0 = high_resolution_clock::now();
-        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
-            double et = duration<double>(now0 - t0).count();
-            std::cout << "\nBackup Stage 2 at prime " << p.get_ui() << " idx=" << idx << " start...\n";
-            save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
-            lastBackup = now0;
-            std::cout << "Backup Stage 2 done.\n";
-            if (guiServer_) { std::ostringstream oss; oss << "Backup Stage 2 at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
-        }
-        if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) { eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RSTATE)); }
+    for (size_t i = iStartRun; ; ++i, ++idx) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
             save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
@@ -1197,7 +1041,78 @@ for (size_t i = iStartRun; ; ++i, ++idx) {
             if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
             return 0;
         }
-    }*/
+        eng->sub(static_cast<engine::Reg>(RACC_R), 1);
+        eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RACC_R));
+        eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
+        if (i >= idxGap.size()) {break; }
+        const uint64_t m_i = (uint64_t)idxGap[i] + 1;
+        cum_m += m_i;
+        const uint64_t k = cum_m - 1;
+        eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
+        auto it = k2slot.find(k);
+        if (it != k2slot.end()) {
+            eng->mul_new(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + (size_t)it->second));
+        } else {
+            eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
+            cum_m = 0;
+        }
+        p_ui += 2ull * m_i;
+        if ((i + 1) < idxGap.size()) {
+            const uint64_t m_next = (uint64_t)idxGap[i + 1] + 1;
+            const uint64_t k_next = cum_m + m_next - 1;
+            if (!k_present.count(k_next)) {
+                eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
+                cum_m = 0;
+            }
+        }
+        ++primes_since_check;
+        auto now = high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 3) {
+            const size_t done_abs  = idx + 1;
+            const double percent   = totalPrimes ? 100.0 * double(done_abs) / double(totalPrimes) : 100.0;
+            const double elapsedSec= std::chrono::duration<double>(now - start).count();
+            const double ips       = (elapsedSec > 0.0) ? double(done_abs) / elapsedSec : 0.0;
+            const double remaining = (totalPrimes > done_abs) ? double(totalPrimes - done_abs) : 0.0;
+            const double etaSec    = (ips > 0.0) ? remaining / ips : 0.0;
+            int days = int(etaSec) / 86400;
+            int hours = (int(etaSec) % 86400) / 3600;
+            int minutes = (int(etaSec) % 3600) / 60;
+            int seconds = int(etaSec) % 60;
+            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+                    << "% | Iter: " << done_abs
+                    << " | prime: " << p_ui
+                    << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
+                    << " | IPS: " << std::fixed << std::setprecision(2) << ips
+                    << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                    << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Progress: " << std::fixed << std::setprecision(2) << percent
+                    << "% | Iter: " << done_abs
+                    << " | prime: " << p_ui
+                    << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
+                    << " | IPS: " << std::fixed << std::setprecision(2) << ips
+                    << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r";
+                guiServer_->appendLog(oss.str());
+                guiServer_->setProgress(double(done_abs), double(totalPrimes), "");
+            }
+            lastDisplay = now;
+        }
+        auto now0 = high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            double et = duration<double>(now0 - t0).count();
+            std::cout << "\nBackup Stage 2 at prime " << p_ui << " idx=" << idx << " start...\n";
+            save_ckpt_s2(eng, p_ui, idx, et);
+            lastBackup = now0;
+            std::cout << "Backup Stage 2 done.\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Backup Stage 2 at prime " << p_ui << " idx=" << idx;
+                guiServer_->appendLog(oss.str());
+            }
+        }
+        if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) { eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RSTATE)); }
+    }
     auto end_sys = std::chrono::system_clock::now();
     auto fmt = [](const std::chrono::system_clock::time_point& tp){
         using namespace std::chrono;
@@ -1232,7 +1147,7 @@ for (size_t i = iStartRun; ; ++i, ++idx) {
         char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
         writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + std::string(s));
         std::cout << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n';
-        if (guiServer_) { std::ostringstream oss; oss << "\n>>>  Factor P-1 (stage 2) found : " << s << '\n'; guiServer_->appendLog(oss.str()); }
+        if (guiServer_) { std::ostringstream oss; oss << "\n>>>  Factor P-1 (stage 2) found : " << s << "\n"; guiServer_->appendLog(oss.str()); }
         options.knownFactors.push_back(std::string(s));
         std::free(s);
     } else {
