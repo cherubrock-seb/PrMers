@@ -345,6 +345,7 @@ static std::string generatePrimeNetJson(
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
+        //<< " hash='" << canon.str() <<"' "
         << "}";
     return oss.str();
 }
@@ -426,6 +427,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         oss.str(""); oss.clear();
         oss << prefix
             << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
+            //<< " hash='" << canon.str() <<"' "
             << "}";
         return oss.str();
     }
@@ -518,6 +520,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         oss.str(""); oss.clear();
         oss << prefix
             << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
+            //<< " hash='" << canon.str() <<"' "
             << "}";
         return oss.str();
     }
