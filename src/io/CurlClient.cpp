@@ -1,12 +1,17 @@
 #include "io/CurlClient.hpp"
-#include <curl/curl.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
 #include <regex>
 #include <cstring>
 #include <cstdio>
-
+#include <cstdlib>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#if defined(HAS_CURL) && HAS_CURL
+#include <curl/curl.h>
+#endif
 
 namespace io {
 
@@ -55,8 +60,7 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
                                            const std::string& username,
                                            const std::string& password)
 {
-
-
+#if defined(HAS_CURL) && HAS_CURL
     CURL* curl = curl_easy_init();
     if (!curl) {
         std::cerr << "❌ Failed to initialize CURL.\n";
@@ -69,7 +73,7 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     #else
         trace = fopen("curl_trace.txt", "w");
     #endif
-    // Headers simulant un navigateur réel
+
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
     headers = curl_slist_append(headers, "Accept-Language: fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7");
@@ -78,13 +82,12 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     headers = curl_slist_append(headers, "Upgrade-Insecure-Requests: 1");
     headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
 
-
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl, CURLOPT_STDERR, trace);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, ""); 
+    curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
     curl_easy_setopt(curl, CURLOPT_COOKIEJAR, "cookies.txt");
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
@@ -94,18 +97,15 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &loginResponse);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
 
-    // Construction des données POST
     std::ostringstream loginData;
     loginData << "user_login=" << username
-            << "&user_password=" << password;
+              << "&user_password=" << password;
     std::string postFields = loginData.str();
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postFields.c_str());
 
-    // Exécution de la requête de login
     std::cerr << "[TRACE] Sending login with user: " << username << std::endl;
     CURLcode loginRes = curl_easy_perform(curl);
 
-    // Sauvegarde de la réponse HTML pour vérification
     std::ofstream htmlOut("login_response_debug.html");
     htmlOut << loginResponse;
     htmlOut.close();
@@ -114,11 +114,10 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
         std::cerr << "❌ Login failed: " << curl_easy_strerror(loginRes) << "\n";
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-        fclose(trace);
+        if (trace) fclose(trace);
         return false;
     }
 
-    // Vérification du cookie GIMPSWWW
     struct curl_slist* cookies = nullptr;
     curl_easy_getinfo(curl, CURLINFO_COOKIELIST, &cookies);
     bool hasSession = false;
@@ -134,28 +133,16 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
         std::cerr << "❌ Login failed: no session cookie received.\n";
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-        fclose(trace);
+        if (trace) fclose(trace);
         return false;
     }
 
     std::cerr << "✅ Login successful, session cookie received.\n";
 
-    if (loginRes != CURLE_OK) {
-        std::cerr << "❌ Login failed or session not recognized.\n";
-        //std::cerr << loginData.str().c_str() << "\n";
-        std::ofstream htmlOut("login_response_debug.html");
-        htmlOut << loginResponse;
-        htmlOut.close();
-        std::cerr << "💡 Login HTML saved to login_response_debug.html\n";
-        curl_easy_cleanup(curl);
-        fclose(trace);
-        return false;
-    }
-
     std::string htmlFormPage;
     curl_easy_setopt(curl, CURLOPT_URL, "https://www.mersenne.org/manual_result/");
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);     // clear POST data
-    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);              // force GET
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, nullptr);
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &htmlFormPage);
 
@@ -163,21 +150,20 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     if (pageRes != CURLE_OK) {
         std::cerr << "❌ Failed to get manual_result page: " << curl_easy_strerror(pageRes) << "\n";
         curl_easy_cleanup(curl);
-        fclose(trace);
+        if (trace) fclose(trace);
         return false;
     }
 
     std::string uid = extractUID(htmlFormPage);
     std::cerr << "[TRACE] Extracted was_logged_in_as UID: " << uid << "\n";
     if (uid.empty()) {
-        std::ofstream htmlOut("login_response_manual_debug.html");
-        htmlOut << htmlFormPage;
-        htmlOut.close();
+        std::ofstream htmlOut2("login_response_manual_debug.html");
+        htmlOut2 << htmlFormPage;
+        htmlOut2.close();
         std::cerr << "💡 Login HTML saved to login_response_manual_debug.html\n";
-        
         std::cerr << "❌ Could not find was_logged_in_as value in form page.\n";
         curl_easy_cleanup(curl);
-        fclose(trace);
+        if (trace) fclose(trace);
         return false;
     }
 
@@ -205,8 +191,8 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     std::cerr << "[TRACE] Sending manual result with was_logged_in_as = " << uid << std::endl;
 
     CURLcode res = curl_easy_perform(curl);
-    fflush(trace);
-    fclose(trace);
+    if (trace) fflush(trace);
+    if (trace) fclose(trace);
     curl_mime_free(form);
     curl_easy_cleanup(curl);
 
@@ -270,6 +256,12 @@ bool CurlClient::sendManualResultWithLogin(const std::string& jsonResult,
     }
 
     return true;
+#else
+    (void)jsonResult;
+    (void)username;
+    (void)password;
+    return false;
+#endif
 }
 
 } // namespace io
