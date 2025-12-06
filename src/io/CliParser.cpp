@@ -300,6 +300,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.B2 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
+        else if (std::strcmp(argv[i], "-b3") == 0 && i + 1 < argc) {
+            opts.B3 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
         else if (std::strcmp(argv[i], "-K") == 0 && i + 1 < argc) {
             opts.K = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
@@ -352,6 +356,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.max_e_bits = (mb == 0 ? 10000ULL : (mb << 23));
             ++i;
         }
+        
         else if (std::strcmp(argv[i], "-l2") == 0 && i + 1 < argc) {
             opts.max_local_size2 = to_u64(argv[++i]);
         }

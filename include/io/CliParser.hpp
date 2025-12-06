@@ -22,13 +22,14 @@ struct CliOptions {
     bool resume95 = false;
     bool exportmers = false; 
     uint64_t llsafe_block = 0;
+    uint64_t B3 = 0;
     bool marin = true;
     bool bench = false;
     bool profiling = false;
     bool debug = false;
     bool verify = true;
     bool gerbiczli = true;
-    uint64_t B1 = 10000;
+    uint64_t B1 = 0;
     uint64_t memlim = 85;
     uint64_t B1old = 0;
     uint64_t B1_new = 0;

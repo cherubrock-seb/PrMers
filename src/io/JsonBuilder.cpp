@@ -237,6 +237,7 @@ static std::string jsonEscape(const std::string& s) {
 }
 
 static std::string generatePrimeNetJson(
+    const CliOptions &opts,
     const std::string &status,
     unsigned int exponent,
     const std::string &worktype,
@@ -260,16 +261,29 @@ static std::string generatePrimeNetJson(
     const std::string &computer,
     const std::vector<std::string>& knownFactors)
 {
-    (void) uid;
-
-    std::string canonWT = (worktype == "prp" ? "PRP-3" : toUpper(worktype));
-    if (!knownFactors.empty()) {
-        std::string knownFactorStr = knownFactors[0];
-        for (size_t i = 1; i < knownFactors.size(); ++i)
-            knownFactorStr += "," + knownFactors[i];
-        canon << knownFactorStr;                                 // factors
-    }
+    std::string canonWT;
+    if (worktype == "prp") canonWT = "PRP-3";
+    else if (worktype == "ll" || worktype == "llsafe") canonWT = "LL";
+    else canonWT = toUpper(worktype);
+    bool isEdw = opts.edwards;
+    int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
     std::ostringstream oss;
+
+    std::vector<std::string> uniqFactors;
+    uniqFactors.reserve(knownFactors.size());
+    for (const auto& f : knownFactors) {
+        if (std::find(uniqFactors.begin(), uniqFactors.end(), f) == uniqFactors.end()) {
+            uniqFactors.push_back(f);
+        }
+    }
+
+    std::string knownFactorStr;
+    if (!uniqFactors.empty()) {
+        knownFactorStr = uniqFactors[0];
+        for (size_t i = 1; i < uniqFactors.size(); ++i) {
+            knownFactorStr += "," + uniqFactors[i];
+        }
+    }
 
     oss << "{";
     oss <<  "\"status\":"                          << jsonEscape(status);
@@ -277,7 +291,7 @@ static std::string generatePrimeNetJson(
     oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
     	// *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
-    	if ((worktype == "ll") || (worktype == "prp")) {
+    	if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
         	oss << ",\"known-factors\":[" << jsonEscape(knownFactorStr) << "]";
     	} else {
         	oss << ",\"factors\":[" << jsonEscape(knownFactorStr) << "]";
@@ -289,21 +303,19 @@ static std::string generatePrimeNetJson(
 			oss << ",\"b2\":" << opts.B2;
     	}
     }
-    if ((worktype == "ll") || (worktype == "prp")) {
+    if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
 	    oss << ",\"res64\":"                       << jsonEscape(res64);
+        if (worktype == "prp") {
+            oss << ",\"res2048\":"                 << jsonEscape(res2048);
+            oss << ",\"residue-type\":"            <<            residueType;
+        }
 	    oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
-	    if (worktype == "ll") {
-	    	oss << ",\"shift-count\":0";
-	    } else if (worktype == "prp") {
-		    oss << ",\"residue-type\":"            <<            residueType;
-	    }
+        oss << ",\"shift-count\":0";
 	} else if (worktype == "ecm") {
-        bool isEdw = opts.edwards;
-        int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
 		if (opts.curves_tested_for_found > 0) {
 	        oss << ",\"curves\":"                  << opts.curves_tested_for_found;
 		}
-        if (!opts.sigma192.empty()) {
+        if (opts.sigma192) {
 	        oss << ",\"sigma192\":"                << opts.sigma192;  // *** TODO: not sure where this value comes from ***
         }
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery");
@@ -312,7 +324,10 @@ static std::string generatePrimeNetJson(
         oss << ",\"curve_seed\":"                  <<            opts.curve_seed;
         oss << ",\"base_seed\":"                   <<            opts.curve_seed;
 	}
-    if (ffLenght > 0) oss << ",\"fft-length\":"    <<            fftLength;
+    else if (worktype == "pm1") {
+	    oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+    }
+    if (fftLength > 0) oss << ",\"fft-length\":"  <<            fftLength;
     if (!proofMd5.empty()) {
         oss << ",\"proof\":{"
             <<    "\"version\":"                   <<            proofVersion
@@ -340,7 +355,9 @@ static std::string generatePrimeNetJson(
 
     std::ostringstream canon;
     canon << exponent << ";";                                    // exponent
-    canon << canonWT  << ";";                                    // worktype
+    std::string canonWTNorm = canonWT;
+    if (canonWTNorm == "PRP-3" || canonWTNorm == "prp-3") canonWTNorm = "PRP";
+    canon << canonWTNorm  << ";";                                // worktype
     if (!knownFactors.empty()) {
         canon << knownFactorStr;                                 // factors
     }
@@ -370,7 +387,7 @@ static std::string generatePrimeNetJson(
         if (isEdw) canon << "E";                                 // sigma
         if (opts.sigma192) {
             canon << opts.sigma192;                              // *** TODO: not sure where this value comes from ***
-        } else if (opts.sigma)
+        } else if (opts.sigma) {
             canon << opts.sigma;
         }
         if (torsion > 0) {
@@ -405,7 +422,7 @@ static std::string generatePrimeNetJson(
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-        //<< ",hash=\"" << canon.str() << "\""
+        //<< ",hash:\"" << canon.str() << "\""
         //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
@@ -428,13 +445,15 @@ std::string JsonBuilder::generate(const CliOptions& opts,
     char timestampBuf[32];
     std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
 
-    if ((opts.mode == "ll") || (opts.mode == "prp")) {
-    	std::string status = (isPrime ? "P" : "C");
+    std::string status;
+    if ((opts.mode == "ll") || (opts.mode == "llsafe") || (opts.mode == "prp")) {
+    	status = (isPrime ? "P" : "C");
     } else {
-    	std::string status = (!opts.knownFactors.empty() ? "F" : "NF");
+    	status = (!opts.knownFactors.empty() ? "F" : "NF");
     }
     int residueType = opts.knownFactors.empty() ? 1 : 5;
     return generatePrimeNetJson(
+        opts,
         status,
         opts.exponent,
         opts.mode,
