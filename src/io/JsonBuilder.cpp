@@ -65,6 +65,13 @@ static std::string toLower(const std::string& s){
     return t;
 }
 
+static std::string toUpper(const std::string& s){
+    std::string t = s;
+    std::transform(t.begin(), t.end(), t.begin(),
+                   [](unsigned char c){ return char(std::toupper(c)); });
+    return t;
+}
+
 std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
     const std::vector<uint64_t>& hostResult,
     const CliOptions& opts,
@@ -249,35 +256,64 @@ static std::string generatePrimeNetJson(
     const std::string &osArchitecture,
     const std::string &user,
     const std::string &aid,
-    const std::string &uid,
     const std::string &timestamp,
     const std::string &computer,
     const std::vector<std::string>& knownFactors)
 {
     (void) uid;
+
+    std::string canonWT = (worktype == "prp" ? "PRP-3" : toUpper(worktype));
+    if (!knownFactors.empty()) {
+        std::string knownFactorStr = knownFactors[0];
+        for (size_t i = 1; i < knownFactors.size(); ++i)
+            knownFactorStr += "," + knownFactors[i];
+        canon << knownFactorStr;                                 // factors
+    }
     std::ostringstream oss;
-    bool isPRP = (worktype.rfind("PRP", 0) == 0);
+
     oss << "{";
     oss <<  "\"status\":"                          << jsonEscape(status);
     oss << ",\"exponent\":"                        <<            exponent;
-    oss << ",\"worktype\":"                        << jsonEscape(worktype);
+    oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
-        oss << ",\"known-factors\":[";
-        for (size_t i = 0; i < knownFactors.size(); ++i) {
-            if (i) oss << ",";
-            oss << jsonEscape(knownFactors[i]);
+    	// *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
+    	if ((worktype == "ll") || (worktype == "prp")) {
+        	oss << ",\"known-factors\":[" << jsonEscape(knownFactorStr) << "]";
+    	} else {
+        	oss << ",\"factors\":[" << jsonEscape(knownFactorStr) << "]";
         }
-        oss << "]";
     }
-    oss << ",\"res64\":"                           << jsonEscape(res64);
-    if (isPRP) {
-        oss << ",\"res2048\":"                     << jsonEscape(res2048);
+    if (opts.B1 > 0) {
+		oss << ",\"b1\":" << opts.B1;
+    	if (opts.B2 > opts.B1) {
+			oss << ",\"b2\":" << opts.B2;
+    	}
     }
-    oss << ",\"residue-type\":"                    <<            residueType;
-    oss << ",\"errors\":{\"gerbicz\":"             <<            gerbiczError << "}";
-    oss << ",\"fft-length\":"                      <<            fftLength;
-    oss << ",\"shift-count\":0";
-    if (isPRP && !proofMd5.empty()) {
+    if ((worktype == "ll") || (worktype == "prp")) {
+	    oss << ",\"res64\":"                       << jsonEscape(res64);
+	    oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+	    if (worktype == "ll") {
+	    	oss << ",\"shift-count\":0";
+	    } else if (worktype == "prp") {
+		    oss << ",\"residue-type\":"            <<            residueType;
+	    }
+	} else if (worktype == "ecm") {
+        bool isEdw = opts.edwards;
+        int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
+		if (opts.curves_tested_for_found > 0) {
+	        oss << ",\"curves\":"                  << opts.curves_tested_for_found;
+		}
+        if (!opts.sigma192.empty()) {
+	        oss << ",\"sigma192\":"                << opts.sigma192;  // *** TODO: not sure where this value comes from ***
+        }
+        oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery");
+        oss << ",\"torsion-subgroup\":"            << torsion;
+        oss << ",\"sigma_hex\":"                   << jsonEscape(opts.sigma_hex);
+        oss << ",\"curve_seed\":"                  <<            opts.curve_seed;
+        oss << ",\"base_seed\":"                   <<            opts.curve_seed;
+	}
+    if (ffLenght > 0) oss << ",\"fft-length\":"    <<            fftLength;
+    if (!proofMd5.empty()) {
         oss << ",\"proof\":{"
             <<    "\"version\":"                   <<            proofVersion
             <<   ",\"power\":"                     <<            proofPower
@@ -303,31 +339,55 @@ static std::string generatePrimeNetJson(
     std::string prefix = oss.str();
 
     std::ostringstream canon;
-    std::string canonWT = worktype;
-    if      (canonWT.rfind("PRP", 0) == 0) canonWT = "PRP";
-    else if (canonWT.rfind("LL",  0) == 0) canonWT = "LL";
-
     canon << exponent << ";";                                    // exponent
     canon << canonWT  << ";";                                    // worktype
-    canon << ""       << ";";                                    // factors
     if (!knownFactors.empty()) {
-        std::string knownFactorStr = knownFactors[0];
-        for (size_t i = 1; i < knownFactors.size(); ++i)
-            knownFactorStr += "," + knownFactors[i];
-        canon << knownFactorStr;                                 // known-factors
+        canon << knownFactorStr;                                 // factors
     }
     canon << ";";
+    canon << "" << ";";                                          // known-factors *** TODO: not yet supported (factors that were known BEFORE this factoring run and included in worktodo.txt, distinct from factors just found ***
 
-    if (canonWT == "PRP") {
-        canon << toLower(res64)    << ";";                       // res64
-        canon << toLower(res2048)  << ";";                       // res2048
-        canon << "0" << "_"                                      // shift-count
+    if (canonWT == "TF") {
+        // *** TODO: not yet not yet implemented ***
+        canon << "<BITLO>"         << ";";                       // bitlo (e.g. 68)
+        canon << "<BITHI>"         << ";";                       // bithi (e.g. 75)
+        canon << "<RANGECOMPLETE>" << ";";                       // rangecomplete (0 or 1)
+	} else if (canonWT == "PRP-3") {
+		canon << toLower(res64)    << ";";                       // res64
+		canon << toLower(res2048)  << ";";                       // res2048
+		canon << "0" << "_"                                      // shift-count
               << "3" << "_"                                      // prp-base
               << residueType       << ";";                       // residue-type
     } else if (canonWT == "LL") {
-        canon << toLower(res64)    << ";";                       // res64
-        canon << ""                << ";";                       // unused
-        canon << "0"               << ";";                       // shift-count
+		canon << toLower(res64)    << ";";                       // res64
+		canon << ""                << ";";                       // unused
+		canon << "0"               << ";";                       // shift-count
+    } else if (canonWT == "ECM") {
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > opts.B1) canon << opts.B2;                 // b2
+        canon << ";";
+
+        if (isEdw) canon << "E";                                 // sigma
+        if (opts.sigma192) {
+            canon << opts.sigma192;                              // *** TODO: not sure where this value comes from ***
+        } else if (opts.sigma)
+            canon << opts.sigma;
+        }
+        if (torsion > 0) {
+            canon << "_TSG" << torsion;                          // torsion-subgroup
+        }
+        canon << ";";
+    } else if (canonWT == "PM1") {
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > opts.B1) canon << opts.B2;                 // b2
+        canon << ";";
+        canon << "" << ";";                                      // brent-suyama
+    } else if (canonWT == "PP1") {
+        // *** TODO: not yet not yet implemented ***
+        canon << opts.B1           << ";";                       // b1
+        if (opts.B2 > opts.B1) canon << opts.B2;                 // b2
+        canon << ";";
+        canon << "<START>" << ";";                               // P+1 start
     }
 
     canon << fftLength << ";";                                   // fft-length
@@ -345,7 +405,7 @@ static std::string generatePrimeNetJson(
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-        //<< " hash='" << canon.str() <<"' "
+        //<< ",hash=\"" << canon.str() << "\""
         //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
@@ -368,170 +428,16 @@ std::string JsonBuilder::generate(const CliOptions& opts,
     char timestampBuf[32];
     std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
 
-    if (opts.mode == "pm1") {
-        std::ostringstream oss;
-        bool hasFactor = !opts.knownFactors.empty();
-        oss << "{"
-            <<  "\"status\":\"" << (hasFactor ? "F" : "NF") << "\""
-            << ",\"exponent\":" << opts.exponent
-            << ",\"worktype\":\"PM1\"";
-        if (hasFactor) {
-            oss << ",\"factors\":[";
-            for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
-                if (i) oss << ",";
-                oss << jsonEscape(opts.knownFactors[i]);
-            }
-            oss << "]";
-        }
-        oss << ",\"b1\":" << opts.B1;
-        if (opts.B2 > 0) oss << ",\"b2\":" << opts.B2;
-        oss << ",\"fft-length\":" << transform_size;
-        oss << ",\"program\":{"
-            <<    "\"name\":\"prmers\""
-            <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
-            <<   ",\"port\":"    <<            opts.portCode
-            << "}"; // close "program"
-        oss << ",\"os\":{"
-            <<   "\"os\":"            << jsonEscape(opts.osName);
-        if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
-            oss << ",\"architecture\":" << jsonEscape(opts.osArch);
-        }
-        oss << "}"; // close "os"
-        if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
-        if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
-        if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
-        oss << ",\"timestamp\":" << jsonEscape(timestampBuf);
-
-        std::string prefix = oss.str();
-        std::ostringstream canon;
-        canon << opts.exponent << ";";         // exponent
-        canon << "PM1"         << ";";         // worktype
-        canon << ""            << ";";         // factors (new) *** TODO: this is broken ***
-        canon << ""            << ";";         // known-factors *** TODO: this is broken ***
-        canon << opts.B1 << ";";               // b1
-        if (opts.B2 > 0) canon << opts.B2;     // b2
-        canon << ";";
-        canon << "" << ";";                    // brent-suyama
-
-        canon << transform_size << ";";        // fft-length
-        canon << "" << ";";                    // errorsObjectStringified *** TODO: this is broken ***
-        canon << "prmers" << ";";              // program.name
-        canon << core::PRMERS_VERSION << ";";  // program.version
-        canon << "" << ";";                    // program.kernel|program.subversion
-        canon << "" << ";";                    // program.details
-        canon << opts.osName << ";";           // os.os
-        canon << opts.osArch << ";";           // os.architecture
-        canon << timestampBuf;                 // timestamp
-        unsigned int crc = computeCRC32(canon.str());
-        std::ostringstream hexss;
-        hexss << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
-        oss.str(""); oss.clear();
-        oss << prefix
-            << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-            //<< " hash='" << canon.str() <<"' "
-            << "}";
-        return oss.str();
+    if ((opts.mode == "ll") || (opts.mode == "prp")) {
+    	std::string status = (isPrime ? "P" : "C");
+    } else {
+    	std::string status = (!opts.knownFactors.empty() ? "F" : "NF");
     }
-
-    if (opts.mode == "ecm") {
-        std::ostringstream oss;
-        bool hasFactor = !opts.knownFactors.empty();
-        oss << "{"
-            <<  "\"status\":\"" << (hasFactor ? "F" : "NF") << "\""
-            << ",\"exponent\":" << opts.exponent
-            << ",\"worktype\":\"ECM\"";
-        if (hasFactor) {
-            oss << ",\"factors\":[";
-            for (size_t i = 0; i < opts.knownFactors.size(); ++i) {
-                if (i) oss << ",";
-                oss << jsonEscape(opts.knownFactors[i]);
-            }
-            oss << "]";
-        }
-        oss << ",\"b1\":" << opts.B1;
-        if (opts.B2 > 0) oss << ",\"b2\":" << opts.B2;
-        //uint64_t curves = opts.nmax ? opts.nmax : (opts.K ? opts.K : 0ULL);
-        oss << ",\"curves\":" << opts.curves_tested_for_found;
-        oss << ",\"fft-length\":" << transform_size;
-
-        bool isEdw = opts.edwards;
-        int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
-        oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery")
-            << ",\"torsion-subgroup\":" << torsion;
-        /*if (isEdw) {
-            if (opts.sigma) oss << ",\"Edwards\":{\"sigma\":" << opts.sigma << "}";
-            else oss << ",\"Edwards\":{}";
-        } else {
-            if (opts.sigma) oss << ",\"sigma\":" << opts.sigma;
-        }*/
-        oss << ",\"sigma_hex\":"        << jsonEscape(opts.sigma_hex);
-        oss << ",\"curve_seed\":"       <<            opts.curve_seed;
-        oss << ",\"base_seed\":"        <<            opts.curve_seed;
-
-        oss << ",\"program\":{"
-            <<    "\"name\":\"prmers\""
-            <<   ",\"version\":" << jsonEscape(core::PRMERS_VERSION)
-            <<   ",\"port\":"    <<            opts.portCode
-            << "}"; // close "program"
-        oss << ",\"os\":{"
-            <<   "\"os\":"            << jsonEscape(opts.osName);
-        if (!opts.osArch.empty() && (opts.osArch != "unknown")) {
-            oss << ",\"architecture\":" << jsonEscape(opts.osArch);
-        }
-        oss << "}"; // close "os"
-        if (!opts.user.empty())          oss << ",\"user\":"     << jsonEscape(opts.user);
-        if (!opts.computer_name.empty()) oss << ",\"computer\":" << jsonEscape(opts.computer_name);
-        if (!opts.aid.empty())           oss << ",\"aid\":"      << jsonEscape(opts.aid);
-        oss << ",\"timestamp\":" << jsonEscape(timestampBuf);
-
-        std::string prefix = oss.str();
-        std::ostringstream canon;
-
-        canon << opts.exponent << ";";         // exponent
-        canon << "ECM"         << ";";         // worktype
-        canon << ""            << ";";         // factors (new) *** TODO: this is broken ***
-        canon << ""            << ";";         // known-factors *** TODO: this is broken ***
-        canon << opts.B1 << ";";               // b1
-        if (opts.B2 > 0) canon << opts.B2;     // b2
-        canon << ";";
-
-        if (isEdw) canon << "E";               // sigma
-        if (opts.sigma192) {
-             canon << opts.sigma192;           // *** TODO: not sure where this value comes from ***
-        } else if (opts.sigma) {
-             canon << opts.sigma;
-        }
-        if (torsion > 0) {
-            canon << "_TSG" << torsion;        // torsion-subgroup
-        }
-        canon << ";";
-
-        canon << transform_size << ";";        // fft-length
-        canon << "" << ";";                    // errorsObjectStringified *** TODO: this is broken ***
-        canon << "prmers" << ";";              // program.name
-        canon << core::PRMERS_VERSION << ";";  // program.version
-        canon << "" << ";";                    // program.kernel|program.subversion
-        canon << "" << ";";                    // program.details
-        canon << opts.osName << ";";           // os.os
-        canon << opts.osArch << ";";           // os.architecture
-        canon << timestampBuf;                 // timestamp
-        unsigned int crc = computeCRC32(canon.str());
-        std::ostringstream hexss;
-        hexss << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
-        oss.str(""); oss.clear();
-        oss << prefix
-            << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-            //<< " hash='" << canon.str() <<"' "
-            << "}";
-        return oss.str();
-    }
-
-    std::string status = isPrime ? "P" : "C";
     int residueType = opts.knownFactors.empty() ? 1 : 5;
     return generatePrimeNetJson(
         status,
         opts.exponent,
-        opts.mode == "prp" ? "PRP-3" : "LL",
+        opts.mode,
         res64,
         res2048,
         residueType,
@@ -548,7 +454,6 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.osArch,
         opts.user.empty() ? "" : opts.user,
         opts.aid,
-        opts.uid,
         timestampBuf,
         opts.computer_name,
         opts.knownFactors
@@ -608,6 +513,8 @@ void JsonBuilder::write(const std::string& json,
 }
 
 
+/*
+// James says this is neat code that should NEVER be made available to the public
 
 static bool j_get_str(const std::string& s, const char* key, std::string& out){
     std::string pat = "\\\"" + std::string(key) + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"";
@@ -776,7 +683,6 @@ std::string rewriteChecksumInSubmittedJson(const std::string& json)
     }
     return out;
 }
-
-
+*/
 
 } // namespace io
