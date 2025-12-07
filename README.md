@@ -211,7 +211,7 @@ Lucas–Lehmer modes and safety
 
 PrMers implements three LL variants:
 
-1) **LL (safe)** — `-ll`  
+1) **LL (safe)** - `-ll`  
    - Uses the split representation *s = a + b√3* so each squaring is computed as:
      (a + b√3)^2 = (a^2 + 3b^2) + (2ab)√3.  
      Implemented as four transforms per iteration:  
@@ -223,13 +223,13 @@ PrMers implements three LL variants:
    - **Speed:** safer but slower than the classic LL (more transforms per step).
    - **When to use:** when you need a reliable LL run on GPU.
 
-2) **LL (classic / unsafe)** — `-llunsafe`  
+2) **LL (classic / unsafe)** - `-llunsafe`  
    - Classical recurrence S_0=4; S_{i+1}=S_i^2−2 modulo M_p.  
    - **Error checking:** *none*. Fastest LL but susceptible to silent errors on
      marginal hardware or aggressive overclocks.
    - **When to use:** quick checks / debugging. Prefer PRP or LL safe for proofs.
 
-3) **LL (safe2, doubling)** — `-llsafe2` [optional `-llsafeb <B>`]  
+3) **LL (safe2, doubling)** - `-llsafe2` [optional `-llsafeb <B>`]  
    - Block‑doubling consistency check variant. Work is split into blocks of size *B*
      (by default B≈⌊√p⌋); at block boundaries a
      doubling identity is used to verify progress and roll back on mismatch.
@@ -638,27 +638,27 @@ Credits
 -------
 
 Backend and code
-- **Marin backend** by Yves Gallot — https://github.com/galloty/marin
-- **Integer NTT / IBDWT techniques** — based on ideas discussed by Nick Craig‑Wood
+- **Marin backend** by Yves Gallot - https://github.com/galloty/marin
+- **Integer NTT / IBDWT techniques** - based on ideas discussed by Nick Craig‑Wood
   and others; NTT and IBDWT using arithmetic modulo 2^64 − 2^32 + 1.
 
 Related inspiration and resources
 - GPUOwl (Preda)
 - Genefer22 (Yves Gallot)
 - GIMPS and the Mersenne Forum community
-- **GMP‑ECM** and related elliptic‑curve factoring work — https://gitlab.inria.fr/zimmerma/ecm
+- **GMP‑ECM** and related elliptic‑curve factoring work - https://gitlab.inria.fr/zimmerma/ecm
 - Repositories by Yves Gallot (many useful resources):
   - https://github.com/galloty
   - https://github.com/galloty/f12ecm
   - https://github.com/galloty/FastMultiplication
 - Nick Craig‑Wood:
-  - IOCCC 2012 — https://github.com/ncw/ioccc2012
-  - Armprime — https://github.com/ncw/
-  - ARM Prime Math — https://www.craig-wood.com/nick/armprime/math/
+  - IOCCC 2012 - https://github.com/ncw/ioccc2012
+  - Armprime - https://github.com/ncw/
+  - ARM Prime Math - https://www.craig-wood.com/nick/armprime/math/
 
 Must read papers
 - **An Efficient Modular Exponentiation Proof Scheme** (Gerbicz–Li generalization)  
-  Darren Li, Yves Gallot (arXiv 2209.15623, v2 2023) — https://arxiv.org/abs/2209.15623
+  Darren Li, Yves Gallot (arXiv 2209.15623, v2 2023) - https://arxiv.org/abs/2209.15623
 - **Discrete Weighted Transforms and Large Integer Arithmetic**  
   Richard Crandall, Barry Fagin (1994)
 - **Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers**  
@@ -671,7 +671,7 @@ Must read papers
 Author
 ------
 
-- **cherubrock (Sebastien)** — with contributions and feedback from users on
+- **cherubrock (Sebastien)** - with contributions and feedback from users on
   mersenneforum.org and GitHub.
 
 Bug reports / feature requests / contributions:
