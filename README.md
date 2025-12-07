@@ -710,23 +710,6 @@ Typical ranges seen (power-capped / undervolted in some runs):
 These values may change between PrMers versions or with different OpenCL drivers and power
 limits; treat them as indicative rather than absolute.
 
----
-
-#### Copy-paste dataset (CSV) — for filtering in a spreadsheet
-
-```csv
-GPU,User/System,PRMERS_SCORE,Iter/s @ p≈1.36e8,ETA,Notes
-RTX 5090,Resolver (vast.ai),,2230,~17 h,Auto NTT
-RTX 4090,Resolver,100.00/100,1225,~31 h,Reference score
-RTX 5070 Laptop,beepthebee,62.69/100,356,~4.4–4.6 d,OC +200 core/+500 VRAM
-RTX 4060 Ti,Lorenzo,69.14/100,318,~5 d,Desktop midrange
-RTX 4070 Laptop,Phantomas,52.24/100,255,~6 d,Gaming laptop
-RTX 2060,hwt; Artoria2e5,45.76/100,240–259,~5.9–6.7 d,Some runs undervolted/power-capped
-GTX 1660 Ti,Phantomas (MSI GL73),,234,~6.8 d,Older Turing GPU
-Radeon VII,cherubrock,50.57/100,~350,~4.5 d,Dev reference card
-Apple M4 Pro,wigglefruit,30.29/100,164,~9.6 d,18-core GPU
-Apple M2 (MBA 8 GB),cherubrock,,25,~62 d,Thin-and-light
-```
 
 PrimeNet Integration
 --------------------
