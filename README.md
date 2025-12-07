@@ -57,6 +57,7 @@ Main modes
 
 - **P‑1 factoring**
   - Stage 1 and Stage 2 on N = 2^p − 1.
+  - Stage is error checked with Gerbicz–Li.
   - Targets factors q of N such that q − 1 is B1‑smooth (with Stage 2 extension).
   - **GPU (Marin) only.** Stage 2 supports both the classic prime-sweep and an **n^K (Crandall) variant** (see `-K` and `-nmax`).
   - **Interoperability & resume files** (after Stage 1 or Stage 2, see `-resume` / `-p95`):
