@@ -532,73 +532,6 @@ All runs above:
 
 Your results will vary with clocks, thermals, drivers and PrMers version.
 
-### Example PRP throughput (Marin backend, PRP mode)
-
-Concrete examples for different GPUs/exponents (automatic NTT selection).
-
-**NVIDIA GeForce RTX 5090** (Resolver, vast.ai instance)
-- p = 57,885,161 → ~2350 iter/s (ETA ~6 h 50 m)
-- p = 74,207,281 → ~2230 iter/s (ETA ~9 h 15 m)
-- p = 82,589,933 → ~1970 iter/s (ETA ~11 h 40 m)
-- p = 136,279,841 → ~2230 iter/s (ETA ~17 h)
-
-**AMD Radeon VII** (cherubrock)
-- p = 57,885,161 → ~510 iter/s (ETA ~31 h)
-- p = 74,207,281 → ~436 iter/s (ETA ~48 h)
-- p = 82,589,933 → ~402 iter/s (ETA ~52 h)
-- p = 136,279,841 → ~350 iter/s (ETA ~4.5 days)
-
-**NVIDIA GeForce RTX 4090** (Resolver)
-- p = 57,885,161 → ~1030 iter/s (ETA ~15 h)
-- p = 74,207,281 → ~910 iter/s (ETA ~22 h)
-- p = 82,589,933 → ~840 iter/s (ETA ~27 h)
-- p = 136,279,841 → ~1225 iter/s (ETA ~31 h)
-
-**NVIDIA GeForce RTX 4060 Ti** (Lorenzo)
-- p = 57,885,161 → ~420 iter/s (ETA ~37 h)
-- p = 74,207,281 → ~366 iter/s (ETA ~55 h)
-- p = 82,589,933 → ~337 iter/s (ETA ~59 h)
-- p = 136,279,841 → ~318 iter/s (ETA ~<5 days)
-
-**NVIDIA GeForce RTX 4070 Laptop GPU** (Phantomas)
-- p = 57,885,161 → ~370 iter/s (ETA ~42 h)
-- p = 74,207,281 → ~320 iter/s (ETA ~63 h)
-- p = 82,589,933 → ~283 iter/s (ETA ~71 h)
-- p = 136,279,841 → ~255 iter/s (ETA ~6+ days)
-
-**NVIDIA GeForce GTX 1660 Ti** (Phantomas, MSI GL73)
-- p = 57,885,161 → ~330 iter/s (ETA ~47 h)
-- p = 74,207,281 → ~288 iter/s (ETA ~69 h)
-- p = 82,589,933 → ~262 iter/s (ETA ~76 h)
-- p = 136,279,841 → ~234 iter/s (ETA ~6.8 days)
-
-**NVIDIA GeForce RTX 2060** (hwt; Artoria2e5)
-- p = 57,885,161 → ~491–502 iter/s (ETA ≈ 1 d 7 h – 1 d 20 h)
-- p = 74,207,281 → ~499 iter/s (ETA ≈ 1 d 16 h)
-- p = 82,589,933 → ~499–502 iter/s (ETA ≈ 1 d 15 h – 1 d 20 h)
-- p = 136,279,841 → ~240–259 iter/s (ETA ≈ 5 d 21 h – 6 d 18 h)
-
-**NVIDIA GeForce RTX 5070 Laptop** (beepthebee, OC: +200 MHz core, +500 MHz VRAM)
-- p = 57,885,161 → ~858 iter/s (ETA ~18 h 45 m)
-- p = 74,207,281 → ~882 iter/s (ETA ~1 d 0 h)
-- p = 82,589,933 → ~875 iter/s (ETA ~1 d 2 h)
-- p = 136,279,841 → ~356 iter/s (ETA ~4 d 10 h)
-
-**Apple M4 Pro** (wigglefruit)
-- p = 57,885,161 → ~264 iter/s (ETA ~58 h)
-- p = 74,207,281 → ~231 iter/s (ETA ~87 h)
-- p = 82,589,933 → ~213 iter/s (ETA ~94 h)
-- p = 136,279,841 → ~164 iter/s (ETA ~9.6 days)
-
-**Apple M2 (MacBook Air 8 GB)** (cherubrock)
-- p = 57,885,161 → ~42 iter/s (ETA ~15 h)
-- p = 74,207,281 → ~38 iter/s (ETA ~25 h)
-- p = 82,589,933 → ~32 iter/s (ETA ~29 h)
-- p = 136,279,841 → ~25 iter/s (ETA ~62 days)
-
-(Values may change with PrMers versions, drivers and power limits.)
-
-
 PrimeNet Integration
 --------------------
 
@@ -634,46 +567,204 @@ Uninstall installed files:
     sudo make uninstall
 
 
-Credits
--------
-
 Backend and code
-- **Marin backend** by Yves Gallot - https://github.com/galloty/marin
-- **Integer NTT / IBDWT techniques** - based on ideas discussed by Nick Craig‑Wood
-  and others; NTT and IBDWT using arithmetic modulo 2^64 − 2^32 + 1.
+----------------
 
-Related inspiration and resources
-- GPUOwl (Preda)
-- Genefer22 (Yves Gallot)
-- GIMPS and the Mersenne Forum community
-- **GMP‑ECM** and related elliptic‑curve factoring work - https://gitlab.inria.fr/zimmerma/ecm
-- Repositories by Yves Gallot (many useful resources):
-  - https://github.com/galloty
-  - https://github.com/galloty/f12ecm
+- Marin backend by Yves Gallot  
+  - https://github.com/galloty/marin
+
+- Integer NTT / IBDWT techniques  
+  - Based on ideas discussed by Nick Craig-Wood and others in the context of
+    modular arithmetic for Mersenne numbers. In particular, NTT and IBDWT
+    using modular arithmetic modulo 2^64 - 2^32 + 1.
+
+- Gerbicz-Li proof scheme  
+  - Used for PRP error checking in PrMers (see the paper in the "Must read papers"
+    section below).
+
+Related inspiration
+-------------------
+
+- GPUOwl (Preda)  
+- Genefer22 (Yves Gallot)  
+- GIMPS and the Mersenne Forum community  
+- GMP-ECM and related work on elliptic curve factoring:  
+  - https://gitlab.inria.fr/zimmerma/ecm
+
+- Repositories by Yves Gallot containing many useful resources:  
+  - https://github.com/galloty  
+  - https://github.com/galloty/f12ecm  
   - https://github.com/galloty/FastMultiplication
-- Nick Craig‑Wood:
-  - IOCCC 2012 - https://github.com/ncw/ioccc2012
-  - Armprime - https://github.com/ncw/
-  - ARM Prime Math - https://www.craig-wood.com/nick/armprime/math/
+
+- Work by Nick Craig-Wood:  
+  - IOCCC 2012 entry: https://github.com/ncw/ioccc2012  
+  - Armprime project: https://github.com/ncw/  
+  - ARM Prime Math (background on the math behind Armprime):  
+    https://www.craig-wood.com/nick/armprime/math/
 
 Must read papers
-- **An Efficient Modular Exponentiation Proof Scheme** (Gerbicz–Li generalization)  
-  Darren Li, Yves Gallot (arXiv 2209.15623, v2 2023) - https://arxiv.org/abs/2209.15623
-- **Discrete Weighted Transforms and Large Integer Arithmetic**  
-  Richard Crandall, Barry Fagin (1994)
-- **Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers**  
-  Colin Percival (2002)
-- **An FFT Extension to the P‑1 Factoring Algorithm**  
-  Peter L. Montgomery, Robert D. Silverman (1990)
-- **Improved Stage 2 to P±1 Factoring Algorithms**  
-  Peter L. Montgomery, Alexander Kruppa (2008)
+----------------
+
+### Multiplication by FFT
+
+- Discrete Weighted Transforms and Large Integer Arithmetic  
+  Richard Crandall and Barry Fagin, 1994  
+  https://www.ams.org/journals/mcom/1994-62-205/S0025-5718-1994-1185244-1/S0025-5718-1994-1185244-1.pdf
+
+- Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers  
+  Colin Percival, 2002  
+  https://www.daemonology.net/papers/fft.pdf
+
+### P-1 factoring
+
+- An FFT Extension to the P-1 Factoring Algorithm  
+  Peter L. Montgomery and Robert D. Silverman, 1990  
+  https://www.ams.org/journals/mcom/1990-54-190/S0025-5718-1990-1011444-3/S0025-5718-1990-1011444-3.pdf
+
+- Improved Stage 2 to P+/-1 Factoring Algorithms  
+  Peter L. Montgomery and Alexander Kruppa, 2008  
+  https://inria.hal.science/inria-00188192v3/document
+
+### Proof schemes (Gerbicz-Li)
+
+- An Efficient Modular Exponentiation Proof Scheme  
+  Darren Li, Yves Gallot, 2022–2023  
+  arXiv: https://arxiv.org/abs/2209.15623  
+
+  Presents an efficient proof scheme for left-to-right modular exponentiation,
+  generalizing the Gerbicz-Pietrzak approach to arbitrary exponents. It allows
+  an = r (mod m) to be proven with overhead negligible compared to the
+  exponentiation itself and has been deployed at PrimeGrid to validate long
+  runs.
 
 Author
 ------
 
-- **cherubrock (Sebastien)** - with contributions and feedback from users on
+Author of PrMers:
+
+- cherubrock (Sebastien), with contributions and feedback from users on
   mersenneforum.org and GitHub.
 
-Bug reports / feature requests / contributions:
+For bug reports, feature requests, or contributions, please use:
 
     https://github.com/cherubrock-seb/PrMers/issues
+
+
+    ### Example PRP throughput (Marin backend, PRP mode)
+
+Below are some concrete examples for different GPUs and exponents. All are for
+Mersenne numbers M_p = 2^p − 1 in PRP mode.
+
+#### NVIDIA GeForce RTX 5090 (Resolver, vast.ai instance)
+
+Transform sizes were chosen automatically by PrMers.
+
+- p = 57 885 161, NTT size 8  
+  - About 2350 iter/s, ETA around 6 h 50 min.
+- p = 74 207 281, NTT size 8  
+  - About 2230 iter/s, ETA around 9 h 15 min.
+- p = 82 589 933, NTT size 8  
+  - About 1970 iter/s, ETA around 11 h 40 min.
+- p = 136 279 841, NTT size 8  
+  - About 2230 iter/s, ETA around 17 h.
+
+#### AMD Radeon VII (cherubrock, local dev machine)
+
+- p = 57 885 161, NTT size 8  
+  - About 510 iter/s, ETA around 31 h.
+- p = 74 207 281, NTT size 8  
+  - About 436 iter/s, ETA around 48 h.
+- p = 82 589 933, NTT size 8  
+  - About 402 iter/s, ETA around 52 h.
+- p = 136 279 841, NTT size 8  
+  - About 350 iter/s, ETA around 4.5 days.
+
+#### NVIDIA GeForce RTX 4090 (Resolver)
+
+- p = 57 885 161, NTT size 8  
+  - About 1030 iter/s, ETA around 15 h.
+- p = 74 207 281, NTT size 8  
+  - About 910 iter/s, ETA around 22 h.
+- p = 82 589 933, NTT size 8  
+  - About 840 iter/s, ETA around 27 h.
+- p = 136 279 841, NTT size 8  
+  - About 1225 iter/s, ETA around 31 h.
+
+#### NVIDIA GeForce RTX 4060 Ti (Lorenzo)
+
+- p = 57 885 161, NTT size 8  
+  - About 420 iter/s, ETA around 37 h.
+- p = 74 207 281, NTT size 8  
+  - About 366 iter/s, ETA around 55 h.
+- p = 82 589 933, NTT size 8  
+  - About 337 iter/s, ETA around 59 h.
+- p = 136 279 841, NTT size 8  
+  - About 318 iter/s, ETA just under 5 days.
+
+#### NVIDIA GeForce RTX 4070 Laptop GPU (Phantomas)
+
+- p = 57 885 161, NTT size 8  
+  - About 370 iter/s, ETA around 42 h.
+- p = 74 207 281, NTT size 8  
+  - About 320 iter/s, ETA around 63 h.
+- p = 82 589 933, NTT size 8  
+  - About 283 iter/s, ETA around 71 h.
+- p = 136 279 841, NTT size 8  
+  - About 255 iter/s, ETA a bit over 6 days.
+
+#### NVIDIA GeForce GTX 1660 Ti (Phantomas, MSI GL73 notebook)
+
+- p = 57 885 161, NTT size 8  
+  - About 330 iter/s, ETA around 47 h.
+- p = 74 207 281, NTT size 8  
+  - About 288 iter/s, ETA around 69 h.
+- p = 82 589 933, NTT size 8  
+  - About 262 iter/s, ETA around 76 h.
+- p = 136 279 841, NTT size 8  
+  - About 234 iter/s, ETA around 6.8 days.
+
+#### NVIDIA GeForce RTX 2060 (hwt; Artoria2e5)
+
+Typical ranges seen (power-capped / undervolted in some runs):
+
+- p = 57 885 161  
+  - ≈ 491–502 iter/s, ETA ≈ 1 d 7 h – 1 d 20 h.
+- p = 74 207 281  
+  - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
+- p = 82 589 933  
+  - ≈ 499–502 iter/s, ETA ≈ 1 d 15 h – 1 d 20 h.
+- p = 136 279 841  
+  - ≈ 240–259 iter/s, ETA ≈ 5 d 21 h – 6 d 18 h.
+
+#### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
+
+- p = 57 885 161, NTT size 8  
+  - About 858 iter/s, ETA around 18 h 45 min.
+- p = 74 207 281, NTT size 8  
+  - About 882 iter/s, ETA around 1 d 0 h.
+- p = 82 589 933, NTT size 8  
+  - About 875 iter/s, ETA around 1 d 2 h.
+- p = 136 279 841, NTT size 8  
+  - About 356 iter/s, ETA around 4 d 10 h.
+
+#### Apple M4 Pro (wigglefruit)
+
+- p = 57 885 161, NTT size 8  
+  - About 264 iter/s, ETA around 58 h.
+- p = 74 207 281, NTT size 8  
+  - About 231 iter/s, ETA around 87 h.
+- p = 82 589 933, NTT size 8  
+  - About 213 iter/s, ETA around 94 h.
+- p = 136 279 841, NTT size 8  
+  - About 164 iter/s, ETA around 9.6 days.
+
+#### Apple M2 (MacBook Air 8 GB, cherubrock)
+
+- p = 57 885 161, NTT size 8  
+  - About 42 iter/s, ETA around 15 h.
+- p = 74 207 281, NTT size 8  
+  - About 38 iter/s, ETA around 25 h.
+- p = 82 589 933, NTT size 8  
+  - About 32 iter/s, ETA around 29 h.
+- p = 136 279 841, NTT size 8  
+  - About 25 iter/s, ETA around 62 days.
