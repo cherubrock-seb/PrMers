@@ -588,125 +588,6 @@ All runs above:
 Your own results will differ depending on clocks, thermals, drivers, and PrMers
 version.
 
-### Example PRP throughput (Marin backend, PRP mode)
-
-Below are some concrete examples for different GPUs and exponents. All are for
-Mersenne numbers M_p = 2^p − 1 in PRP mode.
-
-#### NVIDIA GeForce RTX 5090 (Resolver, vast.ai instance)
-
-Transform sizes were chosen automatically by PrMers.
-
-- p = 57 885 161, NTT size 8  
-  - About 2350 iter/s, ETA around 6 h 50 min.
-- p = 74 207 281, NTT size 8  
-  - About 2230 iter/s, ETA around 9 h 15 min.
-- p = 82 589 933, NTT size 8  
-  - About 1970 iter/s, ETA around 11 h 40 min.
-- p = 136 279 841, NTT size 8  
-  - About 2230 iter/s, ETA around 17 h.
-
-#### AMD Radeon VII (cherubrock, local dev machine)
-
-- p = 57 885 161, NTT size 8  
-  - About 510 iter/s, ETA around 31 h.
-- p = 74 207 281, NTT size 8  
-  - About 436 iter/s, ETA around 48 h.
-- p = 82 589 933, NTT size 8  
-  - About 402 iter/s, ETA around 52 h.
-- p = 136 279 841, NTT size 8  
-  - About 350 iter/s, ETA around 4.5 days.
-
-#### NVIDIA GeForce RTX 4090 (Resolver)
-
-- p = 57 885 161, NTT size 8  
-  - About 1030 iter/s, ETA around 15 h.
-- p = 74 207 281, NTT size 8  
-  - About 910 iter/s, ETA around 22 h.
-- p = 82 589 933, NTT size 8  
-  - About 840 iter/s, ETA around 27 h.
-- p = 136 279 841, NTT size 8  
-  - About 1225 iter/s, ETA around 31 h.
-
-#### NVIDIA GeForce RTX 4060 Ti (Lorenzo)
-
-- p = 57 885 161, NTT size 8  
-  - About 420 iter/s, ETA around 37 h.
-- p = 74 207 281, NTT size 8  
-  - About 366 iter/s, ETA around 55 h.
-- p = 82 589 933, NTT size 8  
-  - About 337 iter/s, ETA around 59 h.
-- p = 136 279 841, NTT size 8  
-  - About 318 iter/s, ETA just under 5 days.
-
-#### NVIDIA GeForce RTX 4070 Laptop GPU (Phantomas)
-
-- p = 57 885 161, NTT size 8  
-  - About 370 iter/s, ETA around 42 h.
-- p = 74 207 281, NTT size 8  
-  - About 320 iter/s, ETA around 63 h.
-- p = 82 589 933, NTT size 8  
-  - About 283 iter/s, ETA around 71 h.
-- p = 136 279 841, NTT size 8  
-  - About 255 iter/s, ETA a bit over 6 days.
-
-#### NVIDIA GeForce GTX 1660 Ti (Phantomas, MSI GL73 notebook)
-
-- p = 57 885 161, NTT size 8  
-  - About 330 iter/s, ETA around 47 h.
-- p = 74 207 281, NTT size 8  
-  - About 288 iter/s, ETA around 69 h.
-- p = 82 589 933, NTT size 8  
-  - About 262 iter/s, ETA around 76 h.
-- p = 136 279 841, NTT size 8  
-  - About 234 iter/s, ETA around 6.8 days.
-
-#### NVIDIA GeForce RTX 2060 (hwt; Artoria2e5)
-
-Typical ranges seen (power-capped / undervolted in some runs):
-
-- p = 57 885 161  
-  - ≈ 491–502 iter/s, ETA ≈ 1 d 7 h – 1 d 20 h.
-- p = 74 207 281  
-  - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
-- p = 82 589 933  
-  - ≈ 499–502 iter/s, ETA ≈ 1 d 15 h – 1 d 20 h.
-- p = 136 279 841  
-  - ≈ 240–259 iter/s, ETA ≈ 5 d 21 h – 6 d 18 h.
-
-#### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
-
-- p = 57 885 161, NTT size 8  
-  - About 858 iter/s, ETA around 18 h 45 min.
-- p = 74 207 281, NTT size 8  
-  - About 882 iter/s, ETA around 1 d 0 h.
-- p = 82 589 933, NTT size 8  
-  - About 875 iter/s, ETA around 1 d 2 h.
-- p = 136 279 841, NTT size 8  
-  - About 356 iter/s, ETA around 4 d 10 h.
-
-#### Apple M4 Pro (wigglefruit)
-
-- p = 57 885 161, NTT size 8  
-  - About 264 iter/s, ETA around 58 h.
-- p = 74 207 281, NTT size 8  
-  - About 231 iter/s, ETA around 87 h.
-- p = 82 589 933, NTT size 8  
-  - About 213 iter/s, ETA around 94 h.
-- p = 136 279 841, NTT size 8  
-  - About 164 iter/s, ETA around 9.6 days.
-
-#### Apple M2 (MacBook Air 8 GB, cherubrock)
-
-- p = 57 885 161, NTT size 8  
-  - About 42 iter/s, ETA around 15 h.
-- p = 74 207 281, NTT size 8  
-  - About 38 iter/s, ETA around 25 h.
-- p = 82 589 933, NTT size 8  
-  - About 32 iter/s, ETA around 29 h.
-- p = 136 279 841, NTT size 8  
-  - About 25 iter/s, ETA around 62 days.
-
 These values may change between PrMers versions or with different OpenCL drivers and power
 limits; treat them as indicative rather than absolute.
 
@@ -846,3 +727,123 @@ Author of PrMers:
 For bug reports, feature requests, or contributions, please use:
 
     https://github.com/cherubrock-seb/PrMers/issues
+
+
+    ### Example PRP throughput (Marin backend, PRP mode)
+
+Below are some concrete examples for different GPUs and exponents. All are for
+Mersenne numbers M_p = 2^p − 1 in PRP mode.
+
+#### NVIDIA GeForce RTX 5090 (Resolver, vast.ai instance)
+
+Transform sizes were chosen automatically by PrMers.
+
+- p = 57 885 161, NTT size 8  
+  - About 2350 iter/s, ETA around 6 h 50 min.
+- p = 74 207 281, NTT size 8  
+  - About 2230 iter/s, ETA around 9 h 15 min.
+- p = 82 589 933, NTT size 8  
+  - About 1970 iter/s, ETA around 11 h 40 min.
+- p = 136 279 841, NTT size 8  
+  - About 2230 iter/s, ETA around 17 h.
+
+#### AMD Radeon VII (cherubrock, local dev machine)
+
+- p = 57 885 161, NTT size 8  
+  - About 510 iter/s, ETA around 31 h.
+- p = 74 207 281, NTT size 8  
+  - About 436 iter/s, ETA around 48 h.
+- p = 82 589 933, NTT size 8  
+  - About 402 iter/s, ETA around 52 h.
+- p = 136 279 841, NTT size 8  
+  - About 350 iter/s, ETA around 4.5 days.
+
+#### NVIDIA GeForce RTX 4090 (Resolver)
+
+- p = 57 885 161, NTT size 8  
+  - About 1030 iter/s, ETA around 15 h.
+- p = 74 207 281, NTT size 8  
+  - About 910 iter/s, ETA around 22 h.
+- p = 82 589 933, NTT size 8  
+  - About 840 iter/s, ETA around 27 h.
+- p = 136 279 841, NTT size 8  
+  - About 1225 iter/s, ETA around 31 h.
+
+#### NVIDIA GeForce RTX 4060 Ti (Lorenzo)
+
+- p = 57 885 161, NTT size 8  
+  - About 420 iter/s, ETA around 37 h.
+- p = 74 207 281, NTT size 8  
+  - About 366 iter/s, ETA around 55 h.
+- p = 82 589 933, NTT size 8  
+  - About 337 iter/s, ETA around 59 h.
+- p = 136 279 841, NTT size 8  
+  - About 318 iter/s, ETA just under 5 days.
+
+#### NVIDIA GeForce RTX 4070 Laptop GPU (Phantomas)
+
+- p = 57 885 161, NTT size 8  
+  - About 370 iter/s, ETA around 42 h.
+- p = 74 207 281, NTT size 8  
+  - About 320 iter/s, ETA around 63 h.
+- p = 82 589 933, NTT size 8  
+  - About 283 iter/s, ETA around 71 h.
+- p = 136 279 841, NTT size 8  
+  - About 255 iter/s, ETA a bit over 6 days.
+
+#### NVIDIA GeForce GTX 1660 Ti (Phantomas, MSI GL73 notebook)
+
+- p = 57 885 161, NTT size 8  
+  - About 330 iter/s, ETA around 47 h.
+- p = 74 207 281, NTT size 8  
+  - About 288 iter/s, ETA around 69 h.
+- p = 82 589 933, NTT size 8  
+  - About 262 iter/s, ETA around 76 h.
+- p = 136 279 841, NTT size 8  
+  - About 234 iter/s, ETA around 6.8 days.
+
+#### NVIDIA GeForce RTX 2060 (hwt; Artoria2e5)
+
+Typical ranges seen (power-capped / undervolted in some runs):
+
+- p = 57 885 161  
+  - ≈ 491–502 iter/s, ETA ≈ 1 d 7 h – 1 d 20 h.
+- p = 74 207 281  
+  - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
+- p = 82 589 933  
+  - ≈ 499–502 iter/s, ETA ≈ 1 d 15 h – 1 d 20 h.
+- p = 136 279 841  
+  - ≈ 240–259 iter/s, ETA ≈ 5 d 21 h – 6 d 18 h.
+
+#### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
+
+- p = 57 885 161, NTT size 8  
+  - About 858 iter/s, ETA around 18 h 45 min.
+- p = 74 207 281, NTT size 8  
+  - About 882 iter/s, ETA around 1 d 0 h.
+- p = 82 589 933, NTT size 8  
+  - About 875 iter/s, ETA around 1 d 2 h.
+- p = 136 279 841, NTT size 8  
+  - About 356 iter/s, ETA around 4 d 10 h.
+
+#### Apple M4 Pro (wigglefruit)
+
+- p = 57 885 161, NTT size 8  
+  - About 264 iter/s, ETA around 58 h.
+- p = 74 207 281, NTT size 8  
+  - About 231 iter/s, ETA around 87 h.
+- p = 82 589 933, NTT size 8  
+  - About 213 iter/s, ETA around 94 h.
+- p = 136 279 841, NTT size 8  
+  - About 164 iter/s, ETA around 9.6 days.
+
+#### Apple M2 (MacBook Air 8 GB, cherubrock)
+
+- p = 57 885 161, NTT size 8  
+  - About 42 iter/s, ETA around 15 h.
+- p = 74 207 281, NTT size 8  
+  - About 38 iter/s, ETA around 25 h.
+- p = 82 589 933, NTT size 8  
+  - About 32 iter/s, ETA around 29 h.
+- p = 136 279 841, NTT size 8  
+  - About 25 iter/s, ETA around 62 days.
