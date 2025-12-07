@@ -566,16 +566,18 @@ discussion:
 The table below compares the PRP throughput for a single large Mersenne
 exponent (p = 136 279 841) in PRP mode. Values are approximate.
 
-| GPU                                       | User / system           | PRMERS_SCORE | Iter/s @ p ≈ 1.36e8 | Approx PRP ETA | Notes                            |
-|-------------------------------------------|-------------------------|--------------|---------------------|----------------|----------------------------------|
-| NVIDIA GeForce RTX 5090                   | Resolver (vast.ai)      | n/a          | ≈ 2230              | ≈ 17 h         | High-end NVIDIA Ada/Blackwell    |
-| NVIDIA GeForce RTX 4090                   | Resolver                | 100.00/100   | ≈ 1225              | ≈ 31 h         | Reference 100/100 score          |
-| NVIDIA GeForce RTX 4060 Ti                | Lorenzo                 | 69.14/100    | ≈ 318               | ≈ 5 days       | Desktop midrange                 |
-| NVIDIA GeForce RTX 4070 Laptop GPU        | Phantomas              | 52.24/100    | ≈ 255               | ≈ 6 days       | Gaming laptop GPU                |
-| NVIDIA GeForce GTX 1660 Ti                | Phantomas              | n/a          | ≈ 234               | ≈ 6.8 days     | Older Turing GPU                 |
-| AMD Radeon VII                            | cherubrock (author)     | 50.57/100    | ≈ 353               | ≈ 4.5 days     | Reference dev card               |
-| Apple M4 Pro (Mac mini / MacBook)         | wigglefruit             | 30.29/100    | ≈ 164               | ≈ 9.6 days     | Apple silicon, 18-core GPU       |
-| Apple M2 (MacBook Air, 8 GB unified RAM)  | cherubrock (author)     | n/a          | ≈ 25                | ≈ 62 days      | Thin-and-light laptop            |
+| GPU                                       | User / system                | PRMERS_SCORE | Iter/s @ p ≈ 1.36e8 | Approx PRP ETA | Notes                                  |
+|-------------------------------------------|------------------------------|--------------|---------------------|----------------|----------------------------------------|
+| NVIDIA GeForce RTX 5090                   | Resolver (vast.ai)           | n/a          | ≈ 2230              | ≈ 17 h         | High-end NVIDIA Ada/Blackwell          |
+| NVIDIA GeForce RTX 4090                   | Resolver                     | 100.00/100   | ≈ 1225              | ≈ 31 h         | Reference 100/100 score                |
+| NVIDIA GeForce RTX 5070 Laptop            | beepthebee                   | 62.69/100    | ≈ 356               | ≈ 4.4–4.6 days | +200 MHz core, +500 MHz VRAM (OC)      |
+| NVIDIA GeForce RTX 4060 Ti                | Lorenzo                      | 69.14/100    | ≈ 318               | ≈ 5 days       | Desktop midrange                       |
+| NVIDIA GeForce RTX 4070 Laptop GPU        | Phantomas                    | 52.24/100    | ≈ 255               | ≈ 6 days       | Gaming laptop GPU                      |
+| NVIDIA GeForce RTX 2060                   | hwt, Artoria2e5              | 45.76/100    | ≈ 240–259           | ≈ 5.9–6.7 days | Undervolt / power cap in some reports  |
+| NVIDIA GeForce GTX 1660 Ti                | Phantomas (MSI GL73)         | n/a          | ≈ 234               | ≈ 6.8 days     | Older Turing GPU                       |
+| AMD Radeon VII                            | cherubrock (author)          | 50.57/100    | ≈ 350               | ≈ 4.5 days     | Reference dev card                     |
+| Apple M4 Pro (Mac mini / MacBook)         | wigglefruit                  | 30.29/100    | ≈ 164               | ≈ 9.6 days     | Apple silicon, 18-core GPU             |
+| Apple M2 (MacBook Air, 8 GB unified RAM)  | cherubrock (author)          | n/a          | ≈ 25                | ≈ 62 days      | Thin-and-light laptop                  |
 
 All runs above:
 
@@ -659,6 +661,30 @@ Transform sizes were chosen automatically by PrMers.
 - p = 136 279 841, NTT size 8  
   - About 234 iter/s, ETA around 6.8 days.
 
+#### NVIDIA GeForce RTX 2060 (hwt; Artoria2e5)
+
+Typical ranges seen (power-capped / undervolted in some runs):
+
+- p = 57 885 161  
+  - ≈ 491–502 iter/s, ETA ≈ 1 d 7 h – 1 d 20 h.
+- p = 74 207 281  
+  - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
+- p = 82 589 933  
+  - ≈ 499–502 iter/s, ETA ≈ 1 d 15 h – 1 d 20 h.
+- p = 136 279 841  
+  - ≈ 240–259 iter/s, ETA ≈ 5 d 21 h – 6 d 18 h.
+
+#### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
+
+- p = 57 885 161, NTT size 8  
+  - About 858 iter/s, ETA around 18 h 45 min.
+- p = 74 207 281, NTT size 8  
+  - About 882 iter/s, ETA around 1 d 0 h.
+- p = 82 589 933, NTT size 8  
+  - About 875 iter/s, ETA around 1 d 2 h.
+- p = 136 279 841, NTT size 8  
+  - About 356 iter/s, ETA around 4 d 10 h.
+
 #### Apple M4 Pro (wigglefruit)
 
 - p = 57 885 161, NTT size 8  
@@ -683,6 +709,24 @@ Transform sizes were chosen automatically by PrMers.
 
 These values may change between PrMers versions or with different OpenCL drivers and power
 limits; treat them as indicative rather than absolute.
+
+---
+
+#### Copy-paste dataset (CSV) — for filtering in a spreadsheet
+
+```csv
+GPU,User/System,PRMERS_SCORE,Iter/s @ p≈1.36e8,ETA,Notes
+RTX 5090,Resolver (vast.ai),,2230,~17 h,Auto NTT
+RTX 4090,Resolver,100.00/100,1225,~31 h,Reference score
+RTX 5070 Laptop,beepthebee,62.69/100,356,~4.4–4.6 d,OC +200 core/+500 VRAM
+RTX 4060 Ti,Lorenzo,69.14/100,318,~5 d,Desktop midrange
+RTX 4070 Laptop,Phantomas,52.24/100,255,~6 d,Gaming laptop
+RTX 2060,hwt; Artoria2e5,45.76/100,240–259,~5.9–6.7 d,Some runs undervolted/power-capped
+GTX 1660 Ti,Phantomas (MSI GL73),,234,~6.8 d,Older Turing GPU
+Radeon VII,cherubrock,50.57/100,~350,~4.5 d,Dev reference card
+Apple M4 Pro,wigglefruit,30.29/100,164,~9.6 d,18-core GPU
+Apple M2 (MBA 8 GB),cherubrock,,25,~62 d,Thin-and-light
+```
 
 PrimeNet Integration
 --------------------
