@@ -55,7 +55,7 @@ Main computational modes
     mainly selected via `-ll`, `-llunsafe`, `-llsafe2`. See `./prmers -h` for details.
 
 - P-1 factoring
-  - Stage 1 and Stage 2, with optional Stage 3.
+  - Stage 1 and Stage 2.
   - Targets factors q of 2^p - 1 with q - 1 having small prime factors.
   - Supports various implementations (Marin-based GPU, GMP-based CPU polynomial code).
 
