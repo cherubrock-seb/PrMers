@@ -19,7 +19,6 @@
 #include "core/Logger.hpp"
 #include "util/Timer.hpp"
 #include "io/JsonBuilder.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include <memory>
 #include <optional>

@@ -34,6 +34,7 @@ struct CliOptions {
     uint64_t B1old = 0;
     uint64_t B1_new = 0;
     uint64_t B2 = 0;
+    uint64_t B4 = 1;
     uint64_t checklevel = 0;
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;

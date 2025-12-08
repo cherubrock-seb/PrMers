@@ -10,7 +10,6 @@
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
@@ -964,7 +963,7 @@ int App::runPrpOrLl() {
         json,
         isPrime
     );
-    bool skippedSubmission = false;
+/*    bool skippedSubmission = false;
 
     if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
@@ -1005,7 +1004,7 @@ int App::runPrpOrLl() {
                 }
             }
         }
-    }
+    }*/
 
 
     backupManager.clearState();

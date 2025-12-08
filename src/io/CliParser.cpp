@@ -69,10 +69,10 @@ void printUsage(const char* progName) {
     //std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;
     //std::cout << "  -l3 <value>          : (Optional) Force local size for mixed radix NTT kernel" << std::endl;
-    std::cout << "  -submit              : (Optional) activate the possibility to send results to PrimeNet (prompt or autosend)" << std::endl;
+    //std::cout << "  -submit              : (Optional) activate the possibility to send results to PrimeNet (prompt or autosend)" << std::endl;
     std::cout << "  --noask              : (Optional) Automatically send results to PrimeNet without prompting" << std::endl;
-    std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
-    std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
+    //std::cout << "  -user <username>     : (Optional) PrimeNet username to auto-fill during result submission" << std::endl;
+    //std::cout << "  -password <password> : (Optional) PrimeNet password to autosubmit the result without prompt (used only when -no-ask is set)" << std::endl;
     std::cout << "  -computer <name>     : (Optional) PrimeNet computer name to auto-fill the result submission" << std::endl;
     std::cout << "  -worktodo <path>     : (Optional) Load exponent from specified worktodo.txt (default: ./worktodo.txt)" << std::endl;
     std::cout << "  -config <path>       : (Optional) Load config file from specified path" << std::endl;

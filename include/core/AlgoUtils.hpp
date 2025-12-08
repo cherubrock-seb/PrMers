@@ -15,7 +15,6 @@
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"

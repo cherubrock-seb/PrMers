@@ -7,8 +7,7 @@ testing of Mersenne numbers. It uses OpenCL and an integer NTT / IBDWT engine mo
 
     p = 2^64 − 2^32 + 1
 
-and is designed for long, reliable runs with checkpointing and optional PrimeNet
-submission.
+and is designed for long, reliable runs with checkpointing.
 
 The project also supports PRP tests of cofactors and Wagstaff numbers, and includes
 a web-based GUI and a GPU VRAM tester.
@@ -77,7 +76,6 @@ Requirements
 
 - OpenCL 1.2 runtime (OpenCL 2.0 recommended) and a supported GPU.
 - C++20 compiler (g++/clang++ on Linux/macOS; MSVC or MinGW on Windows).
-- libcurl (PrimeNet HTTP client).
 - GMP (ECM and CPU‑side helpers).
 
 Debian/Ubuntu packages:
@@ -85,7 +83,6 @@ Debian/Ubuntu packages:
     sudo apt-get update
     sudo apt-get install -y g++ make \
         ocl-icd-opencl-dev opencl-headers \
-        libcurl4-openssl-dev \
         libgmp-dev
 
 
@@ -120,7 +117,6 @@ Windows with CMake + vcpkg (recommended)
     git clone https://github.com/microsoft/vcpkg.git
     cd vcpkg
     .\bootstrap-vcpkg.bat
-    .\vcpkg install curl:x64-windows
     cd ..
 
     cmake -S . -B build ^
@@ -140,8 +136,7 @@ Windows with MSYS2 / MinGW (UCRT64)
         mingw-w64-ucrt-x86_64-gcc \
         mingw-w64-ucrt-x86_64-opencl-headers \
         mingw-w64-ucrt-x86_64-opencl-icd-loader \
-        mingw-w64-ucrt-x86_64-gmp \
-        mingw-w64-ucrt-x86_64-curl
+        mingw-w64-ucrt-x86_64-gmp
 
 - Build:
 
@@ -298,13 +293,6 @@ ECM
 Checkpoints and backup
 - `-t <sec>`              Checkpoint interval (default: 120s).
 - `-f <path>`             Directory for checkpoints (default: current).
-
-PrimeNet / JSON
-- `-submit`               Enable auto‑submission to mersenne.org.
-- `--noask`               Submit without prompting.
-- `-user <name>`          PrimeNet username.
-- `-password <pwd>`       PrimeNet password (with `--noask`).
-- `-computer <name>`      Computer name (PrimeNet).
 
 Worktodo / config
 - `-worktodo [path]`      Read GIMPS‑style `worktodo.txt` (first PRP= line).
@@ -532,29 +520,6 @@ All runs above:
 - were executed with reasonably tuned (not extreme) power settings.
 
 Your results will vary with clocks, thermals, drivers and PrMers version.
-
-PrimeNet Integration
---------------------
-
-When a test finishes, PrMers writes a JSON file containing status, exponent,
-worktype (PRP‑3, PM1, ECM, LL, …), residues (res64, res2048), errors (Gerbicz),
-transform size, program/version, OS and checksum. Example filename:
-
-    100003_prp_result.json
-
-Results are also appended to `results.txt`.
-
-If `-submit` and proper credentials are provided, PrMers can log in to
-mersenne.org and send results automatically, e.g.:
-
-    ./prmers -worktodo ./worktodo.txt \
-             -submit --noask \
-             -user my_login \
-             -password my_password
-
-If a result JSON remains unsent (e.g. after exit), PrMers will detect it at the
-next startup and ask whether to submit.
-
 
 Cleaning and Uninstall
 ----------------------

@@ -10,7 +10,6 @@
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
@@ -342,7 +341,7 @@ int App::runLlSafeMarinDoubling()
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), is_prime, res64_hex, res2048_hex);
     Printer::finalReport(options, elapsed_time, json, is_prime);
 
-    if (options.submit && !options.gui) {
+    /*if (options.submit && !options.gui) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
         if (noAsk && options.password.empty()) {
             std::cerr << "No password provided with --noask; skipping submission.\n";
@@ -373,7 +372,7 @@ int App::runLlSafeMarinDoubling()
                 }
             }
         }
-    }
+    }*/
 
     delete_checkpoints(options.exponent, options.wagstaff, true, true);
     delete eng;

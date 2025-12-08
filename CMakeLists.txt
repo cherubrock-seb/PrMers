@@ -10,11 +10,6 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GMP   REQUIRED IMPORTED_TARGET gmp)
 pkg_check_modules(GMPXX REQUIRED IMPORTED_TARGET gmpxx)
 
-option(USE_CURL "Enable libcurl support" ON)
-if (USE_CURL)
-  find_package(CURL REQUIRED)
-endif()
-
 file(GLOB_RECURSE SOURCES src/*.cpp)
 add_executable(prmers ${SOURCES})
 
@@ -35,10 +30,6 @@ target_compile_definitions(prmers PRIVATE
   $<$<NOT:$<PLATFORM_ID:Windows>>:KERNEL_PATH=\"/usr/local/share/prmers/\">
 )
 
-if (USE_CURL)
-  target_compile_definitions(prmers PRIVATE HAS_CURL=1)
-endif()
-
 target_link_libraries(prmers PRIVATE
   OpenCL::OpenCL
   PkgConfig::GMP
@@ -47,8 +38,4 @@ target_link_libraries(prmers PRIVATE
 
 if (WIN32)
   target_link_libraries(prmers PRIVATE ws2_32)
-endif()
-
-if (USE_CURL)
-  target_link_libraries(prmers PRIVATE CURL::libcurl)
 endif()

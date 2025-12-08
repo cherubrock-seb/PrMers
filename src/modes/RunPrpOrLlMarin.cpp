@@ -10,7 +10,6 @@
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
@@ -631,7 +630,7 @@ int App::runPrpOrLlMarin()
             is_prp_prime
         );
     }
-    bool skippedSubmission = false;
+    /*bool skippedSubmission = false;
     if (options.submit) {
         bool noAsk = options.noAsk || hasWorktodoEntry_;
         if (noAsk && options.password.empty()) {
@@ -673,7 +672,7 @@ int App::runPrpOrLlMarin()
                 }
             }
         }
-    }
+    }*/
 
     backupManager.clearState();
     io::WorktodoManager wm(options);

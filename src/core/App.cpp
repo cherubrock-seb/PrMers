@@ -32,7 +32,6 @@
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
-#include "io/CurlClient.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
@@ -885,14 +884,13 @@ int App::run() {
         rc = runPrpOrLl();
         ran = true;
     } else if (options.mode == "pm1") {
-        if (options.exponent > 89) {
+        if (options.exponent >= 241) {
             rc = runPM1();
             ran = true;
         } else {
-            std::cout << "P-1 factoring (stage 1) need exponent > 89" << std::endl;
+            std::cout << "P-1 factoring (stage 1) need exponent >= 241" << std::endl;
         }
     }
-
     if (options.gui) {
         if (guiServer_) {
             std::cout << "GUI " << guiServer_->url() << std::endl;

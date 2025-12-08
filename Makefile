@@ -39,14 +39,6 @@ endif
 
 LDFLAGS += -lgmpxx -lgmp
 
-USE_CURL ?= 1
-ifeq ($(USE_CURL),1)
-  CPPFLAGS += -DHAS_CURL=1
-  LDFLAGS  += -lcurl
-else
-  CPPFLAGS += -DNO_CURL=1
-endif
-
 CPPFLAGS   += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package
