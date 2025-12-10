@@ -277,12 +277,16 @@ static std::string generatePrimeNetJson(
         }
     }
 
-    std::string knownFactorStr;
+    std::string knownFactorStr;        // e.g. 204453287,1255070097822910516312001       -- for use in checksum
+    std::string knownFactorStrQuoted;  // e.g. "204453287","1255070097822910516312001"   -- for use in JSON, note is already quoted and MUST NOT be wrapped in jsonEscape()
     if (!uniqFactors.empty()) {
-        knownFactorStr = uniqFactors[0];
+        knownFactorStr       =        uniqFactors[0];
+        knownFactorStrQuoted = "\"" + uniqFactors[0];
         for (size_t i = 1; i < uniqFactors.size(); ++i) {
-            knownFactorStr += "," + uniqFactors[i];
+            knownFactorStr       += ","     + uniqFactors[i];
+            knownFactorStrQuoted += "\",\"" + uniqFactors[i];
         }
+        knownFactorStrQuoted += "\"";
     }
 
     oss << "{";
@@ -292,9 +296,9 @@ static std::string generatePrimeNetJson(
     if (!knownFactors.empty()) {
     	// *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
     	if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
-        	oss << ",\"known-factors\":[" << jsonEscape(knownFactorStr) << "]";
+        	oss << ",\"known-factors\":[" << knownFactorStrQuoted << "]";
     	} else {
-        	oss << ",\"factors\":[" << jsonEscape(knownFactorStr) << "]";
+        	oss << ",\"factors\":[" << knownFactorStrQuoted << "]";
         }
     }
     if (opts.B1 > 0) {
