@@ -294,42 +294,45 @@ static std::string generatePrimeNetJson(
     oss << ",\"exponent\":"                        <<            exponent;
     oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
-    	// *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
-    	if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
-        	oss << ",\"known-factors\":[" << knownFactorStrQuoted << "]";
-    	} else {
-        	oss << ",\"factors\":[" << knownFactorStrQuoted << "]";
+        // *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
+        if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
+            oss << ",\"known-factors\":[" << knownFactorStrQuoted << "]";
+        } else {
+            oss << ",\"factors\":[" << knownFactorStrQuoted << "]";
         }
     }
     if (opts.B1 > 0) {
-		oss << ",\"b1\":" << opts.B1;
-    	if (opts.B2 > opts.B1) {
-			oss << ",\"b2\":" << opts.B2;
-    	}
+        oss << ",\"b1\":" << opts.B1;
+        if (opts.B2 > opts.B1) {
+            oss << ",\"b2\":" << opts.B2;
+        }
     }
     if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
-	    oss << ",\"res64\":"                       << jsonEscape(res64);
+        oss << ",\"res64\":"                       << jsonEscape(res64);
         if (worktype == "prp") {
             oss << ",\"res2048\":"                 << jsonEscape(res2048);
             oss << ",\"residue-type\":"            <<            residueType;
         }
-	    oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+        oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
         oss << ",\"shift-count\":0";
-	} else if (worktype == "ecm") {
-		if (opts.curves_tested_for_found > 0) {
-	        oss << ",\"curves\":"                  << opts.curves_tested_for_found;
-		}
+    } else if (worktype == "ecm") {
+        if (opts.curves_tested_for_found > 0) {
+            oss << ",\"curves\":"                  << opts.curves_tested_for_found;
+        }
         if (opts.sigma192) {
-	        oss << ",\"sigma192\":"                << opts.sigma192;  // *** TODO: not sure where this value comes from ***
+            oss << ",\"sigma192\":"                << opts.sigma192;  // *** TODO: not sure where this value comes from ***
         }
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery");
         oss << ",\"torsion-subgroup\":"            << torsion;
         oss << ",\"sigma_hex\":"                   << jsonEscape(opts.sigma_hex);
         oss << ",\"curve_seed\":"                  <<            opts.curve_seed;
         oss << ",\"base_seed\":"                   <<            opts.curve_seed;
-	}
+    }
     else if (worktype == "pm1") {
-	    oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+        oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+        if (opts.nmax) {
+            oss << ",\"crandall-nK\":{\"n\":" << opts.nmax << ",\"K\":" << opts.K << "}";
+        }
     }
     if (fftLength > 0) oss << ",\"fft-length\":"  <<            fftLength;
     if (!proofMd5.empty()) {
@@ -373,16 +376,16 @@ static std::string generatePrimeNetJson(
         canon << "<BITLO>"         << ";";                       // bitlo (e.g. 68)
         canon << "<BITHI>"         << ";";                       // bithi (e.g. 75)
         canon << "<RANGECOMPLETE>" << ";";                       // rangecomplete (0 or 1)
-	} else if (canonWT == "PRP-3") {
-		canon << toLower(res64)    << ";";                       // res64
-		canon << toLower(res2048)  << ";";                       // res2048
-		canon << "0" << "_"                                      // shift-count
+    } else if (canonWT == "PRP-3") {
+        canon << toLower(res64)    << ";";                       // res64
+        canon << toLower(res2048)  << ";";                       // res2048
+        canon << "0" << "_"                                      // shift-count
               << "3" << "_"                                      // prp-base
               << residueType       << ";";                       // residue-type
     } else if (canonWT == "LL") {
-		canon << toLower(res64)    << ";";                       // res64
-		canon << ""                << ";";                       // unused
-		canon << "0"               << ";";                       // shift-count
+        canon << toLower(res64)    << ";";                       // res64
+        canon << ""                << ";";                       // unused
+        canon << "0"               << ";";                       // shift-count
     } else if (canonWT == "ECM") {
         canon << opts.B1           << ";";                       // b1
         if (opts.B2 > opts.B1) canon << opts.B2;                 // b2
@@ -402,7 +405,10 @@ static std::string generatePrimeNetJson(
         canon << opts.B1           << ";";                       // b1
         if (opts.B2 > opts.B1) canon << opts.B2;                 // b2
         canon << ";";
-        canon << "" << ";";                                      // brent-suyama
+        if (opts.nmax) {                                         // Crandall-nK
+            canon << opts.nmax << "_" << opts.K;
+        }
+        canon << ";";
     } else if (canonWT == "PP1") {
         // *** TODO: not yet not yet implemented ***
         canon << opts.B1           << ";";                       // b1
@@ -451,9 +457,9 @@ std::string JsonBuilder::generate(const CliOptions& opts,
 
     std::string status;
     if ((opts.mode == "ll") || (opts.mode == "llsafe") || (opts.mode == "prp")) {
-    	status = (isPrime ? "P" : "C");
+        status = (isPrime ? "P" : "C");
     } else {
-    	status = (!opts.knownFactors.empty() ? "F" : "NF");
+        status = (!opts.knownFactors.empty() ? "F" : "NF");
     }
     int residueType = opts.knownFactors.empty() ? 1 : 5;
     return generatePrimeNetJson(
