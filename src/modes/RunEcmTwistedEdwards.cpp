@@ -1483,6 +1483,7 @@ int App::runECMMarinTwistedEdwards()
                 else{
                     std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
                     if (have_last_good_state) {
+                        options.invarianterror += 1;
                         std::cout << "[ECM] Restoring last known good state at iteration "
                                   << last_good_iter << " and retrying from there." << std::endl;
                         if (eng->set_checkpoint(last_good_state)) {

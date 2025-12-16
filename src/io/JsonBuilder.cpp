@@ -324,7 +324,7 @@ static std::string generatePrimeNetJson(
         oss << ",\"sigma-hex\":"                   << jsonEscape(opts.sigma_hex);
         oss << ",\"curve-seed\":"                  <<            opts.curve_seed;
         oss << ",\"base-seed\":"                   <<            opts.curve_seed;
-        oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
+        oss << ",\"errors\":{\"invariant\":"         <<            opts.invarianterror << "}";
     }
     else if (worktype == "pm1") {
         oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";

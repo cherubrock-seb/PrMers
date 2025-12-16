@@ -93,6 +93,7 @@ struct CliOptions {
     bool ipv4 = true;
     uint64_t max_e_bits = 268'435'456ULL;
     uint64_t curves_tested_for_found = 0;
+    int invarianterror = 0;
 
 };
 
