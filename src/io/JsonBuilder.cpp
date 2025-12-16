@@ -321,7 +321,9 @@ static std::string generatePrimeNetJson(
         }
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery");
         oss << ",\"torsion-subgroup\":"            << torsion;
-        oss << ",\"sigma-hex\":"                   << jsonEscape(opts.sigma_hex);
+        if (!opts.sigma_hex.empty()) {
+            oss << ",\"sigma-hex\":"                   << jsonEscape(opts.sigma_hex);
+        }
         oss << ",\"curve-seed\":"                  <<            opts.curve_seed;
         oss << ",\"base-seed\":"                   <<            opts.curve_seed;
         oss << ",\"errors\":{\"invariant\":"         <<            opts.invarianterror << "}";
@@ -416,7 +418,12 @@ static std::string generatePrimeNetJson(
     }
 
     canon << fftLength << ";";                                   // fft-length
-    canon << "gerbicz:" << gerbiczError << ";";                  // errorsObjectStringified
+    if (worktype != "ecm") {
+        canon << "gerbicz:" << gerbiczError << ";";                  // errorsObjectStringified
+    }
+    else{
+        canon << "invariant:" << gerbiczError << ";"; 
+    }
     canon << programName << ";";                                 // program.name
     canon << programVersion << ";";                              // program.version
     canon << "" << ";";                                          // program.kernel|program.subversion

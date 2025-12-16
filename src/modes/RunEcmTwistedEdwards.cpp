@@ -527,6 +527,7 @@ int App::runECMMarinTwistedEdwards()
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
         options.base_seed  = base_seed;
+        
 
 
         const std::string ckpt_file      = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
