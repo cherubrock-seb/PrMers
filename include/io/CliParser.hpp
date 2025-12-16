@@ -94,7 +94,7 @@ struct CliOptions {
     uint64_t max_e_bits = 268'435'456ULL;
     uint64_t curves_tested_for_found = 0;
     int invarianterror = 0;
-
+    uint32_t ecm_progress_interval_ms = 2000;
 };
 
 class CliParser {

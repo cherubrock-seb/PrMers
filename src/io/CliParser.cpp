@@ -94,6 +94,8 @@ void printUsage(const char* progName) {
     std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
+    std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
+
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
@@ -326,6 +328,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-ecm_check_interval") == 0 && i + 1 < argc) {
             opts.ecm_check_interval = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-ecm_progress_ms") == 0 && i + 1 < argc) {
+            opts.ecm_progress_interval_ms = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         

@@ -201,6 +201,7 @@ int App::runECMMarinTwistedEdwards()
     const bool verbose = true;
     const bool forceCurve = (options.curve_seed != 0ULL);
     if (forceCurve) curves =1ULL;
+    const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
@@ -1518,7 +1519,7 @@ int App::runECMMarinTwistedEdwards()
                 }*/
                 last_check = now;
             }
-            if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_steps) {
+            if (duration_cast<milliseconds>(now - last_ui).count() >= progress_interval_ms || i+1 == total_steps) {
                 double done = double(i + 1), total = double(total_steps? total_steps:1);
                 double elapsed = duration<double>(now - t0).count() + saved_et;
                 double ips = done / std::max(1e-9, elapsed);
@@ -1675,7 +1676,7 @@ int App::runECMMarinTwistedEdwards()
                 int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
                 if (b==0) xDBLADD_strict(0,1, 2,3); else xDBLADD_strict(2,3, 0,1);
                 auto now2 = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1==stage2_bits){
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= progress_interval_ms || i+1==stage2_bits) {
                     double done = double(i+1), total = double(stage2_bits);
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     double ips = done / std::max(1e-9, elapsed);

@@ -104,6 +104,7 @@ int App::runECMMarin()
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
     const bool forceSigma = (options.curve_seed != 0ULL);
+    const uint32_t ui_interval_ms = options.ecm_progress_interval_ms ? options.ecm_progress_interval_ms : 2000;
     if (forceSigma) curves = 1ULL;
 
     auto splitmix64_step = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
@@ -834,15 +835,20 @@ int App::runECMMarin()
                 else      { xDBLADD_strict(2,3, 0,1); }
 
                 auto now = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now - last_ui).count() >= 400 || i+1 == total_bits) {
+                if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || i+1 == total_bits) {
                     double done = double(i + 1), total = double(total_bits);
                     double elapsed = duration<double>(now - t0).count() + saved_et;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
-                    line<<"\r[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 "<<(i+1)<<"/"<<total_bits<<" ("<<fixed<<setprecision(2)<<(done*100.0/total)<<"%) | ETA "<<fmt_hms(eta);
-                    std::cout<<line.str()<<std::flush; last_ui = now;
+                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                        << " | Stage1 " << (i+1) << "/" << total_bits
+                        << " (" << std::fixed << std::setprecision(1)  // <== moins de digits
+                        << (done * 100.0 / total) << "%) | ETA " << fmt_hms(eta);
+                    std::cout << line.str() << std::flush;
+                    last_ui = now;
                 }
+
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
                 if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0; }
             }
@@ -912,7 +918,7 @@ int App::runECMMarin()
                 else        xDBLADD_strict2(2,3, 0,1);
 
                 auto now2 = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= 400 || i+1 == stage2_bits) {
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i+1 == stage2_bits) {
                     double done = double(i+1), total = double(stage2_bits);
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     double ips = done / std::max(1e-9, elapsed);
@@ -920,12 +926,13 @@ int App::runECMMarin()
                     std::ostringstream line;
                     line << "\r[ECM] Curve " << (c+1) << "/" << curves
                         << " | Stage2 " << (i+1) << "/" << stage2_bits
-                        << " (" << std::fixed << std::setprecision(2)
+                        << " (" << std::fixed << std::setprecision(1)
                         << (total ? (done*100.0/total) : 100.0)
                         << "%) | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
                     last2_ui = now2;
                 }
+
                 if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
                     double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                     save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
