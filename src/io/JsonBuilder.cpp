@@ -265,7 +265,7 @@ static std::string generatePrimeNetJson(
     if (worktype == "prp") canonWT = "PRP-3";
     else if (worktype == "ll" || worktype == "llsafe") canonWT = "LL";
     else canonWT = toUpper(worktype);
-    bool isEdw = opts.edwards;
+    bool isEdw = opts.compute_edwards;
     int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
     std::ostringstream oss;
 
