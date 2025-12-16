@@ -389,7 +389,7 @@ static std::string generatePrimeNetJson(
         canon << ";";
 
         if (isEdw) canon << "E";                                 // sigma
-        if (opts.sigma_hex) {
+        if (!opts.sigma_hex.empty()) {
             canon << "0x" << toLower(opts.sigma_hex);
         } else if (opts.sigma) {
             canon << opts.sigma;
