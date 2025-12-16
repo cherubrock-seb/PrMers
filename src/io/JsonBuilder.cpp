@@ -324,9 +324,9 @@ static std::string generatePrimeNetJson(
         }
         oss << ",\"curve-type\":" << jsonEscape(isEdw ? "Edwards" : "Montgomery");
         oss << ",\"torsion-subgroup\":"            << torsion;
-        oss << ",\"sigma_hex\":"                   << jsonEscape(opts.sigma_hex);
-        oss << ",\"curve_seed\":"                  <<            opts.curve_seed;
-        oss << ",\"base_seed\":"                   <<            opts.curve_seed;
+        oss << ",\"sigma-hex\":"                   << jsonEscape(opts.sigma_hex);
+        oss << ",\"curve-seed\":"                  <<            opts.curve_seed;
+        oss << ",\"base-seed\":"                   <<            opts.curve_seed;
     }
     else if (worktype == "pm1") {
         oss << ",\"errors\":{\"gerbicz\":"         <<            gerbiczError << "}";
@@ -394,6 +394,8 @@ static std::string generatePrimeNetJson(
         if (isEdw) canon << "E";                                 // sigma
         if (opts.sigma192) {
             canon << opts.sigma192;                              // *** TODO: not sure where this value comes from ***
+        } else if (opts.sigma_hex) {
+            canon << "0x" << toLower(opts.sigma_hex);
         } else if (opts.sigma) {
             canon << opts.sigma;
         }
