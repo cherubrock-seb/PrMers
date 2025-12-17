@@ -882,13 +882,13 @@ int App::runECMMarinTwistedEdwards()
             auto rhs = addm(sqrm(Zv), mulm(dE, sqrm(Tv)));
             auto rel = subm(lhs, rhs);
             if (rel != 0){
-                std::cout << "[ECM] invariant FAIL (a="
-                          << aE << ")\n";
+                std::cout << "[ECM] invariant FAIL " //(a="
+                          /*<< aE*/ << ")\n";
                 return false;
             }
             else{
-                std::cout << "[ECM] check invariant OK (a="
-                          << aE << ")\n";
+                std::cout << "[ECM] check invariant OK " // (a="
+                          /*<< aE*/ << ")\n";
                 // Save an in-memory checkpoint of this good state
                 if (ctx_ckpt_size > 0) {
                     last_good_state.resize(ctx_ckpt_size);
