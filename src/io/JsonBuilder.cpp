@@ -365,10 +365,14 @@ static std::string generatePrimeNetJson(
     std::string canonWTNorm = canonWT;
     if (canonWTNorm == "PRP-3" || canonWTNorm == "prp-3") canonWTNorm = "PRP";
     canon << canonWTNorm  << ";";                                // worktype
-    if (!knownFactors.empty()) {
+    if (!(canonWTNorm == "PRP") && !knownFactors.empty()) {
         canon << knownFactorStr;                                 // factors
     }
-    canon << ";";
+    canon << ";"; 
+    if ((canonWTNorm == "PRP") && !knownFactors.empty()) {
+        canon << knownFactorStr;                                 // factors
+    }
+   
     canon << "" << ";";                                          // known-factors *** TODO: not yet supported (factors that were known BEFORE this factoring run and included in worktodo.txt, distinct from factors just found ***
 
     if (canonWT == "TF") {
@@ -437,7 +441,7 @@ static std::string generatePrimeNetJson(
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-        //<< ",hash:\"" << canon.str() << "\""
+        //<< ",\"hash\":\"" << canon.str() << "\""
         //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
