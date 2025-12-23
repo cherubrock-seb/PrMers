@@ -49,6 +49,7 @@ public:
     int runPM1Marin();
     int runPM1Stage2();
     int runPM1Stage2Marin();
+    int runPM1Stage3Marin();
     int runPM1Stage2MarinNKVersion();
     int runMemtestOpenCL();
     int runECMMarin();

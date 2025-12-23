@@ -87,6 +87,7 @@ struct CliOptions {
     int res64_display_interval = 0;
     bool cl_queue_throttle_active = false;
     std::vector<std::string> knownFactors;
+    std::vector<std::string> knownFactors_start;
     bool gui = false;
     int http_port = 3131;
     std::string http_host = "localhost";
@@ -95,6 +96,7 @@ struct CliOptions {
     uint64_t curves_tested_for_found = 0;
     int invarianterror = 0;
     uint32_t ecm_progress_interval_ms = 2000;
+    bool s3only = false;
 };
 
 class CliParser {

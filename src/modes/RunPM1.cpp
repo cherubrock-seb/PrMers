@@ -1167,9 +1167,6 @@ int App::runPM1Stage2Marin() {
 }
 
 
-
-
-
 /* ===== n^K Stage-2 (Topics in advanced scientific computation. by: Crandall, Richard E) ===== */
 /* Fast b^{n^K} (Stirling init + z-chain); product of differences; GCD. */
 int App::runPM1Stage2MarinNKVersion() {
@@ -2236,7 +2233,7 @@ int App::runPM1Marin() {
         io::WorktodoManager wm(options);
         wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
         wm.appendToResultsTxt(json);
-
+        delete_checkpoints(options.exponent, options.wagstaff, true, false);
         delete eng;
         return factorFound ? 0 : 1;
     }
@@ -2619,3 +2616,525 @@ int App::runPM1Marin() {
     //delete eng;
     return factorFound ? 0 : 1;
 }
+
+/*
+2025 - Cherubrock
+P-1 Stage 3 — Paired Multiplicative Offsets (k = 0, ±1, ±2, …)
+*/
+
+int App::runPM1Stage3Marin() {
+    using namespace std::chrono;
+
+    if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 3"; guiServer_->setStatus(oss.str()); }
+    const uint64_t B3u = options.B3;
+    if (B3u == 0) { std::cout << "Stage 3 skipped (B3=0)\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 3 skipped (B3=0)"; guiServer_->appendLog(oss.str()); } return 1; }
+
+    const uint32_t pexp = static_cast<uint32_t>(options.exponent);
+    const bool verbose = true;
+
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+    bool foundIntermediate = false;
+    mpz_class midFactor;
+
+    static constexpr size_t baseRegsStage1 = 11;
+    // +2 registres pour H^k et H^{-k}
+    const size_t RSTATE=0, RACC=1, RSQ=2, RMINUS=3, RPLUS=4, RPOW=5, RHINV=6, RHK=7, RHIK=8, RHINV_2=9, RHINV_3=10, RHK_2=11, RHK_3=12, RSTART_SQ=13, RCHK_SQ=14;
+    static constexpr size_t regsS3 = 15;
+
+    std::ostringstream ck3; ck3 << "pm1_s3_m_" << pexp << ".ckpt";
+    const std::string ckpt_file_s3 = ck3.str();
+
+    auto read_ckpt_s3 = [&](engine* e, const std::string& file, uint64_t& saved_b, double& et, uint64_t& sB3)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 2) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != pexp) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sB3), sizeof(sB3))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_b), sizeof(saved_b))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = e->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!e->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+    auto save_ckpt_s3 = [&](engine* e, uint64_t cur_b, double et){
+        const std::string oldf = ckpt_file_s3 + ".old", newf = ckpt_file_s3 + ".new";
+        {
+            File f(newf, "wb");
+            int version = 2;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
+            if (!f.write(reinterpret_cast<const char*>(&B3u), sizeof(B3u))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_b), sizeof(cur_b))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!e->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat s;
+        if ((stat(ckpt_file_s3.c_str(), &s) == 0) && (std::rename(ckpt_file_s3.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file_s3.c_str());
+    };
+
+    engine* eng = engine::create_gpu(pexp, regsS3, static_cast<size_t>(options.device_id), verbose);
+
+    // Charger H (RSTATE) et H^{-1} (RHINV) depuis checkpoint S1
+    {
+        mpz_t Hs1; mpz_init(Hs1);
+
+        if (options.s3only) {
+            uint64_t B1_file = 0;
+            uint32_t p_file  = 0;
+            mpz_class X_s1;
+
+            std::string basePath = options.pm1_extend_save_path;
+            if (basePath.empty()) {
+                basePath = "resume_p" + std::to_string(options.exponent) +
+                           "_B1_" + std::to_string(options.B1);
+            }
+
+            std::string resumeSave = basePath;
+            std::string resumeP95  = basePath;
+
+            if (resumeSave.size() >= 5 &&
+                resumeSave.substr(resumeSave.size() - 5) == ".save")
+            {
+                resumeP95 = resumeSave.substr(resumeSave.size() - 5) + ".p95";
+            }
+            else if (resumeSave.size() >= 4 &&
+                     resumeSave.substr(resumeSave.size() - 4) == ".p95")
+            {
+                resumeP95  = resumeSave;
+                resumeSave = resumeSave.substr(resumeSave.size() - 4) + ".save";
+            }
+            else {
+                resumeSave += ".save";
+                resumeP95  += ".p95";
+            }
+
+            std::string usedPath;
+
+            if (load_pm1_s1_from_save(resumeSave, B1_file, p_file, X_s1)) {
+                usedPath = resumeSave;
+            }
+            else if (load_pm1_s1_from_p95(resumeP95, B1_file, p_file, X_s1)) {
+                usedPath = resumeP95;
+            }
+            else {
+                std::cerr << "Cannot load PM1 S1 state from \"" << resumeSave
+                          << "\" nor from \"" << resumeP95 << "\"\n";
+                mpz_clear(Hs1);
+                delete eng;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Stage 3: cannot load PM1 S1 state from " << resumeSave
+                        << " nor " << resumeP95;
+                    guiServer_->appendLog(oss.str());
+                }
+                return -2;
+            }
+
+            if (p_file != pexp) {
+                std::cerr << "Mismatch between S1 resume file (p=" << p_file
+                          << ") and options (p=" << pexp << ")\n";
+                mpz_clear(Hs1);
+                delete eng;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Stage 3: mismatch between S1 resume file (p=" << p_file
+                        << ") and options (p=" << pexp << ")";
+                    guiServer_->appendLog(oss.str());
+                }
+                return -2;
+            }
+
+            std::cout << "Stage 3: using PM1 S1 state from " << usedPath << "\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Stage 3: using PM1 S1 state from " << usedPath;
+                guiServer_->appendLog(oss.str());
+            }
+
+            mpz_set(Hs1, X_s1.get_mpz_t());
+        } else {
+            engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, static_cast<size_t>(options.device_id), verbose);
+            std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+            const std::string ckpt_file = ck.str();
+
+            auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
+                File f(file);
+                if (!f.exists()) return -1;
+                int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+                if (version != 3) return -2;
+                uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+                if (rp != pexp) return -2;
+                uint32_t ri = 0; double et = 0.0;
+                if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                const size_t cksz = e->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!f.read(data.data(), cksz)) return -2;
+                if (!e->set_checkpoint(data)) return -2;
+                uint64_t tmp64;
+                if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+                uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+                uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+                if (eacc_len) { std::string skip; skip.resize(eacc_len); if (!f.read(skip.data(), eacc_len)) return -2; }
+                uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+                if (wbits_len) { std::string skip; skip.resize(wbits_len); if (!f.read(skip.data(), wbits_len)) return -2; }
+                uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
+                if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+                if (!f.check_crc32()) return -2;
+                return 0;
+            };
+
+            int rr = read_ckpt_s1(eng_load, ckpt_file);
+            if (rr < 0) rr = read_ckpt_s1(eng_load, ckpt_file + ".old");
+            if (rr != 0) { delete eng_load; delete eng; std::cerr << "Stage 3: cannot load pm1 stage1 checkpoint.\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 3: cannot load pm1 stage1 checkpoint.\n"; guiServer_->appendLog(oss.str()); } mpz_clear(Hs1); return -2; }
+
+            eng_load->get_mpz(Hs1, static_cast<engine::Reg>(RSTATE));
+            delete eng_load;
+        }
+
+        mpz_t Mp_local, Hinv;
+        mpz_init(Mp_local); mpz_init(Hinv);
+        mpz_ui_pow_ui(Mp_local, 2, pexp); mpz_sub_ui(Mp_local, Mp_local, 1);
+        if (mpz_invert(Hinv, Hs1, Mp_local) == 0) {
+            mpz_clear(Mp_local); mpz_clear(Hinv); mpz_clear(Hs1);
+            delete eng;
+            std::cerr << "Stage 3: H not invertible mod Mp.\n";
+            if (guiServer_) { std::ostringstream oss; oss << "Stage 3: H not invertible mod Mp."; guiServer_->appendLog(oss.str()); }
+            return -3;
+        }
+        eng->set_mpz(static_cast<engine::Reg>(RSTATE), Hs1);     // H
+        eng->set_mpz(static_cast<engine::Reg>(RHINV),  Hinv);    // H^{-1}
+        mpz_clear(Mp_local); mpz_clear(Hinv); mpz_clear(Hs1);
+    }
+
+    eng->set(static_cast<engine::Reg>(RACC), 1);
+    eng->copy(static_cast<engine::Reg>(RSQ),  static_cast<engine::Reg>(RSTATE));
+
+    bool resumed_s3 = false;
+    uint64_t resume_b = 0, s3B3 = 0;
+    double restored_time = 0.0;
+    {
+        int rs3 = read_ckpt_s3(eng, ckpt_file_s3, resume_b, restored_time, s3B3);
+        if (rs3 == 0 && s3B3 == B3u) {
+            resumed_s3 = true;
+            if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 3 at b=" << resume_b << "/" << B3u; guiServer_->appendLog(oss.str()); }
+            std::cout << "Resuming Stage 3 at b=" << resume_b << "/" << B3u << "\n";
+        }
+    }
+
+    auto t0 = high_resolution_clock::now();
+    auto lastBackup  = t0;
+    auto lastDisplay = t0;
+
+    const uint64_t Kmax = std::min<uint64_t>(3, std::max<uint64_t>(1, options.B4));
+    uint64_t b = resumed_s3 ? resume_b : 0;
+    if (!resumed_s3) {
+        std::cout << "Start P-1 Stage 3 up to B3=" << B3u << " [±k, k≤" << Kmax << "]\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Start P-1 Stage 3 up to B3=" << B3u << " [±k, k≤" << Kmax << "]"; guiServer_->appendLog(oss.str()); }
+    }
+
+    // --- Inverses : RHINV = H^{-1}, RHINV_2 = H^{-2}, RHINV_3 = H^{-3}
+    eng->copy((engine::Reg)RHIK, (engine::Reg)RHINV);              // RHIK = H^{-1}
+    eng->set_multiplicand((engine::Reg)RHINV, (engine::Reg)RHIK);  // mul(..., RHINV) = *H^{-1}
+    eng->square_mul((engine::Reg)RHIK);                            // RHIK = (H^{-1})^2 = H^{-2}
+    eng->set_multiplicand((engine::Reg)RHINV_2, (engine::Reg)RHIK);// RHINV_2 = H^{-2}
+    eng->mul((engine::Reg)RHIK, (engine::Reg)RHINV);               // RHIK *= H^{-1} → H^{-3}
+    eng->set_multiplicand((engine::Reg)RHINV_3, (engine::Reg)RHIK);// RHINV_3 = H^{-3}
+
+    // --- Puissances positives : RHK = H, RHK_2 = H^2, RHK_3 = H^3
+    eng->copy((engine::Reg)RPOW, (engine::Reg)RSTATE);             // RPOW = H
+    eng->set_multiplicand((engine::Reg)RHK, (engine::Reg)RPOW);    // RHK = H
+
+    eng->square_mul((engine::Reg)RPOW);                            // RPOW = H^2
+    eng->set_multiplicand((engine::Reg)RHK_2, (engine::Reg)RPOW);  // RHK_2 = H^2
+
+    eng->mul((engine::Reg)RPOW, (engine::Reg)RHK);                 // RPOW *= H → H^3
+    eng->set_multiplicand((engine::Reg)RHK_3, (engine::Reg)RPOW);  // RHK_3 = H^3
+
+    eng->square_mul(static_cast<engine::Reg>(RSQ));
+    eng->square_mul(static_cast<engine::Reg>(RSQ));
+    eng->square_mul(static_cast<engine::Reg>(RSQ));
+    eng->square_mul(static_cast<engine::Reg>(RSQ));
+    eng->square_mul(static_cast<engine::Reg>(RSQ));
+
+    uint64_t total_iters = B3u;
+    uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)std::max<uint64_t>(1, total_iters)));
+    double desiredIntervalSeconds = 600.0;
+    uint64_t checkpasslevel_auto = (uint64_t)((1000.0 * desiredIntervalSeconds) / (double)B);
+    if (checkpasslevel_auto == 0) {
+        uint64_t tmpB = (uint64_t)std::sqrt((double)B);
+        if (tmpB == 0) tmpB = 1;
+        checkpasslevel_auto = (total_iters / B) / tmpB;
+    }
+    uint64_t checkpasslevel = (options.checklevel > 0)
+        ? options.checklevel
+        : checkpasslevel_auto;
+    if (checkpasslevel == 0) checkpasslevel = 1;
+
+    uint64_t steps_in_block = 0;
+    uint64_t blocks_since_last_check = 0;
+    bool errordone = false;
+    uint64_t originalB3 = options.B3;
+
+    for (; b < B3u; ++b) {
+        if (interrupted) {
+            double et = duration<double>(high_resolution_clock::now() - t0).count() + restored_time;
+            save_ckpt_s3(eng, b, et);
+            delete eng;
+            std::cout << "\nInterrupted by user, Stage 3 state saved at b=" << b << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "Interrupted, Stage 3 saved at b=" << b; guiServer_->appendLog(oss.str()); }
+            return 0;
+        }
+
+        if (steps_in_block == 0) {
+            eng->copy((engine::Reg)RSTART_SQ, (engine::Reg)RSQ);
+        }
+
+        // RSQ := RSQ^2  (RSQ = H^{2^b} → H^{2^{b+1}})
+        eng->square_mul(static_cast<engine::Reg>(RSQ));
+
+        if (options.erroriter > 0 &&
+            (b + 1) == options.erroriter &&
+            !errordone)
+        {
+            errordone = true;
+            eng->sub(static_cast<engine::Reg>(RSQ), 33);
+            std::cout << "Injected error at Stage 3 iteration " << (b + 1) << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Injected error at Stage 3 iteration " << (b + 1);
+                guiServer_->appendLog(oss.str());
+            }
+        }
+
+        // Init H^k et H^{-k}
+        //eng->copy(static_cast<engine::Reg>(RHK),  static_cast<engine::Reg>(RSTATE)); // H^1
+        //eng->copy(static_cast<engine::Reg>(RHIK), static_cast<engine::Reg>(RHINV));  // H^{-1}
+        
+        
+        //for (uint64_t k = 1; k <= Kmax; ++k) {
+            // (RSQ * H^{-k} - 1)
+
+        for (uint64_t k = 1; k <= Kmax; ++k) {
+            engine::Reg regHplus, regHminus;
+            if (k == 1) {
+                regHplus  = (engine::Reg)RHK;
+                regHminus = (engine::Reg)RHINV;
+            } else if (k == 2) {
+                regHplus  = (engine::Reg)RHK_2;
+                regHminus = (engine::Reg)RHINV_2;
+            } else { // k == 3
+                regHplus  = (engine::Reg)RHK_3;
+                regHminus = (engine::Reg)RHINV_3;
+            }
+
+            // (RSQ * H^{-k} - 1)
+            eng->copy((engine::Reg)RMINUS, (engine::Reg)RSQ);
+            eng->mul ((engine::Reg)RMINUS, regHminus);
+            eng->sub ((engine::Reg)RMINUS, 1);
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)RMINUS);
+            eng->mul ((engine::Reg)RACC, (engine::Reg)RPOW);
+
+            // (RSQ * H^{+k} - 1)
+            eng->copy((engine::Reg)RPLUS, (engine::Reg)RSQ);
+            eng->mul ((engine::Reg)RPLUS, regHplus);
+            eng->sub ((engine::Reg)RPLUS, 1);
+            eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)RPLUS);
+            eng->mul ((engine::Reg)RACC, (engine::Reg)RPOW);
+        }
+
+        
+
+/*
+            // (RSQ * H^{+k} - 1)
+            eng->copy(static_cast<engine::Reg>(RPLUS), static_cast<engine::Reg>(RSQ));
+            eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RHK));
+            eng->mul (static_cast<engine::Reg>(RPLUS), static_cast<engine::Reg>(RPOW));
+            eng->sub (static_cast<engine::Reg>(RPLUS), 1);
+            eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RPLUS));
+            eng->mul (static_cast<engine::Reg>(RACC),  static_cast<engine::Reg>(RPOW));
+
+            // k <- k+1 : H^k *= H ; H^{-k} *= H^{-1}
+            eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RSTATE));
+            eng->mul (static_cast<engine::Reg>(RHK),  static_cast<engine::Reg>(RPOW));
+            eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RHINV));
+            eng->mul (static_cast<engine::Reg>(RHIK), static_cast<engine::Reg>(RPOW));*/
+        //}
+
+        steps_in_block++;
+
+        bool end_block = (steps_in_block == B) || (b + 1 == B3u);
+        if (end_block) {
+            blocks_since_last_check++;
+
+            bool doCheck = options.gerbiczli &&
+                           (blocks_since_last_check >= checkpasslevel || (b + 1 == B3u));
+            if (doCheck) {
+                std::cout << "[Gerbicz Li] Stage 3 check start\n";
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "[Gerbicz Li] Stage 3 check start";
+                    guiServer_->appendLog(oss.str());
+                }
+
+                eng->copy((engine::Reg)RCHK_SQ, (engine::Reg)RSTART_SQ);
+                for (uint64_t k = 0; k < steps_in_block; ++k) {
+                    eng->square_mul((engine::Reg)RCHK_SQ);
+                }
+
+                mpz_t z0, z1;
+                mpz_inits(z0, z1, nullptr);
+                eng->get_mpz(z0, (engine::Reg)RCHK_SQ);
+                eng->get_mpz(z1, (engine::Reg)RSQ);
+                bool ok = (mpz_cmp(z0, z1) == 0);
+                mpz_clears(z0, z1, nullptr);
+
+                if (!ok) {
+                    std::cout << "[Gerbicz Li] Stage 3 mismatch : last correct RSQ will be restored\n";
+                    if (guiServer_) {
+                        std::ostringstream oss;
+                        oss << "[Gerbicz Li] Stage 3 mismatch : last correct RSQ will be restored";
+                        guiServer_->appendLog(oss.str());
+                    }
+                    options.gerbicz_error_count += 1;
+                    eng->copy((engine::Reg)RSQ, (engine::Reg)RSTART_SQ);
+                    eng->set(static_cast<engine::Reg>(RACC), 1);
+                } else {
+                    std::cout << "[Gerbicz Li] Stage 3 check passed\n";
+                    if (guiServer_) {
+                        std::ostringstream oss;
+                        oss << "[Gerbicz Li] Stage 3 check passed";
+                        guiServer_->appendLog(oss.str());
+                    }
+
+                    mpz_class X_acc = compute_X_with_dots(eng, static_cast<engine::Reg>(RACC), Mp);
+                    mpz_class g_mid = gcd_with_dots(X_acc, Mp);
+                    bool found_mid = g_mid != 1 && g_mid != Mp;
+                    if (found_mid) {
+                        char* s = mpz_get_str(nullptr, 10, g_mid.get_mpz_t());
+                        std::string fname_mid = "stage3_result_B3_" + std::to_string(b + 1) + "_p_" + std::to_string(options.exponent) + ".txt";
+                        writeStageResult(fname_mid, "B3=" + std::to_string(b + 1) + "  factor=" + std::string(s));
+                        std::cout << "\n>>>  Factor P-1 (stage 3, intermediate) found : " << s << '\n';
+                        if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "\n>>>  Factor P-1 (stage 3, intermediate) found : " << s << "\n";
+                            guiServer_->appendLog(oss.str());
+                        }
+                        options.knownFactors.push_back(std::string(s));
+                        midFactor = g_mid;
+                        foundIntermediate = true;
+                        uint64_t tmpB3 = options.B3;
+                        options.B3 = b + 1;
+                        std::string json_mid = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+                        std::cout << "Manual submission JSON (stage 3 intermediate):\n" << json_mid << "\n";
+                        io::WorktodoManager wm_mid(options);
+                        wm_mid.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3_intermediate", json_mid);
+                        wm_mid.appendToResultsTxt(json_mid);
+                        options.B3 = tmpB3;
+                        std::free(s);
+                    }
+
+                    eng->set(static_cast<engine::Reg>(RACC), 1);
+                    blocks_since_last_check = 0;
+                }
+            }
+
+            steps_in_block = 0;
+        }
+
+        auto now = high_resolution_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 3) {
+            double percent = B3u ? (100.0 * double(b + 1) / double(B3u)) : 100.0;
+            double elapsedSec= std::chrono::duration<double>(now - t0).count() + restored_time;
+            double etaSec = (b + 1) ? elapsedSec * (double(B3u - (b + 1)) / double(b + 1)) : 0.0;
+            int days = int(etaSec) / 86400;
+            int hours = (int(etaSec) % 86400) / 3600;
+            int minutes = (int(etaSec) % 3600) / 60;
+            int seconds = int(etaSec) % 60;
+            std::cout << "Stage3: " << std::fixed << std::setprecision(2) << percent
+                      << "% | b=" << (b + 1) << "/" << B3u
+                      << " | K=" << Kmax
+                      << " | Elapsed " << elapsedSec << "s | ETA "
+                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss; oss << "Stage3: " << std::fixed << std::setprecision(2) << percent
+                                            << "% | b=" << (b + 1) << "/" << B3u
+                                            << " | K=" << Kmax;
+                guiServer_->appendLog(oss.str());
+                guiServer_->setProgress(double(b + 1), double(B3u), "Stage 3");
+            }
+            lastDisplay = now;
+        }
+        if (now - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            double et = duration<double>(now - t0).count() + restored_time;
+            std::cout << "\nBackup Stage 3 at b=" << (b + 1) << " start...\n";
+            save_ckpt_s3(eng, b + 1, et);
+            lastBackup = now;
+            std::cout << "Backup Stage 3 done.\n";
+            if (guiServer_) { std::ostringstream oss; oss << "Backup Stage 3 at b=" << (b + 1); guiServer_->appendLog(oss.str()); }
+        }
+    }
+
+    auto t1 = high_resolution_clock::now();
+    double elapsed = duration<double>(t1 - t0).count() + restored_time;
+
+    mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RACC), Mp);
+    mpz_class g  = gcd_with_dots(X, Mp);
+    bool found_final = g != 1 && g != Mp;
+    bool found = found_final || foundIntermediate;
+
+    std::cout << "\nElapsed time (stage 3) = " << std::fixed << std::setprecision(2) << elapsed << " s." << std::endl;
+    if (guiServer_) { std::ostringstream oss; oss << "Elapsed time (stage 3) = " << std::fixed << std::setprecision(2) << elapsed << " s."; guiServer_->appendLog(oss.str()); }
+
+    std::string filename = "stage3_result_B3_" + std::to_string(B3u) + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (found_final) {
+        char* s = mpz_get_str(nullptr, 10, g.get_mpz_t());
+        writeStageResult(filename, "B3=" + std::to_string(B3u) + "  factor=" + std::string(s));
+        std::cout << "\n>>>  Factor P-1 (stage 3) found : " << s << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\n>>>  Factor P-1 (stage 3) found : " << s << "\n"; guiServer_->appendLog(oss.str()); }
+        options.knownFactors.push_back(std::string(s));
+        std::free(s);
+    } else if (!foundIntermediate) {
+        writeStageResult(filename, "No factor P-1 up to B3=" + std::to_string(B3u));
+        std::cout << "\nNo factor P-1 (stage 3) until B3 = " << B3u << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 3) until B3 = " << B3u << '\n'; guiServer_->appendLog(oss.str()); }
+    } else {
+        char* s = mpz_get_str(nullptr, 10, midFactor.get_mpz_t());
+        writeStageResult(filename, "B3=" + std::to_string(B3u) + "  factor=" + std::string(s));
+        std::cout << "\n>>>  Factor P-1 (stage 3) found (from intermediate) : " << s << '\n';
+        if (guiServer_) { std::ostringstream oss; oss << "\n>>>  Factor P-1 (stage 3) found (from intermediate) : " << s << "\n"; guiServer_->appendLog(oss.str()); }
+        std::free(s);
+    }
+
+    std::remove(ckpt_file_s3.c_str());
+    std::remove((ckpt_file_s3 + ".old").c_str());
+    std::remove((ckpt_file_s3 + ".new").c_str());
+
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3", json);
+    wm.appendToResultsTxt(json);
+
+    delete eng;
+    return found ? 0 : 1;
+}
+

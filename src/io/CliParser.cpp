@@ -203,6 +203,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-marin") == 0) {
             opts.marin = false;
         }
+        else if (std::strcmp(argv[i], "-s3") == 0) {
+            opts.s3only = true;
+        }
         else if (std::strcmp(argv[i], "-montgomery") == 0) {
             opts.edwards = false;
         }
@@ -304,6 +307,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-b3") == 0 && i + 1 < argc) {
             opts.B3 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-b4") == 0 && i + 1 < argc) {
+            opts.B4 = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-K") == 0 && i + 1 < argc) {
@@ -421,6 +428,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (strcmp(argv[i], "-factors") == 0 && i + 1 < argc) {
             opts.knownFactors = util::split(argv[++i], ',');
+            //opts.knownFactors_start = util::split(argv[++i], ',');
+            opts.knownFactors_start.assign(opts.knownFactors.begin(), opts.knownFactors.end());
         }
         
         else if (argv[i][0] != '-') {

@@ -279,6 +279,8 @@ App::App(int argc, char** argv)
                         : (e->pm1Test ? "pm1" : "")));
         o.aid          = e->aid;
         o.knownFactors = e->knownFactors;
+        o.knownFactors_start.assign(e->knownFactors.begin(), e->knownFactors.end());
+
 
         if (e->pm1Test) {
             o.B1 = e->B1;
@@ -836,8 +838,17 @@ int App::run() {
 
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
             bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
+            if(options.s3only){
+                std::ostringstream msg;
+                msg << "S3 only requested " 
+                    << "→ jumping to runPM1Stage3Marin()";
+                std::cout << msg.str() << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage 3 only"); }
 
-            if ((haveS2) && options.nmax == 0  && options.K == 0) {
+                rc_local = runPM1Stage3Marin();
+                ran_local = true;
+            }
+            else if ((haveS2) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "
                     << (haveS2 ? "[Stage 2] " : "")

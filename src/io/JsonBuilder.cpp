@@ -29,6 +29,7 @@
 #include <cctype>
 #include <regex>
 #include <string>
+#include <unordered_set>
 
 namespace io{
 
@@ -71,6 +72,83 @@ static std::string toUpper(const std::string& s){
                    [](unsigned char c){ return char(std::toupper(c)); });
     return t;
 }
+
+static std::vector<std::string> splitAndUniqFactorsBySelfDivision(
+    const std::vector<std::string>& inFactors
+) {
+    std::vector<mpz_class> f;
+    f.reserve(inFactors.size());
+    for (const auto& s : inFactors) {
+        if (s.empty()) continue;
+        mpz_class x;
+        if (x.set_str(s, 10) != 0) continue;
+        if (x < 0) x = -x;
+        if (x > 1) f.push_back(x);
+    }
+
+    auto normalize = [&](){
+        f.erase(std::remove_if(f.begin(), f.end(),
+                               [](const mpz_class& v){ return v <= 1; }),
+                f.end());
+        std::sort(f.begin(), f.end()); 
+    };
+
+    normalize();
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        normalize();
+
+        for (size_t i = 0; i < f.size() && !changed; ++i) {
+            for (size_t j = 0; j < f.size(); ++j) {
+                if (i == j) continue;
+                if (f[j] <= 1) continue;
+
+                if (f[i] > f[j]) {
+                    if (mpz_divisible_p(f[i].get_mpz_t(), f[j].get_mpz_t())) {
+                        mpz_class q;
+                        mpz_tdiv_q(q.get_mpz_t(), f[i].get_mpz_t(), f[j].get_mpz_t());
+                        f[i] = f[j];
+                        if (q > 1) f.push_back(q);
+
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (changed) continue;
+
+        for (size_t i = 0; i < f.size() && !changed; ++i) {
+            for (size_t j = i + 1; j < f.size() && !changed; ++j) {
+                mpz_class g;
+                mpz_gcd(g.get_mpz_t(), f[i].get_mpz_t(), f[j].get_mpz_t());
+
+                if (g > 1 && g < f[i] && g < f[j]) {
+                    mpz_class ai, bj;
+                    mpz_tdiv_q(ai.get_mpz_t(), f[i].get_mpz_t(), g.get_mpz_t());
+                    mpz_tdiv_q(bj.get_mpz_t(), f[j].get_mpz_t(), g.get_mpz_t());
+
+                    f[i] = g;
+                    f[j] = bj;
+                    if (ai > 1) f.push_back(ai);
+
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    normalize();
+    f.erase(std::unique(f.begin(), f.end()), f.end());
+
+    std::vector<std::string> out;
+    out.reserve(f.size());
+    for (const auto& x : f) out.push_back(x.get_str(10));
+    return out;
+}
+
 
 std::tuple<bool, std::string, std::string> JsonBuilder::computeResult(
     const std::vector<uint64_t>& hostResult,
@@ -259,7 +337,8 @@ static std::string generatePrimeNetJson(
     const std::string &aid,
     const std::string &timestamp,
     const std::string &computer,
-    const std::vector<std::string>& knownFactors)
+    const std::vector<std::string>& knownFactors,
+    const std::vector<std::string>& knownFactors_start)
 {
     std::string canonWT;
     if (worktype == "prp") canonWT = "PRP-3";
@@ -269,25 +348,52 @@ static std::string generatePrimeNetJson(
     int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
     std::ostringstream oss;
 
-    std::vector<std::string> uniqFactors;
-    uniqFactors.reserve(knownFactors.size());
-    for (const auto& f : knownFactors) {
-        if (std::find(uniqFactors.begin(), uniqFactors.end(), f) == uniqFactors.end()) {
-            uniqFactors.push_back(f);
-        }
+
+    std::vector<std::string> startFactors =
+        splitAndUniqFactorsBySelfDivision(knownFactors_start);
+
+    std::vector<std::string> allFactors = knownFactors;
+    allFactors.insert(allFactors.end(), startFactors.begin(), startFactors.end());
+
+    std::vector<std::string> allSplit =
+        splitAndUniqFactorsBySelfDivision(allFactors);
+
+    std::unordered_set<std::string> startSet(startFactors.begin(), startFactors.end());
+
+    std::vector<std::string> newFactors;
+    newFactors.reserve(allSplit.size());
+    for (const auto& f : allSplit) {
+        if (!startSet.count(f)) newFactors.push_back(f);
     }
 
-    std::string knownFactorStr;        // e.g. 204453287,1255070097822910516312001       -- for use in checksum
-    std::string knownFactorStrQuoted;  // e.g. "204453287","1255070097822910516312001"   -- for use in JSON, note is already quoted and MUST NOT be wrapped in jsonEscape()
-    if (!uniqFactors.empty()) {
-        knownFactorStr       =        uniqFactors[0];
-        knownFactorStrQuoted = "\"" + uniqFactors[0];
-        for (size_t i = 1; i < uniqFactors.size(); ++i) {
-            knownFactorStr       += ","     + uniqFactors[i];
-            knownFactorStrQuoted += "\",\"" + uniqFactors[i];
+    std::string factorStr;
+    std::string factorStrQuoted;
+
+    if (!newFactors.empty()) {
+        factorStr       =        newFactors[0];
+        factorStrQuoted = "\"" + newFactors[0];
+        for (size_t i = 1; i < newFactors.size(); ++i) {
+            factorStr       += ","     + newFactors[i];
+            factorStrQuoted += "\",\"" + newFactors[i];
         }
-        knownFactorStrQuoted += "\"";
+        factorStrQuoted += "\"";
     }
+
+    std::string startFactorStr;
+    std::string startFactorStrQuoted;
+    if (!startFactors.empty()) {
+        startFactorStr       =        startFactors[0];
+        startFactorStrQuoted = "\"" + startFactors[0];
+        for (size_t i = 1; i < startFactors.size(); ++i) {
+            startFactorStr       += ","     + startFactors[i];
+            startFactorStrQuoted += "\",\"" + startFactors[i];
+        }
+        startFactorStrQuoted += "\"";
+    }
+std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
+          << " knownFactors=" << knownFactors.size()
+          << " startFactors=" << startFactors.size()
+          << " newFactors=" << newFactors.size() << "\n";
 
     oss << "{";
     oss <<  "\"status\":"                          << jsonEscape(status);
@@ -296,9 +402,17 @@ static std::string generatePrimeNetJson(
     if (!knownFactors.empty()) {
         // *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
         if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
-            oss << ",\"known-factors\":[" << knownFactorStrQuoted << "]";
+            oss << ",\"known-factors\":[" << startFactorStrQuoted << "]";
         } else {
-            oss << ",\"factors\":[" << knownFactorStrQuoted << "]";
+            if (!newFactors.empty()) {
+                oss << ",\"factors\":[" << factorStrQuoted << "]";
+            }
+
+            // Facteurs connus avant le run (worktodo)
+            if (!startFactors.empty()) {
+                oss << ",\"known-factors\":[" << startFactorStrQuoted << "]";
+            }
+
         }
     }
     if (opts.B1 > 0) {
@@ -365,15 +479,18 @@ static std::string generatePrimeNetJson(
     std::string canonWTNorm = canonWT;
     if (canonWTNorm == "PRP-3" || canonWTNorm == "prp-3") canonWTNorm = "PRP";
     canon << canonWTNorm  << ";";                                // worktype
-    if (!(canonWTNorm == "PRP") && !knownFactors.empty()) {
+    /*if (!(canonWTNorm == "PRP") && !knownFactors.empty()) {
         canon << knownFactorStr;                                 // factors
     }
     canon << ";"; 
     if ((canonWTNorm == "PRP") && !knownFactors.empty()) {
         canon << knownFactorStr;                                 // factors
-    }
-   
-    canon << "" << ";";                                          // known-factors *** TODO: not yet supported (factors that were known BEFORE this factoring run and included in worktodo.txt, distinct from factors just found ***
+    }*/
+    canon << factorStr;  
+    canon << ";"; 
+    canon << startFactorStr;  
+    canon << ";"; 
+                                             // known-factors *** TODO: not yet supported (factors that were known BEFORE this factoring run and included in worktodo.txt, distinct from factors just found ***
 
     if (canonWT == "TF") {
         // *** TODO: not yet not yet implemented ***
@@ -441,7 +558,7 @@ static std::string generatePrimeNetJson(
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-        //<< ",\"hash\":\"" << canon.str() << "\""
+        << ",\"hash\":\"" << canon.str() << "\""
         //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
@@ -494,7 +611,8 @@ std::string JsonBuilder::generate(const CliOptions& opts,
         opts.aid,
         timestampBuf,
         opts.computer_name,
-        opts.knownFactors
+        opts.knownFactors,
+        opts.knownFactors_start
     );
 }
 
