@@ -558,7 +558,7 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
     oss.str(""); oss.clear();
     oss << prefix
         << ",\"checksum\":{\"version\":1,\"checksum\":\"" << hexss.str() << "\"}"
-        << ",\"hash\":\"" << canon.str() << "\""
+        //<< ",\"hash\":\"" << canon.str() << "\""
         //<< ",\"code-hash\":" << jsonEscape(util::code_hash_crc32_upper8())
         << "}";
     return oss.str();
