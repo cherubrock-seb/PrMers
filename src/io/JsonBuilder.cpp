@@ -394,9 +394,10 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
           << " knownFactors=" << knownFactors.size()
           << " startFactors=" << startFactors.size()
           << " newFactors=" << newFactors.size() << "\n";
-
+    
+    
     oss << "{";
-    oss <<  "\"status\":"                          << jsonEscape(status);
+    oss <<  "\"status\":"                          << jsonEscape((!newFactors.empty() ? "F" : "NF"));
     oss << ",\"exponent\":"                        <<            exponent;
     oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
