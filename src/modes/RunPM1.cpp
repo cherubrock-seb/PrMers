@@ -2235,6 +2235,19 @@ int App::runPM1Marin() {
         wm.appendToResultsTxt(json);
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
         delete eng;
+        if (hasWorktodoEntry_) {
+                if (worktodoParser_->removeFirstProcessed()) {
+                    std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                    if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+                    std::ifstream f(options.worktodo_path);
+                    std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
+                    f.close();
+                    if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
+                    else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
+                } else {
+                    std::cerr << "Failed to update " << options.worktodo_path << "\n"; if (guiServer_) { std::ostringstream oss; oss << "Failed to update " << options.worktodo_path << "\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(-1);}
+                }
+            }
         return factorFound ? 0 : 1;
     }
     else{
