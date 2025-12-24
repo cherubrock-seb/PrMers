@@ -833,7 +833,7 @@ struct S2Entry {
   uint32_t k_rel;  // k - k0
   uint32_t e;      // q = k*D + e  (e < D)
 };
-
+/*
 static void primes_to_ke(const std::vector<uint64_t>& primes,
                          uint32_t D,
                          uint64_t k0,
@@ -845,7 +845,7 @@ static void primes_to_ke(const std::vector<uint64_t>& primes,
     const uint32_t e = (uint32_t)(q - k * (uint64_t)D);
     out.push_back(S2Entry{ (uint32_t)(k - k0), e });
   }
-}
+}*/
 
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
@@ -1592,7 +1592,7 @@ static mpz_class buildE_full(uint64_t B1)
     return E;
 }
 
-
+/*
 static mpz_class buildE_incremental(uint64_t B1_old, uint64_t B1_new)
 {
     if (B1_new <= B1_old)
@@ -1604,7 +1604,7 @@ static mpz_class buildE_incremental(uint64_t B1_old, uint64_t B1_new)
     mpz_class E_diff;
     mpz_divexact(E_diff.get_mpz_t(), E_new.get_mpz_t(), E_old.get_mpz_t());
     return E_diff;
-}
+}*/
 
 
 static inline void mpz_mul_u64(mpz_class& a, uint64_t x) {
@@ -1612,15 +1612,15 @@ static inline void mpz_mul_u64(mpz_class& a, uint64_t x) {
         mpz_mul_ui(a.get_mpz_t(), a.get_mpz_t(), (unsigned long)x);
     } else {
         mpz_class t;
-        t = x;
+        t = mpz_from_u64(x);
         mpz_mul(a.get_mpz_t(), a.get_mpz_t(), t.get_mpz_t());
     }
 }
 
 static std::vector<uint32_t> primes_up_to(uint32_t n) {
     std::vector<uint8_t> is(n + 1, 1);
-    if (n >= 0) is[0] = 0;
-    if (n >= 1) is[1] = 0;
+    if (n >= 0u) is[0] = 0;
+    if (n >= 1u) is[1] = 0;
     for (uint32_t i = 2; (uint64_t)i * i <= n; ++i) {
         if (!is[i]) continue;
         for (uint64_t j = (uint64_t)i * i; j <= n; j += i) is[(size_t)j] = 0;
@@ -3210,7 +3210,7 @@ int App::runPM1Stage3Marin() {
     uint64_t steps_in_block = 0;
     uint64_t blocks_since_last_check = 0;
     bool errordone = false;
-    uint64_t originalB3 = options.B3;
+   // uint64_t originalB3 = options.B3;
 
     for (; b < B3u; ++b) {
         if (interrupted) {
