@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <map>
 #include <future>
+#include <cinttypes>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -50,6 +51,11 @@
 #include <filesystem>
 #include <set>
 #include <unordered_set>
+#include <limits>
+#include <cmath>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
 
 using namespace core;
 using namespace std::chrono;
@@ -1486,6 +1492,137 @@ static mpz_class buildE_incremental(uint64_t B1_old, uint64_t B1_new)
 }
 
 
+static inline void mpz_mul_u64(mpz_class& a, uint64_t x) {
+    if (x <= (uint64_t)std::numeric_limits<unsigned long>::max()) {
+        mpz_mul_ui(a.get_mpz_t(), a.get_mpz_t(), (unsigned long)x);
+    } else {
+        mpz_class t;
+        t = x;
+        mpz_mul(a.get_mpz_t(), a.get_mpz_t(), t.get_mpz_t());
+    }
+}
+
+static std::vector<uint32_t> primes_up_to(uint32_t n) {
+    std::vector<uint8_t> is(n + 1, 1);
+    if (n >= 0) is[0] = 0;
+    if (n >= 1) is[1] = 0;
+    for (uint32_t i = 2; (uint64_t)i * i <= n; ++i) {
+        if (!is[i]) continue;
+        for (uint64_t j = (uint64_t)i * i; j <= n; j += i) is[(size_t)j] = 0;
+    }
+    std::vector<uint32_t> pr;
+    pr.reserve(n / 10);
+    for (uint32_t i = 2; i <= n; ++i) if (is[i]) pr.push_back(i);
+    return pr;
+}
+
+
+static inline double now_seconds_since(std::chrono::steady_clock::time_point t0) {
+    using namespace std::chrono;
+    return duration_cast<duration<double>>(steady_clock::now() - t0).count();
+}
+
+static constexpr uint64_t SIEVE_BLOCK = 1ULL << 20;
+
+static mpz_class buildE_incremental_fast(uint64_t B1_old, uint64_t B1_new)
+{
+    if (B1_new <= B1_old) return mpz_class(1);
+    if (B1_old < 2) B1_old = 1;
+
+    mpz_class E_diff(1);
+
+    const uint64_t high = B1_new;
+    const uint32_t root = (uint32_t)std::sqrt((long double)high);
+    auto primes = primes_up_to(root);
+
+    using clock = std::chrono::steady_clock;
+    const auto t0 = clock::now();
+    auto t_last = t0;
+
+    auto should_print = [&]() {
+        auto t = clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(t - t_last).count() >= 400) {
+            t_last = t;
+            return true;
+        }
+        return false;
+    };
+
+    auto print_line = [&](const char* phase, double pct, uint64_t cur, uint64_t total) {
+        double elapsed = now_seconds_since(t0);
+        double eta = (pct > 0.0001) ? elapsed * (1.0 / (pct / 100.0) - 1.0) : 0.0;
+        std::fprintf(stderr,
+            "\r[%s] %6.2f%%  (%" PRIu64 "/%" PRIu64 ")  elapsed=%.1fs  eta=%.1fs      ",
+            phase, pct, cur, total, elapsed, eta);
+        std::fflush(stderr);
+    };
+
+    const uint64_t total_primes = (uint64_t)primes.size();
+    for (uint64_t idx = 0; idx < total_primes; ++idx) {
+        uint32_t p = primes[(size_t)idx];
+        uint64_t pp = (uint64_t)p;
+
+        uint64_t pw = pp;
+        while (pw <= B1_old / pp) pw *= pp;
+
+        while (pw <= B1_new / pp) {
+            pw *= pp;
+            mpz_mul_u64(E_diff, pp);
+        }
+
+        if (should_print()) {
+            double pct = total_primes ? (100.0 * (double)(idx + 1) / (double)total_primes) : 100.0;
+            print_line("prime-powers", pct, idx + 1, total_primes);
+        }
+    }
+    const uint64_t total_range = (B1_new - B1_old);
+    uint64_t done_range = 0;
+
+    uint64_t start = B1_old + 1;
+    while (start <= B1_new) {
+        uint64_t end = std::min(B1_new, start + SIEVE_BLOCK - 1);
+        size_t len = (size_t)(end - start + 1);
+
+        std::vector<uint8_t> seg(len, 1);
+
+        for (uint32_t q : primes) {
+            uint64_t qq = (uint64_t)q * (uint64_t)q;
+            if (qq > end) break;
+
+            uint64_t first = (start + q - 1) / q;
+            uint64_t j = first * (uint64_t)q;
+            if (j < qq) j = qq;
+
+            for (; j <= end; j += q) {
+                seg[(size_t)(j - start)] = 0;
+            }
+        }
+
+        for (size_t i = 0; i < len; ++i) {
+            uint64_t n = start + (uint64_t)i;
+            if (n < 2) continue;
+            if (!seg[i]) continue;
+            mpz_mul_u64(E_diff, n);
+        }
+
+        done_range += (end - start + 1);
+
+        if (should_print()) {
+            double pct = total_range ? (100.0 * (double)done_range / (double)total_range) : 100.0;
+            print_line("sieve-range", pct, done_range, total_range);
+        }
+
+        start = end + 1;
+    }
+
+    std::fprintf(stderr, "\r[done]                                   elapsed=%.1fs                    \n",
+                 now_seconds_since(t0));
+
+    return E_diff;
+}
+
+
+
 int App::runPM1Marin() {
    if (guiServer_) {
         std::ostringstream oss;
@@ -1670,7 +1807,10 @@ int App::runPM1Marin() {
     if (rr == 0) { restored = true; firstChunk = (firstChunk_ck != 0); }
     auto start_sys = std::chrono::system_clock::now();
     if (doExtend) {
-        mpz_class E_diff = buildE_incremental(B1_old, B1_new);
+        std::cout << "Building E_diff for (B1old=" << B1_old << ", B1new=" << B1_new << ")...\n" << std::flush;
+        mpz_class E_diff = buildE_incremental_fast(B1_old, B1_new);
+        std::cout << "E_diff built (" << mpz_sizeinbase(E_diff.get_mpz_t(), 2) << " bits)\n" << std::flush;
+
         mp_bitcnt_t bits = mpz_sizeinbase(E_diff.get_mpz_t(), 2);
 
         std::cout << "Extending PM1 exponent: E_diff has " << bits << " bits\n";
