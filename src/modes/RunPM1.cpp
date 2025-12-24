@@ -56,6 +56,8 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <climits>
+#include <gmpxx.h>
 
 using namespace core;
 using namespace std::chrono;
@@ -100,11 +102,50 @@ using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
 
+static inline void mpz_set_u64(mpz_t z, uint64_t x) {
+#if ULONG_MAX >= UINT64_MAX
+    mpz_set_ui(z, (unsigned long)x);
+#else
+    mpz_import(z, 1, -1, sizeof(x), 0, 0, &x);
+#endif
+}
+
+static inline uint64_t mpz_get_u64(const mpz_t z) {
+#if ULONG_MAX >= UINT64_MAX
+    return (uint64_t)mpz_get_ui(z);
+#else
+    uint64_t out = 0;
+    size_t count = 0;
+    mpz_export(&out, &count, -1, sizeof(out), 0, 0, z);
+    if (count == 0) return 0;
+    if (count > 1) {
+        // z ne tient pas sur 64 bits
+        throw std::runtime_error("mpz_get_u64: value doesn't fit in uint64_t");
+    }
+    return out;
+#endif
+}
+
+
+static inline uint64_t mpz_get_u64(const mpz_class& z) {
+    return mpz_get_u64(z.get_mpz_t());
+}
+
+
+static inline mpz_class mpz_from_u64(uint64_t x) {
+    mpz_class r;
+    mpz_set_u64(r.get_mpz_t(), x);
+    return r;
+}
+
+
 int App::runPM1Stage2() {
     using namespace std::chrono;
     bool debug = false;
-    mpz_class B1(static_cast<unsigned long>(options.B1));
-    mpz_class B2(static_cast<unsigned long>(options.B2));
+    //mpz_class B1(static_cast<unsigned long>(options.B1));
+    mpz_class B1 = mpz_from_u64(options.B1);
+    mpz_class B2 = mpz_from_u64(options.B2);
+    //mpz_class B2(static_cast<unsigned long>(options.B2));
     if (guiServer_) {
         std::ostringstream oss;
         oss << "P-1 factoring stage 2";
@@ -246,7 +287,9 @@ int App::runPM1Stage2() {
     for (; p <= B2; ++idx) {
         if (idx) {
             mpz_class d = p - p_prev;
-            unsigned long idxGap = mpz_get_ui(d.get_mpz_t()) / 2 - 1;
+            uint64_t gap = mpz_get_u64(d.get_mpz_t());
+            unsigned long idxGap = (unsigned long)((gap >> 1) - 1);
+
             ensureEvenPow(idxGap);
             
             nttEngine->forward_simple(buffers->Hq, 0);
@@ -279,7 +322,7 @@ int App::runPM1Stage2() {
             int minutes = (static_cast<int>(etaSec) % 3600) / 60;
             int seconds = static_cast<int>(etaSec) % 60;
             std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
-                      << "prime: " << p.get_ui() << " | "
+                      << "prime: " << mpz_get_u64(p) << " | "
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
@@ -288,7 +331,7 @@ int App::runPM1Stage2() {
             if (guiServer_) {
                                 std::ostringstream oss;
                                 oss << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
-                      << "prime: " << p.get_ui() << " | "
+                      << "prime: " << mpz_get_u64(p) << " | "
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
@@ -392,7 +435,7 @@ int App::runPM1() {
                       guiServer_->appendLog(oss.str());
         }
         E = buildE(B1);
-        E *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+        E *= mpz_class(2) * mpz_from_u64(options.exponent);
 
 
     }
@@ -725,11 +768,92 @@ int App::runPM1() {
     return 1;
 }
 
+
+static uint64_t isqrt_u64(uint64_t x) {
+  long double r = std::sqrt((long double)x);
+  uint64_t y = (uint64_t)r;
+  while ((y+1) > 0 && (y+1) <= x / (y+1)) ++y;
+  while (y > 0 && y > x / y) --y;
+  return y;
+}
+
+static std::vector<uint32_t> sieve_base_primes(uint32_t limit) {
+  std::vector<uint8_t> isPrime(limit + 1, 1);
+  isPrime[0] = isPrime[1] = 0;
+  for (uint32_t p = 2; (uint64_t)p * p <= limit; ++p) {
+    if (!isPrime[p]) continue;
+    for (uint64_t m = (uint64_t)p * p; m <= limit; m += p) isPrime[(size_t)m] = 0;
+  }
+  std::vector<uint32_t> primes;
+  primes.reserve(limit / 10);
+  for (uint32_t i = 2; i <= limit; ++i) if (isPrime[i]) primes.push_back(i);
+  return primes;
+}
+
+static void segmented_primes_odd(uint64_t low, uint64_t high,
+                                 const std::vector<uint32_t>& basePrimes,
+                                 std::vector<uint64_t>& out) {
+  out.clear();
+  if (high < 2 || low > high) return;
+
+  if (low <= 2 && 2 <= high) out.push_back(2);
+
+  if (low < 3) low = 3;
+  if ((low & 1ULL) == 0) ++low;
+  if ((high & 1ULL) == 0) --high;
+  if (low > high) return;
+
+  const uint64_t nOdds = ((high - low) >> 1) + 1; 
+  std::vector<uint8_t> isPrime((size_t)nOdds, 1);
+
+  for (uint32_t p32 : basePrimes) {
+    if (p32 == 2) continue;
+    const uint64_t p = (uint64_t)p32;
+    const uint64_t p2 = p * p;
+    if (p2 > high) break;
+
+    uint64_t start = (low + p - 1) / p * p;
+    if (start < p2) start = p2;
+    if ((start & 1ULL) == 0) start += p;
+
+    for (uint64_t x = start; x <= high; x += (p << 1)) {
+      const uint64_t idx = (x - low) >> 1;
+      isPrime[(size_t)idx] = 0;
+    }
+  }
+
+  out.reserve((size_t)(nOdds / 10));
+  for (uint64_t i = 0; i < nOdds; ++i) {
+    if (!isPrime[(size_t)i]) continue;
+    out.push_back(low + (i << 1));
+  }
+}
+
+struct S2Entry {
+  uint32_t k_rel;  // k - k0
+  uint32_t e;      // q = k*D + e  (e < D)
+};
+
+static void primes_to_ke(const std::vector<uint64_t>& primes,
+                         uint32_t D,
+                         uint64_t k0,
+                         std::vector<S2Entry>& out) {
+  out.clear();
+  out.reserve(primes.size());
+  for (uint64_t q : primes) {
+    const uint64_t k = q / (uint64_t)D;
+    const uint32_t e = (uint32_t)(q - k * (uint64_t)D);
+    out.push_back(S2Entry{ (uint32_t)(k - k0), e });
+  }
+}
+
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
     if (guiServer_) { std::ostringstream oss; oss << "P-1 factoring stage 2"; guiServer_->setStatus(oss.str()); }
     uint64_t B1u = options.B1, B2u = options.B2;
-    mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
+    //mpz_class B1(static_cast<unsigned long>(B1u)), B2(static_cast<unsigned long>(B2u));
+    mpz_class B1 = mpz_from_u64(B1u);
+    mpz_class B2 = mpz_from_u64(B2u);
     if (B2 <= B1) {
         std::cerr << "Stage 2 error B2 < B1.\n";
         if (guiServer_) { std::ostringstream oss; oss << "Stage 2 error B2 < B1.\n"; guiServer_->appendLog(oss.str()); }
@@ -802,94 +926,48 @@ int App::runPM1Stage2Marin() {
         if (guiServer_) { std::ostringstream oss; oss << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n'; guiServer_->appendLog(oss.str()); }
         return 1;
     }
-    std::vector<uint32_t> idxGap;
-    {
-        using clock = std::chrono::steady_clock;
-        auto t0 = clock::now(), last = t0;
-        if (B2u <= 3 || B2u <= B1u) { idxGap.clear(); }
-        std::vector<uint8_t> sieve((B2u >> 1) + 1, 1);
-        uint64_t r = (uint64_t)std::sqrt((long double)B2u);
-        uint64_t steps = (r >= 3) ? ((r - 3) / 2 + 1) : 0, done = 0;
-        std::cout << "Sieve primes:   0%  ETA  --:--:--" << std::flush;
-        for (uint64_t i = 3; i <= r; i += 2) {
-            if (sieve[i >> 1]) {
-                uint64_t ii = i * i;
-                for (uint64_t j = ii; j <= B2u; j += (i << 1)) sieve[j >> 1] = 0;
-            }
-            ++done;
-            auto now = clock::now();
-            if (now - last >= std::chrono::milliseconds(400)) {
-                double prog = steps ? double(done) / steps : 1.0;
-                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
-                long sec = long(eta + 0.5);
-                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
-                std::cout << "\rSieve primes: " << std::setw(3) << int(prog * 100)
-                        << "%  ETA "
-                        << std::setw(2) << std::setfill('0') << h << ':'
-                        << std::setw(2) << m << ':'
-                        << std::setw(2) << s << std::setfill(' ')
-                        << std::flush;
-                last = now;
-            }
-            if (interrupted) break;
-        }
-        std::cout << "\rSieve primes: 100%  ETA  00:00:00\n";
-        uint64_t start = (B1u >= 2) ? (B1u + 1) : 3;
-        if ((start & 1) == 0) ++start;
-        while (start <= B2u && !sieve[start >> 1]) start += 2;
-        if (start > B2u) { idxGap.clear(); }
-        uint64_t total_pr = 0;
-        for (uint64_t q = start; q <= B2u; q += 2) if (sieve[q >> 1]) ++total_pr;
-        if (total_pr <= 1) { idxGap.clear(); }
-        idxGap.reserve(total_pr ? (size_t)(total_pr - 1) : 0);
-        uint64_t processed = 0;
-        t0 = clock::now(); last = t0;
-        std::cout << "Build gaps:   0%  ETA  --:--:--" << std::flush;
-        uint64_t p = start;
-        for (uint64_t q = p + 2; q <= B2u; q += 2) {
-            if (!sieve[q >> 1]) continue;
-            uint64_t gap = q - p;
-            uint64_t ig = (gap >> 1) - 1;
-            idxGap.push_back((uint32_t)ig);
-            p = q;
-            ++processed;
-            auto now = clock::now();
-            if (now - last >= std::chrono::milliseconds(400)) {
-                double prog = total_pr ? double(processed) / double(total_pr) : 1.0;
-                double eta = prog ? std::chrono::duration<double>(now - t0).count() * (1.0 - prog) / prog : 0.0;
-                long sec = long(eta + 0.5);
-                int h = int(sec / 3600), m = int((sec % 3600) / 60), s = int(sec % 60);
-                std::cout << "\rBuild gaps: " << std::setw(3) << int(prog * 100)
-                        << "%  ETA "
-                        << std::setw(2) << std::setfill('0') << h << ':'
-                        << std::setw(2) << m << ':'
-                        << std::setw(2) << s << std::setfill(' ')
-                        << std::flush;
-                last = now;
-            }
-            if (interrupted) break;
-        }
-        std::cout << "\rBuild gaps: 100%  ETA  00:00:00\n";
-    }
+
+    const uint64_t p0u = mpz_get_u64(p0.get_mpz_t());
+    const uint64_t root = isqrt_u64(B2u);
+    const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
+    const uint64_t SEG_SPAN = 100000000ULL;
+
     std::unordered_map<uint64_t,int> k2slot;
     k2slot.reserve(nbEven*2);
     std::vector<uint64_t> ks_order;
     ks_order.reserve(nbEven);
     {
         uint64_t cum_m = 0;
-        for (size_t i = 0; i < idxGap.size() && k2slot.size() < nbEven; ++i) {
-            cum_m += (uint64_t)idxGap[i] + 1;
-            uint64_t k = cum_m - 1;
-            if (!k2slot.count(k)) {
-                k2slot.emplace(k, (int)k2slot.size());
-                ks_order.push_back(k);
+        uint64_t prev_p = p0u;
+        uint64_t segLow = p0u;
+        std::vector<uint64_t> primesSeg;
+        while (segLow <= B2u && k2slot.size() < nbEven) {
+            uint64_t segHigh = segLow + SEG_SPAN - 1;
+            if (segHigh > B2u) segHigh = B2u;
+            segmented_primes_odd(segLow, segHigh, basePrimes, primesSeg);
+            for (uint64_t q : primesSeg) {
+                if (q <= prev_p) continue;
+                uint64_t gap = q - prev_p;
+                uint64_t m_i = (gap >> 1);
+                cum_m += m_i;
+                uint64_t k = cum_m - 1;
+                if (!k2slot.count(k)) {
+                    k2slot.emplace(k, (int)k2slot.size());
+                    ks_order.push_back(k);
+                    if (k2slot.size() >= nbEven) break;
+                }
+                prev_p = q;
             }
+            if (segHigh >= B2u) break;
+            segLow = segHigh + 1;
+            if (segLow <= prev_p) segLow = prev_p + 1;
         }
         if (k2slot.empty()) {
             k2slot.emplace(0,0);
             ks_order.push_back(0);
         }
     }
+
     std::vector<uint64_t> ks_sorted = ks_order;
     std::sort(ks_sorted.begin(), ks_sorted.end());
     for (size_t i = 0; i < ks_sorted.size(); ++i) {
@@ -991,42 +1069,32 @@ int App::runPM1Stage2Marin() {
         std::cout << "\n";
         eng->set(static_cast<engine::Reg>(RACC_L), 1);
     }
-    size_t totalPrimes = idxGap.size() + 1;
+
     auto t0 = high_resolution_clock::now();
     auto lastBackup = t0;
     auto lastDisplay = t0;
-    mpz_class p = p0;
     uint64_t idx = 0;
+    uint64_t p_ui = p0u;
     if (resumed_s2) {
-        mpz_class rp; mpz_set_ui(rp.get_mpz_t(), static_cast<unsigned long>(resume_p_u64));
-        size_t iStart = 0;
-        mpz_class cur = p0;
-        while (iStart < idxGap.size() && cur < rp) {
-            unsigned long add = (unsigned long)(2ull * (static_cast<uint64_t>(idxGap[iStart]) + 1ull));
-            mpz_add_ui(cur.get_mpz_t(), cur.get_mpz_t(), add);
-            ++iStart;
-        }
-        if (cur != rp) { delete eng; std::cerr << "Stage 2: resume prime not found in precomputed sequence.\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2: resume prime not found in precomputed sequence.\n"; guiServer_->appendLog(oss.str()); } return -3; }
-        p = cur;
         idx = resume_idx;
-        std::cout << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")\n";
-        if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 2 from checkpoint at prime " << p.get_ui() << " (idx=" << idx << ")"; guiServer_->appendLog(oss.str()); }
+        p_ui = resume_p_u64;
+        std::cout << "Resuming Stage 2 from checkpoint at prime " << p_ui << " (idx=" << idx << ")\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 2 from checkpoint at prime " << p_ui << " (idx=" << idx << ")"; guiServer_->appendLog(oss.str()); }
         t0 = high_resolution_clock::now() - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
         lastBackup = high_resolution_clock::now();
         lastDisplay = lastBackup;
     } else {
-        eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), mpz_get_ui(p0.get_mpz_t()));
+        eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), p0u);
     }
     uint64_t primes_since_check = 0;
     eng->copy(static_cast<engine::Reg>(RSAVE_Q), static_cast<engine::Reg>(RACC_L));
     eng->copy(static_cast<engine::Reg>(RSAVE_HQ), static_cast<engine::Reg>(RACC_R));
-    size_t iStartRun = 0;
-    uint64_t p_ui = mpz_get_ui(p0.get_mpz_t());
+
     size_t base_done = 0;
     (void)base_done;
     auto start_sys = std::chrono::system_clock::now();
-    iStartRun = resume_idx;
     auto start = t0;
+
     eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
     uint64_t cum_m = 0;
     std::unordered_set<uint64_t> k_present;
@@ -1037,22 +1105,68 @@ int App::runPM1Stage2Marin() {
     std::cout << "Stored even powers: " << storedEven << "/" << nbEven << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "Stored even powers: " << storedEven << "/" << nbEven; guiServer_->appendLog(oss.str()); }
 
-    for (size_t i = iStartRun; ; ++i, ++idx) {
+    std::vector<uint64_t> primesRun;
+    uint64_t segLowRun = p_ui;
+    uint64_t segHighRun = segLowRun + SEG_SPAN - 1;
+    if (segHighRun > B2u) segHighRun = B2u;
+    segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
+    size_t posRun = 0;
+    while (posRun < primesRun.size() && primesRun[posRun] < p_ui) ++posRun;
+    if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
+        delete eng;
+        std::cerr << "Stage 2: start prime not found in segmented sieve.\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Stage 2: start prime not found in segmented sieve.\n"; guiServer_->appendLog(oss.str()); }
+        return -3;
+    }
+
+    auto advancePrime = [&](uint64_t& out)->bool{
+        for (;;) {
+            if (posRun + 1 < primesRun.size()) {
+                ++posRun;
+                out = primesRun[posRun];
+                return true;
+            }
+            if (segHighRun >= B2u) return false;
+            segLowRun = segHighRun + 1;
+            segHighRun = segLowRun + SEG_SPAN - 1;
+            if (segHighRun > B2u) segHighRun = B2u;
+            segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
+            posRun = 0;
+            if (primesRun.empty()) continue;
+            out = primesRun[0];
+            return true;
+        }
+    };
+
+    for (;;) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
-            save_ckpt_s2(eng, static_cast<uint64_t>(p.get_ui()), idx, et);
+            save_ckpt_s2(eng, p_ui, idx, et);
             delete eng;
-            std::cout << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx << std::endl;
-            if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted by user, Stage 2 state saved at prime " << p.get_ui() << " idx=" << idx; guiServer_->appendLog(oss.str()); }
+            std::cout << "\nInterrupted by user, Stage 2 state saved at prime " << p_ui
+                    << " idx=" << idx << std::endl;
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "\nInterrupted by user, Stage 2 state saved at prime " << p_ui
+                    << " idx=" << idx;
+                guiServer_->appendLog(oss.str());
+            }
             return 0;
         }
+
         eng->sub(static_cast<engine::Reg>(RACC_R), 1);
         eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RACC_R));
         eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
-        if (i >= idxGap.size()) {break; }
-        const uint64_t m_i = (uint64_t)idxGap[i] + 1;
+
+        uint64_t next_p = 0;
+        bool has_next = advancePrime(next_p);
+        if (!has_next) break;
+
+        uint64_t gap = next_p - p_ui;
+        uint64_t m_i = (gap >> 1);
         cum_m += m_i;
         const uint64_t k = cum_m - 1;
+
         eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
         auto it = k2slot.find(k);
         if (it != k2slot.end()) {
@@ -1061,24 +1175,19 @@ int App::runPM1Stage2Marin() {
             eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
             cum_m = 0;
         }
-        p_ui += 2ull * m_i;
-        if ((i + 1) < idxGap.size()) {
-            const uint64_t m_next = (uint64_t)idxGap[i + 1] + 1;
-            const uint64_t k_next = cum_m + m_next - 1;
-            if (!k_present.count(k_next)) {
-                eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-                cum_m = 0;
-            }
-        }
+
+        p_ui = next_p;
         ++primes_since_check;
+
         auto now = high_resolution_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastDisplay).count() >= 3) {
             const size_t done_abs  = idx + 1;
-            const double percent   = totalPrimes ? 100.0 * double(done_abs) / double(totalPrimes) : 100.0;
+            const double denom     = double((B2u > p0u) ? (B2u - p0u) : 1ull);
+            const double numer     = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
+            const double percent   = 100.0 * (numer / denom);
             const double elapsedSec= std::chrono::duration<double>(now - start).count();
             const double ips       = (elapsedSec > 0.0) ? double(done_abs) / elapsedSec : 0.0;
-            const double remaining = (totalPrimes > done_abs) ? double(totalPrimes - done_abs) : 0.0;
-            const double etaSec    = (ips > 0.0) ? remaining / ips : 0.0;
+            const double etaSec    = (percent > 0.0) ? elapsedSec * (100.0 - percent) / percent : 0.0;
             int days = int(etaSec) / 86400;
             int hours = (int(etaSec) % 86400) / 3600;
             int minutes = (int(etaSec) % 3600) / 60;
@@ -1099,10 +1208,11 @@ int App::runPM1Stage2Marin() {
                     << " | IPS: " << std::fixed << std::setprecision(2) << ips
                     << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r";
                 guiServer_->appendLog(oss.str());
-                guiServer_->setProgress(double(done_abs), double(totalPrimes), "");
+                guiServer_->setProgress(double((p_ui > p0u) ? (p_ui - p0u) : 0ull), double((B2u > p0u) ? (B2u - p0u) : 1ull), "");
             }
             lastDisplay = now;
         }
+
         auto now0 = high_resolution_clock::now();
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
             double et = duration<double>(now0 - t0).count();
@@ -1116,8 +1226,12 @@ int App::runPM1Stage2Marin() {
                 guiServer_->appendLog(oss.str());
             }
         }
+
         if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) { eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RSTATE)); }
+
+        ++idx;
     }
+
     auto end_sys = std::chrono::system_clock::now();
     auto fmt = [](const std::chrono::system_clock::time_point& tp){
         using namespace std::chrono;
@@ -1171,6 +1285,7 @@ int App::runPM1Stage2Marin() {
     delete eng;
     return found ? 0 : 1;
 }
+
 
 
 /* ===== n^K Stage-2 (Topics in advanced scientific computation. by: Crandall, Richard E) ===== */
@@ -2373,6 +2488,56 @@ int App::runPM1Marin() {
         io::WorktodoManager wm(options);
         wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
         wm.appendToResultsTxt(json);
+        if(options.B2 > 0){
+            const double elapsed_time_ck =
+                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                + restored_time;
+
+            save_ckpt(
+                0,
+                elapsed_time_ck,
+                0,
+                0,
+                0,
+                0,
+                0,
+                mpz_class(0),
+                mpz_class(0),
+                chunkIndex,
+                startPrime,
+                firstChunk ? 1 : 0,
+                processed_total_bits,
+                0
+            );
+
+            factorFound = runPM1Stage2Marin() || factorFound;
+        }
+
+        if(options.nmax > 0 && options.K > 0){
+            const double elapsed_time_ck =
+                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                + restored_time;
+
+            save_ckpt(
+                0,
+                elapsed_time_ck,
+                0,
+                0,
+                0,
+                0,
+                0,
+                mpz_class(0),
+                mpz_class(0),
+                chunkIndex,
+                startPrime,
+                firstChunk ? 1 : 0,
+                processed_total_bits,
+                0
+            );
+
+            factorFound = runPM1Stage2MarinNKVersion() || factorFound;
+        }
+
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
         delete eng;
         if (hasWorktodoEntry_) {
@@ -2405,7 +2570,7 @@ int App::runPM1Marin() {
             } else {
                 Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
             }
-            if (firstChunk) Echunk *= mpz_class(2) * mpz_class(static_cast<unsigned long>(options.exponent));
+            if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
             bool useFast3 = useFast3Candidate && (nextStart == 0);
             mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
             if (bits == 0) break;
