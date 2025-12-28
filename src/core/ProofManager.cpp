@@ -9,7 +9,7 @@
  *         https://www.craig-wood.com/nick/armprime/
  *     and available on GitHub at:
  *         https://github.com/ncw/
- *   - Yves Gallot (https://github.com/galloty), author of Genefer 
+ *   - Yves Gallot (https://github.com/galloty), author of Genefer
  *     (https://github.com/galloty/genefer22), who helped clarify the NTT and IDBWT concepts.
  *   - The GPUOwl project (https://github.com/preda/gpuowl), which performs Mersenne
  *     searches using FFT and double-precision arithmetic.
@@ -18,12 +18,54 @@
  *
  * Author: Cherubrock
  *
- * This code is released as free software. 
+ * This code is released as free software.
  */
 #include "core/ProofManager.hpp"
 #include "io/JsonBuilder.hpp"
 #include <vector>
 #include <iostream>
+#include <filesystem>
+#include <system_error>
+#include <chrono>
+#include <stdexcept>
+
+namespace {
+
+namespace fs = std::filesystem;
+
+fs::path ensureDir(const fs::path& p) {
+    std::error_code ec;
+    fs::create_directories(p, ec);
+    if (ec) {
+        throw std::runtime_error("Cannot create directory '" + p.string() + "': " + ec.message());
+    }
+    return p;
+}
+
+void fancyRename(const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+
+    fs::remove(to, ec);
+    ec.clear();
+
+    fs::rename(from, to, ec);
+    if (!ec) return;
+
+    ec.clear();
+    fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        throw std::runtime_error("Cannot move '" + from.string() + "' -> '" + to.string() + "': " + ec.message());
+    }
+    ec.clear();
+    fs::remove(from, ec);
+}
+
+fs::path uniqueTmpPath(const fs::path& dir, const std::string& baseName) {
+    uint64_t ts = (uint64_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    return dir / (baseName + ".tmp-" + std::to_string(ts));
+}
+
+} // namespace
 
 namespace core {
 
@@ -41,107 +83,94 @@ ProofManager::ProofManager(uint32_t exponent, int proofLevel,
 void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
     if (! proofSet_.shouldCheckpoint(iter)) return;
 
-    // read back the buffer from GPU
     std::vector<uint64_t> host(n_);
     clEnqueueReadBuffer(queue_, buf, CL_TRUE, 0,
                         n_ * sizeof(uint64_t),
                         host.data(), 0, nullptr, nullptr);
 
-    // Get residue from NTT buffer using compactBits
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
-    
-    // Save in PRPLL-compatible format
+
     proofSet_.save(iter, words);
-    
-    // Verify the checkpoint by loading it back and comparing
+
     try {
         auto loadedWords = proofSet_.load(iter);
-        
-        // Compare the saved and loaded data
+
         if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
+            std::cerr << "Warning: Checkpoint validation failed: size mismatch ("
                       << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
             return;
         }
-        
+
         for (size_t i = 0; i < words.size(); ++i) {
             if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
+                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word "
                           << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
                 return;
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
+        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter
                   << ": " << e.what() << std::endl;
     }
 }
+
 void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
     if (! proofSet_.shouldCheckpoint(iter)) return;
 
-    // Get residue from NTT buffer using compactBits
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
-    
-    // Save in PRPLL-compatible format
+
     proofSet_.save(iter, words);
-    
-    // Verify the checkpoint by loading it back and comparing
+
     try {
         auto loadedWords = proofSet_.load(iter);
-        
-        // Compare the saved and loaded data
+
         if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
+            std::cerr << "Warning: Checkpoint validation failed: size mismatch ("
                       << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
             return;
         }
-        
+
         for (size_t i = 0; i < words.size(); ++i) {
             if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
+                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word "
                           << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
                 return;
             }
         }
     } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
+        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter
                   << ": " << e.what() << std::endl;
     }
 }
 
 std::filesystem::path ProofManager::proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify) const {
     try {
-        //proofSet_.power = proofPower;
-        // Calculate limbBytes for GPU proof generation
         size_t limbBytes = n_ * sizeof(uint64_t);
 
-        // Create GPU context for proof generation
         core::GpuContext gpu(exponent_, ctx, ntt, carry, digitWidth_, limbBytes);
-        
-        // Generate proof from collected checkpoints
+
         Proof proof = proofSet_.computeProof(gpu, proofPower);
-        
-        // Create proof file name: {exponent}-{power}.proof
-        std::string filename = std::to_string(exponent_) + "-" + 
+
+        std::string filename = std::to_string(exponent_) + "-" +
                                std::to_string(proof.middles.size()) + ".proof";
-        std::filesystem::path proofFilePath = std::filesystem::current_path() / filename;
-        
-        // Save the proof file
-        proof.save(proofFilePath);
-        
-        try {
-            // Check the proof was saved correctly by attempting to load it
-            auto loadedProof = Proof::load(proofFilePath);
-            // Verify generated proof
-            if (verify) {
-                loadedProof.verify(gpu, proofPower);
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof file verification failed: " << e.what() << std::endl;
+
+        fs::path base = fs::current_path();
+        fs::path proofDir = ensureDir(base / "proof");
+        fs::path tmpDir = ensureDir(base / "proof-tmp");
+
+        fs::path finalPath = proofDir / filename;
+        fs::path tmpPath = uniqueTmpPath(tmpDir, filename);
+
+        proof.save(tmpPath);
+
+        auto loadedProof = Proof::load(tmpPath);
+        if (verify) {
+            loadedProof.verify(gpu, proofPower);
         }
-        
-        return proofFilePath;
-        
+
+        fancyRename(tmpPath, finalPath);
+
+        return finalPath;
     } catch (const std::exception& e) {
         std::cerr << "Error generating proof file: " << e.what() << std::endl;
         throw;
