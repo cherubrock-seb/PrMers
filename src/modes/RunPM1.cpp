@@ -2420,7 +2420,8 @@ int App::runPM1Marin() {
                 guiServer_->appendLog(oss.str());
             }
         }
-
+        uint64_t B2save = options.B2; 
+        options.B2 = 0;
         // JSON + worktodo removal same as usual ...
         std::string json = io::JsonBuilder::generate(
             options,
@@ -2431,8 +2432,7 @@ int App::runPM1Marin() {
         );
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        uint64_t B2save = options.B2; 
-        options.B2 = 0;
+        
         wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
         wm.appendToResultsTxt(json);
         options.B2 = B2save;
@@ -2802,10 +2802,11 @@ int App::runPM1Marin() {
         std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
     }
+    uint64_t B2save = options.B2; 
+    options.B2 = 0;
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    uint64_t B2save = options.B2; 
     options.B2 = 0;
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
     wm.appendToResultsTxt(json);
