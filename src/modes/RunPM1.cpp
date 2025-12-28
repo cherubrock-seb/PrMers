@@ -872,7 +872,7 @@ int App::runPM1Stage2Marin() {
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 1) return -2;
+        if (version != 2) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != pexp) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
@@ -891,7 +891,7 @@ int App::runPM1Stage2Marin() {
         const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
         {
             File f(newf, "wb");
-            int version = 1;
+            int version = 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
             if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
@@ -932,53 +932,11 @@ int App::runPM1Stage2Marin() {
     const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
     const uint64_t SEG_SPAN = 100000000ULL;
 
-    std::unordered_map<uint64_t,int> k2slot;
-    k2slot.reserve(nbEven*2);
-    std::vector<uint64_t> ks_order;
-    ks_order.reserve(nbEven);
-    {
-        uint64_t cum_m = 0;
-        uint64_t prev_p = p0u;
-        uint64_t segLow = p0u;
-        std::vector<uint64_t> primesSeg;
-        while (segLow <= B2u && k2slot.size() < nbEven) {
-            uint64_t segHigh = segLow + SEG_SPAN - 1;
-            if (segHigh > B2u) segHigh = B2u;
-            segmented_primes_odd(segLow, segHigh, basePrimes, primesSeg);
-            for (uint64_t q : primesSeg) {
-                if (q <= prev_p) continue;
-                uint64_t gap = q - prev_p;
-                uint64_t m_i = (gap >> 1);
-                cum_m += m_i;
-                uint64_t k = cum_m - 1;
-                if (!k2slot.count(k)) {
-                    k2slot.emplace(k, (int)k2slot.size());
-                    ks_order.push_back(k);
-                    if (k2slot.size() >= nbEven) break;
-                }
-                prev_p = q;
-            }
-            if (segHigh >= B2u) break;
-            segLow = segHigh + 1;
-            if (segLow <= prev_p) segLow = prev_p + 1;
-        }
-        if (k2slot.empty()) {
-            k2slot.emplace(0,0);
-            ks_order.push_back(0);
-        }
-    }
-
-    std::vector<uint64_t> ks_sorted = ks_order;
-    std::sort(ks_sorted.begin(), ks_sorted.end());
-    for (size_t i = 0; i < ks_sorted.size(); ++i) {
-        k2slot[ks_sorted[i]] = (int)i;
-    }
-    size_t usedSlots = ks_sorted.size();
-    size_t regCount = baseRegsStage2 + nbEven + 2;
+    size_t regCount = baseRegsStage2 + (size_t)nbEven + 2;
     engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
     const size_t REVEN = baseRegsStage2;
-    const size_t RSAVE_Q = baseRegsStage2 + nbEven;
-    const size_t RSAVE_HQ = baseRegsStage2 + nbEven + 1;
+    const size_t RSAVE_Q = baseRegsStage2 + (size_t)nbEven;
+    const size_t RSAVE_HQ = baseRegsStage2 + (size_t)nbEven + 1;
     uint64_t resume_idx = 0;
     uint64_t resume_p_u64 = 0;
     double restored_time = 0.0;
@@ -1033,20 +991,13 @@ int App::runPM1Stage2Marin() {
         eng->copy(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RSTATE));
         eng->square_mul(static_cast<engine::Reg>(RPOW));
         eng->copy(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RPOW));
-        uint64_t cur_k = 0;
         int pct = -1;
-        size_t produced = 0;
-        for (size_t t = 0; t < ks_sorted.size(); ++t) {
-            uint64_t target_k = ks_sorted[t];
-            while (cur_k < target_k) {
-                eng->set_multiplicand(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RPOW));
-                eng->mul(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RREF));
-                ++cur_k;
-            }
-            size_t slot = REVEN + static_cast<size_t>(k2slot[target_k]);
+        for (size_t j = 0; j < (size_t)nbEven; ++j) {
+            const size_t slot = REVEN + j;
             eng->copy(static_cast<engine::Reg>(slot), static_cast<engine::Reg>(RTMP));
-            ++produced;
-            int newPct = int((produced * 100ull) / std::max<size_t>(1, usedSlots));
+            eng->set_multiplicand(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RPOW));
+            eng->mul(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(RREF));
+            int newPct = int(((j + 1) * 100ull) / std::max<size_t>(1, (size_t)nbEven));
             if (newPct > pct) {
                 pct = newPct;
                 std::cout << "\rPrecomputing H powers: " << pct << "%" << std::flush;
@@ -1061,7 +1012,7 @@ int App::runPM1Stage2Marin() {
             }
         }
         std::cout << "\n";
-        for (size_t j = 0; j < usedSlots; ++j) {
+        for (size_t j = 0; j < (size_t)nbEven; ++j) {
             const size_t slot = REVEN + j;
             eng->set_multiplicand(static_cast<engine::Reg>(RTMP), static_cast<engine::Reg>(slot));
             eng->copy(static_cast<engine::Reg>(slot), static_cast<engine::Reg>(RTMP));
@@ -1095,13 +1046,7 @@ int App::runPM1Stage2Marin() {
     auto start_sys = std::chrono::system_clock::now();
     auto start = t0;
 
-    eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-    uint64_t cum_m = 0;
-    std::unordered_set<uint64_t> k_present;
-    k_present.reserve(ks_sorted.size()*2);
-    for (auto v: ks_sorted) k_present.insert(v);
-    size_t usedSlotsD = ks_sorted.size();
-    size_t storedEven = usedSlotsD;
+    size_t storedEven = (size_t)nbEven;
     std::cout << "Stored even powers: " << storedEven << "/" << nbEven << std::endl;
     if (guiServer_) { std::ostringstream oss; oss << "Stored even powers: " << storedEven << "/" << nbEven; guiServer_->appendLog(oss.str()); }
 
@@ -1154,9 +1099,13 @@ int App::runPM1Stage2Marin() {
             return 0;
         }
 
+        eng->copy(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
+
         eng->sub(static_cast<engine::Reg>(RACC_R), 1);
         eng->set_multiplicand(static_cast<engine::Reg>(RPOW), static_cast<engine::Reg>(RACC_R));
         eng->mul(static_cast<engine::Reg>(RACC_L), static_cast<engine::Reg>(RPOW));
+
+        eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
 
         uint64_t next_p = 0;
         bool has_next = advancePrime(next_p);
@@ -1164,16 +1113,12 @@ int App::runPM1Stage2Marin() {
 
         uint64_t gap = next_p - p_ui;
         uint64_t m_i = (gap >> 1);
-        cum_m += m_i;
-        const uint64_t k = cum_m - 1;
+        const uint64_t idxGap = (m_i > 0) ? (m_i - 1) : 0;
 
-        eng->copy(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RREF));
-        auto it = k2slot.find(k);
-        if (it != k2slot.end()) {
-            eng->mul_new(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + (size_t)it->second));
+        if ((size_t)idxGap < storedEven) {
+            eng->mul_new(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(REVEN + (size_t)idxGap));
         } else {
-            eng->set_multiplicand2(static_cast<engine::Reg>(RREF), static_cast<engine::Reg>(RACC_R));
-            cum_m = 0;
+            eng->pow(static_cast<engine::Reg>(RACC_R), static_cast<engine::Reg>(RSTATE), next_p);
         }
 
         p_ui = next_p;
@@ -2486,8 +2431,11 @@ int App::runPM1Marin() {
         );
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
+        uint64_t B2save = options.B2; 
+        options.B2 = 0;
         wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
         wm.appendToResultsTxt(json);
+        options.B2 = B2save;
         if(options.B2 > 0){
             const double elapsed_time_ck =
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
@@ -2857,8 +2805,11 @@ int App::runPM1Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
+    uint64_t B2save = options.B2; 
+    options.B2 = 0;
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
     wm.appendToResultsTxt(json);
+    options.B2 = B2save;
 
     if(options.B2 > 0){
         {
