@@ -13,6 +13,8 @@ results.txt
 logs/
 .DS_Store
 *~
+*.save
+*.p95
 *.o
 *.swp
 /prmers
@@ -34,3 +36,6 @@ lastcurve.gp
 /*.zip
 /package
 /.vscode
+prmers.log
+proof/
+proof-tmp/
