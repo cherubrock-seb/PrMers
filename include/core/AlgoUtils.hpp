@@ -702,7 +702,7 @@ static inline bool write_prime95_s1_from_bytes(const std::string& outPath, uint3
     arch_str = "";
     #endif
 
-    std::string json = std::string("{\"programs\":[{\"work\":{\"type\":\"PM1\",\"stage\":\"1\"},\"program\":{\"name\":\"prmers\",\"version\":\"" + core::PRMERS_VERSION + "\"},\"os\":{\"os\":\"") + os_str + "\",\"architecture\":\"" + arch_str + "\"},\"date_start\":\"" + ds + "\",\"date_end\":\"" + de + "\"}]}";
+    std::string json = std::string(",\"programs\":[{\"work\":{\"type\":\"PM1\",\"stage\":\"1\"},\"program\":{\"name\":\"prmers\",\"version\":\"" + core::PRMERS_VERSION + "\"},\"os\":{\"os\":\"") + os_str + "\",\"architecture\":\"" + arch_str + "\"},\"date_start\":\"" + ds + "\",\"date_end\":\"" + de + "\"}]";
 
     auto crc32 = [](const uint8_t* d, size_t n){
         uint32_t crc = 0xFFFFFFFFu;
