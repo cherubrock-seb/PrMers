@@ -397,7 +397,14 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
     
     
     oss << "{";
-    oss <<  "\"status\":"                          << jsonEscape((!newFactors.empty() ? "F" : "NF"));
+    std::string statusOut = status;
+
+    if (worktype == "pm1" || worktype == "ecm" ) {
+        statusOut = (!newFactors.empty() ? "F" : "NF");
+    }
+
+    oss << "\"status\":" << jsonEscape(statusOut);
+    //oss <<  "\"status\":"                          << jsonEscape((!newFactors.empty() ? "F" : "NF"));
     oss << ",\"exponent\":"                        <<            exponent;
     oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
