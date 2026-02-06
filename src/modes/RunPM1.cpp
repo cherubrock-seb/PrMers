@@ -852,9 +852,7 @@ static void primes_to_ke(const std::vector<uint64_t>& primes,
 int App::runPM1Stage2Marin() {
     using namespace std::chrono;
 
-    if (guiServer_) {
-        guiServer_->setStatus("P-1 factoring stage 2 (BSGS)");
-    }
+    if (guiServer_) guiServer_->setStatus("P-1 factoring stage 2 (BSGS)");
 
     const uint64_t B1u = options.B1, B2u = options.B2;
     mpz_class B1 = mpz_from_u64(B1u);
@@ -876,23 +874,31 @@ int App::runPM1Stage2Marin() {
     const uint32_t pexp = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
 
+    // --------- BSGS parameters ----------
+    const uint64_t D = 630;
+    const uint64_t SEG_SPAN = 100000000ULL;
+
+    #ifndef PM1_BSGS_SELFTEST
+    #define PM1_BSGS_SELFTEST 0
+    #endif
+
     // ---- Registers ----
     static constexpr size_t baseRegsStage2 = 13;
     static constexpr size_t baseRegsStage1 = 11;
 
-    static constexpr size_t RSTATE    = 0;  // H (digits)
-    static constexpr size_t RACC_L    = 1;  // accumulator Π(H^r - 1) (digits)
-    static constexpr size_t RGIANT    = 2;  // (H^D)^k (digits)
-    static constexpr size_t RGIANT_F  = 3;  // forward((H^D)^k) (forward domain)
-    static constexpr size_t RSTEP     = 4;  // H^2 (digits)
-    static constexpr size_t RX        = 5;  // H^D (digits)
-    static constexpr size_t RMUL_STEP = 6;  // multiplicand(H^2)
-    static constexpr size_t RMUL_RX   = 7;  // multiplicand(H^D)
-    static constexpr size_t RTMP      = 8;  // scratch (digits/forward depending)
-    static constexpr size_t RPOW      = 9;  // multiplicand scratch (H^r - 1)
-    static constexpr size_t RREF      = 10; // reference pow result (digits)
-    static constexpr size_t RSAVE_Q   = 11; // scratch for pow src / compat
-    static constexpr size_t RSAVE_HQ  = 12; // unused compat
+    static constexpr size_t RSTATE    = 0;   // H (digits)
+    static constexpr size_t RACC_L    = 1;   // accumulator Π(H^r - 1) (digits)
+    static constexpr size_t RGIANT    = 2;   // (H^D)^k (digits)
+    static constexpr size_t RGIANT_F  = 3;   // forward((H^D)^k)
+    static constexpr size_t RSTEP     = 4;   // H^2 (digits)
+    static constexpr size_t RX        = 5;   // H^D (digits)
+    static constexpr size_t RMUL_STEP = 6;   // multiplicand(H^2)
+    static constexpr size_t RMUL_RX   = 7;   // multiplicand(H^D)
+    static constexpr size_t RTMP      = 8;   // scratch (forward or multiplicand depending)
+    [[maybe_unused]] static constexpr size_t RREF      = 9;   // selftest pow result (digits)
+    static constexpr size_t RSAVE_Q   = 10;  // pow-src scratch (digits)
+    static constexpr size_t RSAVE_HQ  = 11;  // compat
+    static constexpr size_t RSAVE_Q2  = 12;  // compat
 
     // ---- Stage2 checkpoint ----
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
@@ -922,7 +928,7 @@ int App::runPM1Stage2Marin() {
         return 0;
     };
 
-    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, double et, uint64_t D){
+    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, double et, uint64_t Dsave){
         const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
         {
             File f(newf, "wb");
@@ -931,7 +937,7 @@ int App::runPM1Stage2Marin() {
             if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
             if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
             if (!f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u))) return;
-            if (!f.write(reinterpret_cast<const char*>(&D),   sizeof(D)))   return;
+            if (!f.write(reinterpret_cast<const char*>(&Dsave), sizeof(Dsave))) return;
             if (!f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p))) return;
             if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
@@ -949,7 +955,8 @@ int App::runPM1Stage2Marin() {
     };
 
     // ---- early prime check ----
-    mpz_class p0; mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
+    mpz_class p0;
+    mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
     if (p0 > B2) {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
         if (guiServer_) guiServer_->appendLog("No factor P-1 (stage 2) (no primes in range).");
@@ -960,10 +967,6 @@ int App::runPM1Stage2Marin() {
     // ---- sieve base ----
     const uint64_t root = isqrt_u64(B2u);
     const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
-    const uint64_t SEG_SPAN = 100000000ULL;
-
-    // ---- Prime95-ish D for small B2 ----
-    const uint64_t D = 630;
 
     auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
         while (b) { uint64_t t = a % b; a = b; b = t; }
@@ -985,14 +988,18 @@ int App::runPM1Stage2Marin() {
         return -2;
     }
 
+    std::cout << "Stage 2 BSGS: D=" << D << " | baby=" << babyCount << "\n";
+
+    // ---- engine ----
     const size_t babyBase = baseRegsStage2;
     const size_t regCount = baseRegsStage2 + babyCount;
     engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
 
-    // ---- resume stage2? ----
+    // ---- resume stage2? (DECLARE ONCE) ----
     uint64_t resume_idx = 0, resume_p_u64 = 0;
     double restored_time = 0.0;
     uint64_t s2B1=0, s2B2=0, s2D=0;
+
     int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
 
@@ -1062,11 +1069,10 @@ int App::runPM1Stage2Marin() {
         eng->square_mul((engine::Reg)RSTEP);
         eng->set_multiplicand((engine::Reg)RMUL_STEP, (engine::Reg)RSTEP);
 
-        // ---- baby steps H^e (odd e) ----
-        std::cout << "Stage 2 BSGS: D=" << D << " | baby=" << babyCount << "\n";
+        // ---- baby steps H^e ----
         std::cout << "Precomputing baby steps (H^e, gcd(e,D)=1)...\n";
-
         eng->copy((engine::Reg)RTMP, (engine::Reg)RSTATE); // RTMP = H^1
+
         size_t stored = 0;
         int pct = -1;
 
@@ -1074,55 +1080,50 @@ int App::runPM1Stage2Marin() {
             int32_t bi = e2i[(size_t)e];
             if (bi >= 0) {
                 const size_t slot = babyBase + (size_t)bi;
-                eng->copy((engine::Reg)slot, (engine::Reg)RTMP);             // digits
-                eng->set_multiplicand((engine::Reg)slot, (engine::Reg)slot); // multiplicand(H^e)
+                eng->copy((engine::Reg)slot, (engine::Reg)RTMP);               // digits
+                eng->set_multiplicand((engine::Reg)slot, (engine::Reg)slot);  // multiplicand(H^e)
                 ++stored;
                 int newPct = int((stored * 100ull) / std::max<size_t>(1, babyCount));
                 if (newPct > pct) { pct = newPct; std::cout << "\rBaby steps: " << pct << "%" << std::flush; }
             }
-            eng->mul((engine::Reg)RTMP, (engine::Reg)RMUL_STEP); // RTMP *= H^2 (digits)
+            eng->mul((engine::Reg)RTMP, (engine::Reg)RMUL_STEP); // RTMP *= H^2
         }
         std::cout << "\rBaby steps: 100%\n";
+        std::cout << "Stored baby steps: " << babyCount << " (D=" << D << ")\n";
 
-        // ---- compute RX = H^D (NO aliasing pow !) ----
-        eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RSTATE);  // scratch src
-        eng->pow((engine::Reg)RX, (engine::Reg)RSAVE_Q, D);    // RX = H^D, RSAVE_Q erased
-
+        // ---- RX = H^D (NO aliasing pow) ----
+        eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RSTATE);
+        eng->pow((engine::Reg)RX, (engine::Reg)RSAVE_Q, D);
         eng->set_multiplicand((engine::Reg)RMUL_RX, (engine::Reg)RX);
 
-        // ---- init giant for k0 = floor(p0/D) using pow (NO aliasing) ----
+        // ---- init giant = (H^D)^(floor(p0/D)) ----
         const uint64_t k0 = p0u / D;
-        eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RX);      // scratch src = H^D
-        eng->pow((engine::Reg)RGIANT, (engine::Reg)RSAVE_Q, k0); // giant = (H^D)^k0
-
-        // cache giant forward
+        eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RX);
+        eng->pow((engine::Reg)RGIANT, (engine::Reg)RSAVE_Q, k0);
         eng->set_multiplicand2((engine::Reg)RGIANT_F, (engine::Reg)RGIANT);
 
         eng->set((engine::Reg)RACC_L, 1);
     } else {
-        // safety rebuild (in case)
+        // resume: just rebuild forward cache (safe)
         eng->set_multiplicand2((engine::Reg)RGIANT_F, (engine::Reg)RGIANT);
     }
 
-    // ---- timers ----
-    auto t0 = high_resolution_clock::now();
-    auto lastBackup = t0;
-    auto lastDisplay = t0;
-
+    // ---- timers + start prime ----
     uint64_t idx = 0;
     uint64_t p_ui = p0u;
 
+    auto t0 = high_resolution_clock::now();
     if (resumed_s2) {
         idx = resume_idx;
         p_ui = resume_p_u64;
         std::cout << "Resuming Stage 2 from checkpoint at prime " << p_ui << " (idx=" << idx << ") D=" << D << "\n";
         t0 = high_resolution_clock::now() - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
-        lastBackup = high_resolution_clock::now();
-        lastDisplay = lastBackup;
     }
 
-    auto start_sys = std::chrono::system_clock::now();
-    auto start = t0;
+    auto lastBackup  = high_resolution_clock::now();
+    auto lastDisplay = high_resolution_clock::now();
+    auto start       = t0;
+    auto start_sys   = std::chrono::system_clock::now();
 
     // ---- prime stream ----
     std::vector<uint64_t> primesRun;
@@ -1156,10 +1157,10 @@ int App::runPM1Stage2Marin() {
         }
     };
 
+    // current k for giant
     uint64_t cur_k = p_ui / D;
 
-    std::cout << "Stored baby steps: " << babyCount << " (D=" << D << ")\n";
-
+    // ---- main loop ----
     for (;;) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
@@ -1174,30 +1175,27 @@ int App::runPM1Stage2Marin() {
         const uint64_t k = r / D;
         const uint64_t e = r - k * D;
 
-        // update giant to correct k (digits), refresh forward cache
         while (cur_k < k) {
-            eng->mul((engine::Reg)RGIANT, (engine::Reg)RMUL_RX);                 // giant *= H^D (digits)
+            eng->mul((engine::Reg)RGIANT, (engine::Reg)RMUL_RX);
             ++cur_k;
-            eng->set_multiplicand2((engine::Reg)RGIANT_F, (engine::Reg)RGIANT);  // forward(giant)
+            eng->set_multiplicand2((engine::Reg)RGIANT_F, (engine::Reg)RGIANT);
         }
 
-        // compute H^r via mul_new(forward(giant), multiplicand(baby))
-        int32_t bi = (e < D) ? e2i[(size_t)e] : -1;
+        const int32_t bi = (e < D) ? e2i[(size_t)e] : -1;
         if (bi < 0) {
-            // fallback: pow with scratch (NO aliasing)
-            eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RSTATE);
-            eng->pow((engine::Reg)RTMP, (engine::Reg)RSAVE_Q, r);
-        } else {
-            const size_t babyReg = babyBase + (size_t)bi;
-            eng->copy((engine::Reg)RTMP, (engine::Reg)RGIANT_F);     // forward
-            eng->mul_new((engine::Reg)RTMP, (engine::Reg)babyReg);   // -> digits H^r
+            std::cerr << "\n[BSGS] INTERNAL ERROR: residue not found for prime r=" << r
+                      << " (e=" << e << ", D=" << D << ")\n";
+            std::abort();
         }
 
-        // self-check first primes (NO aliasing pow!)
-        if (idx < 20) {
-            eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RSTATE);      // scratch src
-            eng->pow((engine::Reg)RREF, (engine::Reg)RSAVE_Q, r);      // RREF = H^r
+        const size_t babyReg = babyBase + (size_t)bi;
+        eng->copy((engine::Reg)RTMP, (engine::Reg)RGIANT_F);   // forward
+        eng->mul_new((engine::Reg)RTMP, (engine::Reg)babyReg); // -> digits H^r
 
+        #if PM1_BSGS_SELFTEST
+        if (idx < 20) {
+            eng->copy((engine::Reg)RSAVE_Q, (engine::Reg)RSTATE);
+            eng->pow((engine::Reg)RREF, (engine::Reg)RSAVE_Q, r);
             mpz_t a,b; mpz_init(a); mpz_init(b);
             eng->get_mpz(a, (engine::Reg)RTMP);
             eng->get_mpz(b, (engine::Reg)RREF);
@@ -1209,19 +1207,18 @@ int App::runPM1Stage2Marin() {
             }
             mpz_clear(a); mpz_clear(b);
         }
+        #endif
 
-        // Acc *= (H^r - 1)
+        // Acc *= (H^r - 1) (reuse RTMP as multiplicand)
         eng->sub((engine::Reg)RTMP, 1);
-        eng->set_multiplicand((engine::Reg)RPOW, (engine::Reg)RTMP);
-        eng->mul((engine::Reg)RACC_L, (engine::Reg)RPOW);
+        eng->set_multiplicand((engine::Reg)RTMP, (engine::Reg)RTMP);
+        eng->mul((engine::Reg)RACC_L, (engine::Reg)RTMP);
 
-        // next prime
         uint64_t next_p = 0;
         if (!advancePrime(next_p)) break;
         p_ui = next_p;
         ++idx;
 
-        // progress
         auto now = high_resolution_clock::now();
         if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
             const size_t done_abs = idx + 1;
@@ -1244,10 +1241,10 @@ int App::runPM1Stage2Marin() {
                       << " | IPS: " << std::fixed << std::setprecision(2) << ips
                       << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
                       << std::flush;
+
             lastDisplay = now;
         }
 
-        // backup
         auto now0 = high_resolution_clock::now();
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
             double et = duration<double>(now0 - t0).count();
@@ -1262,41 +1259,14 @@ int App::runPM1Stage2Marin() {
 
     // ---- end timing ----
     auto end_sys = std::chrono::system_clock::now();
+    (void)end_sys; // keep if you use it in resume file timestamps elsewhere
+
     auto t1 = high_resolution_clock::now();
     double elapsed = duration<double>(t1 - t0).count();
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     mpz_class X  = compute_X_with_dots(eng, (engine::Reg)RACC_L, Mp);
-
-    if (options.resume) {
-        auto fmt = [](const std::chrono::system_clock::time_point& tp){
-            using namespace std::chrono;
-            auto ms = duration_cast<milliseconds>(tp.time_since_epoch()) % 1000;
-            std::time_t tt = system_clock::to_time_t(tp);
-            std::tm tmv{};
-        #if defined(_WIN32)
-            gmtime_s(&tmv, &tt);
-        #else
-            std::tm* tmp = std::gmtime(&tt);
-            if (tmp) tmv = *tmp;
-        #endif
-            char buf[32];
-            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
-            std::ostringstream s;
-            s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
-            return s.str();
-        };
-        std::string ds = fmt(start_sys);
-        std::string de = fmt(end_sys);
-
-        writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + "_B2_" + std::to_string(options.B2) + ".save",
-                           options.B1, options.exponent, X);
-        convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + "_B2_" + std::to_string(options.B2) + ".save",
-                                  "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + "_B2_" + std::to_string(options.B2) + ".p95",
-                                  ds, de);
-    }
-
-    mpz_class g = gcd_with_dots(X, Mp);
+    mpz_class g  = gcd_with_dots(X, Mp);
 
     auto gcd_mpz = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
         mpz_class r;
@@ -1304,7 +1274,6 @@ int App::runPM1Stage2Marin() {
         return r;
     };
 
-    // strip known factors
     mpz_class gNew = g;
     for (const std::string& fs : options.knownFactors) {
         if (gNew == 1) break;
@@ -1316,21 +1285,25 @@ int App::runPM1Stage2Marin() {
     }
 
     bool found = (gNew != 1 && gNew != Mp);
+
+    std::vector<std::string> newlyFound;
     auto pushFactor = [&](const std::string& s){
         if (s.empty() || s == "1") return;
-        if (std::find(options.knownFactors.begin(), options.knownFactors.end(), s) == options.knownFactors.end())
-            options.knownFactors.push_back(s);
+        if (std::find(options.knownFactors.begin(), options.knownFactors.end(), s) != options.knownFactors.end()) return;
+        options.knownFactors.push_back(s);
+        newlyFound.push_back(s);
     };
 
-    // if you found a new factor:
-    pushFactor(gNew.get_str()); // or for u64-splitting, push each prime factor string
+    if (found) pushFactor(gNew.get_str());
 
     std::cout << "\nElapsed time (stage 2) = " << std::fixed << std::setprecision(2) << elapsed << " s.\n";
 
     std::string filename = "stage2_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
     if (found) {
-        writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + gNew.get_str());
-        std::cout << "\n>>>  Factor P-1 (stage 2) found : " << gNew.get_str() << "\n";
+        std::ostringstream fs;
+        for (size_t i = 0; i < newlyFound.size(); ++i) { if (i) fs << ","; fs << newlyFound[i]; }
+        writeStageResult(filename, "B2=" + B2.get_str() + "  factor=" + fs.str());
+        std::cout << "\n>>>  Factor P-1 (stage 2) found : " << fs.str() << "\n";
     } else {
         writeStageResult(filename, "No factor P-1 up to B2=" + B2.get_str());
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << "\n";
