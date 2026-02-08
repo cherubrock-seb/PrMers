@@ -1645,13 +1645,19 @@ static int run_pm1_stage1_torus_oneN(uint32_t pexp,
     if (forceNonP1 && (uint64_t)pexp <= B1) {
         uint64_t pPow = (uint64_t)pexp;
         while (pPow <= B1 / (uint64_t)pexp) pPow *= (uint64_t)pexp;
-        mpz_class pp = pPow;
-        mpz_divexact(E.get_mpz_t(), E.get_mpz_t(), pp.get_mpz_t());
+        mpz_t pp;
+        mpz_init(pp);
+        mpz_import(pp, 1, 1, sizeof(pPow), 0, 0, &pPow); // charge uint64_t -> mpz_t (portable)
+        mpz_divexact(E.get_mpz_t(), E.get_mpz_t(), pp);
+        mpz_clear(pp);
+
         std::cout << "[TORUS] NON-P-1: removed P^k, kPow=" << pPow << "\n";
         if (gui) { std::ostringstream oss; oss << "[TORUS] NON-P-1: removed P^k, kPow=" << pPow; gui->appendLog(oss.str()); }
     }
 
-    const mp_bitcnt_t ebits = mpz_sizeinbase(E.get_mpz_t(), 2);
+    const size_t ebits_sz = mpz_sizeinbase(E.get_mpz_t(), 2);
+    const mp_bitcnt_t ebits = (mp_bitcnt_t)ebits_sz;
+
     std::cout << "[TORUS] n=" << n << " | B1=" << B1 << " | E bits=" << (unsigned long long)ebits << "\n";
     if (gui) {
         std::ostringstream oss;
