@@ -848,6 +848,17 @@ int App::run() {
                 rc_local = runPM1Stage3Marin();
                 ran_local = true;
             }
+            else if(options.torus){
+                //options.torus = runPM1Stage1SLnTorusMarin();
+                std::ostringstream msg;
+                msg << "TORUS only requested " 
+                    << "→ jumping to runPM1Stage1SLnTorusMarin()";
+                std::cout << msg.str() << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage TORUS only"); }
+
+                rc_local = runPM1Stage1SLnTorusMarin();
+                ran_local = true;
+            }
             else if ((haveS2) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "

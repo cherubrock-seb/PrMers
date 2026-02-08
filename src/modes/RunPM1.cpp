@@ -59,6 +59,7 @@
 #include <numeric>
 #include <climits>
 #include <gmpxx.h>
+#include <cstdlib>
 
 using namespace core;
 using namespace std::chrono;
@@ -1323,9 +1324,423 @@ int App::runPM1Stage2Marin() {
     delete eng;
     return found ? 0 : 1;
 }
+#include <array>
+#include <cstdlib>
 
+// ------------------------------------------------------------
+// FAST SLn-torus Stage-1 (Marin engine)
+// Key speedups:
+//  - No torus_copy(): swap register banks (swap indices only)
+//  - Multiply-by-x is O(n) (shift+reduce), no NTT multiplications
+// ------------------------------------------------------------
 
+static inline void add_times_small(engine* eng, const engine::Reg dst, const engine::Reg src, const uint32_t a)
+{
+    // a is small (from {1,3,5,7,11,13,17,19} typically)
+    switch (a) {
+        case 1:  eng->add(dst, src); break;
+        case 3:  eng->add(dst, src); eng->add(dst, src); eng->add(dst, src); break;
+        case 5:  eng->add(dst, src); eng->add(dst, src); eng->add(dst, src); eng->add(dst, src); eng->add(dst, src); break;
+        case 7:  for (int i=0;i<7;i++)  eng->add(dst, src); break;
+        case 11: for (int i=0;i<11;i++) eng->add(dst, src); break;
+        case 13: for (int i=0;i<13;i++) eng->add(dst, src); break;
+        case 17: for (int i=0;i<17;i++) eng->add(dst, src); break;
+        case 19: for (int i=0;i<19;i++) eng->add(dst, src); break;
+        default: for (uint32_t i = 0; i < a; ++i) eng->add(dst, src); break;
+    }
+}
 
+template<int N>
+static inline void torus_set_identity(engine* eng, const std::array<engine::Reg, N>& v)
+{
+    eng->set(v[0], 1u);
+    for (int i = 1; i < N; ++i) eng->set(v[i], 0u);
+}
+
+template<int N>
+static inline void torus_mul_by_x_ax1(engine* eng,
+                                      const std::array<engine::Reg, N>& out,
+                                      const std::array<engine::Reg, N>& in,
+                                      const uint32_t a_coeff)
+{
+    // modulus: x^N = a*x + 1
+    // (c0 + c1 x + ... + c_{N-1} x^{N-1})*x
+    // = c_{N-1} + (c0 + a*c_{N-1}) x + c1 x^2 + ... + c_{N-2} x^{N-1}
+
+    eng->copy(out[0], in[N - 1]);         // out0 = c_{N-1}
+
+    eng->copy(out[1], in[0]);             // out1 = c0
+    add_times_small(eng, out[1], in[N - 1], a_coeff); // out1 += a*c_{N-1}
+
+    for (int i = 2; i < N; ++i) {
+        eng->copy(out[i], in[i - 1]);     // out[i] = c_{i-1}
+    }
+}
+
+template<int N>
+static inline void torus_sqr_ax1(engine* eng,
+                                 const std::array<engine::Reg, N>& out,
+                                 const std::array<engine::Reg, N>& x,
+                                 const std::array<engine::Reg, N>& xMul,
+                                 const engine::Reg tmp,
+                                 const uint32_t a_coeff)
+{
+    // out = x^2 in R=(Z/NZ)[X]/(X^N - aX - 1), N odd
+    for (int i = 0; i < N; ++i) eng->set(out[i], 0u);
+
+    // prepare multiplicands of x[j]
+    for (int j = 0; j < N; ++j) {
+        eng->copy(xMul[j], x[j]);
+        eng->set_multiplicand(xMul[j], xMul[j]);
+    }
+
+    for (int i = 0; i < N; ++i) {
+        // diagonal term: x[i]^2
+        eng->copy(tmp, x[i]);
+        eng->square_mul(tmp);
+
+        {
+            const int k = i + i;
+            if (k < N) {
+                eng->add(out[k], tmp);
+            } else {
+                const int m = k - N; // 0..N-2
+                eng->add(out[m], tmp);
+                add_times_small(eng, out[m + 1], tmp, a_coeff);
+            }
+        }
+
+        // cross terms: 2*x[i]*x[j]
+        for (int j = i + 1; j < N; ++j) {
+            eng->copy(tmp, x[i]);
+            eng->mul(tmp, xMul[j], 2u);
+
+            const int k = i + j;
+            if (k < N) {
+                eng->add(out[k], tmp);
+            } else {
+                const int m = k - N; // 0..N-2
+                eng->add(out[m], tmp);
+                add_times_small(eng, out[m + 1], tmp, a_coeff);
+            }
+        }
+    }
+}
+
+// -------- n=2 (quadratic): x^2 = t x - 1 --------
+
+static inline void torus2_mul_by_x(engine* eng,
+                                  const std::array<engine::Reg, 2>& out,
+                                  const std::array<engine::Reg, 2>& in,
+                                  const uint32_t t)
+{
+    // (c0 + c1 x)*x = -c1 + (c0 + t*c1) x
+    eng->set(out[0], 0u);
+    eng->sub_reg(out[0], in[1]);      // out0 = -c1
+
+    eng->copy(out[1], in[0]);         // out1 = c0
+    for (uint32_t i = 0; i < t; ++i) eng->add(out[1], in[1]); // out1 += t*c1
+}
+
+static inline void torus2_sqr(engine* eng,
+                              const std::array<engine::Reg, 2>& out,
+                              const std::array<engine::Reg, 2>& a,
+                              const std::array<engine::Reg, 2>& aMul,
+                              const engine::Reg tmpA1sq,
+                              const uint32_t t)
+{
+    // (a0+a1x)^2, x^2 = t x - 1
+    // c0 = a0^2 - a1^2
+    // c1 = 2*a0*a1 + t*a1^2
+
+    eng->copy(aMul[1], a[1]);
+    eng->set_multiplicand(aMul[1], aMul[1]);
+
+    // tmpA1sq = a1^2
+    eng->copy(tmpA1sq, a[1]);
+    eng->square_mul(tmpA1sq);
+
+    // out0 = a0^2 - a1^2
+    eng->copy(out[0], a[0]);
+    eng->square_mul(out[0]);
+    eng->sub_reg(out[0], tmpA1sq);
+
+    // out1 = 2*a0*a1 + t*a1^2
+    eng->copy(out[1], a[0]);
+    eng->mul(out[1], aMul[1], 2u);
+    for (uint32_t i = 0; i < t; ++i) eng->add(out[1], tmpA1sq);
+}
+
+static uint32_t pick_quadratic_t(const mpz_class& Mp)
+{
+    const uint32_t cand[] = {5u, 6u, 7u, 10u, 11u, 13u, 17u, 19u, 23u, 29u, 31u, 37u, 41u, 43u};
+    for (size_t i = 0; i < sizeof(cand)/sizeof(cand[0]); ++i) {
+        const uint32_t t = cand[i];
+        mpz_class delta = mpz_class(t) * mpz_class(t) - 4; // t^2 - 4
+        if (mpz_jacobi(delta.get_mpz_t(), Mp.get_mpz_t()) == -1) return t;
+    }
+    return 5u;
+}
+
+template<int N>
+static inline bool torus_gcd_check(engine* eng,
+                                  const mpz_class& Mp,
+                                  const std::array<engine::Reg, N>& S,
+                                  mpz_t& z,
+                                  mpz_class& outFactor)
+{
+    for (int i = 0; i < N; ++i) {
+        eng->get_mpz(z, S[i]);
+        mpz_class diff(z);
+        if (i == 0) {
+            diff -= 1;
+            if (diff < 0) diff += Mp; // avoid mpz_mod
+        }
+        if (diff == 0) continue;
+
+        mpz_class g;
+        mpz_gcd(g.get_mpz_t(), diff.get_mpz_t(), Mp.get_mpz_t());
+        if (g > 1 && g < Mp) { outFactor = g; return true; }
+    }
+    return false;
+}
+
+template<int N>
+static int run_pm1_stage1_torus_oddN(uint32_t pexp,
+                                    uint64_t B1,
+                                    int device_id,
+                                    bool verbose,
+                                    ui::WebGuiServer* gui,
+                                    const mpz_class& E,
+                                    const mp_bitcnt_t ebits,
+                                    const uint32_t a_coeff)
+{
+    const mpz_class Mp = (mpz_class(1) << pexp) - 1;
+
+    // regs: S[N], T[N], MUL[N], TMP
+    size_t base = 0;
+    std::array<engine::Reg, N> S{}, T{}, MUL{};
+    for (int i = 0; i < N; ++i) S[i]   = base++;
+    for (int i = 0; i < N; ++i) T[i]   = base++;
+    for (int i = 0; i < N; ++i) MUL[i] = base++;
+    const engine::Reg TMP = base++;
+    const size_t regCount = base;
+
+    engine* eng = engine::create_gpu(pexp, regCount, (size_t)device_id, verbose);
+
+    torus_set_identity<N>(eng, S);
+
+    const mp_bitcnt_t mask = (mp_bitcnt_t)1023u;
+
+    for (mp_bitcnt_t i = ebits; i-- > 0; ) {
+        // S = S^2
+        torus_sqr_ax1<N>(eng, T, S, MUL, TMP, a_coeff);
+        std::swap(S, T); // NO COPY of big registers
+
+        // if bit set: S = S * x  (cheap!)
+        if (mpz_tstbit(E.get_mpz_t(), i) != 0) {
+            torus_mul_by_x_ax1<N>(eng, T, S, a_coeff);
+            std::swap(S, T);
+        }
+
+        if ((i & mask) == 0) {
+            std::cout << "[TORUS] n=" << N << " a=" << a_coeff
+                      << " bit " << (unsigned long long)i
+                      << "/" << (unsigned long long)ebits << "\r" << std::flush;
+            if (interrupted) { std::cout << "\nInterrupted\n"; delete eng; return 0; }
+        }
+    }
+    std::cout << "\n[TORUS] n=" << N << " a=" << a_coeff << " done, gcd...\n";
+
+    mpz_t z; mpz_init(z);
+    mpz_class factor;
+    const bool ok = torus_gcd_check<N>(eng, Mp, S, z, factor);
+    mpz_clear(z);
+    delete eng;
+
+    if (ok) {
+        std::cout << "[TORUS] FACTOR FOUND (n=" << N << ", a=" << a_coeff << "): " << factor.get_str() << "\n";
+        if (gui) { std::ostringstream oss; oss << "[TORUS] FACTOR FOUND (n=" << N << ", a=" << a_coeff << "): " << factor.get_str(); gui->appendLog(oss.str()); }
+        return 1;
+    }
+    std::cout << "[TORUS] n=" << N << " a=" << a_coeff << " : no factor\n";
+    return 0;
+}
+
+static int run_pm1_stage1_torus_n2(uint32_t pexp,
+                                  uint64_t B1,
+                                  int device_id,
+                                  bool verbose,
+                                  ui::WebGuiServer* gui,
+                                  const mpz_class& E,
+                                  const mp_bitcnt_t ebits)
+{
+    const mpz_class Mp = (mpz_class(1) << pexp) - 1;
+    const uint32_t t = pick_quadratic_t(Mp);
+
+    std::cout << "[TORUS] n=2 using t=" << t << " (Jacobi(t^2-4,N)=-1)\n";
+    if (gui) { std::ostringstream oss; oss << "[TORUS] n=2 using t=" << t; gui->appendLog(oss.str()); }
+
+    // regs: S[2], T[2], MUL[2], TMP (a1^2)
+    size_t base = 0;
+    std::array<engine::Reg, 2> S{}, T{}, MUL{};
+    for (int i = 0; i < 2; ++i) S[i]   = base++;
+    for (int i = 0; i < 2; ++i) T[i]   = base++;
+    for (int i = 0; i < 2; ++i) MUL[i] = base++;
+    const engine::Reg TMPA1SQ = base++;
+    const size_t regCount = base;
+
+    engine* eng = engine::create_gpu(pexp, regCount, (size_t)device_id, verbose);
+
+    torus_set_identity<2>(eng, S);
+
+    const mp_bitcnt_t mask = (mp_bitcnt_t)1023u;
+
+    for (mp_bitcnt_t i = ebits; i-- > 0; ) {
+        torus2_sqr(eng, T, S, MUL, TMPA1SQ, t);
+        std::swap(S, T);
+
+        if (mpz_tstbit(E.get_mpz_t(), i) != 0) {
+            torus2_mul_by_x(eng, T, S, t);
+            std::swap(S, T);
+        }
+
+        if ((i & mask) == 0) {
+            std::cout << "[TORUS] n=2 bit " << (unsigned long long)i
+                      << "/" << (unsigned long long)ebits << "\r" << std::flush;
+            if (interrupted) { std::cout << "\nInterrupted\n"; delete eng; return 0; }
+        }
+    }
+    std::cout << "\n[TORUS] n=2 done, gcd...\n";
+
+    mpz_t z; mpz_init(z);
+    mpz_class factor;
+    const bool ok = torus_gcd_check<2>(eng, Mp, S, z, factor);
+    mpz_clear(z);
+    delete eng;
+
+    if (ok) {
+        std::cout << "[TORUS] FACTOR FOUND (n=2): " << factor.get_str() << "\n";
+        if (gui) { std::ostringstream oss; oss << "[TORUS] FACTOR FOUND (n=2): " << factor.get_str(); gui->appendLog(oss.str()); }
+        return 1;
+    }
+    std::cout << "[TORUS] n=2 : no factor\n";
+    return 0;
+}
+
+static int run_pm1_stage1_torus_oneN(uint32_t pexp,
+                                     uint64_t B1,
+                                     int device_id,
+                                     bool verbose,
+                                     ui::WebGuiServer* gui,
+                                     const int n,
+                                     const bool forceNonP1)
+{
+    const mpz_class Mp = (mpz_class(1) << pexp) - 1;
+
+    // Build E once
+    mpz_class E = buildE(B1);
+
+    // NON-P-1: remove P^k from E (do NOT clamp B1)
+    if (forceNonP1 && (uint64_t)pexp <= B1) {
+        uint64_t pPow = (uint64_t)pexp;
+        while (pPow <= B1 / (uint64_t)pexp) pPow *= (uint64_t)pexp;
+        mpz_class pp = pPow;
+        mpz_divexact(E.get_mpz_t(), E.get_mpz_t(), pp.get_mpz_t());
+        std::cout << "[TORUS] NON-P-1: removed P^k, kPow=" << pPow << "\n";
+        if (gui) { std::ostringstream oss; oss << "[TORUS] NON-P-1: removed P^k, kPow=" << pPow; gui->appendLog(oss.str()); }
+    }
+
+    const mp_bitcnt_t ebits = mpz_sizeinbase(E.get_mpz_t(), 2);
+    std::cout << "[TORUS] n=" << n << " | B1=" << B1 << " | E bits=" << (unsigned long long)ebits << "\n";
+    if (gui) {
+        std::ostringstream oss;
+        oss << "[TORUS] n=" << n << " | B1=" << B1 << " | E bits=" << (unsigned long long)ebits;
+        gui->appendLog(oss.str());
+    }
+
+    if (n == 2) {
+        return run_pm1_stage1_torus_n2(pexp, B1, device_id, verbose, gui, E, ebits);
+    }
+
+    const uint32_t a_list[] = {1u,3u,5u,7u,11u,13u,17u,19u};
+
+    for (size_t ai = 0; ai < sizeof(a_list)/sizeof(a_list[0]); ++ai) {
+        const uint32_t a_coeff = a_list[ai];
+
+        std::cout << "[TORUS] n=" << n << " trying a=" << a_coeff << "\n";
+        if (gui) { std::ostringstream oss; oss << "[TORUS] n=" << n << " trying a=" << a_coeff; gui->appendLog(oss.str()); }
+
+        int ok = 0;
+        switch (n) {
+            case 3:  ok = run_pm1_stage1_torus_oddN<3 >(pexp, B1, device_id, verbose, gui, E, ebits, a_coeff); break;
+            case 5:  ok = run_pm1_stage1_torus_oddN<5 >(pexp, B1, device_id, verbose, gui, E, ebits, a_coeff); break;
+            case 7:  ok = run_pm1_stage1_torus_oddN<7 >(pexp, B1, device_id, verbose, gui, E, ebits, a_coeff); break;
+            case 13: ok = run_pm1_stage1_torus_oddN<13>(pexp, B1, device_id, verbose, gui, E, ebits, a_coeff); break;
+            default:
+                std::cerr << "[TORUS] unsupported n=" << n << " (allowed 2,3,5,7,13)\n";
+                return 0;
+        }
+        if (ok) return 1;
+        if (interrupted) return 0;
+    }
+
+    std::cout << "[TORUS] n=" << n << " : no factor\n";
+    return 0;
+}
+
+// Run torus suite
+int App::runPM1Stage1SLnTorusMarin()
+{
+    const uint32_t pexp = (uint32_t)options.exponent;
+    const bool verbose = options.debug;
+    ui::WebGuiServer* gui = guiServer_ ? guiServer_.get() : nullptr;
+
+    // env option: PRMERS_TORUS_NONP1=1
+    bool forceNonP1 = false;
+    if (const char* e = std::getenv("PRMERS_TORUS_NONP1")) {
+        if (e[0] == '1') forceNonP1 = true;
+    }
+
+    uint64_t B1 = (uint64_t)options.B1;
+
+    std::cout << "[TORUS] Stage-1 on M(" << pexp << "), B1=" << B1
+              << (forceNonP1 ? " (NON-P-1 ON)" : "") << "\n";
+    if (gui) {
+        std::ostringstream oss;
+        oss << "[TORUS] Stage-1 on M(" << pexp << "), B1=" << B1
+            << (forceNonP1 ? " (NON-P-1 ON)" : "");
+        gui->appendLog(oss.str());
+    }
+
+    // Default degrees
+    static const int degreesDefault[] = { 3, 5, 7 };
+
+    const int* degrees = degreesDefault;
+    size_t degreesCount = sizeof(degreesDefault) / sizeof(degreesDefault[0]);
+
+    // If options.B4 != 0, force a single n = B4
+    const int forcedN = (int)options.B4;
+    if (forcedN != 1) {
+        if (!(forcedN == 2 || forcedN == 3 || forcedN == 5 || forcedN == 7 || forcedN == 13)) {
+            std::cerr << "[TORUS] invalid B4=" << forcedN << " (allowed: 2,3,5,7,13)\n";
+            return 0;
+        }
+        degrees = &forcedN;
+        degreesCount = 1;
+
+        std::cout << "[TORUS] B4 forced: testing only n=" << forcedN << "\n";
+        if (gui) { std::ostringstream oss; oss << "[TORUS] B4 forced: testing only n=" << forcedN; gui->appendLog(oss.str()); }
+    }
+
+    for (size_t idx = 0; idx < degreesCount; ++idx) {
+        const int n = degrees[idx];
+        const int ok = run_pm1_stage1_torus_oneN(pexp, B1, (int)options.device_id, verbose, gui, n, forceNonP1);
+        if (ok != 0) return 1;
+        if (interrupted) return 0;
+    }
+    return 0;
+}
 
 
 

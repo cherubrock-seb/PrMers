@@ -182,6 +182,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             //opts.marin = false;
             opts.proof = false;
         }
+        else if (std::strcmp(argv[i], "-torus") == 0) {
+            opts.torus = true;
+        }
         else if (std::strcmp(argv[i], "-ecm") == 0) {
             opts.mode = "ecm";
             //opts.marin = false;
