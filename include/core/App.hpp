@@ -50,6 +50,7 @@ public:
     int runPM1Stage2();
     int runPM1Stage2Marin();
     int runPM1Stage3Marin();
+    int runPM1Stage4Marin();
     int runPM1Stage1SLnTorusMarin();
     int runPM1Stage2MarinNKVersion();
     int runMemtestOpenCL();

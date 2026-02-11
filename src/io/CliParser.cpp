@@ -209,6 +209,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-s3") == 0) {
             opts.s3only = true;
         }
+        else if (std::strcmp(argv[i], "-s4") == 0) {
+            opts.s4only = true;
+        }
         else if (std::strcmp(argv[i], "-montgomery") == 0) {
             opts.edwards = false;
         }
@@ -330,6 +333,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-seed") == 0 && i + 1 < argc) {
             opts.curve_seed = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-tbits") == 0 && i + 1 < argc) {
+            opts.tbits = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
         else if (std::strcmp(argv[i], "-erroriter") == 0 && i + 1 < argc) {

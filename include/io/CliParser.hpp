@@ -47,6 +47,7 @@ struct CliOptions {
     bool notorsion = false;
     uint64_t sigma = 0ULL;
     uint64_t seed = 0ULL;
+    uint64_t tbits = 500000ULL;
     bool resume = true;
     bool submit = false;
     uint64_t chunk256 = 4;
@@ -98,6 +99,7 @@ struct CliOptions {
     int invarianterror = 0;
     uint32_t ecm_progress_interval_ms = 2000;
     bool s3only = false;
+    bool s4only = false;
 };
 
 class CliParser {

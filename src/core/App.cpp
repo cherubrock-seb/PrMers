@@ -848,6 +848,16 @@ int App::run() {
                 rc_local = runPM1Stage3Marin();
                 ran_local = true;
             }
+            if(options.s4only){
+                std::ostringstream msg;
+                msg << "S4 only requested " 
+                    << "→ jumping to runPM1Stage4Marin()";
+                std::cout << msg.str() << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage 4 only"); }
+
+                rc_local = runPM1Stage4Marin();
+                ran_local = true;
+            }
             else if(options.torus){
                 //options.torus = runPM1Stage1SLnTorusMarin();
                 std::ostringstream msg;
