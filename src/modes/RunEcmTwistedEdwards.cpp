@@ -486,11 +486,33 @@ int App::runECMMarinTwistedEdwards()
             return;
         }
 
+        std::string who = options.user.empty() ? "" : options.user;
+        for (char& c : who) {
+            if (c == ';' || c == '\n' || c == '\r') c = '_';
+        }
+
+        std::time_t now_t = std::time(nullptr);
+        std::tm tmv{};
+        #if defined(_WIN32)
+        localtime_s(&tmv, &now_t);
+        #else
+        localtime_r(&now_t, &tmv);
+        #endif
+
+        std::ostringstream time_ss;
+        time_ss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
+
         out << "METHOD=ECM; B1=" << B1
             << "; N=" << N.get_str()
             << "; X=0x" << xred.get_str(16)
             << "; A=" << Ared.get_str()
-            << "; CHECKSUM=" << chk_u << ";\n";
+            << "; CHECKSUM=" << chk_u
+            << "; PROGRAM=PrMers " << core::PRMERS_VERSION;
+            if (!who.empty()) {
+                out << "; WHO=" << who;
+            }
+            out << "; TIME=" << time_ss.str()
+                << ";\n";
         out.flush();
 
         std::ostringstream oss;
