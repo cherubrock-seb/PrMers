@@ -104,9 +104,12 @@ int App::runECMMarin()
     const uint64_t B2 = options.B2 ? options.B2 : 0ULL;
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
-    const bool forceSigma = (options.curve_seed != 0ULL);
+    const bool forceCurveSeed = (options.curve_seed != 0ULL);   // deterministic RNG seed
+    const bool forceSigma = !options.sigma.empty();      // force Suyama sigma (curve)
     const uint32_t ui_interval_ms = options.ecm_progress_interval_ms ? options.ecm_progress_interval_ms : 2000;
-    if (forceSigma) curves = 1ULL;
+
+   // const uint32_t ui_interval_ms = options.ecm_progress_interval_ms ? options.ecm_progress_interval_ms : 2000;
+    if (forceCurveSeed || forceSigma) curves = 1ULL;
 
     auto splitmix64_step = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
     auto splitmix64_u64 = [&](uint64_t seed0)->uint64_t{ uint64_t s=seed0; return splitmix64_step(s); };
@@ -325,7 +328,7 @@ int App::runECMMarin()
    
         uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
         uint64_t curve_seed = mix64(base_seed, c);
-        if (forceSigma) { curve_seed = options.curve_seed; base_seed = curve_seed; }
+        if (forceCurveSeed) { curve_seed = options.curve_seed; base_seed = curve_seed; }
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
@@ -740,11 +743,22 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             if (picked_mode == 0)
             {
                 mode_name="montgomery"; torsion_name="none";
+
                 mpz_class sigma_mpz;
-                if (forceSigma){
+                if (forceCurveSeed){
                     curve_seed = options.curve_seed;
                 }
-                sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
+
+                if (forceSigma) {
+                    if (mpz_set_str(sigma_mpz.get_mpz_t(), options.sigma.c_str(), 0) != 0) {
+                        std::cerr << "[ECM] Invalid -sigma value: " << options.sigma << std::endl;
+                        delete eng;
+                        return 0;
+                    }
+                } else {
+                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 192);
+                }
+
                 options.sigma_hex = sigma_mpz.get_str(16);
                 sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
@@ -820,7 +834,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                     xr = RX; yr=RY; return 0;
                 };
 
-                if (forceSigma){
+                if (forceCurveSeed){
                     base_seed = options.curve_seed;
                 }
                 curve_seed = base_seed;
@@ -860,7 +874,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             }
             else if (picked_mode == 2)
             {
-                if (forceSigma){
+                if (forceCurveSeed){
                     curve_seed = options.curve_seed;
                 }
                 mode_name="montgomery"; torsion_name="8";
@@ -886,10 +900,20 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             {
                 mode_name="edwards--conv-->montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceSigma){
+                if (forceCurveSeed){
                     curve_seed = options.curve_seed;
                 }
-                sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
+
+                if (forceSigma) {
+                    if (mpz_set_str(sigma_mpz.get_mpz_t(), options.sigma.c_str(), 0) != 0) {
+                        std::cerr << "[ECM] Invalid -sigma value: " << options.sigma << std::endl;
+                        delete eng;
+                        return 0;
+                    }
+                } else {
+                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 192);
+                }
+
                 options.sigma_hex = sigma_mpz.get_str(16);
                 sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
@@ -936,7 +960,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             else
             {
                 mode_name="edwards--conv-->montgomery"; torsion_name="8";
-                if (forceSigma){
+                if (forceCurveSeed){
                     curve_seed = options.curve_seed;
                 }
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);

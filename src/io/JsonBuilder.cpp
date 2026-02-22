@@ -523,7 +523,7 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
         if (isEdw) canon << "E";                                 // sigma
         if (!opts.sigma_hex.empty()) {
             canon << "0x" << toLower(opts.sigma_hex);
-        } else if (opts.sigma) {
+        } else if (!opts.sigma.empty()) {
             canon << opts.sigma;
         }
         if (torsion > 0) {

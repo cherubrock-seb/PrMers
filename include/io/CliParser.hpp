@@ -45,7 +45,7 @@ struct CliOptions {
     bool compute_edwards = false;
     bool torsion16 = false;
     bool notorsion = true;
-    uint64_t sigma = 0ULL;
+    std::string sigma;
     uint64_t seed = 0ULL;
     uint64_t tbits = 500000ULL;
     bool resume = true;

@@ -90,6 +90,7 @@ void printUsage(const char* progName) {
     std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
     std::cout << "  -ced                 : (Optional) compute in Edwards and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
+    std::cout << "  -sigma               : (Optional) force a curve sigma in Montgomery notorsion mode" << std::endl;
     std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
@@ -336,6 +337,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-seed") == 0 && i + 1 < argc) {
             opts.curve_seed = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-sigma") == 0 && i + 1 < argc) {
+            opts.sigma = argv[i + 1];
             ++i;
         }
         else if (std::strcmp(argv[i], "-tbits") == 0 && i + 1 < argc) {
