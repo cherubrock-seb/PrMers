@@ -44,7 +44,7 @@ struct CliOptions {
     uint32_t ecm_check_interval = 300;
     bool compute_edwards = false;
     bool torsion16 = false;
-    bool notorsion = false;
+    bool notorsion = true;
     uint64_t sigma = 0ULL;
     uint64_t seed = 0ULL;
     uint64_t tbits = 500000ULL;

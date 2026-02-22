@@ -221,12 +221,15 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-ced") == 0) {
             opts.compute_edwards = true;
             opts.torsion16 = true;
+            opts.notorsion = false;
         }
         else if (std::strcmp(argv[i], "-torsion8") == 0) {
             opts.torsion16 = false;
+            opts.notorsion = false;
         }
         else if (std::strcmp(argv[i], "-torsion16") == 0) {
             opts.torsion16 = true;
+            opts.notorsion = false;
         }
         else if (std::strcmp(argv[i], "-notorsion") == 0) {
             opts.notorsion = true;
