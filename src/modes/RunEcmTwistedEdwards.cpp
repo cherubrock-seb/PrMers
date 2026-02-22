@@ -50,6 +50,7 @@
 #include <filesystem>
 #include <set>
 #include <unordered_set>
+#include <ctime>
 
 using namespace core;
 using namespace std::chrono;
@@ -458,10 +459,25 @@ int App::runECMMarinTwistedEdwards()
         }
     }
 
-    const std::string ecm_stage1_resume_file =
+    const std::string ecm_stage1_resume_save_file =
+        "resume_p" + std::to_string(p) + "_ECM_TE_B1_" + std::to_string(B1) + ".save";
+    const std::string ecm_stage1_resume_p95_file =
         "resume_p" + std::to_string(p) + "_ECM_TE_B1_" + std::to_string(B1) + ".p95";
 
-    auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& Aresume, const mpz_class& xAff)->void {
+    auto ecm_now_string = [&]() -> std::string {
+        std::time_t t = std::time(nullptr);
+        std::tm tmv{};
+    #if defined(_WIN32)
+        localtime_s(&tmv, &t);
+    #else
+        localtime_r(&t, &tmv);
+    #endif
+        std::ostringstream oss;
+        oss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
+        return oss.str();
+    };
+
+    auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& Aresume, const mpz_class& xAff, const mpz_class* sigmaForP95)->void {
         mpz_class Ared = Aresume;
         mpz_mod(Ared.get_mpz_t(), Ared.get_mpz_t(), N.get_mpz_t());
         if (Ared < 0) Ared += N;
@@ -470,6 +486,10 @@ int App::runECMMarinTwistedEdwards()
         mpz_mod(xred.get_mpz_t(), xred.get_mpz_t(), N.get_mpz_t());
         if (xred < 0) xred += N;
 
+        const std::string ecmResumeProgram = std::string("PrMers ") + core::PRMERS_VERSION;
+        const std::string ecmResumeTime = ecm_now_string();
+        const std::string ecmResumeWho = options.user;
+
         mpz_class chk;
         mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
         chk *= mpz_class(mpz_fdiv_ui(Ared.get_mpz_t(), CHKSUMMOD));
@@ -477,47 +497,64 @@ int App::runECMMarinTwistedEdwards()
         chk *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
         const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
 
-        std::ofstream out(ecm_stage1_resume_file, std::ios::out | std::ios::app);
-        if (!out) {
-            std::ostringstream oss;
-            oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_file << "'";
-            std::cerr << oss.str() << std::endl;
-            if (guiServer_) guiServer_->appendLog(oss.str());
-            return;
-        }
-
-        std::string who = options.user.empty() ? "" : options.user;
-        for (char& c : who) {
-            if (c == ';' || c == '\n' || c == '\r') c = '_';
-        }
-
-        std::time_t now_t = std::time(nullptr);
-        std::tm tmv{};
-        #if defined(_WIN32)
-        localtime_s(&tmv, &now_t);
-        #else
-        localtime_r(&now_t, &tmv);
-        #endif
-
-        std::ostringstream time_ss;
-        time_ss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
-
-        out << "METHOD=ECM; B1=" << B1
-            << "; N=" << N.get_str()
-            << "; X=0x" << xred.get_str(16)
-            << "; A=" << Ared.get_str()
-            << "; CHECKSUM=" << chk_u
-            << "; PROGRAM=PrMers " << core::PRMERS_VERSION;
-            if (!who.empty()) {
-                out << "; WHO=" << who;
+        {
+            std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
+            if (!out) {
+                std::ostringstream oss;
+                oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_save_file << "'";
+                std::cerr << oss.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(oss.str());
+            } else {
+                out << "METHOD=ECM; B1=" << B1
+                    << "; N=" << N.get_str()
+                    << "; X=0x" << xred.get_str(16)
+                    << "; A=" << Ared.get_str()
+                    << "; CHECKSUM=" << chk_u
+                    << "; PROGRAM=" << ecmResumeProgram
+                    << "; X0=0x0; Y0=0x0;";
+                if (!ecmResumeWho.empty()) out << " WHO=" << ecmResumeWho << ";";
+                out << " TIME=" << ecmResumeTime << ";\n";
+                out.flush();
             }
-            out << "; TIME=" << time_ss.str()
-                << ";\n";
-        out.flush();
+        }
+
+        if (sigmaForP95 != nullptr) {
+            const mpz_class& sigma = *sigmaForP95;
+
+            mpz_class chk2;
+            mpz_set_ui(chk2.get_mpz_t(), (unsigned long)B1);
+            chk2 *= mpz_class(mpz_fdiv_ui(sigma.get_mpz_t(), CHKSUMMOD));
+            chk2 *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
+            chk2 *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
+            const uint32_t chk_u2 = (uint32_t)mpz_fdiv_ui(chk2.get_mpz_t(), CHKSUMMOD);
+
+            const std::string nField = N.get_str();
+
+            std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
+            if (!outp) {
+                std::ostringstream oss;
+                oss << "[ECM] Warning: cannot append Prime95 Stage2 resume to '" << ecm_stage1_resume_p95_file << "'";
+                std::cerr << oss.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(oss.str());
+            } else {
+                outp << "METHOD=ECM; SIGMA=" << sigma.get_str()
+                     << "; B1=" << B1
+                     << "; N=" << nField
+                     << "; X=0x" << xred.get_str(16)
+                     << "; CHECKSUM=" << chk_u2
+                     << "; PROGRAM=" << ecmResumeProgram
+                     << "; X0=0x0; Y0=0x0;";
+                if (!ecmResumeWho.empty()) outp << " WHO=" << ecmResumeWho << ";";
+                outp << " TIME=" << ecmResumeTime << ";\n";
+                outp.flush();
+            }
+        }
 
         std::ostringstream oss;
         oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
-            << " | Stage1 resume appended: " << ecm_stage1_resume_file;
+            << " | Stage1 resume appended: " << ecm_stage1_resume_save_file;
+        if (sigmaForP95 != nullptr) oss << " + " << ecm_stage1_resume_p95_file;
+        else oss << " (Prime95 export skipped: TE curve is not a GMP-ECM SIGMA family)";
         std::cout << oss.str() << std::endl;
         if (guiServer_) guiServer_->appendLog(oss.str());
     };
@@ -1747,7 +1784,7 @@ int App::runECMMarinTwistedEdwards()
                     if (r_a == 1) found = true;
                     if (!found && r_a == 0) {
                         mpz_class Aresume = mulm(numA, invDenA);
-                        append_ecm_stage1_resume_line(c, Aresume, uAff);
+                        append_ecm_stage1_resume_line(c, Aresume, uAff, nullptr);
                     }
                 }
             }

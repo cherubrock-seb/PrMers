@@ -50,6 +50,7 @@
 #include <filesystem>
 #include <set>
 #include <unordered_set>
+#include <ctime>
 
 using namespace core;
 using namespace std::chrono;
@@ -92,66 +93,6 @@ using core::algo::product_prefix_fit_u64;
 using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
-
-static uint64_t ecm_isqrt_u64(uint64_t x) {
-    long double r = std::sqrt((long double)x);
-    uint64_t y = (uint64_t)r;
-    while ((y + 1) > 0 && (y + 1) <= x / (y + 1)) ++y;
-    while (y > 0 && y > x / y) --y;
-    return y;
-}
-
-static std::vector<uint32_t> ecm_sieve_base_primes(uint32_t limit) {
-    std::vector<uint8_t> isPrime(limit + 1, 1);
-    if (limit == 0) {
-        isPrime[0] = 0;
-    } else {
-        isPrime[0] = 0;
-        isPrime[1] = 0;
-    }
-    for (uint32_t p = 2; (uint64_t)p * p <= limit; ++p) {
-        if (!isPrime[p]) continue;
-        for (uint64_t m = (uint64_t)p * p; m <= limit; m += p) isPrime[(size_t)m] = 0;
-    }
-    std::vector<uint32_t> primes;
-    primes.reserve(limit / 10 + 16);
-    for (uint32_t i = 2; i <= limit; ++i) if (isPrime[i]) primes.push_back(i);
-    return primes;
-}
-
-static void ecm_segmented_primes_odd(uint64_t low, uint64_t high,
-                                     const std::vector<uint32_t>& basePrimes,
-                                     std::vector<uint64_t>& out) {
-    out.clear();
-    if (high < 2 || low > high) return;
-    if (low <= 2 && 2 <= high) out.push_back(2);
-
-    if (low < 3) low = 3;
-    if ((low & 1ULL) == 0) ++low;
-    if ((high & 1ULL) == 0) --high;
-    if (low > high) return;
-
-    const uint64_t nOdds = ((high - low) >> 1) + 1;
-    std::vector<uint8_t> isPrime((size_t)nOdds, 1);
-
-    for (uint32_t p32 : basePrimes) {
-        if (p32 == 2) continue;
-        const uint64_t p = (uint64_t)p32;
-        const uint64_t p2 = p * p;
-        if (p2 > high) break;
-        uint64_t start = ((low + p - 1) / p) * p;
-        if (start < p2) start = p2;
-        if ((start & 1ULL) == 0) start += p;
-        for (uint64_t x = start; x <= high; x += (p << 1)) {
-            isPrime[(size_t)((x - low) >> 1)] = 0;
-        }
-    }
-
-    out.reserve((size_t)(nOdds / 10 + 16));
-    for (uint64_t i = 0; i < nOdds; ++i) {
-        if (isPrime[(size_t)i]) out.push_back(low + (i << 1));
-    }
-}
 
 int App::runECMMarin()
 {
@@ -331,92 +272,32 @@ int App::runECMMarin()
         }
     }
 
-
-    const std::string ecm_stage1_resume_file =
-        "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".p95";
-
-    auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& A24v, const mpz_class& xAff)->void {
-        mpz_class Aresume;
-        mpz_mul_ui(Aresume.get_mpz_t(), A24v.get_mpz_t(), 4UL);
-        Aresume -= 2;
-        mpz_mod(Aresume.get_mpz_t(), Aresume.get_mpz_t(), N.get_mpz_t());
-        if (Aresume < 0) Aresume += N;
-
-        mpz_class chk; mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
-        chk *= mpz_class(mpz_fdiv_ui(Aresume.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
-        const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
-
-        std::ofstream out(ecm_stage1_resume_file, std::ios::out | std::ios::app);
-        if (!out) {
-            std::ostringstream oss;
-            oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_file << "'";
-            std::cerr << oss.str() << std::endl;
-            if (guiServer_) guiServer_->appendLog(oss.str());
-            return;
-        }
-        std::string who = options.user.empty() ? "" : options.user;
-        for (char& c : who) {
-            if (c == ';' || c == '\n' || c == '\r') c = '_';
-        }
-
-        // Build TIME like: Fri Feb 20 19:38:35 2026
-        std::time_t now_t = std::time(nullptr);
-        std::tm tmv{};
-        #if defined(_WIN32)
-        localtime_s(&tmv, &now_t);
-        #else
-        localtime_r(&now_t, &tmv);
-        #endif
-
-        std::ostringstream time_ss;
-        time_ss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
-
-        out << "METHOD=ECM; B1=" << B1
-            << "; N=" << N.get_str()
-            << "; X=0x" << xAff.get_str(16)
-            << "; A=" << Aresume.get_str()
-            << "; CHECKSUM=" << chk_u
-            << "; PROGRAM=PrMers " << core::PRMERS_VERSION;
-            if (!who.empty()) {
-                out << "; WHO=" << who;
-            }
-            out << "; TIME=" << time_ss.str()
-                << ";\n";
-        out.flush();
-
-        std::ostringstream oss;
-        oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
-            << " | Stage1 resume appended: " << ecm_stage1_resume_file;
-        std::cout << oss.str() << std::endl;
-        if (guiServer_) guiServer_->appendLog(oss.str());
-    };
-
     vector<uint64_t> primesB1_v, primesS2_v;
     {
-        const uint64_t Pmax = (B2 > B1) ? B2 : B1;
-        const uint64_t root = ecm_isqrt_u64(Pmax);
-        const std::vector<uint32_t> basePrimes = ecm_sieve_base_primes((uint32_t)root);
+        uint64_t Pmax = B1;
+        if (B2 > B1) Pmax = B2;
 
-        const uint64_t SEG = 1000000ULL;
-        std::vector<uint64_t> segPrimes;
-        for (uint64_t lo = 2; lo <= Pmax; ) {
-            uint64_t hi = lo + SEG - 1;
-            if (hi < lo || hi > Pmax) hi = Pmax;
-            ecm_segmented_primes_odd(lo, hi, basePrimes, segPrimes);
-            for (uint64_t q : segPrimes) {
-                if (q <= B1) primesB1_v.push_back(q);
-                else if (q <= B2) primesS2_v.push_back(q);
-            }
-            if (hi == Pmax) break;
-            lo = hi + 1;
-        }
+        vector<char> sieve(Pmax + 1, 1);
+        sieve[0] = 0;
+        if (Pmax >= 1) sieve[1] = 0;
+
+        for (uint64_t q = 2; q*q <= Pmax; ++q)
+            if (sieve[q])
+                for (uint64_t k = q*q; k <= Pmax; k += q)
+                    sieve[k] = 0;
+
+        for (uint64_t q = 2; q <= B1; ++q)
+            if (sieve[q])
+                primesB1_v.push_back((uint32_t)q);
+
+        if (B2 > B1)
+            for (uint64_t q = B1 + 1; q <= B2; ++q)
+                if (sieve[q])
+                    primesS2_v.push_back((uint64_t)q);
 
         std::cout << "[ECM] Prime counts: B1=" << primesB1_v.size()
-                  << ", S2=" << primesS2_v.size() << std::endl;
+                << ", S2=" << primesS2_v.size() << std::endl;
     }
-
 
 
     vector<uint64_t> s1_factors;
@@ -518,18 +399,18 @@ int App::runECMMarin()
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
             {
                 File f(newf, "wb");
-                int version = 4;
+                int version = 3;
                 if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return -1;
                 if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return -1;
                 if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return -1;
                 if (!f.write(reinterpret_cast<const char*>(&cnt_bits), sizeof(cnt_bits))) return -1;
                 if (!f.write(reinterpret_cast<const char*>(&B1),       sizeof(B1)))       return -1;
                 if (!f.write(reinterpret_cast<const char*>(&B2),       sizeof(B2)))       return -1;
+                if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return -1;
                 uint64_t seed64 = (uint64_t)curve_seed;
                 if (!f.write(reinterpret_cast<const char*>(&seed64),   sizeof(seed64)))   return -1;
                 uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return -1;
-                if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return -1;
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!eng->get_checkpoint(data)) return -1;
@@ -544,12 +425,13 @@ int App::runECMMarin()
             return 0;
         };
 
+
         auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2 && version != 3 && version != 4) return -2;
+            if (version != 2 && version != 3) return -2;
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
@@ -558,26 +440,15 @@ int App::runECMMarin()
             uint64_t b1s = 0, b2s = 0;
             if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
-
-            uint64_t saved_seed = 0;
-            uint8_t  saved_tor  = 0;
-            if (version == 4) {
+            if (version == 3) {
+                uint64_t saved_seed = 0;
+                uint8_t  saved_tor  = 0;
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
-            } else if (version == 3) {
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
-                if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
-                if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
-            } else {
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
-            }
-
-            if (version >= 3) {
                 uint8_t current_tor = (!options.notorsion && options.torsion16) ? 1 : 0;
                 if (saved_seed != (uint64_t)curve_seed || saved_tor != current_tor) return -2;
             }
-
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
             if (b1s != B1 || b2s != B2) return -2;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -589,10 +460,7 @@ int App::runECMMarin()
 
 
 
-
-
         auto write_gp = [&](const std::string& mode, const std::string& tors, const mpz_class& Nref, uint32_t pe, uint64_t b1e, uint64_t b2e, uint64_t seed_base, uint64_t seed_curve, const mpz_class* sigma_opt, const mpz_class* r_opt, const mpz_class* v_opt, const mpz_class* aE_opt, const mpz_class* dE_opt, const mpz_class& A24_ref, const mpz_class& x0_ref)->void{
-            (void)mode; (void)tors; (void)Nref; (void)pe; (void)b1e; (void)b2e; (void)seed_base; (void)seed_curve; (void)sigma_opt; (void)r_opt; (void)v_opt; (void)aE_opt; (void)dE_opt; (void)A24_ref; (void)x0_ref; return;
             (void) A24_ref;
             (void) Nref;
             std::ofstream gp("lastcurve.gp");
@@ -604,10 +472,10 @@ int App::runECMMarin()
             if (mode=="montgomery" && tors=="none") {
                 gp<<"sigma="<<(sigma_opt? sigma_opt->get_str() : "0")<<";\n";
                 gp<<"u=modN(sigma^2-5); v=modN(4*sigma);\n";
-                gp<<"x=u^3; t0=modN(4*x*v);\n";
+                gp<<"u3=modN(u^3); v3=modN(v^3); t0=modN(4*u3*v);\n";
                 gp<<"A=lift(modN(((v-u)^2*(v-u)*(3*u+v))/t0 - 2));\n";
                 gp<<"A24=lift(modN((A+2)/4));\n";
-                gp<<"x0=lift(modN(((v-u)^2)/(4*u*v)));\n";
+                gp<<"x0=lift(modN(u3/v3));\n";
             } else if (mode=="montgomery" && tors=="16") {
                 gp<<"r="<<(r_opt? r_opt->get_str() : "0")<<";\n";
                 gp<<"A=lift(modN((8*r^4-16*r^3+16*r^2-8*r+1)/(4*r^2)));\n";
@@ -627,9 +495,114 @@ int App::runECMMarin()
             gp<<"\\print(\"A24=\",A24);\n";
             gp<<"\\print(\"x0=\",x0);\n";
             gp.close();
-        };
+};
 
-        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+const std::string ecm_stage1_resume_save_file =
+    "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".save";
+const std::string ecm_stage1_resume_p95_file =
+    "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".p95";
+
+auto ecm_now_string = [&]() -> std::string {
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+#if defined(_WIN32)
+    localtime_s(&tmv, &t);
+#else
+    localtime_r(&t, &tmv);
+#endif
+    std::ostringstream oss;
+    oss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
+    return oss.str();
+};
+
+auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx,
+                                         const mpz_class& A24v,
+                                         const mpz_class& xAffRaw,
+                                         const mpz_class* sigmaForP95)->void {
+    mpz_class xAff = xAffRaw;
+    mpz_mod(xAff.get_mpz_t(), xAff.get_mpz_t(), N.get_mpz_t());
+    if (xAff < 0) xAff += N;
+
+    mpz_class Aresume;
+    mpz_mul_ui(Aresume.get_mpz_t(), A24v.get_mpz_t(), 4UL);
+    Aresume -= 2;
+    mpz_mod(Aresume.get_mpz_t(), Aresume.get_mpz_t(), N.get_mpz_t());
+    if (Aresume < 0) Aresume += N;
+
+    const std::string ecmResumeProgram = std::string("PrMers ") + core::PRMERS_VERSION;
+    const std::string ecmResumeTime = ecm_now_string();
+    const std::string ecmResumeWho = options.user;
+
+    {
+        mpz_class chk;
+        mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
+        chk *= mpz_class(mpz_fdiv_ui(Aresume.get_mpz_t(), CHKSUMMOD));
+        chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
+        chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
+        const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+
+        std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
+        if (!out) {
+            std::ostringstream oss;
+            oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_save_file << "'";
+            std::cerr << oss.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(oss.str());
+        } else {
+            out << "METHOD=ECM; B1=" << B1
+                << "; N=" << N.get_str()
+                << "; X=0x" << xAff.get_str(16)
+                << "; A=" << Aresume.get_str()
+                << "; CHECKSUM=" << chk_u
+                << "; PROGRAM=" << ecmResumeProgram
+                << "; X0=0x0; Y0=0x0;";
+            if (!ecmResumeWho.empty()) out << " WHO=" << ecmResumeWho << ";";
+            out << " TIME=" << ecmResumeTime << ";\n";
+            out.flush();
+        }
+    }
+
+    if (sigmaForP95 != nullptr) {
+        const mpz_class& sigma = *sigmaForP95;
+
+        mpz_class chk;
+        mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
+        chk *= mpz_class(mpz_fdiv_ui(sigma.get_mpz_t(), CHKSUMMOD));
+        chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
+        chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
+        const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+
+        const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+
+        std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
+        if (!outp) {
+            std::ostringstream oss;
+            oss << "[ECM] Warning: cannot append Prime95 Stage2 resume to '" << ecm_stage1_resume_p95_file << "'";
+            std::cerr << oss.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(oss.str());
+        } else {
+            outp << "METHOD=ECM; SIGMA=" << sigma.get_str()
+                 << "; B1=" << B1
+                 << "; N=" << nField
+                 << "; X=0x" << xAff.get_str(16)
+                 << "; CHECKSUM=" << chk_u
+                 << "; PROGRAM=" << ecmResumeProgram
+                 << "; X0=0x0; Y0=0x0;";
+            if (!ecmResumeWho.empty()) outp << " WHO=" << ecmResumeWho << ";";
+            outp << " TIME=" << ecmResumeTime << ";\n";
+            outp.flush();
+        }
+    }
+
+    std::ostringstream oss;
+    oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
+        << " | Stage1 resume appended: " << ecm_stage1_resume_save_file;
+    if (sigmaForP95 != nullptr) oss << " + " << ecm_stage1_resume_p95_file;
+    else oss << " (Prime95 export skipped: curve family is A-based/custom, no GMP-ECM SIGMA line)";
+    std::cout << oss.str() << std::endl;
+    if (guiServer_) guiServer_->appendLog(oss.str());
+};
+
+uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
        
         /*uint64_t curve_seed = mix64(base_seed, c);
@@ -653,6 +626,7 @@ int App::runECMMarin()
         };
 
         mpz_class A24, x0;
+        mpz_class sigma_resume; bool have_sigma_resume = false;
 
         if (resume_stage2) {
             if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards--conv-->montgomery";
@@ -759,7 +733,8 @@ int App::runECMMarin()
         if (!resume_stage2)
         {
             int picked_mode = -1;
-            if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
+            if (forceSigma || options.notorsion) picked_mode = options.edwards ? 3 : 0;
+            else if (options.torsion16) picked_mode = options.edwards ? 4 : 1;
             else picked_mode = options.edwards ? 5 : 2;
 
             if (picked_mode == 0)
@@ -771,6 +746,7 @@ int App::runECMMarin()
                 }
                 sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
                 options.sigma_hex = sigma_mpz.get_str(16);
+                sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
                 mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
@@ -782,9 +758,29 @@ int App::runECMMarin()
                 mpz_class A = subm(Araw, mpz_class(2));
                 mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
-                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
-                mpz_class num = sqrm(subm(v,u));
-                x0 = mulm(num, den);
+                mpz_class u3 = mulm(sqrm(u), u);
+                mpz_class v3 = mulm(sqrm(v), v);
+                mpz_class invv3;
+                {
+                    int r = invm(v3, invv3);
+                    if (r==1){
+                        curves_tested_for_found = c+1;
+                        options.curves_tested_for_found = c+1;
+                        write_result();
+                        publish_json();
+                        delete eng;
+                        return 0;
+                    }
+                    if (r<0){
+                        curves_tested_for_found = c+1;
+                        options.curves_tested_for_found = c+1;
+                        write_result();
+                        publish_json();
+                        delete eng;
+                        return 0;
+                    }
+                }
+                x0 = mulm(u3, invv3);
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
@@ -895,6 +891,7 @@ int App::runECMMarin()
                 }
                 sigma_mpz = rnd_mpz_bits(N, curve_seed, 192); 
                 options.sigma_hex = sigma_mpz.get_str(16);
+                sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
                 mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
@@ -906,9 +903,29 @@ int App::runECMMarin()
                 mpz_class A = subm(Araw, mpz_class(2));
                 mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
-                mpz_class den = mulm(mpz_class(4), mulm(u, v)); { int r = invm(den, den); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
-                mpz_class num = sqrm(subm(v,u));
-                x0 = mulm(num, den);
+                mpz_class u3 = mulm(sqrm(u), u);
+                mpz_class v3 = mulm(sqrm(v), v);
+                mpz_class invv3;
+                {
+                    int r = invm(v3, invv3);
+                    if (r==1){
+                        curves_tested_for_found = c+1;
+                        options.curves_tested_for_found = c+1;
+                        write_result();
+                        publish_json();
+                        delete eng;
+                        return 0;
+                    }
+                    if (r<0){
+                        curves_tested_for_found = c+1;
+                        options.curves_tested_for_found = c+1;
+                        write_result();
+                        publish_json();
+                        delete eng;
+                        return 0;
+                    }
+                }
+                x0 = mulm(u3, invv3);
                 mpz_class aE = addm(A, mpz_class(2));
                 mpz_class dE = subm(A, mpz_class(2));
                 std::ostringstream head;
@@ -995,180 +1012,101 @@ int App::runECMMarin()
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
-            if (!found && gg == 1) {
-                mpz_class Xfin = compute_X_with_dots(eng, (engine::Reg)0, N);
-                mpz_class invZ;
-                if (invm(Zfin, invZ) == 0) {
-                    mpz_class xAff = mulm(Xfin, invZ);
-                    append_ecm_stage1_resume_line(c, A24, xAff);
-                }
-            }
+if (!found && gg == 1) {
+    mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
+    mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
+    mpz_class invZ;
+    int rz = invm(Zv, invZ);
+    if (rz == 1) {
+        found = true;
+    } else if (rz == 0) {
+        mpz_class xAff = mulm(Xv, invZ);
+        append_ecm_stage1_resume_line(c, A24, xAff, have_sigma_resume ? &sigma_resume : nullptr);
+    }
+}
 
-            if (found) {
+if (found) {
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
+                std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+                std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); result_factor=gg; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
             }
         }
-        if (B2 > B1 && !primesS2_v.empty()) {
+        else
+        {
+            std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx;
+            std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
+        }
+        std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+        std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
+        if (B2 > B1) {
             const uint32_t baseX = 4, baseZ = 5;
-            const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
-            const uint32_t MAX_S2_CHUNK_BITS = 262144;
-            auto u64_bitlen = [&](uint64_t v)->uint32_t { uint32_t n = 0; do { ++n; v >>= 1; } while (v); return n; };
 
-            uint64_t approx_total_bits = 0;
-            for (uint64_t q : primesS2_v) approx_total_bits += (uint64_t)u64_bitlen(q);
+            mpz_class M(1);
+            for (uint64_t q : primesS2_v) mpz_mul_ui(M.get_mpz_t(), M.get_mpz_t(), q);
+            uint32_t stage2_bits = (uint32_t)mpz_sizeinbase(M.get_mpz_t(), 2);
+
+            uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+            bool resume_stage2 = false; {
+                int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et);
+                if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et);
+                resume_stage2 = (rr2 == 0);
+            }
+            if (resume_stage2 && s2_cnt != stage2_bits) { resume_stage2 = false; s2_idx = 0; s2_et = 0.0; }
+            uint32_t start_bit = resume_stage2 ? s2_idx : 0;
+
+            eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
 
             if (!resume_stage2) {
-                mpz_t tx, tz;
-                mpz_init(tx); mpz_init(tz);
-                eng->get_mpz(tx, (engine::Reg)0);
-                eng->get_mpz(tz, (engine::Reg)1);
-                mpz_class Xs(tx), Zs(tz);
-                mpz_clear(tx); mpz_clear(tz);
-
-                mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
-                if (gz > 1 && gz < N) {
-                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
-                    result_factor = gz; result_status = "found";
-                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                    write_result(); publish_json(); delete eng; return 0;
-                }
-
-                mpz_class invz;
-                if (invm(Zs, invz) != 0) {
-                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                    write_result(); publish_json(); delete eng; return 0;
-                }
-                mpz_class xQ = mulm(Xs, invz);
-
-                mpz_t xQ_tmp; mpz_init_set(xQ_tmp, xQ.get_mpz_t());
-                eng->set_mpz((engine::Reg)4, xQ_tmp);
-                mpz_clear(xQ_tmp);
-                eng->set((engine::Reg)5, 1u);
+                eng->copy((engine::Reg)baseX, (engine::Reg)0);
+                eng->copy((engine::Reg)baseZ, (engine::Reg)1);
                 eng->set((engine::Reg)0, 1u);
                 eng->set((engine::Reg)1, 0u);
-                eng->copy((engine::Reg)2, (engine::Reg)4);
-                eng->copy((engine::Reg)3, (engine::Reg)5);
-                eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
-                eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
-            } else {
-                std::ostringstream s2r; s2r << "[ECM] Curve " << (c+1) << "/" << curves
-                                           << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
-                std::cout << s2r.str() << std::endl;
-                if (guiServer_) guiServer_->appendLog(s2r.str());
+                eng->copy((engine::Reg)2, (engine::Reg)baseX);
+                eng->copy((engine::Reg)3, (engine::Reg)baseZ);
             }
+            eng->set_multiplicand((engine::Reg)13, (engine::Reg)baseX);
+            eng->set_multiplicand((engine::Reg)14, (engine::Reg)baseZ);
 
             auto t2_0 = high_resolution_clock::now();
             auto last2_save = t2_0, last2_ui = t2_0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
 
-            uint64_t done_bits_est = 0;
-            for (uint32_t ii = 0; ii < std::min<uint32_t>(s2_idx, (uint32_t)primesS2_v.size()); ++ii) {
-                uint64_t v = primesS2_v[ii];
-                do { ++done_bits_est; v >>= 1; } while (v);
-            }
-
-            auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
-                mpz_t tx, tz;
-                mpz_init(tx); mpz_init(tz);
-                eng->get_mpz(tx, (engine::Reg)0);
-                eng->get_mpz(tz, (engine::Reg)1);
-                mpz_class Xs(tx), Zs(tz);
-                mpz_clear(tx); mpz_clear(tz);
-
-                mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
-                if (gz > 1 && gz < N) {
-                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
-                    result_factor = gz; result_status = "found";
-                    return 1;
-                }
-
-                mpz_class invz;
-                if (invm(Zs, invz) != 0) return -1;
-                xOut = mulm(Xs, invz);
-                return 0;
-            };
-
-            bool stop_after_chunk = false;
-            while (s2_idx < (uint32_t)primesS2_v.size()) {
-                mpz_class Echunk(1);
-                uint32_t chunk_start = s2_idx;
-                uint32_t chunk_end = s2_idx;
-                while (chunk_end < (uint32_t)primesS2_v.size()) {
-                    mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
-                    ++chunk_end;
-                    if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
-                }
-
-                const uint32_t chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
-                for (uint32_t i = 0; i < chunk_bits; ++i) {
-                    const uint32_t bit = chunk_bits - 1 - i;
-                    const int b = mpz_tstbit(Echunk.get_mpz_t(), bit) ? 1 : 0;
-                    if (b == 0) xDBLADD_strict(0,1, 2,3);
-                    else        xDBLADD_strict(2,3, 0,1);
-
-                    auto now2 = high_resolution_clock::now();
-                    if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i + 1 == chunk_bits) {
-                        const double done = double(done_bits_est + i + 1);
-                        const double total = double(std::max<uint64_t>(1ULL, approx_total_bits));
-                        const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                        const double ips = done / std::max(1e-9, elapsed);
-                        const double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
-                        std::ostringstream line;
-                        line << "\r[ECM] Curve " << (c+1) << "/" << curves
-                             << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
-                             << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
-                             << " | ETA " << fmt_hms(eta);
-                        std::cout << line.str() << std::flush;
-                        last2_ui = now2;
-                    }
-                    if (interrupted) stop_after_chunk = true;
-                }
-
-                done_bits_est += chunk_bits;
-                s2_idx = chunk_end;
-
-                if (s2_idx < (uint32_t)primesS2_v.size()) {
-                    mpz_class xNext;
-                    int nr = normalize_for_next_chunk(xNext);
-                    if (nr == 1) {
-                        std::cout << "\n";
-                        curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                        write_result(); publish_json(); delete eng; return 0;
-                    }
-                    if (nr < 0) {
-                        std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 normalization failed, retrying\n";
-                        delete eng; continue;
-                    }
-                    mpz_t xNext_tmp; mpz_init_set(xNext_tmp, xNext.get_mpz_t());
-                    eng->set_mpz((engine::Reg)4, xNext_tmp);
-                    mpz_clear(xNext_tmp);
-                    eng->set((engine::Reg)5, 1u);
-                    eng->set((engine::Reg)0, 1u);
-                    eng->set((engine::Reg)1, 0u);
-                    eng->copy((engine::Reg)2, (engine::Reg)4);
-                    eng->copy((engine::Reg)3, (engine::Reg)5);
-                    eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
-                    eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
-                }
+            for (uint32_t i = start_bit; i < stage2_bits; ++i) {
+                uint32_t bit = stage2_bits - 1 - i;
+                int b = mpz_tstbit(M.get_mpz_t(), bit) ? 1 : 0;
+                if (b == 0) xDBLADD_strict2(0,1, 2,3);
+                else        xDBLADD_strict2(2,3, 0,1);
 
                 auto now2 = high_resolution_clock::now();
-                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period || stop_after_chunk || s2_idx == (uint32_t)primesS2_v.size()) {
-                    const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                    save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
-                    last2_save = now2;
+                if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i+1 == stage2_bits) {
+                    double done = double(i+1), total = double(stage2_bits);
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    double ips = done / std::max(1e-9, elapsed);
+                    double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                    std::ostringstream line;
+                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                        << " | Stage2 " << (i+1) << "/" << stage2_bits
+                        << " (" << std::fixed << std::setprecision(1)
+                        << (total ? (done*100.0/total) : 100.0)
+                        << "%) | ETA " << fmt_hms(eta);
+                    std::cout << line.str() << std::flush;
+                    last2_ui = now2;
                 }
 
-                if (stop_after_chunk) {
+                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period) {
+                    double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
+                    last2_save = now2;
+                }
+                if (interrupted) {
+                    double elapsed = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+                    save_ckpt2((uint32_t)(i + 1), elapsed, stage2_bits);
                     std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
-                              << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
-                    if (guiServer_) {
-                        std::ostringstream oss;
-                        oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
-                        guiServer_->appendLog(oss.str());
-                    }
+                            << " bit " << (i+1) << "/" << stage2_bits << "\n";
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at Stage2 curve "<<(c+1)<<" bit "<<(i+1)<<"/"<<stage2_bits; guiServer_->appendLog(oss.str()); }
                     curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
                     write_result(); delete eng; return 0;
                 }
@@ -1184,13 +1122,13 @@ int App::runECMMarin()
             fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
 
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
-            { std::ostringstream s2s; s2s << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 elapsed=" << std::fixed << std::setprecision(2) << elapsed2 << " s"; std::cout << s2s.str() << std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
+            { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
 
             bool found2 = (gg2 > 1 && gg2 < N);
             if (found2) {
                 bool known = is_known(gg2);
-                std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gg2.get_str() << std::endl;
-                if (guiServer_) { std::ostringstream oss; oss << "[ECM] " << (known ? "Known " : "") << "factor: " << gg2.get_str(); guiServer_->appendLog(oss.str()); }
+                std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
+                if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
                 if (!known) {
                     std::error_code ec;
                     fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
@@ -1199,6 +1137,13 @@ int App::runECMMarin()
                 }
             }
         }
+
+
+
+
+
+
+
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
