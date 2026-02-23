@@ -826,7 +826,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                         return 0;
                     }
                 } else {
-                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 192);
+                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 64);
                 }
 
                 options.sigma_hex = sigma_mpz.get_str(16);
