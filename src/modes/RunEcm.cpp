@@ -361,42 +361,36 @@ int App::runECMMarin()
 
 
 
+    std::vector<uint32_t> s2_chunk_ends;
+    std::vector<uint64_t> s2_chunk_prefix_iters;
+    uint64_t s2_total_iters_precomputed = 0;
+    if (B2 > B1 && !primesS2_v.empty()) {
+        const uint32_t MAX_S2_CHUNK_BITS_PRE = 262144;
+        mpz_class EchunkPre(1);
+        uint32_t idxPre = 0;
+        while (idxPre < (uint32_t)primesS2_v.size()) {
+            EchunkPre = 1;
+            const uint32_t chunkStartPre = idxPre;
+            while (idxPre < (uint32_t)primesS2_v.size()) {
+                mpz_mul_ui(EchunkPre.get_mpz_t(), EchunkPre.get_mpz_t(), primesS2_v[idxPre]);
+                ++idxPre;
+                if (mpz_sizeinbase(EchunkPre.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS_PRE && idxPre > chunkStartPre) break;
+            }
+            const uint32_t cb = (uint32_t)mpz_sizeinbase(EchunkPre.get_mpz_t(), 2);
+            s2_total_iters_precomputed += cb;
+            s2_chunk_ends.push_back(idxPre);
+            s2_chunk_prefix_iters.push_back(s2_total_iters_precomputed);
+        }
+    }
+
     vector<uint64_t> s1_factors;
     mpz_class K(1);
     for (uint32_t q : primesB1_v) { uint64_t m = q; while (m <= B1 / q) m *= q; s1_factors.push_back(m); mpz_mul_ui(K.get_mpz_t(), K.get_mpz_t(), m); }
 
-    struct S1FactorPlan {
-        uint64_t m;
-        uint32_t bits;
-        uint32_t ops;
-        bool pure_double;
-    };
-    std::vector<S1FactorPlan> s1_plan;
-    s1_plan.reserve(s1_factors.size());
-    uint64_t total_s1_ops = 0;
-    for (uint64_t m0 : s1_factors) {
-        if (m0 <= 1) continue;
-        if ((m0 & (m0 - 1)) == 0) {
-            uint64_t t = m0;
-            uint32_t e = 0;
-            while (t > 1) { t >>= 1; ++e; }
-            if (e) {
-                s1_plan.push_back({m0, 0u, e, true});
-                total_s1_ops += (uint64_t)e;
-            }
-        } else {
-            uint64_t t = m0;
-            uint32_t bits = 0;
-            while (t) { ++bits; t >>= 1; }
-            s1_plan.push_back({m0, bits, bits, false});
-            total_s1_ops += (uint64_t)bits;
-        }
-    }
-
     {
         std::ostringstream hdr;
         hdr<<"[ECM] N=M_"<<p<<"  B1="<<B1<<"  B2="<<B2<<"  curves="<<curves<<"\n";
-        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<", S1_ops="<<total_s1_ops<<"\n";
+        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<"\n";
         if (!primesS2_v.empty()) hdr<<"[ECM] Stage2 primes ("<<B1<<","<<B2<<"] count="<<primesS2_v.size()<<"\n"; else hdr<<"[ECM] Stage2: disabled\n";
         std::cout<<hdr.str(); if (guiServer_) guiServer_->appendLog(hdr.str());
     }
@@ -426,15 +420,15 @@ int App::runECMMarin()
         //std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
         //const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
 
-        auto save_ckpt = [&](uint64_t i, double et){
+        auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 2;
+                int version = 1;
                 if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
                 if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
-                uint64_t nbb = (uint64_t)total_s1_ops;
+                uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2);
                 if (!f.write(reinterpret_cast<const char*>(&nbb),     sizeof(nbb)))     return;
                 if (!f.write(reinterpret_cast<const char*>(&B1),      sizeof(B1)))      return;
                 if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
@@ -455,12 +449,12 @@ int App::runECMMarin()
         };
 //./prmers 193 -ecm -b1 400 -b2 4020 -seed 13515957324328859655
 
-        auto read_ckpt = [&](const std::string& file, uint64_t& ri, uint64_t& rnb, double& et)->int{
+        auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2) return -2;
+            if (version != 1) return -2;
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
@@ -480,7 +474,7 @@ int App::runECMMarin()
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (rnb != (uint64_t)total_s1_ops || rB1 != B1) return -2;
+            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
             return 0;
         };
 
@@ -780,18 +774,6 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         };*/
 
 
-
-        auto xDBL_only = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-            hadamard(X1, Z1, 25, 24);
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X2);
-            eng->square_mul((engine::Reg)24);
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
-            eng->mul((engine::Reg)X2,(engine::Reg)15);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
-            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z2);
-        };
 
         // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
         auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
@@ -1097,111 +1079,58 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
             eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
 
-            mpz_t zxcur; mpz_init(zxcur); mpz_set(zxcur, x0.get_mpz_t()); eng->set_mpz((engine::Reg)0, zxcur); mpz_clear(zxcur);
-            eng->set((engine::Reg)1, 1u);
-            eng->copy((engine::Reg)2, (engine::Reg)0);
-            eng->copy((engine::Reg)3, (engine::Reg)1);
-            eng->copy((engine::Reg)4, (engine::Reg)0);
-            eng->copy((engine::Reg)5, (engine::Reg)1);
+            eng->set((engine::Reg)0, 1u);
+            eng->set((engine::Reg)1, 0u);
+            eng->set((engine::Reg)3, 1u);
+            mpz_t zx0; mpz_init(zx0); mpz_set(zx0, x0.get_mpz_t()); eng->set_mpz((engine::Reg)2, zx0); mpz_clear(zx0);
+            mpz_t zxd; mpz_init(zxd); mpz_set(zxd, x0.get_mpz_t()); eng->set_mpz((engine::Reg)4, zxd); mpz_clear(zxd);
+            eng->set((engine::Reg)5, 1u);
             eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
             eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
 
             std::ostringstream head2;
-            head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start (factor-scheduled)";
+            head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
             std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
 
-            uint64_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
-            const uint64_t total_ops = (uint64_t)total_s1_ops;
-            uint64_t done_ops = start_i;
-            double s1_ips_ema = 0.0;
-            uint64_t s1_last_done = done_ops;
-            auto s1_last_t = t0;
+            size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
+            size_t last_ui_done = start_i;
+            double ema_ips_stage1 = 0.0;
 
-            auto tick_stage1 = [&](uint64_t completed)->bool{
+            for (size_t i = start_i; i < total_bits; ++i){
+                size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
+                if (b==0) { xDBLADD_strict(0,1, 2,3); }
+                else      { xDBLADD_strict(2,3, 0,1); }
+
                 auto now = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || completed == total_ops) {
-                    double done = double(completed), total = double(std::max<uint64_t>(1ULL, total_ops));
-                    double elapsed = duration<double>(now - t0).count() + saved_et;
-                    double ips_avg = done / std::max(1e-9, elapsed);
-                    double dt_ui = duration<double>(now - s1_last_t).count();
-                    uint64_t dd_ui = (completed >= s1_last_done) ? (completed - s1_last_done) : 0ULL;
-                    if (dt_ui > 0.0 && dd_ui > 0) {
-                        double ips_inst = double(dd_ui) / dt_ui;
-                        s1_ips_ema = (s1_ips_ema > 0.0) ? (0.30 * ips_inst + 0.70 * s1_ips_ema) : ips_inst;
-                        s1_last_t = now;
-                        s1_last_done = completed;
-                    }
-                    double ips = (s1_ips_ema > 0.0) ? s1_ips_ema : ips_avg;
-                    double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || i+1 == total_bits) {
+                    const size_t done_u = i + 1;
+                    const double done = double(done_u), total = double(total_bits);
+                    const double elapsed = duration<double>(now - t0).count() + saved_et;
+                    const double avg_ips = done / std::max(1e-9, elapsed);
+                    const double dt_ui = duration<double>(now - last_ui).count();
+                    const double dd_ui = double(done_u - last_ui_done);
+                    const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                    if (ema_ips_stage1 <= 0.0) ema_ips_stage1 = inst_ips;
+                    else ema_ips_stage1 = 0.75 * ema_ips_stage1 + 0.25 * inst_ips;
+                    const double eta_ips = (ema_ips_stage1 > 0.0) ? ema_ips_stage1 : avg_ips;
+                    const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                     std::ostringstream line;
                     line << "\r[ECM] Curve " << (c+1) << "/" << curves
-                         << " | Stage1 " << completed << "/" << total_ops
-                         << " (" << std::fixed << std::setprecision(1)
-                         << (done * 100.0 / total) << "%)"
-                         << " | " << std::fixed << std::setprecision(1) << ips << " it/s"
-                         << " | ETA " << fmt_hms(eta);
+                        << " | Stage1 " << (i+1) << "/" << total_bits
+                        << " (" << std::fixed << std::setprecision(1)
+                        << (done * 100.0 / total) << "%)"
+                        << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                        << " | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
+                    last_ui_done = done_u;
                     last_ui = now;
                 }
-                if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
-                    double elapsed = duration<double>(now - t0).count() + saved_et;
-                    save_ckpt(completed, elapsed);
-                    last_save = now;
-                }
-                if (interrupted) {
-                    double elapsed = duration<double>(now - t0).count() + saved_et;
-                    save_ckpt(completed, elapsed);
-                    std::cout << "\n[ECM] Interrupted at curve " << (c+1) << ", stage1 op " << completed << "/" << total_ops << "\n";
-                    if (guiServer_) {
-                        std::ostringstream ossi;
-                        ossi << "[ECM] Interrupted at curve " << (c+1) << ", stage1 op " << completed << "/" << total_ops;
-                        guiServer_->appendLog(ossi.str());
-                    }
-                    curves_tested_for_found = c+1;
-                    options.curves_tested_for_found = c+1;
-                    write_result();
-                    delete eng;
-                    return true;
-                }
-                return false;
-            };
 
-            uint64_t op_cursor = 0;
-            for (const auto& fp : s1_plan) {
-                const uint64_t factor_ops = (uint64_t)fp.ops;
-                if (done_ops >= op_cursor + factor_ops) { op_cursor += factor_ops; continue; }
-                uint64_t local = (done_ops > op_cursor) ? (done_ops - op_cursor) : 0ULL;
-
-                if (fp.pure_double) {
-                    for (uint32_t sOp = (uint32_t)local; sOp < fp.ops; ++sOp) {
-                        xDBL_only(0, 1, 0, 1);
-                        ++done_ops;
-                        if (tick_stage1(done_ops)) return 0;
-                    }
-                } else {
-                    if (local == 0) {
-                        eng->copy((engine::Reg)4, (engine::Reg)0);
-                        eng->copy((engine::Reg)5, (engine::Reg)1);
-                        eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
-                        eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
-                        xDBL_only(0, 1, 2, 3);
-                        ++done_ops;
-                        if (tick_stage1(done_ops)) return 0;
-                        local = 1;
-                    }
-                    for (uint32_t sOp = (uint32_t)local; sOp < fp.ops; ++sOp) {
-                        const uint32_t bit = fp.bits - sOp - 1;
-                        const int b = ((fp.m >> bit) & 1ULL) ? 1 : 0;
-                        if (b==0) { xDBLADD_strict2(0,1, 2,3); }
-                        else      { xDBLADD_strict2(2,3, 0,1); }
-                        ++done_ops;
-                        if (tick_stage1(done_ops)) return 0;
-                    }
-                }
-                op_cursor += factor_ops;
+                if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0; }
             }
-            std::cout<<std::endl;
             std::cout<<std::endl;
 
             mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
@@ -1209,7 +1138,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
             bool found = (gg > 1 && gg < N);
 
-            double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
+            double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
 if (!found && gg == 1) {
@@ -1245,25 +1174,7 @@ if (found) {
             const uint32_t baseX = 4, baseZ = 5;
             const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
             const uint32_t MAX_S2_CHUNK_BITS = 262144;
-            uint64_t total_s2_ops_exact = 0;
-            uint64_t done_s2_ops_exact = 0;
-            if (!primesS2_v.empty()) {
-                uint32_t sim_idx = 0;
-                while (sim_idx < (uint32_t)primesS2_v.size()) {
-                    mpz_class EchunkSim(1);
-                    uint32_t sim_start = sim_idx;
-                    uint32_t sim_end = sim_idx;
-                    while (sim_end < (uint32_t)primesS2_v.size()) {
-                        mpz_mul_ui(EchunkSim.get_mpz_t(), EchunkSim.get_mpz_t(), primesS2_v[sim_end]);
-                        ++sim_end;
-                        if (mpz_sizeinbase(EchunkSim.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && sim_end > sim_start) break;
-                    }
-                    const uint64_t chunk_ops_sim = (uint64_t)mpz_sizeinbase(EchunkSim.get_mpz_t(), 2);
-                    total_s2_ops_exact += chunk_ops_sim;
-                    if (sim_end <= s2_idx) done_s2_ops_exact += chunk_ops_sim;
-                    sim_idx = sim_end;
-                }
-            }
+            const uint64_t total_s2_iters = std::max<uint64_t>(1ULL, s2_total_iters_precomputed);
 
             if (!resume_stage2) {
                 mpz_t tx, tz;
@@ -1308,11 +1219,14 @@ if (found) {
             auto t2_0 = high_resolution_clock::now();
             auto last2_save = t2_0, last2_ui = t2_0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
-            double s2_ips_ema = 0.0;
-            uint64_t s2_last_done = done_s2_ops_exact;
-            auto s2_last_t = t2_0;
 
-            uint64_t done_bits_est = done_s2_ops_exact;
+            uint64_t done_bits_est = 0;
+            for (size_t ci = 0; ci < s2_chunk_ends.size(); ++ci) {
+                if (s2_chunk_ends[ci] <= s2_idx) done_bits_est = s2_chunk_prefix_iters[ci];
+                else break;
+            }
+            uint64_t last2_ui_done = done_bits_est;
+            double ema_ips_stage2 = 0.0;
 
             auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
                 mpz_t tx, tz;
@@ -1355,28 +1269,26 @@ if (found) {
 
                     auto now2 = high_resolution_clock::now();
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i + 1 == chunk_bits) {
-                        const double done = double(done_bits_est + i + 1);
-                        const double total = double(std::max<uint64_t>(1ULL, total_s2_ops_exact));
+                        const uint64_t done_u = done_bits_est + i + 1;
+                        const double done = double(done_u);
+                        const double total = double(total_s2_iters);
                         const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                        const double ips_avg = done / std::max(1e-9, elapsed);
-                        const double dt_ui = duration<double>(now2 - s2_last_t).count();
-                        const uint64_t cur_done_u = done_bits_est + i + 1;
-                        const uint64_t dd_ui = (cur_done_u >= s2_last_done) ? (cur_done_u - s2_last_done) : 0ULL;
-                        if (dt_ui > 0.0 && dd_ui > 0) {
-                            const double ips_inst = double(dd_ui) / dt_ui;
-                            s2_ips_ema = (s2_ips_ema > 0.0) ? (0.30 * ips_inst + 0.70 * s2_ips_ema) : ips_inst;
-                            s2_last_t = now2;
-                            s2_last_done = cur_done_u;
-                        }
-                        const double ips = (s2_ips_ema > 0.0) ? s2_ips_ema : ips_avg;
-                        const double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                        const double avg_ips = done / std::max(1e-9, elapsed);
+                        const double dt_ui = duration<double>(now2 - last2_ui).count();
+                        const double dd_ui = double(done_u - last2_ui_done);
+                        const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                        if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                        else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                        const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                        const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                         std::ostringstream line;
                         line << "\r[ECM] Curve " << (c+1) << "/" << curves
                              << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
                              << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
-                             << " | " << std::fixed << std::setprecision(1) << ips << " it/s"
+                             << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                              << " | ETA " << fmt_hms(eta);
                         std::cout << line.str() << std::flush;
+                        last2_ui_done = done_u;
                         last2_ui = now2;
                     }
                     if (interrupted) stop_after_chunk = true;
