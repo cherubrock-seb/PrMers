@@ -1114,19 +1114,33 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
             const uint64_t total_ops = (uint64_t)total_s1_ops;
             uint64_t done_ops = start_i;
+            double s1_ips_ema = 0.0;
+            uint64_t s1_last_done = done_ops;
+            auto s1_last_t = t0;
 
             auto tick_stage1 = [&](uint64_t completed)->bool{
                 auto now = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || completed == total_ops) {
                     double done = double(completed), total = double(std::max<uint64_t>(1ULL, total_ops));
                     double elapsed = duration<double>(now - t0).count() + saved_et;
-                    double ips = done / std::max(1e-9, elapsed);
+                    double ips_avg = done / std::max(1e-9, elapsed);
+                    double dt_ui = duration<double>(now - s1_last_t).count();
+                    uint64_t dd_ui = (completed >= s1_last_done) ? (completed - s1_last_done) : 0ULL;
+                    if (dt_ui > 0.0 && dd_ui > 0) {
+                        double ips_inst = double(dd_ui) / dt_ui;
+                        s1_ips_ema = (s1_ips_ema > 0.0) ? (0.30 * ips_inst + 0.70 * s1_ips_ema) : ips_inst;
+                        s1_last_t = now;
+                        s1_last_done = completed;
+                    }
+                    double ips = (s1_ips_ema > 0.0) ? s1_ips_ema : ips_avg;
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
                     line << "\r[ECM] Curve " << (c+1) << "/" << curves
                          << " | Stage1 " << completed << "/" << total_ops
                          << " (" << std::fixed << std::setprecision(1)
-                         << (done * 100.0 / total) << "%) | ETA " << fmt_hms(eta);
+                         << (done * 100.0 / total) << "%)"
+                         << " | " << std::fixed << std::setprecision(1) << ips << " it/s"
+                         << " | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
                     last_ui = now;
                 }
@@ -1195,7 +1209,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
             bool found = (gg > 1 && gg < N);
 
-            double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
+            double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
 if (!found && gg == 1) {
@@ -1231,10 +1245,25 @@ if (found) {
             const uint32_t baseX = 4, baseZ = 5;
             const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
             const uint32_t MAX_S2_CHUNK_BITS = 262144;
-            auto u64_bitlen = [&](uint64_t v)->uint32_t { uint32_t n = 0; do { ++n; v >>= 1; } while (v); return n; };
-
-            uint64_t approx_total_bits = 0;
-            for (uint64_t q : primesS2_v) approx_total_bits += (uint64_t)u64_bitlen(q);
+            uint64_t total_s2_ops_exact = 0;
+            uint64_t done_s2_ops_exact = 0;
+            if (!primesS2_v.empty()) {
+                uint32_t sim_idx = 0;
+                while (sim_idx < (uint32_t)primesS2_v.size()) {
+                    mpz_class EchunkSim(1);
+                    uint32_t sim_start = sim_idx;
+                    uint32_t sim_end = sim_idx;
+                    while (sim_end < (uint32_t)primesS2_v.size()) {
+                        mpz_mul_ui(EchunkSim.get_mpz_t(), EchunkSim.get_mpz_t(), primesS2_v[sim_end]);
+                        ++sim_end;
+                        if (mpz_sizeinbase(EchunkSim.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && sim_end > sim_start) break;
+                    }
+                    const uint64_t chunk_ops_sim = (uint64_t)mpz_sizeinbase(EchunkSim.get_mpz_t(), 2);
+                    total_s2_ops_exact += chunk_ops_sim;
+                    if (sim_end <= s2_idx) done_s2_ops_exact += chunk_ops_sim;
+                    sim_idx = sim_end;
+                }
+            }
 
             if (!resume_stage2) {
                 mpz_t tx, tz;
@@ -1279,12 +1308,11 @@ if (found) {
             auto t2_0 = high_resolution_clock::now();
             auto last2_save = t2_0, last2_ui = t2_0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
+            double s2_ips_ema = 0.0;
+            uint64_t s2_last_done = done_s2_ops_exact;
+            auto s2_last_t = t2_0;
 
-            uint64_t done_bits_est = 0;
-            for (uint32_t ii = 0; ii < std::min<uint32_t>(s2_idx, (uint32_t)primesS2_v.size()); ++ii) {
-                uint64_t v = primesS2_v[ii];
-                do { ++done_bits_est; v >>= 1; } while (v);
-            }
+            uint64_t done_bits_est = done_s2_ops_exact;
 
             auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
                 mpz_t tx, tz;
@@ -1328,14 +1356,25 @@ if (found) {
                     auto now2 = high_resolution_clock::now();
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i + 1 == chunk_bits) {
                         const double done = double(done_bits_est + i + 1);
-                        const double total = double(std::max<uint64_t>(1ULL, approx_total_bits));
+                        const double total = double(std::max<uint64_t>(1ULL, total_s2_ops_exact));
                         const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                        const double ips = done / std::max(1e-9, elapsed);
+                        const double ips_avg = done / std::max(1e-9, elapsed);
+                        const double dt_ui = duration<double>(now2 - s2_last_t).count();
+                        const uint64_t cur_done_u = done_bits_est + i + 1;
+                        const uint64_t dd_ui = (cur_done_u >= s2_last_done) ? (cur_done_u - s2_last_done) : 0ULL;
+                        if (dt_ui > 0.0 && dd_ui > 0) {
+                            const double ips_inst = double(dd_ui) / dt_ui;
+                            s2_ips_ema = (s2_ips_ema > 0.0) ? (0.30 * ips_inst + 0.70 * s2_ips_ema) : ips_inst;
+                            s2_last_t = now2;
+                            s2_last_done = cur_done_u;
+                        }
+                        const double ips = (s2_ips_ema > 0.0) ? s2_ips_ema : ips_avg;
                         const double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                         std::ostringstream line;
                         line << "\r[ECM] Curve " << (c+1) << "/" << curves
                              << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
                              << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                             << " | " << std::fixed << std::setprecision(1) << ips << " it/s"
                              << " | ETA " << fmt_hms(eta);
                         std::cout << line.str() << std::flush;
                         last2_ui = now2;
