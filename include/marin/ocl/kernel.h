@@ -1952,6 +1952,47 @@ static const char * const src_ocl_kernel = \
 "	x[id] = mod_mul4(u, w);\n" \
 "}\n" \
 "\n" \
+"__kernel\n" \
+"__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
+"void carry_weight_muladd_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
+"    __global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
+"    const uint32 a, const sz_t offset_y, const sz_t offset_x)\n" \
+"{\n" \
+"    __global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);\n" \
+"    __global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
+"    __global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"    __global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"    __local uint64 cl[CWM_WG_SZ];\n" \
+"\n" \
+"    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"\n" \
+"    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
+"\n" \
+"    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"    const uint_8_4 wd = width4[gid];\n" \
+"\n" \
+"    uint64 c = 0;\n" \
+"\n" \
+"    // y = result of backward mul (needs INV_N_2 and scalar a)\n" \
+"    uint64_4 u = mod_mul4(mod_mul4(y[gid], INV_N_2), wi);\n" \
+"    u = adc_mul4(u, a, wd, &c);\n" \
+"\n" \
+"    // x = addend (regular weighted register, only unweight)\n" \
+"    const uint64_4 v = mod_mul4(x[gid], wi);\n" \
+"    u = addc4(u, v, wd, &c);\n" \
+"\n" \
+"    cl[lid] = c;\n" \
+"    barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
+"    y[gid] = mod_mul4(u, w);\n" \
+"\n" \
+"    if (lid == CWM_WG_SZ - 1)\n" \
+"    {\n" \
+"        carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
+"    }\n" \
+"}\n" \
 "// --- misc ---\n" \
 "\n" \
 "__kernel\n" \

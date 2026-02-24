@@ -36,26 +36,60 @@ public:
 	virtual void square_mul(const Reg src, const uint32 a = 1) const = 0;
 	// dst = multiplicand(src). A multiplicand is the src of the mul operation.
 	virtual void set_multiplicand(const Reg dst, const Reg src) const = 0;
-	virtual void set_multiplicand2(const Reg dst, const Reg src) const = 0;
+	virtual void set_multiplicand2(const Reg dst, const Reg src) const
+	{
+		set_multiplicand(dst,src);
+	}
+	
 	// dst = dst * src * a. src must be a multiplicand, created with set_multiplicand.
 	virtual void mul(const Reg dst, const Reg src, const uint32 a = 1) const = 0;
 	// src = src - a
 	virtual void sub(const Reg src, const uint32 a) const = 0;
 	// dst = dst + src
 	virtual void add(const Reg dst, const Reg src) const = 0;
+	virtual void mul_add(const Reg dst, const Reg mul_src, const Reg add_src, const uint32 a = 1) const
+	{
+		mul(dst, mul_src, a);
+		add(dst, add_src);
+	}
 	// dst = dst - src
 	virtual void sub_reg(const Reg dst, const Reg src) const = 0;
-	virtual void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const = 0;
+	virtual void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const
+	{
+		copy(sum_out, a);
+		add(sum_out, b);
 
-	virtual void square_mul_copy(const Reg src, const Reg dst_copy, const uint32 a = 1) const = 0;
-	virtual void mul_new(const Reg dst, const Reg src, const uint32 a = 1) const = 0;
+		copy(diff_out, a);
+		sub_reg(diff_out, b);
+	}
 
-	virtual void mul_copy(const Reg dst, const Reg src, const Reg dst_copy, const uint32 a = 1) const = 0;
+	virtual void square_mul_copy(const Reg src, const Reg dst_copy, const uint32 a = 1) const
+	{
+		square_mul(src, a);
+		copy(dst_copy, src);
+	}
+	virtual void mul_new(const Reg dst, const Reg src, const uint32 a = 1) const
+	{
+		mul(dst, src, a);
+	}
+
+	virtual void mul_copy(const Reg dst, const Reg src, const Reg dst_copy, const uint32 a = 1) const
+	{
+		mul(dst, src, a);
+		copy(dst_copy, dst);
+	}
+
 	virtual void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
-							const Reg a, const Reg b) const = 0;
+							const Reg a, const Reg b) const
+	{
+		addsub(sum, diff, a, b);
+		copy(sum_copy, sum);
+		copy(diff_copy, diff);
+	}
 
 	// get size in bytes of a register
 	virtual size_t get_register_data_size() const = 0;
+	
 	// copy the content of src to data. The size of data must be equal to get_register_data_size().
 	virtual bool get_data(std::vector<char> & data, const Reg src) const = 0;
 	// copy the content of data to dst. The size of data must be equal to get_register_data_size().
