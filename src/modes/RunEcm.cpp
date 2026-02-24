@@ -365,10 +365,38 @@ int App::runECMMarin()
     mpz_class K(1);
     for (uint32_t q : primesB1_v) { uint64_t m = q; while (m <= B1 / q) m *= q; s1_factors.push_back(m); mpz_mul_ui(K.get_mpz_t(), K.get_mpz_t(), m); }
 
+    struct S1FactorPlan {
+        uint64_t m;
+        uint32_t bits;
+        uint32_t ops;
+        bool pure_double;
+    };
+    std::vector<S1FactorPlan> s1_plan;
+    s1_plan.reserve(s1_factors.size());
+    uint64_t total_s1_ops = 0;
+    for (uint64_t m0 : s1_factors) {
+        if (m0 <= 1) continue;
+        if ((m0 & (m0 - 1)) == 0) {
+            uint64_t t = m0;
+            uint32_t e = 0;
+            while (t > 1) { t >>= 1; ++e; }
+            if (e) {
+                s1_plan.push_back({m0, 0u, e, true});
+                total_s1_ops += (uint64_t)e;
+            }
+        } else {
+            uint64_t t = m0;
+            uint32_t bits = 0;
+            while (t) { ++bits; t >>= 1; }
+            s1_plan.push_back({m0, bits, bits, false});
+            total_s1_ops += (uint64_t)bits;
+        }
+    }
+
     {
         std::ostringstream hdr;
         hdr<<"[ECM] N=M_"<<p<<"  B1="<<B1<<"  B2="<<B2<<"  curves="<<curves<<"\n";
-        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<"\n";
+        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<", S1_ops="<<total_s1_ops<<"\n";
         if (!primesS2_v.empty()) hdr<<"[ECM] Stage2 primes ("<<B1<<","<<B2<<"] count="<<primesS2_v.size()<<"\n"; else hdr<<"[ECM] Stage2: disabled\n";
         std::cout<<hdr.str(); if (guiServer_) guiServer_->appendLog(hdr.str());
     }
@@ -398,15 +426,15 @@ int App::runECMMarin()
         //std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
         //const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
 
-        auto save_ckpt = [&](uint32_t i, double et){
+        auto save_ckpt = [&](uint64_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 1;
+                int version = 2;
                 if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
                 if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
-                uint32_t nbb = (uint32_t)mpz_sizeinbase(K.get_mpz_t(),2);
+                uint64_t nbb = (uint64_t)total_s1_ops;
                 if (!f.write(reinterpret_cast<const char*>(&nbb),     sizeof(nbb)))     return;
                 if (!f.write(reinterpret_cast<const char*>(&B1),      sizeof(B1)))      return;
                 if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
@@ -427,12 +455,12 @@ int App::runECMMarin()
         };
 //./prmers 193 -ecm -b1 400 -b2 4020 -seed 13515957324328859655
 
-        auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
+        auto read_ckpt = [&](const std::string& file, uint64_t& ri, uint64_t& rnb, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 1) return -2;
+            if (version != 2) return -2;
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
@@ -452,7 +480,7 @@ int App::runECMMarin()
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
+            if (rnb != (uint64_t)total_s1_ops || rB1 != B1) return -2;
             return 0;
         };
 
@@ -752,6 +780,18 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         };*/
 
 
+
+        auto xDBL_only = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
+            hadamard(X1, Z1, 25, 24);
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X2);
+            eng->square_mul((engine::Reg)24);
+            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+            eng->mul((engine::Reg)X2,(engine::Reg)15);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
+            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z2);
+        };
 
         // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
         auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
@@ -1057,46 +1097,97 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
             eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
 
-            eng->set((engine::Reg)0, 1u);
-            eng->set((engine::Reg)1, 0u);
-            eng->set((engine::Reg)3, 1u);
-            mpz_t zx0; mpz_init(zx0); mpz_set(zx0, x0.get_mpz_t()); eng->set_mpz((engine::Reg)2, zx0); mpz_clear(zx0);
-            mpz_t zxd; mpz_init(zxd); mpz_set(zxd, x0.get_mpz_t()); eng->set_mpz((engine::Reg)4, zxd); mpz_clear(zxd);
-            eng->set((engine::Reg)5, 1u);
+            mpz_t zxcur; mpz_init(zxcur); mpz_set(zxcur, x0.get_mpz_t()); eng->set_mpz((engine::Reg)0, zxcur); mpz_clear(zxcur);
+            eng->set((engine::Reg)1, 1u);
+            eng->copy((engine::Reg)2, (engine::Reg)0);
+            eng->copy((engine::Reg)3, (engine::Reg)1);
+            eng->copy((engine::Reg)4, (engine::Reg)0);
+            eng->copy((engine::Reg)5, (engine::Reg)1);
             eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
             eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
 
             std::ostringstream head2;
-            head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
+            head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start (factor-scheduled)";
             std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
 
-            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+            uint64_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
-            size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
+            const uint64_t total_ops = (uint64_t)total_s1_ops;
+            uint64_t done_ops = start_i;
 
-            for (size_t i = start_i; i < total_bits; ++i){
-                size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
-                if (b==0) { xDBLADD_strict(0,1, 2,3); }
-                else      { xDBLADD_strict(2,3, 0,1); }
-
+            auto tick_stage1 = [&](uint64_t completed)->bool{
                 auto now = high_resolution_clock::now();
-                if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || i+1 == total_bits) {
-                    double done = double(i + 1), total = double(total_bits);
+                if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || completed == total_ops) {
+                    double done = double(completed), total = double(std::max<uint64_t>(1ULL, total_ops));
                     double elapsed = duration<double>(now - t0).count() + saved_et;
                     double ips = done / std::max(1e-9, elapsed);
                     double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
                     std::ostringstream line;
                     line << "\r[ECM] Curve " << (c+1) << "/" << curves
-                        << " | Stage1 " << (i+1) << "/" << total_bits
-                        << " (" << std::fixed << std::setprecision(1)  // <== moins de digits
-                        << (done * 100.0 / total) << "%) | ETA " << fmt_hms(eta);
+                         << " | Stage1 " << completed << "/" << total_ops
+                         << " (" << std::fixed << std::setprecision(1)
+                         << (done * 100.0 / total) << "%) | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
                     last_ui = now;
                 }
+                if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
+                    double elapsed = duration<double>(now - t0).count() + saved_et;
+                    save_ckpt(completed, elapsed);
+                    last_save = now;
+                }
+                if (interrupted) {
+                    double elapsed = duration<double>(now - t0).count() + saved_et;
+                    save_ckpt(completed, elapsed);
+                    std::cout << "\n[ECM] Interrupted at curve " << (c+1) << ", stage1 op " << completed << "/" << total_ops << "\n";
+                    if (guiServer_) {
+                        std::ostringstream ossi;
+                        ossi << "[ECM] Interrupted at curve " << (c+1) << ", stage1 op " << completed << "/" << total_ops;
+                        guiServer_->appendLog(ossi.str());
+                    }
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = c+1;
+                    write_result();
+                    delete eng;
+                    return true;
+                }
+                return false;
+            };
 
-                if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0; }
+            uint64_t op_cursor = 0;
+            for (const auto& fp : s1_plan) {
+                const uint64_t factor_ops = (uint64_t)fp.ops;
+                if (done_ops >= op_cursor + factor_ops) { op_cursor += factor_ops; continue; }
+                uint64_t local = (done_ops > op_cursor) ? (done_ops - op_cursor) : 0ULL;
+
+                if (fp.pure_double) {
+                    for (uint32_t sOp = (uint32_t)local; sOp < fp.ops; ++sOp) {
+                        xDBL_only(0, 1, 0, 1);
+                        ++done_ops;
+                        if (tick_stage1(done_ops)) return 0;
+                    }
+                } else {
+                    if (local == 0) {
+                        eng->copy((engine::Reg)4, (engine::Reg)0);
+                        eng->copy((engine::Reg)5, (engine::Reg)1);
+                        eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
+                        eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
+                        xDBL_only(0, 1, 2, 3);
+                        ++done_ops;
+                        if (tick_stage1(done_ops)) return 0;
+                        local = 1;
+                    }
+                    for (uint32_t sOp = (uint32_t)local; sOp < fp.ops; ++sOp) {
+                        const uint32_t bit = fp.bits - sOp - 1;
+                        const int b = ((fp.m >> bit) & 1ULL) ? 1 : 0;
+                        if (b==0) { xDBLADD_strict2(0,1, 2,3); }
+                        else      { xDBLADD_strict2(2,3, 0,1); }
+                        ++done_ops;
+                        if (tick_stage1(done_ops)) return 0;
+                    }
+                }
+                op_cursor += factor_ops;
             }
+            std::cout<<std::endl;
             std::cout<<std::endl;
 
             mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
