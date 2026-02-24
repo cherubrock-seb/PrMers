@@ -775,8 +775,9 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
             eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);  // multiplicand=E
-            eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
-            eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
+            //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
+            //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
+            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
             eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
         };
 

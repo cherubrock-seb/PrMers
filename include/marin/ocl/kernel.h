@@ -144,6 +144,19 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
+"INLINE uint64_4 adc4_c(const uint64_4 lhs, const uint_8_4 width, uint64 * const carry)\n" \
+"{\n" \
+"    uint64_4 r;\n" \
+"    uint64 c = *carry;\n" \
+"    r.s0 = adc(lhs.s0, width.s0, &c);\n" \
+"    r.s1 = adc(lhs.s1, width.s1, &c);\n" \
+"    r.s2 = adc(lhs.s2, width.s2, &c);\n" \
+"    r.s3 = adc(lhs.s3, width.s3, &c);\n" \
+"    *carry = c;\n" \
+"    return r;\n" \
+"}\n" \
+"\n" \
+"\n" \
 "INLINE uint64 mask_w(const uint w) {\n" \
 "    return (w >= 64) ? (uint64)(~(uint64)0) : (((uint64)1 << w) - 1ul);\n" \
 "}\n" \
@@ -1964,7 +1977,8 @@ static const char * const src_ocl_kernel = \
 "    __global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
 "    __local uint64 cl[CWM_WG_SZ];\n" \
 "\n" \
-"    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"    const sz_t gid = (sz_t)get_global_id(0);\n" \
+"    const sz_t lid = (sz_t)get_local_id(0);\n" \
 "\n" \
 "    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
 "\n" \
@@ -1972,19 +1986,23 @@ static const char * const src_ocl_kernel = \
 "    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
 "    const uint_8_4 wd = width4[gid];\n" \
 "\n" \
-"    uint64 c = 0;\n" \
-"\n" \
-"    // y = result of backward mul (needs INV_N_2 and scalar a)\n" \
+"    // 1) mul part on current block\n" \
+"    uint64 c_mul = 0;\n" \
 "    uint64_4 u = mod_mul4(mod_mul4(y[gid], INV_N_2), wi);\n" \
-"    u = adc_mul4(u, a, wd, &c);\n" \
+"    u = adc_mul4(u, a, wd, &c_mul);\n" \
 "\n" \
-"    // x = addend (regular weighted register, only unweight)\n" \
+"    // 2) add part on current block (carry starts at 0 for THIS block)\n" \
 "    const uint64_4 v = mod_mul4(x[gid], wi);\n" \
-"    u = addc4(u, v, wd, &c);\n" \
+"    uint64 c_add = 0;\n" \
+"    u = addc4(u, v, wd, &c_add);\n" \
 "\n" \
+"    // Total carry to next block\n" \
+"    const uint64 c = c_mul + c_add;\n" \
 "    cl[lid] = c;\n" \
+"\n" \
 "    barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
+"    // Apply previous-block carry (same scheme as existing kernels)\n" \
 "    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
 "    y[gid] = mod_mul4(u, w);\n" \
 "\n" \
@@ -1992,6 +2010,28 @@ static const char * const src_ocl_kernel = \
 "    {\n" \
 "        carry[(gid != N_SZ / 4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
 "    }\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void carry_weight_muladd_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
+"    __global const uint64 * restrict const weight, __global const uint_8 * restrict const width, const sz_t offset)\n" \
+"{\n" \
+"    __global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
+"    __global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"    __global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"\n" \
+"    const sz_t gid = (sz_t)get_global_id(0), id = CWM_WG_SZ * gid;\n" \
+"\n" \
+"    uint64_2 w2[4]; loadg2(4, w2, &weight2[id], N_SZ / 4);\n" \
+"\n" \
+"    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"\n" \
+"    const uint_8_4 wd = width4[id];\n" \
+"\n" \
+"    uint64_4 u = mod_mul4(x[id], wi);\n" \
+"    u = adc4(u, wd, carry[gid]);\n" \
+"    x[id] = mod_mul4(u, w);\n" \
 "}\n" \
 "// --- misc ---\n" \
 "\n" \
