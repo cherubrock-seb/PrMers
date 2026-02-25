@@ -1272,7 +1272,37 @@ public:
 	{
 		_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
 	}
+	void mul_pair_prepared(const Reg rdst0, const Reg rsrc0,
+						const Reg rdst1, const Reg rsrc1,
+						const uint32 a0 = 1, const uint32 a1 = 1) const override
+	{
+		if ((a0 != 1) || (a1 != 1))
+		{
+			mul(rdst0, rsrc0, a0);
+			mul(rdst1, rsrc1, a1);
+			return;
+		}
 
+		const size_t dst0 = size_t(rdst0), src0 = size_t(rsrc0);
+		const size_t dst1 = size_t(rdst1), src1 = size_t(rsrc1);
+
+		mul_new_core(dst0, src0);
+		mul_new_core(dst1, src1);
+		_gpu->carry_weight_mul2_unit(dst0, dst1);
+	}
+
+	void xdbl_tail_uv(const Reg x_out, const Reg z_out,
+					const Reg u_work, const Reg v_reg,
+					const Reg a24_mul,
+					const Reg tmp_e_mul, const Reg tmp_v_mul) const override
+	{
+		sub_reg(u_work, v_reg);
+		set_multiplicand(tmp_e_mul, u_work);
+		set_multiplicand(tmp_v_mul, v_reg);
+		mul_pair_prepared(x_out, tmp_v_mul, u_work, a24_mul);
+		add(u_work, v_reg);
+		mul_copy(u_work, tmp_e_mul, z_out);
+	}
 	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
 
 	bool get_data(std::vector<char> & data, const Reg src) const override

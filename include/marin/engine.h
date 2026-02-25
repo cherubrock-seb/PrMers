@@ -86,7 +86,27 @@ public:
 		set_multiplicand(src1, src1);
 		mul(dst1, src1);
 	}
-	
+		
+	virtual void mul_pair_prepared(const Reg dst0, const Reg mul_src0,
+								const Reg dst1, const Reg mul_src1,
+								const uint32 a0 = 1, const uint32 a1 = 1) const
+	{
+		mul(dst0, mul_src0, a0);
+		mul(dst1, mul_src1, a1);
+	}
+
+	virtual void xdbl_tail_uv(const Reg x_out, const Reg z_out,
+							const Reg u_work, const Reg v_reg,
+							const Reg a24_mul,
+							const Reg tmp_e_mul, const Reg tmp_v_mul) const
+	{
+		sub_reg(u_work, v_reg);
+		set_multiplicand(tmp_v_mul, v_reg);
+		mul(x_out, tmp_v_mul);
+		set_multiplicand(tmp_e_mul, u_work);
+		mul_add(u_work, a24_mul, v_reg);
+		mul_copy(u_work, tmp_e_mul, z_out);
+	}
 	virtual void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 							const Reg a, const Reg b) const
 	{

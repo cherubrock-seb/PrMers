@@ -792,7 +792,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             eng->mul((engine::Reg)Z2,(engine::Reg)13);               // Z2=k13*...
 
             // xDBL part (U,V,E with fused square+copy; no extra copy for Z1)
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
+            /*eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
             eng->square_mul((engine::Reg)24);                        // 24=V=(X1−Z1)^2
             eng->sub_reg((engine::Reg)25,(engine::Reg)24);           // 25=E=U−V
             eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
@@ -801,7 +801,13 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
             //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
             eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E*/
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+            eng->square_mul((engine::Reg)24);
+            eng->xdbl_tail_uv((engine::Reg)X1, (engine::Reg)Z1,
+                              (engine::Reg)25, (engine::Reg)24,
+                              (engine::Reg)12,
+                              (engine::Reg)15, (engine::Reg)11);
         };
 
         auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
