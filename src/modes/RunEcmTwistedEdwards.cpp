@@ -748,6 +748,7 @@ int App::runECMMarinTwistedEdwards()
 
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
+        if (!forceSigma) { options.sigma.clear(); options.sigma_hex.clear(); }
         options.base_seed  = base_seed;
         
 
@@ -1103,6 +1104,8 @@ int App::runECMMarinTwistedEdwards()
                 sigma_mpz %= N;
                 if (sigma_mpz < 0) sigma_mpz += N;
                 if (sigma_mpz == 0) sigma_mpz = 1;
+                options.sigma = sigma_mpz.get_str();
+                options.sigma_hex = sigma_mpz.get_str(16);
 
                 auto inv_or_finish = [&](const mpz_class& den, mpz_class& inv)->int {
                     int r = invm(den, inv);
@@ -1226,6 +1229,7 @@ int App::runECMMarinTwistedEdwards()
                     continue;
                 }
 
+                options.sigma = sigma_mpz.get_str();
                 options.sigma_hex = sigma_mpz.get_str(16);
                 sigma_resume = sigma_mpz;
                 have_sigma_resume = true;
@@ -1268,7 +1272,7 @@ int App::runECMMarinTwistedEdwards()
                  << " | torsion=" << torsion_used
                  << " | K_bits=" << mpz_sizeinbase(K.get_mpz_t(),2)
                  << " | seed=" << curve_seed;
-            if (have_sigma_resume) head << " | sigma";
+            if (have_sigma_resume) head << " | sigma=" << sigma_resume.get_str();
             std::cout << head.str() << std::endl;
             if (guiServer_) guiServer_->appendLog(head.str());
         }
@@ -2206,6 +2210,7 @@ int App::runECMMarinTwistedEdwards()
     curves_tested_for_found = 0;
     options.curves_tested_for_found = 0;
     write_result();
+    publish_json();
     return 1;
 }
 
