@@ -250,7 +250,11 @@ int App::runECMMarin()
     };
 
     size_t transform_size_once = 0;
-
+    auto hash64_str = [&](const std::string& s)->uint64_t{
+        uint64_t h = 1469598103934665603ULL;
+        for (unsigned char ch : s) { h ^= (uint64_t)ch; h *= 1099511628211ULL; }
+        return h;
+    };
     auto publish_json = [&](){
         vector<string> saved = options.knownFactors;
         if (result_factor > 0) { options.knownFactors.clear(); options.knownFactors.push_back(result_factor.get_str()); }
@@ -405,10 +409,21 @@ int App::runECMMarin()
     for (uint64_t c = 0; c < curves; ++c)
     {
         auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-   
-        uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
+
+        uint64_t base_seed = 0;
+        if (forceCurveSeed) {
+            base_seed = options.curve_seed;
+        } else if (options.seed) {
+            base_seed = options.seed;
+        } else if (forceSigma) {
+            base_seed = mix64(hash64_str(options.sigma) ^ (((uint64_t)p) << 32) ^ B1, 0xA5C31E29ULL);
+        } else {
+            base_seed = (now_ns ^ ((uint64_t)p<<32) ^ B1);
+        }
+
         uint64_t curve_seed = mix64(base_seed, c);
         if (forceCurveSeed) { curve_seed = options.curve_seed; base_seed = curve_seed; }
+
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
@@ -1099,7 +1114,10 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
             std::cout<<head2.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head2.str());
 
-            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0; (void)read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+            uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0;
+            int rr_ck = read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
+            if (rr_ck < 0) rr_ck = read_ckpt(ckpt_file + ".old", start_i, nb_ck, saved_et);
+            if (rr_ck != 0) { start_i = 0; nb_ck = 0; saved_et = 0.0; }
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
             size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
             size_t last_ui_done = start_i;
