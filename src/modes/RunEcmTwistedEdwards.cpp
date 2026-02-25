@@ -28,6 +28,9 @@
 #endif
 #ifdef _WIN32
 # include <windows.h>
+# include <io.h>
+#else
+# include <unistd.h>
 #endif
 #include <csignal>
 #include <chrono>
@@ -101,6 +104,23 @@ using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
 namespace fs = std::filesystem;
+
+static bool ecm_progress_use_single_line() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    return ::isatty(fileno(stdout)) != 0;
+#endif
+}
+
+static void ecm_print_progress_line(const std::string& s) {
+    static const bool single_line = ecm_progress_use_single_line();
+    if (single_line) {
+        std::cout << '\r' << s << std::flush;
+    } else {
+        std::cout << s << std::endl;
+    }
+}
 
 
 static uint64_t ecm_isqrt_u64(uint64_t x) {
@@ -263,6 +283,7 @@ int App::runECMMarinTwistedEdwards()
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
     const bool forceCurve = (options.curve_seed != 0ULL);
+    const bool forceSigma = !options.sigma.empty();
     if (forceCurve) curves =1ULL;
     const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
@@ -313,8 +334,8 @@ int App::runECMMarinTwistedEdwards()
 
     bool wrote_result = false;
     string mode_name = "twisted_edwards";
-    string torsion_name = options.notorsion ? string("none") :
-                          (options.torsion16 ? string("16") : string("8"));
+    const bool te_use_torsion16 = (!options.notorsion && options.torsion16) && !forceSigma;
+    string torsion_name = te_use_torsion16 ? string("16") : string("none");
     string result_status = "not_found";
     mpz_class result_factor = 0;
     uint64_t curves_tested_for_found = 0;
@@ -637,7 +658,7 @@ int App::runECMMarinTwistedEdwards()
         uint8_t  saved_torsion16  = 0;
         if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return false;
         if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return false;
-        uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+        uint8_t current_torsion16 = te_use_torsion16 ? 1 : 0;
         if (saved_torsion16 != current_torsion16) return false;
 
         out_seed = saved_curve_seed;
@@ -750,7 +771,7 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
 
                 if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
-                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                uint8_t torsion16_flag = te_use_torsion16 ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
 
                 const size_t cksz = eng->get_checkpoint_size();
@@ -790,7 +811,7 @@ int App::runECMMarinTwistedEdwards()
             uint8_t  saved_torsion16  = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
             if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
-            uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+            uint8_t current_torsion16 = te_use_torsion16 ? 1 : 0;
             if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
 
             const size_t cksz = eng->get_checkpoint_size();
@@ -823,7 +844,7 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&B2),       sizeof(B2)))       return;
                 uint64_t seed64 = (uint64_t)curve_seed;
                 if (!f.write(reinterpret_cast<const char*>(&seed64),   sizeof(seed64)))   return;
-                uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
+                uint8_t torsion16_flag = te_use_torsion16 ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
                 if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return;
 
@@ -875,7 +896,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             if (version >= 3) {
-                uint8_t current_tor = (!options.notorsion && options.torsion16) ? 1 : 0;
+                uint8_t current_tor = te_use_torsion16 ? 1 : 0;
                 if (saved_seed != (uint64_t)curve_seed || saved_tor != current_tor) return -2;
             }
 
@@ -971,8 +992,10 @@ int App::runECMMarinTwistedEdwards()
         };*/
 
         mpz_class aE, dE, X0, Y0;
+        mpz_class sigma_resume;
+        bool have_sigma_resume = false;
         
-        string torsion_used = options.notorsion ? string("none") : string("16");
+        string torsion_used = te_use_torsion16 ? string("16") : string("none");
                              // (options.torsion16 ? string("16") : string("8"));
         bool built = false;
 
@@ -999,7 +1022,7 @@ int App::runECMMarinTwistedEdwards()
             return true;
         };
         // ---- torsion 16 (Gallot / Theorem 2.5) : a = 1 ----
-        if (!options.notorsion && options.torsion16) {
+        if (te_use_torsion16) {
             bool ok = false;
             for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
                 //uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
@@ -1060,6 +1083,163 @@ int App::runECMMarinTwistedEdwards()
 
         }
 
+        if (!built && !te_use_torsion16) {
+            bool sigma_built = false;
+            for (uint32_t tries = 0; tries < 256 && !sigma_built; ++tries) {
+                mpz_class sigma_mpz;
+                if (forceSigma) {
+                    if (tries > 0) break;
+                    if (mpz_set_str(sigma_mpz.get_mpz_t(), options.sigma.c_str(), 0) != 0) {
+                        std::cerr << "[ECM] Invalid -sigma value: " << options.sigma << std::endl;
+                        delete eng;
+                        return 0;
+                    }
+                } else {
+                    const uint64_t sigma_seed = (tries == 0) ? curve_seed : mix64(curve_seed, 0x5EED5EEDULL + uint64_t(tries));
+                    sigma_mpz = rnd_mpz_bits(N, sigma_seed, 64);
+                }
+
+                sigma_mpz %= N;
+                if (sigma_mpz < 0) sigma_mpz += N;
+                if (sigma_mpz == 0) sigma_mpz = 1;
+
+                auto inv_or_finish = [&](const mpz_class& den, mpz_class& inv)->int {
+                    int r = invm(den, inv);
+                    if (r == 1) {
+                        curves_tested_for_found = c+1;
+                        options.curves_tested_for_found = (uint32_t)(c+1);
+                        write_result();
+                        publish_json();
+                        delete eng;
+                        return 1;
+                    }
+                    return r;
+                };
+
+                mpz_class sigma2 = sqrm(sigma_mpz);
+                mpz_class su = subm(sigma2, mpz_class(5));
+                mpz_class sv = mulm(mpz_class(4), sigma_mpz);
+
+                mpz_class inv_sv;
+                {
+                    int r = inv_or_finish(sv, inv_sv);
+                    if (r == 1) return 0;
+                    if (r < 0) {
+                        if (forceSigma) {
+                            std::cerr << "[ECM] Invalid/singular -sigma on this modulus" << std::endl;
+                            delete eng;
+                            return 0;
+                        }
+                        continue;
+                    }
+                }
+
+                mpz_class denA = mulm(mpz_class(4), mulm(mulm(sqrm(su), su), sv));
+                mpz_class inv_denA;
+                {
+                    int r = inv_or_finish(denA, inv_denA);
+                    if (r == 1) return 0;
+                    if (r < 0) {
+                        if (forceSigma) {
+                            std::cerr << "[ECM] Invalid/singular -sigma on this modulus" << std::endl;
+                            delete eng;
+                            return 0;
+                        }
+                        continue;
+                    }
+                }
+
+                mpz_class tnum = mulm(sqrm(subm(sv, su)), subm(sv, su));
+                mpz_class Aplus2 = mulm(mulm(tnum, addm(mulm(mpz_class(3), su), sv)), inv_denA);
+                mpz_class Bmont = mulm(su, inv_sv);
+                mpz_class invB;
+                {
+                    int r = inv_or_finish(Bmont, invB);
+                    if (r == 1) return 0;
+                    if (r < 0) {
+                        if (forceSigma) {
+                            std::cerr << "[ECM] Invalid/singular -sigma on this modulus" << std::endl;
+                            delete eng;
+                            return 0;
+                        }
+                        continue;
+                    }
+                }
+
+                aE = mulm(Aplus2, invB);
+                dE = mulm(subm(Aplus2, mpz_class(4)), invB);
+
+                mpz_class sp = addm(sigma2, mpz_class(5));
+                mpz_class denX = mulm(mulm(subm(su, sv), addm(su, sv)), sp);
+                mpz_class inv_denX;
+                {
+                    int r = inv_or_finish(denX, inv_denX);
+                    if (r == 1) return 0;
+                    if (r < 0) {
+                        if (forceSigma) {
+                            std::cerr << "[ECM] Invalid/singular -sigma on this modulus" << std::endl;
+                            delete eng;
+                            return 0;
+                        }
+                        continue;
+                    }
+                }
+                X0 = mulm(mulm(sqrm(su), sv), inv_denX);
+
+                mpz_class su3 = mulm(sqrm(su), su);
+                mpz_class sv3 = mulm(sqrm(sv), sv);
+                mpz_class denY = addm(su3, sv3);
+                mpz_class inv_denY;
+                {
+                    int r = inv_or_finish(denY, inv_denY);
+                    if (r == 1) return 0;
+                    if (r < 0) {
+                        if (forceSigma) {
+                            std::cerr << "[ECM] Invalid/singular -sigma on this modulus" << std::endl;
+                            delete eng;
+                            return 0;
+                        }
+                        continue;
+                    }
+                }
+                Y0 = mulm(subm(su3, sv3), inv_denY);
+
+                if (X0 == 0 || Y0 == 0) {
+                    if (forceSigma) {
+                        std::cerr << "[ECM] Invalid/singular -sigma generated a degenerate point" << std::endl;
+                        delete eng;
+                        return 0;
+                    }
+                    continue;
+                }
+
+                auto X2 = sqrm(X0), Y2 = sqrm(Y0);
+                auto L  = addm(mulm(aE, X2), Y2);
+                auto R  = addm(mpz_class(1), mulm(dE, mulm(X2, Y2)));
+                if (subm(L, R) != 0) {
+                    if (forceSigma) {
+                        std::cerr << "[ECM] Internal curve conversion failure for -sigma" << std::endl;
+                        delete eng;
+                        return 0;
+                    }
+                    continue;
+                }
+
+                options.sigma_hex = sigma_mpz.get_str(16);
+                sigma_resume = sigma_mpz;
+                have_sigma_resume = true;
+                built = true;
+                sigma_built = true;
+                torsion_used = "none";
+            }
+        }
+
+        if (!built && !te_use_torsion16) {
+            std::cout << "[ECM] Could not build a SIGMA-based Twisted Edwards curve for this seed, retrying curve\n";
+            delete eng;
+            continue;
+        }
+
         if(!built){
             aE = subm(N, mpz_class(2));
             for (int tries=0; tries<256 && !built; ++tries){
@@ -1079,6 +1259,17 @@ int App::runECMMarinTwistedEdwards()
                 }
                 built = true;
             }
+        }
+        {
+            std::ostringstream head;
+            head << "[ECM] Curve " << (c+1) << "/" << curves
+                 << " | twisted_edwards"
+                 << " | torsion=" << torsion_used
+                 << " | K_bits=" << mpz_sizeinbase(K.get_mpz_t(),2)
+                 << " | seed=" << curve_seed;
+            if (have_sigma_resume) head << " | sigma";
+            std::cout << head.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(head.str());
         }
         
         auto check_invariant = [&](){
@@ -1572,6 +1763,8 @@ int App::runECMMarinTwistedEdwards()
         auto last_save = t0;
         auto last_ui   = t0;
         auto last_check = t0;
+        size_t last_ui_done = start_i;
+        double ema_ips_stage1 = 0.0;
 
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
         std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
@@ -1650,7 +1843,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             
-            if((!options.notorsion && options.torsion16)){
+            if(te_use_torsion16){
                 eDBL_XYTZ_notwist(3,4,1,5);
             }
             else{
@@ -1662,12 +1855,12 @@ int App::runECMMarinTwistedEdwards()
                     /*eng->set_mpz((engine::Reg)6, zXpos);
                     eng->set_mpz((engine::Reg)7, zYpos);
                     eng->set_mpz((engine::Reg)9, zTpos);*/
-                    if((!options.notorsion && options.torsion16)) eADD_RP_notwist(); else eADD_RP();
+                    if(te_use_torsion16) eADD_RP_notwist(); else eADD_RP();
                 } else {
                     //eng->set_mpz((engine::Reg)6, zXneg);
                     //eng->set_mpz((engine::Reg)7, zYneg);
                     //eng->set_mpz((engine::Reg)9, zTneg);
-                    if((!options.notorsion && options.torsion16)) eADD_RP_notwist_2(); else eADD_RP_2();
+                    if(te_use_torsion16) eADD_RP_notwist_2(); else eADD_RP_2();
                 }
             }
             if (options.erroriter > 0 && (i + 1) == options.erroriter && !errordone) {
@@ -1701,6 +1894,9 @@ int App::runECMMarinTwistedEdwards()
                             i = (last_good_iter > 0) ? (last_good_iter - 1) : 0;
                             last_check = now;
                             last_save  = now;
+                            last_ui = now;
+                            last_ui_done = (last_good_iter > 0) ? size_t(last_good_iter) : size_t(0);
+                            ema_ips_stage1 = 0.0;
                             continue;
                         } else {
                             std::cout << "[ECM] Failed to restore last good state, aborting curve." << std::endl;
@@ -1714,14 +1910,24 @@ int App::runECMMarinTwistedEdwards()
                     last_check = now;
             }
             if (duration_cast<milliseconds>(now - last_ui).count() >= progress_interval_ms || i+1 == total_steps) {
-                double done = double(i + 1), total = double(total_steps ? total_steps : 1);
-                double elapsed = duration<double>(now - t0).count() + saved_et;
-                double ips = done / std::max(1e-9, elapsed);
-                double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                const size_t done_u = i + 1;
+                const double done = double(done_u), total = double(total_steps ? total_steps : 1);
+                const double elapsed = duration<double>(now - t0).count() + saved_et;
+                const double avg_ips = done / std::max(1e-9, elapsed);
+                const double dt_ui = duration<double>(now - last_ui).count();
+                const double dd_ui = double(done_u - last_ui_done);
+                const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                if (ema_ips_stage1 <= 0.0) ema_ips_stage1 = inst_ips;
+                else ema_ips_stage1 = 0.75 * ema_ips_stage1 + 0.25 * inst_ips;
+                const double eta_ips = (ema_ips_stage1 > 0.0) ? ema_ips_stage1 : avg_ips;
+                const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                 std::ostringstream line;
-                line << "\r[ECM] Curve " << (c+1) << "/" << curves << " | Stage1 " << (i+1) << "/" << total_steps
-                     << " (" << std::fixed << std::setprecision(2) << (done * 100.0 / total) << "%) | ETA " << fmt_hms(eta);
-                std::cout << line.str() << std::flush;
+                line << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage1 " << (i+1) << "/" << total_steps
+                     << " (" << std::fixed << std::setprecision(2) << (done * 100.0 / total) << "%)"
+                     << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                     << " | ETA " << fmt_hms(eta);
+                ecm_print_progress_line(line.str());
+                last_ui_done = done_u;
                 last_ui = now;
             }
             if (duration_cast<seconds>(now - last_save).count() >= backup_period) {
@@ -1784,7 +1990,7 @@ int App::runECMMarinTwistedEdwards()
                     if (r_a == 1) found = true;
                     if (!found && r_a == 0) {
                         mpz_class Aresume = mulm(numA, invDenA);
-                        append_ecm_stage1_resume_line(c, Aresume, uAff, nullptr);
+                        append_ecm_stage1_resume_line(c, Aresume, uAff, have_sigma_resume ? &sigma_resume : nullptr);
                     }
                 }
             }
@@ -1875,6 +2081,8 @@ int App::runECMMarinTwistedEdwards()
                 uint64_t v = primesS2_v[ii];
                 do { ++done_bits_est; v >>= 1; } while (v);
             }
+            uint64_t last2_done_bits = done_bits_est;
+            double ema_ips_stage2 = 0.0;
 
             auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
                 mpz_t tx, tz;
@@ -1938,17 +2146,26 @@ int App::runECMMarinTwistedEdwards()
 
                     auto now2 = high_resolution_clock::now();
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= progress_interval_ms || i + 1 == chunk_bits) {
-                        const double done = double(done_bits_est + i + 1);
+                        const uint64_t done_u = done_bits_est + i + 1;
+                        const double done = double(done_u);
                         const double total = double(std::max<uint64_t>(1ULL, approx_total_bits));
                         const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
-                        const double ips = done / std::max(1e-9, elapsed);
-                        const double eta = (total > done && ips > 0.0) ? (total - done) / ips : 0.0;
+                        const double avg_ips = done / std::max(1e-9, elapsed);
+                        const double dt_ui = duration<double>(now2 - last2_ui).count();
+                        const double dd_ui = double(done_u - last2_done_bits);
+                        const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                        if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                        else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                        const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                        const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                         std::ostringstream line;
-                        line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                        line << "[ECM] Curve " << (c+1) << "/" << curves
                              << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
                              << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                             << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                              << " | ETA " << fmt_hms(eta);
-                        std::cout << line.str() << std::flush;
+                        ecm_print_progress_line(line.str());
+                        last2_done_bits = done_u;
                         last2_ui = now2;
                     }
                     if (interrupted) stop_after_chunk = true;
