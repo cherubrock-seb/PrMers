@@ -326,6 +326,7 @@ int App::runECMMarinTwistedEdwards()
     };
 
     mpz_class N = (mpz_class(1) << p) - 1;
+    const mpz_class N_full = N;
 
     auto run_start = high_resolution_clock::now();
     uint32_t bits_B1 = u64_bits(B1);
@@ -549,7 +550,7 @@ int App::runECMMarinTwistedEdwards()
             chk2 *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
             const uint32_t chk_u2 = (uint32_t)mpz_fdiv_ui(chk2.get_mpz_t(), CHKSUMMOD);
 
-            const std::string nField = N.get_str();
+            const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
 
             std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
             if (!outp) {
