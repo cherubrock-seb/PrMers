@@ -1659,6 +1659,56 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "__kernel\n" \
+"__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
+"void carry_weight_mul2_unit_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
+"	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
+"	const sz_t off0, const sz_t off1)\n" \
+"{\n" \
+"	__global uint64_4 * restrict const x0 = (__global uint64_4 *)(&reg[off0]);\n" \
+"	__global uint64_4 * restrict const x1 = (__global uint64_4 *)(&reg[off1]);\n" \
+"	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"\n" \
+"	const sz_t gid = (sz_t)get_global_id(0);\n" \
+"	const sz_t lid = (sz_t)get_local_id(0);\n" \
+"	const sz_t grp = (sz_t)get_group_id(0);\n" \
+"	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
+"\n" \
+"	__local uint2 lcc[CWM_WG_SZ];\n" \
+"\n" \
+"	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
+"	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"	const uint_8_4 wd = width4[gid];\n" \
+"\n" \
+"	uint64 c0 = 0, c1 = 0;\n" \
+"\n" \
+"	uint64_4 u0 = mod_mul4(mod_mul4(x0[gid], INV_N_2), wi);\n" \
+"	uint64_4 u1 = mod_mul4(mod_mul4(x1[gid], INV_N_2), wi);\n" \
+"\n" \
+"	u0 = adc_mul4(u0, 1u, wd, &c0);\n" \
+"	u1 = adc_mul4(u1, 1u, wd, &c1);\n" \
+"\n" \
+"	lcc[lid] = (uint2)((uint)c0, (uint)c1);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"	const uint2 prev = (lid == 0) ? (uint2)(0u, 0u) : lcc[lid - 1];\n" \
+"\n" \
+"	u0 = adc4(u0, wd, (uint64)prev.x);\n" \
+"	u1 = adc4(u1, wd, (uint64)prev.y);\n" \
+"\n" \
+"	x0[gid] = mod_mul4(u0, w);\n" \
+"	x1[gid] = mod_mul4(u1, w);\n" \
+"\n" \
+"	if (lid == (CWM_WG_SZ - 1))\n" \
+"	{\n" \
+"		uint j = (uint)(grp + 1u);\n" \
+"		if (j == (uint)ngr) j = 0u;\n" \
+"		carry[j] = (uint64)((uint64)lcc[lid].x | ((uint64)lcc[lid].y << 32));\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
 "void carry_weight_p2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
 "	const sz_t off_src, const sz_t off_dst)\n" \

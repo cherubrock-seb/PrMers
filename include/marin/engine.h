@@ -79,6 +79,14 @@ public:
 		copy(dst_copy, dst);
 	}
 
+	virtual void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const
+	{
+		set_multiplicand(src0, src0);
+		mul(dst0, src0);
+		set_multiplicand(src1, src1);
+		mul(dst1, src1);
+	}
+	
 	virtual void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 							const Reg a, const Reg b) const
 	{

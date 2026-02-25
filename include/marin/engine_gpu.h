@@ -60,7 +60,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr;;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr;
 	cl_kernel _carry_weight_muladd_p1 = nullptr, _carry_weight_muladd_p2 = nullptr;
 
@@ -324,6 +324,7 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p1_copy);
 		CREATE_KERNEL_CARRY(carry_weight_p2x2_copy);
+		CREATE_KERNEL_CARRY(carry_weight_mul2_unit_p1);
 
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
@@ -541,6 +542,20 @@ public:
 		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
 		_set_kernel_arg(_carry_weight_p2x2, 4, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_p2x2, 5, sizeof(uint32), &offD);
+		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
+	}
+
+	void carry_weight_mul2_unit(const size_t dst0, const size_t dst1)
+	{
+		uint32 off0 = (uint32)(dst0 * _n);
+		uint32 off1 = (uint32)(dst1 * _n);
+
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, 4, sizeof(uint32), &off0);
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, 5, sizeof(uint32), &off1);
+		_execute_kernel(_carry_weight_mul2_unit_p1, _n / 4, 1u << _lcwm_wg_size);
+
+		_set_kernel_arg(_carry_weight_p2x2, 4, sizeof(uint32), &off0);
+		_set_kernel_arg(_carry_weight_p2x2, 5, sizeof(uint32), &off1);
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -922,6 +937,8 @@ public:
 		{
 			//case 1u <<  2:	_gpu->mul4x1(dst, src); break;
 			//case 1u <<  3:	_gpu->mul8(dst, src); break;
+			case 1u <<  2: break;
+			case 1u <<  3: break;
 			case 1u <<  4:	_gpu->forward4_0(dst); break;
 			case 1u <<  5:	_gpu->forward4_0(dst); break;
 			case 1u <<  6:	_gpu->forward16_0(dst); break;
@@ -1034,7 +1051,7 @@ public:
 		_gpu->carry_weight_mul(dst, a);
 	}
 	
-	void mul_new(const Reg rdst, const Reg rsrc, const uint32 a = 1) const override
+	void mul_new_core(const Reg rdst, const Reg rsrc) const
 	{
 		const size_t n = _n, dst = size_t(rdst), src = size_t(rsrc);
 
@@ -1082,19 +1099,36 @@ public:
 			case 5u << 16: _gpu->mul1024(dst, src); _gpu->backward320_0(dst); break;
 			case 5u << 17: _gpu->mul128(dst, src); _gpu->backward64(dst, 1280, 6); _gpu->backward80_0(dst); break;
 			case 5u << 18: _gpu->mul256(dst, src); _gpu->backward64(dst, 1280, 7); _gpu->backward80_0(dst); break;
-			case 5u << 19:  _gpu->mul128(dst, src); _gpu->backward256(dst, 5120, 6); _gpu->backward80_0(dst); break;
-			case 5u << 20:  _gpu->mul256(dst, src); _gpu->backward256(dst, 5120, 7); _gpu->backward80_0(dst); break;
-			case 5u << 21:  _gpu->mul512(dst, src); _gpu->backward256(dst, 5120, 8); _gpu->backward80_0(dst); break;
-			case 5u << 22:  _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
+			case 5u << 19: _gpu->mul128(dst, src); _gpu->backward256(dst, 5120, 6); _gpu->backward80_0(dst); break;
+			case 5u << 20: _gpu->mul256(dst, src); _gpu->backward256(dst, 5120, 7); _gpu->backward80_0(dst); break;
+			case 5u << 21: _gpu->mul512(dst, src); _gpu->backward256(dst, 5120, 8); _gpu->backward80_0(dst); break;
+			case 5u << 22: _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
 			case 5u << 23: _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
 			case 5u << 24: _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
-
-		_gpu->carry_weight_mul(dst, a);
 	}
 
+	void mul_new(const Reg rdst, const Reg rsrc, const uint32 a = 1) const override
+	{
+		mul_new_core(rdst, rsrc);
+		_gpu->carry_weight_mul(size_t(rdst), a);
+	}
+
+	void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
+	{
+		set_multiplicand2(dst0, dst0);
+		set_multiplicand2(dst1, dst1);
+
+		set_multiplicand(src0, src0);
+		set_multiplicand(src1, src1);
+
+		mul_new_core(dst0, src0);
+		mul_new_core(dst1, src1);
+
+		_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
+	}
 	void mul_add(const Reg rdst, const Reg rsrc, const Reg radd, const uint32 a = 1) const override
 	{
 		const size_t n = _n, dst = size_t(rdst), src = size_t(rsrc);

@@ -780,10 +780,11 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             // xADD part
             hadamard_copy(X1, Z1, 25, 24, 10, 9);                    // 25=S1, 24=D1, 10=S1_copy, 9=D1_copy
             hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
+            //eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
+            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
+            //eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
+            eng->mul_pair_unit((engine::Reg)9, (engine::Reg)8, (engine::Reg)10, (engine::Reg)7);
             hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1−t2
             eng->square_mul((engine::Reg)X2);                        // X2=(t1+t2)^2
             //eng->mul((engine::Reg)X2,(engine::Reg)14);               // X2=k14*...

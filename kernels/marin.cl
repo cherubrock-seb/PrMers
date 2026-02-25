@@ -1649,6 +1649,56 @@ void carry_weight_mul_p1_copy(__global uint64 * restrict const reg, __global uin
 }
 
 __kernel
+__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))
+void carry_weight_mul2_unit_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,
+	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,
+	const sz_t off0, const sz_t off1)
+{
+	__global uint64_4 * restrict const x0 = (__global uint64_4 *)(&reg[off0]);
+	__global uint64_4 * restrict const x1 = (__global uint64_4 *)(&reg[off1]);
+	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);
+	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);
+
+	const sz_t gid = (sz_t)get_global_id(0);
+	const sz_t lid = (sz_t)get_local_id(0);
+	const sz_t grp = (sz_t)get_group_id(0);
+	const sz_t ngr = (sz_t)get_num_groups(0);
+
+	__local uint2 lcc[CWM_WG_SZ];
+
+	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
+	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
+	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
+	const uint_8_4 wd = width4[gid];
+
+	uint64 c0 = 0, c1 = 0;
+
+	uint64_4 u0 = mod_mul4(mod_mul4(x0[gid], INV_N_2), wi);
+	uint64_4 u1 = mod_mul4(mod_mul4(x1[gid], INV_N_2), wi);
+
+	u0 = adc_mul4(u0, 1u, wd, &c0);
+	u1 = adc_mul4(u1, 1u, wd, &c1);
+
+	lcc[lid] = (uint2)((uint)c0, (uint)c1);
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	const uint2 prev = (lid == 0) ? (uint2)(0u, 0u) : lcc[lid - 1];
+
+	u0 = adc4(u0, wd, (uint64)prev.x);
+	u1 = adc4(u1, wd, (uint64)prev.y);
+
+	x0[gid] = mod_mul4(u0, w);
+	x1[gid] = mod_mul4(u1, w);
+
+	if (lid == (CWM_WG_SZ - 1))
+	{
+		uint j = (uint)(grp + 1u);
+		if (j == (uint)ngr) j = 0u;
+		carry[j] = (uint64)((uint64)lcc[lid].x | ((uint64)lcc[lid].y << 32));
+	}
+}
+
+__kernel
 void carry_weight_p2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,
 	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,
 	const sz_t off_src, const sz_t off_dst)
