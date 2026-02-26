@@ -913,7 +913,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("montgomery","none", N, p, B1, B2, base_seed, curve_seed, &sigma_mpz, nullptr, nullptr, nullptr, nullptr, A24, x0);
+                //write_gp("montgomery","none", N, p, B1, B2, base_seed, curve_seed, &sigma_mpz, nullptr, nullptr, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 1)
             {
@@ -985,7 +985,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=16 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("montgomery","16", N, p, B1, B2, base_seed, curve_seed, nullptr, &rpar, nullptr, nullptr, nullptr, A24, x0);
+                //write_gp("montgomery","16", N, p, B1, B2, base_seed, curve_seed, nullptr, &rpar, nullptr, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 2)
             {
@@ -1009,7 +1009,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, nullptr, nullptr, A24, x0);
+                //write_gp("montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 3)
             {
@@ -1070,7 +1070,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("edwards--conv-->montgomery","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
+                //write_gp("edwards--conv-->montgomery","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
             }
             else
             {
@@ -1095,7 +1095,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                write_gp("edwards--conv-->montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
+                //write_gp("edwards--conv-->montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
             }
 
             mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
@@ -1166,26 +1166,33 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
-if (!found && gg == 1) {
-    mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
-    mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
-    mpz_class invZ;
-    int rz = invm(Zv, invZ);
-    if (rz == 1) {
-        found = true;
-    } else if (rz == 0) {
-        mpz_class xAff = mulm(Xv, invZ);
-        append_ecm_stage1_resume_line(c, A24, xAff, have_sigma_resume ? &sigma_resume : nullptr);
-    }
-}
+            mpz_class xAff = x0;
+            if (gg == 1) {
+                mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
+                mpz_class invZ;
+                if (invm(Zfin, invZ) == 0) xAff = mulm(Xv, invZ);
+            }
+            append_ecm_stage1_resume_line(c, A24, xAff, have_sigma_resume ? &sigma_resume : nullptr);
 
-if (found) {
+            if (found) {
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
-                std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+                //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
                 std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) { std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0); result_factor=gg; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+
+                std::error_code ec0;
+                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+
+                if (!known) {
+                    result_factor=gg; result_status="found";
+                    curves_tested_for_found=c+1; options.curves_tested_for_found = c+1;
+                    write_result(); publish_json();
+                }
+
+                delete eng;
+                continue;
             }
         }
         else
@@ -1193,7 +1200,7 @@ if (found) {
             std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx;
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
-        std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+        //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
         std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
         if (B2 > B1 && !primesS2_v.empty()) {
             const uint32_t baseX = 4, baseZ = 5;
