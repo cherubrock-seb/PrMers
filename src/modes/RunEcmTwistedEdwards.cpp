@@ -1974,30 +1974,46 @@ int App::runECMMarinTwistedEdwards()
             }
             std::cout<<"\n[ECM] Error check ...."<<std::endl;
 
-            if (!found && g == 1) {
+            mpz_class uAff = 0;
+            mpz_class Aresume = 0;
+            bool have_u = false;
+            bool have_A = false;
+
+            if (g == 1) {
                 mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
                 mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
 
                 mpz_class den_u = subm(Zv, Yv), inv_den_u;
                 int r_u = invm(den_u, inv_den_u);
                 if (r_u == 1) found = true;
-                if (!found && r_u == 0) {
-                    mpz_class uAff = mulm(addm(Zv, Yv), inv_den_u);
+                if (r_u == 0) {
+                    uAff = mulm(addm(Zv, Yv), inv_den_u);
+                    have_u = true;
 
                     mpz_class numA = mulm(mpz_class(2), addm(aE, dE));
                     mpz_class denA = subm(aE, dE), invDenA;
                     int r_a = invm(denA, invDenA);
                     if (r_a == 1) found = true;
-                    if (!found && r_a == 0) {
-                        mpz_class Aresume = mulm(numA, invDenA);
-                        append_ecm_stage1_resume_line(c, Aresume, uAff, have_sigma_resume ? &sigma_resume : nullptr);
+                    if (r_a == 0) {
+                        Aresume = mulm(numA, invDenA);
+                        have_A = true;
                     }
                 }
+            }
+
+            if ((have_u && have_A) || found) {
+                append_ecm_stage1_resume_line(
+                    c,
+                    have_A ? Aresume : mpz_class(0),
+                    have_u ? uAff   : mpz_class(0),
+                    have_sigma_resume ? &sigma_resume : nullptr
+                );
             }
 
             if (found) {
                 bool known = is_known(result_factor > 1 ? result_factor : g);
                 const mpz_class& gf = (result_factor > 1 ? result_factor : g);
+
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                          <<(known?" | known factor=":" | factor=")<<gf.get_str()<<std::endl;
                 std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
@@ -2006,17 +2022,22 @@ int App::runECMMarinTwistedEdwards()
                     oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gf.get_str();
                     guiServer_->appendLog(oss.str());
                 }
+
+                std::error_code ec0;
+                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
+
                 if (!known) {
-                    std::error_code ec0; fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                     if (!(result_factor > 1)) result_factor = gf;
                     result_status = "found";
                     curves_tested_for_found = c+1;
                     options.curves_tested_for_found = (uint32_t)(c+1);
                     write_result();
                     publish_json();
-                    delete eng;
-                    return 0;
                 }
+
+                delete eng;
+                continue;
             }
         }
 
