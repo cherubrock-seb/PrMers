@@ -784,31 +784,28 @@ int App::runECMMarin()
 
         // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
         auto xDBLADD_strict_s2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            // xADD part
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);                    // 25=S1, 24=D1, 10=S1_copy, 9=D1_copy
-            hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
-            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1−t2
-            eng->square_mul((engine::Reg)X2);                        // X2=(t1+t2)^2
-            //eng->mul((engine::Reg)X2,(engine::Reg)14);               // X2=k14*...
-            eng->square_mul((engine::Reg)Z2);                        // Z2=(t1−t2)^2
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);               // Z2=k13*...
+            hadamard_copy(X1, Z1, 25, 24, 10, 9);
+            hadamard(X2, Z2, 8, 7);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)9,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)10,(engine::Reg)11);
+            hadamard(9, 10, X2, Z2);
+            eng->square_mul((engine::Reg)X2);
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
 
-            // xDBL part (U,V,E with fused square+copy; no extra copy for Z1)
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
-            eng->square_mul((engine::Reg)24);                        // 24=V=(X1−Z1)^2
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);           // 25=E=U−V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
-            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);  // multiplicand=E
-            //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
-            //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+            eng->square_mul((engine::Reg)24);
+            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+            eng->mul((engine::Reg)X1,(engine::Reg)15);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
             eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
         };
+        
         auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
             hadamard_copy(X1, Z1, 25, 24, 10, 9);
             hadamard(X2, Z2, 8, 7);
