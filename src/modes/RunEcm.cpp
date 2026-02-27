@@ -164,6 +164,21 @@ static void ecm_segmented_primes_odd(uint64_t low, uint64_t high,
     }
 }
 
+
+static inline mpz_class ecm_mpz_from_u64(uint64_t v) {
+    mpz_class z;
+    mpz_import(z.get_mpz_t(), 1, 1, sizeof(v), 0, 0, &v);
+    return z;
+}
+static inline void ecm_mpz_mul_u64(mpz_class& a, uint64_t x) {
+    if (x <= (uint64_t)(~0UL)) {
+        mpz_mul_ui(a.get_mpz_t(), a.get_mpz_t(), (unsigned long)x);
+    } else {
+        mpz_class t = ecm_mpz_from_u64(x);
+        mpz_mul(a.get_mpz_t(), a.get_mpz_t(), t.get_mpz_t());
+    }
+}
+
 int App::runECMMarin()
 {
     using namespace std;
@@ -406,9 +421,110 @@ int App::runECMMarin()
         }
     }
 
-    vector<uint64_t> s1_factors;
     mpz_class K(1);
-    for (uint32_t q : primesB1_v) { uint64_t m = q; while (m <= B1 / q) m *= q; s1_factors.push_back(m); mpz_mul_ui(K.get_mpz_t(), K.get_mpz_t(), m); }
+    {
+        std::ostringstream msg;
+        msg << "[ECM] Building Stage1 exponent K from B1=" << B1 << " ...";
+        std::cout << msg.str() << std::endl;
+        if (guiServer_) guiServer_->appendLog(msg.str());
+
+        using clock = std::chrono::steady_clock;
+        auto t0k = clock::now();
+        auto tlast = t0k;
+        size_t last_done = 0;
+        double ema_pps = 0.0;
+
+        const size_t total = primesB1_v.size();
+        const uint32_t BLOCK_BITS = 32768u;
+        const double L_est_bits = 1.4426950408889634 * (double)B1;
+        std::vector<mpz_class> chunks;
+        chunks.reserve((size_t)std::ceil(L_est_bits / (double)BLOCK_BITS) + 8);
+
+        mpz_class chunk(1);
+        double approx_bits = 0.0;
+
+        for (size_t i = 0; i < total; ++i) {
+            const uint64_t q = primesB1_v[i];
+            uint64_t m = q;
+            while (m <= B1 / q) m *= q;
+
+            ecm_mpz_mul_u64(chunk, m);
+            approx_bits += std::log2((long double)m);
+
+            if (approx_bits >= (double)BLOCK_BITS) {
+                chunks.push_back(chunk);
+                chunk = 1;
+                approx_bits = 0.0;
+            }
+
+            auto now = clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - tlast).count() >= 400 || i + 1 == total) {
+                const size_t done = i + 1;
+                const double elapsed = std::chrono::duration<double>(now - t0k).count();
+                const double dt = std::chrono::duration<double>(now - tlast).count();
+                const double dd = (double)(done - last_done);
+                const double inst = (dt > 1e-9 && dd >= 0.0) ? (dd / dt) : (done / std::max(1e-9, elapsed));
+                if (ema_pps <= 0.0) ema_pps = inst;
+                else ema_pps = 0.75 * ema_pps + 0.25 * inst;
+                const double eta = (ema_pps > 0.0 && done < total) ? ((double)(total - done) / ema_pps) : 0.0;
+
+                std::ostringstream line;
+                line << "[ECM] Building K " << done << "/" << total
+                    << " (" << std::fixed << std::setprecision(1) << (100.0 * (double)done / (double)total) << "%)"
+                    << " | primes/s " << std::fixed << std::setprecision(1) << ema_pps
+                    << " | ETA " << fmt_hms(eta);
+                std::cout << line.str() << std::flush;
+
+                last_done = done;
+                tlast = now;
+            }
+        }
+
+        if (chunk != 1) chunks.push_back(chunk);
+        std::cout << std::endl;
+
+        if (chunks.empty()) {
+            K = 1;
+        } else {
+            std::ostringstream m2;
+            m2 << "[ECM] Reducing " << chunks.size() << " chunks...";
+            std::cout << m2.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(m2.str());
+
+            auto tr0 = clock::now();
+            auto trl = tr0;
+            const size_t initial = chunks.size();
+
+            while (chunks.size() > 1) {
+                std::vector<mpz_class> next;
+                next.reserve((chunks.size() + 1) / 2);
+                for (size_t j = 0; j + 1 < chunks.size(); j += 2) {
+                    next.push_back(chunks[j] * chunks[j + 1]);
+                }
+                if (chunks.size() & 1) next.push_back(chunks.back());
+                chunks.swap(next);
+
+                auto now = clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - trl).count() >= 400 || chunks.size() == 1) {
+                    const double elapsed = std::chrono::duration<double>(now - tr0).count();
+                    const double pct = 100.0 * (1.0 - (double)chunks.size() / (double)initial);
+                    std::ostringstream line;
+                    line << "[ECM] Reducing K " << std::fixed << std::setprecision(1) << pct
+                        << "% | remaining " << chunks.size()
+                        << " | elapsed " << std::fixed << std::setprecision(1) << elapsed << "s      ";
+                    std::cout << line.str() << std::flush;
+                    trl = now;
+                }
+            }
+            std::cout << std::endl;
+            K = chunks[0];
+        }
+
+        std::ostringstream done;
+        done << "[ECM] K built (" << mpz_sizeinbase(K.get_mpz_t(), 2) << " bits)";
+        std::cout << done.str() << std::endl;
+        if (guiServer_) guiServer_->appendLog(done.str());
+    }
 
     {
         std::ostringstream hdr;
