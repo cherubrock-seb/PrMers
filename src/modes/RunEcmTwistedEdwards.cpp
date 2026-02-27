@@ -131,6 +131,31 @@ static uint64_t ecm_isqrt_u64(uint64_t x) {
     return y;
 }
 
+static inline uint32_t compute_s2_chunk_bits(size_t transform_words) {
+    const uint32_t base = 262144;
+    uint32_t scale = (uint32_t)((transform_words + 63) / 64);
+    if (scale == 0) scale = 1;
+    uint32_t bits = base / scale;
+    if (bits < 8192u) bits = 8192u;
+    if (bits > 262144u) bits = 262144u;
+    bits = (bits + 1023u) & ~1023u;
+    return bits;
+}
+
+static inline mpz_class ecm_mpz_from_u64(uint64_t v) {
+    mpz_class z;
+    mpz_import(z.get_mpz_t(), 1, 1, sizeof(v), 0, 0, &v);
+    return z;
+}
+static inline void ecm_mpz_mul_u64(mpz_class& a, uint64_t x) {
+    if (x <= (uint64_t)(~0UL)) {
+        mpz_mul_ui(a.get_mpz_t(), a.get_mpz_t(), (unsigned long)x);
+    } else {
+        mpz_class t = ecm_mpz_from_u64(x);
+        mpz_mul(a.get_mpz_t(), a.get_mpz_t(), t.get_mpz_t());
+    }
+}
+
 static std::vector<uint32_t> ecm_sieve_base_primes(uint32_t limit) {
     std::vector<uint8_t> isPrime(limit + 1, 1);
     if (limit == 0) {
@@ -327,16 +352,27 @@ int App::runECMMarinTwistedEdwards()
 
     mpz_class N = (mpz_class(1) << p) - 1;
 
+#ifdef SIGINT
+    std::signal(SIGINT, handle_sigint);
+#endif
+#ifdef SIGTERM
+    std::signal(SIGTERM, handle_sigint);
+#endif
+#ifdef SIGQUIT
+    std::signal(SIGQUIT, handle_sigint);
+#endif
+    interrupted.store(false, std::memory_order_relaxed);
+
     auto run_start = high_resolution_clock::now();
     uint32_t bits_B1 = u64_bits(B1);
-    uint32_t bits_B2 = u64_bits(B2 ? B2 : B1);
+    uint32_t bits_B2 = B2 ? u64_bits(B2) : 0;
     uint64_t mersenne_digits = (uint64_t)mpz_sizeinbase(N.get_mpz_t(),10);
 
     bool wrote_result = false;
     string mode_name = "twisted_edwards";
     const bool te_use_torsion16 = (!options.notorsion && options.torsion16) && !forceSigma;
     string torsion_name = te_use_torsion16 ? string("16") : string("none");
-    string result_status = "not_found";
+    string result_status = "NF";
     mpz_class result_factor = 0;
     uint64_t curves_tested_for_found = 0;
     size_t transform_size_once = 0;
@@ -615,13 +651,139 @@ int App::runECMMarinTwistedEdwards()
                   << ", S2=" << primesS2_v.size() << std::endl;
     }
 
+    std::vector<uint32_t> s2_chunk_ends;
+    std::vector<uint64_t> s2_chunk_prefix_iters;
+    uint64_t total_s2_iters = 0;
+    if (B2 > B1) {
+        const uint32_t MAX_S2_CHUNK_BITS_PRE = compute_s2_chunk_bits(transform_size_once);
+        mpz_class EchunkPre(1);
+        uint32_t idxPre = 0;
+        while (idxPre < (uint32_t)primesS2_v.size()) {
+            EchunkPre = 1;
+            const uint32_t chunkStartPre = idxPre;
+            while (idxPre < (uint32_t)primesS2_v.size()) {
+                mpz_mul_ui(EchunkPre.get_mpz_t(), EchunkPre.get_mpz_t(), (unsigned long)primesS2_v[idxPre]);
+                ++idxPre;
+                if (mpz_sizeinbase(EchunkPre.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS_PRE && idxPre > chunkStartPre) break;
+            }
+            const uint32_t cb = (uint32_t)mpz_sizeinbase(EchunkPre.get_mpz_t(), 2);
+            total_s2_iters += cb;
+            s2_chunk_ends.push_back(idxPre);
+            s2_chunk_prefix_iters.push_back(total_s2_iters);
+        }
+    }
+
     mpz_class K(1);
-    for (uint32_t q : primesB1_v) {
-        uint64_t m = q;
-        while (m <= B1 / q) m *= q;
-        mpz_mul_ui(K.get_mpz_t(), K.get_mpz_t(), m);
+    {
+        std::ostringstream msg;
+        msg << "[ECM] Building Stage1 exponent K from B1=" << B1 << " ...";
+        std::cout << msg.str() << std::endl;
+        if (guiServer_) guiServer_->appendLog(msg.str());
+
+        using clock = std::chrono::steady_clock;
+        auto t0k = clock::now();
+        auto tlast = t0k;
+        size_t last_done = 0;
+        double ema_pps = 0.0;
+
+        const size_t total = primesB1_v.size();
+        const uint32_t BLOCK_BITS = 32768u;
+        const double L_est_bits = 1.4426950408889634 * (double)B1;
+        std::vector<mpz_class> chunks;
+        chunks.reserve((size_t)std::ceil(L_est_bits / (double)BLOCK_BITS) + 8);
+
+        mpz_class chunk(1);
+        double approx_bits = 0.0;
+
+        for (size_t i = 0; i < total; ++i) {
+            const uint64_t q = primesB1_v[i];
+            uint64_t mm = q;
+            while (mm <= B1 / q) mm *= q;
+
+            ecm_mpz_mul_u64(chunk, mm);
+            approx_bits += std::log2((long double)mm);
+
+            if (approx_bits >= (double)BLOCK_BITS) {
+                chunks.push_back(chunk);
+                chunk = 1;
+                approx_bits = 0.0;
+            }
+
+            auto now = clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - tlast).count() >= 400 || i + 1 == total) {
+                const size_t done = i + 1;
+                const double elapsed = std::chrono::duration<double>(now - t0k).count();
+                const double dt = std::chrono::duration<double>(now - tlast).count();
+                const double dd = (double)(done - last_done);
+                const double inst = (dt > 1e-9 && dd >= 0.0) ? (dd / dt) : (done / std::max(1e-9, elapsed));
+                if (ema_pps <= 0.0) ema_pps = inst;
+                else ema_pps = 0.75 * ema_pps + 0.25 * inst;
+                const double eta = (ema_pps > 0.0 && done < total) ? ((double)(total - done) / ema_pps) : 0.0;
+
+                std::ostringstream line;
+                line << "[ECM] Building K " << done << "/" << total
+                     << " (" << std::fixed << std::setprecision(1) << (100.0 * (double)done / (double)total) << "%)"
+                     << " | primes/s " << std::fixed << std::setprecision(1) << ema_pps
+                     << " | ETA " << fmt_hms(eta);
+                ecm_print_progress_line(line.str());
+
+                last_done = done;
+                tlast = now;
+            }
+        }
+
+        if (chunk != 1) chunks.push_back(chunk);
+        std::cout << std::endl;
+
+        if (chunks.empty()) {
+            K = 1;
+        } else {
+            std::ostringstream m2;
+            m2 << "[ECM] Reducing " << chunks.size() << " chunks...";
+            std::cout << m2.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(m2.str());
+
+            auto tr0 = clock::now();
+            auto trl = tr0;
+            const size_t initial = chunks.size();
+
+            while (chunks.size() > 1) {
+                std::vector<mpz_class> next;
+                next.reserve((chunks.size() + 1) / 2);
+                for (size_t j = 0; j + 1 < chunks.size(); j += 2) next.push_back(chunks[j] * chunks[j + 1]);
+                if (chunks.size() & 1) next.push_back(chunks.back());
+                chunks.swap(next);
+
+                auto now = clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - trl).count() >= 400 || chunks.size() == 1) {
+                    const double elapsed = std::chrono::duration<double>(now - tr0).count();
+                    const double pct = 100.0 * (1.0 - (double)chunks.size() / (double)initial);
+                    std::ostringstream line;
+                    line << "[ECM] Reducing K " << std::fixed << std::setprecision(1) << pct
+                         << "% | remaining " << chunks.size()
+                         << " | elapsed " << std::fixed << std::setprecision(1) << elapsed << "s";
+                    ecm_print_progress_line(line.str());
+                    trl = now;
+                }
+            }
+            std::cout << std::endl;
+            K = chunks[0];
+        }
+
+        std::ostringstream done;
+        done << "[ECM] K built (" << mpz_sizeinbase(K.get_mpz_t(), 2) << " bits)";
+        std::cout << done.str() << std::endl;
+        if (guiServer_) guiServer_->appendLog(done.str());
     }
     size_t Kbits = mpz_sizeinbase(K.get_mpz_t(),2);
+
+    {
+        std::ostringstream hdr;
+        hdr<<"[ECM] N=M_"<<p<<"  B1="<<B1<<"  B2="<<B2<<"  curves="<<curves<<"\n";
+        hdr<<"[ECM] Stage1: prime powers up to B1="<<primesB1_v.size()<<", K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<"\n";
+        if (!primesS2_v.empty()) hdr<<"[ECM] Stage2 primes ("<<B1<<","<<B2<<"] count="<<primesS2_v.size()<<"\n"; else hdr<<"[ECM] Stage2: disabled\n";
+        std::cout<<hdr.str(); if (guiServer_) guiServer_->appendLog(hdr.str());
+    }
 
 
 
@@ -706,12 +868,12 @@ int App::runECMMarinTwistedEdwards()
     for (uint64_t c = start_curve; c < curves; ++c)
 
     {
-        if (core::algo::interrupted) {
-            result_status = "interrupted";
+        if (interrupted.load(std::memory_order_relaxed)) {
             curves_tested_for_found = c;
             options.curves_tested_for_found = (uint32_t)c;
             write_result();
-            return 2;
+            publish_json();
+            return 0;
         }
 
         engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
@@ -1832,15 +1994,21 @@ int App::runECMMarinTwistedEdwards()
             start_i = total_steps;
         }
         for (uint32_t i = start_i; i < total_steps; ++i) {
-            if (core::algo::interrupted) {
+            if (interrupted.load(std::memory_order_relaxed)) {
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
                 save_ckpt((uint32_t)i, elapsed);
-                result_status = "interrupted";
-                curves_tested_for_found = c+1;
-                options.curves_tested_for_found = (uint32_t)(c+1);
+                std::cout << "[ECM] Interrupted at curve " << (c+1) << ", iter " << i << "/" << total_steps << "";
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "[ECM] Interrupted at curve " << (c+1) << ", iter " << i << "/" << total_steps;
+                    guiServer_->appendLog(oss.str());
+                }
+                curves_tested_for_found = c;
+                options.curves_tested_for_found = (uint32_t)c;
                 write_result();
+                publish_json();
                 delete eng;
-                return 2;
+                return 0;
             }
 
             
@@ -2209,19 +2377,15 @@ int App::runECMMarinTwistedEdwards()
             eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
 
             const uint32_t MAX_S2_CHUNK_BITS = 262144;
-            auto u64_bitlen = [&](uint64_t v)->uint32_t { uint32_t n = 0; do { ++n; v >>= 1; } while (v); return n; };
-
-            uint64_t approx_total_bits = 0;
-            for (uint64_t q : primesS2_v) approx_total_bits += (uint64_t)u64_bitlen(q);
 
             auto t2_0 = high_resolution_clock::now();
             auto last2_save = t2_0, last2_ui = t2_0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
 
             uint64_t done_bits_est = 0;
-            for (uint32_t ii = 0; ii < std::min<uint32_t>(s2_idx, (uint32_t)primesS2_v.size()); ++ii) {
-                uint64_t v = primesS2_v[ii];
-                do { ++done_bits_est; v >>= 1; } while (v);
+            for (size_t ci = 0; ci < s2_chunk_ends.size(); ++ci) {
+                if (s2_chunk_ends[ci] <= s2_idx) done_bits_est = s2_chunk_prefix_iters[ci];
+                else break;
             }
             uint64_t last2_done_bits = done_bits_est;
             double ema_ips_stage2 = 0.0;
@@ -2249,6 +2413,7 @@ int App::runECMMarinTwistedEdwards()
             };
             bool abort_curve = false;
             bool stop_after_chunk = false;
+            bool stop_msg_printed = false;
             while (s2_idx < (uint32_t)primesS2_v.size()) {
                 mpz_class Echunk(1);
                 uint32_t chunk_start = s2_idx;
@@ -2270,7 +2435,7 @@ int App::runECMMarinTwistedEdwards()
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= progress_interval_ms || i + 1 == chunk_bits) {
                         const uint64_t done_u = done_bits_est + i + 1;
                         const double done = double(done_u);
-                        const double total = double(std::max<uint64_t>(1ULL, approx_total_bits));
+                        const double total = double(std::max<uint64_t>(1ULL, total_s2_iters));
                         const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                         const double avg_ips = done / std::max(1e-9, elapsed);
                         const double dt_ui = duration<double>(now2 - last2_ui).count();
@@ -2290,7 +2455,13 @@ int App::runECMMarinTwistedEdwards()
                         last2_done_bits = done_u;
                         last2_ui = now2;
                     }
-                    if (interrupted) stop_after_chunk = true;
+                    if (interrupted.load(std::memory_order_relaxed)) {
+                        stop_after_chunk = true;
+                        if (!stop_msg_printed) {
+                            stop_msg_printed = true;
+                            std::cout << "[ECM] Interrupt received — finishing current Stage2 chunk before stopping...\n";
+                        }
+                    }
                 }
 
                 done_bits_est += chunk_bits;
@@ -2339,8 +2510,8 @@ int App::runECMMarinTwistedEdwards()
                         oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
                         guiServer_->appendLog(oss.str());
                     }
-                    curves_tested_for_found = c+1; options.curves_tested_for_found=(uint32_t)(c+1);
-                    write_result(); delete eng; return 0;
+                    curves_tested_for_found = c; options.curves_tested_for_found=(uint32_t)(c);
+                    write_result(); publish_json(); delete eng; return 0;
                 }
             }
             std::cout << std::endl;
@@ -2399,10 +2570,10 @@ int App::runECMMarinTwistedEdwards()
     if (result_status == "found") return 0;
 
     std::cout<<"[ECM] No factor found"<<std::endl;
-    result_status = "not_found";
-    curves_tested_for_found = 0;
-    options.curves_tested_for_found = 0;
+    curves_tested_for_found = curves;
+    options.curves_tested_for_found = (uint32_t)curves;
     write_result();
+    publish_json();
     return 1;
 }
 
