@@ -549,7 +549,8 @@ int App::runECMMarinTwistedEdwards()
             chk2 *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
             const uint32_t chk_u2 = (uint32_t)mpz_fdiv_ui(chk2.get_mpz_t(), CHKSUMMOD);
 
-            const std::string nField = N.get_str();
+            //const std::string nField = N.get_str();
+            const std::string nField = ("2^" + std::to_string(p) + "-1");
 
             std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
             if (!outp) {

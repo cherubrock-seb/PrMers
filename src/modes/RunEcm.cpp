@@ -805,29 +805,6 @@ int App::runECMMarin()
             eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
             eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
         };
-        
-        auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);
-            hadamard(X2, Z2, 8, 7);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)9,(engine::Reg)11);
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-            eng->mul((engine::Reg)10,(engine::Reg)11);
-            hadamard(9, 10, X2, Z2);
-            eng->square_mul((engine::Reg)X2);
-            eng->mul((engine::Reg)X2,(engine::Reg)14);
-            eng->square_mul((engine::Reg)Z2);
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
-            eng->square_mul((engine::Reg)24);
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
-            eng->mul((engine::Reg)X1,(engine::Reg)15);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
-            eng->mul((engine::Reg)25,(engine::Reg)12);
-            eng->add((engine::Reg)25,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
-        };
 
         if (!resume_stage2)
         {
