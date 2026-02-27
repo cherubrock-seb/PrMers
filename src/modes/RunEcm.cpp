@@ -101,7 +101,17 @@ static uint64_t ecm_isqrt_u64(uint64_t x) {
     while (y > 0 && y > x / y) --y;
     return y;
 }
+static inline uint32_t compute_s2_chunk_bits(size_t transform_words /* ex: transform_size_once */) {
+    const uint32_t base = 262144;                 // chunk “référence”
+    uint32_t scale = (uint32_t)((transform_words + 63) / 64); // 1,2,3... par blocs de 64 words
+    if (scale == 0) scale = 1;
 
+    uint32_t bits = base / scale;
+
+    bits = std::clamp(bits, 8192u, 262144u);     // bornes sécurité
+    bits = (bits + 1023u) & ~1023u;              // arrondi multiple de 1024 (optionnel)
+    return bits;
+}
 static std::vector<uint32_t> ecm_sieve_base_primes(uint32_t limit) {
     std::vector<uint8_t> isPrime(limit + 1, 1);
     if (limit == 0) {
@@ -189,6 +199,14 @@ int App::runECMMarin()
     //auto mpz_from_u64 = [](uint64_t v)->mpz_class{ mpz_class z; mpz_import(z.get_mpz_t(), 1, 1, sizeof(v), 0, 0, &v); return z; };
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
+    std::signal(SIGINT, handle_sigint);
+    #ifdef SIGTERM
+        std::signal(SIGTERM, handle_sigint);
+    #endif
+    #ifdef SIGQUIT
+        std::signal(SIGQUIT, handle_sigint);
+    #endif
+    interrupted.store(false, std::memory_order_relaxed);
     auto run_start = high_resolution_clock::now();
     mpz_class N_full = (mpz_class(1) << p) - 1;
     mpz_class N = N_full;
@@ -369,7 +387,8 @@ int App::runECMMarin()
     std::vector<uint64_t> s2_chunk_prefix_iters;
     uint64_t s2_total_iters_precomputed = 0;
     if (B2 > B1 /*&& !primesS2_v.empty()*/) {
-        const uint32_t MAX_S2_CHUNK_BITS_PRE = 262144;
+        //const uint32_t MAX_S2_CHUNK_BITS_PRE = 65536;
+        const uint32_t MAX_S2_CHUNK_BITS_PRE = compute_s2_chunk_bits(transform_size_once);
         mpz_class EchunkPre(1);
         uint32_t idxPre = 0;
         while (idxPre < (uint32_t)primesS2_v.size()) {
@@ -1143,7 +1162,7 @@ int App::runECMMarin()
                 }
 
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c); options.curves_tested_for_found=(uint32_t)(c); write_result(); publish_json(); delete eng; return 0; }
             }
             std::cout<<std::endl;
 
@@ -1183,9 +1202,11 @@ int App::runECMMarin()
                     options.B2 = B2;
                 } else {
                     result_factor=0; result_status="NF";
-                    options.B2 = 0;
-                    write_result(); publish_json();
-                    options.B2 = B2;
+                    if((B2 <= B1)){
+                        options.B2 = 0;
+                        write_result(); publish_json();
+                        options.B2 = B2;
+                    }
                 }
 
                 if((B2 <= B1)){
@@ -1194,9 +1215,11 @@ int App::runECMMarin()
                 }
             }
             else{
-                result_factor=0; result_status="NF";
-                curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
-                write_result(); publish_json();
+                if((B2 <= B1)){
+                    result_factor=0; result_status="NF";
+                    curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                    write_result(); publish_json();
+                }
             }
         }
         else
@@ -1209,7 +1232,9 @@ int App::runECMMarin()
         if (B2 > B1) {
             const uint32_t baseX = 4, baseZ = 5;
             const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
-            const uint32_t MAX_S2_CHUNK_BITS = 262144;
+            //const uint32_t MAX_S2_CHUNK_BITS = 262144;
+            const uint32_t MAX_S2_CHUNK_BITS = compute_s2_chunk_bits(transform_size_once);
+        
             const uint64_t total_s2_iters = std::max<uint64_t>(1ULL, s2_total_iters_precomputed);
 
             if (!resume_stage2) {
@@ -1266,7 +1291,9 @@ int App::runECMMarin()
             uint64_t last2_ui_done = done_bits_est;
             double ema_ips_stage2 = 0.0;
 
-            bool stop_after_chunk = false;
+            //bool stop_after_chunk = false;
+            bool stop_after_chunk = false; 
+            bool stop_msg_printed = false;
             while (s2_idx < (uint32_t)primesS2_v.size()) {
                 mpz_class Echunk(1);
                 uint32_t chunk_start = s2_idx;
@@ -1308,7 +1335,13 @@ int App::runECMMarin()
                         last2_ui_done = done_u;
                         last2_ui = now2;
                     }
-                    if (interrupted) stop_after_chunk = true;
+                    if (interrupted.load(std::memory_order_relaxed)) {
+                        stop_after_chunk = true;
+                        if (!stop_msg_printed) {
+                            stop_msg_printed = true;
+                            std::cout << "[ECM] Interrupt received — finishing current Stage2 chunk before stopping...\n";
+                        }
+                    }
                 }
 
                 done_bits_est += chunk_bits;
@@ -1360,9 +1393,14 @@ int App::runECMMarin()
                         oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
                         guiServer_->appendLog(oss.str());
                     }
-                    curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
-                    write_result(); delete eng; return 0;
+                    //curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
+                    curves_tested_for_found = (uint32_t)(c); options.curves_tested_for_found = (uint32_t)(c);
+                    
+                    write_result();
+                    publish_json();
+                    delete eng; return 0;
                 }
+                
             }
             std::cout << std::endl;
 
@@ -1392,16 +1430,16 @@ int App::runECMMarin()
                     options.knownFactors.push_back(gg2.get_str());
                     result_factor = gg2; result_status = "found";
                     write_result(); publish_json();
-                } else {
-                    result_factor = 0; result_status = "NF";
-                    write_result(); publish_json();
-                }
-            }
+                } /*else {
+                    //result_factor = 0; result_status = "NF";
+                    //write_result(); publish_json();
+                }*/
+            }/*
             else{
                 result_factor=0; result_status="NF";
                 curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
                 write_result(); publish_json();
-            }
+            }*/
         }
 
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
