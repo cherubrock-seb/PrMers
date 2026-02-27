@@ -2036,26 +2036,99 @@ int App::runECMMarinTwistedEdwards()
                     publish_json();
                 }
 
-                delete eng;
-                continue;
+                if((B2 <= B1)){
+                    delete eng;
+                    continue;
+                }
             }
         }
 
-        if (B2 > B1 && !primesS2_v.empty()) {
+        if (B2 > B1 /*&& !primesS2_v.empty()*/) {
             mpz_class A24;
             if (!resume_stage2) {
                 mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
                 mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
 
                 mpz_class den = subm(Zv, Yv), invden;
-                { int r = invm(den, invden); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                //{ int r = invm(den, invden); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                { int r = invm(den, invden);
+                /*if (r == 1) {
+                    bool known = is_known(result_factor);
+                    std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<result_factor.get_str()<<std::endl;
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<result_factor.get_str(); guiServer_->appendLog(oss.str()); }
+
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                    fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                    if (!known) {
+                        result_status="found";
+                        curves_tested_for_found=c+1;
+                        options.curves_tested_for_found=c+1;
+                        write_result();
+                        publish_json();
+                    }
+
+                    delete eng;
+                    continue;
+                }*/
+                if (r < 0) { delete eng; continue; }
+                }
                 mpz_class u = mulm(addm(Zv, Yv), invden);
 
                 mpz_class numA = mulm(mpz_class(2), addm(aE, dE));
                 mpz_class denA = subm(aE, dE), invDenA;
-                { int r = invm(denA, invDenA); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                //{ int r = invm(denA, invDenA); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                { int r = invm(denA, invDenA);
+                /*if (r == 1) {
+                    bool known = is_known(result_factor);
+                    std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<result_factor.get_str()<<std::endl;
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<result_factor.get_str(); guiServer_->appendLog(oss.str()); }
+
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                    fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                    if (!known) {
+                        result_status="found";
+                        curves_tested_for_found=c+1;
+                        options.curves_tested_for_found=c+1;
+                        write_result();
+                        publish_json();
+                    }
+
+                    delete eng;
+                    continue;
+                }*/
+                if (r < 0) { delete eng; continue; }
+                }
+
                 mpz_class A = mulm(numA, invDenA);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; 
+                //{ int r = invm(mpz_class(4), inv4); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                { int r = invm(mpz_class(4), inv4);
+                /*if (r == 1) {
+                    bool known = is_known(result_factor);
+                    std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<result_factor.get_str()<<std::endl;
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<result_factor.get_str(); guiServer_->appendLog(oss.str()); }
+
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                    fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                    if (!known) {
+                        result_status="found";
+                        curves_tested_for_found=c+1;
+                        options.curves_tested_for_found=c+1;
+                        write_result();
+                        publish_json();
+                    }
+
+                    delete eng;
+                    continue;
+                }*/
+                if (r < 0) { delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
 
                 mpz_t zA24; mpz_init_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
@@ -2070,9 +2143,56 @@ int App::runECMMarinTwistedEdwards()
             } else {
                 mpz_class numA = mulm(mpz_class(2), addm(aE, dE));
                 mpz_class denA = subm(aE, dE), invDenA;
-                { int r = invm(denA, invDenA); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                //{ int r = invm(denA, invDenA); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                { int r = invm(denA, invDenA);
+                if (r == 1) {
+                    bool known = is_known(result_factor);
+                    std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<result_factor.get_str()<<std::endl;
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<result_factor.get_str(); guiServer_->appendLog(oss.str()); }
+
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                    fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                    if (!known) {
+                        result_status="found";
+                        curves_tested_for_found=c+1;
+                        options.curves_tested_for_found=c+1;
+                        write_result();
+                        publish_json();
+                    }
+
+                    delete eng;
+                    continue;
+                }
+                if (r < 0) { delete eng; continue; }
+                }
                 mpz_class A = mulm(numA, invDenA);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; 
+                //{ int r = invm(mpz_class(4), inv4); if (r) { curves_tested_for_found=c+1; options.curves_tested_for_found=c+1; write_result(); publish_json(); delete eng; return 0; } }
+                { int r = invm(mpz_class(4), inv4);
+                /*if (r == 1) {
+                    bool known = is_known(result_factor);
+                    std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<result_factor.get_str()<<std::endl;
+                    if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<result_factor.get_str(); guiServer_->appendLog(oss.str()); }
+
+                    std::error_code ec;
+                    fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                    fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                    if (!known) {
+                        result_status="found";
+                        curves_tested_for_found=c+1;
+                        options.curves_tested_for_found=c+1;
+                        write_result();
+                        publish_json();
+                    }
+
+                    delete eng;
+                    continue;
+                }*/
+                if (r < 0) { delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
 
                 mpz_t zA24; mpz_init_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
@@ -2105,27 +2225,6 @@ int App::runECMMarinTwistedEdwards()
             uint64_t last2_done_bits = done_bits_est;
             double ema_ips_stage2 = 0.0;
 
-            auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
-                mpz_t tx, tz;
-                mpz_init(tx); mpz_init(tz);
-                eng->get_mpz(tx, (engine::Reg)0);
-                eng->get_mpz(tz, (engine::Reg)1);
-                mpz_class Xs(tx), Zs(tz);
-                mpz_clear(tx); mpz_clear(tz);
-
-                mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
-                if (gz > 1 && gz < N) {
-                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
-                    result_factor = gz; result_status = "found";
-                    return 1;
-                }
-
-                mpz_class invz;
-                if (invm(Zs, invz) != 0) return -1;
-                xOut = mulm(Xs, invz);
-                return 0;
-            };
-
             auto hadamard = [&](size_t a, size_t b, size_t sx, size_t dx){ eng->addsub((engine::Reg)sx, (engine::Reg)dx, (engine::Reg)a, (engine::Reg)b); };
             auto hadamard_copy = [&](size_t a, size_t b, size_t sx, size_t dx, size_t sc, size_t dc){ eng->addsub_copy((engine::Reg)sx,(engine::Reg)dx,(engine::Reg)sc,(engine::Reg)dc,(engine::Reg)a,(engine::Reg)b); };
             auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
@@ -2135,6 +2234,7 @@ int App::runECMMarinTwistedEdwards()
                 eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);  eng->mul((engine::Reg)10,(engine::Reg)11);
                 hadamard(9, 10, X2, Z2);
                 eng->square_mul((engine::Reg)X2);
+                eng->mul((engine::Reg)X2,(engine::Reg)14);
                 eng->square_mul((engine::Reg)Z2); eng->mul((engine::Reg)Z2,(engine::Reg)13);
                 eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
                 eng->square_mul((engine::Reg)24);
@@ -2146,7 +2246,7 @@ int App::runECMMarinTwistedEdwards()
                 eng->add((engine::Reg)25,(engine::Reg)24);
                 eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
             };
-
+            bool abort_curve = false;
             bool stop_after_chunk = false;
             while (s2_idx < (uint32_t)primesS2_v.size()) {
                 mpz_class Echunk(1);
@@ -2196,21 +2296,25 @@ int App::runECMMarinTwistedEdwards()
                 s2_idx = chunk_end;
 
                 if (s2_idx < (uint32_t)primesS2_v.size()) {
-                    mpz_class xNext;
-                    int nr = normalize_for_next_chunk(xNext);
-                    if (nr == 1) {
-                        std::cout << std::endl;
-                        curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                        write_result(); publish_json(); delete eng; return 0;
+                    mpz_t tx, tz;
+                    mpz_init(tx); mpz_init(tz);
+                    eng->get_mpz(tx, (engine::Reg)0);
+                    eng->get_mpz(tz, (engine::Reg)1);
+                    mpz_class Xs(tx), Zs(tz);
+                    mpz_clear(tx); mpz_clear(tz);
+
+                    mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
+                    if (gz > 1 && gz < N) {
+                        std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
+                        if (result_status != "found") { result_factor = gz; result_status = "found"; curves_tested_for_found = c+1; options.curves_tested_for_found = c+1; }
                     }
-                    if (nr < 0) {
-                        std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 normalization failed, retrying\n";
-                        delete eng; continue;
-                    }
-                    mpz_t xNextTmp; mpz_init_set(xNextTmp, xNext.get_mpz_t());
-                    eng->set_mpz((engine::Reg)4, xNextTmp);
-                    mpz_clear(xNextTmp);
-                    eng->set((engine::Reg)5, 1u);
+
+                    mpz_t tQx; mpz_init_set(tQx, Xs.get_mpz_t());
+                    mpz_t tQz; mpz_init_set(tQz, Zs.get_mpz_t());
+                    eng->set_mpz((engine::Reg)4, tQx);
+                    eng->set_mpz((engine::Reg)5, tQz);
+                    mpz_clear(tQx); mpz_clear(tQz);
+
                     eng->set((engine::Reg)0, 1u);
                     eng->set((engine::Reg)1, 0u);
                     eng->copy((engine::Reg)2, (engine::Reg)4);
@@ -2239,7 +2343,13 @@ int App::runECMMarinTwistedEdwards()
                 }
             }
             std::cout << std::endl;
-
+            if (abort_curve) {
+                std::error_code ec;
+                fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+                delete eng;
+                continue;
+            }
             eng->copy((engine::Reg)7,(engine::Reg)1);
             mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
             mpz_class gg2 = gcd_with_dots(Zres, N);
@@ -2257,7 +2367,22 @@ int App::runECMMarinTwistedEdwards()
                 bool known = is_known(gg2);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg2.get_str()<<std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg2.get_str(); guiServer_->appendLog(oss.str()); }
-                if (!known) { std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec); result_factor=gg2; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+
+                std::error_code ec;
+                fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
+                fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+
+                if (!known) {
+                    result_factor=gg2;
+                    result_status="found";
+                    curves_tested_for_found=c+1;
+                    options.curves_tested_for_found = c+1;
+                    write_result();
+                    publish_json();
+                }
+
+                delete eng;
+                continue;
             }
         }
 
@@ -2269,6 +2394,8 @@ int App::runECMMarinTwistedEdwards()
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
     }
+
+    if (result_status == "found") return 0;
 
     std::cout<<"[ECM] No factor found"<<std::endl;
     result_status = "not_found";

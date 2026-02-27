@@ -368,7 +368,7 @@ int App::runECMMarin()
     std::vector<uint32_t> s2_chunk_ends;
     std::vector<uint64_t> s2_chunk_prefix_iters;
     uint64_t s2_total_iters_precomputed = 0;
-    if (B2 > B1 && !primesS2_v.empty()) {
+    if (B2 > B1 /*&& !primesS2_v.empty()*/) {
         const uint32_t MAX_S2_CHUNK_BITS_PRE = 262144;
         mpz_class EchunkPre(1);
         uint32_t idxPre = 0;
@@ -405,9 +405,13 @@ int App::runECMMarin()
 
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
     //const std::string ckpt2 = "ecm2_m_p" + std::to_string(p) + "_curve" + std::to_string(curve_seed) + ".ckpt2";
-
     for (uint64_t c = 0; c < curves; ++c)
     {
+        result_factor = 0;
+        result_status = "NF";
+        curves_tested_for_found = (uint32_t)(c + 1);
+        options.curves_tested_for_found = (uint32_t)(c + 1);
+
         auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 
         uint64_t base_seed = 0;
@@ -430,10 +434,6 @@ int App::runECMMarin()
         engine* eng = engine::create_gpu(p, static_cast<size_t>(32), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
-
-        //std::ostringstream ck;  ck << "ecm_m_"  << p << "_c" << c << ".ckpt";
-        //std::ostringstream ck2; ck2<< "ecm2_m_" << p << "_c" << c << ".ckpt";
-        //const std::string ckpt_file = ck.str(), ckpt2 = ck2.str();
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
@@ -462,7 +462,6 @@ int App::runECMMarin()
             fs::rename(ckpt_file + ".new",ckpt_file,          ec);
             fs::remove(ckpt_file + ".old", ec);
         };
-//./prmers 193 -ecm -b1 400 -b2 4020 -seed 13515957324328859655
 
         auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
             File f(file);
@@ -566,10 +565,6 @@ int App::runECMMarin()
             return 0;
         };
 
-
-
-
-
         auto write_gp = [&](const std::string& mode, const std::string& tors, const mpz_class& Nref, uint32_t pe, uint64_t b1e, uint64_t b2e, uint64_t seed_base, uint64_t seed_curve, const mpz_class* sigma_opt, const mpz_class* r_opt, const mpz_class* v_opt, const mpz_class* aE_opt, const mpz_class* dE_opt, const mpz_class& A24_ref, const mpz_class& x0_ref)->void{
             (void) A24_ref;
             (void) Nref;
@@ -605,121 +600,116 @@ int App::runECMMarin()
             gp<<"\\print(\"A24=\",A24);\n";
             gp<<"\\print(\"x0=\",x0);\n";
             gp.close();
-};
+        };
 
-const std::string ecm_stage1_resume_save_file =
-    "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".save";
-const std::string ecm_stage1_resume_p95_file =
-    "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".p95";
+        const std::string ecm_stage1_resume_save_file =
+            "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".save";
+        const std::string ecm_stage1_resume_p95_file =
+            "resume_p" + std::to_string(p) + "_ECM_B1_" + std::to_string(B1) + ".p95";
 
-auto ecm_now_string = [&]() -> std::string {
-    std::time_t t = std::time(nullptr);
-    std::tm tmv{};
-#if defined(_WIN32)
-    localtime_s(&tmv, &t);
-#else
-    localtime_r(&t, &tmv);
-#endif
-    std::ostringstream oss;
-    oss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
-    return oss.str();
-};
-
-auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx,
-                                         const mpz_class& A24v,
-                                         const mpz_class& xAffRaw,
-                                         const mpz_class* sigmaForP95)->void {
-    mpz_class xAff = xAffRaw;
-    mpz_mod(xAff.get_mpz_t(), xAff.get_mpz_t(), N.get_mpz_t());
-    if (xAff < 0) xAff += N;
-
-    mpz_class Aresume;
-    mpz_mul_ui(Aresume.get_mpz_t(), A24v.get_mpz_t(), 4UL);
-    Aresume -= 2;
-    mpz_mod(Aresume.get_mpz_t(), Aresume.get_mpz_t(), N.get_mpz_t());
-    if (Aresume < 0) Aresume += N;
-
-    const std::string ecmResumeProgram = std::string("PrMers ") + core::PRMERS_VERSION;
-    const std::string ecmResumeTime = ecm_now_string();
-    const std::string ecmResumeWho = options.user;
-
-    {
-        mpz_class chk;
-        mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
-        chk *= mpz_class(mpz_fdiv_ui(Aresume.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
-        const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
-
-        std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
-        if (!out) {
+        auto ecm_now_string = [&]() -> std::string {
+            std::time_t t = std::time(nullptr);
+            std::tm tmv{};
+        #if defined(_WIN32)
+            localtime_s(&tmv, &t);
+        #else
+            localtime_r(&t, &tmv);
+        #endif
             std::ostringstream oss;
-            oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_save_file << "'";
-            std::cerr << oss.str() << std::endl;
-            if (guiServer_) guiServer_->appendLog(oss.str());
-        } else {
-            out << "METHOD=ECM; B1=" << B1
-                << "; N=" << N.get_str()
-                << "; X=0x" << xAff.get_str(16)
-                << "; A=" << Aresume.get_str()
-                << "; CHECKSUM=" << chk_u
-                << "; PROGRAM=" << ecmResumeProgram
-                << "; X0=0x0; Y0=0x0;";
-            if (!ecmResumeWho.empty()) out << " WHO=" << ecmResumeWho << ";";
-            out << " TIME=" << ecmResumeTime << ";\n";
-            out.flush();
-        }
-    }
+            oss << std::put_time(&tmv, "%a %b %d %H:%M:%S %Y");
+            return oss.str();
+        };
 
-    if (sigmaForP95 != nullptr) {
-        const mpz_class& sigma = *sigmaForP95;
+        auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx,
+                                                const mpz_class& A24v,
+                                                const mpz_class& xAffRaw,
+                                                const mpz_class* sigmaForP95)->void {
+            mpz_class xAff = xAffRaw;
+            mpz_mod(xAff.get_mpz_t(), xAff.get_mpz_t(), N.get_mpz_t());
+            if (xAff < 0) xAff += N;
 
-        mpz_class chk;
-        mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
-        chk *= mpz_class(mpz_fdiv_ui(sigma.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
-        chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
-        const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+            mpz_class Aresume;
+            mpz_mul_ui(Aresume.get_mpz_t(), A24v.get_mpz_t(), 4UL);
+            Aresume -= 2;
+            mpz_mod(Aresume.get_mpz_t(), Aresume.get_mpz_t(), N.get_mpz_t());
+            if (Aresume < 0) Aresume += N;
 
-        const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+            const std::string ecmResumeProgram = std::string("PrMers ") + core::PRMERS_VERSION;
+            const std::string ecmResumeTime = ecm_now_string();
+            const std::string ecmResumeWho = options.user;
 
-        std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
-        if (!outp) {
+            {
+                mpz_class chk;
+                mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
+                chk *= mpz_class(mpz_fdiv_ui(Aresume.get_mpz_t(), CHKSUMMOD));
+                chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
+                chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
+                const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+
+                std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
+                if (!out) {
+                    std::ostringstream oss;
+                    oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_save_file << "'";
+                    std::cerr << oss.str() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(oss.str());
+                } else {
+                    out << "METHOD=ECM; B1=" << B1
+                        << "; N=" << N.get_str()
+                        << "; X=0x" << xAff.get_str(16)
+                        << "; A=" << Aresume.get_str()
+                        << "; CHECKSUM=" << chk_u
+                        << "; PROGRAM=" << ecmResumeProgram
+                        << "; X0=0x0; Y0=0x0;";
+                    if (!ecmResumeWho.empty()) out << " WHO=" << ecmResumeWho << ";";
+                    out << " TIME=" << ecmResumeTime << ";\n";
+                    out.flush();
+                }
+            }
+
+            if (sigmaForP95 != nullptr) {
+                const mpz_class& sigma = *sigmaForP95;
+
+                mpz_class chk;
+                mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
+                chk *= mpz_class(mpz_fdiv_ui(sigma.get_mpz_t(), CHKSUMMOD));
+                chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
+                chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
+                const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+
+                const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+
+                std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
+                if (!outp) {
+                    std::ostringstream oss;
+                    oss << "[ECM] Warning: cannot append Prime95 Stage2 resume to '" << ecm_stage1_resume_p95_file << "'";
+                    std::cerr << oss.str() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(oss.str());
+                } else {
+                    outp << "METHOD=ECM; SIGMA=" << sigma.get_str()
+                        << "; B1=" << B1
+                        << "; N=" << nField
+                        << "; X=0x" << xAff.get_str(16)
+                        << "; CHECKSUM=" << chk_u
+                        << "; PROGRAM=" << ecmResumeProgram
+                        << "; X0=0x0; Y0=0x0;";
+                    if (!ecmResumeWho.empty()) outp << " WHO=" << ecmResumeWho << ";";
+                    outp << " TIME=" << ecmResumeTime << ";\n";
+                    outp.flush();
+                }
+            }
+
             std::ostringstream oss;
-            oss << "[ECM] Warning: cannot append Prime95 Stage2 resume to '" << ecm_stage1_resume_p95_file << "'";
-            std::cerr << oss.str() << std::endl;
+            oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
+                << " | Stage1 resume appended: " << ecm_stage1_resume_save_file;
+            if (sigmaForP95 != nullptr) oss << " + " << ecm_stage1_resume_p95_file;
+            else oss << " (Prime95 export skipped: curve family is A-based/custom, no GMP-ECM SIGMA line)";
+            std::cout << oss.str() << std::endl;
             if (guiServer_) guiServer_->appendLog(oss.str());
-        } else {
-            outp << "METHOD=ECM; SIGMA=" << sigma.get_str()
-                 << "; B1=" << B1
-                 << "; N=" << nField
-                 << "; X=0x" << xAff.get_str(16)
-                 << "; CHECKSUM=" << chk_u
-                 << "; PROGRAM=" << ecmResumeProgram
-                 << "; X0=0x0; Y0=0x0;";
-            if (!ecmResumeWho.empty()) outp << " WHO=" << ecmResumeWho << ";";
-            outp << " TIME=" << ecmResumeTime << ";\n";
-            outp.flush();
-        }
-    }
+        };
 
-    std::ostringstream oss;
-    oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
-        << " | Stage1 resume appended: " << ecm_stage1_resume_save_file;
-    if (sigmaForP95 != nullptr) oss << " + " << ecm_stage1_resume_p95_file;
-    else oss << " (Prime95 export skipped: curve family is A-based/custom, no GMP-ECM SIGMA line)";
-    std::cout << oss.str() << std::endl;
-    if (guiServer_) guiServer_->appendLog(oss.str());
-};
-
-uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
+        uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
-       
-        /*uint64_t curve_seed = mix64(base_seed, c);
-        if (forceSigma){
-            curve_seed = options.curve_seed;
-            base_seed = curve_seed;
-        }*/
+
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
         options.base_seed = base_seed;
@@ -727,11 +717,24 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
         auto subm = [&](mpz_class a, mpz_class b)->mpz_class{ mpz_class r=a-b; r%=N; if (r<0) r+=N; return r; };
         auto mulm = [&](const mpz_class& a, const mpz_class& b)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
         auto sqrm = [&](const mpz_class& a)->mpz_class{ mpz_class r; mpz_mul(r.get_mpz_t(), a.get_mpz_t(), a.get_mpz_t()); mpz_mod(r.get_mpz_t(), r.get_mpz_t(), N.get_mpz_t()); if (r<0) r+=N; return r; };
+
         auto invm = [&](const mpz_class& a, mpz_class& inv)->int{
             if (mpz_sgn(a.get_mpz_t())==0) return -1;
             if (mpz_invert(inv.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t())) return 0;
             mpz_class g; mpz_gcd(g.get_mpz_t(), a.get_mpz_t(), N.get_mpz_t());
-            if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor = g; result_status = "found"; return 1; }
+            if (g > 1 && g < N) {
+                bool known = is_known(g);
+                std::cout<<"[ECM] "<<(known?"known factor=":"factor=")<<g.get_str()<<std::endl;
+                if (!known) {
+                    options.knownFactors.push_back(g.get_str());
+                    result_factor = g; result_status = "found";
+                    curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
+                } else {
+                    result_factor = 0; result_status = "NF";
+                    curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
+                }
+                return 1;
+            }
             return -1;
         };
 
@@ -742,87 +745,52 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards--conv-->montgomery";
             if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
         }
-        //test case ./prmers 127913 -ecm -b1 50000 -seed 15236911113677539612
-        //./prmers 193 -ecm -b1 200000 -seed 15677667396027516913
-        //./prmers 193 -ecm -b1 1000 -seed 13028155278960170310
-        //B2 test case : ./prmers 193 -ecm -b1 556 -b2 557 -seed 13028155278960170310
-        // hadamard(a,b -> s,d): s = a + b, d = a - b (use only when BOTH outputs are needed)
+
         auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
-            eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b); // s=a+b, d=a-b
+            eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b);
         };
         auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t s_copy, size_t d_copy){
             eng->addsub_copy((engine::Reg)s,(engine::Reg)d,(engine::Reg)s_copy,(engine::Reg)d_copy,
                             (engine::Reg)a,(engine::Reg)b);
         };
-/*
-        // xDBL: U=(X1+Z1)^2, V=(X1-Z1)^2, E=U-V; X2=U*V; Z2=(A24*E + V)*E
-        auto xDBL = [&](size_t X1,size_t Z1,size_t X2,size_t Z2){
-            hadamard(X1, Z1, 7, 9);                               // 7 = X1+Z1, 9 = X1-Z1
-            eng->square_mul_copy((engine::Reg)7,(engine::Reg)X2); // 7 = U, X2 = U
-            eng->square_mul((engine::Reg)9);                      // 9 = V
-            eng->sub_reg((engine::Reg)7,(engine::Reg)9);          // 7 = E = U - V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);// *V
-            eng->mul((engine::Reg)X2,(engine::Reg)15);            // X2 = U * V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)7);// multiplicand = E
-            eng->mul((engine::Reg)7,(engine::Reg)12);             // 7 = A24 * E
-            eng->add((engine::Reg)7,(engine::Reg)9);              // 7 = A24*E + V
-            eng->mul_copy((engine::Reg)7,(engine::Reg)15,(engine::Reg)Z2); // Z2 = (A24*E + V) * E
+
+        auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+            hadamard_copy(X1, Z1, 25, 24, 10, 9);
+            hadamard(X2, Z2, 8, 7);
+            eng->mul_pair_unit((engine::Reg)9, (engine::Reg)8, (engine::Reg)10, (engine::Reg)7);
+            hadamard(9, 10, X2, Z2);
+            eng->square_mul((engine::Reg)X2);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
+
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+            eng->square_mul((engine::Reg)24);
+            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+            eng->mul((engine::Reg)X1,(engine::Reg)15);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
+            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
         };
 
-        // xADD: S1=X1+Z1, D1=X1-Z1; S2=X2+Z2, D2=X2-Z2
-        //       t1=D1*S2, t2=S1*D2; X3=k14*(t1+t2)^2; Z3=k13*(t1-t2)^2
-        auto xADD = [&](size_t X1,size_t Z1,size_t X2,size_t Z2,size_t X3,size_t Z3){
-            hadamard(X1, Z1, 25, 24);                         // 25 = S1 = X1+Z1, 24 = D1 = X1-Z1
-            hadamard(X2, Z2, 8,  7 );                         //  8 = S2 = X2+Z2,  7 = D2 = X2-Z2
-
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8); // multiplicand = S2
-            eng->mul((engine::Reg)24,(engine::Reg)11);        // 24 = t1 = D1*S2  (clobbers D1)
-
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7); // multiplicand = D2
-            eng->mul((engine::Reg)25,(engine::Reg)11);        // 25 = t2 = S1*D2  (clobbers S1)
-
-            hadamard(24, 25, X3, Z3);                         // X3 = t1+t2, Z3 = t1-t2
-            eng->square_mul((engine::Reg)X3);                 // X3 = (t1+t2)^2
-            eng->mul((engine::Reg)X3,(engine::Reg)14);        // X3 = k14*(t1+t2)^2
-            eng->square_mul((engine::Reg)Z3);                 // Z3 = (t1-t2)^2
-            eng->mul((engine::Reg)Z3,(engine::Reg)13);        // Z3 = k13*(t1-t2)^2
-        };*/
-
-
-
-        // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
-        auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            // xADD part
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);                    // 25=S1, 24=D1, 10=S1_copy, 9=D1_copy
-            hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
-            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
-            //eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
-            //eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
-            //eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
+        auto xDBLADD_strict_s2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+            hadamard_copy(X1, Z1, 25, 24, 10, 9);
+            hadamard(X2, Z2, 8, 7);
             eng->mul_pair_unit((engine::Reg)9, (engine::Reg)8, (engine::Reg)10, (engine::Reg)7);
-            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1−t2
-            eng->square_mul((engine::Reg)X2);                        // X2=(t1+t2)^2
-            //eng->mul((engine::Reg)X2,(engine::Reg)14);               // X2=k14*...
-            eng->square_mul((engine::Reg)Z2);                        // Z2=(t1−t2)^2
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);               // Z2=k13*...
+            hadamard(9, 10, X2, Z2);
+            eng->square_mul((engine::Reg)X2);
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
 
-            // xDBL part (U,V,E with fused square+copy; no extra copy for Z1)
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
-            eng->square_mul((engine::Reg)24);                        // 24=V=(X1−Z1)^2
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);           // 25=E=U−V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
-            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);  // multiplicand=E
-            //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
-            //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
-            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
-            /*eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
+            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
             eng->square_mul((engine::Reg)24);
-            eng->xdbl_tail_uv((engine::Reg)X1, (engine::Reg)Z1,
-                              (engine::Reg)25, (engine::Reg)24,
-                              (engine::Reg)12,
-                              (engine::Reg)15, (engine::Reg)11);*/
+            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
+            eng->mul((engine::Reg)X1,(engine::Reg)15);
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
+            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
+            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
         };
 
         auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
@@ -878,42 +846,43 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
-                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t());
+                if (g > 1 && g < N) {
+                    bool known = is_known(g);
+                    std::cout<<"[ECM] "<<(known?"known factor=":"factor=")<<g.get_str()<<std::endl;
+                    if (!known) { options.knownFactors.push_back(g.get_str()); result_factor=g; result_status="found"; }
+                    else { result_factor=0; result_status="NF"; }
+                    curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                    write_result(); publish_json(); delete eng; continue;
+                }
+
                 mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
-                mpz_class invt; { int r = invm(t0, invt); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invt; { int r = invm(t0, invt);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+
                 mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
                 mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
                 Araw = mulm(Araw, invt);
                 mpz_class A = subm(Araw, mpz_class(2));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 mpz_class u3 = mulm(sqrm(u), u);
                 mpz_class v3 = mulm(sqrm(v), v);
                 mpz_class invv3;
                 {
                     int r = invm(v3, invv3);
-                    if (r==1){
-                        curves_tested_for_found = c+1;
-                        options.curves_tested_for_found = c+1;
-                        write_result();
-                        publish_json();
-                        delete eng;
-                        return 0;
-                    }
-                    if (r<0){
-                        curves_tested_for_found = c+1;
-                        options.curves_tested_for_found = c+1;
-                        write_result();
-                        publish_json();
-                        delete eng;
-                        return 0;
-                    }
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
                 }
                 x0 = mulm(u3, invv3);
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                //write_gp("montgomery","none", N, p, B1, B2, base_seed, curve_seed, &sigma_mpz, nullptr, nullptr, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 1)
             {
@@ -922,7 +891,9 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                     if (x1==x2 && (y1+ y2)%N==0) return -1;
                     mpz_class num = subm(y2, y1);
                     mpz_class den = subm(x2, x1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); return 1; } if (r<0) { curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); return -1; }
+                    mpz_class inv; int r = invm(den, inv);
+                    if (r==1) return 1;
+                    if (r<0) return -1;
                     mpz_class lam = mulm(num, inv);
                     xr = subm(subm(sqrm(lam), x1), x2);
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -931,7 +902,9 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
                     mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
                     mpz_class den = mulm(mpz_class(2), y1);
-                    mpz_class inv; int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); return 1; } if (r<0) { curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); return -1; }
+                    mpz_class inv; int r = invm(den, inv);
+                    if (r==1) return 1;
+                    if (r<0) return -1;
                     mpz_class lam = mulm(num, inv);
                     xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
                     yr = subm(mulm(lam, subm(x1, xr)), y1);
@@ -958,15 +931,23 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 ss << std::hex << std::setw(16) << std::setfill('0') << k;
                 options.sigma_hex = ss.str();
                 mpz_class s = mpz_class(4), t = mpz_class(8);
-                int rmul = ec_mul(k, s, t, s, t); if (rmul==1){ delete eng; publish_json(); return 0; } if (rmul<0){ delete eng; publish_json(); return 0; }
+                int rmul = ec_mul(k, s, t, s, t);
+                if (rmul==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                if (rmul<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
 
                 mpz_class den = subm(s, mpz_class(4));
-                mpz_class inv; { int r = invm(den, inv); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv; { int r = invm(den, inv);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
 
                 mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
                 mpz_class denr = subm(mpz_class(8), sqrm(alpha));
-                mpz_class invdenr; { int r = invm(denr, invdenr); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invdenr; { int r = invm(denr, invdenr);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class rpar = mulm(numr, invdenr);
 
                 mpz_class r2 = sqrm(rpar);
@@ -974,18 +955,26 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 mpz_class r4 = sqrm(r2);
                 mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
                 mpz_class A_den = mulm(mpz_class(4), r2);
-                mpz_class invAden; { int r = invm(A_den, invAden); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invAden; { int r = invm(A_den, invAden);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class A = mulm(A_num, invAden);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
 
-                mpz_class inv2; { int r = invm(mpz_class(2), inv2); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv2; { int r = invm(mpz_class(2), inv2);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 x0 = subm(inv2, r2);
 
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=16 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                //write_gp("montgomery","16", N, p, B1, B2, base_seed, curve_seed, nullptr, &rpar, nullptr, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 2)
             {
@@ -997,19 +986,24 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 options.sigma_hex = a.get_str(16);
                 mpz_class a2 = sqrm(a);
                 mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invdenv; { int r = invm(denv, invdenv);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
                 mpz_class fourv = mulm(mpz_class(4), v);
                 mpz_class one = mpz_class(1);
                 mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
 
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                //write_gp("montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, nullptr, nullptr, A24, x0);
             }
             else if (picked_mode == 3)
             {
@@ -1033,36 +1027,37 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 sigma_resume = sigma_mpz; have_sigma_resume = true;
                 mpz_class u = subm(sqrm(sigma_mpz), mpz_class(5));
                 mpz_class v = (mpz_class(4) * sigma_mpz) % N;
-                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t()); if (g > 1 && g < N) { std::cout<<"[ECM] factor="<<g.get_str()<<std::endl; result_factor=g; result_status="found"; curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; }
+                mpz_class g; mpz_gcd(g.get_mpz_t(), v.get_mpz_t(), N.get_mpz_t());
+                if (g > 1 && g < N) {
+                    bool known = is_known(g);
+                    std::cout<<"[ECM] "<<(known?"known factor=":"factor=")<<g.get_str()<<std::endl;
+                    if (!known) { options.knownFactors.push_back(g.get_str()); result_factor=g; result_status="found"; }
+                    else { result_factor=0; result_status="NF"; }
+                    curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                    write_result(); publish_json(); delete eng; continue;
+                }
+
                 mpz_class t0 = mulm(mpz_class(4), mulm(mulm(sqrm(u), u), v));
-                mpz_class invt; { int r = invm(t0, invt); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invt; { int r = invm(t0, invt);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class tnum = mulm(sqrm(subm(v,u)), subm(v,u));
                 mpz_class Araw = mulm(tnum, addm(mulm(mpz_class(3),u), v));
                 Araw = mulm(Araw, invt);
                 mpz_class A = subm(Araw, mpz_class(2));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 mpz_class u3 = mulm(sqrm(u), u);
                 mpz_class v3 = mulm(sqrm(v), v);
                 mpz_class invv3;
                 {
                     int r = invm(v3, invv3);
-                    if (r==1){
-                        curves_tested_for_found = c+1;
-                        options.curves_tested_for_found = c+1;
-                        write_result();
-                        publish_json();
-                        delete eng;
-                        return 0;
-                    }
-                    if (r<0){
-                        curves_tested_for_found = c+1;
-                        options.curves_tested_for_found = c+1;
-                        write_result();
-                        publish_json();
-                        delete eng;
-                        return 0;
-                    }
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
                 }
                 x0 = mulm(u3, invv3);
                 mpz_class aE = addm(A, mpz_class(2));
@@ -1070,7 +1065,6 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                //write_gp("edwards--conv-->montgomery","none", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, nullptr, &aE, &dE, A24, x0);
             }
             else
             {
@@ -1082,12 +1076,18 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 options.sigma_hex = a.get_str(16);
                 mpz_class a2 = sqrm(a);
                 mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class invdenv; { int r = invm(denv, invdenv);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
                 mpz_class fourv = mulm(mpz_class(4), v);
                 mpz_class one = mpz_class(1);
                 mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4); if (r==1){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } if (r<0){ curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); publish_json(); delete eng; return 0; } }
+                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
                 A24 = mulm(addm(A, mpz_class(2)), inv4);
                 x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
                 mpz_class aE = addm(A, mpz_class(2));
@@ -1095,7 +1095,6 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-                //write_gp("edwards--conv-->montgomery","8", N, p, B1, B2, base_seed, curve_seed, nullptr, nullptr, &v, &aE, &dE, A24, x0);
             }
 
             mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
@@ -1154,7 +1153,7 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 }
 
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=c+1; options.curves_tested_for_found = c+1 ; write_result(); delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); delete eng; return 0; }
             }
             std::cout<<std::endl;
 
@@ -1177,7 +1176,6 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             if (found) {
                 bool known = is_known(gg);
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<(known?" | known factor=":" | factor=")<<gg.get_str()<<std::endl;
-                //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
                 std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
 
@@ -1185,14 +1183,30 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                 fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
 
+                curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+
                 if (!known) {
+                    options.knownFactors.push_back(gg.get_str());
                     result_factor=gg; result_status="found";
-                    curves_tested_for_found=c+1; options.curves_tested_for_found = c+1;
+                    options.B2 = 0;
                     write_result(); publish_json();
+                    options.B2 = B2;
+                } else {
+                    result_factor=0; result_status="NF";
+                    options.B2 = 0;
+                    write_result(); publish_json();
+                    options.B2 = B2;
                 }
 
-                delete eng;
-                continue;
+                if((B2 <= B1)){
+                    delete eng;
+                    continue;
+                }
+            }
+            else{
+                result_factor=0; result_status="NF";
+                curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                write_result(); publish_json();
             }
         }
         else
@@ -1200,9 +1214,9 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             std::ostringstream s2r; s2r<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Resuming Stage2 at index "<<s2_idx;
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
-        //std::cout << "[ECM] Last curve written to 'lastcurve.gp' (PARI/GP script)." << std::endl;
+
         std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
-        if (B2 > B1 && !primesS2_v.empty()) {
+        if (B2 > B1) {
             const uint32_t baseX = 4, baseZ = 5;
             const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
             const uint32_t MAX_S2_CHUNK_BITS = 262144;
@@ -1218,23 +1232,23 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
 
                 mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
                 if (gz > 1 && gz < N) {
-                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
-                    result_factor = gz; result_status = "found";
-                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                    write_result(); publish_json(); delete eng; return 0;
+                    bool known = is_known(gz);
+                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gz.get_str() << std::endl;
+                    if (!known) { options.knownFactors.push_back(gz.get_str()); result_factor = gz; result_status = "found"; }
+                    else { result_factor = 0; result_status = "NF"; }
+                    curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
                 }
 
+                mpz_class Qx = Xs, Qz = Zs;
                 mpz_class invz;
-                if (invm(Zs, invz) != 0) {
-                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                    write_result(); publish_json(); delete eng; return 0;
-                }
-                mpz_class xQ = mulm(Xs, invz);
+                if (invm(Zs, invz) == 0) { Qx = mulm(Xs, invz); Qz = 1; }
 
-                mpz_t xQ_tmp; mpz_init_set(xQ_tmp, xQ.get_mpz_t());
-                eng->set_mpz((engine::Reg)4, xQ_tmp);
-                mpz_clear(xQ_tmp);
-                eng->set((engine::Reg)5, 1u);
+                mpz_t tQx; mpz_init_set(tQx, Qx.get_mpz_t());
+                mpz_t tQz; mpz_init_set(tQz, Qz.get_mpz_t());
+                eng->set_mpz((engine::Reg)4, tQx);
+                eng->set_mpz((engine::Reg)5, tQz);
+                mpz_clear(tQx); mpz_clear(tQz);
+
                 eng->set((engine::Reg)0, 1u);
                 eng->set((engine::Reg)1, 0u);
                 eng->copy((engine::Reg)2, (engine::Reg)4);
@@ -1243,9 +1257,11 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
             } else {
                 std::ostringstream s2r; s2r << "[ECM] Curve " << (c+1) << "/" << curves
-                                           << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
+                                        << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
                 std::cout << s2r.str() << std::endl;
                 if (guiServer_) guiServer_->appendLog(s2r.str());
+                eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
+                eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
             }
 
             auto t2_0 = high_resolution_clock::now();
@@ -1259,27 +1275,6 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
             }
             uint64_t last2_ui_done = done_bits_est;
             double ema_ips_stage2 = 0.0;
-
-            auto normalize_for_next_chunk = [&](mpz_class& xOut)->int {
-                mpz_t tx, tz;
-                mpz_init(tx); mpz_init(tz);
-                eng->get_mpz(tx, (engine::Reg)0);
-                eng->get_mpz(tz, (engine::Reg)1);
-                mpz_class Xs(tx), Zs(tz);
-                mpz_clear(tx); mpz_clear(tz);
-
-                mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
-                if (gz > 1 && gz < N) {
-                    std::cout << "[ECM] Curve " << (c+1) << "/" << curves << " | factor=" << gz.get_str() << std::endl;
-                    result_factor = gz; result_status = "found";
-                    return 1;
-                }
-
-                mpz_class invz;
-                if (invm(Zs, invz) != 0) return -1;
-                xOut = mulm(Xs, invz);
-                return 0;
-            };
 
             bool stop_after_chunk = false;
             while (s2_idx < (uint32_t)primesS2_v.size()) {
@@ -1296,8 +1291,8 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 for (uint32_t i = 0; i < chunk_bits; ++i) {
                     const uint32_t bit = chunk_bits - 1 - i;
                     const int b = mpz_tstbit(Echunk.get_mpz_t(), bit) ? 1 : 0;
-                    if (b == 0) xDBLADD_strict(0,1, 2,3);
-                    else        xDBLADD_strict(2,3, 0,1);
+                    if (b == 0) xDBLADD_strict_s2(0,1, 2,3);
+                    else        xDBLADD_strict_s2(2,3, 0,1);
 
                     auto now2 = high_resolution_clock::now();
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i + 1 == chunk_bits) {
@@ -1315,10 +1310,10 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                         const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                         std::ostringstream line;
                         line << "\r[ECM] Curve " << (c+1) << "/" << curves
-                             << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
-                             << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
-                             << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
-                             << " | ETA " << fmt_hms(eta);
+                            << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
+                            << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                            << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                            << " | ETA " << fmt_hms(eta);
                         std::cout << line.str() << std::flush;
                         last2_ui_done = done_u;
                         last2_ui = now2;
@@ -1330,21 +1325,28 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 s2_idx = chunk_end;
 
                 if (s2_idx < (uint32_t)primesS2_v.size()) {
-                    mpz_class xNext;
-                    int nr = normalize_for_next_chunk(xNext);
-                    if (nr == 1) {
-                        std::cout << "\n";
-                        curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                        write_result(); publish_json(); delete eng; return 0;
+                    mpz_t tx, tz;
+                    mpz_init(tx); mpz_init(tz);
+                    eng->get_mpz(tx, (engine::Reg)0);
+                    eng->get_mpz(tz, (engine::Reg)1);
+                    mpz_class Xs(tx), Zs(tz);
+                    mpz_clear(tx); mpz_clear(tz);
+
+                    mpz_class gz; mpz_gcd(gz.get_mpz_t(), Zs.get_mpz_t(), N.get_mpz_t());
+                    if (gz > 1 && gz < N) {
+                        bool known = is_known(gz);
+                        std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gz.get_str() << std::endl;
+                        if (!known) { options.knownFactors.push_back(gz.get_str()); result_factor = gz; result_status = "found"; }
+                        else { result_factor = 0; result_status = "NF"; }
+                        curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
                     }
-                    if (nr < 0) {
-                        std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 normalization failed, retrying\n";
-                        delete eng; continue;
-                    }
-                    mpz_t xNext_tmp; mpz_init_set(xNext_tmp, xNext.get_mpz_t());
-                    eng->set_mpz((engine::Reg)4, xNext_tmp);
-                    mpz_clear(xNext_tmp);
-                    eng->set((engine::Reg)5, 1u);
+
+                    mpz_t tQx; mpz_init_set(tQx, Xs.get_mpz_t());
+                    mpz_t tQz; mpz_init_set(tQz, Zs.get_mpz_t());
+                    eng->set_mpz((engine::Reg)4, tQx);
+                    eng->set_mpz((engine::Reg)5, tQz);
+                    mpz_clear(tQx); mpz_clear(tQz);
+
                     eng->set((engine::Reg)0, 1u);
                     eng->set((engine::Reg)1, 0u);
                     eng->copy((engine::Reg)2, (engine::Reg)4);
@@ -1362,13 +1364,13 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
 
                 if (stop_after_chunk) {
                     std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
-                              << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
+                            << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
                     if (guiServer_) {
                         std::ostringstream oss;
                         oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
                         guiServer_->appendLog(oss.str());
                     }
-                    curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
+                    curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
                     write_result(); delete eng; return 0;
                 }
             }
@@ -1390,21 +1392,39 @@ uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
                 bool known = is_known(gg2);
                 std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gg2.get_str() << std::endl;
                 if (guiServer_) { std::ostringstream oss; oss << "[ECM] " << (known ? "Known " : "") << "factor: " << gg2.get_str(); guiServer_->appendLog(oss.str()); }
+
+                std::error_code ec;
+                fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+
+                curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+
                 if (!known) {
-                    std::error_code ec;
-                    fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
-                    result_factor = gg2; result_status = "found"; curves_tested_for_found = c+1; options.curves_tested_for_found = c+1;
-                    write_result(); publish_json(); delete eng; return 0;
+                    options.knownFactors.push_back(gg2.get_str());
+                    result_factor = gg2; result_status = "found";
+                    write_result(); publish_json();
+                } else {
+                    result_factor = 0; result_status = "NF";
+                    write_result(); publish_json();
                 }
             }
+            else{
+                result_factor=0; result_status="NF";
+                curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                write_result(); publish_json();
+            }
         }
+
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
     }
 
-    std::cout<<"[ECM] No factor found"<<std::endl;
-    write_result();
-    publish_json();
-    return 1;
+    if (result_status != "found") {
+        std::cout<<"[ECM] No factor found"<<std::endl;
+        write_result();
+        publish_json();
+        return 1;
+    }
+
+    return 0;
 }
