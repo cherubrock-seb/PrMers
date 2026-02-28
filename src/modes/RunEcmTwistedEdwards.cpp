@@ -556,6 +556,8 @@ int App::runECMMarinTwistedEdwards()
 
         {
             std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
+            const std::string nField = ("2^" + std::to_string(p) + "-1");
+
             if (!out) {
                 std::ostringstream oss;
                 oss << "[ECM] Warning: cannot append Stage1 resume to '" << ecm_stage1_resume_save_file << "'";
@@ -563,7 +565,7 @@ int App::runECMMarinTwistedEdwards()
                 if (guiServer_) guiServer_->appendLog(oss.str());
             } else {
                 out << "METHOD=ECM; B1=" << B1
-                    << "; N=" << N.get_str()
+                    << "; N=" << nField
                     << "; X=0x" << xred.get_str(16)
                     << "; A=" << Ared.get_str()
                     << "; CHECKSUM=" << chk_u

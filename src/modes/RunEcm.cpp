@@ -780,6 +780,7 @@ int App::runECMMarin()
                 chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
                 chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
                 const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
+                const std::string nField = ("2^" + std::to_string(p) + "-1");
 
                 std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
                 if (!out) {
@@ -789,7 +790,7 @@ int App::runECMMarin()
                     if (guiServer_) guiServer_->appendLog(oss.str());
                 } else {
                     out << "METHOD=ECM; B1=" << B1
-                        << "; N=" << N.get_str()
+                        << "; N=" << nField
                         << "; X=0x" << xAff.get_str(16)
                         << "; A=" << Aresume.get_str()
                         << "; CHECKSUM=" << chk_u
@@ -811,7 +812,8 @@ int App::runECMMarin()
                 chk *= mpz_class(mpz_fdiv_ui(xAff.get_mpz_t(), CHKSUMMOD));
                 const uint32_t chk_u = (uint32_t)mpz_fdiv_ui(chk.get_mpz_t(), CHKSUMMOD);
 
-                const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+                //const std::string nField = (N == N_full) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+                const std::string nField = ("2^" + std::to_string(p) + "-1");
 
                 std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
                 if (!outp) {
@@ -1334,7 +1336,8 @@ int App::runECMMarin()
                 if((B2 <= B1)){
                     result_factor=0; result_status="NF";
                     curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
-                    write_result(); publish_json();
+                    //write_result(); 
+                    //publish_json();
                 }
             }
         }
