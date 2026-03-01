@@ -1748,29 +1748,45 @@ static const char * const src_ocl_kernel = \
 "    __global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
 "    __global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);\n" \
 "    __global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);\n" \
-"    __local  uint64 cl[CWM_WG_SZ];\n" \
 "\n" \
-"    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"    __local uint64_4 lsum[CWM_WG_SZ];\n" \
+"    __local uint_8_4 lwd [CWM_WG_SZ];\n" \
+"    __local uint64_4 lout[CWM_WG_SZ];\n" \
+"\n" \
+"    const sz_t gid = (sz_t)get_global_id(0);\n" \
+"    const sz_t lid = (sz_t)get_local_id(0);\n" \
 "\n" \
 "    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
 "    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
 "    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
 "    const uint_8_4  wd = width4[gid];\n" \
 "\n" \
-"    uint64 c = 0;\n" \
-"    uint64_4 u  = mod_mul4(y[gid], wi);\n" \
-"    uint64_4 vx = mod_mul4(x[gid], wi);\n" \
-"    uint64_4 vn = neg_mp4(vx, wd);               // vn = Mp - X\n" \
+"    const uint64_4 uy = mod_mul4(y[gid], wi);\n" \
+"    const uint64_4 vx = mod_mul4(x[gid], wi);\n" \
+"    const uint64_4 vn = neg_mp4(vx, wd);\n" \
 "\n" \
-"    u = addc4(u, vn, wd, &c);                    \n" \
-"    cl[lid] = c;\n" \
+"    lsum[lid] = uy + vn;\n" \
+"    lwd[lid]  = wd;\n" \
 "    barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
-"    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
-"    y[gid] = mod_mul4(u, w);\n" \
-"    if (lid == CWM_WG_SZ - 1) {\n" \
-"        carry[(gid != N_SZ/4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
+"    if (lid == 0)\n" \
+"    {\n" \
+"        uint64 c = 0;\n" \
+"        for (uint t = 0; t < CWM_WG_SZ; ++t)\n" \
+"        {\n" \
+"            uint64_4 tmp = lsum[t];\n" \
+"            tmp = adc4_c(tmp, lwd[t], &c);\n" \
+"            lout[t] = tmp;\n" \
+"        }\n" \
+"        const sz_t grp = (sz_t)get_group_id(0);\n" \
+"        const sz_t ngr = (sz_t)get_num_groups(0);\n" \
+"        sz_t j = grp + 1;\n" \
+"        if (j == ngr) j = 0;\n" \
+"        carry[j] = c;\n" \
 "    }\n" \
+"    barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"    y[gid] = mod_mul4(lout[lid], w);\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \

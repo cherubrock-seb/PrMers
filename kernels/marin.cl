@@ -1738,29 +1738,45 @@ void carry_weight_add_neg_p1(__global uint64 * restrict reg, __global uint64 * r
     __global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);
     __global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);
     __global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);
-    __local  uint64 cl[CWM_WG_SZ];
 
-    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;
+    __local uint64_4 lsum[CWM_WG_SZ];
+    __local uint_8_4 lwd [CWM_WG_SZ];
+    __local uint64_4 lout[CWM_WG_SZ];
+
+    const sz_t gid = (sz_t)get_global_id(0);
+    const sz_t lid = (sz_t)get_local_id(0);
 
     uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);
     const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);
     const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);
     const uint_8_4  wd = width4[gid];
 
-    uint64 c = 0;
-    uint64_4 u  = mod_mul4(y[gid], wi);
-    uint64_4 vx = mod_mul4(x[gid], wi);
-    uint64_4 vn = neg_mp4(vx, wd);               // vn = Mp - X
+    const uint64_4 uy = mod_mul4(y[gid], wi);
+    const uint64_4 vx = mod_mul4(x[gid], wi);
+    const uint64_4 vn = neg_mp4(vx, wd);
 
-    u = addc4(u, vn, wd, &c);                    
-    cl[lid] = c;
+    lsum[lid] = uy + vn;
+    lwd[lid]  = wd;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);
-    y[gid] = mod_mul4(u, w);
-    if (lid == CWM_WG_SZ - 1) {
-        carry[(gid != N_SZ/4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;
+    if (lid == 0)
+    {
+        uint64 c = 0;
+        for (uint t = 0; t < CWM_WG_SZ; ++t)
+        {
+            uint64_4 tmp = lsum[t];
+            tmp = adc4_c(tmp, lwd[t], &c);
+            lout[t] = tmp;
+        }
+        const sz_t grp = (sz_t)get_group_id(0);
+        const sz_t ngr = (sz_t)get_num_groups(0);
+        sz_t j = grp + 1;
+        if (j == ngr) j = 0;
+        carry[j] = c;
     }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    y[gid] = mod_mul4(lout[lid], w);
 }
 
 __kernel
