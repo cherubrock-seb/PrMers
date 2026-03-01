@@ -2056,7 +2056,7 @@ int App::runECMMarinTwistedEdwards()
                 }
                 else{
                     std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
-                }/*    if (have_last_good_state) {
+                    if (have_last_good_state) {
                         options.invarianterror += 1;
                         std::cout << "[ECM] Restoring last known good state at iteration "
                                   << last_good_iter << " and retrying from there." << std::endl;
@@ -2077,7 +2077,7 @@ int App::runECMMarinTwistedEdwards()
                     }
                     fatal_error = true;
                     break;
-                }*/
+                }
                     last_check = now;
             }
             if (duration_cast<milliseconds>(now - last_ui).count() >= progress_interval_ms || i+1 == total_steps) {
