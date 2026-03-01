@@ -40,9 +40,9 @@ struct CliOptions {
     uint64_t gerbicz_error_count = 0;
     uint64_t erroriter = 0;
     bool proof = true;
-    bool edwards = true;
+    bool edwards = false;
     uint32_t ecm_check_interval = 300;
-    bool compute_edwards = false;
+    bool compute_edwards = true;
     bool torsion16 = false;
     bool notorsion = true;
     std::string sigma;
