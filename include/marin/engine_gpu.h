@@ -610,6 +610,11 @@ private:
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
 
+	bool avoid_fused_x2_path() const
+	{
+		return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
+	}
+
 public:
 	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
 		_reg_count(reg_count), _n(ibdwt::transform_size(q))
@@ -1118,16 +1123,25 @@ public:
 
 	void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
 	{
-		set_multiplicand2(dst0, dst0);
-		set_multiplicand2(dst1, dst1);
+		if (!avoid_fused_x2_path())
+		{
+			set_multiplicand2(dst0, dst0);
+			set_multiplicand2(dst1, dst1);
+
+			set_multiplicand(src0, src0);
+			set_multiplicand(src1, src1);
+
+			mul_new_core(dst0, src0);
+			mul_new_core(dst1, src1);
+
+			_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
+			return;
+		}
 
 		set_multiplicand(src0, src0);
+		mul(dst0, src0);
 		set_multiplicand(src1, src1);
-
-		mul_new_core(dst0, src0);
-		mul_new_core(dst1, src1);
-
-		_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
+		mul(dst1, src1);
 	}
 	void mul_add(const Reg rdst, const Reg rsrc, const Reg radd, const uint32 a = 1) const override
 	{
@@ -1264,19 +1278,41 @@ public:
 
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
-		_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
+		if (!avoid_fused_x2_path())
+		{
+			_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
+			return;
+		}
+
+		copy(sum_out, a);
+		add(sum_out, b);
+
+		copy(diff_out, a);
+		sub_reg(diff_out, b);
 	}
 
 	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 					const Reg a, const Reg b) const override
 	{
-		_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
+		if (!avoid_fused_x2_path())
+		{
+			_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
+			return;
+		}
+
+		copy(sum, a);
+		add(sum, b);
+		copy(sum_copy, sum);
+
+		copy(diff, a);
+		sub_reg(diff, b);
+		copy(diff_copy, diff);
 	}
 	void mul_pair_prepared(const Reg rdst0, const Reg rsrc0,
 						const Reg rdst1, const Reg rsrc1,
 						const uint32 a0 = 1, const uint32 a1 = 1) const override
 	{
-		if ((a0 != 1) || (a1 != 1))
+		if ((a0 != 1) || (a1 != 1) || avoid_fused_x2_path())
 		{
 			mul(rdst0, rsrc0, a0);
 			mul(rdst1, rsrc1, a1);
