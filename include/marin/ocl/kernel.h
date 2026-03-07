@@ -206,6 +206,16 @@ static const char * const src_ocl_kernel = \
 "	*carry = borrow ? 1 : 0;\n" \
 "	return r;\n" \
 "}\n" \
+"INLINE uint64 sbc_reg(const uint64 lhs, const uint64 rhs, const uint_8 width, uint32 * const carry)\n" \
+"{\n" \
+"	const uint64 sub = rhs + (uint64)(*carry);\n" \
+"	const bool borrow = (lhs < sub);\n" \
+"	const uint64 base = (width < 64) ? ((uint64)1 << width) : 0ul;\n" \
+"	const uint64 r = lhs - sub + (borrow ? base : 0ul);\n" \
+"	*carry = borrow ? 1u : 0u;\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
 "\n" \
 "// --- transform - inline ---\n" \
 "\n" \
@@ -2108,6 +2118,35 @@ static const char * const src_ocl_kernel = \
 "			const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
 "			x[k] = mod_mul(sbc(mod_mul(x[k], w.s1), width[k], &c), w.s0);\n" \
 "			if (c == 0) return;\n" \
+"		}\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void subtract_reg(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,\n" \
+"	__global const uint_8 * restrict const width, const sz_t offset_y, const sz_t offset_x)\n" \
+"{\n" \
+"	__global uint64 * restrict const y = &reg[offset_y];\n" \
+"	__global const uint64 * restrict const x = &reg[offset_x];\n" \
+"	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"\n" \
+"	uint32 b = 0;\n" \
+"	for (size_t k = 0; k < N_SZ; ++k)\n" \
+"	{\n" \
+"		const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
+"		const uint64 yu = mod_mul(y[k], w.s1);\n" \
+"		const uint64 xu = mod_mul(x[k], w.s1);\n" \
+"		y[k] = mod_mul(sbc_reg(yu, xu, width[k], &b), w.s0);\n" \
+"	}\n" \
+"\n" \
+"	while (b != 0)\n" \
+"	{\n" \
+"		for (size_t k = 0; k < N_SZ; ++k)\n" \
+"		{\n" \
+"			const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
+"			const uint64 yu = mod_mul(y[k], w.s1);\n" \
+"			y[k] = mod_mul(sbc(yu, width[k], &b), w.s0);\n" \
+"			if (b == 0) return;\n" \
 "		}\n" \
 "	}\n" \
 "}\n" \

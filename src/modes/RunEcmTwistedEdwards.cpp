@@ -2046,22 +2046,20 @@ int App::runECMMarinTwistedEdwards()
                 }
             }
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval || i+1 == total_steps) {
-
-                std::cout<<"\n[ECM] Error check ...."<<std::endl;
-                // remember which iteration this invariant corresponds to
+            if ((options.ecm_check_interval < 0 && i + 1 == total_steps) ||
+                (options.ecm_check_interval > 0 &&
+                (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval || i + 1 == total_steps))) {
+                std::cout << "\n[ECM] Error check ...." << std::endl;
                 current_iter_for_invariant = i + 1;
-                if(check_invariant()){
-                    std::cout<<"[ECM] Error check Done ! ...."<<std::endl;
-                }
-                else{
-                    std::cout<<"[ECM] Error detected!!!!!!!! ...."<<std::endl;
+                if (check_invariant()) {
+                    std::cout << "[ECM] Error check Done ! ...." << std::endl;
+                } else {
+                    std::cout << "[ECM] Error detected!!!!!!!! ...." << std::endl;
                     if (have_last_good_state) {
                         options.invarianterror += 1;
                         std::cout << "[ECM] Restoring last known good state at iteration "
-                                  << last_good_iter << " and retrying from there." << std::endl;
+                                << last_good_iter << " and retrying from there." << std::endl;
                         if (eng->set_checkpoint(last_good_state)) {
-                            // rewind loop to last_good_iter so it will be processed again
                             i = (last_good_iter > 0) ? (last_good_iter - 1) : 0;
                             last_check = now;
                             last_save  = now;
@@ -2078,7 +2076,7 @@ int App::runECMMarinTwistedEdwards()
                     fatal_error = true;
                     break;
                 }
-                    last_check = now;
+                last_check = now;
             }
             if (duration_cast<milliseconds>(now - last_ui).count() >= progress_interval_ms || i+1 == total_steps) {
                 const size_t done_u = i + 1;

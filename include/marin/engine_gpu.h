@@ -61,7 +61,7 @@ private:
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
 	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
-	cl_kernel _copy = nullptr, _subtract = nullptr;
+	cl_kernel _copy = nullptr, _subtract = nullptr, _subtract_reg = nullptr;
 	cl_kernel _carry_weight_muladd_p1 = nullptr, _carry_weight_muladd_p2 = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -335,6 +335,12 @@ public:
 		_set_kernel_arg(_subtract, 1, sizeof(cl_mem), &_weight);
 		_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract);
+
+		_subtract_reg = _create_kernel("subtract_reg");
+		_set_kernel_arg(_subtract_reg, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
+		_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
+		_kernels.push_back(_subtract_reg);
 	}
 
 	void release_kernels()
@@ -598,6 +604,14 @@ public:
 		_set_kernel_arg(_subtract, 3, sizeof(uint32), &offset);
 		_set_kernel_arg(_subtract, 4, sizeof(uint32), &a);
 		_execute_kernel(_subtract, 1);
+	}
+
+	void subtract_reg_strong(const size_t dst, const size_t src)
+	{
+		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		_set_kernel_arg(_subtract_reg, 3, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_subtract_reg, 4, sizeof(uint32), &offset_x);
+		_execute_kernel(_subtract_reg, 1);
 	}
 };
 
@@ -1273,6 +1287,11 @@ public:
 	
 	void sub_reg(const Reg dst, const Reg src) const override 
 	{ 
+		if (avoid_fused_x2_path())
+		{
+			_gpu->subtract_reg_strong(size_t(dst), size_t(src));
+			return;
+		}
 		_gpu->carry_weight_sub(size_t(dst), size_t(src)); 
 	}
 
