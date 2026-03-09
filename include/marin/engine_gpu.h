@@ -7,6 +7,9 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #pragma once
 
+#include <cstdlib>
+#include <cstring>
+
 #include "engine.h"
 #include "ibdwt.h"
 #include "ocl.h"
@@ -60,7 +63,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr, _subtract_reg = nullptr;
 	cl_kernel _carry_weight_muladd_p1 = nullptr, _carry_weight_muladd_p2 = nullptr;
 
@@ -318,6 +321,8 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_add_p1);
 		CREATE_KERNEL_CARRY(carry_weight_add_neg_p1);
 		CREATE_KERNEL_CARRY(carry_weight_p2);
+		CREATE_KERNEL_CARRY(carry_weight_sub_p2);
+			CREATE_KERNEL_CARRY(carry_weight_sub_p2_phase);
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p1);
 		CREATE_KERNEL_CARRY(carry_weight_p2x2);
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1_copy);
@@ -329,7 +334,6 @@ public:
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
 		_kernels.push_back(_copy);
-
 		_subtract = _create_kernel("subtract");
 		_set_kernel_arg(_subtract, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(_subtract, 1, sizeof(cl_mem), &_weight);
@@ -341,6 +345,7 @@ public:
 		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
 		_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract_reg);
+
 	}
 
 	void release_kernels()
@@ -534,6 +539,40 @@ public:
 
 	}
 
+	void carry_weight_sub_safe(const size_t dst, const size_t src)
+	{
+		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+
+		// P1: Y := Y + (Mp - X)  (Y - X without negatives), store group carries in _carry
+		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
+		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
+
+		// P2: propagate carries across work-groups using an even/odd two-phase schedule
+		_set_kernel_arg(_carry_weight_sub_p2_phase, 4, sizeof(uint32), &offset_y);
+
+		unsigned rounds = 16;
+		if (const char *s = std::getenv("MARIN_SUBSAFE_ROUNDS"))
+		{
+			const unsigned v = (unsigned)std::strtoul(s, nullptr, 10);
+			if (v != 0) rounds = v;
+		}
+
+		const size_t ngr = (_n / 4) >> _lcwm_wg_size; // number of groups
+		if (rounds > ngr) rounds = (unsigned)ngr;
+
+		for (unsigned r = 0; r < rounds; ++r)
+		{
+			uint32 phase = 0;
+			_set_kernel_arg(_carry_weight_sub_p2_phase, 5, sizeof(uint32), &phase);
+			_execute_kernel(_carry_weight_sub_p2_phase, ngr);
+
+			phase = 1;
+			_set_kernel_arg(_carry_weight_sub_p2_phase, 5, sizeof(uint32), &phase);
+			_execute_kernel(_carry_weight_sub_p2_phase, ngr);
+		}
+	}
+
 	
 	void carry_weight_addsub(const size_t sum, const size_t diff, const size_t a, const size_t b)
 	{
@@ -608,6 +647,11 @@ public:
 
 	void subtract_reg_strong(const size_t dst, const size_t src)
 	{
+		if (_subtract_reg == nullptr)
+		{
+			carry_weight_sub(dst, src);
+			return;
+		}
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
 		_set_kernel_arg(_subtract_reg, 3, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_subtract_reg, 4, sizeof(uint32), &offset_x);
@@ -623,11 +667,6 @@ private:
 	gpu * _gpu;
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
-
-	bool avoid_fused_x2_path() const
-	{
-		return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
-	}
 
 public:
 	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
@@ -1137,25 +1176,11 @@ public:
 
 	void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
 	{
-		if (!avoid_fused_x2_path())
-		{
-			set_multiplicand2(dst0, dst0);
-			set_multiplicand2(dst1, dst1);
-
-			set_multiplicand(src0, src0);
-			set_multiplicand(src1, src1);
-
-			mul_new_core(dst0, src0);
-			mul_new_core(dst1, src1);
-
-			_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
-			return;
-		}
-
 		set_multiplicand(src0, src0);
-		mul(dst0, src0);
+		mul_new_core(size_t(dst0), size_t(src0));
 		set_multiplicand(src1, src1);
-		mul(dst1, src1);
+		mul_new_core(size_t(dst1), size_t(src1));
+		_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
 	}
 	void mul_add(const Reg rdst, const Reg rsrc, const Reg radd, const uint32 a = 1) const override
 	{
@@ -1285,24 +1310,19 @@ public:
 		_gpu->carry_weight_add(dst, src);
 	}
 	
-	void sub_reg(const Reg dst, const Reg src) const override 
-	{ 
-		if (avoid_fused_x2_path())
+	void sub_reg(const Reg dst, const Reg src) const override
+	{
+		if (dst == src)
 		{
-			_gpu->subtract_reg_strong(size_t(dst), size_t(src));
+			set(dst, 0u);
 			return;
 		}
-		_gpu->carry_weight_sub(size_t(dst), size_t(src)); 
+
+		_gpu->carry_weight_sub_safe(size_t(dst), size_t(src));
 	}
 
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
-		if (!avoid_fused_x2_path())
-		{
-			_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
-			return;
-		}
-
 		copy(sum_out, a);
 		add(sum_out, b);
 
@@ -1313,12 +1333,6 @@ public:
 	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 					const Reg a, const Reg b) const override
 	{
-		if (!avoid_fused_x2_path())
-		{
-			_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
-			return;
-		}
-
 		copy(sum, a);
 		add(sum, b);
 		copy(sum_copy, sum);
@@ -1331,19 +1345,16 @@ public:
 						const Reg rdst1, const Reg rsrc1,
 						const uint32 a0 = 1, const uint32 a1 = 1) const override
 	{
-		if ((a0 != 1) || (a1 != 1) || avoid_fused_x2_path())
+		if ((a0 != 1) || (a1 != 1))
 		{
 			mul(rdst0, rsrc0, a0);
 			mul(rdst1, rsrc1, a1);
 			return;
 		}
 
-		const size_t dst0 = size_t(rdst0), src0 = size_t(rsrc0);
-		const size_t dst1 = size_t(rdst1), src1 = size_t(rsrc1);
-
-		mul_new_core(dst0, src0);
-		mul_new_core(dst1, src1);
-		_gpu->carry_weight_mul2_unit(dst0, dst1);
+		mul_new_core(size_t(rdst0), size_t(rsrc0));
+		mul_new_core(size_t(rdst1), size_t(rsrc1));
+		_gpu->carry_weight_mul2_unit(size_t(rdst0), size_t(rdst1));
 	}
 
 	void xdbl_tail_uv(const Reg x_out, const Reg z_out,

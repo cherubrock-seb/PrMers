@@ -2046,7 +2046,7 @@ int App::runECMMarinTwistedEdwards()
                 }
             }
             auto now = high_resolution_clock::now();
-            if ((options.ecm_check_interval < 0 && i + 1 == total_steps) ||
+            if ((options.ecm_check_interval <= 0 && i + 1 == total_steps) ||
                 (options.ecm_check_interval > 0 &&
                 (duration_cast<seconds>(now - last_check).count() >= options.ecm_check_interval || i + 1 == total_steps))) {
                 std::cout << "\n[ECM] Error check ...." << std::endl;

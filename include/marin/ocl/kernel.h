@@ -174,6 +174,56 @@ static const char * const src_ocl_kernel = \
 "    return r;\n" \
 "}\n" \
 "\n" \
+"\n" \
+"INLINE long carry_shift_signed(const long t, const uint bits, const uint64 mask)\n" \
+"{\n" \
+"	if (bits >= 64u) return 0;\n" \
+"	if (t >= 0) return (t >> bits);\n" \
+"	return -(long)((((uint64)(-t)) + mask) >> bits);\n" \
+"}\n" \
+"\n" \
+"INLINE uint64 sub_digit_exact_mp(const uint64 yv, const uint64 xv, const uint bits, long * const carry)\n" \
+"{\n" \
+"	const uint64 m = mask_w(bits);\n" \
+"	const uint64 ylo = yv & m;\n" \
+"	const uint64 xlo = xv & m;\n" \
+"	const long yhi = (bits >= 64u) ? 0 : (long)(yv >> bits);\n" \
+"	const long xhi = (bits >= 64u) ? 0 : (long)(xv >> bits);\n" \
+"	const long t = (long)ylo + (long)(m - xlo) + *carry;\n" \
+"	const uint64 out = ((uint64)t) & m;\n" \
+"	*carry = carry_shift_signed(t, bits, m) + yhi - xhi;\n" \
+"	return out;\n" \
+"}\n" \
+"\n" \
+"INLINE uint64 add_signed_digit_exact(const uint64 v, const uint bits, long * const carry)\n" \
+"{\n" \
+"	const uint64 m = mask_w(bits);\n" \
+"	const long t = (long)(v & m) + *carry;\n" \
+"	const uint64 out = ((uint64)t) & m;\n" \
+"	*carry = carry_shift_signed(t, bits, m);\n" \
+"	return out;\n" \
+"}\n" \
+"\n" \
+"INLINE uint64_4 sub4_exact_mp(const uint64_4 yv, const uint64_4 xv, const uint_8_4 wd, long * const carry)\n" \
+"{\n" \
+"	uint64_4 r;\n" \
+"	r.s0 = sub_digit_exact_mp(yv.s0, xv.s0, (uint)wd.s0, carry);\n" \
+"	r.s1 = sub_digit_exact_mp(yv.s1, xv.s1, (uint)wd.s1, carry);\n" \
+"	r.s2 = sub_digit_exact_mp(yv.s2, xv.s2, (uint)wd.s2, carry);\n" \
+"	r.s3 = sub_digit_exact_mp(yv.s3, xv.s3, (uint)wd.s3, carry);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
+"INLINE uint64_4 add_signed4_exact(const uint64_4 v, const uint_8_4 wd, long * const carry)\n" \
+"{\n" \
+"	uint64_4 r;\n" \
+"	r.s0 = add_signed_digit_exact(v.s0, (uint)wd.s0, carry);\n" \
+"	r.s1 = add_signed_digit_exact(v.s1, (uint)wd.s1, carry);\n" \
+"	r.s2 = add_signed_digit_exact(v.s2, (uint)wd.s2, carry);\n" \
+"	r.s3 = add_signed_digit_exact(v.s3, (uint)wd.s3, carry);\n" \
+"	return r;\n" \
+"}\n" \
+"\n" \
 "INLINE uint64_4 adc_mul4(const uint64_4 lhs, const uint32 a, const uint_8_4 width, uint64 * const carry)\n" \
 "{\n" \
 "	uint64_4 r;\n" \
@@ -206,16 +256,15 @@ static const char * const src_ocl_kernel = \
 "	*carry = borrow ? 1 : 0;\n" \
 "	return r;\n" \
 "}\n" \
+"\n" \
 "INLINE uint64 sbc_reg(const uint64 lhs, const uint64 rhs, const uint_8 width, uint32 * const carry)\n" \
 "{\n" \
 "	const uint64 sub = rhs + (uint64)(*carry);\n" \
 "	const bool borrow = (lhs < sub);\n" \
-"	const uint64 base = (width < 64) ? ((uint64)1 << width) : 0ul;\n" \
-"	const uint64 r = lhs - sub + (borrow ? base : 0ul);\n" \
+"	const uint64 r = lhs - sub + (borrow ? (((uint64)1) << width) : 0);\n" \
 "	*carry = borrow ? 1u : 0u;\n" \
 "	return r;\n" \
 "}\n" \
-"\n" \
 "\n" \
 "// --- transform - inline ---\n" \
 "\n" \
@@ -1684,7 +1733,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t grp = (sz_t)get_group_id(0);\n" \
 "	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
 "\n" \
-"	__local uint2 lcc[CWM_WG_SZ];\n" \
+"	__local uint64_2 lcc[CWM_WG_SZ];\n" \
 "\n" \
 "	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
 "	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
@@ -1699,13 +1748,13 @@ static const char * const src_ocl_kernel = \
 "	u0 = adc_mul4(u0, 1u, wd, &c0);\n" \
 "	u1 = adc_mul4(u1, 1u, wd, &c1);\n" \
 "\n" \
-"	lcc[lid] = (uint2)((uint)c0, (uint)c1);\n" \
+"	lcc[lid] = (uint64_2)(c0, c1);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
-"	const uint2 prev = (lid == 0) ? (uint2)(0u, 0u) : lcc[lid - 1];\n" \
+"	const uint64_2 prev = (lid == 0) ? (uint64_2)(0ul, 0ul) : lcc[lid - 1];\n" \
 "\n" \
-"	u0 = adc4(u0, wd, (uint64)prev.x);\n" \
-"	u1 = adc4(u1, wd, (uint64)prev.y);\n" \
+"	u0 = adc4(u0, wd, prev.s0);\n" \
+"	u1 = adc4(u1, wd, prev.s1);\n" \
 "\n" \
 "	x0[gid] = mod_mul4(u0, w);\n" \
 "	x1[gid] = mod_mul4(u1, w);\n" \
@@ -1714,9 +1763,12 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		uint j = (uint)(grp + 1u);\n" \
 "		if (j == (uint)ngr) j = 0u;\n" \
-"		carry[j] = (uint64)((uint64)lcc[lid].x | ((uint64)lcc[lid].y << 32));\n" \
+"\n" \
+"		carry[j] = lcc[lid].s0;\n" \
+"		carry[j + ngr] = lcc[lid].s1;\n" \
 "	}\n" \
 "}\n" \
+"\n" \
 "\n" \
 "__kernel\n" \
 "void carry_weight_p2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
@@ -1751,36 +1803,48 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_add_neg_p1(__global uint64 * restrict reg, __global uint64 * restrict carry,\n" \
-"    __global const uint64 * restrict weight, __global const uint_8 * restrict width,\n" \
-"    const sz_t offset_y, const sz_t offset_x)\n" \
+"	__global const uint64 * restrict weight, __global const uint_8 * restrict width,\n" \
+"	const sz_t offset_y, const sz_t offset_x)\n" \
 "{\n" \
-"    __global uint64_4 * restrict y = (__global uint64_4 *)(&reg[offset_y]);\n" \
-"    __global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
-"    __global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);\n" \
-"    __global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);\n" \
-"    __local  uint64 cl[CWM_WG_SZ];\n" \
+"	__global uint64_4 * restrict y = (__global uint64_4 *)(&reg[offset_y]);\n" \
+"	__global const uint64_4 * restrict x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
+"	__global const uint64_2 * restrict weight2 = (__global const uint64_2 *)(weight);\n" \
+"	__global const uint_8_4 * restrict width4  = (__global const uint_8_4 *)(width);\n" \
 "\n" \
-"    const sz_t gid = (sz_t)get_global_id(0), lid = gid % CWM_WG_SZ;\n" \
+"	const sz_t gid = (sz_t)get_global_id(0);\n" \
+"	const sz_t lid = (sz_t)get_local_id(0);\n" \
+"	const sz_t grp = (sz_t)get_group_id(0);\n" \
+"	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
+"	const sz_t base = grp * (sz_t)CWM_WG_SZ;\n" \
 "\n" \
-"    uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
-"    const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
-"    const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
-"    const uint_8_4  wd = width4[gid];\n" \
+"	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
+"	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
 "\n" \
-"    uint64 c = 0;\n" \
-"    uint64_4 u  = mod_mul4(y[gid], wi);\n" \
-"    uint64_4 vx = mod_mul4(x[gid], wi);\n" \
-"    uint64_4 vn = neg_mp4(vx, wd);               // vn = Mp - X\n" \
+"	__local uint64_4 lY[CWM_WG_SZ];\n" \
+"	__local uint64_4 lX[CWM_WG_SZ];\n" \
 "\n" \
-"    u = addc4(u, vn, wd, &c);                    \n" \
-"    cl[lid] = c;\n" \
-"    barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"	lY[lid] = mod_mul4(y[gid], wi);\n" \
+"	lX[lid] = mod_mul4(x[gid], wi);\n" \
 "\n" \
-"    u = adc4(u, wd, (lid == 0) ? 0 : cl[lid - 1]);\n" \
-"    y[gid] = mod_mul4(u, w);\n" \
-"    if (lid == CWM_WG_SZ - 1) {\n" \
-"        carry[(gid != N_SZ/4 - 1) ? gid / CWM_WG_SZ + 1 : 0] = c;\n" \
-"    }\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
+"\n" \
+"	if (lid == 0)\n" \
+"	{\n" \
+"		long c = 0;\n" \
+"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		{\n" \
+"			const sz_t id = base + t;\n" \
+"			uint64_2 ww2[4]; loadg2(4, ww2, &weight2[id], N_SZ / 4);\n" \
+"			const uint64_4 w  = (uint64_4)(ww2[0].s0, ww2[1].s0, ww2[2].s0, ww2[3].s0);\n" \
+"			const uint_8_4  wd = width4[id];\n" \
+"			const uint64_4 u = sub4_exact_mp(lY[t], lX[t], wd, &c);\n" \
+"			y[id] = mod_mul4(u, w);\n" \
+"		}\n" \
+"\n" \
+"		uint j = (uint)(grp + 1u);\n" \
+"		if (j == (uint)ngr) j = 0u;\n" \
+"		carry[j] = as_ulong(c);\n" \
+"	}\n" \
 "}\n" \
 "\n" \
 "__kernel\n" \
@@ -1791,48 +1855,58 @@ static const char * const src_ocl_kernel = \
 "{\n" \
 "	__global uint64_4 * restrict const yS = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const yD = (__global uint64_4 *)(&reg[off_diff]);\n" \
-"	__global const uint64_4 * restrict const a = (__global const uint64_4 *)(&reg[off_a]);\n" \
-"	__global const uint64_4 * restrict const b = (__global const uint64_4 *)(&reg[off_b]);\n" \
+"	__global const uint64_4 * restrict const a  = (__global const uint64_4 *)(&reg[off_a]);\n" \
+"	__global const uint64_4 * restrict const b  = (__global const uint64_4 *)(&reg[off_b]);\n" \
 "	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
-"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"	__global const uint_8_4 * restrict const width4  = (__global const uint_8_4 *)(width);\n" \
 "\n" \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
 "	const sz_t lid = (sz_t)get_local_id(0);\n" \
 "	const sz_t grp = (sz_t)get_group_id(0);\n" \
 "	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
+"	const sz_t base = grp * (sz_t)CWM_WG_SZ;\n" \
 "\n" \
-"	__local uint2 lcc[CWM_WG_SZ];\n" \
-"\n" \
+"	// Unweight operands in parallel\n" \
 "	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
-"	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
 "	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
-"	const uint_8_4 wd = width4[gid];\n" \
 "\n" \
-"	uint64 cS = 0, cD = 0;\n" \
-"	const uint64_4 av = mod_mul4(a[gid], wi);\n" \
-"	const uint64_4 bv = mod_mul4(b[gid], wi);\n" \
-"	const uint64_4 nb = neg_mp4(bv, wd);\n" \
+"	__local uint64_4 lA[CWM_WG_SZ];\n" \
+"	__local uint64_4 lB[CWM_WG_SZ];\n" \
 "\n" \
-"	uint64_4 uS = addc4(av, bv, wd, &cS);\n" \
-"	uint64_4 uD = addc4(av, nb, wd, &cD);\n" \
+"	lA[lid] = mod_mul4(a[gid], wi);\n" \
+"	lB[lid] = mod_mul4(b[gid], wi);\n" \
 "\n" \
-"	lcc[lid] = (uint2)((uint)cS, (uint)cD);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
-"	const uint2 prev = (lid == 0) ? (uint2)(0u,0u) : lcc[lid - 1];\n" \
-"	uS = adc4(uS, wd, (uint64)prev.x);\n" \
-"	uD = adc4(uD, wd, (uint64)prev.y);\n" \
-"\n" \
-"	yS[gid] = mod_mul4(uS, w);\n" \
-"	yD[gid] = mod_mul4(uD, w);\n" \
-"\n" \
-"	if (lid == (CWM_WG_SZ - 1))\n" \
+"	if (lid == 0)\n" \
 "	{\n" \
+"		uint64 cS = 0, cD = 0;\n" \
+"\n" \
+"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		{\n" \
+"			const sz_t id = base + t;\n" \
+"\n" \
+"			uint64_2 ww2[4]; loadg2(4, ww2, &weight2[id], N_SZ / 4);\n" \
+"			const uint64_4 w  = (uint64_4)(ww2[0].s0, ww2[1].s0, ww2[2].s0, ww2[3].s0);\n" \
+"			const uint_8_4  wd = width4[id];\n" \
+"\n" \
+"			const uint64_4 uS = addc4(lA[t], lB[t], wd, &cS);\n" \
+"			const uint64_4 nb = neg_mp4(lB[t], wd);\n" \
+"			const uint64_4 uD = addc4(lA[t], nb, wd, &cD);\n" \
+"\n" \
+"			yS[id] = mod_mul4(uS, w);\n" \
+"			yD[id] = mod_mul4(uD, w);\n" \
+"		}\n" \
+"\n" \
 "		uint j = (uint)(grp + 1u);\n" \
 "		if (j == (uint)ngr) j = 0u;\n" \
-"		carry[j] = (uint64)((uint64)lcc[lid].x | ((uint64)lcc[lid].y << 32));\n" \
+"\n" \
+"		// two carry streams: [0..ngr-1] for SUM, [ngr..2*ngr-1] for DIFF\n" \
+"		carry[j] = cS;\n" \
+"		carry[j + ngr] = cD;\n" \
 "	}\n" \
 "}\n" \
+"\n" \
 "\n" \
 "__kernel\n" \
 "void carry_weight_p2x2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
@@ -1852,18 +1926,26 @@ static const char * const src_ocl_kernel = \
 "	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
 "	const uint_8_4 wd = width4[id];\n" \
 "\n" \
-"	const uint64 packed = carry[gid];\n" \
-"	const uint cs = (uint)(packed & 0xffffffffUL);\n" \
-"	const uint cd = (uint)(packed >> 32);\n" \
+"	const sz_t ngr = (sz_t)get_global_size(0);\n" \
 "\n" \
-"	uint64_4 us = mod_mul4(xs[id], wi);\n" \
-"	us = adc4(us, wd, (uint64)cs);\n" \
-"	xs[id] = mod_mul4(us, w);\n" \
+"	const uint64 cs = carry[gid];\n" \
+"	const uint64 cd = carry[gid + ngr];\n" \
 "\n" \
-"	uint64_4 ud = mod_mul4(xd[id], wi);\n" \
-"	ud = adc4(ud, wd, (uint64)cd);\n" \
-"	xd[id] = mod_mul4(ud, w);\n" \
+"	if (cs != 0)\n" \
+"	{\n" \
+"		uint64_4 us = mod_mul4(xs[id], wi);\n" \
+"		us = adc4(us, wd, cs);\n" \
+"		xs[id] = mod_mul4(us, w);\n" \
+"	}\n" \
+"\n" \
+"	if (cd != 0)\n" \
+"	{\n" \
+"		uint64_4 ud = mod_mul4(xd[id], wi);\n" \
+"		ud = adc4(ud, wd, cd);\n" \
+"		xd[id] = mod_mul4(ud, w);\n" \
+"	}\n" \
 "}\n" \
+"\n" \
 "\n" \
 "__kernel\n" \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
@@ -1876,50 +1958,62 @@ static const char * const src_ocl_kernel = \
 "	__global uint64_4 * restrict const yD  = (__global uint64_4 *)(&reg[off_diff]);\n" \
 "	__global uint64_4 * restrict const ySc = (__global uint64_4 *)(&reg[off_sum_copy]);\n" \
 "	__global uint64_4 * restrict const yDc = (__global uint64_4 *)(&reg[off_diff_copy]);\n" \
-"	__global const uint64_4 * restrict const a = (__global const uint64_4 *)(&reg[off_a]);\n" \
-"	__global const uint64_4 * restrict const b = (__global const uint64_4 *)(&reg[off_b]);\n" \
+"	__global const uint64_4 * restrict const a  = (__global const uint64_4 *)(&reg[off_a]);\n" \
+"	__global const uint64_4 * restrict const b  = (__global const uint64_4 *)(&reg[off_b]);\n" \
 "	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
-"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"	__global const uint_8_4 * restrict const width4  = (__global const uint_8_4 *)(width);\n" \
 "\n" \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
 "	const sz_t lid = (sz_t)get_local_id(0);\n" \
+"	const sz_t grp = (sz_t)get_group_id(0);\n" \
+"	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
+"	const sz_t base = grp * (sz_t)CWM_WG_SZ;\n" \
 "\n" \
-"	__local uint2 lcc[CWM_WG_SZ];\n" \
-"\n" \
+"	// Unweight operands in parallel\n" \
 "	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
-"	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
 "	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
-"	const uint_8_4 wd = width4[gid];\n" \
 "\n" \
-"	const uint64_4 av = mod_mul4(a[gid], wi);\n" \
-"	const uint64_4 bv = mod_mul4(b[gid], wi);\n" \
-"	const uint64_4 nb = neg_mp4(bv, wd);\n" \
+"	__local uint64_4 lA[CWM_WG_SZ];\n" \
+"	__local uint64_4 lB[CWM_WG_SZ];\n" \
 "\n" \
-"	uint64 cS = 0, cD = 0;\n" \
-"	uint64_4 uS = addc4(av, bv, wd, &cS);\n" \
-"	uint64_4 uD = addc4(av, nb, wd, &cD);\n" \
+"	lA[lid] = mod_mul4(a[gid], wi);\n" \
+"	lB[lid] = mod_mul4(b[gid], wi);\n" \
 "\n" \
-"	lcc[lid] = (uint2)((uint)cS,(uint)cD);\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
-"	const uint2 prev = (lid == 0) ? (uint2)(0u,0u) : lcc[lid - 1];\n" \
-"	uS = adc4(uS, wd, (uint64)prev.x);\n" \
-"	uD = adc4(uD, wd, (uint64)prev.y);\n" \
-"\n" \
-"	const uint64_4 outS = mod_mul4(uS, w);\n" \
-"	const uint64_4 outD = mod_mul4(uD, w);\n" \
-"\n" \
-"	yS [gid] = outS;\n" \
-"	yD [gid] = outD;\n" \
-"	ySc[gid] = outS;\n" \
-"	yDc[gid] = outD;\n" \
-"\n" \
-"	if (lid == (CWM_WG_SZ - 1))\n" \
+"	if (lid == 0)\n" \
 "	{\n" \
-"		const sz_t j = ((gid != N_SZ / 4 - 1) ? (gid / CWM_WG_SZ + 1) : 0);\n" \
-"		carry[j] = (uint64)((uint64)lcc[lid].x | ((uint64)lcc[lid].y << 32));\n" \
+"		uint64 cS = 0, cD = 0;\n" \
+"\n" \
+"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		{\n" \
+"			const sz_t id = base + t;\n" \
+"\n" \
+"			uint64_2 ww2[4]; loadg2(4, ww2, &weight2[id], N_SZ / 4);\n" \
+"			const uint64_4 w  = (uint64_4)(ww2[0].s0, ww2[1].s0, ww2[2].s0, ww2[3].s0);\n" \
+"			const uint_8_4  wd = width4[id];\n" \
+"\n" \
+"			const uint64_4 uS = addc4(lA[t], lB[t], wd, &cS);\n" \
+"			const uint64_4 nb = neg_mp4(lB[t], wd);\n" \
+"			const uint64_4 uD = addc4(lA[t], nb, wd, &cD);\n" \
+"\n" \
+"			const uint64_4 outS = mod_mul4(uS, w);\n" \
+"			const uint64_4 outD = mod_mul4(uD, w);\n" \
+"\n" \
+"			yS [id] = outS;\n" \
+"			yD [id] = outD;\n" \
+"			ySc[id] = outS;\n" \
+"			yDc[id] = outD;\n" \
+"		}\n" \
+"\n" \
+"		uint j = (uint)(grp + 1u);\n" \
+"		if (j == (uint)ngr) j = 0u;\n" \
+"\n" \
+"		carry[j] = cS;\n" \
+"		carry[j + ngr] = cD;\n" \
 "	}\n" \
 "}\n" \
+"\n" \
 "\n" \
 "__kernel\n" \
 "void carry_weight_p2x2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
@@ -1941,26 +2035,27 @@ static const char * const src_ocl_kernel = \
 "	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
 "	const uint_8_4 wd = width4[id];\n" \
 "\n" \
-"	const uint64 packed = carry[gid];\n" \
-"	const uint cs = (uint)(packed & 0xffffffffUL);\n" \
-"	const uint cd = (uint)(packed >> 32);\n" \
+"	const sz_t ngr = (sz_t)get_global_size(0);\n" \
 "\n" \
+"	const uint64 cs = carry[gid];\n" \
+"	const uint64 cd = carry[gid + ngr];\n" \
+"\n" \
+"	// SUM\n" \
 "	uint64_4 us = mod_mul4(xs[id], wi);\n" \
-"	us = adc4(us, wd, (uint64)cs);\n" \
-"	xs[id] = mod_mul4(us, w);\n" \
+"	if (cs != 0) us = adc4(us, wd, cs);\n" \
+"	const uint64_4 outS = mod_mul4(us, w);\n" \
 "\n" \
+"	// DIFF\n" \
 "	uint64_4 ud = mod_mul4(xd[id], wi);\n" \
-"	ud = adc4(ud, wd, (uint64)cd);\n" \
-"	xd[id] = mod_mul4(ud, w);\n" \
+"	if (cd != 0) ud = adc4(ud, wd, cd);\n" \
+"	const uint64_4 outD = mod_mul4(ud, w);\n" \
 "\n" \
-"	uint64_4 usc = mod_mul4(xsc[id], wi);\n" \
-"	usc = adc4(usc, wd, (uint64)cs);\n" \
-"	xsc[id] = mod_mul4(usc, w);\n" \
-"\n" \
-"	uint64_4 udc = mod_mul4(xdc[id], wi);\n" \
-"	udc = adc4(udc, wd, (uint64)cd);\n" \
-"	xdc[id] = mod_mul4(udc, w);\n" \
+"	xs [id] = outS;\n" \
+"	xd [id] = outD;\n" \
+"	xsc[id] = outS;\n" \
+"	xdc[id] = outD;\n" \
 "}\n" \
+"\n" \
 "\n" \
 "\n" \
 "\n" \
@@ -2026,6 +2121,72 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "\n" \
 "__kernel\n" \
+"void carry_weight_sub_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
+"	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width, const sz_t offset)\n" \
+"{\n" \
+"	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
+"	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"\n" \
+"	const sz_t gid = (sz_t)get_global_id(0);\n" \
+"	const sz_t base = (sz_t)(CWM_WG_SZ * gid);\n" \
+"	long c = as_long(carry[gid]);\n" \
+"	if (c == 0) return;\n" \
+"\n" \
+"	for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"	{\n" \
+"		const sz_t id = base + t;\n" \
+"		uint64_2 w2[4]; loadg2(4, w2, &weight2[id], N_SZ / 4);\n" \
+"		const uint64_4 w = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"		const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"		const uint_8_4 wd = width4[id];\n" \
+"		uint64_4 u = mod_mul4(x[id], wi);\n" \
+"		u = add_signed4_exact(u, wd, &c);\n" \
+"		x[id] = mod_mul4(u, w);\n" \
+"		if (c == 0) break;\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
+"void carry_weight_sub_p2_phase(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
+"	__global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
+"	const sz_t offset, const uint phase)\n" \
+"{\n" \
+"	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
+"	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
+"	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
+"\n" \
+"	const sz_t gid = (sz_t)get_global_id(0);\n" \
+"	if (((uint)gid & 1u) != (phase & 1u)) return;\n" \
+"\n" \
+"	const sz_t ngr  = (sz_t)((N_SZ / 4) / (sz_t)CWM_WG_SZ);\n" \
+"	const sz_t base = (sz_t)(CWM_WG_SZ * gid);\n" \
+"	long c = as_long(carry[gid]);\n" \
+"	if (c == 0) return;\n" \
+"\n" \
+"	carry[gid] = 0ul;\n" \
+"	for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"	{\n" \
+"		const sz_t id = base + t;\n" \
+"		uint64_2 w2[4]; loadg2(4, w2, &weight2[id], N_SZ / 4);\n" \
+"		const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"		const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"		const uint_8_4  wd = width4[id];\n" \
+"		uint64_4 u = mod_mul4(x[id], wi);\n" \
+"		u = add_signed4_exact(u, wd, &c);\n" \
+"		x[id] = mod_mul4(u, w);\n" \
+"		if (c == 0) break;\n" \
+"	}\n" \
+"\n" \
+"	if (c != 0)\n" \
+"	{\n" \
+"		const sz_t next_gid = (gid + 1 < ngr) ? (gid + 1) : 0;\n" \
+"		const long next_c = as_long(carry[next_gid]) + c;\n" \
+"		carry[next_gid] = as_ulong(next_c);\n" \
+"	}\n" \
+"}\n" \
+"\n" \
+"__kernel\n" \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_muladd_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "    __global const uint64 * restrict const weight, __global const uint_8 * restrict const width,\n" \
@@ -2057,7 +2218,7 @@ static const char * const src_ocl_kernel = \
 "    u = addc4(u, v, wd, &c_add);\n" \
 "\n" \
 "    // Total carry to next block\n" \
-"    const uint64 c = c_mul + c_add;\n" \
+"    uint64 c = c_mul + c_add;\n" \
 "    cl[lid] = c;\n" \
 "\n" \
 "    barrier(CLK_LOCAL_MEM_FENCE);\n" \
@@ -2121,7 +2282,6 @@ static const char * const src_ocl_kernel = \
 "		}\n" \
 "	}\n" \
 "}\n" \
-"\n" \
 "__kernel\n" \
 "void subtract_reg(__global uint64 * restrict const reg, __global const uint64 * restrict const weight,\n" \
 "	__global const uint_8 * restrict const width, const sz_t offset_y, const sz_t offset_x)\n" \
@@ -2130,24 +2290,69 @@ static const char * const src_ocl_kernel = \
 "	__global const uint64 * restrict const x = &reg[offset_x];\n" \
 "	__global const uint64_2 * restrict const weight2 = (__global const uint64_2 *)(weight);\n" \
 "\n" \
-"	uint32 b = 0;\n" \
+"	// Exact subtraction modulo M_p = 2^p - 1.\n" \
+"	// Important point: the unweighted digits are not always fully normalized.\n" \
+"	// A digit may temporarily be: low + base * high.\n" \
+"	// The old code only used the low part of x (via mask), which drops a hidden carry\n" \
+"	// and can flip one very high bit later. Here we propagate both low and high parts.\n" \
+"	long c = 0;\n" \
 "	for (size_t k = 0; k < N_SZ; ++k)\n" \
 "	{\n" \
 "		const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
-"		const uint64 yu = mod_mul(y[k], w.s1);\n" \
-"		const uint64 xu = mod_mul(x[k], w.s1);\n" \
-"		y[k] = mod_mul(sbc_reg(yu, xu, width[k], &b), w.s0);\n" \
+"		const uint bits = (uint)width[k];\n" \
+"		const uint64 m = mask_w(bits);\n" \
+"\n" \
+"		const uint64 yv = mod_mul(y[k], w.s1);\n" \
+"		const uint64 xv = mod_mul(x[k], w.s1);\n" \
+"\n" \
+"		const uint64 ylo = yv & m;\n" \
+"		const uint64 xlo = xv & m;\n" \
+"		const long yhi = (bits >= 64u) ? 0 : (long)(yv >> bits);\n" \
+"		const long xhi = (bits >= 64u) ? 0 : (long)(xv >> bits);\n" \
+"\n" \
+"		const long t = (long)ylo + (long)(m - xlo) + c;\n" \
+"		const uint64 out = ((uint64)t) & m;\n" \
+"\n" \
+"		long q;\n" \
+"		if (bits >= 64u) q = 0;\n" \
+"		else if (t >= 0) q = (t >> bits);\n" \
+"		else q = -(long)((((uint64)(-t)) + m) >> bits);   // floor(t / 2^bits)\n" \
+"\n" \
+"		c = q + yhi - xhi;\n" \
+"		y[k] = mod_mul(out, w.s0);\n" \
 "	}\n" \
 "\n" \
-"	while (b != 0)\n" \
+"	// End-around carry / borrow for modulo (B^n - 1).\n" \
+"	while (c != 0)\n" \
 "	{\n" \
 "		for (size_t k = 0; k < N_SZ; ++k)\n" \
 "		{\n" \
 "			const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
-"			const uint64 yu = mod_mul(y[k], w.s1);\n" \
-"			y[k] = mod_mul(sbc(yu, width[k], &b), w.s0);\n" \
-"			if (b == 0) return;\n" \
+"			const uint bits = (uint)width[k];\n" \
+"			const uint64 m = mask_w(bits);\n" \
+"			const long t = (long)mod_mul(y[k], w.s1) + c;\n" \
+"			const uint64 out = ((uint64)t) & m;\n" \
+"\n" \
+"			if (bits >= 64u) c = 0;\n" \
+"			else if (t >= 0) c = (t >> bits);\n" \
+"			else c = -(long)((((uint64)(-t)) + m) >> bits);\n" \
+"\n" \
+"			y[k] = mod_mul(out, w.s0);\n" \
+"			if (c == 0) break;\n" \
 "		}\n" \
+"	}\n" \
+"\n" \
+"	// Canonicalize the alternative zero representation Mp = (base_i - 1, ..., base_i - 1) to 0.\n" \
+"	bool all_mask = true;\n" \
+"	for (size_t k = 0; k < N_SZ; ++k)\n" \
+"	{\n" \
+"		const uint64_2 w = weight2[k / 4 + (k % 4) * (N_SZ / 4)];\n" \
+"		const uint64 d = mod_mul(y[k], w.s1);\n" \
+"		if (d != mask_w((uint)width[k])) { all_mask = false; break; }\n" \
+"	}\n" \
+"	if (all_mask)\n" \
+"	{\n" \
+"		for (size_t k = 0; k < N_SZ; ++k) y[k] = 0;\n" \
 "	}\n" \
 "}\n" \
 "";
