@@ -41,8 +41,8 @@ struct CliOptions {
     uint64_t erroriter = 0;
     bool proof = true;
     bool edwards = false;
-    uint32_t ecm_check_interval = 0;
-    bool compute_edwards = false;
+    uint32_t ecm_check_interval = 600;
+    bool compute_edwards = true;
     bool torsion16 = false;
     bool notorsion = true;
     std::string sigma;

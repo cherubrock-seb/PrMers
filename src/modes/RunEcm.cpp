@@ -566,7 +566,7 @@ int App::runECMMarin()
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
-        engine* eng = engine::create_gpu(p, static_cast<size_t>(32), static_cast<size_t>(options.device_id), verbose);
+        engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
         if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
 
@@ -877,6 +877,8 @@ int App::runECMMarin()
 
         mpz_class A24, x0;
         mpz_class sigma_resume; bool have_sigma_resume = false;
+        bool use_te_stage1 = false;
+        mpz_class te_aE, te_dE, te_X0, te_Y0;
 
         if (resume_stage2) {
             if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards--conv-->montgomery";
@@ -886,87 +888,157 @@ int App::runECMMarin()
         auto hadamard = [&](size_t a, size_t b, size_t s, size_t d){
             eng->addsub((engine::Reg)s, (engine::Reg)d, (engine::Reg)a, (engine::Reg)b);
         };
-        auto hadamard_copy = [&](size_t a, size_t b, size_t s, size_t d, size_t s_copy, size_t d_copy){
-            eng->addsub_copy((engine::Reg)s,(engine::Reg)d,(engine::Reg)s_copy,(engine::Reg)d_copy,
-                            (engine::Reg)a,(engine::Reg)b);
-        };
 
-        // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
         auto xDBLADD_strict = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
             // xADD part
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);                    // 25=S1, 24=D1, 10=S1_copy, 9=D1_copy
+            hadamard(X1, Z1, 25, 24);                                // 25=S1, 24=D1
+            eng->copy((engine::Reg)10, (engine::Reg)25);             // 10=S1 copy
+            eng->copy((engine::Reg)9,  (engine::Reg)24);             // 9 =D1 copy
             hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
-            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1−t2
-            eng->square_mul((engine::Reg)X2);                        // X2=(t1+t2)^2
-            //eng->mul((engine::Reg)X2,(engine::Reg)14);               // X2=k14*...
-            eng->square_mul((engine::Reg)Z2);                        // Z2=(t1−t2)^2
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);               // Z2=k13*...
-
-            // xDBL part (U,V,E with fused square+copy; no extra copy for Z1)
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
-            eng->square_mul((engine::Reg)24);                        // 24=V=(X1−Z1)^2
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);           // 25=E=U−V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
-            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);  // multiplicand=E
-            //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
-            //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
-            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
-        };
-
-        // xDBLADD_strict: xADD for (X2,Z2), then xDBL for (X1,Z1), using hadamard_copy to avoid copies
-        auto xDBLADD_strict_s2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            // xADD part
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);                    // 25=S1, 24=D1, 10=S1_copy, 9=D1_copy
-            hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);   // *S2
-            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9 = t1 = D1_copy * S2
-            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);   // *D2
-            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = t2 = S1_copy * D2
-            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1−t2
-            eng->square_mul((engine::Reg)X2);                        // X2=(t1+t2)^2
-            //eng->mul((engine::Reg)X2,(engine::Reg)14);               // X2=k14*...
-            eng->square_mul((engine::Reg)Z2);                        // Z2=(t1−t2)^2
-            eng->mul((engine::Reg)Z2,(engine::Reg)13);               // Z2=k13*...
-
-            // xDBL part (U,V,E with fused square+copy; no extra copy for Z1)
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);   // 25=U=(X1+Z1)^2, and X1=U
-            eng->square_mul((engine::Reg)24);                        // 24=V=(X1−Z1)^2
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);           // 25=E=U−V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
-            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);  // multiplicand=E
-            //eng->mul((engine::Reg)25,(engine::Reg)12);               // 25=A24*E
-            //eng->add((engine::Reg)25,(engine::Reg)24);               // 25=A24*E + V
-            eng->mul_add((engine::Reg)25,(engine::Reg)12,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1); // Z1=(A24*E+V)*E
-        };
-        auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
-            hadamard_copy(X1, Z1, 25, 24, 10, 9);
-            hadamard(X2, Z2, 8, 7);
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
-            eng->mul((engine::Reg)9,(engine::Reg)11);
+            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9  = D1*S2
             eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
-            eng->mul((engine::Reg)10,(engine::Reg)11);
-            hadamard(9, 10, X2, Z2);
+            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = S1*D2
+            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1-t2
             eng->square_mul((engine::Reg)X2);
             eng->mul((engine::Reg)X2,(engine::Reg)14);
             eng->square_mul((engine::Reg)Z2);
             eng->mul((engine::Reg)Z2,(engine::Reg)13);
-            eng->square_mul_copy((engine::Reg)25,(engine::Reg)X1);
-            eng->square_mul((engine::Reg)24);
-            eng->sub_reg((engine::Reg)25,(engine::Reg)24);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);
-            eng->mul((engine::Reg)X1,(engine::Reg)15);
-            eng->set_multiplicand((engine::Reg)15,(engine::Reg)25);
-            eng->mul((engine::Reg)25,(engine::Reg)12);
-            eng->add((engine::Reg)25,(engine::Reg)24);
-            eng->mul_copy((engine::Reg)25,(engine::Reg)15,(engine::Reg)Z1);
+
+            // xDBL part
+            eng->square_mul((engine::Reg)25);                        // 25=U=(X1+Z1)^2
+            eng->square_mul((engine::Reg)24);                        // 24=V=(X1-Z1)^2
+
+            eng->copy((engine::Reg)X1,(engine::Reg)25);              // X1=U
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
+            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
+
+            hadamard(25, 24, 8, 9);                                  // 8=U+V, 9=E=U-V
+            eng->copy((engine::Reg)Z1,(engine::Reg)9);               // Z1=E
+            eng->mul((engine::Reg)9,(engine::Reg)12);                // 9=A24*E
+            eng->add((engine::Reg)9,(engine::Reg)24);                // 9=A24*E + V
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);
+            eng->mul((engine::Reg)Z1,(engine::Reg)15);               // Z1=E*(A24*E+V)
+        };
+
+        auto xDBLADD_strict_s2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+            // xADD part
+            hadamard(X1, Z1, 25, 24);                                // 25=S1, 24=D1
+            eng->copy((engine::Reg)10, (engine::Reg)25);             // 10=S1 copy
+            eng->copy((engine::Reg)9,  (engine::Reg)24);             // 9 =D1 copy
+            hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9  = D1*S2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = S1*D2
+            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1-t2
+            eng->square_mul((engine::Reg)X2);
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
+
+            // xDBL part
+            eng->square_mul((engine::Reg)25);                        // 25=U=(X1+Z1)^2
+            eng->square_mul((engine::Reg)24);                        // 24=V=(X1-Z1)^2
+
+            eng->copy((engine::Reg)X1,(engine::Reg)25);              // X1=U
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
+            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
+
+            hadamard(25, 24, 8, 9);                                  // 8=U+V, 9=E=U-V
+            eng->copy((engine::Reg)Z1,(engine::Reg)9);               // Z1=E
+            eng->mul((engine::Reg)9,(engine::Reg)12);                // 9=A24*E
+            eng->add((engine::Reg)9,(engine::Reg)24);                // 9=A24*E + V
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);
+            eng->mul((engine::Reg)Z1,(engine::Reg)15);               // Z1=E*(A24*E+V)
+        };
+
+        auto xDBLADD_strict2 = [&](size_t X1,size_t Z1, size_t X2,size_t Z2){
+            hadamard(X1, Z1, 25, 24);                                // 25=S1, 24=D1
+            eng->copy((engine::Reg)10, (engine::Reg)25);             // 10=S1 copy
+            eng->copy((engine::Reg)9,  (engine::Reg)24);             // 9 =D1 copy
+            hadamard(X2, Z2, 8, 7);                                  // 8=S2, 7=D2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)8);
+            eng->mul((engine::Reg)9,(engine::Reg)11);                // 9  = D1*S2
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)10,(engine::Reg)11);               // 10 = S1*D2
+            hadamard(9, 10, X2, Z2);                                 // X2=t1+t2, Z2=t1-t2
+            eng->square_mul((engine::Reg)X2);
+            eng->mul((engine::Reg)X2,(engine::Reg)14);
+            eng->square_mul((engine::Reg)Z2);
+            eng->mul((engine::Reg)Z2,(engine::Reg)13);
+
+            // xDBL part
+            eng->square_mul((engine::Reg)25);                        // 25=U=(X1+Z1)^2
+            eng->square_mul((engine::Reg)24);                        // 24=V=(X1-Z1)^2
+
+            eng->copy((engine::Reg)X1,(engine::Reg)25);              // X1=U
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)24);  // *V
+            eng->mul((engine::Reg)X1,(engine::Reg)15);               // X1=U*V
+
+            hadamard(25, 24, 8, 9);                                  // 8=U+V, 9=E=U-V
+            eng->copy((engine::Reg)Z1,(engine::Reg)9);               // Z1=E
+            eng->mul((engine::Reg)9,(engine::Reg)12);                // 9=A24*E
+            eng->add((engine::Reg)9,(engine::Reg)24);                // 9=A24*E + V
+            eng->set_multiplicand((engine::Reg)15,(engine::Reg)9);
+            eng->mul((engine::Reg)Z1,(engine::Reg)15);               // Z1=E*(A24*E+V)
+        };
+
+        auto eADD_RP = [&](){
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3);
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)7,(engine::Reg)6);
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)6);
+            eng->mul_copy((engine::Reg)30,(engine::Reg)11, (engine::Reg)39);
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)7);
+            eng->mul((engine::Reg)31,(engine::Reg)11);
+            eng->copy((engine::Reg)32,(engine::Reg)5);
+            eng->mul((engine::Reg)32,(engine::Reg)46);
+            eng->mul((engine::Reg)32,(engine::Reg)45);
+            hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
+            eng->copy((engine::Reg)38,(engine::Reg)34);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
+            eng->mul((engine::Reg)38,(engine::Reg)11);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);
+            eng->mul((engine::Reg)39,(engine::Reg)43);
+            eng->copy((engine::Reg)40,(engine::Reg)31);
+            eng->sub_reg((engine::Reg)40,(engine::Reg)39);
+            eng->copy((engine::Reg)3,(engine::Reg)38);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
+            eng->mul((engine::Reg)3,(engine::Reg)11);
+            eng->copy((engine::Reg)1,(engine::Reg)42);
+            eng->mul((engine::Reg)1,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            eng->copy((engine::Reg)4,(engine::Reg)42);
+            eng->mul((engine::Reg)4,(engine::Reg)11);
+            eng->copy((engine::Reg)5,(engine::Reg)38);
+            eng->mul((engine::Reg)5,(engine::Reg)11);
+        };
+
+        auto eDBL_XYTZ = [&](size_t RX,size_t RY,size_t RZ,size_t RT){
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)RZ);
+            eng->mul((engine::Reg)RT,(engine::Reg)11);
+            eng->add((engine::Reg)RT,(engine::Reg)RT);
+            eng->square_mul((engine::Reg)RZ);
+            eng->add((engine::Reg)RZ,(engine::Reg)RZ);
+            eng->square_mul((engine::Reg)RX);
+            eng->square_mul((engine::Reg)RY);
+            eng->mul((engine::Reg)RX,(engine::Reg)43);
+            hadamard((engine::Reg)RX,(engine::Reg)RY,
+                    (engine::Reg)23,(engine::Reg)25);
+            eng->copy((engine::Reg)24,(engine::Reg)23);
+            eng->sub_reg((engine::Reg)24,(engine::Reg)RZ);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)24);
+            eng->copy((engine::Reg)RX,(engine::Reg)RT);
+            eng->mul((engine::Reg)RX,(engine::Reg)11);
+            eng->copy((engine::Reg)RZ,(engine::Reg)23);
+            eng->mul((engine::Reg)RZ,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)25);
+            eng->copy((engine::Reg)RY,(engine::Reg)23);
+            eng->mul((engine::Reg)RY,(engine::Reg)11);
+            eng->mul((engine::Reg)RT,(engine::Reg)11);
         };
 
         if (!resume_stage2)
@@ -1033,6 +1105,52 @@ int App::runECMMarin()
                     if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
                 }
                 x0 = mulm(u3, invv3);
+
+                mpz_class su = u;
+                mpz_class sv = v;
+                mpz_class denA = mulm(mpz_class(4), mulm(mulm(sqrm(su), su), sv));
+                mpz_class inv_denA;
+                {
+                    int r = invm(denA, inv_denA);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+                mpz_class Aplus2 = mulm(mulm(tnum, addm(mulm(mpz_class(3), su), sv)), inv_denA);
+                mpz_class inv_sv;
+                {
+                    int r = invm(sv, inv_sv);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+                mpz_class Bm = mulm(su, inv_sv);
+                mpz_class invBm;
+                {
+                    int r = invm(Bm, invBm);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+                te_aE = mulm(Aplus2, invBm);
+                te_dE = mulm(subm(Aplus2, mpz_class(4)), invBm);
+                mpz_class sp = addm(sqrm(sigma_mpz), mpz_class(5));
+                mpz_class denX = mulm(mulm(subm(su, sv), addm(su, sv)), sp);
+                mpz_class inv_denX;
+                {
+                    int r = invm(denX, inv_denX);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+                te_X0 = mulm(mulm(sqrm(su), sv), inv_denX);
+                mpz_class su3 = mulm(sqrm(su), su);
+                mpz_class sv3 = mulm(sqrm(sv), sv);
+                mpz_class denY = addm(su3, sv3);
+                mpz_class inv_denY;
+                {
+                    int r = invm(denY, inv_denY);
+                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                }
+                te_Y0 = mulm(subm(su3, sv3), inv_denY);
+                use_te_stage1 = true;
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
@@ -1250,17 +1368,34 @@ int App::runECMMarin()
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
             }
 
-            mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
-            eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
+            if (!use_te_stage1) {
+                mpz_t zA24; mpz_init(zA24); mpz_set(zA24, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24); mpz_clear(zA24);
+                eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
 
-            eng->set((engine::Reg)0, 1u);
-            eng->set((engine::Reg)1, 0u);
-            eng->set((engine::Reg)3, 1u);
-            mpz_t zx0; mpz_init(zx0); mpz_set(zx0, x0.get_mpz_t()); eng->set_mpz((engine::Reg)2, zx0); mpz_clear(zx0);
-            mpz_t zxd; mpz_init(zxd); mpz_set(zxd, x0.get_mpz_t()); eng->set_mpz((engine::Reg)4, zxd); mpz_clear(zxd);
-            eng->set((engine::Reg)5, 1u);
-            eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
-            eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
+                eng->set((engine::Reg)0, 1u);
+                eng->set((engine::Reg)1, 0u);
+                eng->set((engine::Reg)3, 1u);
+                mpz_t zx0; mpz_init(zx0); mpz_set(zx0, x0.get_mpz_t()); eng->set_mpz((engine::Reg)2, zx0); mpz_clear(zx0);
+                mpz_t zxd; mpz_init(zxd); mpz_set(zxd, x0.get_mpz_t()); eng->set_mpz((engine::Reg)4, zxd); mpz_clear(zxd);
+                eng->set((engine::Reg)5, 1u);
+                eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
+                eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
+            } else {
+                mpz_t za; mpz_init(za); mpz_set(za, te_aE.get_mpz_t()); eng->set_mpz((engine::Reg)16, za); mpz_clear(za);
+                mpz_t zd; mpz_init(zd); mpz_set(zd, te_dE.get_mpz_t()); eng->set_mpz((engine::Reg)29, zd); mpz_clear(zd);
+                eng->set((engine::Reg)0, 0u);
+                eng->set((engine::Reg)1, 1u);
+                mpz_t zx; mpz_init(zx); mpz_set(zx, te_X0.get_mpz_t()); eng->set_mpz((engine::Reg)6, zx); mpz_clear(zx);
+                mpz_t zy; mpz_init(zy); mpz_set(zy, te_Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
+                mpz_class te_T0 = mulm(te_X0, te_Y0);
+                mpz_t zt; mpz_init(zt); mpz_set(zt, te_T0.get_mpz_t()); eng->set_mpz((engine::Reg)9, zt); mpz_clear(zt);
+                eng->set((engine::Reg)3, 0u);
+                eng->set((engine::Reg)4, 1u);
+                eng->set((engine::Reg)5, 0u);
+                eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
+                eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
+                eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
+            }
 
             std::ostringstream head2;
             head2<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 start";
@@ -1277,8 +1412,13 @@ int App::runECMMarin()
 
             for (size_t i = start_i; i < total_bits; ++i){
                 size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
-                if (b==0) { xDBLADD_strict(0,1, 2,3); }
-                else      { xDBLADD_strict(2,3, 0,1); }
+                if (!use_te_stage1) {
+                    if (b==0) { xDBLADD_strict(0,1, 2,3); }
+                    else      { xDBLADD_strict(2,3, 0,1); }
+                } else {
+                    eDBL_XYTZ(3,4,1,5);
+                    if (b != 0) eADD_RP();
+                }
 
                 auto now = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || i+1 == total_bits) {
@@ -1310,20 +1450,40 @@ int App::runECMMarin()
             }
             std::cout<<std::endl;
 
-            mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
-            mpz_class gg = gcd_with_dots(Zfin, N);
-            if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
-            bool found = (gg > 1 && gg < N);
+            mpz_class gg;
+            mpz_class xAff = x0;
+            if (!use_te_stage1) {
+                mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
+                gg = gcd_with_dots(Zfin, N);
+                if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
+                if (gg == 1) {
+                    mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
+                    mpz_class invZ;
+                    if (invm(Zfin, invZ) == 0) xAff = mulm(Xv, invZ);
+                }
+            } else {
+                mpz_class Tfin = compute_X_with_dots(eng, (engine::Reg)5, N);
+                gg = gcd_with_dots(Tfin, N);
+                if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
+                if (gg == 1) {
+                    mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
+                    mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
+                    mpz_class den_u = subm(Zv, Yv), inv_den_u;
+                    int r_u = invm(den_u, inv_den_u);
+                    if (r_u == 0) {
+                        xAff = mulm(addm(Zv, Yv), inv_den_u);
+                        mpz_t tx; mpz_init(tx); mpz_set(tx, xAff.get_mpz_t()); eng->set_mpz((engine::Reg)0, tx); mpz_clear(tx);
+                        eng->set((engine::Reg)1, 1u);
+                    } else if (r_u == 1) {
+                        gg = result_factor > 1 ? result_factor : gg;
+                    }
+                }
+            }
+            bool found = (gg > 1 && gg < N) || (result_factor > 1 && result_factor < N);
 
             double elapsed_stage1 = duration<double>(high_resolution_clock::now() - t0).count();
             { std::ostringstream s1; s1<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage1 elapsed="<<fixed<<setprecision(2)<<elapsed_stage1<<" s"; std::cout<<s1.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s1.str()); }
 
-            mpz_class xAff = x0;
-            if (gg == 1) {
-                mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
-                mpz_class invZ;
-                if (invm(Zfin, invZ) == 0) xAff = mulm(Xv, invZ);
-            }
             append_ecm_stage1_resume_line(c, A24, xAff, have_sigma_resume ? &sigma_resume : nullptr);
 
             if (found) {

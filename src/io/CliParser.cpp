@@ -88,7 +88,8 @@ void printUsage(const char* progName) {
     
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
     std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
-    std::cout << "  -ced                 : (Optional) compute in Edwards and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
+    std::cout << "  -ced                 : (Optional) compute in Twisted Edwards (by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
+    std::cout << "  -cmont                 : (Optional) compute in Montgomery (Twisted Edwards by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
     std::cout << "  -sigma               : (Optional) force a curve sigma in Montgomery notorsion mode" << std::endl;
     std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
@@ -221,6 +222,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-ced") == 0) {
             opts.compute_edwards = true;
+           // opts.torsion16 = true;
+            //opts.notorsion = false;
+        }
+        else if (std::strcmp(argv[i], "-cmont") == 0) {
+            opts.compute_edwards = false;
            // opts.torsion16 = true;
             //opts.notorsion = false;
         }
