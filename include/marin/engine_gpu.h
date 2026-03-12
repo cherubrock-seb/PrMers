@@ -35,7 +35,6 @@ private:
 	const size_t _n, _n5;
 	const size_t _reg_count;
 	const int _lcwm_wg_size;
-	const int _sub_lcwm_wg_size;
 	const size_t _blk16, _blk32, _blk64, _blk128, _blk256, _blk512;
 	const size_t _chunk16, _chunk20, _chunk64, _chunk80, _chunk256, _chunk320;
 	static const size_t _blk4 = 0, _blk8 = 0, _blk1024 = 1, _blk2048 = 1, _chunk4 = 0, _chunk5 = 0, _chunk1024 = 1, _chunk1280 = 1;
@@ -74,7 +73,6 @@ public:
 	gpu(const ocl::platform & platform, const size_t d, const size_t n, const size_t reg_count, const bool verbose)
 		: device(platform, d, verbose), _n(n), _n5((n % 5 == 0) ? n / 5 : n), _reg_count(reg_count),
 		_lcwm_wg_size(ilog2(std::min(_n5 / 4, std::min(get_max_local_worksize(sizeof(uint64)), size_t(256))))),
-		_sub_lcwm_wg_size(ilog2(std::min(_n5 / 4, std::min(get_max_local_worksize(sizeof(uint64)), size_t(64))))),
 
 		// We must have (u / 4) * BLKu <= n / 8
 		_blk16((_n5 >= 512) ? 16 : 1),		// 16 * BLK16 uint64_2 <= 4KB, workgroup size = (16 / 4) * BLK16 <= 64
@@ -98,7 +96,6 @@ public:
 	virtual ~gpu() {}
 
 	int get_lcwm_wg_size() const { return _lcwm_wg_size; }
-	int get_sub_lcwm_wg_size() const { return _sub_lcwm_wg_size; }
 	size_t get_blk16() const { return _blk16; }
 	size_t get_blk32() const { return _blk32; }
 	size_t get_blk64() const { return _blk64; }
@@ -343,11 +340,6 @@ public:
 		_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract);
 
-		_subtract_reg = _create_kernel("subtract_reg");
-		_set_kernel_arg(_subtract_reg, 0, sizeof(cl_mem), &_reg);
-		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
-		_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
-		_kernels.push_back(_subtract_reg);
 
 	}
 
@@ -536,44 +528,15 @@ public:
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
-		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _sub_lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_sub_p2, 4, sizeof(uint32), &offset_y);
-		_execute_kernel(_carry_weight_sub_p2, (_n / 4) >> _sub_lcwm_wg_size);
+		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
+		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
 
 	void carry_weight_sub_safe(const size_t dst, const size_t src)
 	{
-		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
-
-		// P1: Y := Y + (Mp - X)  (Y - X without negatives), store group carries in _carry
-		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
-		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _sub_lcwm_wg_size);
-
-		// P2: propagate carries across work-groups using an even/odd two-phase schedule
-		_set_kernel_arg(_carry_weight_sub_p2_phase, 4, sizeof(uint32), &offset_y);
-
-		unsigned rounds = 16;
-		if (const char *s = std::getenv("MARIN_SUBSAFE_ROUNDS"))
-		{
-			const unsigned v = (unsigned)std::strtoul(s, nullptr, 10);
-			if (v != 0) rounds = v;
-		}
-
-		const size_t ngr = (_n / 4) >> _sub_lcwm_wg_size; // number of groups
-		if (rounds > ngr) rounds = (unsigned)ngr;
-
-		for (unsigned r = 0; r < rounds; ++r)
-		{
-			uint32 phase = 0;
-			_set_kernel_arg(_carry_weight_sub_p2_phase, 5, sizeof(uint32), &phase);
-			_execute_kernel(_carry_weight_sub_p2_phase, ngr);
-
-			phase = 1;
-			_set_kernel_arg(_carry_weight_sub_p2_phase, 5, sizeof(uint32), &phase);
-			_execute_kernel(_carry_weight_sub_p2_phase, ngr);
-		}
+		carry_weight_sub(dst, src);
 	}
 
 	
@@ -671,6 +634,11 @@ private:
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
 
+	bool avoid_fused_x2_path() const
+	{
+		return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
+	}
+
 public:
 	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
 		_reg_count(reg_count), _n(ibdwt::transform_size(q))
@@ -712,7 +680,6 @@ public:
 		src << "#define CHUNK320\t" << _gpu->get_chunk320() << "u" << std::endl;
 
 		src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
-		src << "#define SUB_WG_SZ\t" << (1u << _gpu->get_sub_lcwm_wg_size()) << "u" << std::endl;
 
 		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << "u" << std::endl << std::endl;
 
@@ -1180,11 +1147,25 @@ public:
 
 	void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
 	{
+		if (!avoid_fused_x2_path())
+		{
+			set_multiplicand2(dst0, dst0);
+			set_multiplicand2(dst1, dst1);
+
+			set_multiplicand(src0, src0);
+			set_multiplicand(src1, src1);
+
+			mul_new_core(dst0, src0);
+			mul_new_core(dst1, src1);
+
+			_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
+			return;
+		}
+
 		set_multiplicand(src0, src0);
-		mul_new_core(size_t(dst0), size_t(src0));
+		mul(dst0, src0);
 		set_multiplicand(src1, src1);
-		mul_new_core(size_t(dst1), size_t(src1));
-		_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
+		mul(dst1, src1);
 	}
 	void mul_add(const Reg rdst, const Reg rsrc, const Reg radd, const uint32 a = 1) const override
 	{
@@ -1314,16 +1295,15 @@ public:
 		_gpu->carry_weight_add(dst, src);
 	}
 	
-	void sub_reg(const Reg dst, const Reg src) const override
-	{
-		if (dst == src)
-		{
-			set(dst, 0u);
-			return;
-		}
-
-		_gpu->carry_weight_sub_safe(size_t(dst), size_t(src));
-	}
+void sub_reg(const Reg dst, const Reg src) const override
+{
+   // if (avoid_fused_x2_path())
+    //{
+        _gpu->carry_weight_sub_safe(size_t(dst), size_t(src));
+      //  return;
+    //}
+    //_gpu->carry_weight_sub(size_t(dst), size_t(src));
+}
 
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
@@ -1337,6 +1317,12 @@ public:
 	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 					const Reg a, const Reg b) const override
 	{
+		if (!avoid_fused_x2_path())
+		{
+			_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
+			return;
+		}
+
 		copy(sum, a);
 		add(sum, b);
 		copy(sum_copy, sum);
@@ -1349,16 +1335,19 @@ public:
 						const Reg rdst1, const Reg rsrc1,
 						const uint32 a0 = 1, const uint32 a1 = 1) const override
 	{
-		if ((a0 != 1) || (a1 != 1))
+		if ((a0 != 1) || (a1 != 1) || avoid_fused_x2_path())
 		{
 			mul(rdst0, rsrc0, a0);
 			mul(rdst1, rsrc1, a1);
 			return;
 		}
 
-		mul_new_core(size_t(rdst0), size_t(rsrc0));
-		mul_new_core(size_t(rdst1), size_t(rsrc1));
-		_gpu->carry_weight_mul2_unit(size_t(rdst0), size_t(rdst1));
+		const size_t dst0 = size_t(rdst0), src0 = size_t(rsrc0);
+		const size_t dst1 = size_t(rdst1), src1 = size_t(rsrc1);
+
+		mul_new_core(dst0, src0);
+		mul_new_core(dst1, src1);
+		_gpu->carry_weight_mul2_unit(dst0, dst1);
 	}
 
 	void xdbl_tail_uv(const Reg x_out, const Reg z_out,
