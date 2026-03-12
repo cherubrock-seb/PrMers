@@ -25,6 +25,10 @@ static const char * const src_ocl_kernel = \
 "	#define PTX_ASM	1\n" \
 "#endif\n" \
 "\n" \
+"#if !defined(SUB_WG_SZ)\n" \
+"#define SUB_WG_SZ	CWM_WG_SZ\n" \
+"#endif\n" \
+"\n" \
 "#if !defined(N_SZ)\n" \
 "#define N_SZ		65536u\n" \
 "#define LN_SZ_S5	14\n" \
@@ -1801,7 +1805,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "\n" \
 "__kernel\n" \
-"__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
+"__attribute__((reqd_work_group_size(SUB_WG_SZ, 1, 1)))\n" \
 "void carry_weight_add_neg_p1(__global uint64 * restrict reg, __global uint64 * restrict carry,\n" \
 "	__global const uint64 * restrict weight, __global const uint_8 * restrict width,\n" \
 "	const sz_t offset_y, const sz_t offset_x)\n" \
@@ -1815,30 +1819,33 @@ static const char * const src_ocl_kernel = \
 "	const sz_t lid = (sz_t)get_local_id(0);\n" \
 "	const sz_t grp = (sz_t)get_group_id(0);\n" \
 "	const sz_t ngr = (sz_t)get_num_groups(0);\n" \
-"	const sz_t base = grp * (sz_t)CWM_WG_SZ;\n" \
+"	const sz_t base = grp * (sz_t)SUB_WG_SZ;\n" \
 "\n" \
 "	uint64_2 w2[4]; loadg2(4, w2, &weight2[gid], N_SZ / 4);\n" \
 "	const uint64_4 wi = (uint64_4)(w2[0].s1, w2[1].s1, w2[2].s1, w2[3].s1);\n" \
+"	const uint64_4 w  = (uint64_4)(w2[0].s0, w2[1].s0, w2[2].s0, w2[3].s0);\n" \
+"	const uint_8_4 wd = width4[gid];\n" \
 "\n" \
-"	__local uint64_4 lY[CWM_WG_SZ];\n" \
-"	__local uint64_4 lX[CWM_WG_SZ];\n" \
+"	__local uint64_4 lY[SUB_WG_SZ];\n" \
+"	__local uint64_4 lX[SUB_WG_SZ];\n" \
+"	__local uint64_4 lW[SUB_WG_SZ];\n" \
+"	__local uint_8_4 lWd[SUB_WG_SZ];\n" \
 "\n" \
 "	lY[lid] = mod_mul4(y[gid], wi);\n" \
 "	lX[lid] = mod_mul4(x[gid], wi);\n" \
+"	lW[lid] = w;\n" \
+"	lWd[lid] = wd;\n" \
 "\n" \
 "	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "\n" \
 "	if (lid == 0)\n" \
 "	{\n" \
 "		long c = 0;\n" \
-"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		for (sz_t t = 0; t < (sz_t)SUB_WG_SZ; ++t)\n" \
 "		{\n" \
 "			const sz_t id = base + t;\n" \
-"			uint64_2 ww2[4]; loadg2(4, ww2, &weight2[id], N_SZ / 4);\n" \
-"			const uint64_4 w  = (uint64_4)(ww2[0].s0, ww2[1].s0, ww2[2].s0, ww2[3].s0);\n" \
-"			const uint_8_4  wd = width4[id];\n" \
-"			const uint64_4 u = sub4_exact_mp(lY[t], lX[t], wd, &c);\n" \
-"			y[id] = mod_mul4(u, w);\n" \
+"			const uint64_4 u = sub4_exact_mp(lY[t], lX[t], lWd[t], &c);\n" \
+"			y[id] = mod_mul4(u, lW[t]);\n" \
 "		}\n" \
 "\n" \
 "		uint j = (uint)(grp + 1u);\n" \
@@ -1882,7 +1889,7 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		uint64 cS = 0, cD = 0;\n" \
 "\n" \
-"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		for (sz_t t = 0; t < (sz_t)SUB_WG_SZ; ++t)\n" \
 "		{\n" \
 "			const sz_t id = base + t;\n" \
 "\n" \
@@ -1985,7 +1992,7 @@ static const char * const src_ocl_kernel = \
 "	{\n" \
 "		uint64 cS = 0, cD = 0;\n" \
 "\n" \
-"		for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"		for (sz_t t = 0; t < (sz_t)SUB_WG_SZ; ++t)\n" \
 "		{\n" \
 "			const sz_t id = base + t;\n" \
 "\n" \
@@ -2129,11 +2136,11 @@ static const char * const src_ocl_kernel = \
 "	__global const uint_8_4 * restrict const width4 = (__global const uint_8_4 *)(width);\n" \
 "\n" \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
-"	const sz_t base = (sz_t)(CWM_WG_SZ * gid);\n" \
+"	const sz_t base = (sz_t)(SUB_WG_SZ * gid);\n" \
 "	long c = as_long(carry[gid]);\n" \
 "	if (c == 0) return;\n" \
 "\n" \
-"	for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"	for (sz_t t = 0; t < (sz_t)SUB_WG_SZ; ++t)\n" \
 "	{\n" \
 "		const sz_t id = base + t;\n" \
 "		uint64_2 w2[4]; loadg2(4, w2, &weight2[id], N_SZ / 4);\n" \
@@ -2159,13 +2166,13 @@ static const char * const src_ocl_kernel = \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
 "	if (((uint)gid & 1u) != (phase & 1u)) return;\n" \
 "\n" \
-"	const sz_t ngr  = (sz_t)((N_SZ / 4) / (sz_t)CWM_WG_SZ);\n" \
-"	const sz_t base = (sz_t)(CWM_WG_SZ * gid);\n" \
+"	const sz_t ngr  = (sz_t)((N_SZ / 4) / (sz_t)SUB_WG_SZ);\n" \
+"	const sz_t base = (sz_t)(SUB_WG_SZ * gid);\n" \
 "	long c = as_long(carry[gid]);\n" \
 "	if (c == 0) return;\n" \
 "\n" \
 "	carry[gid] = 0ul;\n" \
-"	for (sz_t t = 0; t < (sz_t)CWM_WG_SZ; ++t)\n" \
+"	for (sz_t t = 0; t < (sz_t)SUB_WG_SZ; ++t)\n" \
 "	{\n" \
 "		const sz_t id = base + t;\n" \
 "		uint64_2 w2[4]; loadg2(4, w2, &weight2[id], N_SZ / 4);\n" \

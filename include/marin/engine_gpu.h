@@ -35,6 +35,7 @@ private:
 	const size_t _n, _n5;
 	const size_t _reg_count;
 	const int _lcwm_wg_size;
+	const int _sub_lcwm_wg_size;
 	const size_t _blk16, _blk32, _blk64, _blk128, _blk256, _blk512;
 	const size_t _chunk16, _chunk20, _chunk64, _chunk80, _chunk256, _chunk320;
 	static const size_t _blk4 = 0, _blk8 = 0, _blk1024 = 1, _blk2048 = 1, _chunk4 = 0, _chunk5 = 0, _chunk1024 = 1, _chunk1280 = 1;
@@ -73,6 +74,7 @@ public:
 	gpu(const ocl::platform & platform, const size_t d, const size_t n, const size_t reg_count, const bool verbose)
 		: device(platform, d, verbose), _n(n), _n5((n % 5 == 0) ? n / 5 : n), _reg_count(reg_count),
 		_lcwm_wg_size(ilog2(std::min(_n5 / 4, std::min(get_max_local_worksize(sizeof(uint64)), size_t(256))))),
+		_sub_lcwm_wg_size(ilog2(std::min(_n5 / 4, std::min(get_max_local_worksize(sizeof(uint64)), size_t(64))))),
 
 		// We must have (u / 4) * BLKu <= n / 8
 		_blk16((_n5 >= 512) ? 16 : 1),		// 16 * BLK16 uint64_2 <= 4KB, workgroup size = (16 / 4) * BLK16 <= 64
@@ -96,6 +98,7 @@ public:
 	virtual ~gpu() {}
 
 	int get_lcwm_wg_size() const { return _lcwm_wg_size; }
+	int get_sub_lcwm_wg_size() const { return _sub_lcwm_wg_size; }
 	size_t get_blk16() const { return _blk16; }
 	size_t get_blk32() const { return _blk32; }
 	size_t get_blk64() const { return _blk64; }
@@ -533,9 +536,9 @@ public:
 		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
-		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
-		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
+		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _sub_lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_sub_p2, 4, sizeof(uint32), &offset_y);
+		_execute_kernel(_carry_weight_sub_p2, (_n / 4) >> _sub_lcwm_wg_size);
 
 	}
 
@@ -546,7 +549,7 @@ public:
 		// P1: Y := Y + (Mp - X)  (Y - X without negatives), store group carries in _carry
 		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
-		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
+		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _sub_lcwm_wg_size);
 
 		// P2: propagate carries across work-groups using an even/odd two-phase schedule
 		_set_kernel_arg(_carry_weight_sub_p2_phase, 4, sizeof(uint32), &offset_y);
@@ -558,7 +561,7 @@ public:
 			if (v != 0) rounds = v;
 		}
 
-		const size_t ngr = (_n / 4) >> _lcwm_wg_size; // number of groups
+		const size_t ngr = (_n / 4) >> _sub_lcwm_wg_size; // number of groups
 		if (rounds > ngr) rounds = (unsigned)ngr;
 
 		for (unsigned r = 0; r < rounds; ++r)
@@ -709,6 +712,7 @@ public:
 		src << "#define CHUNK320\t" << _gpu->get_chunk320() << "u" << std::endl;
 
 		src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
+		src << "#define SUB_WG_SZ\t" << (1u << _gpu->get_sub_lcwm_wg_size()) << "u" << std::endl;
 
 		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << "u" << std::endl << std::endl;
 
