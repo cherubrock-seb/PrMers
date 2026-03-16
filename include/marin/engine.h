@@ -57,9 +57,9 @@ public:
 	virtual void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const
 	{
 		copy(sum_out, a);
-		add(sum_out, b);
-
 		copy(diff_out, a);
+
+		add(sum_out, b);
 		sub_reg(diff_out, b);
 	}
 

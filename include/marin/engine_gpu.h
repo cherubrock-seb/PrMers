@@ -63,7 +63,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_p2x2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_addsub_p2 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_addsub_p2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr, _subtract_reg = nullptr;
 	cl_kernel _carry_weight_muladd_p1 = nullptr, _carry_weight_muladd_p2 = nullptr;
 
@@ -324,11 +324,12 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_sub_p2);
 			CREATE_KERNEL_CARRY(carry_weight_sub_p2_phase);
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p1);
+		CREATE_KERNEL_CARRY(carry_weight_addsub_p2);
 		CREATE_KERNEL_CARRY(carry_weight_p2x2);
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1_copy);
 		CREATE_KERNEL_CARRY(carry_weight_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p1_copy);
-		CREATE_KERNEL_CARRY(carry_weight_p2x2_copy);
+		CREATE_KERNEL_CARRY(carry_weight_addsub_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_mul2_unit_p1);
 
 		_copy = _create_kernel("copy");
@@ -339,6 +340,12 @@ public:
 		_set_kernel_arg(_subtract, 1, sizeof(cl_mem), &_weight);
 		_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract);
+
+		_subtract_reg = _create_kernel("subtract_reg");
+		_set_kernel_arg(_subtract_reg, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
+		_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
+		_kernels.push_back(_subtract_reg);
 
 
 	}
@@ -544,16 +551,18 @@ public:
 	{
 		uint32 offS = (uint32)(sum * _n);
 		uint32 offD = (uint32)(diff * _n);
-		uint32 offA = (uint32)(a   * _n);
-		uint32 offB = (uint32)(b   * _n);
+		uint32 offA = (uint32)(a * _n);
+		uint32 offB = (uint32)(b * _n);
+
 		_set_kernel_arg(_carry_weight_addsub_p1, 4, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_addsub_p1, 5, sizeof(uint32), &offD);
 		_set_kernel_arg(_carry_weight_addsub_p1, 6, sizeof(uint32), &offA);
 		_set_kernel_arg(_carry_weight_addsub_p1, 7, sizeof(uint32), &offB);
 		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2x2, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_p2x2, 5, sizeof(uint32), &offD);
-		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
+
+		_set_kernel_arg(_carry_weight_addsub_p2, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2, 5, sizeof(uint32), &offD);
+		_execute_kernel(_carry_weight_addsub_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
 	void carry_weight_mul2_unit(const size_t dst0, const size_t dst1)
@@ -573,12 +582,12 @@ public:
 	void addsub_copy(const size_t sum, const size_t diff, const size_t sum_copy, const size_t diff_copy,
 					const size_t a, const size_t b)
 	{
-		const uint32 offS  = (uint32)(sum  * _n);
-		const uint32 offD  = (uint32)(diff * _n);
-		const uint32 offSc = (uint32)(sum_copy  * _n);
+		const uint32 offS = (uint32)(sum * _n);
+		const uint32 offD = (uint32)(diff * _n);
+		const uint32 offSc = (uint32)(sum_copy * _n);
 		const uint32 offDc = (uint32)(diff_copy * _n);
-		const uint32 offA  = (uint32)(a * _n);
-		const uint32 offB  = (uint32)(b * _n);
+		const uint32 offA = (uint32)(a * _n);
+		const uint32 offB = (uint32)(b * _n);
 
 		_set_kernel_arg(_carry_weight_addsub_p1_copy, 4, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_addsub_p1_copy, 5, sizeof(uint32), &offD);
@@ -588,11 +597,11 @@ public:
 		_set_kernel_arg(_carry_weight_addsub_p1_copy, 9, sizeof(uint32), &offB);
 		_execute_kernel(_carry_weight_addsub_p1_copy, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_p2x2_copy, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_p2x2_copy, 5, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_p2x2_copy, 6, sizeof(uint32), &offSc);
-		_set_kernel_arg(_carry_weight_p2x2_copy, 7, sizeof(uint32), &offDc);
-		_execute_kernel(_carry_weight_p2x2_copy, (_n / 4) >> _lcwm_wg_size);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, 4, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, 6, sizeof(uint32), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, 7, sizeof(uint32), &offDc);
+		_execute_kernel(_carry_weight_addsub_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
 	void copy(const size_t dst, const size_t src)
@@ -634,11 +643,6 @@ private:
 	std::vector<uint64> _weight;
 	std::vector<uint8> _digit_width;
 
-	bool avoid_fused_x2_path() const
-	{
-		return true;
-		//return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
-	}
 
 public:
 	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
@@ -1148,21 +1152,6 @@ public:
 
 	void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
 	{
-		if (!avoid_fused_x2_path())
-		{
-			set_multiplicand2(dst0, dst0);
-			set_multiplicand2(dst1, dst1);
-
-			set_multiplicand(src0, src0);
-			set_multiplicand(src1, src1);
-
-			mul_new_core(dst0, src0);
-			mul_new_core(dst1, src1);
-
-			_gpu->carry_weight_mul2_unit(size_t(dst0), size_t(dst1));
-			return;
-		}
-
 		set_multiplicand(src0, src0);
 		mul(dst0, src0);
 		set_multiplicand(src1, src1);
@@ -1296,59 +1285,34 @@ public:
 		_gpu->carry_weight_add(dst, src);
 	}
 	
-void sub_reg(const Reg dst, const Reg src) const override
-{
-   // if (avoid_fused_x2_path())
-    //{
-        _gpu->carry_weight_sub_safe(size_t(dst), size_t(src));
-      //  return;
-    //}
-    //_gpu->carry_weight_sub(size_t(dst), size_t(src));
-}
+	void sub_reg(const Reg dst, const Reg src) const override
+	{
+		_gpu->carry_weight_sub_safe(size_t(dst), size_t(src));
+	}
 
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
-		copy(sum_out, a);
-		add(sum_out, b);
-
-		copy(diff_out, a);
-		sub_reg(diff_out, b);
+		_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
 	}
 
 	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 					const Reg a, const Reg b) const override
 	{
-		if (!avoid_fused_x2_path())
-		{
-			_gpu->addsub_copy((size_t)sum,(size_t)diff,(size_t)sum_copy,(size_t)diff_copy,(size_t)a,(size_t)b);
-			return;
-		}
-
-		copy(sum, a);
-		add(sum, b);
-		copy(sum_copy, sum);
-
-		copy(diff, a);
-		sub_reg(diff, b);
-		copy(diff_copy, diff);
+		_gpu->addsub_copy((size_t)sum, (size_t)diff, (size_t)sum_copy, (size_t)diff_copy, (size_t)a, (size_t)b);
 	}
 	void mul_pair_prepared(const Reg rdst0, const Reg rsrc0,
 						const Reg rdst1, const Reg rsrc1,
 						const uint32 a0 = 1, const uint32 a1 = 1) const override
 	{
-		if ((a0 != 1) || (a1 != 1) || avoid_fused_x2_path())
+		if ((a0 != 1) || (a1 != 1))
 		{
 			mul(rdst0, rsrc0, a0);
 			mul(rdst1, rsrc1, a1);
 			return;
 		}
 
-		const size_t dst0 = size_t(rdst0), src0 = size_t(rsrc0);
-		const size_t dst1 = size_t(rdst1), src1 = size_t(rsrc1);
-
-		mul_new_core(dst0, src0);
-		mul_new_core(dst1, src1);
-		_gpu->carry_weight_mul2_unit(dst0, dst1);
+		mul(rdst0, rsrc0);
+		mul(rdst1, rsrc1);
 	}
 
 	void xdbl_tail_uv(const Reg x_out, const Reg z_out,
