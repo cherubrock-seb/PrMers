@@ -1193,10 +1193,10 @@ int App::runECMMarinTwistedEdwards()
             auto t0_t16 = clock::now();
             auto tlast_t16 = t0_t16;
             double ema_tps_t16 = 0.0;
-            for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
-                //uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
-                uint64_t m = (mix64(curve_seed, tries) | 1ULL) % 1000000ULL;
-                if (m < 2) m = 2;
+            constexpr uint32_t torsion16_init_tries = 128;
+            for (uint32_t tries = 0; tries < torsion16_init_tries && !ok; ++tries) {
+                uint64_t m = (mix64(curve_seed, 0x544F523136ULL + uint64_t(tries)) | 1ULL);
+                if (m < 3) m += 2;
 
                 {
                     auto now = clock::now();
@@ -1209,10 +1209,10 @@ int App::runECMMarinTwistedEdwards()
                         else ema_tps_t16 = 0.75 * ema_tps_t16 + 0.25 * inst;
                     }
                     const double rate = (ema_tps_t16 > 0.0) ? ema_tps_t16 : ((elapsed > 1e-9 && done > 0) ? (double)done / elapsed : 0.0);
-                    const double eta = (rate > 0.0) ? ((128.0 - (double)done) / rate) : 0.0;
+                    const double eta = (rate > 0.0) ? ((double)(torsion16_init_tries - done) / rate) : 0.0;
                     std::ostringstream line;
-                    line << "[ECM] torsion16 init " << done << "/128"
-                         << " (" << std::fixed << std::setprecision(1) << (100.0 * (double)done / 128.0) << "%)"
+                    line << "[ECM] torsion16 init " << done << "/" << torsion16_init_tries
+                         << " (" << std::fixed << std::setprecision(1) << (100.0 * (double)done / (double)torsion16_init_tries) << "%)"
                          << " | tries/s " << std::fixed << std::setprecision(1) << rate
                          << " | ETA " << fmt_hms(eta)
                          << " | m=" << m;
@@ -1225,23 +1225,39 @@ int App::runECMMarinTwistedEdwards()
 
                 aE = mpz_class(1);
 
-                auto inv_or_gcd = [&](const mpz_class& den, mpz_class& inv)->bool {
-                    int r = invm(den, inv);
-                    if (r == 1) {
-                        curves_tested_for_found = c+1; options.curves_tested_for_found = (uint32_t)(c+1);
-                        write_result(); publish_json(); delete eng; return false;
-                    }
-                    return (r == 0);
+                auto inv_or_gcd = [&](const mpz_class& den, mpz_class& inv)->int {
+                    int rr = invm(den, inv);
+                    if (rr == 1) return 1;
+                    if (rr == 0) return 0;
+                    return -1;
                 };
 
-                mpz_class inv, alpha, alpha2, r, x, y;
+                mpz_class inv, alpha, alpha2, r;
                 mpz_class den = subm(s, mpz_class(4));
-                if (!inv_or_gcd(den, inv)) return 0;
+                int inv_status = inv_or_gcd(den, inv);
+                if (inv_status == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (inv_status < 0) continue;
                 alpha  = mulm(addm(t, mpz_class(8)), inv);
                 alpha2 = sqrm(alpha);
 
                 den = subm(mpz_class(8), alpha2);
-                if (!inv_or_gcd(den, inv)) return 0;
+                inv_status = inv_or_gcd(den, inv);
+                if (inv_status == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (inv_status < 0) continue;
                 r = mulm(addm(mpz_class(8), mulm(mpz_class(2), alpha)), inv);
 
                 mpz_class two_r_minus1 = subm(mulm(mpz_class(2), r), mpz_class(1));
@@ -1249,16 +1265,44 @@ int App::runECMMarinTwistedEdwards()
 
                 mpz_class numD = addm(subm(mulm(mpz_class(8), sqrm(r)), mulm(mpz_class(8), r)), mpz_class(1));
                 mpz_class t1sq = sqrm(t1);
-                if (!inv_or_gcd(t1sq, inv)) return 0;
+                inv_status = inv_or_gcd(t1sq, inv);
+                if (inv_status == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (inv_status < 0) continue;
                 dE = mulm(numD, inv);
+                if (dE == 0 || dE == 1 || dE == subm(N, mpz_class(1))) continue;
 
                 mpz_class numX = mulm(subm(mpz_class(8), alpha2), subm(mulm(mpz_class(2), sqrm(r)), mpz_class(1)));
                 mpz_class denX = addm(subm(mulm(mpz_class(2), s), alpha2), mpz_class(4));
-                if (!inv_or_gcd(denX, inv)) return 0;
+                inv_status = inv_or_gcd(denX, inv);
+                if (inv_status == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (inv_status < 0) continue;
                 X0 = mulm(numX, inv);
 
                 mpz_class denY = subm(mulm(mpz_class(4), r), mpz_class(3));
-                if (!inv_or_gcd(denY, inv)) return 0;
+                inv_status = inv_or_gcd(denY, inv);
+                if (inv_status == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (inv_status < 0) continue;
                 Y0 = mulm(t1, inv);
 
                 if (X0 == 0 || Y0 == 0) continue;
