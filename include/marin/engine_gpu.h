@@ -636,7 +636,8 @@ private:
 
 	bool avoid_fused_x2_path() const
 	{
-		return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
+		return true;
+		//return (_n >= (size_t(1) << 19)) && ((_n & (_n - 1)) == 0);
 	}
 
 public:
