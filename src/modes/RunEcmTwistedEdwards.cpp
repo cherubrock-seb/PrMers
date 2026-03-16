@@ -1189,10 +1189,36 @@ int App::runECMMarinTwistedEdwards()
         // ---- torsion 16 (Gallot / Theorem 2.5) : a = 1 ----
         if (te_use_torsion16) {
             bool ok = false;
+            using clock = std::chrono::steady_clock;
+            auto t0_t16 = clock::now();
+            auto tlast_t16 = t0_t16;
+            double ema_tps_t16 = 0.0;
             for (uint32_t tries = 0; tries < 128 && !ok; ++tries) {
                 //uint64_t m = (mix64(base_seed, c ^ (0x9E37u + tries)) | 1ULL) % 1000000ULL;
                 uint64_t m = (mix64(curve_seed, tries) | 1ULL) % 1000000ULL;
                 if (m < 2) m = 2;
+
+                {
+                    auto now = clock::now();
+                    const uint32_t done = tries;
+                    const double elapsed = std::chrono::duration<double>(now - t0_t16).count();
+                    const double dt = std::chrono::duration<double>(now - tlast_t16).count();
+                    const double inst = (dt > 1e-9 && tries > 0) ? (1.0 / dt) : 0.0;
+                    if (inst > 0.0) {
+                        if (ema_tps_t16 <= 0.0) ema_tps_t16 = inst;
+                        else ema_tps_t16 = 0.75 * ema_tps_t16 + 0.25 * inst;
+                    }
+                    const double rate = (ema_tps_t16 > 0.0) ? ema_tps_t16 : ((elapsed > 1e-9 && done > 0) ? (double)done / elapsed : 0.0);
+                    const double eta = (rate > 0.0) ? ((128.0 - (double)done) / rate) : 0.0;
+                    std::ostringstream line;
+                    line << "[ECM] torsion16 init " << done << "/128"
+                         << " (" << std::fixed << std::setprecision(1) << (100.0 * (double)done / 128.0) << "%)"
+                         << " | tries/s " << std::fixed << std::setprecision(1) << rate
+                         << " | ETA " << fmt_hms(eta)
+                         << " | m=" << m;
+                    ecm_print_progress_line(line.str());
+                    tlast_t16 = now;
+                }
 
                 mpz_class s, t;
                 ecm_local::EC_mod4::get(m, 4, 8, N, s, t);
@@ -1245,6 +1271,7 @@ int App::runECMMarinTwistedEdwards()
                 built = ok = true;
                 torsion_used = "16";
             }
+            std::cout << std::endl;
 
         }
 
