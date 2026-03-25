@@ -312,7 +312,7 @@ int App::runECMMarinTwistedEdwards()
     if (forceCurve) curves =1ULL;
     const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
-    const bool stage2_debug_checks = true;
+    const bool stage2_debug_checks = false;
 
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
