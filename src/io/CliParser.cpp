@@ -353,6 +353,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-sigma") == 0 && i + 1 < argc) {
             opts.sigma = argv[i + 1];
+            opts.K = 1;
             ++i;
         }
         else if (std::strcmp(argv[i], "-tbits") == 0 && i + 1 < argc) {
