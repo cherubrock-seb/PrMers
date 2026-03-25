@@ -44,6 +44,7 @@ struct CliOptions {
     uint32_t ecm_check_interval = 600;
     bool compute_edwards = true;
     bool torsion16 = false;
+    bool family_iv_163 = false;
     bool notorsion = true;
     std::string sigma;
     uint64_t seed = 0ULL;

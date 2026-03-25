@@ -89,12 +89,14 @@ void printUsage(const char* progName) {
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
     std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
     std::cout << "  -ced                 : (Optional) compute in Twisted Edwards (by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
-    std::cout << "  -cmont                 : (Optional) compute in Montgomery (Twisted Edwards by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
+    std::cout << "  -cmont               : (Optional) compute in Montgomery (Twisted Edwards by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
-    std::cout << "  -sigma               : (Optional) force a curve sigma in Montgomery notorsion mode" << std::endl;
+    std::cout << "  -sigma               : (Optional) force a curve sigma in Montgomery (notorsion mode)" << std::endl;
     std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
+    std::cout << "  -iv163               : (Optional) use family_iv_163 curves (Gélin–Kleinjung–Lenstra) gives 16/3 average v2 (around order 32 point)" << std::endl;
+    
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
     std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
 
@@ -236,6 +238,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-torsion16") == 0) {
             opts.torsion16 = true;
+            opts.notorsion = false;
+        }
+        else if (std::strcmp(argv[i], "-iv163") == 0) {
+            opts.family_iv_163 = true;
             opts.notorsion = false;
         }
         else if (std::strcmp(argv[i], "-notorsion") == 0) {

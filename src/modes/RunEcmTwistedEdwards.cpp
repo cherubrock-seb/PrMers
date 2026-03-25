@@ -371,7 +371,9 @@ int App::runECMMarinTwistedEdwards()
     bool wrote_result = false;
     string mode_name = "twisted_edwards";
     const bool te_use_torsion16 = (!options.notorsion && options.torsion16) && !forceSigma;
-    string torsion_name = te_use_torsion16 ? string("16") : string("none");
+    const bool te_use_family_iv_163 = (!options.notorsion && !options.torsion16 && options.family_iv_163) && !forceSigma;
+    const uint8_t current_te_family_mode = te_use_torsion16 ? 1 : (te_use_family_iv_163 ? 2 : 0);
+    string torsion_name = te_use_torsion16 ? string("16") : (te_use_family_iv_163 ? string("family_iv_163") : string("none"));
     string result_status = "NF";
     mpz_class result_factor = 0;
     uint64_t curves_tested_for_found = 0;
@@ -820,11 +822,11 @@ int App::runECMMarinTwistedEdwards()
         if (rB1 != B1) return false;
 
         uint64_t saved_curve_seed = 0;
-        uint8_t  saved_torsion16  = 0;
+        uint8_t  saved_curve_family = 0;
         if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return false;
-        if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return false;
-        uint8_t current_torsion16 = te_use_torsion16 ? 1 : 0;
-        if (saved_torsion16 != current_torsion16) return false;
+        if (!f.read(reinterpret_cast<char*>(&saved_curve_family),  sizeof(saved_curve_family)))  return false;
+        uint8_t current_curve_family = current_te_family_mode;
+        if (saved_curve_family != current_curve_family) return false;
 
         out_seed = saved_curve_seed;
         return true;
@@ -936,8 +938,8 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&et),      sizeof(et)))      return;
 
                 if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
-                uint8_t torsion16_flag = te_use_torsion16 ? 1 : 0;
-                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+                uint8_t curve_family_mode = current_te_family_mode;
+                if (!f.write(reinterpret_cast<const char*>(&curve_family_mode), sizeof(curve_family_mode))) return;
 
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
@@ -973,11 +975,11 @@ int App::runECMMarinTwistedEdwards()
             if (!f.read(reinterpret_cast<char*>(&et),  sizeof(et)))  return -2;
 
             uint64_t saved_curve_seed = 0;
-            uint8_t  saved_torsion16  = 0;
+            uint8_t  saved_curve_family = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
-            uint8_t current_torsion16 = te_use_torsion16 ? 1 : 0;
-            if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
+            if (!f.read(reinterpret_cast<char*>(&saved_curve_family),  sizeof(saved_curve_family)))  return -2;
+            uint8_t current_curve_family = current_te_family_mode;
+            if (saved_curve_seed != curve_seed || saved_curve_family != current_curve_family) return -2;
 
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -1009,8 +1011,8 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&B2),       sizeof(B2)))       return;
                 uint64_t seed64 = (uint64_t)curve_seed;
                 if (!f.write(reinterpret_cast<const char*>(&seed64),   sizeof(seed64)))   return;
-                uint8_t torsion16_flag = te_use_torsion16 ? 1 : 0;
-                if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+                uint8_t curve_family_mode = current_te_family_mode;
+                if (!f.write(reinterpret_cast<const char*>(&curve_family_mode), sizeof(curve_family_mode))) return;
                 if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return;
 
                 const size_t cksz = eng->get_checkpoint_size();
@@ -1061,7 +1063,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             if (version >= 3) {
-                uint8_t current_tor = te_use_torsion16 ? 1 : 0;
+                uint8_t current_tor = current_te_family_mode;
                 if (saved_seed != (uint64_t)curve_seed || saved_tor != current_tor) return -2;
             }
 
@@ -1160,7 +1162,7 @@ int App::runECMMarinTwistedEdwards()
         mpz_class sigma_resume;
         bool have_sigma_resume = false;
         
-        string torsion_used = te_use_torsion16 ? string("16") : string("none");
+        string torsion_used = te_use_torsion16 ? string("16") : (te_use_family_iv_163 ? string("family_iv_163") : string("none"));
                              // (options.torsion16 ? string("16") : string("8"));
         bool built = false;
 
@@ -1185,6 +1187,45 @@ int App::runECMMarinTwistedEdwards()
             if (r<0) return false;
             dE_ref = mulm(subm(addm(mulm(aE_ref, X2), Y2), mpz_class(1)), invXY2);
             return true;
+        };
+        auto sqrQ = [](const mpq_class& z)->mpq_class { return z * z; };
+        auto pow4Q = [&](const mpq_class& z)->mpq_class { mpq_class t = sqrQ(z); return t * t; };
+        auto mpq_to_mod = [&](const mpq_class& q, mpz_class& out)->int{
+            mpz_class num(q.get_num()), den(q.get_den());
+            mpz_class inv;
+            int r = invm(den, inv);
+            if (r==1) return 1;
+            if (r<0)  return -1;
+            out = mulm(num, inv);
+            return 0;
+        };
+
+        //struct QPt { mpq_class x, y; bool inf=false; };
+        auto q_add_family_iv = [&](const QPt& P, const QPt& Q)->QPt{
+            if (P.inf) return Q;
+            if (Q.inf) return P;
+            if (P.x == Q.x) {
+                if (P.y == -Q.y) return QPt{{}, {}, true};
+                if (P.y == 0) return QPt{{}, {}, true};
+            }
+            mpq_class lambda;
+            if (P.x == Q.x && P.y == Q.y) {
+                lambda = (mpq_class(3) * sqrQ(P.x) - mpq_class(2) * P.x - mpq_class(9)) / (mpq_class(2) * P.y);
+            } else {
+                lambda = (Q.y - P.y) / (Q.x - P.x);
+            }
+            mpq_class x3 = sqrQ(lambda) + mpq_class(1) - P.x - Q.x;
+            mpq_class y3 = -P.y - lambda * (x3 - P.x);
+            return QPt{x3, y3, false};
+        };
+        auto q_mul_family_iv = [&](QPt P, uint32_t k)->QPt{
+            QPt R{{}, {}, true};
+            while (k) {
+                if (k & 1u) R = q_add_family_iv(R, P);
+                P = q_add_family_iv(P, P);
+                k >>= 1u;
+            }
+            return R;
         };
         // ---- torsion 16 (Gallot / Theorem 2.5) : a = 1 ----
         if (te_use_torsion16) {
@@ -1319,7 +1360,84 @@ int App::runECMMarinTwistedEdwards()
 
         }
 
-        if (!built && !te_use_torsion16) {
+        if (!built && te_use_family_iv_163) {
+            bool family_built = false;
+            for (uint32_t tries = 0; tries < 128 && !family_built; ++tries) {
+                uint32_t m = (uint32_t)(1 + (mix64(curve_seed, 0x163163ULL + uint64_t(tries)) % 100ULL));
+                QPt Q0{mpq_class(5), mpq_class(8), false};
+                QPt Pq = q_mul_family_iv(Q0, m);
+                if (Pq.inf) continue;
+                if (Pq.y == mpq_class(4)) continue;
+
+                mpq_class tq = (mpq_class(4) * Pq.x + mpq_class(4)) / (Pq.y - mpq_class(4));
+                mpq_class t2q = sqrQ(tq);
+                if (t2q == mpq_class(4)) continue;
+                mpq_class eq = (t2q + mpq_class(4) * tq) / (t2q - mpq_class(4));
+                if (eq == 0) continue;
+
+                mpq_class t4q = pow4Q(tq);
+                mpq_class t6q = t4q * t2q;
+                mpq_class denXq = t4q + mpq_class(6) * tq * t2q + mpq_class(12) * t2q + mpq_class(16) * tq;
+                if (denXq == 0) continue;
+                mpq_class Xq = (mpq_class(2) * tq * t2q + mpq_class(2) * t2q - mpq_class(8) * tq - mpq_class(8)) / denXq;
+                mpq_class denYq = t6q + mpq_class(6) * t4q * tq + mpq_class(10) * t4q + mpq_class(16) * tq * t2q + mpq_class(48) * t2q + mpq_class(64) * tq;
+                if (denYq == 0) continue;
+                mpq_class Yq = (t6q + mpq_class(6) * t4q * tq + mpq_class(10) * t4q - mpq_class(16) * tq * t2q - mpq_class(48) * t2q - mpq_class(32) * tq - mpq_class(32)) / denYq;
+                mpq_class dQ = -pow4Q(eq);
+
+                aE = subm(N, mpz_class(1));
+                int r = mpq_to_mod(dQ, dE);
+                if (r == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (r < 0) continue;
+                r = mpq_to_mod(Xq, X0);
+                if (r == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (r < 0) continue;
+                r = mpq_to_mod(Yq, Y0);
+                if (r == 1) {
+                    curves_tested_for_found = c+1;
+                    options.curves_tested_for_found = (uint32_t)(c+1);
+                    write_result();
+                    publish_json();
+                    delete eng;
+                    return 0;
+                }
+                if (r < 0) continue;
+
+                if (dE == 0 || dE == 1 || dE == subm(N, mpz_class(1))) continue;
+                if (X0 == 0 || Y0 == 0) continue;
+
+                auto X2 = sqrm(X0), Y2 = sqrm(Y0);
+                auto L  = addm(mulm(aE, X2), Y2);
+                auto R  = addm(mpz_class(1), mulm(dE, mulm(X2, Y2)));
+                if (subm(L, R) != 0) continue;
+
+                built = true;
+                family_built = true;
+                torsion_used = "family_iv_163";
+            }
+        }
+
+        if (!built && te_use_family_iv_163) {
+            std::cout << "[ECM] Could not build a family_iv_163 Twisted Edwards curve for this seed, retrying curve\n";
+            delete eng;
+            continue;
+        }
+
+        if (!built && !te_use_torsion16 && !te_use_family_iv_163) {
             bool sigma_built = false;
             for (uint32_t tries = 0; tries < 256 && !sigma_built; ++tries) {
                 mpz_class sigma_mpz;
