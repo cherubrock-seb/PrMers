@@ -132,14 +132,11 @@ static uint64_t ecm_isqrt_u64(uint64_t x) {
 }
 
 static inline uint32_t compute_s2_chunk_bits(size_t transform_words) {
-    const uint32_t base = 262144;
-    uint32_t scale = (uint32_t)((transform_words + 63) / 64);
-    if (scale == 0) scale = 1;
-    uint32_t bits = base / scale;
-    if (bits < 8192u) bits = 8192u;
-    if (bits > 262144u) bits = 262144u;
-    bits = (bits + 1023u) & ~1023u;
-    return bits;
+    if (transform_words <= 256)    return 1048576u;
+    if (transform_words <= 1024)   return 524288u;
+    if (transform_words <= 4096)   return 262144u;
+    if (transform_words <= 16384)  return 131072u;
+    return 65536u;
 }
 
 static inline mpz_class ecm_mpz_from_u64(uint64_t v) {
@@ -312,7 +309,7 @@ int App::runECMMarinTwistedEdwards()
     if (forceCurve) curves =1ULL;
     const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
-    const bool stage2_debug_checks = false;
+    const bool stage2_debug_checks = true;
 
     auto u64_bits = [](uint64_t x)->size_t{ if(!x) return 1; size_t n=0; while(x){ ++n; x>>=1; } return n; };
 
@@ -782,6 +779,7 @@ int App::runECMMarinTwistedEdwards()
     uint64_t resume_curve_idx  = 0;
     uint64_t resume_curve_seed = 0;
     bool     have_resume_seed  = false;
+    bool     have_resume_stage2 = false;
 
     auto try_probe_te_ckpt = [&](const std::string& file, uint64_t& out_seed)->bool {
         File f(file);
@@ -816,17 +814,120 @@ int App::runECMMarinTwistedEdwards()
         return true;
     };
 
+    auto try_probe_te_ckpt2 = [&](const std::string& file, uint64_t& out_seed, bool& out_has_seed)->bool {
+        File f(file);
+        if (!f.exists()) return false;
+
+        int version = 0;
+        if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+        if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6) return false;
+
+        uint32_t rp = 0;
+        if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
+        if (rp != p) return false;
+
+        uint32_t idx = 0;
+        uint32_t cnt_bits = 0;
+        if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return false;
+        if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return false;
+
+        uint64_t b1s = 0, b2s = 0;
+        if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return false;
+        if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return false;
+        if (b1s != B1 || b2s != B2) return false;
+
+        out_seed = 0;
+        out_has_seed = false;
+        if (version == 6 || version == 5) {
+            uint64_t saved_seed = 0;
+            uint8_t saved_tor = 0;
+            double et = 0.0;
+            uint8_t in_chunk = 0;
+            uint32_t chunk_start_idx = 0, chunk_end_idx = 0, chunk_bits_saved = 0, chunk_steps_done_saved = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
+            if (!f.read(reinterpret_cast<char*>(&saved_tor), sizeof(saved_tor))) return false;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+            if (!f.read(reinterpret_cast<char*>(&in_chunk), sizeof(in_chunk))) return false;
+            if (!f.read(reinterpret_cast<char*>(&chunk_start_idx), sizeof(chunk_start_idx))) return false;
+            if (!f.read(reinterpret_cast<char*>(&chunk_end_idx), sizeof(chunk_end_idx))) return false;
+            if (!f.read(reinterpret_cast<char*>(&chunk_bits_saved), sizeof(chunk_bits_saved))) return false;
+            if (!f.read(reinterpret_cast<char*>(&chunk_steps_done_saved), sizeof(chunk_steps_done_saved))) return false;
+            uint8_t current_tor = current_te_family_mode;
+            if (saved_tor != current_tor) return false;
+            out_seed = saved_seed;
+            out_has_seed = true;
+            return true;
+        }
+        if (version == 4) {
+            uint64_t saved_seed = 0;
+            uint8_t saved_tor = 0;
+            double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
+            if (!f.read(reinterpret_cast<char*>(&saved_tor), sizeof(saved_tor))) return false;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+            uint8_t current_tor = current_te_family_mode;
+            if (saved_tor != current_tor) return false;
+            out_seed = saved_seed;
+            out_has_seed = true;
+            return true;
+        }
+        if (version == 3) {
+            double et = 0.0;
+            uint64_t saved_seed = 0;
+            uint8_t saved_tor = 0;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+            if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
+            if (!f.read(reinterpret_cast<char*>(&saved_tor), sizeof(saved_tor))) return false;
+            uint8_t current_tor = current_te_family_mode;
+            if (saved_tor != current_tor) return false;
+            out_seed = saved_seed;
+            out_has_seed = true;
+            return true;
+        }
+
+        // version 2: no seed or torsion information recorded.
+        // Safe only when the curve is externally fixed and can be rebuilt identically.
+        if (forceCurve || forceSigma) {
+            out_seed = forceCurve ? options.curve_seed : 0ULL;
+            out_has_seed = forceCurve;
+            return true;
+        }
+        return false;
+    };
+
     if (!options.seed) {
         for (uint64_t c = 0; c < curves; ++c) {
-            const std::string ckpt_file   = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-            const std::string ckpt_file_o = ckpt_file + ".old";
+            const std::string ckpt2_file      = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string ckpt2_file_o    = ckpt2_file + ".old";
+            const std::string ckpt2_legacy    = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string ckpt2_legacy_o  = ckpt2_legacy + ".old";
 
             uint64_t s = 0;
-            if (try_probe_te_ckpt(ckpt_file, s) || try_probe_te_ckpt(ckpt_file_o, s)) {
-                resume_curve_idx  = c;
-                resume_curve_seed = s;
-                have_resume_seed  = true;
+            bool has_seed = false;
+            if (try_probe_te_ckpt2(ckpt2_file, s, has_seed) ||
+                try_probe_te_ckpt2(ckpt2_file_o, s, has_seed) ||
+                try_probe_te_ckpt2(ckpt2_legacy, s, has_seed) ||
+                try_probe_te_ckpt2(ckpt2_legacy_o, s, has_seed)) {
+                resume_curve_idx   = c;
+                resume_curve_seed  = s;
+                have_resume_seed   = has_seed;
+                have_resume_stage2 = true;
                 break;
+            }
+        }
+
+        if (!have_resume_stage2) {
+            for (uint64_t c = 0; c < curves; ++c) {
+                const std::string ckpt_file   = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+                const std::string ckpt_file_o = ckpt_file + ".old";
+
+                uint64_t s = 0;
+                if (try_probe_te_ckpt(ckpt_file, s) || try_probe_te_ckpt(ckpt_file_o, s)) {
+                    resume_curve_idx  = c;
+                    resume_curve_seed = s;
+                    have_resume_seed  = true;
+                    break;
+                }
             }
         }
     }
@@ -843,13 +944,14 @@ int App::runECMMarinTwistedEdwards()
     }
 
     std::cout << "[ECM] seed=" << base_seed;
-    if (!options.seed && have_resume_seed) {
-        std::cout << " (resumed from checkpoint, curve index " << (resume_curve_idx + 1) << ")";
+    if (!options.seed && (have_resume_seed || have_resume_stage2)) {
+        std::cout << " (resumed from " << (have_resume_stage2 ? "Stage2" : "Stage1")
+                  << " checkpoint, curve index " << (resume_curve_idx + 1) << ")";
     }
     std::cout << std::endl;
 
     uint64_t start_curve = 0;
-    if (!options.seed && have_resume_seed) {
+    if (!options.seed && (have_resume_seed || have_resume_stage2)) {
         start_curve = resume_curve_idx;
     }
 
@@ -857,10 +959,7 @@ int App::runECMMarinTwistedEdwards()
 
     {
         if (interrupted.load(std::memory_order_relaxed)) {
-            curves_tested_for_found = c;
-            options.curves_tested_for_found = (uint32_t)c;
-            write_result();
-            publish_json();
+            std::cout << "[ECM] Interrupt received — exiting without publishing a final result." << std::endl;
             return 0;
         }
 
@@ -908,6 +1007,11 @@ int App::runECMMarinTwistedEdwards()
         uint32_t s2_idx = 0, s2_cnt = 0; 
         double   s2_et  = 0.0;
         bool     resume_stage2 = false; 
+        bool     resume_stage2_in_chunk = false;
+        uint32_t resume_s2_chunk_start = 0;
+        uint32_t resume_s2_chunk_end = 0;
+        uint32_t resume_s2_chunk_bits = 0;
+        uint32_t resume_s2_steps_done = 0;
         (void) resume_stage2;
 
         uint64_t curve_seed;
@@ -933,7 +1037,40 @@ int App::runECMMarinTwistedEdwards()
         const std::string ckpt_legacy    = "ecm_m_"     + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2_legacy   = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
-        
+        mpz_class s2_base_Xpos, s2_base_Ypos, s2_base_Tpos;
+        mpz_class s2_base_Xneg, s2_base_Yneg, s2_base_Tneg;
+        bool have_s2_base_cache = false;
+
+        auto write_mpz_blob = [&](File& f, const mpz_class& z)->bool {
+            std::string hx = z.get_str(16);
+            uint32_t len = (uint32_t)hx.size();
+            if (!f.write(reinterpret_cast<const char*>(&len), sizeof(len))) return false;
+            if (len != 0 && !f.write(hx.data(), len)) return false;
+            return true;
+        };
+        auto read_mpz_blob = [&](File& f, mpz_class& z)->bool {
+            uint32_t len = 0;
+            if (!f.read(reinterpret_cast<char*>(&len), sizeof(len))) return false;
+            std::string hx(len, '\0');
+            if (len != 0 && !f.read(&hx[0], len)) return false;
+            if (len == 0) { z = 0; return true; }
+            return mpz_set_str(z.get_mpz_t(), hx.c_str(), 16) == 0;
+        };
+        auto restore_te_stage2_base_from_cache = [&]()->void {
+            if (!have_s2_base_cache) return;
+            mpz_t zXpos; mpz_init_set(zXpos, s2_base_Xpos.get_mpz_t()); eng->set_mpz((engine::Reg)6,  zXpos); mpz_clear(zXpos);
+            mpz_t zYpos; mpz_init_set(zYpos, s2_base_Ypos.get_mpz_t()); eng->set_mpz((engine::Reg)7,  zYpos); mpz_clear(zYpos);
+            mpz_t zTpos; mpz_init_set(zTpos, s2_base_Tpos.get_mpz_t()); eng->set_mpz((engine::Reg)9,  zTpos); mpz_clear(zTpos);
+            mpz_t zXneg; mpz_init_set(zXneg, s2_base_Xneg.get_mpz_t()); eng->set_mpz((engine::Reg)47, zXneg); mpz_clear(zXneg);
+            mpz_t zYneg; mpz_init_set(zYneg, s2_base_Yneg.get_mpz_t()); eng->set_mpz((engine::Reg)48, zYneg); mpz_clear(zYneg);
+            mpz_t zTneg; mpz_init_set(zTneg, s2_base_Tneg.get_mpz_t()); eng->set_mpz((engine::Reg)49, zTneg); mpz_clear(zTneg);
+            eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
+            eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);
+            eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
+            eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
+            eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);
+        };
+
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
@@ -989,7 +1126,7 @@ int App::runECMMarinTwistedEdwards()
             if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
             if (!f.read(reinterpret_cast<char*>(&saved_curve_family),  sizeof(saved_curve_family)))  return -2;
             uint8_t current_curve_family = current_te_family_mode;
-            if (saved_curve_seed != curve_seed || saved_curve_family != current_curve_family) return -2;
+            if ((!forceSigma && saved_curve_seed != curve_seed) || saved_curve_family != current_curve_family) return -2;
 
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -1008,11 +1145,16 @@ int App::runECMMarinTwistedEdwards()
             return rr;
         };
 
-        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+        auto save_ckpt2_ex = [&](uint32_t idx, double et, uint32_t cnt_bits,
+                                 uint8_t in_chunk,
+                                 uint32_t chunk_start_idx,
+                                 uint32_t chunk_end_idx,
+                                 uint32_t chunk_bits_saved,
+                                 uint32_t chunk_steps_done_saved){
             const std::string oldf = ckpt2_file + ".old", newf = ckpt2_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 4;
+                int version = 6;
                 if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return;
                 if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return;
                 if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return;
@@ -1024,6 +1166,21 @@ int App::runECMMarinTwistedEdwards()
                 uint8_t curve_family_mode = current_te_family_mode;
                 if (!f.write(reinterpret_cast<const char*>(&curve_family_mode), sizeof(curve_family_mode))) return;
                 if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return;
+                if (!f.write(reinterpret_cast<const char*>(&in_chunk), sizeof(in_chunk))) return;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_start_idx), sizeof(chunk_start_idx))) return;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_end_idx), sizeof(chunk_end_idx))) return;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_bits_saved), sizeof(chunk_bits_saved))) return;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_steps_done_saved), sizeof(chunk_steps_done_saved))) return;
+                uint8_t has_stage2_base = have_s2_base_cache ? 1u : 0u;
+                if (!f.write(reinterpret_cast<const char*>(&has_stage2_base), sizeof(has_stage2_base))) return;
+                if (has_stage2_base) {
+                    if (!write_mpz_blob(f, s2_base_Xpos)) return;
+                    if (!write_mpz_blob(f, s2_base_Ypos)) return;
+                    if (!write_mpz_blob(f, s2_base_Tpos)) return;
+                    if (!write_mpz_blob(f, s2_base_Xneg)) return;
+                    if (!write_mpz_blob(f, s2_base_Yneg)) return;
+                    if (!write_mpz_blob(f, s2_base_Tneg)) return;
+                }
 
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
@@ -1039,13 +1196,17 @@ int App::runECMMarinTwistedEdwards()
             fs::remove(ckpt2_file + ".new", ec);
         };
 
+        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+            save_ckpt2_ex(idx, et, cnt_bits, 0, 0, 0, 0, 0);
+        };
+
         auto read_ckpt2_one = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
 
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2 && version != 3 && version != 4) return -2;
+            if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6) return -2;
 
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -1058,9 +1219,36 @@ int App::runECMMarinTwistedEdwards()
             if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
 
+            have_s2_base_cache = false;
             uint64_t saved_seed = 0;
             uint8_t  saved_tor  = 0;
-            if (version == 4) {
+            if (version == 6 || version == 5) {
+                if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
+                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                uint8_t in_chunk = 0;
+                if (!f.read(reinterpret_cast<char*>(&in_chunk), sizeof(in_chunk))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_start), sizeof(resume_s2_chunk_start))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_end), sizeof(resume_s2_chunk_end))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_bits), sizeof(resume_s2_chunk_bits))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_steps_done), sizeof(resume_s2_steps_done))) return -2;
+                resume_stage2_in_chunk = (in_chunk != 0);
+                if (version == 6) {
+                    uint8_t has_stage2_base = 0;
+                    if (!f.read(reinterpret_cast<char*>(&has_stage2_base), sizeof(has_stage2_base))) return -2;
+                    if (has_stage2_base) {
+                        if (!read_mpz_blob(f, s2_base_Xpos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Ypos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tpos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Xneg)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Yneg)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tneg)) return -2;
+                        have_s2_base_cache = true;
+                    }
+                } else if (resume_stage2_in_chunk) {
+                    return -2;
+                }
+            } else if (version == 4) {
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
                 if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
@@ -1074,7 +1262,7 @@ int App::runECMMarinTwistedEdwards()
 
             if (version >= 3) {
                 uint8_t current_tor = current_te_family_mode;
-                if (saved_seed != (uint64_t)curve_seed || saved_tor != current_tor) return -2;
+                if ((!forceSigma && saved_seed != (uint64_t)curve_seed) || saved_tor != current_tor) return -2;
             }
 
             const size_t cksz = eng->get_checkpoint_size();
@@ -1087,8 +1275,15 @@ int App::runECMMarinTwistedEdwards()
             return 0;
         };
         auto read_ckpt2 = [&](uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
+            resume_stage2_in_chunk = false;
+            resume_s2_chunk_start = 0;
+            resume_s2_chunk_end = 0;
+            resume_s2_chunk_bits = 0;
+            resume_s2_steps_done = 0;
             int rr = read_ckpt2_one(ckpt2_file, idx, cnt_bits, et);
             if (rr < 0) rr = read_ckpt2_one(ckpt2_file + ".old", idx, cnt_bits, et);
+            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy, idx, cnt_bits, et);
+            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy + ".old", idx, cnt_bits, et);
             return rr;
         };
 
@@ -2177,7 +2372,7 @@ int App::runECMMarinTwistedEdwards()
         eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 = +P.t
         eng->set_multiplicand((engine::Reg)50,(engine::Reg)49); // T2neg = −P.t
 
-        if (!resumed && naf_len) {
+        if (!resumed && !resume_stage2 && naf_len) {
             short top = naf_vec[naf_len - 1];
             if (top < 0) {
                 eng->set_mpz((engine::Reg)3, zXneg);
@@ -2204,10 +2399,6 @@ int App::runECMMarinTwistedEdwards()
                     oss << "[ECM] Interrupted at curve " << (c+1) << ", iter " << i << "/" << total_steps;
                     guiServer_->appendLog(oss.str());
                 }
-                curves_tested_for_found = c;
-                options.curves_tested_for_found = (uint32_t)c;
-                write_result();
-                publish_json();
                 delete eng;
                 return 0;
             }
@@ -2473,21 +2664,20 @@ int App::runECMMarinTwistedEdwards()
                 mpz_class Xneg = subm(N, Xaff);
                 mpz_class Tneg = subm(N, Taff);
 
-                mpz_t zXpos; mpz_init_set(zXpos, Xaff.get_mpz_t()); eng->set_mpz((engine::Reg)6,  zXpos); mpz_clear(zXpos);
-                mpz_t zYpos; mpz_init_set(zYpos, Yaff.get_mpz_t()); eng->set_mpz((engine::Reg)7,  zYpos); mpz_clear(zYpos);
-                mpz_t zTpos; mpz_init_set(zTpos, Taff.get_mpz_t()); eng->set_mpz((engine::Reg)9,  zTpos); mpz_clear(zTpos);
-                mpz_t zXneg; mpz_init_set(zXneg, Xneg.get_mpz_t()); eng->set_mpz((engine::Reg)47, zXneg); mpz_clear(zXneg);
-                mpz_t zYneg; mpz_init_set(zYneg, Yaff.get_mpz_t()); eng->set_mpz((engine::Reg)48, zYneg); mpz_clear(zYneg);
-                mpz_t zTneg; mpz_init_set(zTneg, Tneg.get_mpz_t()); eng->set_mpz((engine::Reg)49, zTneg); mpz_clear(zTneg);
-                eng->set_multiplicand((engine::Reg)43,(engine::Reg)16); // a
-                eng->set_multiplicand((engine::Reg)44,(engine::Reg)8);  // 2
-                eng->set_multiplicand((engine::Reg)45,(engine::Reg)29); // d
-                eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 = +P.t
-                eng->set_multiplicand((engine::Reg)50,(engine::Reg)49); // T2neg = −P.t
+                s2_base_Xpos = Xaff;
+                s2_base_Ypos = Yaff;
+                s2_base_Tpos = Taff;
+                s2_base_Xneg = Xneg;
+                s2_base_Yneg = Yaff;
+                s2_base_Tneg = Tneg;
+                have_s2_base_cache = true;
+
+                restore_te_stage2_base_from_cache();
                 return 0;
             };
 
-            auto run_te_stage2_chunk = [&](const mpz_class& Echunk) {
+            bool interrupted_in_chunk = false;
+            auto run_te_stage2_chunk = [&](const mpz_class& Echunk, uint32_t chunk_start, uint32_t chunk_end, uint32_t chunk_bits, uint32_t resume_steps_done) -> bool {
                 std::vector<short> naf2;
                 naf2.reserve((size_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2) + 2);
                 mpz_class ec = Echunk;
@@ -2504,22 +2694,26 @@ int App::runECMMarinTwistedEdwards()
                     mpz_fdiv_q_2exp(e, e, 1);
                 }
                 while (!naf2.empty() && naf2.back() == 0) naf2.pop_back();
-                if (naf2.empty()) return;
+                if (naf2.empty()) return true;
 
                 short top = naf2.back();
-                eng->set((engine::Reg)1, 1u);
-                if (top < 0) {
-                    eng->copy((engine::Reg)3, (engine::Reg)47);
-                    eng->copy((engine::Reg)4, (engine::Reg)48);
-                    eng->copy((engine::Reg)5, (engine::Reg)49);
-                } else {
-                    eng->copy((engine::Reg)3, (engine::Reg)6);
-                    eng->copy((engine::Reg)4, (engine::Reg)7);
-                    eng->copy((engine::Reg)5, (engine::Reg)9);
+                const size_t total_steps2 = (naf2.size() >= 1 ? naf2.size() - 1 : 0);
+                if (resume_steps_done == 0) {
+                    eng->set((engine::Reg)1, 1u);
+                    if (top < 0) {
+                        eng->copy((engine::Reg)3, (engine::Reg)47);
+                        eng->copy((engine::Reg)4, (engine::Reg)48);
+                        eng->copy((engine::Reg)5, (engine::Reg)49);
+                    } else {
+                        eng->copy((engine::Reg)3, (engine::Reg)6);
+                        eng->copy((engine::Reg)4, (engine::Reg)7);
+                        eng->copy((engine::Reg)5, (engine::Reg)9);
+                    }
+                } else if ((size_t)resume_steps_done >= total_steps2) {
+                    return true;
                 }
 
-                const size_t total_steps2 = (naf2.size() >= 1 ? naf2.size() - 1 : 0);
-                for (size_t j = 0; j < total_steps2; ++j) {
+                for (size_t j = (size_t)resume_steps_done; j < total_steps2; ++j) {
                     if (te_use_torsion16) eDBL_XYTZ_notwist(3,4,1,5);
                     else                  eDBL_XYTZ(3,4,1,5);
 
@@ -2531,7 +2725,42 @@ int App::runECMMarinTwistedEdwards()
                             if (te_use_torsion16) eADD_RP_notwist_2(); else eADD_RP_2();
                         }
                     }
+
+                    if (((j + 1) & 1023u) == 0u || (j + 1) == total_steps2) {
+                        auto now2 = high_resolution_clock::now();
+                        if (duration_cast<milliseconds>(now2 - last2_ui).count() >= progress_interval_ms || (j + 1) == total_steps2) {
+                            uint64_t inside_done = done_bits_est + std::min<uint64_t>((uint64_t)(j + 1), (uint64_t)chunk_bits);
+                            const double done = double(inside_done);
+                            const double total = double(std::max<uint64_t>(1ULL, total_s2_iters));
+                            const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                            const double avg_ips = done / std::max(1e-9, elapsed);
+                            const double dt_ui = duration<double>(now2 - last2_ui).count();
+                            const double dd_ui = double(inside_done - last2_done_bits);
+                            const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                            if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                            else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                            const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                            const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
+                            std::ostringstream line;
+                            line << "[ECM] Curve " << (c+1) << "/" << curves
+                                 << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
+                                 << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                                 << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                                 << " | ETA " << fmt_hms(eta);
+                            ecm_print_progress_line(line.str());
+                            last2_done_bits = inside_done;
+                            last2_ui = now2;
+                        }
+                        if (interrupted.load(std::memory_order_relaxed) && (j + 1) != total_steps2) {
+                            const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                            save_ckpt2_ex(chunk_start, elapsed, (uint32_t)primesS2_v.size(),
+                                          1u, chunk_start, chunk_end, chunk_bits, (uint32_t)(j + 1));
+                            interrupted_in_chunk = true;
+                            return false;
+                        }
+                    }
                 }
+                return true;
             };
 
             bool abort_curve = false;
@@ -2543,14 +2772,28 @@ int App::runECMMarinTwistedEdwards()
                 mpz_class Echunk(1);
                 uint32_t chunk_start = s2_idx;
                 uint32_t chunk_end = s2_idx;
+                uint32_t chunk_bits = 0;
+                uint32_t chunk_resume_steps_done = 0;
+                bool resume_this_chunk = false;
                 const uint32_t max_s2_chunk_bits = compute_s2_chunk_bits(transform_size_once);
-                while (chunk_end < (uint32_t)primesS2_v.size()) {
-                    mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
-                    ++chunk_end;
-                    if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= max_s2_chunk_bits && chunk_end > chunk_start) break;
+                if (resume_stage2_in_chunk && s2_idx == resume_s2_chunk_start && resume_s2_chunk_end > resume_s2_chunk_start) {
+                    chunk_start = resume_s2_chunk_start;
+                    chunk_end = resume_s2_chunk_end;
+                    for (uint32_t qi = chunk_start; qi < chunk_end; ++qi) {
+                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[qi]);
+                    }
+                    chunk_bits = resume_s2_chunk_bits ? resume_s2_chunk_bits : (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
+                    chunk_resume_steps_done = resume_s2_steps_done;
+                    resume_this_chunk = true;
+                } else {
+                    while (chunk_end < (uint32_t)primesS2_v.size()) {
+                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
+                        ++chunk_end;
+                        if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= max_s2_chunk_bits && chunk_end > chunk_start) break;
+                    }
+                    chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
                 }
 
-                const uint32_t chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
                 if (stage2_debug_checks) {
                     std::ostringstream oss;
                     oss << "[ECM] Stage2 chunk begin | curve=" << (c+1)
@@ -2560,19 +2803,41 @@ int App::runECMMarinTwistedEdwards()
                     if (guiServer_) guiServer_->appendLog(oss.str());
                 }
 
-                int setup_rc = setup_te_stage2_base();
-                if (setup_rc == 1) {
-                    int factor_rc = publish_stage2_factor(result_factor);
-                    if (factor_rc == 2) return 0;
-                    handled_known_factor = true;
-                    break;
+                if (!resume_this_chunk) {
+                    int setup_rc = setup_te_stage2_base();
+                    if (setup_rc == 1) {
+                        int factor_rc = publish_stage2_factor(result_factor);
+                        if (factor_rc == 2) return 0;
+                        handled_known_factor = true;
+                        break;
+                    }
+                    if (setup_rc < 0) {
+                        abort_curve = true;
+                        break;
+                    }
                 }
-                if (setup_rc < 0) {
-                    abort_curve = true;
+
+                if (resume_this_chunk) {
+                    restore_te_stage2_base_from_cache();
+                    last2_done_bits = done_bits_est + std::min<uint64_t>((uint64_t)chunk_resume_steps_done, (uint64_t)chunk_bits);
+                    last2_ui = high_resolution_clock::now();
+                }
+
+                bool chunk_completed = run_te_stage2_chunk(Echunk, chunk_start, chunk_end, chunk_bits, chunk_resume_steps_done);
+                if (!chunk_completed) {
+                    stop_after_chunk = true;
+                    if (!stop_msg_printed) {
+                        stop_msg_printed = true;
+                        std::cout << "[ECM] Interrupt received — checkpoint saved inside current Stage2 chunk...\n";
+                    }
                     break;
                 }
 
-                run_te_stage2_chunk(Echunk);
+                resume_stage2_in_chunk = false;
+                resume_s2_chunk_start = 0;
+                resume_s2_chunk_end = 0;
+                resume_s2_chunk_bits = 0;
+                resume_s2_steps_done = 0;
 
                 done_bits_est += chunk_bits;
                 s2_idx = chunk_end;
@@ -2639,14 +2904,20 @@ int App::runECMMarinTwistedEdwards()
                               << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
                     if (guiServer_) {
                         std::ostringstream oss;
-                        oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
+                        uint32_t stop_idx2 = resume_stage2_in_chunk ? resume_s2_chunk_start : s2_idx;
+                        oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << stop_idx2 << "/" << primesS2_v.size();
                         guiServer_->appendLog(oss.str());
                     }
-                    curves_tested_for_found = c; options.curves_tested_for_found = (uint32_t)(c);
-                    write_result(); publish_json(); delete eng; return 0;
+                    save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
+                    delete eng;
+                    return 0;
                 }
             }
             std::cout << std::endl;
+            if (stop_after_chunk) {
+                delete eng;
+                return 0;
+            }
             if (handled_known_factor) continue;
             if (abort_curve) {
                 std::error_code ec;
