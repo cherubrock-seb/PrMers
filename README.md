@@ -2,7 +2,7 @@ PrMers: GPU-accelerated Mersenne Primality Testing
 ==================================================
 https://github.com/cherubrock-seb/PrMers/
 
-PrMers is a high-performance GPU application for Lucas–Lehmer (LL), PRP, P‑1 and ECM
+PrMers is a high-performance GPU application for Lucas-Lehmer (LL), PRP, P‑1 and ECM
 testing of Mersenne numbers. It uses OpenCL and an integer NTT / IBDWT engine modulo 2^64 − 2^32 + 1 (Uses IBDWT-style transforms over Z / (2^64 − 2^32 + 1) Z) and is designed for long, reliable runs with checkpointing.
 
 The project also supports PRP tests of cofactors and Wagstaff numbers, and includes
@@ -16,7 +16,7 @@ PrMers has two main computational backends:
 
 - Marin backend (default)
   - External library: https://github.com/galloty/marin
-  - Efficient modular exponentiation with Gerbicz–Li style error checking (in PRP and LL safe).
+  - Efficient modular exponentiation with Gerbicz-Li style error checking (in PRP and LL safe).
   - Uses IBDWT-style transforms over Z / (2^64 − 2^32 + 1) Z.
   - Supports PRP, LL, P‑1 and ECM on Mersenne numbers.
 
@@ -40,19 +40,19 @@ Numbers
 
 Main modes
 - **PRP (default)**
-  - Probable-prime test with Gerbicz–Li error checking.
+  - Probable-prime test with Gerbicz-Li error checking.
   - Works for Mersenne, Wagstaff and cofactors.
   - Produces Res64 and full residue (optionally a proof).
 
-- **Lucas–Lehmer (LL)**
-  - Three LL modes exist (GPU). See the dedicated section *“Lucas–Lehmer modes and safety”* below.
+- **Lucas-Lehmer (LL)**
+  - Three LL modes exist (GPU). See the dedicated section *“Lucas-Lehmer modes and safety”* below.
     - `-ll`        → **LL (safe)** (default LL mode)
     - `-llunsafe`  → **LL (classic/unsafe)**
     - `-llsafe2`   → **LL (safe, “doubling” variant)**
 
 - **P‑1 factoring**
   - Stage 1 and Stage 2 on N = 2^p − 1.
-  - Stage is error checked with Gerbicz–Li.
+  - Stage is error checked with Gerbicz-Li.
   - Targets factors q of N such that q − 1 is B1‑smooth (with Stage 2 extension).
   - **GPU (Marin) only.** Stage 2 supports both the classic prime-sweep and an **n^K (Crandall) variant** (see `-K` and `-nmax`).
   - **Interoperability & resume files** (after Stage 1 or Stage 2, see `-resume` / `-p95`):
@@ -159,7 +159,7 @@ Basic PRP on a Mersenne exponent:
 - Checkpoint every 120 s (default).
 - Results go to `results.txt` and `<exponent>_prp_result.json`.
 
-Lucas–Lehmer test (safe mode):
+Lucas-Lehmer test (safe mode):
 
     ./prmers 127 -ll
 
@@ -198,7 +198,7 @@ Disable Marin and use the internal backend:
     ./prmers 136279841 -marin
 
 
-Lucas–Lehmer modes and safety
+Lucas-Lehmer modes and safety
 -----------------------------
 
 PrMers implements three LL variants:
@@ -208,7 +208,7 @@ PrMers implements three LL variants:
      (a + b√3)^2 = (a^2 + 3b^2) + (2ab)√3.  
      Implemented as four transforms per iteration:  
      A=T(a), B=T(b), invT(A^2 + T(3)·B^2), 2·invT(A·B) (start from (a,b)=(2,1); final check is (−1,0)).  
-   - **Error checking:** protected by Gerbicz–Li style verification with periodic
+   - **Error checking:** protected by Gerbicz-Li style verification with periodic
      roll‑back/restore to the last verified checkpoint. Default check cadence is
      ~10 minutes; tune with `-checklevel <k>` (higher = more frequent). Disable
      with `-gerbiczli` (not recommended except for benchmarking).
@@ -262,7 +262,7 @@ Modes
 
 LL safety / diagnostics
 - `-checklevel <k>`       Force GL check every ~B×k iters (B≈√p by default).
-- `-gerbiczli`            Disable Gerbicz–Li checks (PRP/LL‑safe). Not recommended.
+- `-gerbiczli`            Disable Gerbicz-Li checks (PRP/LL‑safe). Not recommended.
 - `-llsafeb <B>`          Block size for `-llsafe2` (default ≈ √p).
 - `-erroriter <i>`        Inject an error at iteration *i* to test detection.
 - `-res64_display_interval <N>`  Show Res64 every N iterations (0=off).
@@ -334,7 +334,7 @@ Usage:
 - Only the first valid `PRP=` line is read currently.
 
 
-Gerbicz–Li Error Checking (PRP & LL safe)
+Gerbicz-Li Error Checking (PRP & LL safe)
 -----------------------------------------
 
 Principle
@@ -429,53 +429,53 @@ For a given exponent p, PrMers chooses an NTT/IBDWT size N:
 
 | Exponent p range | N | Structure |
 |---|---:|---|
-| 3–113 | 4 | 2^2 |
-| 127–239 | 8 | 2^3 |
-| 241–463 | 16 | 2^4 |
-| 467–919 | 32 | 2^5 |
-| 929–1153 | 40 | 5·2^3 |
-| 1163–1789 | 64 | 2^6 |
-| 1801–2239 | 80 | 5·2^4 |
-| 2243–3583 | 128 | 2^7 |
-| 3593–4463 | 160 | 5·2^5 |
-| 4481–6911 | 256 | 2^8 |
-| 6917–8629 | 320 | 5·2^6 |
-| 8641–13807 | 512 | 2^9 |
-| 13829–17257 | 640 | 5·2^7 |
-| 17291–26597 | 1024 | 2^10 |
-| 26627–33247 | 1280 | 5·2^8 |
-| 33287–53239 | 2048 | 2^11 |
-| 53267–66553 | 2560 | 5·2^9 |
-| 66569–102397 | 4096 | 2^12 |
-| 102407–127997 | 5120 | 5·2^10 |
-| 128021–204797 | 8192 | 2^13 |
-| 204803–255989 | 10240 | 5·2^11 |
-| 256019–393209 | 16384 | 2^14 |
-| 393241–491503 | 20480 | 5·2^12 |
-| 491527–786431 | 32768 | 2^15 |
-| 786433–982981 | 40960 | 5·2^13 |
-| 983063–1507321 | 65536 | 2^16 |
-| 1507369–1884133 | 81920 | 5·2^14 |
-| 1884193–3014653 | 131072 | 2^17 |
-| 3014659–3768311 | 163840 | 5·2^15 |
-| 3768341–5767129 | 262144 | 2^18 |
-| 5767169–7208951 | 327680 | 5·2^16 |
-| 7208977–11534329 | 524288 | 2^19 |
-| 11534351–14417881 | 655360 | 5·2^17 |
-| 14417927–22020091 | 1048576 | 2^20 |
-| 22020127–27525109 | 1310720 | 5·2^18 |
-| 27525131–44040187 | 2097152 | 2^21 |
-| 44040253–55050217 | 2621440 | 5·2^19 |
-| 55050253–83886053 | 4194304 | 2^22 |
-| 83886091–104857589 | 5242880 | 5·2^20 |
-| 104857601–167772107 | 8388608 | 2^23 |
-| 167772161–209715199 | 10485760 | 5·2^21 |
-| 209715263–318767093 | 16777216 | 2^24 |
-| 318767107–398458859 | 20971520 | 5·2^22 |
-| 398458889–637534199 | 33554432 | 2^25 |
-| 637534277–796917757 | 41943040 | 5·2^23 |
-| 796917763–1207959503 | 67108864 | 2^26 |
-| 1207959559–1509949421 | 83886080 | 5·2^24 |
+| 3-113 | 4 | 2^2 |
+| 127-239 | 8 | 2^3 |
+| 241-463 | 16 | 2^4 |
+| 467-919 | 32 | 2^5 |
+| 929-1153 | 40 | 5·2^3 |
+| 1163-1789 | 64 | 2^6 |
+| 1801-2239 | 80 | 5·2^4 |
+| 2243-3583 | 128 | 2^7 |
+| 3593-4463 | 160 | 5·2^5 |
+| 4481-6911 | 256 | 2^8 |
+| 6917-8629 | 320 | 5·2^6 |
+| 8641-13807 | 512 | 2^9 |
+| 13829-17257 | 640 | 5·2^7 |
+| 17291-26597 | 1024 | 2^10 |
+| 26627-33247 | 1280 | 5·2^8 |
+| 33287-53239 | 2048 | 2^11 |
+| 53267-66553 | 2560 | 5·2^9 |
+| 66569-102397 | 4096 | 2^12 |
+| 102407-127997 | 5120 | 5·2^10 |
+| 128021-204797 | 8192 | 2^13 |
+| 204803-255989 | 10240 | 5·2^11 |
+| 256019-393209 | 16384 | 2^14 |
+| 393241-491503 | 20480 | 5·2^12 |
+| 491527-786431 | 32768 | 2^15 |
+| 786433-982981 | 40960 | 5·2^13 |
+| 983063-1507321 | 65536 | 2^16 |
+| 1507369-1884133 | 81920 | 5·2^14 |
+| 1884193-3014653 | 131072 | 2^17 |
+| 3014659-3768311 | 163840 | 5·2^15 |
+| 3768341-5767129 | 262144 | 2^18 |
+| 5767169-7208951 | 327680 | 5·2^16 |
+| 7208977-11534329 | 524288 | 2^19 |
+| 11534351-14417881 | 655360 | 5·2^17 |
+| 14417927-22020091 | 1048576 | 2^20 |
+| 22020127-27525109 | 1310720 | 5·2^18 |
+| 27525131-44040187 | 2097152 | 2^21 |
+| 44040253-55050217 | 2621440 | 5·2^19 |
+| 55050253-83886053 | 4194304 | 2^22 |
+| 83886091-104857589 | 5242880 | 5·2^20 |
+| 104857601-167772107 | 8388608 | 2^23 |
+| 167772161-209715199 | 10485760 | 5·2^21 |
+| 209715263-318767093 | 16777216 | 2^24 |
+| 318767107-398458859 | 20971520 | 5·2^22 |
+| 398458889-637534199 | 33554432 | 2^25 |
+| 637534277-796917757 | 41943040 | 5·2^23 |
+| 796917763-1207959503 | 67108864 | 2^26 |
+| 1207959559-1509949421 | 83886080 | 5·2^24 |
 
 
 Benchmarks
@@ -501,10 +501,10 @@ PRP throughput for p ≈ 136,279,841 (PRP mode, Marin, auto NTT).
 |-------------------------------------------|------------------------------|--------------|---------------------|----------------|----------------------------------------|
 | NVIDIA GeForce RTX 5090                   | Resolver (vast.ai)           | n/a          | ≈ 2230              | ≈ 17 h         | High‑end NVIDIA Ada/Blackwell          |
 | NVIDIA GeForce RTX 4090                   | Resolver                     | 100.00/100   | ≈ 1225              | ≈ 31 h         | Reference 100/100 score                |
-| NVIDIA GeForce RTX 5070 Laptop            | beepthebee                   | 62.69/100    | ≈ 356               | ≈ 4.4–4.6 days | +200 MHz core, +500 MHz VRAM (OC)      |
+| NVIDIA GeForce RTX 5070 Laptop            | beepthebee                   | 62.69/100    | ≈ 356               | ≈ 4.4-4.6 days | +200 MHz core, +500 MHz VRAM (OC)      |
 | NVIDIA GeForce RTX 4060 Ti                | Lorenzo                      | 69.14/100    | ≈ 318               | ≈ 5 days       | Desktop midrange                       |
 | NVIDIA GeForce RTX 4070 Laptop GPU        | Phantomas                    | 52.24/100    | ≈ 255               | ≈ 6 days       | Gaming laptop GPU                      |
-| NVIDIA GeForce RTX 2060                   | hwt; Artoria2e5              | 45.76/100    | ≈ 240–259           | ≈ 5.9–6.7 days | Undervolt / power cap in some reports  |
+| NVIDIA GeForce RTX 2060                   | hwt; Artoria2e5              | 45.76/100    | ≈ 240-259           | ≈ 5.9-6.7 days | Undervolt / power cap in some reports  |
 | NVIDIA GeForce GTX 1660 Ti                | Phantomas (MSI GL73)         | n/a          | ≈ 234               | ≈ 6.8 days     | Older Turing GPU                       |
 | AMD Radeon VII                            | cherubrock (author)          | 50.57/100    | ≈ 350               | ≈ 4.5 days     | Reference dev card                     |
 | Apple M4 Pro (Mac mini / MacBook)         | wigglefruit                  | 30.29/100    | ≈ 164               | ≈ 9.6 days     | Apple silicon, 18‑core GPU             |
@@ -590,7 +590,7 @@ Must read papers
 ### Proof schemes (Gerbicz-Li)
 
 - An Efficient Modular Exponentiation Proof Scheme  
-  Darren Li, Yves Gallot, 2022–2023  
+  Darren Li, Yves Gallot, 2022-2023  
   arXiv: https://arxiv.org/abs/2209.15623  
 
   Presents an efficient proof scheme for left-to-right modular exponentiation,
@@ -690,13 +690,13 @@ Transform sizes were chosen automatically by PrMers.
 Typical ranges seen (power-capped / undervolted in some runs):
 
 - p = 57 885 161  
-  - ≈ 491–502 iter/s, ETA ≈ 1 d 7 h – 1 d 20 h.
+  - ≈ 491-502 iter/s, ETA ≈ 1 d 7 h - 1 d 20 h.
 - p = 74 207 281  
   - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
 - p = 82 589 933  
-  - ≈ 499–502 iter/s, ETA ≈ 1 d 15 h – 1 d 20 h.
+  - ≈ 499-502 iter/s, ETA ≈ 1 d 15 h - 1 d 20 h.
 - p = 136 279 841  
-  - ≈ 240–259 iter/s, ETA ≈ 5 d 21 h – 6 d 18 h.
+  - ≈ 240-259 iter/s, ETA ≈ 5 d 21 h - 6 d 18 h.
 
 #### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
 
