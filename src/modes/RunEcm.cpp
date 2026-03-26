@@ -31,6 +31,7 @@
 #endif
 #include <csignal>
 #include <chrono>
+#include <algorithm>
 #include <vector>
 #include <iomanip>
 #include <iostream>
@@ -51,6 +52,8 @@
 #include <set>
 #include <unordered_set>
 #include <ctime>
+
+namespace fs = std::filesystem;
 
 using namespace core;
 using namespace std::chrono;
@@ -239,6 +242,8 @@ int App::runECMMarin()
     if (pm_effective==0 || pm_effective==3) torsion_name = "none";
     else if (pm_effective==1 || pm_effective==4) torsion_name = "16";
     else torsion_name = "8";
+
+    const bool ckpt_expect_te_stage1 = (pm_effective == 0);
 
     bool wrote_result = false;
     string result_status = "not_found";
@@ -538,6 +543,130 @@ int App::runECMMarin()
    // uint64_t base_seed = options.seed ? options.seed : (now_ns ^ ((uint64_t)p<<32) ^ B1);
    // std::cout << "[ECM] seed=" << base_seed << std::endl;
 
+    uint64_t resume_curve_idx  = 0;
+    uint64_t resume_curve_seed = 0;
+    bool     have_resume_seed  = false;
+
+    auto try_probe_mont_ckpt = [&](const std::string& file, uint64_t& out_seed)->bool {
+        File f(file);
+        if (!f.exists()) return false;
+
+        int version = 0;
+        if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+
+        if (version == 1 || version == 5) {
+            uint32_t rp = 0, i = 0, nbb = 0;
+            uint64_t rB1 = 0;
+            double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
+            if (rp != p) return false;
+            if (!f.read(reinterpret_cast<char*>(&i), sizeof(i))) return false;
+            if (!f.read(reinterpret_cast<char*>(&nbb), sizeof(nbb))) return false;
+            if (!f.read(reinterpret_cast<char*>(&rB1), sizeof(rB1))) return false;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+            if (rB1 != B1) return false;
+            uint64_t saved_curve_seed = 0;
+            uint8_t saved_torsion16 = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return false;
+            if (!f.read(reinterpret_cast<char*>(&saved_torsion16), sizeof(saved_torsion16))) return false;
+            if (version == 5) {
+                uint8_t saved_te_stage1 = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_te_stage1), sizeof(saved_te_stage1))) return false;
+            }
+            uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
+            if (saved_torsion16 != current_torsion16) return false;
+            out_seed = saved_curve_seed;
+            return true;
+        }
+
+        if (version == 2 || version == 3 || version == 4 || version == 5 || version == 7 || version == 8 || version == 9) {
+            uint32_t rp = 0, idx = 0, cnt_bits = 0;
+            uint64_t b1s = 0, b2s = 0;
+            double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
+            if (rp != p) return false;
+            if (!f.read(reinterpret_cast<char*>(&idx), sizeof(idx))) return false;
+            if (!f.read(reinterpret_cast<char*>(&cnt_bits), sizeof(cnt_bits))) return false;
+            if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return false;
+            if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return false;
+            if (b1s != B1 || b2s != B2) return false;
+            if (version >= 3) {
+                uint64_t saved_seed = 0;
+                uint8_t  saved_tor  = 0;
+                if (version == 4 || version == 7 || version == 8 || version == 9) {
+                    if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
+                    if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor))) return false;
+                    if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+                } else {
+                    if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
+                    if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
+                    if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor))) return false;
+                }
+                uint8_t current_tor = (!options.notorsion && options.torsion16) ? 1 : 0;
+                if (saved_tor != current_tor) return false;
+                out_seed = saved_seed;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (!options.seed && !forceCurveSeed) {
+        for (uint64_t c = 0; c < curves; ++c) {
+            const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            uint64_t s = 0;
+            if (try_probe_mont_ckpt(ckpt2, s) || try_probe_mont_ckpt(ckpt2 + ".old", s) ||
+                try_probe_mont_ckpt(ckpt_file, s) || try_probe_mont_ckpt(ckpt_file + ".old", s)) {
+                resume_curve_idx = c;
+                resume_curve_seed = s;
+                have_resume_seed = true;
+                break;
+            }
+        }
+    }
+
+    auto now_ns_seed = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
+    uint64_t base_seed = 0;
+    if (forceCurveSeed) {
+        base_seed = options.curve_seed;
+    } else if (options.seed) {
+        base_seed = options.seed;
+    } else if (have_resume_seed) {
+        base_seed = resume_curve_seed;
+    } else if (forceSigma) {
+        base_seed = mix64(hash64_str(options.sigma) ^ (((uint64_t)p) << 32) ^ B1, 0xA5C31E29ULL);
+    } else {
+        base_seed = (now_ns_seed ^ ((uint64_t)p<<32) ^ B1);
+    }
+    std::cout << "[ECM] seed=" << base_seed;
+    if (!options.seed && have_resume_seed) std::cout << " (resume)";
+    std::cout << std::endl;
+
+    auto rebuild_s2_layout = [&](size_t transform_words) {
+        s2_chunk_ends.clear();
+        s2_chunk_prefix_iters.clear();
+        s2_total_iters_precomputed = 0;
+        if (B2 > B1) {
+            const uint32_t MAX_S2_CHUNK_BITS_PRE = compute_s2_chunk_bits(transform_words);
+            mpz_class EchunkPre(1);
+            uint32_t idxPre = 0;
+            while (idxPre < (uint32_t)primesS2_v.size()) {
+                EchunkPre = 1;
+                const uint32_t chunkStartPre = idxPre;
+                while (idxPre < (uint32_t)primesS2_v.size()) {
+                    mpz_mul_ui(EchunkPre.get_mpz_t(), EchunkPre.get_mpz_t(), primesS2_v[idxPre]);
+                    ++idxPre;
+                    if (mpz_sizeinbase(EchunkPre.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS_PRE && idxPre > chunkStartPre) break;
+                }
+                const uint32_t cb = (uint32_t)mpz_sizeinbase(EchunkPre.get_mpz_t(), 2);
+                s2_total_iters_precomputed += cb;
+                s2_chunk_ends.push_back(idxPre);
+                s2_chunk_prefix_iters.push_back(s2_total_iters_precomputed);
+            }
+        }
+    };
+
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
     //const std::string ckpt2 = "ecm2_m_p" + std::to_string(p) + "_curve" + std::to_string(curve_seed) + ".ckpt2";
     for (uint64_t c = 0; c < curves; ++c)
@@ -547,20 +676,12 @@ int App::runECMMarin()
         curves_tested_for_found = (uint32_t)(c + 1);
         options.curves_tested_for_found = (uint32_t)(c + 1);
 
-        auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
-
-        uint64_t base_seed = 0;
-        if (forceCurveSeed) {
-            base_seed = options.curve_seed;
-        } else if (options.seed) {
-            base_seed = options.seed;
-        } else if (forceSigma) {
-            base_seed = mix64(hash64_str(options.sigma) ^ (((uint64_t)p) << 32) ^ B1, 0xA5C31E29ULL);
+        uint64_t curve_seed = 0;
+        if (!options.seed && have_resume_seed && c == resume_curve_idx) {
+            curve_seed = resume_curve_seed;
         } else {
-            base_seed = (now_ns ^ ((uint64_t)p<<32) ^ B1);
+            curve_seed = mix64(base_seed, c);
         }
-
-        uint64_t curve_seed = mix64(base_seed, c);
         if (forceCurveSeed) { curve_seed = options.curve_seed; base_seed = curve_seed; }
 
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
@@ -568,13 +689,46 @@ int App::runECMMarin()
 
         engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
-        if (transform_size_once == 0) { transform_size_once = eng->get_size(); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
+        if (transform_size_once == 0) { transform_size_once = eng->get_size(); rebuild_s2_layout(transform_size_once); std::ostringstream os; os<<"[ECM] Transform size="<<transform_size_once<<" words, device_id="<<options.device_id; std::cout<<os.str()<<std::endl; if (guiServer_) guiServer_->appendLog(os.str()); }
+
+        mpz_class s2_base_Xpos, s2_base_Ypos, s2_base_Tpos;
+        mpz_class s2_base_Xneg, s2_base_Yneg, s2_base_Tneg;
+        bool have_s2_base_cache = false;
+
+        auto write_mpz_blob = [&](File& f, const mpz_class& z)->bool {
+            std::string hx = z.get_str(16);
+            uint32_t len = (uint32_t)hx.size();
+            if (!f.write(reinterpret_cast<const char*>(&len), sizeof(len))) return false;
+            if (len != 0 && !f.write(hx.data(), len)) return false;
+            return true;
+        };
+        auto read_mpz_blob = [&](File& f, mpz_class& z)->bool {
+            uint32_t len = 0;
+            if (!f.read(reinterpret_cast<char*>(&len), sizeof(len))) return false;
+            std::string hx(len, '\0');
+            if (len != 0 && !f.read(&hx[0], len)) return false;
+            if (len == 0) { z = 0; return true; }
+            return mpz_set_str(z.get_mpz_t(), hx.c_str(), 16) == 0;
+        };
+        auto restore_te_stage2_base_from_cache = [&]()->void {
+            if (!have_s2_base_cache) return;
+            mpz_t zXpos; mpz_init_set(zXpos, s2_base_Xpos.get_mpz_t()); eng->set_mpz((engine::Reg)6,  zXpos); mpz_clear(zXpos);
+            mpz_t zYpos; mpz_init_set(zYpos, s2_base_Ypos.get_mpz_t()); eng->set_mpz((engine::Reg)7,  zYpos); mpz_clear(zYpos);
+            mpz_t zTpos; mpz_init_set(zTpos, s2_base_Tpos.get_mpz_t()); eng->set_mpz((engine::Reg)9,  zTpos); mpz_clear(zTpos);
+            mpz_t zXneg; mpz_init_set(zXneg, s2_base_Xneg.get_mpz_t()); eng->set_mpz((engine::Reg)47, zXneg); mpz_clear(zXneg);
+            mpz_t zYneg; mpz_init_set(zYneg, s2_base_Yneg.get_mpz_t()); eng->set_mpz((engine::Reg)48, zYneg); mpz_clear(zYneg);
+            mpz_t zTneg; mpz_init_set(zTneg, s2_base_Tneg.get_mpz_t()); eng->set_mpz((engine::Reg)49, zTneg); mpz_clear(zTneg);
+            eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
+            eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
+            eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
+            eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);
+        };
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 1;
+                int version = ckpt_expect_te_stage1 ? 5 : 1;
                 if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
                 if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
@@ -585,6 +739,10 @@ int App::runECMMarin()
                 if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
                 uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return;
+                if (version == 5) {
+                    uint8_t te_stage1_flag = 1u;
+                    if (!f.write(reinterpret_cast<const char*>(&te_stage1_flag), sizeof(te_stage1_flag))) return;
+                }
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!eng->get_checkpoint(data)) return;
@@ -603,7 +761,12 @@ int App::runECMMarin()
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 1) return -2;
+            if (version != 1 && version != 5) return -2;
+            if (ckpt_expect_te_stage1) {
+                if (version != 5) return -2;
+            } else {
+                if (version != 1) return -2;
+            }
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
@@ -616,6 +779,11 @@ int App::runECMMarin()
             uint8_t  saved_torsion16  = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_curve_seed), sizeof(saved_curve_seed))) return -2;
             if (!f.read(reinterpret_cast<char*>(&saved_torsion16),  sizeof(saved_torsion16)))  return -2;
+            if (version == 5) {
+                uint8_t saved_te_stage1 = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_te_stage1), sizeof(saved_te_stage1))) return -2;
+                if (saved_te_stage1 != 1u) return -2;
+            }
             uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
             if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
             const size_t cksz = eng->get_checkpoint_size();
@@ -627,11 +795,22 @@ int App::runECMMarin()
             return 0;
         };
 
-        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+        bool     resume_stage2_in_chunk = false;
+        uint32_t resume_s2_chunk_start = 0;
+        uint32_t resume_s2_chunk_end = 0;
+        uint32_t resume_s2_chunk_bits = 0;
+        uint32_t resume_s2_steps_done = 0;
+
+        auto save_ckpt2_ex = [&](uint32_t idx, double et, uint32_t cnt_bits,
+                                 uint8_t in_chunk,
+                                 uint32_t chunk_start_idx,
+                                 uint32_t chunk_end_idx,
+                                 uint32_t chunk_bits_saved,
+                                 uint32_t chunk_steps_done_saved){
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
             {
                 File f(newf, "wb");
-                int version = 4;
+                int version = (pm_effective == 0) ? 9 : 6;
                 if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return -1;
                 if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return -1;
                 if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return -1;
@@ -643,6 +822,23 @@ int App::runECMMarin()
                 uint8_t torsion16_flag = (!options.notorsion && options.torsion16) ? 1 : 0;
                 if (!f.write(reinterpret_cast<const char*>(&torsion16_flag), sizeof(torsion16_flag))) return -1;
                 if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return -1;
+                if (!f.write(reinterpret_cast<const char*>(&in_chunk), sizeof(in_chunk))) return -1;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_start_idx), sizeof(chunk_start_idx))) return -1;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_end_idx), sizeof(chunk_end_idx))) return -1;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_bits_saved), sizeof(chunk_bits_saved))) return -1;
+                if (!f.write(reinterpret_cast<const char*>(&chunk_steps_done_saved), sizeof(chunk_steps_done_saved))) return -1;
+                if (pm_effective == 0) {
+                    uint8_t has_stage2_base = have_s2_base_cache ? 1u : 0u;
+                    if (!f.write(reinterpret_cast<const char*>(&has_stage2_base), sizeof(has_stage2_base))) return -1;
+                    if (has_stage2_base) {
+                        if (!write_mpz_blob(f, s2_base_Xpos)) return -1;
+                        if (!write_mpz_blob(f, s2_base_Ypos)) return -1;
+                        if (!write_mpz_blob(f, s2_base_Tpos)) return -1;
+                        if (!write_mpz_blob(f, s2_base_Xneg)) return -1;
+                        if (!write_mpz_blob(f, s2_base_Yneg)) return -1;
+                        if (!write_mpz_blob(f, s2_base_Tneg)) return -1;
+                    }
+                }
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!eng->get_checkpoint(data)) return -1;
@@ -657,12 +853,21 @@ int App::runECMMarin()
             return 0;
         };
 
+        auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){
+            return save_ckpt2_ex(idx, et, cnt_bits, 0u, 0u, 0u, 0u, 0u);
+        };
+
         auto read_ckpt2 = [&](const std::string& file, uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
             File f(file);
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2 && version != 3 && version != 4) return -2;
+            if (version != 2 && version != 3 && version != 4 && version != 6 && version != 7 && version != 8 && version != 9) return -2;
+            if (pm_effective == 0) {
+                if (version != 9) return -2;
+            } else if (version == 7 || version == 8) {
+                return -2;
+            }
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
             if (rp != p) return -2;
@@ -672,9 +877,40 @@ int App::runECMMarin()
             if (!f.read(reinterpret_cast<char*>(&b1s), sizeof(b1s))) return -2;
             if (!f.read(reinterpret_cast<char*>(&b2s), sizeof(b2s))) return -2;
 
+            resume_stage2_in_chunk = false;
+            resume_s2_chunk_start = 0;
+            resume_s2_chunk_end = 0;
+            resume_s2_chunk_bits = 0;
+            resume_s2_steps_done = 0;
+
             uint64_t saved_seed = 0;
             uint8_t  saved_tor  = 0;
-            if (version == 4) {
+            have_s2_base_cache = false;
+            if (version == 6 || version == 7 || version == 8) {
+                uint8_t in_chunk = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
+                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&in_chunk), sizeof(in_chunk))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_start), sizeof(resume_s2_chunk_start))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_end), sizeof(resume_s2_chunk_end))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_bits), sizeof(resume_s2_chunk_bits))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&resume_s2_steps_done), sizeof(resume_s2_steps_done))) return -2;
+                resume_stage2_in_chunk = (in_chunk != 0);
+                if (version == 8 || version == 9) {
+                    uint8_t has_stage2_base = 0;
+                    if (!f.read(reinterpret_cast<char*>(&has_stage2_base), sizeof(has_stage2_base))) return -2;
+                    if (has_stage2_base) {
+                        if (!read_mpz_blob(f, s2_base_Xpos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Ypos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tpos)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Xneg)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Yneg)) return -2;
+                        if (!read_mpz_blob(f, s2_base_Tneg)) return -2;
+                        have_s2_base_cache = true;
+                    }
+                }
+            } else if (version == 4) {
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
                 if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
@@ -995,6 +1231,39 @@ int App::runECMMarin()
             eng->mul((engine::Reg)31,(engine::Reg)11);
             eng->copy((engine::Reg)32,(engine::Reg)5);
             eng->mul((engine::Reg)32,(engine::Reg)46);
+            eng->mul((engine::Reg)32,(engine::Reg)45);
+            hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
+            eng->copy((engine::Reg)38,(engine::Reg)34);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)36);
+            eng->mul((engine::Reg)38,(engine::Reg)11);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)30);
+            eng->sub_reg((engine::Reg)38,(engine::Reg)31);
+            eng->mul((engine::Reg)39,(engine::Reg)43);
+            eng->copy((engine::Reg)40,(engine::Reg)31);
+            eng->sub_reg((engine::Reg)40,(engine::Reg)39);
+            eng->copy((engine::Reg)3,(engine::Reg)38);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)41);
+            eng->mul((engine::Reg)3,(engine::Reg)11);
+            eng->copy((engine::Reg)1,(engine::Reg)42);
+            eng->mul((engine::Reg)1,(engine::Reg)11);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)40);
+            eng->copy((engine::Reg)4,(engine::Reg)42);
+            eng->mul((engine::Reg)4,(engine::Reg)11);
+            eng->copy((engine::Reg)5,(engine::Reg)38);
+            eng->mul((engine::Reg)5,(engine::Reg)11);
+        };
+
+        auto eADD_RP_2 = [&](){
+            eng->addsub((engine::Reg)34,(engine::Reg)35,  (engine::Reg)4,(engine::Reg)3);
+            eng->addsub((engine::Reg)36,(engine::Reg)37,  (engine::Reg)48,(engine::Reg)47);
+            eng->copy((engine::Reg)30,(engine::Reg)3);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)47);
+            eng->mul_copy((engine::Reg)30,(engine::Reg)11, (engine::Reg)39);
+            eng->copy((engine::Reg)31,(engine::Reg)4);
+            eng->set_multiplicand((engine::Reg)11,(engine::Reg)48);
+            eng->mul((engine::Reg)31,(engine::Reg)11);
+            eng->copy((engine::Reg)32,(engine::Reg)5);
+            eng->mul((engine::Reg)32,(engine::Reg)50);
             eng->mul((engine::Reg)32,(engine::Reg)45);
             hadamard((engine::Reg)1,(engine::Reg)32, (engine::Reg)42,(engine::Reg)41);
             eng->copy((engine::Reg)38,(engine::Reg)34);
@@ -1389,12 +1658,18 @@ int App::runECMMarin()
                 mpz_t zy; mpz_init(zy); mpz_set(zy, te_Y0.get_mpz_t()); eng->set_mpz((engine::Reg)7, zy); mpz_clear(zy);
                 mpz_class te_T0 = mulm(te_X0, te_Y0);
                 mpz_t zt; mpz_init(zt); mpz_set(zt, te_T0.get_mpz_t()); eng->set_mpz((engine::Reg)9, zt); mpz_clear(zt);
+                mpz_class te_X0_neg = subm(N, te_X0);
+                mpz_class te_T0_neg = subm(N, te_T0);
+                mpz_t zxneg; mpz_init(zxneg); mpz_set(zxneg, te_X0_neg.get_mpz_t()); eng->set_mpz((engine::Reg)47, zxneg); mpz_clear(zxneg);
+                mpz_t zyneg; mpz_init(zyneg); mpz_set(zyneg, te_Y0.get_mpz_t()); eng->set_mpz((engine::Reg)48, zyneg); mpz_clear(zyneg);
+                mpz_t ztneg; mpz_init(ztneg); mpz_set(ztneg, te_T0_neg.get_mpz_t()); eng->set_mpz((engine::Reg)49, ztneg); mpz_clear(ztneg);
                 eng->set((engine::Reg)3, 0u);
                 eng->set((engine::Reg)4, 1u);
                 eng->set((engine::Reg)5, 0u);
                 eng->set_multiplicand((engine::Reg)43,(engine::Reg)16);
                 eng->set_multiplicand((engine::Reg)45,(engine::Reg)29);
                 eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);
+                eng->set_multiplicand((engine::Reg)50,(engine::Reg)49);
             }
 
             std::ostringstream head2;
@@ -1406,24 +1681,61 @@ int App::runECMMarin()
             if (rr_ck < 0) rr_ck = read_ckpt(ckpt_file + ".old", start_i, nb_ck, saved_et);
             if (rr_ck != 0) { start_i = 0; nb_ck = 0; saved_et = 0.0; }
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
+            std::vector<short> stage1_naf;
             size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
+            if (use_te_stage1) {
+                stage1_naf.reserve(total_bits + 2);
+                mpz_class ec = K;
+                mpz_ptr e = ec.get_mpz_t();
+                for (; mpz_size(e) != 0; ) {
+                    short di = 0;
+                    if (mpz_odd_p(e)) {
+                        unsigned long limb0 = (mpz_size(e) > 0) ? mpz_getlimbn(e, 0) : 0ul;
+                        short mod4 = short(limb0 & 3u);
+                        di = (mod4 == 1) ? 1 : -1;
+                        if (di > 0) mpz_sub_ui(e, e, 1u); else mpz_add_ui(e, e, 1u);
+                    }
+                    stage1_naf.push_back(di);
+                    mpz_fdiv_q_2exp(e, e, 1);
+                }
+                while (!stage1_naf.empty() && stage1_naf.back() == 0) stage1_naf.pop_back();
+                if (!stage1_naf.empty() && start_i == 0) {
+                    short top = stage1_naf.back();
+                    if (top < 0) {
+                        eng->copy((engine::Reg)3, (engine::Reg)47);
+                        eng->copy((engine::Reg)4, (engine::Reg)48);
+                        eng->copy((engine::Reg)5, (engine::Reg)49);
+                    } else {
+                        eng->copy((engine::Reg)3, (engine::Reg)6);
+                        eng->copy((engine::Reg)4, (engine::Reg)7);
+                        eng->copy((engine::Reg)5, (engine::Reg)9);
+                    }
+                }
+                total_bits = (stage1_naf.size() >= 1 ? stage1_naf.size() - 1 : 0);
+                if (start_i > total_bits) start_i = (uint32_t)total_bits;
+            }
             size_t last_ui_done = start_i;
             double ema_ips_stage1 = 0.0;
 
             for (size_t i = start_i; i < total_bits; ++i){
-                size_t bit = total_bits - 1 - i; int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
                 if (!use_te_stage1) {
+                    size_t bit = total_bits - 1 - i;
+                    int b = mpz_tstbit(K.get_mpz_t(), static_cast<mp_bitcnt_t>(bit)) ? 1 : 0;
                     if (b==0) { xDBLADD_strict(0,1, 2,3); }
                     else      { xDBLADD_strict(2,3, 0,1); }
                 } else {
                     eDBL_XYTZ(3,4,1,5);
-                    if (b != 0) eADD_RP();
+                    short di = stage1_naf[stage1_naf.size() - 2 - i];
+                    if (di != 0) {
+                        if (di > 0) eADD_RP();
+                        else        eADD_RP_2();
+                    }
                 }
 
                 auto now = high_resolution_clock::now();
                 if (duration_cast<milliseconds>(now - last_ui).count() >= ui_interval_ms || i+1 == total_bits) {
                     const size_t done_u = i + 1;
-                    const double done = double(done_u), total = double(total_bits);
+                    const double done = double(done_u), total = double(total_bits ? total_bits : 1);
                     const double elapsed = duration<double>(now - t0).count() + saved_et;
                     const double avg_ips = done / std::max(1e-9, elapsed);
                     const double dt_ui = duration<double>(now - last_ui).count();
@@ -1434,7 +1746,7 @@ int App::runECMMarin()
                     const double eta_ips = (ema_ips_stage1 > 0.0) ? ema_ips_stage1 : avg_ips;
                     const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                     std::ostringstream line;
-                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                    line << "[ECM] Curve " << (c+1) << "/" << curves
                         << " | Stage1 " << (i+1) << "/" << total_bits
                         << " (" << std::fixed << std::setprecision(1)
                         << (done * 100.0 / total) << "%)"
@@ -1446,10 +1758,9 @@ int App::runECMMarin()
                 }
 
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"\n[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits<<"\n"; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", bit "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c); options.curves_tested_for_found=(uint32_t)(c); write_result(); publish_json(); delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits<<""; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c); options.curves_tested_for_found=(uint32_t)(c); write_result(); publish_json(); delete eng; return 0; }
             }
             std::cout<<std::endl;
-
             mpz_class gg;
             mpz_class xAff = x0;
             if (!use_te_stage1) {
@@ -1472,8 +1783,6 @@ int App::runECMMarin()
                     int r_u = invm(den_u, inv_den_u);
                     if (r_u == 0) {
                         xAff = mulm(addm(Zv, Yv), inv_den_u);
-                        mpz_t tx; mpz_init(tx); mpz_set(tx, xAff.get_mpz_t()); eng->set_mpz((engine::Reg)0, tx); mpz_clear(tx);
-                        eng->set((engine::Reg)1, 1u);
                     } else if (r_u == 1) {
                         gg = result_factor > 1 ? result_factor : gg;
                     }
@@ -1501,22 +1810,14 @@ int App::runECMMarin()
                 if (!known) {
                     options.knownFactors.push_back(gg.get_str());
                     result_factor=gg; result_status="found";
-                    options.B2 = 0;
-                    write_result(); publish_json();
-                    options.B2 = B2;
                 } else {
                     result_factor=0; result_status="NF";
-                    if((B2 <= B1)){
-                        options.B2 = 0;
-                        write_result(); publish_json();
-                        options.B2 = B2;
-                    }
                 }
-
-                if((B2 <= B1)){
-                    delete eng;
-                    continue;
-                }
+                options.B2 = 0;
+                write_result(); publish_json();
+                options.B2 = B2;
+                delete eng;
+                continue;
             }
             else{
                 if((B2 <= B1)){
@@ -1533,68 +1834,399 @@ int App::runECMMarin()
             std::cout<<s2r.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2r.str());
         }
 
+        std::cout << "[ECM] This result has been added to ecm_result.json" << std::endl;
+        bool next_curve_after_stage2 = false;
         if (B2 > B1) {
+            const uint32_t totalS2Primes = (uint32_t)primesS2_v.size();
             const uint32_t MAX_S2_CHUNK_BITS = compute_s2_chunk_bits(transform_size_once);
             const uint64_t total_s2_iters = std::max<uint64_t>(1ULL, s2_total_iters_precomputed);
 
-            auto handle_stage2_found = [&](const mpz_class& gf)->bool {
-                bool known = is_known(gf);
-                std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gf.get_str() << std::endl;
+            auto publish_stage2_factor = [&](const mpz_class& gg)->int {
+                bool known = is_known(gg);
+                std::cout << "[ECM] Curve " << (c+1) << "/" << curves
+                          << (known ? " | known factor=" : " | factor=") << gg.get_str() << std::endl;
                 if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "[ECM] " << (known ? "Known " : "") << "factor: " << gf.get_str();
+                    oss << "[ECM] " << (known ? "Known " : "") << "factor: " << gg.get_str();
                     guiServer_->appendLog(oss.str());
                 }
+
                 std::error_code ec0;
                 fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                 fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
-                curves_tested_for_found = (uint32_t)(c+1); options.curves_tested_for_found = (uint32_t)(c+1);
+
                 if (!known) {
-                    options.knownFactors.push_back(gf.get_str());
-                    result_factor = gf;
+                    if (std::find(options.knownFactors.begin(), options.knownFactors.end(), gg.get_str()) == options.knownFactors.end()) {
+                        options.knownFactors.push_back(gg.get_str());
+                    }
+                    result_factor = gg;
                     result_status = "found";
+                    curves_tested_for_found = (uint32_t)(c + 1);
+                    options.curves_tested_for_found = (uint32_t)(c + 1);
                     write_result();
                     publish_json();
+                } else {
+                    result_factor = 0;
+                    result_status = "NF";
                 }
-                return true;
+
+                delete eng;
+                return known ? 1 : 2;
             };
 
-            auto setup_mont_stage2_base = [&]() -> int {
-                mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
-                mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
-                mpz_class gz = gcd_with_dots(Zv, N);
-                if (gz > 1 && gz < N) {
-                    result_factor = gz;
-                    return 1;
+            
+            if (use_te_stage1) {
+                auto setup_te_stage2_base = [&]() -> int {
+                    mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)3, N);
+                    mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
+                    mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
+                    mpz_class invZv;
+                    int rz = invm(Zv, invZv);
+                    if (rz == 1) {
+                        mpz_class gg_hit = result_factor > 1 ? result_factor : gcd_with_dots(Zv, N);
+                        return publish_stage2_factor(gg_hit);
+                    }
+                    if (rz < 0) {
+                        return -1;
+                    }
+
+                    mpz_class Xaff = mulm(Xv, invZv);
+                    mpz_class Yaff = mulm(Yv, invZv);
+                    mpz_class Taff = mulm(Xaff, Yaff);
+                    mpz_class Xneg = subm(N, Xaff);
+                    mpz_class Tneg = subm(N, Taff);
+
+                    s2_base_Xpos = Xaff;
+                    s2_base_Ypos = Yaff;
+                    s2_base_Tpos = Taff;
+                    s2_base_Xneg = Xneg;
+                    s2_base_Yneg = Yaff;
+                    s2_base_Tneg = Tneg;
+                    have_s2_base_cache = true;
+
+                    restore_te_stage2_base_from_cache();
+                    return 0;
+                };
+
+                auto run_te_stage2_chunk = [&](const mpz_class& Echunk, uint32_t chunk_start, uint32_t chunk_end, uint32_t chunk_bits, uint32_t resume_steps_done, uint64_t& done_bits_base, uint64_t& last2_ui_done, high_resolution_clock::time_point& last2_ui, const high_resolution_clock::time_point& t2_0, double saved_et2, double& ema_ips_stage2)->bool {
+                    std::vector<short> naf2;
+                    naf2.reserve((size_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2) + 2);
+                    mpz_class ec = Echunk;
+                    mpz_ptr e = ec.get_mpz_t();
+                    for (; mpz_size(e) != 0; ) {
+                        short di = 0;
+                        if (mpz_odd_p(e)) {
+                            unsigned long limb0 = (mpz_size(e) > 0) ? mpz_getlimbn(e, 0) : 0ul;
+                            short mod4 = short(limb0 & 3u);
+                            di = (mod4 == 1) ? 1 : -1;
+                            if (di > 0) mpz_sub_ui(e, e, 1u); else mpz_add_ui(e, e, 1u);
+                        }
+                        naf2.push_back(di);
+                        mpz_fdiv_q_2exp(e, e, 1);
+                    }
+                    while (!naf2.empty() && naf2.back() == 0) naf2.pop_back();
+                    if (naf2.empty()) return true;
+
+                    short top = naf2.back();
+                    const size_t total_steps2 = (naf2.size() >= 1 ? naf2.size() - 1 : 0);
+                    if (resume_steps_done == 0) {
+                        eng->set((engine::Reg)1, 1u);
+                        if (top < 0) {
+                            eng->copy((engine::Reg)3, (engine::Reg)47);
+                            eng->copy((engine::Reg)4, (engine::Reg)48);
+                            eng->copy((engine::Reg)5, (engine::Reg)49);
+                        } else {
+                            eng->copy((engine::Reg)3, (engine::Reg)6);
+                            eng->copy((engine::Reg)4, (engine::Reg)7);
+                            eng->copy((engine::Reg)5, (engine::Reg)9);
+                        }
+                    } else if ((size_t)resume_steps_done >= total_steps2) {
+                        return true;
+                    }
+
+                    for (size_t j = resume_steps_done; j < total_steps2; ++j) {
+                        eDBL_XYTZ(3,4,1,5);
+                        short di = naf2[naf2.size() - 2 - j];
+                        if (di != 0) {
+                            if (di > 0) eADD_RP(); else eADD_RP_2();
+                        }
+
+                        auto now2 = high_resolution_clock::now();
+                        if (((j + 1) & 1023u) == 0u || (j + 1) == total_steps2) {
+                            if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || (j + 1) == total_steps2) {
+                                uint64_t inside_done = done_bits_base + std::min<uint64_t>((uint64_t)(j + 1), (uint64_t)chunk_bits);
+                                const double done = double(inside_done);
+                                const double total = double(std::max<uint64_t>(1ULL, total_s2_iters));
+                                const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                                const double avg_ips = done / std::max(1e-9, elapsed);
+                                const double dt_ui = duration<double>(now2 - last2_ui).count();
+                                const double dd_ui = double(inside_done - last2_ui_done);
+                                const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                                if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                                else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                                const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                                const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
+                                std::ostringstream line;
+                                line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                                     << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
+                                     << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                                     << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                                     << " | ETA " << fmt_hms(eta);
+                                std::cout << line.str() << std::flush;
+                                last2_ui_done = inside_done;
+                                last2_ui = now2;
+                            }
+                            if (interrupted.load(std::memory_order_relaxed) && (j + 1) != total_steps2) {
+                                const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                                save_ckpt2_ex(chunk_start, elapsed, (uint32_t)primesS2_v.size(),
+                                              1u, chunk_start, chunk_end, chunk_bits, (uint32_t)(j + 1));
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                };
+
+                if (resume_stage2) {
+                    std::ostringstream s2r;
+                    s2r << "[ECM] Curve " << (c+1) << "/" << curves
+                        << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
+                    if (resume_stage2_in_chunk) {
+                        s2r << " (inside chunk " << (resume_s2_chunk_start + 1) << "-" << resume_s2_chunk_end
+                            << ", step " << resume_s2_steps_done << "/" << resume_s2_chunk_bits << ")";
+                    }
+                    std::cout << s2r.str() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(s2r.str());
                 }
-                if (gz == N) return -1;
-                mpz_class invz;
-                if (invm(Zv, invz) != 0) return -1;
-                mpz_class Qx = mulm(Xv, invz);
+
+                auto t2_0 = high_resolution_clock::now();
+                auto last2_save = t2_0, last2_ui = t2_0;
+                double saved_et2 = resume_stage2 ? s2_et : 0.0;
+
+                uint32_t progress_prime_idx = resume_stage2_in_chunk ? resume_s2_chunk_start : s2_idx;
+                uint64_t done_bits_base = 0;
+                for (size_t ci = 0; ci < s2_chunk_ends.size(); ++ci) {
+                    if (s2_chunk_ends[ci] <= progress_prime_idx) done_bits_base = s2_chunk_prefix_iters[ci];
+                    else break;
+                }
+                uint64_t last2_ui_done = done_bits_base + (resume_stage2_in_chunk ? std::min<uint32_t>(resume_s2_steps_done, resume_s2_chunk_bits) : 0u);
+                double ema_ips_stage2 = 0.0;
+                bool stop_after_chunk = false;
+                bool stop_msg_printed = false;
+                bool handled_known_factor = false;
+                bool abort_curve = false;
+
+                while (s2_idx < totalS2Primes) {
+                    mpz_class Echunk(1);
+                    uint32_t chunk_start = s2_idx;
+                    uint32_t chunk_end = s2_idx;
+                    uint32_t chunk_bits = 0;
+                    uint32_t chunk_resume_steps_done = 0;
+                    bool resume_this_chunk = false;
+
+                    if (resume_stage2_in_chunk &&
+                        s2_idx == resume_s2_chunk_start &&
+                        resume_s2_chunk_end > resume_s2_chunk_start) {
+                        chunk_start = resume_s2_chunk_start;
+                        chunk_end = resume_s2_chunk_end;
+                        for (uint32_t qi = chunk_start; qi < chunk_end; ++qi) {
+                            mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[qi]);
+                        }
+                        chunk_bits = resume_s2_chunk_bits ? resume_s2_chunk_bits : (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
+                        chunk_resume_steps_done = std::min<uint32_t>(resume_s2_steps_done, chunk_bits);
+                        resume_this_chunk = true;
+                    } else {
+                        while (chunk_end < totalS2Primes) {
+                            mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
+                            ++chunk_end;
+                            if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
+                        }
+                        chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
+                    }
+
+                    if (!resume_this_chunk) {
+                        int setup_rc = setup_te_stage2_base();
+                        if (setup_rc == 2) return 0;
+                        if (setup_rc == 1) {
+                            handled_known_factor = true;
+                            break;
+                        }
+                        if (setup_rc < 0) {
+                            abort_curve = true;
+                            break;
+                        }
+                    } else {
+                        restore_te_stage2_base_from_cache();
+                        last2_ui_done = done_bits_base + std::min<uint64_t>((uint64_t)chunk_resume_steps_done, (uint64_t)chunk_bits);
+                        last2_ui = high_resolution_clock::now();
+                    }
+
+                    bool chunk_completed = run_te_stage2_chunk(Echunk, chunk_start, chunk_end, chunk_bits, chunk_resume_steps_done, done_bits_base, last2_ui_done, last2_ui, t2_0, saved_et2, ema_ips_stage2);
+                    if (!chunk_completed) {
+                        stop_after_chunk = true;
+                        if (!stop_msg_printed) {
+                            stop_msg_printed = true;
+                            std::cout << "[ECM] Interrupt received — checkpoint saved inside current Stage2 chunk...\n";
+                        }
+                        break;
+                    }
+
+                    resume_stage2_in_chunk = false;
+                    resume_s2_chunk_start = 0;
+                    resume_s2_chunk_end = 0;
+                    resume_s2_chunk_bits = 0;
+                    resume_s2_steps_done = 0;
+
+                    done_bits_base += chunk_bits;
+                    s2_idx = chunk_end;
+
+                    auto now2 = high_resolution_clock::now();
+                    const double done = double(done_bits_base);
+                    const double total = double(std::max<uint64_t>(1ULL, total_s2_iters));
+                    const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                    const double avg_ips = done / std::max(1e-9, elapsed);
+                    const double dt_ui = duration<double>(now2 - last2_ui).count();
+                    const double dd_ui = double(done_bits_base - last2_ui_done);
+                    const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                    if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                    else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                    const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                    const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
+                    std::ostringstream line;
+                    line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                         << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
+                         << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                         << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                         << " | ETA " << fmt_hms(eta);
+                    std::cout << line.str() << std::flush;
+                    last2_ui_done = done_bits_base;
+                    last2_ui = now2;
+
+                    mpz_class Tchunk = compute_X_with_dots(eng, (engine::Reg)5, N);
+                    mpz_class gz = gcd_with_dots(Tchunk, N);
+                    if (gz == N) {
+                        std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n";
+                        abort_curve = true;
+                        break;
+                    }
+                    if (gz > 1 && gz < N) {
+                        std::cout << std::endl;
+                        int factor_rc = publish_stage2_factor(gz);
+                        if (factor_rc == 2) return 0;
+                        handled_known_factor = true;
+                        break;
+                    }
+
+                    if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period || s2_idx == totalS2Primes) {
+                        save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
+                        last2_save = now2;
+                    }
+
+                    if (interrupted.load(std::memory_order_relaxed)) {
+                        stop_after_chunk = true;
+                        if (!stop_msg_printed) {
+                            stop_msg_printed = true;
+                            std::cout << "[ECM] Interrupt received — finishing current Stage2 chunk before stopping...\n";
+                        }
+                    }
+                    if (stop_after_chunk) {
+                        std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
+                                  << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
+                        if (guiServer_) {
+                            std::ostringstream oss;
+                            uint32_t stop_idx2 = resume_stage2_in_chunk ? resume_s2_chunk_start : s2_idx;
+                            oss << "[ECM] Interrupted at Stage2 curve " << (c+1)
+                                << " prime-index " << stop_idx2 << "/" << primesS2_v.size();
+                            guiServer_->appendLog(oss.str());
+                        }
+                        save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
+                        delete eng;
+                        return 0;
+                    }
+                }
+                std::cout << std::endl;
+
+                if (stop_after_chunk) {
+                    delete eng;
+                    return 0;
+                }
+                if (handled_known_factor) {
+                    if (next_curve_after_stage2) continue;
+                    continue;
+                }
+                if (abort_curve) {
+                    std::error_code ec0;
+                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    delete eng;
+                    continue;
+                }
+
+                std::error_code ec2;
+                fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+
+                double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
+                { std::ostringstream s2s; s2s << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 elapsed=" << std::fixed << std::setprecision(2) << elapsed2 << " s"; std::cout << s2s.str() << std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
+            } else {
+auto setup_stage2_base = [&]() -> int {
+                mpz_t zA24s; mpz_init_set(zA24s, A24.get_mpz_t()); eng->set_mpz((engine::Reg)6, zA24s); mpz_clear(zA24s);
+                eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
+
+                mpz_class Xs = compute_X_with_dots(eng, (engine::Reg)0, N);
+                mpz_class Zs = compute_X_with_dots(eng, (engine::Reg)1, N);
+
+                mpz_class gz = gcd_with_dots(Zs, N);
+                if (gz > 1 && gz < N) {
+                    return publish_stage2_factor(gz);
+                }
+
+                mpz_class invZs, Qx;
+                int rz = invm(Zs, invZs);
+                if (rz == 1) {
+                    mpz_class gg_hit = result_factor > 1 ? result_factor : gz;
+                    return publish_stage2_factor(gg_hit);
+                }
+                if (rz < 0) {
+                    return -1;
+                }
+
+                Qx = mulm(Xs, invZs);
+
                 mpz_t tQx; mpz_init_set(tQx, Qx.get_mpz_t());
                 eng->set_mpz((engine::Reg)4, tQx);
                 mpz_clear(tQx);
                 eng->set((engine::Reg)5, 1u);
+
                 eng->set((engine::Reg)0, 1u);
                 eng->set((engine::Reg)1, 0u);
                 eng->copy((engine::Reg)2, (engine::Reg)4);
                 eng->copy((engine::Reg)3, (engine::Reg)5);
+                eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
                 eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
                 eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
                 return 0;
             };
 
             if (!resume_stage2) {
-                int setup_rc = setup_mont_stage2_base();
-                if (setup_rc == 1) {
-                    if (handle_stage2_found(result_factor)) { delete eng; continue; }
+                int setup_rc = setup_stage2_base();
+                if (setup_rc == 2) return 0;
+                if (setup_rc == 1) continue;
+                if (setup_rc < 0) {
+                    delete eng;
+                    continue;
                 }
-                if (setup_rc < 0) { delete eng; continue; }
             } else {
-                std::ostringstream s2r; s2r << "[ECM] Curve " << (c+1) << "/" << curves
-                                        << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
+                std::ostringstream s2r;
+                s2r << "[ECM] Curve " << (c+1) << "/" << curves
+                    << " | Resuming Stage2 at prime-index " << s2_idx << "/" << primesS2_v.size();
+                if (resume_stage2_in_chunk) {
+                    s2r << " (inside chunk " << (resume_s2_chunk_start + 1) << "-" << resume_s2_chunk_end
+                        << ", step " << resume_s2_steps_done << "/" << resume_s2_chunk_bits << ")";
+                }
                 std::cout << s2r.str() << std::endl;
                 if (guiServer_) guiServer_->appendLog(s2r.str());
+
+                eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
                 eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
                 eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
             }
@@ -1603,38 +2235,52 @@ int App::runECMMarin()
             auto last2_save = t2_0, last2_ui = t2_0;
             double saved_et2 = resume_stage2 ? s2_et : 0.0;
 
-            uint64_t done_bits_est = 0;
+            uint32_t progress_prime_idx = resume_stage2_in_chunk ? resume_s2_chunk_start : s2_idx;
+            uint64_t done_bits_base = 0;
             for (size_t ci = 0; ci < s2_chunk_ends.size(); ++ci) {
-                if (s2_chunk_ends[ci] <= s2_idx) done_bits_est = s2_chunk_prefix_iters[ci];
+                if (s2_chunk_ends[ci] <= progress_prime_idx) done_bits_base = s2_chunk_prefix_iters[ci];
                 else break;
             }
-            uint64_t last2_ui_done = done_bits_est;
+            uint64_t last2_ui_done = done_bits_base + (resume_stage2_in_chunk ? std::min<uint32_t>(resume_s2_steps_done, resume_s2_chunk_bits) : 0u);
             double ema_ips_stage2 = 0.0;
-            bool stop_after_chunk = false;
-            bool stop_msg_printed = false;
-            bool next_curve_after_stage2 = false;
-            bool abort_curve = false;
 
-            while (s2_idx < (uint32_t)primesS2_v.size()) {
+            while (s2_idx < totalS2Primes) {
                 mpz_class Echunk(1);
                 uint32_t chunk_start = s2_idx;
                 uint32_t chunk_end = s2_idx;
-                while (chunk_end < (uint32_t)primesS2_v.size()) {
-                    mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
-                    ++chunk_end;
-                    if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
+                uint32_t chunk_bits = 0;
+                uint32_t chunk_resume_steps_done = 0;
+                bool resume_this_chunk = false;
+
+                if (resume_stage2_in_chunk &&
+                    s2_idx == resume_s2_chunk_start &&
+                    resume_s2_chunk_end > resume_s2_chunk_start) {
+                    chunk_start = resume_s2_chunk_start;
+                    chunk_end = resume_s2_chunk_end;
+                    for (uint32_t qi = chunk_start; qi < chunk_end; ++qi) {
+                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[qi]);
+                    }
+                    chunk_bits = resume_s2_chunk_bits ? resume_s2_chunk_bits : (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
+                    chunk_resume_steps_done = std::min<uint32_t>(resume_s2_steps_done, chunk_bits);
+                    resume_this_chunk = true;
+                } else {
+                    while (chunk_end < totalS2Primes) {
+                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
+                        ++chunk_end;
+                        if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
+                    }
+                    chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
                 }
 
-                const uint32_t chunk_bits = (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
-                for (uint32_t i = 0; i < chunk_bits; ++i) {
+                for (uint32_t i = chunk_resume_steps_done; i < chunk_bits; ++i) {
                     const uint32_t bit = chunk_bits - 1 - i;
                     const int b = mpz_tstbit(Echunk.get_mpz_t(), bit) ? 1 : 0;
-                    if (b == 0) xDBLADD_strict(0,1, 2,3);
-                    else        xDBLADD_strict(2,3, 0,1);
+                    if (b == 0) xDBLADD_strict_s2(0,1, 2,3);
+                    else        xDBLADD_strict_s2(2,3, 0,1);
 
                     auto now2 = high_resolution_clock::now();
                     if (duration_cast<milliseconds>(now2 - last2_ui).count() >= ui_interval_ms || i + 1 == chunk_bits) {
-                        const uint64_t done_u = done_bits_est + i + 1;
+                        const uint64_t done_u = done_bits_base + i + 1;
                         const double done = double(done_u);
                         const double total = double(total_s2_iters);
                         const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
@@ -1647,7 +2293,7 @@ int App::runECMMarin()
                         const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
                         const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
                         std::ostringstream line;
-                        line << "[ECM] Curve " << (c+1) << "/" << curves
+                        line << "\r[ECM] Curve " << (c+1) << "/" << curves
                              << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
                              << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
                              << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
@@ -1656,44 +2302,114 @@ int App::runECMMarin()
                         last2_ui_done = done_u;
                         last2_ui = now2;
                     }
-                    if (interrupted.load(std::memory_order_relaxed)) {
-                        stop_after_chunk = true;
-                        if (!stop_msg_printed) {
-                            stop_msg_printed = true;
-                            std::cout << "[ECM] Interrupt received — finishing current Stage2 chunk before stopping...";
+
+                    if (interrupted.load(std::memory_order_relaxed) && (i + 1) != chunk_bits) {
+                        const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                        save_ckpt2_ex(chunk_start, elapsed, (uint32_t)primesS2_v.size(),
+                                      1u, chunk_start, chunk_end, chunk_bits, (uint32_t)(i + 1));
+                        std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
+                                  << " prime-index " << chunk_start << "/" << primesS2_v.size()
+                                  << " (checkpoint inside chunk)\n";
+                        if (guiServer_) {
+                            std::ostringstream oss;
+                            oss << "[ECM] Interrupted at Stage2 curve " << (c+1)
+                                << " prime-index " << chunk_start << "/" << primesS2_v.size()
+                                << " (checkpoint inside chunk)";
+                            guiServer_->appendLog(oss.str());
                         }
+                        delete eng;
+                        return 0;
                     }
                 }
 
-                done_bits_est += chunk_bits;
+                resume_stage2_in_chunk = false;
+                resume_s2_chunk_start = 0;
+                resume_s2_chunk_end = 0;
+                resume_s2_chunk_bits = 0;
+                resume_s2_steps_done = 0;
+
+                done_bits_base += chunk_bits;
                 s2_idx = chunk_end;
 
-                if (s2_idx < (uint32_t)primesS2_v.size()) {
-                    int setup_rc = setup_mont_stage2_base();
-                    if (setup_rc == 1) {
-                        handle_stage2_found(result_factor);
+                auto now2 = high_resolution_clock::now();
+                const double done = double(done_bits_base);
+                const double total = double(total_s2_iters);
+                const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                const double avg_ips = done / std::max(1e-9, elapsed);
+                const double dt_ui = duration<double>(now2 - last2_ui).count();
+                const double dd_ui = double(done_bits_base - last2_ui_done);
+                const double inst_ips = (dt_ui > 1e-9 && dd_ui >= 0.0) ? (dd_ui / dt_ui) : avg_ips;
+                if (ema_ips_stage2 <= 0.0) ema_ips_stage2 = inst_ips;
+                else ema_ips_stage2 = 0.75 * ema_ips_stage2 + 0.25 * inst_ips;
+                const double eta_ips = (ema_ips_stage2 > 0.0) ? ema_ips_stage2 : avg_ips;
+                const double eta = (total > done && eta_ips > 0.0) ? (total - done) / eta_ips : 0.0;
+                std::ostringstream line;
+                line << "\r[ECM] Curve " << (c+1) << "/" << curves
+                     << " | Stage2 " << std::fixed << std::setprecision(1) << (100.0 * done / total) << "%"
+                     << " | primes " << (chunk_start + 1) << "-" << chunk_end << "/" << primesS2_v.size()
+                     << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
+                     << " | ETA " << fmt_hms(eta);
+                std::cout << line.str() << std::flush;
+                last2_ui_done = done_bits_base;
+                last2_ui = now2;
+
+                if (s2_idx < totalS2Primes) {
+                    mpz_class Xs = compute_X_with_dots(eng, (engine::Reg)0, N);
+                    mpz_class Zs = compute_X_with_dots(eng, (engine::Reg)1, N);
+
+                    mpz_class gz = gcd_with_dots(Zs, N);
+                    if (gz > 1 && gz < N) {
+                        std::cout << std::endl;
+                        int factor_rc = publish_stage2_factor(gz);
+                        if (factor_rc == 2) return 0;
                         next_curve_after_stage2 = true;
                         break;
                     }
-                    if (setup_rc < 0) {
-                        abort_curve = true;
+
+                    mpz_class invZs, Qx;
+                    int rz = invm(Zs, invZs);
+                    if (rz == 1) {
+                        mpz_class gg_hit = result_factor > 1 ? result_factor : gz;
+                        std::cout << std::endl;
+                        int factor_rc = publish_stage2_factor(gg_hit);
+                        if (factor_rc == 2) return 0;
+                        next_curve_after_stage2 = true;
                         break;
                     }
+                    if (rz < 0) {
+                        next_curve_after_stage2 = true;
+                        break;
+                    }
+
+                    Qx = mulm(Xs, invZs);
+
+                    mpz_t tQx; mpz_init_set(tQx, Qx.get_mpz_t());
+                    eng->set_mpz((engine::Reg)4, tQx);
+                    mpz_clear(tQx);
+                    eng->set((engine::Reg)5, 1u);
+
+                    eng->set((engine::Reg)0, 1u);
+                    eng->set((engine::Reg)1, 0u);
+                    eng->copy((engine::Reg)2, (engine::Reg)4);
+                    eng->copy((engine::Reg)3, (engine::Reg)5);
+                    eng->set_multiplicand((engine::Reg)12, (engine::Reg)6);
+                    eng->set_multiplicand((engine::Reg)13, (engine::Reg)4);
+                    eng->set_multiplicand((engine::Reg)14, (engine::Reg)5);
                 }
 
-                auto now2 = high_resolution_clock::now();
-                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period || stop_after_chunk || s2_idx == (uint32_t)primesS2_v.size()) {
-                    const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
+                if (duration_cast<seconds>(now2 - last2_save).count() >= backup_period || s2_idx == totalS2Primes) {
                     save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
                     last2_save = now2;
                 }
 
-                if (stop_after_chunk) {
-                    std::cout << "[ECM] Interrupted at Stage2 curve " << (c+1)
-                              << " prime-index " << s2_idx << "/" << primesS2_v.size() << "";
+                if (interrupted.load(std::memory_order_relaxed)) {
+                    save_ckpt2(s2_idx, elapsed, (uint32_t)primesS2_v.size());
+                    std::cout << "\n[ECM] Interrupted at Stage2 curve " << (c+1)
+                              << " prime-index " << s2_idx << "/" << primesS2_v.size() << "\n";
                     if (guiServer_) {
                         std::ostringstream oss;
-                        oss << "[ECM] Interrupted at Stage2 curve " << (c+1) << " prime-index " << s2_idx << "/" << primesS2_v.size();
+                        oss << "[ECM] Interrupted at Stage2 curve " << (c+1)
+                            << " prime-index " << s2_idx << "/" << primesS2_v.size();
                         guiServer_->appendLog(oss.str());
                     }
                     delete eng;
@@ -1703,14 +2419,20 @@ int App::runECMMarin()
             std::cout << std::endl;
 
             if (next_curve_after_stage2) {
+                continue;
+            }
+
+            eng->copy((engine::Reg)7, (engine::Reg)1);
+            mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
+            mpz_class gg2  = gcd_with_dots(Zres, N);
+            if (gg2 == N) {
+                std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n";
+                std::error_code ec0;
+                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
                 delete eng;
                 continue;
             }
-            if (abort_curve) { delete eng; continue; }
-
-            mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)1, N);
-            mpz_class gg2  = gcd_with_dots(Zres, N);
-            if (gg2 == N) { std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying"; delete eng; continue; }
 
             std::error_code ec2;
             fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
@@ -1720,7 +2442,10 @@ int App::runECMMarin()
 
             bool found2 = (gg2 > 1 && gg2 < N);
             if (found2) {
-                handle_stage2_found(gg2);
+                int factor_rc = publish_stage2_factor(gg2);
+                if (factor_rc == 2) return 0;
+                continue;
+            }
             }
         }
 
