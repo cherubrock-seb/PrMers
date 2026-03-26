@@ -438,6 +438,104 @@ static std::string p95_normalize_prime_txt(const std::string& original) {
     return oss.str();
 }
 
+static std::string p95_trim_eol_copy(std::string s) {
+    while (!s.empty() && (s.back() == '\r' || s.back() == '\n')) s.pop_back();
+    return s;
+}
+
+static bool p95_text_file_contains_line(const fs::path& file, const std::string& wanted_line) {
+    std::ifstream in(file, std::ios::in | std::ios::binary);
+    if (!in.is_open()) return false;
+
+    const std::string wanted = p95_trim_eol_copy(wanted_line);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line == wanted) return true;
+    }
+    return false;
+}
+
+#ifdef _WIN32
+static std::string p95_windows_error_string(DWORD err) {
+    LPSTR buf = nullptr;
+    const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                        FORMAT_MESSAGE_FROM_SYSTEM |
+                        FORMAT_MESSAGE_IGNORE_INSERTS;
+    const DWORD n = FormatMessageA(flags,
+                                   nullptr,
+                                   err,
+                                   MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                   reinterpret_cast<LPSTR>(&buf),
+                                   0,
+                                   nullptr);
+
+    std::string out;
+    if (n != 0 && buf != nullptr) {
+        out.assign(buf, n);
+        while (!out.empty() &&
+               (out.back() == '\r' || out.back() == '\n' ||
+                std::isspace(static_cast<unsigned char>(out.back())) != 0)) {
+            out.pop_back();
+        }
+        LocalFree(buf);
+    }
+
+    if (out.empty()) {
+        std::ostringstream oss;
+        oss << "Win32 error " << err;
+        out = oss.str();
+    }
+    return out;
+}
+
+static bool p95_start_hidden_windows_process(const fs::path& exe,
+                                             const fs::path& workdir,
+                                             PROCESS_INFORMATION& pi,
+                                             std::string& err) {
+    std::memset(&pi, 0, sizeof(pi));
+
+    STARTUPINFOW si;
+    std::memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    const std::wstring exe_w = exe.wstring();
+    std::wstring cmd = L"\"" + exe_w + L"\"";
+    std::vector<wchar_t> cmdline(cmd.begin(), cmd.end());
+    cmdline.push_back(L'\0');
+
+    const std::wstring cwd_w = workdir.wstring();
+    BOOL ok = CreateProcessW(exe_w.c_str(),
+                             cmdline.data(),
+                             nullptr,
+                             nullptr,
+                             FALSE,
+                             0,
+                             nullptr,
+                             cwd_w.c_str(),
+                             &si,
+                             &pi);
+    if (!ok) {
+        err = std::string("Failed to launch Prime95 hidden: ") + p95_windows_error_string(GetLastError());
+        return false;
+    }
+    return true;
+}
+
+static void p95_close_windows_process_handles(PROCESS_INFORMATION& pi) {
+    if (pi.hThread) {
+        CloseHandle(pi.hThread);
+        pi.hThread = nullptr;
+    }
+    if (pi.hProcess) {
+        CloseHandle(pi.hProcess);
+        pi.hProcess = nullptr;
+    }
+}
+#endif
+
 static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
                                                    const fs::path& p95_exe,
                                                    const Prime95Stage2Task& task) {
@@ -491,12 +589,14 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
     }
 
     std::error_code ec;
-    fs::remove(p95_dir / "worktodo.txt", ec);
+    const fs::path worktodo_file = p95_dir / "worktodo.txt";
+    const fs::path results_file = p95_dir / "results.json.txt";
+    fs::remove(worktodo_file, ec);
     ec.clear();
-    fs::remove(p95_dir / "results.json.txt", ec);
+    fs::remove(results_file, ec);
 
     {
-        std::ofstream wt(p95_dir / "worktodo.txt", std::ios::out | std::ios::trunc);
+        std::ofstream wt(worktodo_file, std::ios::out | std::ios::trunc);
         if (!wt.is_open()) {
             restore_prime_txt();
             result.error = "Failed to create Prime95 worktodo.txt";
@@ -506,30 +606,79 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
         wt.flush();
     }
 
-    std::ostringstream shell;
 #ifdef _WIN32
-    shell << "cd /d " << p95_shell_quote_win(p95_dir.string())
-          << " && " << p95_shell_quote_win(p95_exe.string())
-          << " -d > " << p95_shell_quote_win((p95_dir / task.log_filename).string()) << " 2>&1";
-    const std::string cmd = std::string("cmd /C ") + p95_shell_quote_win(shell.str());
+    PROCESS_INFORMATION pi;
+    std::memset(&pi, 0, sizeof(pi));
+    if (!p95_start_hidden_windows_process(p95_exe, p95_dir, pi, copy_err)) {
+        restore_prime_txt();
+        result.error = copy_err;
+        return result;
+    }
+
+    bool stage2_completed = false;
+    bool process_exited = false;
+    for (;;) {
+        if (p95_read_last_non_empty_line(results_file, result.json_line)) {
+            // keep the latest JSON line if it already exists
+        }
+
+        const DWORD wait_rc = WaitForSingleObject(pi.hProcess, 250);
+        if (wait_rc == WAIT_OBJECT_0) {
+            process_exited = true;
+            stage2_completed = true;
+            break;
+        }
+        if (wait_rc != WAIT_TIMEOUT) {
+            result.error = std::string("WaitForSingleObject failed: ") + p95_windows_error_string(GetLastError());
+            p95_close_windows_process_handles(pi);
+            restore_prime_txt();
+            return result;
+        }
+
+        if (!p95_text_file_contains_line(worktodo_file, task.worktodo_line)) {
+            stage2_completed = true;
+            break;
+        }
+    }
+
+    if (stage2_completed && !process_exited) {
+        for (int attempt = 0; attempt < 20; ++attempt) {
+            if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
+            const DWORD wait_rc = WaitForSingleObject(pi.hProcess, 250);
+            if (wait_rc == WAIT_OBJECT_0) {
+                process_exited = true;
+                break;
+            }
+            if (wait_rc != WAIT_TIMEOUT) break;
+        }
+    }
+
+    if (!process_exited) {
+        TerminateProcess(pi.hProcess, 0);
+        WaitForSingleObject(pi.hProcess, 5000);
+    }
+
+    DWORD exit_code = STILL_ACTIVE;
+    if (GetExitCodeProcess(pi.hProcess, &exit_code)) {
+        result.exit_code = (exit_code == STILL_ACTIVE) ? 0 : static_cast<int>(exit_code);
+    } else {
+        result.exit_code = -1;
+    }
+    p95_close_windows_process_handles(pi);
 #else
+    std::ostringstream shell;
     shell << "cd " << p95_shell_quote_posix(p95_dir.string())
           << " && " << p95_shell_quote_posix(p95_exe.string())
           << " -d > " << p95_shell_quote_posix((p95_dir / task.log_filename).string()) << " 2>&1";
     const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
-#endif
 
     int rc = std::system(cmd.c_str());
-#ifdef _WIN32
-    result.exit_code = rc;
-#else
     if (rc == -1) result.exit_code = -1;
     else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
     else result.exit_code = rc;
 #endif
 
-    const fs::path results_file = p95_dir / "results.json.txt";
-    for (int attempt = 0; attempt < 200; ++attempt) {
+    for (int attempt = 0; attempt < 200 && result.json_line.empty(); ++attempt) {
         if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
@@ -542,6 +691,9 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
             << " (exit_code=" << result.exit_code << ")"
             << " | log=" << (p95_dir / task.log_filename).string()
             << " | worktodo=" << task.worktodo_line;
+#ifdef _WIN32
+        oss << " | completion=worktodo-line-removed";
+#endif
         result.error = oss.str();
         return result;
     }
