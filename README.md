@@ -410,6 +410,39 @@ ECM on Mersenne Numbers
 - Options: `-montgomery`, `-torsion16`, `-notorsion`, `-seed <val>`.
 - Interoperability: P‑1 resumes use **GMP‑ECM**’s `.save` textual format in addition to Prime95’s `.p95` when requested via `-resume`.
 
+
+## Prime95 ECM Stage 2 interop
+
+PrMers can delegate ECM Stage 2 to Prime95 or mprime.
+
+This mode is useful when you want to keep Stage 1 inside PrMers and run Stage 2 with Prime95 in the background from the same resume data.
+
+### How it works
+
+1. PrMers runs ECM Stage 1 as usual.
+2. After each Stage 1 completion, PrMers writes the usual resume files.
+3. If `-p95stage2` and `-p95path` are enabled, PrMers copies a curve specific `.p95` resume file into the Prime95 directory.
+4. PrMers appends an `ECMSTAGE2` entry to Prime95 `worktodo.txt`.
+5. Prime95 or mprime processes that entry and writes the Stage 2 result to `results.json.txt`.
+6. PrMers reads the JSON result and continues with the next curve, or stops if a new factor is found.
+
+### Prime95 directory
+
+The path given with `-p95path` must point to a Prime95 or mprime directory.
+
+PrMers looks for:
+- `mprime` or `prime95` on Linux
+- `prime95.exe` or `mprime.exe` on Windows
+
+Before starting, PrMers backs up:
+- `worktodo.txt`
+- `results.json.txt`
+
+### Example command on Linux
+
+```bash
+./prmers 757 -ecm -b1 97 -b2 9500 -K 15 -p95stage2 -p95path /home/sebastien/gimps/v31_31.04_b05c
+
 GPU Memory Test (-memtest)
 --------------------------
 
