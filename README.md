@@ -198,6 +198,57 @@ Disable Marin and use the internal backend:
     ./prmers 136279841 -marin
 
 
+AutoPrimeNet
+------------
+
+[AutoPrimeNet](https://github.com/tdulcet/AutoPrimeNet) can automate assignment
+fetching, progress check-ins, result submission and proof uploads for PrMers.
+It is recommended to use when contributing to GIMPS.
+
+### Windows
+
+Download and unzip an exectuable [from mersenne.ca](https://download.mersenne.ca/AutoPrimeNet).
+
+Put `autoprimenet.exe` in the same directory as `prmers.exe`.
+
+Run setup once and select PrMers as the GIMPS software:
+
+    autoprimenet.exe --setup`
+
+Then start AutoPrimeNet in monitoring mode:
+
+    autoprimenet.exe
+
+Start PrMers so it reads the assignments AutoPrimeNet writes:
+
+    prmers.exe -worktodo worktodo.txt
+
+### macOS / Linux
+
+Download `autoprimenet.py` [from mersenne.ca](https://download.mersenne.ca/AutoPrimeNet).
+
+Save it in your PrMers working directory.
+
+Run setup once and select PrMers as the GIMPS software:
+
+    python3 autoprimenet.py --setup
+
+Then start AutoPrimeNet in monitoring mode:
+
+    python3 -OO autoprimenet.py
+
+Start PrMers so it reads the assignments AutoPrimeNet writes:
+
+    ./prmers -worktodo worktodo.txt
+
+Notes
+- AutoPrimeNet saves its configuration to `prime.ini` by default, so you
+  usually only need to pass the options once.
+- For multiple GPUs/workers, give each worker its own directory.
+- Use `--timeout 0` if you only want AutoPrimeNet to fetch/report once and exit
+  instead of running continuously.
+
+
 Lucas-Lehmer modes and safety
 -----------------------------
 
