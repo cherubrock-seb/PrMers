@@ -413,35 +413,43 @@ ECM on Mersenne Numbers
 
 ## Prime95 ECM Stage 2 interop
 
-PrMers can delegate ECM Stage 2 to Prime95 or mprime.
+PrMers can run ECM Stage 1 and delegate ECM Stage 2 to Prime95.
 
-This mode is useful when you want to keep Stage 1 inside PrMers and run Stage 2 with Prime95 in the background from the same resume data.
+Use `-p95stage2` with `-p95path` to enable it.
 
-### How it works
-
-1. PrMers runs ECM Stage 1 as usual.
-2. After each Stage 1 completion, PrMers writes the usual resume files.
-3. If `-p95stage2` and `-p95path` are enabled, PrMers copies a curve specific `.p95` resume file into the Prime95 directory.
-4. PrMers appends an `ECMSTAGE2` entry to Prime95 `worktodo.txt`.
-5. Prime95 or mprime processes that entry and writes the Stage 2 result to `results.json.txt`.
-6. PrMers reads the JSON result and continues with the next curve, or stops if a new factor is found.
-
-### Prime95 directory
-
-The path given with `-p95path` must point to a Prime95 or mprime directory.
-
-PrMers looks for:
-- `mprime` or `prime95` on Linux
-- `prime95.exe` or `mprime.exe` on Windows
-
-Before starting, PrMers backs up:
-- `worktodo.txt`
-- `results.json.txt`
-
-### Example command on Linux
+### Linux
 
 ```bash
 ./prmers 757 -ecm -b1 97 -b2 9500 -K 15 -p95stage2 -p95path /home/sebastien/gimps/v31_31.04_b05c
+```
+
+### Windows
+
+```powershell
+prmers.exe 757 -ecm -b1 97 -b2 9500 -K 15 -p95stage2 -p95path C:\gimps\v31_31.04_b05c
+```
+
+### What happens
+
+1. PrMers runs ECM Stage 1.
+2. PrMers writes a `.p95` resume file.
+3. PrMers appends an `ECMSTAGE2` line to Prime95 `worktodo.txt`.
+4. Prime95 runs Stage 2.
+5. PrMers reads `results.json.txt` and reports `NF` or `F`.
+
+### Example worktodo line
+
+```text
+ECMSTAGE2=N/A,1,2,757,-1,"resume_p757_ECM_TE_B1_97_c000006.p95",9500
+```
+
+### Notes
+
+- Stage 1 is done by PrMers.
+- Stage 2 is done by Prime95 or mprime.
+- `-p95path` must point to the Prime95 directory.
+- On Windows, Prime95 can be launched hidden.
+
 
 GPU Memory Test (-memtest)
 --------------------------
