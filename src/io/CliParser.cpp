@@ -95,7 +95,7 @@ void printUsage(const char* progName) {
     std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
     std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
     std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
-    std::cout << "  -iv163               : (Optional) use family_iv_163 curves (Gélin–Kleinjung–Lenstra) gives 16/3 average v2 (around order 32 point)" << std::endl;
+    std::cout << "  -iv163               : (Optional) use family_iv_163 curves (Gélin-Kleinjung-Lenstra) gives 16/3 average v2 (around order 32 point)" << std::endl;
     
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
     std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
