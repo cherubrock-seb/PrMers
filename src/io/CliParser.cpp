@@ -99,7 +99,8 @@ void printUsage(const char* progName) {
     
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
     std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
-
+    std::cout << "  -p95path <path>      : (Optional) Prime95/mprime directory for ECM Stage2 handoff; enables Prime95 Stage2" << std::endl;
+    std::cout << "  -nop95stage2         : (Optional) Disable Prime95 Stage2 handoff even if -p95path is set" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
@@ -260,6 +261,13 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-gui") == 0) {
             opts.gui = true;
+        }
+        else if (std::strcmp(argv[i], "-p95path") == 0 && i + 1 < argc) {
+            opts.p95path = argv[++i];
+            opts.p95stage2 = true;
+        }
+        else if (std::strcmp(argv[i], "-nop95stage2") == 0) {
+            opts.p95stage2 = false;
         }
         else if (std::strcmp(argv[i], "-http") == 0 && i + 1 < argc) {
             opts.http_port = to_u64(argv[++i]);
@@ -629,7 +637,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     opts.osArch = "unknown";
     #endif
 
-
+    if (opts.p95path.empty()) {
+        opts.p95stage2 = false;
+    }
     return opts;
 }
 

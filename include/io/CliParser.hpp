@@ -67,6 +67,8 @@ struct CliOptions {
     std::string config_path;
     std::string worktodo_path = "worktodo.txt";
     std::string pm1_extend_save_path = "";
+    bool p95stage2 = false;
+    std::string p95path;
     int max_local_size1 = 0;
     int max_local_size2 = 0;
     int max_local_size3 = 0;

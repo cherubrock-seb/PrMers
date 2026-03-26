@@ -31,6 +31,7 @@
 # include <io.h>
 #else
 # include <unistd.h>
+# include <sys/wait.h>
 #endif
 #include <csignal>
 #include <chrono>
@@ -53,7 +54,10 @@
 #include <filesystem>
 #include <set>
 #include <unordered_set>
+#include <regex>
 #include <ctime>
+#include <cstdlib>
+#include <cctype>
 
 using namespace core;
 using namespace std::chrono;
@@ -206,6 +210,358 @@ static void ecm_segmented_primes_odd(uint64_t low, uint64_t high,
 }
 
 
+
+
+struct Prime95Stage2Task {
+    uint64_t curve_idx = 0;
+    std::string resume_src_path;
+    std::string resume_filename;
+    std::string worktodo_line;
+    std::vector<std::string> known_factors;
+    std::string log_filename;
+};
+
+struct Prime95Stage2TaskResult {
+    uint64_t curve_idx = 0;
+    bool success = false;
+    bool factor_found = false;
+    bool known_factor = false;
+    std::string factor;
+    std::string json_line;
+    int exit_code = -1;
+    std::string error;
+};
+
+static std::string p95_normalize_factor_string(std::string s) {
+    s.erase(std::remove_if(s.begin(), s.end(), [](unsigned char ch){ return std::isspace(ch) != 0; }), s.end());
+    if (!s.empty() && s.front() == '+') s.erase(s.begin());
+    bool neg = false;
+    if (!s.empty() && s.front() == '-') {
+        neg = true;
+        s.erase(s.begin());
+    }
+    size_t nz = 0;
+    while (nz + 1 < s.size() && s[nz] == '0') ++nz;
+    if (nz > 0) s.erase(0, nz);
+    if (s.empty()) s = "0";
+    if (neg && s != "0") s.insert(s.begin(), '-');
+    return s;
+}
+
+static bool p95_is_known_factor_string(const std::string& factor, const std::vector<std::string>& known_factors) {
+    const std::string nf = p95_normalize_factor_string(factor);
+    for (const std::string& s : known_factors) {
+        if (p95_normalize_factor_string(s) == nf) return true;
+    }
+    return false;
+}
+
+static std::string p95_join_known_factors_csv(const std::vector<std::string>& factors) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const std::string& s : factors) {
+        if (s.empty()) continue;
+        if (!first) oss << ',';
+        oss << s;
+        first = false;
+    }
+    return oss.str();
+}
+
+static bool p95_read_last_non_empty_line(const fs::path& file, std::string& last_line) {
+    std::ifstream in(file, std::ios::in);
+    if (!in.is_open()) return false;
+    std::string line;
+    std::string best;
+    while (std::getline(in, line)) {
+        if (!line.empty()) best = line;
+    }
+    if (best.empty()) return false;
+    last_line = best;
+    return true;
+}
+
+static bool p95_parse_result_json_line(const std::string& line, std::string& status_out, std::string& factor_out) {
+    status_out.clear();
+    factor_out.clear();
+    std::smatch m;
+
+    // Use raw strings with a custom delimiter so the JSON pattern can contain
+    // the sequence `)"` safely.
+    if (std::regex_search(line, m, std::regex(R"p95("status"\s*:\s*"([^"]+)")p95"))) {
+        status_out = m[1].str();
+    }
+    if (std::regex_search(line, m, std::regex(R"p95("factors"\s*:\s*\[\s*"([^"]+)")p95"))) {
+        factor_out = m[1].str();
+    }
+    if (factor_out.empty() &&
+        std::regex_search(line, m, std::regex(R"p95("factor"\s*:\s*"([^"]+)")p95"))) {
+        factor_out = m[1].str();
+    }
+    return !status_out.empty();
+}
+
+static std::string p95_backup_suffix() {
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+#if defined(_WIN32)
+    localtime_s(&tmv, &t);
+#else
+    localtime_r(&t, &tmv);
+#endif
+    std::ostringstream oss;
+    oss << ".bak." << std::put_time(&tmv, "%Y%m%d_%H%M%S");
+    return oss.str();
+}
+
+static bool p95_backup_existing_file(const fs::path& src, std::string* moved_to = nullptr) {
+    std::error_code ec;
+    if (!fs::exists(src, ec)) return true;
+    fs::path dst = src;
+    dst += ".bak";
+    if (fs::exists(dst, ec)) {
+        dst = src;
+        dst += p95_backup_suffix();
+    }
+    fs::rename(src, dst, ec);
+    if (ec) return false;
+    if (moved_to) *moved_to = dst.string();
+    return true;
+}
+
+static bool p95_copy_overwrite(const fs::path& src, const fs::path& dst, std::string& err) {
+    std::error_code ec;
+    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        err = ec.message();
+        return false;
+    }
+    return true;
+}
+
+static std::string p95_shell_quote_posix(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('\'');
+    for (char ch : s) {
+        if (ch == '\'') out += "'\\''";
+        else out.push_back(ch);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+static std::string p95_shell_quote_win(const std::string& s) {
+    std::string out = "\"";
+    for (char ch : s) {
+        if (ch == '\"') out += '\\';
+        out.push_back(ch);
+    }
+    out += "\"";
+    return out;
+}
+
+static bool p95_read_text_file(const fs::path& file, std::string& out) {
+    std::ifstream in(file, std::ios::in | std::ios::binary);
+    if (!in.is_open()) return false;
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    out = ss.str();
+    return true;
+}
+
+static bool p95_write_text_file(const fs::path& file, const std::string& text, std::string& err) {
+    std::ofstream out(file, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        err = "cannot open file for writing";
+        return false;
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out.good()) {
+        err = "write failed";
+        return false;
+    }
+    out.flush();
+    if (!out.good()) {
+        err = "flush failed";
+        return false;
+    }
+    return true;
+}
+
+static std::string p95_normalize_prime_txt(const std::string& original) {
+    std::vector<std::string> lines;
+    {
+        std::istringstream iss(original);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+    }
+
+    struct ForcedSetting {
+        const char* key;
+        const char* value;
+    };
+    static const ForcedSetting forced[] = {
+        {"AllowLowB1", "1"},
+        {"Stage1GCD", "-1"},
+        {"UsePrimenet", "0"},
+        {"ExitWhenOutOfWork", "1"},
+    };
+
+    std::vector<std::string> missing_at_top;
+    missing_at_top.reserve(sizeof(forced) / sizeof(forced[0]));
+
+    for (const ForcedSetting& s : forced) {
+        const std::string prefix = std::string(s.key) + "=";
+        bool found = false;
+        for (std::string& line : lines) {
+            size_t pos = 0;
+            while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) ++pos;
+            if (line.compare(pos, prefix.size(), prefix) == 0) {
+                line = prefix + s.value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) missing_at_top.push_back(prefix + s.value);
+    }
+
+    std::ostringstream oss;
+    for (const std::string& line : missing_at_top) oss << line << "\n";
+    for (const std::string& line : lines) oss << line << "\n";
+    return oss.str();
+}
+
+static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
+                                                   const fs::path& p95_exe,
+                                                   const Prime95Stage2Task& task) {
+    Prime95Stage2TaskResult result;
+    result.curve_idx = task.curve_idx;
+
+    if (p95_dir.empty() || p95_exe.empty()) {
+        result.error = "Prime95 path or executable is empty";
+        return result;
+    }
+
+    const fs::path dst_resume = p95_dir / task.resume_filename;
+    std::string copy_err;
+    if (!p95_copy_overwrite(task.resume_src_path, dst_resume, copy_err)) {
+        result.error = "Failed to copy resume file to Prime95 directory: " + copy_err;
+        return result;
+    }
+
+    const fs::path prime_txt = p95_dir / "prime.txt";
+    const fs::path prime_txt_backup = p95_dir / (std::string("prime.txt") + p95_backup_suffix());
+    bool had_prime_txt = false;
+    std::string prime_txt_original;
+    std::string prime_txt_write_err;
+    auto restore_prime_txt = [&]() {
+        std::error_code rec;
+        if (had_prime_txt) {
+            fs::copy_file(prime_txt_backup, prime_txt, fs::copy_options::overwrite_existing, rec);
+            fs::remove(prime_txt_backup, rec);
+        } else {
+            fs::remove(prime_txt, rec);
+        }
+    };
+
+    if (fs::exists(prime_txt)) {
+        had_prime_txt = true;
+        if (!p95_read_text_file(prime_txt, prime_txt_original)) {
+            result.error = "Failed to read existing Prime95 prime.txt";
+            return result;
+        }
+        if (!p95_copy_overwrite(prime_txt, prime_txt_backup, copy_err)) {
+            result.error = "Failed to backup Prime95 prime.txt: " + copy_err;
+            return result;
+        }
+    }
+
+    const std::string prime_txt_modified = p95_normalize_prime_txt(prime_txt_original);
+    if (!p95_write_text_file(prime_txt, prime_txt_modified, prime_txt_write_err)) {
+        restore_prime_txt();
+        result.error = "Failed to prepare Prime95 prime.txt: " + prime_txt_write_err;
+        return result;
+    }
+
+    std::error_code ec;
+    fs::remove(p95_dir / "worktodo.txt", ec);
+    ec.clear();
+    fs::remove(p95_dir / "results.json.txt", ec);
+
+    {
+        std::ofstream wt(p95_dir / "worktodo.txt", std::ios::out | std::ios::trunc);
+        if (!wt.is_open()) {
+            restore_prime_txt();
+            result.error = "Failed to create Prime95 worktodo.txt";
+            return result;
+        }
+        wt << task.worktodo_line << "\n";
+        wt.flush();
+    }
+
+    std::ostringstream shell;
+#ifdef _WIN32
+    shell << "cd /d " << p95_shell_quote_win(p95_dir.string())
+          << " && " << p95_shell_quote_win(p95_exe.string())
+          << " > " << p95_shell_quote_win((p95_dir / task.log_filename).string()) << " 2>&1";
+    const std::string cmd = std::string("cmd /C ") + p95_shell_quote_win(shell.str());
+#else
+    shell << "cd " << p95_shell_quote_posix(p95_dir.string())
+          << " && " << p95_shell_quote_posix(p95_exe.string())
+          << " > " << p95_shell_quote_posix((p95_dir / task.log_filename).string()) << " 2>&1";
+    const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
+#endif
+
+    int rc = std::system(cmd.c_str());
+#ifdef _WIN32
+    result.exit_code = rc;
+#else
+    if (rc == -1) result.exit_code = -1;
+    else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
+    else result.exit_code = rc;
+#endif
+
+    const fs::path results_file = p95_dir / "results.json.txt";
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    restore_prime_txt();
+
+    if (result.json_line.empty()) {
+        std::ostringstream oss;
+        oss << "Prime95 did not produce results.json.txt for curve " << (task.curve_idx + 1)
+            << " (exit_code=" << result.exit_code << ")"
+            << " | log=" << (p95_dir / task.log_filename).string()
+            << " | worktodo=" << task.worktodo_line;
+        result.error = oss.str();
+        return result;
+    }
+
+    std::string status;
+    std::string factor;
+    if (!p95_parse_result_json_line(result.json_line, status, factor)) {
+        result.error = "Unable to parse Prime95 results.json.txt line";
+        return result;
+    }
+
+    result.factor = factor;
+    result.factor_found = (!factor.empty()) || (status == "F");
+    result.known_factor = result.factor_found && !factor.empty() && p95_is_known_factor_string(factor, task.known_factors);
+    result.success = (status == "NF") || (status == "F");
+
+    if (!result.success && result.error.empty()) {
+        result.error = "Prime95 returned an unsupported status: " + status;
+    }
+    return result;
+}
+
+
 namespace ecm_local {
 
 struct EC_mod4 {
@@ -293,7 +649,32 @@ struct EC_mod4 {
 } // namespace ecm_local
 
 namespace core {
+    static fs::path p95_expand_user_path(const std::string& in) {
+        if (in.empty()) return fs::path();
 
+        #ifdef _WIN32
+            if (in.size() >= 2 && in[0] == '~' && (in[1] == '/' || in[1] == '\\')) {
+                const char* home = std::getenv("USERPROFILE");
+                if (!home) {
+                    const char* drive = std::getenv("HOMEDRIVE");
+                    const char* path  = std::getenv("HOMEPATH");
+                    if (drive && path) return fs::path(std::string(drive) + path) / in.substr(2);
+                } else {
+                    return fs::path(home) / in.substr(2);
+                }
+            }
+        #else
+            if (in[0] == '~' && (in.size() == 1 || in[1] == '/')) {
+                const char* home = std::getenv("HOME");
+                if (home && *home) {
+                    if (in.size() == 1) return fs::path(home);
+                    return fs::path(home) / in.substr(2);
+                }
+            }
+        #endif
+
+            return fs::path(in);
+    }
 int App::runECMMarinTwistedEdwards()
 {
     using namespace std;
@@ -488,6 +869,191 @@ int App::runECMMarinTwistedEdwards()
     };
 
 
+
+
+    const bool want_p95_stage2 = (options.p95stage2 && !options.p95path.empty() && B2 > B1);
+    bool p95_stage2_enabled = false;
+    fs::path p95_dir;
+    fs::path p95_exe;
+    std::deque<Prime95Stage2Task> p95_pending_tasks;
+    std::optional<Prime95Stage2Task> p95_active_task;
+    std::future<Prime95Stage2TaskResult> p95_future;
+    bool p95_future_active = false;
+    std::string p95_background_error;
+
+    auto p95_log = [&](const std::string& msg)->void {
+        std::cout << msg << std::endl;
+        if (guiServer_) guiServer_->appendLog(msg);
+    };
+
+    auto p95_finalize_background_stop = [&](engine* eng_or_null)->int {
+        if (!p95_background_error.empty()) {
+            p95_log(std::string("[ECM] Prime95 Stage2 background error: ") + p95_background_error);
+            if (eng_or_null) delete eng_or_null;
+            return 1;
+        }
+        if (result_status == "found" && result_factor > 0) {
+            std::ostringstream oss;
+            oss << "[ECM] Prime95 Stage2 background found factor " << result_factor.get_str();
+            p95_log(oss.str());
+            write_result();
+            publish_json();
+            if (eng_or_null) delete eng_or_null;
+            return 0;
+        }
+        if (eng_or_null) delete eng_or_null;
+        return 0;
+    };
+
+    auto p95_start_next_task = [&]() -> void {
+        if (!p95_stage2_enabled || p95_future_active || p95_pending_tasks.empty()) return;
+        p95_active_task = p95_pending_tasks.front();
+        p95_pending_tasks.pop_front();
+        Prime95Stage2Task task = *p95_active_task;
+        std::ostringstream oss;
+        oss << "[ECM] Prime95 Stage2 background start | curve=" << (task.curve_idx + 1)
+            << " | queue_remaining=" << p95_pending_tasks.size()
+            << " | log=" << (p95_dir / task.log_filename).string()
+            << " | resume=" << (p95_dir / task.resume_filename).string();
+        p95_log(oss.str());
+        p95_future = std::async(std::launch::async, [p95_dir, p95_exe, task]() {
+            return p95_run_stage2_task(p95_dir, p95_exe, task);
+        });
+        p95_future_active = true;
+    };
+
+    auto p95_handle_finished_task = [&](const Prime95Stage2TaskResult& rr)->bool {
+        if (!rr.error.empty()) {
+            p95_background_error = rr.error;
+            interrupted.store(true, std::memory_order_relaxed);
+            return true;
+        }
+
+        std::ostringstream oss;
+        oss << "[ECM] Prime95 Stage2 background done | curve=" << (rr.curve_idx + 1)
+            << " | exit_code=" << rr.exit_code;
+        if (!rr.json_line.empty()) oss << " | result=" << rr.json_line;
+        p95_log(oss.str());
+
+        if (rr.factor_found && !rr.factor.empty()) {
+            if (rr.known_factor) {
+                std::ostringstream ok;
+                ok << "[ECM] Prime95 Stage2 background curve " << (rr.curve_idx + 1)
+                   << " found known factor " << rr.factor << ", continuing";
+                p95_log(ok.str());
+                return false;
+            }
+            if (mpz_set_str(result_factor.get_mpz_t(), rr.factor.c_str(), 10) != 0) {
+                p95_background_error = std::string("Failed to parse Prime95 factor: ") + rr.factor;
+                interrupted.store(true, std::memory_order_relaxed);
+                return true;
+            }
+            result_status = "found";
+            curves_tested_for_found = rr.curve_idx + 1;
+            options.curves_tested_for_found = (uint32_t)(rr.curve_idx + 1);
+            interrupted.store(true, std::memory_order_relaxed);
+            return true;
+        }
+        return false;
+    };
+
+    auto p95_poll_background = [&](bool wait_for_active)->bool {
+        if (!p95_stage2_enabled) return false;
+        if (p95_future_active) {
+            if (wait_for_active) {
+                Prime95Stage2TaskResult rr = p95_future.get();
+                p95_future_active = false;
+                p95_active_task.reset();
+                bool stop = p95_handle_finished_task(rr);
+                if (!stop) p95_start_next_task();
+                return stop;
+            }
+            if (p95_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                Prime95Stage2TaskResult rr = p95_future.get();
+                p95_future_active = false;
+                p95_active_task.reset();
+                bool stop = p95_handle_finished_task(rr);
+                if (!stop) p95_start_next_task();
+                return stop;
+            }
+        }
+        if (!p95_future_active) p95_start_next_task();
+        return false;
+    };
+
+    auto p95_enqueue_curve = [&](uint64_t curve_idx, const std::string& curve_resume_path)->bool {
+        if (!p95_stage2_enabled || curve_resume_path.empty()) return false;
+        const std::string resume_filename = fs::path(curve_resume_path).filename().string();
+        const std::string known_csv = p95_join_known_factors_csv(options.knownFactors);
+
+        std::ostringstream wt;
+        wt << "ECMSTAGE2=N/A,1,2," << p << ",-1,\"" << resume_filename << "\"," << B2;
+        if (!known_csv.empty()) {
+            wt << ",\"" << known_csv << "\"";
+        }
+
+        Prime95Stage2Task task;
+        task.curve_idx = curve_idx;
+        task.resume_src_path = curve_resume_path;
+        task.resume_filename = resume_filename;
+        task.worktodo_line = wt.str();
+        task.known_factors = options.knownFactors;
+        {
+            std::ostringstream logn;
+            logn << "prmers_p95stage2_curve_" << std::setw(6) << std::setfill('0') << (curve_idx + 1) << ".log";
+            task.log_filename = logn.str();
+        }
+        p95_pending_tasks.push_back(task);
+        std::ostringstream oss;
+        oss << "[ECM] Curve " << (curve_idx + 1) << "/" << curves
+            << " | Stage2 queued for Prime95 background"
+            << " | pending=" << p95_pending_tasks.size();
+        p95_log(oss.str());
+        p95_start_next_task();
+        return true;
+    };
+
+    if (want_p95_stage2) {
+        
+        //p95_dir = fs::path(options.p95path);
+        p95_dir = p95_expand_user_path(options.p95path);
+        std::error_code ec;
+        if (!fs::exists(p95_dir, ec) || !fs::is_directory(p95_dir, ec)) {
+            //p95_log(std::string("[ECM] Prime95 Stage2 disabled: invalid directory '") + options.p95path + "'");
+            p95_log(std::string("[ECM] Prime95 Stage2 disabled: invalid directory '") + options.p95path + "' -> resolved to '" + p95_dir.string() + "'");
+        } else {
+#ifdef _WIN32
+            const std::vector<std::string> exe_candidates = {"prime95.exe", "mprime.exe"};
+#else
+            const std::vector<std::string> exe_candidates = {"mprime", "prime95"};
+#endif
+            for (const std::string& cand : exe_candidates) {
+                fs::path test = p95_dir / cand;
+                if (fs::exists(test, ec)) {
+                    p95_exe = fs::absolute(test, ec);
+                    if (ec) p95_exe = test;
+                    break;
+                }
+            }
+            if (p95_exe.empty()) {
+                p95_log(std::string("[ECM] Prime95 Stage2 disabled: no Prime95/mprime executable found in '") + options.p95path + "'");
+            } else {
+                std::string moved_worktodo;
+                std::string moved_results;
+                bool ok_worktodo = p95_backup_existing_file(p95_dir / "worktodo.txt", &moved_worktodo);
+                bool ok_results = p95_backup_existing_file(p95_dir / "results.json.txt", &moved_results);
+                if (!ok_worktodo || !ok_results) {
+                    p95_log(std::string("[ECM] Prime95 Stage2 disabled: failed to backup worktodo/results in '") + options.p95path + "'");
+                } else {
+                    if (!moved_worktodo.empty()) p95_log(std::string("[ECM] Prime95 worktodo backed up to ") + moved_worktodo);
+                    if (!moved_results.empty()) p95_log(std::string("[ECM] Prime95 results.json.txt backed up to ") + moved_results);
+                    p95_stage2_enabled = true;
+                    p95_log(std::string("[ECM] Prime95 Stage2 background enabled using ") + p95_exe.string());
+                }
+            }
+        }
+    }
+
     {
         vector<string> kf = options.knownFactors;
         vector<pair<mpz_class,unsigned>> acc;
@@ -535,7 +1101,8 @@ int App::runECMMarinTwistedEdwards()
         return oss.str();
     };
 
-    auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& Aresume, const mpz_class& xAff, const mpz_class* sigmaForP95)->void {
+    auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& Aresume, const mpz_class& xAff, const mpz_class* sigmaForP95)->std::string {
+        std::string curve_p95_resume_path;
         mpz_class Ared = Aresume;
         mpz_mod(Ared.get_mpz_t(), Ared.get_mpz_t(), N.get_mpz_t());
         if (Ared < 0) Ared += N;
@@ -609,6 +1176,31 @@ int App::runECMMarinTwistedEdwards()
                 outp << " TIME=" << ecmResumeTime << ";\n";
                 outp.flush();
             }
+
+            std::ostringstream one_name;
+            one_name << "resume_p" << p << "_ECM_TE_B1_" << B1
+                     << "_c" << std::setw(6) << std::setfill('0') << (curve_idx + 1) << ".p95";
+            curve_p95_resume_path = one_name.str();
+
+            std::ofstream outpc(curve_p95_resume_path, std::ios::out | std::ios::trunc);
+            if (!outpc) {
+                std::ostringstream oss;
+                oss << "[ECM] Warning: cannot write per-curve Prime95 Stage2 resume to '" << curve_p95_resume_path << "'";
+                std::cerr << oss.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(oss.str());
+                curve_p95_resume_path.clear();
+            } else {
+                outpc << "METHOD=ECM; SIGMA=" << sigma.get_str()
+                      << "; B1=" << B1
+                      << "; N=" << nField
+                      << "; X=0x" << xred.get_str(16)
+                      << "; CHECKSUM=" << chk_u2
+                      << "; PROGRAM=" << ecmResumeProgram
+                      << "; X0=0x0; Y0=0x0;";
+                if (!ecmResumeWho.empty()) outpc << " WHO=" << ecmResumeWho << ";";
+                outpc << " TIME=" << ecmResumeTime << ";\n";
+                outpc.flush();
+            }
         }
 
         std::ostringstream oss;
@@ -618,6 +1210,7 @@ int App::runECMMarinTwistedEdwards()
         else oss << " (Prime95 export skipped: TE curve is not a GMP-ECM SIGMA family)";
         std::cout << oss.str() << std::endl;
         if (guiServer_) guiServer_->appendLog(oss.str());
+        return curve_p95_resume_path;
     };
 
     vector<uint64_t> primesB1_v, primesS2_v;
@@ -958,7 +1551,18 @@ int App::runECMMarinTwistedEdwards()
     for (uint64_t c = start_curve; c < curves; ++c)
 
     {
+        if (p95_stage2_enabled) {
+            if (p95_poll_background(false)) {
+                return p95_finalize_background_stop(nullptr);
+            }
+        }
         if (interrupted.load(std::memory_order_relaxed)) {
+            if (result_status == "found" && result_factor > 0) {
+                return p95_finalize_background_stop(nullptr);
+            }
+            if (!p95_background_error.empty()) {
+                return p95_finalize_background_stop(nullptr);
+            }
             std::cout << "[ECM] Interrupt received — exiting without publishing a final result." << std::endl;
             return 0;
         }
@@ -2434,6 +3038,14 @@ int App::runECMMarinTwistedEdwards()
         }
         for (uint32_t i = start_i; i < total_steps; ++i) {
             if (interrupted.load(std::memory_order_relaxed)) {
+                if (result_status == "found" && result_factor > 0) {
+                    return p95_finalize_background_stop(eng);
+                }
+                if (!p95_background_error.empty()) {
+                    double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
+                    save_ckpt((uint32_t)i, elapsed);
+                    return p95_finalize_background_stop(eng);
+                }
                 double elapsed = duration<double>(high_resolution_clock::now() - t0).count() + saved_et;
                 save_ckpt((uint32_t)i, elapsed);
                 std::cout << "[ECM] Interrupted at curve " << (c+1) << ", iter " << i << "/" << total_steps << "";
@@ -2512,6 +3124,9 @@ int App::runECMMarinTwistedEdwards()
                 last_check = now;
             }
             if (duration_cast<milliseconds>(now - last_ui).count() >= progress_interval_ms || i+1 == total_steps) {
+                if (p95_stage2_enabled && p95_poll_background(false)) {
+                    interrupted.store(true, std::memory_order_relaxed);
+                }
                 const size_t done_u = i + 1;
                 const double done = double(done_u), total = double(total_steps ? total_steps : 1);
                 const double elapsed = duration<double>(now - t0).count() + saved_et;
@@ -2555,6 +3170,7 @@ int App::runECMMarinTwistedEdwards()
             s2_et = 0.0;
         }
 
+        std::string curve_p95_resume_path;
         if (!resume_stage2) {
             mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
             mpz_class g = gcd_with_dots(Zacc, N);
@@ -2604,7 +3220,7 @@ int App::runECMMarinTwistedEdwards()
             }
 
             if ((have_u && have_A) || found) {
-                append_ecm_stage1_resume_line(
+                curve_p95_resume_path = append_ecm_stage1_resume_line(
                     c,
                     have_A ? Aresume : mpz_class(0),
                     have_u ? uAff   : mpz_class(0),
@@ -2643,6 +3259,24 @@ int App::runECMMarinTwistedEdwards()
             }
         }
 
+
+        if (p95_stage2_enabled && B2 > B1 && !resume_stage2 && !curve_p95_resume_path.empty()) {
+            if (p95_poll_background(false)) {
+                return p95_finalize_background_stop(eng);
+            }
+            std::error_code ecq;
+            fs::remove(ckpt_file, ecq); fs::remove(ckpt_file + ".old", ecq); fs::remove(ckpt_file + ".new", ecq);
+            if (!p95_enqueue_curve(c, curve_p95_resume_path)) {
+                p95_log(std::string("[ECM] Curve ") + std::to_string(c + 1) + "/" + std::to_string(curves) + " | Prime95 Stage2 enqueue failed, falling back to internal Stage2");
+            } else {
+                std::ostringstream fin;
+                fin << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 delegated to Prime95 background";
+                std::cout << fin.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(fin.str());
+                delete eng;
+                continue;
+            }
+        }
 
         if (B2 > B1 /*&& !primesS2_v.empty()*/) {
             auto t2_0 = high_resolution_clock::now();
@@ -2772,6 +3406,9 @@ int App::runECMMarinTwistedEdwards()
                     if (((j + 1) & 1023u) == 0u || (j + 1) == total_steps2) {
                         auto now2 = high_resolution_clock::now();
                         if (duration_cast<milliseconds>(now2 - last2_ui).count() >= progress_interval_ms || (j + 1) == total_steps2) {
+                            if (p95_stage2_enabled && p95_poll_background(false)) {
+                                interrupted.store(true, std::memory_order_relaxed);
+                            }
                             uint64_t inside_done = done_bits_est + std::min<uint64_t>((uint64_t)(j + 1), (uint64_t)chunk_bits);
                             const double done = double(inside_done);
                             const double total = double(std::max<uint64_t>(1ULL, total_s2_iters));
@@ -2795,6 +3432,14 @@ int App::runECMMarinTwistedEdwards()
                             last2_ui = now2;
                         }
                         if (interrupted.load(std::memory_order_relaxed) && (j + 1) != total_steps2) {
+                            if (result_status == "found" && result_factor > 0) {
+                                interrupted_in_chunk = true;
+                                return false;
+                            }
+                            if (!p95_background_error.empty()) {
+                                interrupted_in_chunk = true;
+                                return false;
+                            }
                             const double elapsed = duration<double>(now2 - t2_0).count() + saved_et2;
                             save_ckpt2_ex(chunk_start, elapsed, (uint32_t)primesS2_v.size(),
                                           1u, chunk_start, chunk_end, chunk_bits, (uint32_t)(j + 1));
@@ -2958,6 +3603,12 @@ int App::runECMMarinTwistedEdwards()
             }
             std::cout << std::endl;
             if (stop_after_chunk) {
+                if (result_status == "found" && result_factor > 0) {
+                    return p95_finalize_background_stop(eng);
+                }
+                if (!p95_background_error.empty()) {
+                    return p95_finalize_background_stop(eng);
+                }
                 delete eng;
                 return 0;
             }
@@ -2979,9 +3630,30 @@ int App::runECMMarinTwistedEdwards()
             { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
         }
 
+        if (p95_stage2_enabled && p95_poll_background(false)) {
+            return p95_finalize_background_stop(eng);
+        }
         std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
+    }
+
+    if (p95_stage2_enabled) {
+        if (p95_future_active || !p95_pending_tasks.empty()) {
+            std::ostringstream oss;
+            oss << "[ECM] Waiting for Prime95 Stage2 background jobs to finish"
+                << " | active=" << (p95_future_active ? 1 : 0)
+                << " | pending=" << p95_pending_tasks.size();
+            p95_log(oss.str());
+        }
+        while (p95_future_active || !p95_pending_tasks.empty()) {
+            if (p95_poll_background(true)) {
+                return p95_finalize_background_stop(nullptr);
+            }
+        }
+        if (!p95_background_error.empty() || (result_status == "found" && result_factor > 0)) {
+            return p95_finalize_background_stop(nullptr);
+        }
     }
 
     if (result_status == "found") return 0;
