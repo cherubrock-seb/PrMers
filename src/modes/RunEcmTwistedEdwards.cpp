@@ -2326,10 +2326,16 @@ int App::runECMMarinTwistedEdwards()
         double ema_ips_stage1 = 0.0;
 
         std::cout<<"[ECM] stage1_begin Kbits="<<Kbits<<std::endl;
+        std::cout<<"[ECM] Stage1 init: building NAF path..."<<std::endl;
         std::vector<short> naf_vec; naf_vec.reserve((size_t)Kbits + 2);
         {
             mpz_class ec = K;
             mpz_ptr e = ec.get_mpz_t();
+            auto naf_t0 = high_resolution_clock::now();
+            auto naf_last = naf_t0;
+            size_t naf_done = 0;
+            size_t naf_last_done = 0;
+            double ema_naf_bits_per_s = 0.0;
             for (; mpz_size(e) != 0; )
             {
                 short di = 0;
@@ -2342,12 +2348,48 @@ int App::runECMMarinTwistedEdwards()
                 }
                 naf_vec.push_back(di);
                 mpz_fdiv_q_2exp(e, e, 1);
+                ++naf_done;
+
+                auto now = high_resolution_clock::now();
+                if (duration_cast<milliseconds>(now - naf_last).count() >= progress_interval_ms) {
+                    const double elapsed = duration<double>(now - naf_t0).count();
+                    const double dt = duration<double>(now - naf_last).count();
+                    const double dd = double(naf_done - naf_last_done);
+                    const double inst = (dt > 1e-9) ? (dd / dt) : 0.0;
+                    const double avg = (elapsed > 1e-9) ? (double)naf_done / elapsed : 0.0;
+                    const double speed = (inst > 0.0) ? inst : avg;
+                    if (ema_naf_bits_per_s <= 0.0) ema_naf_bits_per_s = speed;
+                    else ema_naf_bits_per_s = 0.75 * ema_naf_bits_per_s + 0.25 * speed;
+                    const double pct = (Kbits > 0) ? (100.0 * double(naf_done) / double(Kbits)) : 100.0;
+                    const double eta = (ema_naf_bits_per_s > 0.0 && naf_done < Kbits)
+                                     ? (double(Kbits - naf_done) / ema_naf_bits_per_s)
+                                     : 0.0;
+
+                    std::ostringstream line;
+                    line << "[ECM] Stage1 init: NAF "
+                         << naf_done << "/" << Kbits
+                         << " (" << std::fixed << std::setprecision(1) << pct << "%)"
+                         << " | bits/s " << std::fixed << std::setprecision(1) << ema_naf_bits_per_s
+                         << " | ETA " << fmt_hms(eta);
+                    ecm_print_progress_line(line.str());
+                    naf_last = now;
+                    naf_last_done = naf_done;
+                }
             }
             while (!naf_vec.empty() && naf_vec.back()==0) naf_vec.pop_back();
+            std::ostringstream line;
+            line << "[ECM] Stage1 init: NAF "
+                 << naf_done << "/" << Kbits
+                 << " (100.0%)"
+                 << " | elapsed " << std::fixed << std::setprecision(1)
+                 << duration<double>(high_resolution_clock::now() - naf_t0).count() << "s";
+            ecm_print_progress_line(line.str());
         }
+        std::cout<<std::endl;
         size_t naf_len = naf_vec.size();
         if (naf_len == 0) { std::cout<<std::endl; }
         if (naf_len == 0) { }
+        std::cout<<"[ECM] Stage1 init: loading cached base point registers..."<<std::endl;
         mpz_class T0_mpz = mulm(X0, Y0);
         mpz_class X0_neg = subm(N, X0);
         mpz_class T0_neg = subm(N, T0_mpz);
@@ -2371,6 +2413,7 @@ int App::runECMMarinTwistedEdwards()
         eng->set_multiplicand((engine::Reg)45,(engine::Reg)29); // d
         eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 = +P.t
         eng->set_multiplicand((engine::Reg)50,(engine::Reg)49); // T2neg = −P.t
+        std::cout<<"[ECM] Stage1 init: base point registers ready"<<std::endl;
 
         if (!resumed && !resume_stage2 && naf_len) {
             short top = naf_vec[naf_len - 1];
