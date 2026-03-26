@@ -219,6 +219,9 @@ struct Prime95Stage2Task {
     std::string worktodo_line;
     std::vector<std::string> known_factors;
     std::string log_filename;
+    std::string sigma_hex;
+    uint64_t curve_seed = 0;
+    uint64_t base_seed = 0;
 };
 
 struct Prime95Stage2TaskResult {
@@ -507,12 +510,12 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
 #ifdef _WIN32
     shell << "cd /d " << p95_shell_quote_win(p95_dir.string())
           << " && " << p95_shell_quote_win(p95_exe.string())
-          << " > " << p95_shell_quote_win((p95_dir / task.log_filename).string()) << " 2>&1";
+          << " -d > " << p95_shell_quote_win((p95_dir / task.log_filename).string()) << " 2>&1";
     const std::string cmd = std::string("cmd /C ") + p95_shell_quote_win(shell.str());
 #else
     shell << "cd " << p95_shell_quote_posix(p95_dir.string())
           << " && " << p95_shell_quote_posix(p95_exe.string())
-          << " > " << p95_shell_quote_posix((p95_dir / task.log_filename).string()) << " 2>&1";
+          << " -d > " << p95_shell_quote_posix((p95_dir / task.log_filename).string()) << " 2>&1";
     const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
 #endif
 
@@ -943,11 +946,25 @@ int App::runECMMarinTwistedEdwards()
                 p95_log(ok.str());
                 return false;
             }
+
+            if (!p95_active_task.has_value()) {
+                p95_background_error = "Prime95 factor result received without active task metadata";
+                interrupted.store(true, std::memory_order_relaxed);
+                return true;
+            }
+
+            const Prime95Stage2Task& found_task = *p95_active_task;
+
             if (mpz_set_str(result_factor.get_mpz_t(), rr.factor.c_str(), 10) != 0) {
                 p95_background_error = std::string("Failed to parse Prime95 factor: ") + rr.factor;
                 interrupted.store(true, std::memory_order_relaxed);
                 return true;
             }
+
+            options.sigma_hex = found_task.sigma_hex;
+            options.curve_seed = found_task.curve_seed;
+            options.base_seed = found_task.base_seed;
+
             result_status = "found";
             curves_tested_for_found = rr.curve_idx + 1;
             options.curves_tested_for_found = (uint32_t)(rr.curve_idx + 1);
@@ -963,16 +980,16 @@ int App::runECMMarinTwistedEdwards()
             if (wait_for_active) {
                 Prime95Stage2TaskResult rr = p95_future.get();
                 p95_future_active = false;
-                p95_active_task.reset();
                 bool stop = p95_handle_finished_task(rr);
+                p95_active_task.reset();
                 if (!stop) p95_start_next_task();
                 return stop;
             }
             if (p95_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                 Prime95Stage2TaskResult rr = p95_future.get();
                 p95_future_active = false;
-                p95_active_task.reset();
                 bool stop = p95_handle_finished_task(rr);
+                p95_active_task.reset();
                 if (!stop) p95_start_next_task();
                 return stop;
             }
@@ -981,7 +998,11 @@ int App::runECMMarinTwistedEdwards()
         return false;
     };
 
-    auto p95_enqueue_curve = [&](uint64_t curve_idx, const std::string& curve_resume_path)->bool {
+    auto p95_enqueue_curve = [&](uint64_t curve_idx,
+                                const std::string& curve_resume_path,
+                                const std::string& curve_sigma_hex,
+                                uint64_t curve_seed_for_task,
+                                uint64_t base_seed_for_task)->bool {
         if (!p95_stage2_enabled || curve_resume_path.empty()) return false;
         const std::string resume_filename = fs::path(curve_resume_path).filename().string();
         const std::string known_csv = p95_join_known_factors_csv(options.knownFactors);
@@ -998,6 +1019,9 @@ int App::runECMMarinTwistedEdwards()
         task.resume_filename = resume_filename;
         task.worktodo_line = wt.str();
         task.known_factors = options.knownFactors;
+        task.sigma_hex = curve_sigma_hex;
+        task.curve_seed = curve_seed_for_task;
+        task.base_seed = base_seed_for_task;
         {
             std::ostringstream logn;
             logn << "prmers_p95stage2_curve_" << std::setw(6) << std::setfill('0') << (curve_idx + 1) << ".log";
@@ -3266,7 +3290,7 @@ int App::runECMMarinTwistedEdwards()
             }
             std::error_code ecq;
             fs::remove(ckpt_file, ecq); fs::remove(ckpt_file + ".old", ecq); fs::remove(ckpt_file + ".new", ecq);
-            if (!p95_enqueue_curve(c, curve_p95_resume_path)) {
+            if (!p95_enqueue_curve(c, curve_p95_resume_path, options.sigma_hex, options.curve_seed, options.base_seed)) {
                 p95_log(std::string("[ECM] Curve ") + std::to_string(c + 1) + "/" + std::to_string(curves) + " | Prime95 Stage2 enqueue failed, falling back to internal Stage2");
             } else {
                 std::ostringstream fin;
