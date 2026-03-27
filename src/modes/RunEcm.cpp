@@ -1333,7 +1333,7 @@ int App::runECMMarin()
                         return 0;
                     }
                 } else {
-                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 64);
+                    sigma_mpz = rnd_mpz_bits(N, curve_seed, 63);
                 }
 
                 options.sigma_hex = sigma_mpz.get_str(16);

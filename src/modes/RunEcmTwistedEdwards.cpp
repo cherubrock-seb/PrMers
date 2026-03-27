@@ -2435,7 +2435,7 @@ int App::runECMMarinTwistedEdwards()
                     }
                 } else {
                     const uint64_t sigma_seed = (tries == 0) ? curve_seed : mix64(curve_seed, 0x5EED5EEDULL + uint64_t(tries));
-                    sigma_mpz = rnd_mpz_bits(N, sigma_seed, 64);
+                    sigma_mpz = rnd_mpz_bits(N, sigma_seed, 63);
                 }
 
                 sigma_mpz %= N;
