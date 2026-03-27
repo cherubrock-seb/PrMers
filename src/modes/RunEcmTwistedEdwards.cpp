@@ -411,6 +411,7 @@ static std::string p95_normalize_prime_txt(const std::string& original) {
         {"AllowLowB1", "1"},
         {"Stage1GCD", "-1"},
         {"UsePrimenet", "0"},
+        {"ECMBestB2", "0"},
         {"ExitWhenOutOfWork", "1"},
     };
 

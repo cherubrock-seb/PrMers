@@ -29,6 +29,9 @@
 #endif
 #ifdef _WIN32
 # include <windows.h>
+#else
+# include <unistd.h>
+# include <sys/wait.h>
 #endif
 #include <csignal>
 #include <chrono>
@@ -138,6 +141,431 @@ static inline mpz_class mpz_from_u64(uint64_t x) {
     mpz_class r;
     mpz_set_u64(r.get_mpz_t(), x);
     return r;
+}
+
+namespace fs = std::filesystem;
+
+struct PM1Prime95Stage2Result {
+    bool success = false;
+    bool factor_found = false;
+    bool known_factor = false;
+    std::string factor;
+    std::string json_line;
+    int exit_code = -1;
+    std::string error;
+};
+
+static fs::path p95_expand_user_path(const std::string& in) {
+    if (in.empty()) return fs::path();
+#ifdef _WIN32
+    if (in.size() >= 2 && in[0] == '~' && (in[1] == '/' || in[1] == '\\')) {
+        const char* home = std::getenv("USERPROFILE");
+        if (!home) {
+            const char* drive = std::getenv("HOMEDRIVE");
+            const char* path  = std::getenv("HOMEPATH");
+            if (drive && path) return fs::path(std::string(drive) + path) / in.substr(2);
+        } else {
+            return fs::path(home) / in.substr(2);
+        }
+    }
+#else
+    if (in[0] == '~' && (in.size() == 1 || in[1] == '/')) {
+        const char* home = std::getenv("HOME");
+        if (home && *home) {
+            if (in.size() == 1) return fs::path(home);
+            return fs::path(home) / in.substr(2);
+        }
+    }
+#endif
+    return fs::path(in);
+}
+
+static std::string p95_backup_suffix() {
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+#if defined(_WIN32)
+    localtime_s(&tmv, &t);
+#else
+    localtime_r(&t, &tmv);
+#endif
+    std::ostringstream oss;
+    oss << ".bak." << std::put_time(&tmv, "%Y%m%d_%H%M%S");
+    return oss.str();
+}
+
+static bool p95_backup_existing_file(const fs::path& src, std::string* moved_to = nullptr) {
+    std::error_code ec;
+    if (!fs::exists(src, ec)) return true;
+    fs::path dst = src;
+    dst += ".bak";
+    if (fs::exists(dst, ec)) {
+        dst = src;
+        dst += p95_backup_suffix();
+    }
+    fs::rename(src, dst, ec);
+    if (ec) return false;
+    if (moved_to) *moved_to = dst.string();
+    return true;
+}
+
+static bool p95_copy_overwrite(const fs::path& src, const fs::path& dst, std::string& err) {
+    std::error_code ec;
+    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        err = ec.message();
+        return false;
+    }
+    return true;
+}
+
+static bool p95_read_text_file_local(const fs::path& file, std::string& out) {
+    std::ifstream in(file, std::ios::in | std::ios::binary);
+    if (!in.is_open()) return false;
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    out = ss.str();
+    return true;
+}
+
+static bool p95_write_text_file_local(const fs::path& file, const std::string& text, std::string& err) {
+    std::ofstream out(file, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        err = "cannot open file for writing";
+        return false;
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out.good()) {
+        err = "write failed";
+        return false;
+    }
+    out.flush();
+    if (!out.good()) {
+        err = "flush failed";
+        return false;
+    }
+    return true;
+}
+
+static std::string p95_normalize_prime_txt(const std::string& original) {
+    std::vector<std::string> lines;
+    {
+        std::istringstream iss(original);
+        std::string line;
+        while (std::getline(iss, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines.push_back(line);
+        }
+    }
+
+    struct ForcedSetting { const char* key; const char* value; };
+    static const ForcedSetting forced[] = {
+        {"AllowLowB1", "1"},
+        {"Stage1GCD", "-1"},
+        {"UsePrimenet", "0"},
+        {"Pminus1BestB2", "0"},
+        {"ExitWhenOutOfWork", "1"},
+    };
+
+    std::vector<std::string> missing_at_top;
+    for (const ForcedSetting& s : forced) {
+        const std::string prefix = std::string(s.key) + "=";
+        bool found = false;
+        for (std::string& line : lines) {
+            size_t pos = 0;
+            while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) ++pos;
+            if (line.compare(pos, prefix.size(), prefix) == 0) {
+                line = prefix + s.value;
+                found = true;
+                break;
+            }
+        }
+        if (!found) missing_at_top.push_back(prefix + s.value);
+    }
+
+    std::ostringstream oss;
+    for (const std::string& line : missing_at_top) oss << line << "\n";
+    for (const std::string& line : lines) oss << line << "\n";
+    return oss.str();
+}
+
+static std::string p95_shell_quote_posix(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('\'');
+    for (char ch : s) {
+        if (ch == '\'') out += "'\\''";
+        else out.push_back(ch);
+    }
+    out.push_back('\'');
+    return out;
+}
+
+static std::string p95_shell_quote_win(const std::string& s) {
+    std::string out = "\"";
+    for (char ch : s) {
+        if (ch == '"') out += '\\';
+        out.push_back(ch);
+    }
+    out += "\"";
+    return out;
+}
+
+static bool p95_read_last_non_empty_line(const fs::path& file, std::string& last_line) {
+    std::ifstream in(file, std::ios::in);
+    if (!in.is_open()) return false;
+    std::string line;
+    std::string best;
+    while (std::getline(in, line)) {
+        if (!line.empty()) best = line;
+    }
+    if (best.empty()) return false;
+    last_line = best;
+    return true;
+}
+
+static bool p95_read_last_non_empty_lines(const fs::path& file, size_t max_lines, std::vector<std::string>& lines_out) {
+    lines_out.clear();
+    std::ifstream in(file, std::ios::in);
+    if (!in.is_open()) return false;
+    std::deque<std::string> q;
+    std::string line;
+    while (std::getline(in, line)) {
+        //if (!line.empty() && line.back() == '') line.pop_back();
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        q.push_back(line);
+        while (q.size() > max_lines) q.pop_front();
+    }
+    if (q.empty()) return false;
+    lines_out.assign(q.begin(), q.end());
+    return true;
+}
+
+static std::string p95_normalize_factor_string(std::string s) {
+    s.erase(std::remove_if(s.begin(), s.end(), [](unsigned char ch){ return std::isspace(ch) != 0; }), s.end());
+    if (!s.empty() && s.front() == '+') s.erase(s.begin());
+    bool neg = false;
+    if (!s.empty() && s.front() == '-') {
+        neg = true;
+        s.erase(s.begin());
+    }
+    size_t nz = 0;
+    while (nz + 1 < s.size() && s[nz] == '0') ++nz;
+    if (nz > 0) s.erase(0, nz);
+    if (s.empty()) s = "0";
+    if (neg && s != "0") s.insert(s.begin(), '-');
+    return s;
+}
+
+static bool p95_is_known_factor_string(const std::string& factor, const std::vector<std::string>& known_factors) {
+    const std::string nf = p95_normalize_factor_string(factor);
+    for (const std::string& s : known_factors) {
+        if (p95_normalize_factor_string(s) == nf) return true;
+    }
+    return false;
+}
+
+static std::string p95_join_known_factors_csv(const std::vector<std::string>& factors) {
+    std::ostringstream oss;
+    bool first = true;
+    for (const std::string& s : factors) {
+        if (s.empty()) continue;
+        if (!first) oss << ',';
+        oss << s;
+        first = false;
+    }
+    return oss.str();
+}
+
+static bool p95_extract_json_string_field(const std::string& line, const std::string& key, std::string& value) {
+    value.clear();
+    const std::string needle = std::string("\"") + key + "\"";
+    size_t pos = line.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = line.find(':', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    pos = line.find('"', pos + 1);
+    if (pos == std::string::npos) return false;
+    size_t end = line.find('"', pos + 1);
+    if (end == std::string::npos) return false;
+    value = line.substr(pos + 1, end - pos - 1);
+    return true;
+}
+
+static bool p95_extract_json_first_factor(const std::string& line, std::string& factor) {
+    factor.clear();
+    const std::string needle = "\"factors\"";
+    size_t pos = line.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = line.find('[', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    pos = line.find('"', pos + 1);
+    if (pos == std::string::npos) return false;
+    size_t end = line.find('"', pos + 1);
+    if (end == std::string::npos) return false;
+    factor = line.substr(pos + 1, end - pos - 1);
+    return true;
+}
+
+static bool p95_parse_result_json_line(const std::string& line, std::string& status_out, std::string& factor_out) {
+    status_out.clear();
+    factor_out.clear();
+    p95_extract_json_string_field(line, "status", status_out);
+    if (!p95_extract_json_first_factor(line, factor_out)) {
+        p95_extract_json_string_field(line, "factor", factor_out);
+    }
+    return !status_out.empty();
+}
+
+static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
+                                                       const fs::path& p95_exe,
+                                                       const fs::path& state_file,
+                                                       const std::string& worktodo_line,
+                                                       const std::string& log_filename,
+                                                       const std::vector<std::string>& known_factors) {
+    PM1Prime95Stage2Result result;
+    if (p95_dir.empty() || p95_exe.empty()) {
+        result.error = "Prime95 path or executable is empty";
+        return result;
+    }
+    if (state_file.empty()) {
+        result.error = "Prime95 state file path is empty";
+        return result;
+    }
+
+    const fs::path prime_txt = p95_dir / "prime.txt";
+    const fs::path prime_txt_backup = p95_dir / (std::string("prime.txt") + p95_backup_suffix());
+    bool had_prime_txt = false;
+    std::string prime_txt_original;
+    std::string prime_txt_write_err;
+    auto restore_prime_txt = [&]() {
+        std::error_code rec;
+        if (had_prime_txt) {
+            fs::copy_file(prime_txt_backup, prime_txt, fs::copy_options::overwrite_existing, rec);
+            fs::remove(prime_txt_backup, rec);
+        } else {
+            fs::remove(prime_txt, rec);
+        }
+    };
+
+    std::string copy_err;
+    if (fs::exists(prime_txt)) {
+        had_prime_txt = true;
+        if (!p95_read_text_file_local(prime_txt, prime_txt_original)) {
+            result.error = "Failed to read existing Prime95 prime.txt";
+            return result;
+        }
+        if (!p95_copy_overwrite(prime_txt, prime_txt_backup, copy_err)) {
+            result.error = "Failed to backup Prime95 prime.txt: " + copy_err;
+            return result;
+        }
+    }
+
+    const std::string prime_txt_modified = p95_normalize_prime_txt(prime_txt_original);
+    if (!p95_write_text_file_local(prime_txt, prime_txt_modified, prime_txt_write_err)) {
+        restore_prime_txt();
+        result.error = "Failed to prepare Prime95 prime.txt: " + prime_txt_write_err;
+        return result;
+    }
+
+    std::error_code ec;
+    fs::remove(p95_dir / "worktodo.txt", ec);
+    ec.clear();
+    fs::remove(p95_dir / "results.json.txt", ec);
+
+    {
+        std::ofstream wt(p95_dir / "worktodo.txt", std::ios::out | std::ios::trunc);
+        if (!wt.is_open()) {
+            restore_prime_txt();
+            result.error = "Failed to create Prime95 worktodo.txt";
+            return result;
+        }
+        wt << worktodo_line << "\n";
+        wt.flush();
+    }
+
+    std::ostringstream shell;
+#ifdef _WIN32
+    shell << "cd /d " << p95_shell_quote_win(p95_dir.string())
+          << " && " << p95_shell_quote_win(p95_exe.string())
+          << " -d > " << p95_shell_quote_win((p95_dir / log_filename).string()) << " 2>&1";
+    const std::string cmd = std::string("cmd /C ") + p95_shell_quote_win(shell.str());
+#else
+    shell << "cd " << p95_shell_quote_posix(p95_dir.string())
+          << " && " << p95_shell_quote_posix(p95_exe.string())
+          << " -d > " << p95_shell_quote_posix((p95_dir / log_filename).string()) << " 2>&1";
+    const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
+#endif
+
+    auto future_rc = std::async(std::launch::async, [cmd]() {
+        return std::system(cmd.c_str());
+    });
+
+    const fs::path log_path = p95_dir / log_filename;
+    const fs::path results_file = p95_dir / "results.json.txt";
+    auto last_progress = std::chrono::steady_clock::now();
+
+    for (;;) {
+        if (future_rc.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
+            int rc = future_rc.get();
+#ifdef _WIN32
+            result.exit_code = rc;
+#else
+            if (rc == -1) result.exit_code = -1;
+            else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
+            else result.exit_code = rc;
+#endif
+            break;
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_progress >= std::chrono::seconds(5)) {
+            std::cout << "[PM1] Prime95 Stage 2 still running... showing the last 5 lines of the log:" << std::endl;
+            std::vector<std::string> tail_lines;
+            if (p95_read_last_non_empty_lines(log_path, 5, tail_lines)) {
+                std::cout << "[PM1] ----- log tail begin -----" << std::endl;
+                for (const std::string& line : tail_lines) std::cout << line << std::endl;
+                std::cout << "[PM1] ----- log tail end -----" << std::endl;
+            } else {
+                std::cout << "[PM1] (log not available yet)" << std::endl;
+            }
+            last_progress = now;
+        }
+    }
+
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+
+    restore_prime_txt();
+
+    if (result.json_line.empty()) {
+        std::ostringstream oss;
+        oss << "Prime95 did not produce results.json.txt"
+            << " (exit_code=" << result.exit_code << ")"
+            << " | log=" << (p95_dir / log_filename).string()
+            << " | worktodo=" << worktodo_line;
+        result.error = oss.str();
+        return result;
+    }
+
+    std::string status;
+    std::string factor;
+    if (!p95_parse_result_json_line(result.json_line, status, factor)) {
+        result.error = "Unable to parse Prime95 results.json.txt line";
+        return result;
+    }
+
+    result.factor = factor;
+    result.factor_found = (!factor.empty()) || (status == "F");
+    result.known_factor = result.factor_found && !factor.empty() && p95_is_known_factor_string(factor, known_factors);
+    result.success = (status == "NF") || (status == "F");
+
+    if (!result.success && result.error.empty()) {
+        result.error = "Prime95 returned an unsupported status: " + status;
+    }
+    return result;
 }
 
 
@@ -2224,6 +2652,121 @@ int App::runPM1Marin() {
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
 
+    const bool want_p95_stage2 = options.p95stage2 && !options.p95path.empty();
+    bool p95_stage2_enabled = false;
+    fs::path p95_dir;
+    fs::path p95_exe;
+    auto p95_log = [&](const std::string& s) {
+        std::cout << s << std::endl;
+        if (guiServer_) guiServer_->appendLog(s);
+    };
+    if (want_p95_stage2) {
+        p95_dir = p95_expand_user_path(options.p95path);
+        std::error_code ec;
+        if (!fs::exists(p95_dir, ec) || !fs::is_directory(p95_dir, ec)) {
+            p95_log(std::string("[PM1] Prime95 Stage2 disabled: invalid directory '") + options.p95path + "' -> resolved to '" + p95_dir.string() + "'");
+        } else {
+#ifdef _WIN32
+            const std::vector<std::string> exe_candidates = {"prime95.exe", "mprime.exe"};
+#else
+            const std::vector<std::string> exe_candidates = {"mprime", "prime95"};
+#endif
+            for (const std::string& cand : exe_candidates) {
+                fs::path test = p95_dir / cand;
+                if (fs::exists(test, ec)) {
+                    p95_exe = fs::absolute(test, ec);
+                    if (ec) p95_exe = test;
+                    break;
+                }
+            }
+            if (p95_exe.empty()) {
+                p95_log(std::string("[PM1] Prime95 Stage2 disabled: no Prime95/mprime executable found in '") + options.p95path + "'");
+            } else {
+                std::string moved_worktodo;
+                std::string moved_results;
+                bool ok_worktodo = p95_backup_existing_file(p95_dir / "worktodo.txt", &moved_worktodo);
+                bool ok_results = p95_backup_existing_file(p95_dir / "results.json.txt", &moved_results);
+                if (!ok_worktodo || !ok_results) {
+                    p95_log(std::string("[PM1] Prime95 Stage2 disabled: failed to backup worktodo/results in '") + options.p95path + "'");
+                } else {
+                    if (!moved_worktodo.empty()) p95_log(std::string("[PM1] Prime95 worktodo backed up to ") + moved_worktodo);
+                    if (!moved_results.empty()) p95_log(std::string("[PM1] Prime95 results.json.txt backed up to ") + moved_results);
+                    p95_stage2_enabled = true;
+                    p95_log(std::string("[PM1] Prime95 Stage2 enabled using ") + p95_exe.string());
+                }
+            }
+        }
+    }
+
+    auto run_pm1_stage2_external = [&](const std::string& resume_save_path,
+                                       const std::string& ds,
+                                       const std::string& de,
+                                       bool& factor_found_out)->bool {
+        factor_found_out = false;
+        if (!p95_stage2_enabled || resume_save_path.empty()) return false;
+
+        std::ostringstream p95_name;
+        p95_name << 'm' << std::setw(7) << std::setfill('0') << p;
+        const fs::path p95_state = p95_dir / p95_name.str();
+        int conv_rc = convertEcmResumeToPrime95(resume_save_path, p95_state.string(), ds, de);
+        if (conv_rc != 0) {
+            p95_log(std::string("[PM1] Prime95 Stage2 failed: could not write state file ") + p95_state.string());
+            return false;
+        }
+
+        const std::string known_csv = p95_join_known_factors_csv(options.knownFactors);
+        std::ostringstream wt;
+        wt << "Pminus1=1,2," << p << ",-1," << options.B1 << "," << options.B2 << ",68";
+        if (!known_csv.empty()) {
+            wt << ",\"" << known_csv << "\"";
+        }
+
+        const std::string log_filename = std::string("prmers_p95stage2_pm1_p") + std::to_string(p) + ".log";
+        p95_log(std::string("[PM1] Prime95 Stage2 start | state=") + p95_state.string() + " | log=" + (p95_dir / log_filename).string());
+        PM1Prime95Stage2Result rr = p95_run_pm1_stage2_task(p95_dir, p95_exe, p95_state, wt.str(), log_filename, options.knownFactors);
+        if (!rr.error.empty()) {
+            p95_log(std::string("[PM1] Prime95 Stage2 error: ") + rr.error);
+            return false;
+        }
+
+        std::ostringstream done;
+        done << "[PM1] Prime95 Stage2 done | exit_code=" << rr.exit_code;
+        if (!rr.json_line.empty()) done << " | result=" << rr.json_line;
+        p95_log(done.str());
+
+        const std::string result_file = std::string("stage2_result_B2_") + std::to_string(options.B2) + "_p_" + std::to_string(options.exponent) + ".txt";
+        if (rr.factor_found && !rr.factor.empty() && !rr.known_factor) {
+            writeStageResult(result_file, std::string("B2=") + std::to_string(options.B2) + "  factor=" + rr.factor);
+            std::cout << "\n>>>  Factor P-1 (stage 2) found : " << rr.factor << '\n';
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "\n>>>  Factor P-1 (stage 2) found : " << rr.factor << '\n';
+                guiServer_->appendLog(oss.str());
+            }
+            options.knownFactors.push_back(rr.factor);
+            factor_found_out = true;
+        } else {
+            writeStageResult(result_file, std::string("No factor P-1 up to B2=") + std::to_string(options.B2));
+            std::cout << "\nNo factor P-1 (stage 2) until B2 = " << options.B2 << '\n';
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "\nNo factor P-1 (stage 2) until B2 = " << options.B2 << '\n';
+                guiServer_->appendLog(oss.str());
+            }
+            if (rr.factor_found && rr.known_factor) {
+                p95_log(std::string("[PM1] Prime95 Stage2 found known factor ") + rr.factor + ", continuing");
+            }
+        }
+
+        std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+        std::cout << "Manual submission JSON:\n" << json << "\n";
+        io::WorktodoManager wm(options);
+        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_ext", json);
+        wm.appendToResultsTxt(json);
+
+        return true;
+    };
+
     mpz_class X_old;
     if (doExtend) {
         std::string basePath = options.pm1_extend_save_path;
@@ -2873,8 +3416,12 @@ int App::runPM1Marin() {
         mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
         mpz_class X  = compute_X_with_dots(eng, static_cast<engine::Reg>(RSTATE), Mp);
 
-        // Write new resume & p95 if you like
-        if (options.resume) {
+        std::string resume_save_path;
+        std::string resume_p95_path;
+        std::string ds;
+        std::string de;
+        const bool need_pm1_resume = options.resume || (p95_stage2_enabled && options.B2 > 0 && !(options.nmax > 0 && options.K > 0));
+        if (need_pm1_resume) {
             auto now_sys = std::chrono::system_clock::now();
             auto fmt = [](const std::chrono::system_clock::time_point& tp){
                 using namespace std::chrono;
@@ -2893,18 +3440,13 @@ int App::runPM1Marin() {
                 s << buf << '.' << std::setw(3) << std::setfill('0') << (int)(ms.count());
                 return s.str();
             };
-            std::string ds = fmt(now_sys);
-            std::string de = ds;
+            ds = fmt(now_sys);
+            de = ds;
+            resume_save_path = "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(B1_new) + ".save";
+            resume_p95_path  = "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(B1_new) + ".p95";
 
-            writeEcmResumeLine("resume_p" + std::to_string(options.exponent) +
-                               "_B1_" + std::to_string(B1_new) + ".save",
-                               B1_new, options.exponent, X);
-
-            convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) +
-                                      "_B1_" + std::to_string(B1_new) + ".save",
-                                      "resume_p" + std::to_string(options.exponent) +
-                                      "_B1_" + std::to_string(B1_new) + ".p95",
-                                      ds, de);
+            writeEcmResumeLine(resume_save_path, B1_new, options.exponent, X);
+            convertEcmResumeToPrime95(resume_save_path, resume_p95_path, ds, de);
         }
 
         // Do gcd and results file exactly as in the normal Stage1 end:
@@ -2975,7 +3517,15 @@ int App::runPM1Marin() {
                 0
             );
 
-            factorFound = runPM1Stage2Marin() || factorFound;
+            bool external_used = false;
+            if (p95_stage2_enabled && !(options.nmax > 0 && options.K > 0) && !resume_save_path.empty()) {
+                bool ext_found = false;
+                external_used = run_pm1_stage2_external(resume_save_path, ds, de, ext_found);
+                factorFound = ext_found || factorFound;
+            }
+            if (!external_used) {
+                factorFound = runPM1Stage2Marin() || factorFound;
+            }
         }
 
         if(options.nmax > 0 && options.K > 0){
@@ -3301,7 +3851,15 @@ int App::runPM1Marin() {
     };
     std::string ds = fmt(start_sys);
     std::string de = fmt(end_sys);
-    if (options.resume) { writeEcmResumeLine("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", options.B1, options.exponent, X); convertEcmResumeToPrime95("resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save", "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95", ds, de); }
+    std::string resume_save_path;
+    std::string resume_p95_path;
+    const bool need_pm1_resume = options.resume || (p95_stage2_enabled && options.B2 > 0 && !(options.nmax > 0 && options.K > 0));
+    if (need_pm1_resume) {
+        resume_save_path = "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".save";
+        resume_p95_path  = "resume_p" + std::to_string(options.exponent) + "_B1_" + std::to_string(options.B1) + ".p95";
+        writeEcmResumeLine(resume_save_path, options.B1, options.exponent, X);
+        convertEcmResumeToPrime95(resume_save_path, resume_p95_path, ds, de);
+    }
     X -= 1;
     mpz_class g = gcd_with_dots(X, Mp);
     bool factorFound = (g != 1) && (g != Mp);
@@ -3352,8 +3910,15 @@ int App::runPM1Marin() {
                 0                  // bitsInChunk
             );
         }
-        //options.B2 = 214439;
-        factorFound = runPM1Stage2Marin() || factorFound;
+        bool external_used = false;
+        if (p95_stage2_enabled && !(options.nmax > 0 && options.K > 0) && !resume_save_path.empty()) {
+            bool ext_found = false;
+            external_used = run_pm1_stage2_external(resume_save_path, ds, de, ext_found);
+            factorFound = ext_found || factorFound;
+        }
+        if (!external_used) {
+            factorFound = runPM1Stage2Marin() || factorFound;
+        }
     }
    if(options.nmax > 0 && options.K > 0){
         {
