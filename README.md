@@ -1,6 +1,7 @@
 PrMers: GPU-accelerated Mersenne Primality Testing
 ==================================================
 https://github.com/cherubrock-seb/PrMers/
+Binary releases : https://github.com/cherubrock-seb/PrMers/tags
 
 PrMers is a high-performance GPU application for Lucas-Lehmer (LL), PRP, P‑1 and ECM
 testing of Mersenne numbers. It uses OpenCL and an integer NTT / IBDWT engine modulo 2^64 − 2^32 + 1 (Uses IBDWT-style transforms over Z / (2^64 − 2^32 + 1) Z) and is designed for long, reliable runs with checkpointing.
