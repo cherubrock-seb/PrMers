@@ -10,6 +10,14 @@ testing of Mersenne numbers. It uses OpenCL and an integer NTT / IBDWT engine mo
 The project also supports PRP tests of cofactors and Wagstaff numbers, and includes
 a web-based GUI and a GPU VRAM tester.
 
+## Try the PrMers Demo on Google Colab
+
+You can test **PrMers** directly in your browser with GPU acceleration by opening the interactive notebook below:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
+https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
+
+
 
 Overview of Algorithms and Backends
 -----------------------------------
