@@ -30,6 +30,7 @@ Run:
 ./mersenne2_mixed_crt_2d_half_fast 11213
 ./mersenne2_mixed_crt_2d_half_fast 11213 --original
 ./mersenne2_mixed_crt_2d_half_fast 11213 --compare
+./mersenne2_mixed_crt_2d_half_fast 208610 --compare --max-iters 100
 ```
 
 Example:
