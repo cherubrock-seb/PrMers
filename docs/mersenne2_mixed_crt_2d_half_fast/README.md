@@ -4,7 +4,7 @@ Small experimental CPU code based on Yves Gallot mersenne2.
 Original code is here:
 https://github.com/galloty/mersenne2
 
-This version try to test odd transform size like 9*2^m or 21*2^m.
+This version try to test odd transform size like 9 * 2^m or 21 * 2^m.
 The odd part is separated with CRT indexing.
 The power of two part keep the half real GF(p^2) transform.
 
