@@ -1,11 +1,13 @@
 /*
-Copyright 2025, Yves Gallot
-Modified by CherubRock (Radix)
+Original Copyright 2025, Yves Gallot
+Copyright 2026, Modified original by Cherubrock (experimental mixed-radix CRT)
 mersenne2.cpp is free source code. You can redistribute, use and/or modify it.
 Please give feedback to the authors if improvement is realized. It is distributed in the hope that it will be useful.
 
 Original code by Yves Gallot:
 https://github.com/galloty/mersenne2
+New version by Cherubrock :
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
 
 Experimental mixed-radix CRT attempt by Sébastien "cherubrock".
 This variant tries to use odd radix sizes by separating the odd axis with CRT indexing.
@@ -13,7 +15,6 @@ The original power-of-two half-real GF(p^2) transform is kept for the 2^m axis.
 
 Radix 3, 7, 9, 21 and 63 use small specialized butterflies.
 */
-
 
 #include <iostream>
 #include <cstdint>
@@ -529,6 +530,23 @@ private:
 		}
 	}
 
+
+	static inline void dft7_matrix_unrolled(const GF61_31 * const in, GF61_31 * const out, const GF61_31 * const matrix)
+	{
+		for (size_t k = 0; k < 7; ++k)
+		{
+			const GF61_31 * const m = matrix + 7 * k;
+			GF61_31 sum = in[0];
+			sum = sum + in[1].mul(m[1]);
+			sum = sum + in[2].mul(m[2]);
+			sum = sum + in[3].mul(m[3]);
+			sum = sum + in[4].mul(m[4]);
+			sum = sum + in[5].mul(m[5]);
+			sum = sum + in[6].mul(m[6]);
+			out[k] = sum;
+		}
+	}
+
 	__attribute__((noinline)) void dft9_radix3(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root9) const
 	{
 		const GF61_31 root3 = root9.pow(3);
@@ -566,15 +584,18 @@ private:
 			for (size_t ks = 0; ks < 7; ++ks) tmp[r * 7 + ks] = vout[ks];
 		}
 
+		GF61_31 tw1 = GF61_31(1u);
+		GF61_31 tw2 = GF61_31(1u);
+		const GF61_31 step2 = root21.sqr();
 		for (size_t ks = 0; ks < 7; ++ks)
 		{
-			const GF61_31 tw1 = root21.pow(uint64_t(ks));
-			const GF61_31 tw2 = root21.pow(uint64_t(2 * ks));
 			GF61_31 y0, y1, y2;
 			dft3_direct(tmp[0 * 7 + ks], tmp[1 * 7 + ks].mul(tw1), tmp[2 * 7 + ks].mul(tw2), root3, y0, y1, y2);
 			out[ks + 7 * 0] = y0;
 			out[ks + 7 * 1] = y1;
 			out[ks + 7 * 2] = y2;
+			tw1 = tw1.mul(root21);
+			tw2 = tw2.mul(step2);
 		}
 	}
 
@@ -616,7 +637,7 @@ private:
 		}
 		if (_odd == 7)
 		{
-			dft7_direct(in, out, matrix[8]);
+			dft7_matrix_unrolled(in, out, matrix);
 			return;
 		}
 		if (_odd == 9)
