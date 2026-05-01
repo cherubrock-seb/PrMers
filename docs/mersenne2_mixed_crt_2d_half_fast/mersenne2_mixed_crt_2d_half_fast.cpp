@@ -1,11 +1,13 @@
 /*
-Copyright 2025, Yves Gallot
-Modified by CherubRock (Radix)
+Original Copyright 2025, Yves Gallot
+Copyright 2026, Modified original by Cherubrock (experimental mixed-radix CRT)
 mersenne2.cpp is free source code. You can redistribute, use and/or modify it.
 Please give feedback to the authors if improvement is realized. It is distributed in the hope that it will be useful.
 
 Original code by Yves Gallot:
 https://github.com/galloty/mersenne2
+New version by Cherubrock :
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
 
 Experimental mixed-radix CRT attempt by Sébastien "cherubrock".
 This variant tries to use odd radix sizes by separating the odd axis with CRT indexing.
@@ -13,7 +15,6 @@ The original power-of-two half-real GF(p^2) transform is kept for the 2^m axis.
 
 Radix 3, 7, 9, 21 and 63 use small specialized butterflies.
 */
-
 
 #include <iostream>
 #include <cstdint>
