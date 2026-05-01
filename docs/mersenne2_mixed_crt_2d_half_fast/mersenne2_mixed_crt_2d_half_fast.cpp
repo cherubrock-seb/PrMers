@@ -1,13 +1,11 @@
 /*
-Original Copyright 2025, Yves Gallot
-Copyright 2026, Modified original by Cherubrock (experimental mixed-radix CRT)
+Copyright 2025, Yves Gallot
+Modified by CherubRock (Radix)
 mersenne2.cpp is free source code. You can redistribute, use and/or modify it.
 Please give feedback to the authors if improvement is realized. It is distributed in the hope that it will be useful.
 
 Original code by Yves Gallot:
 https://github.com/galloty/mersenne2
-New version by Cherubrock :
-https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
 
 Experimental mixed-radix CRT attempt by Sébastien "cherubrock".
 This variant tries to use odd radix sizes by separating the odd axis with CRT indexing.
@@ -15,6 +13,7 @@ The original power-of-two half-real GF(p^2) transform is kept for the 2^m axis.
 
 Radix 3, 7, 9, 21 and 63 use small specialized butterflies.
 */
+
 
 #include <iostream>
 #include <cstdint>
@@ -168,6 +167,7 @@ public:
 
 	GF61 sqr() const { const Z61 t = _s0 * _s1; return GF61(_s0.sqr() - _s1.sqr(), t + t); }
 	GF61 mul(const GF61 & rhs) const { return GF61(_s0 * rhs._s0 - _s1 * rhs._s1, _s1 * rhs._s0 + _s0 * rhs._s1); }
+	GF61 mul_real(const Z61 & rhs) const { return GF61(_s0 * rhs, _s1 * rhs); }
 	GF61 mulconj(const GF61 & rhs) const { return GF61(_s0 * rhs._s0 + _s1 * rhs._s1, _s1 * rhs._s0 - _s0 * rhs._s1); }
 
 	GF61 lshift(const uint8_t ls0, const uint8_t ls1) const { return GF61(_s0.lshift(ls0), _s1.lshift(ls1)); }
@@ -320,6 +320,7 @@ public:
 
 	GF31 sqr() const { const Z31 t = _s0 * _s1; return GF31(_s0.sqr() - _s1.sqr(), t + t); }
 	GF31 mul(const GF31 & rhs) const { return GF31(_s0 * rhs._s0 - _s1 * rhs._s1, _s1 * rhs._s0 + _s0 * rhs._s1); }
+	GF31 mul_real(const Z31 & rhs) const { return GF31(_s0 * rhs, _s1 * rhs); }
 	GF31 mulconj(const GF31 & rhs) const { return GF31(_s0 * rhs._s0 + _s1 * rhs._s1, _s1 * rhs._s0 - _s0 * rhs._s1); }
 
 	GF31 lshift(const uint8_t ls0, const uint8_t ls1) const { return GF31(_s0.lshift(ls0), _s1.lshift(ls1)); }
@@ -409,6 +410,7 @@ public:
 
 	GF61_31 sqr() const { return GF61_31(_n61.sqr(), _n31.sqr()); }
 	GF61_31 mul(const GF61_31 & rhs) const { return GF61_31(_n61.mul(rhs._n61), _n31.mul(rhs._n31)); }
+	GF61_31 mul_real(const Z61_31 & rhs) const { return GF61_31(_n61.mul_real(rhs.n61()), _n31.mul_real(rhs.n31())); }
 	GF61_31 mulconj(const GF61_31 & rhs) const { return GF61_31(_n61.mulconj(rhs._n61), _n31.mulconj(rhs._n31)); }
 
 	GF61_31 lshift(const IBWeight ls0, const IBWeight ls1) const { return GF61_31(_n61.lshift(ls0._w61, ls1._w61), _n31.lshift(ls0._w31, ls1._w31)); }
@@ -497,62 +499,62 @@ private:
 		return best;
 	}
 
+	static Z61_31 real_one()
+	{
+		return Z61_31(Z61(1), Z31(1u));
+	}
+
+	static Z61_31 real_pow(Z61_31 y, uint64_t e)
+	{
+		Z61_31 r = real_one();
+		while (e != 0)
+		{
+			if ((e & 1) != 0) r = r * y;
+			e >>= 1;
+			if (e != 0) y = y.sqr();
+		}
+		return r;
+	}
+
 	void dft_small_matrix(const GF61_31 * const in, GF61_31 * const out, const GF61_31 * const matrix) const
 	{
 		for (size_t k = 0; k < _odd; ++k)
 		{
 			GF61_31 sum(0u);
-			for (size_t j = 0; j < _odd; ++j) sum = sum + in[j].mul(matrix[k * _odd + j]);
+			for (size_t j = 0; j < _odd; ++j) sum = sum + in[j].mul_real(matrix[k * _odd + j].s0());
 			out[k] = sum;
 		}
 	}
 
 	__attribute__((noinline)) static void dft3_direct(const GF61_31 & x0, const GF61_31 & x1, const GF61_31 & x2,
-		const GF61_31 & root3, GF61_31 & y0, GF61_31 & y1, GF61_31 & y2)
+		const Z61_31 & root3, GF61_31 & y0, GF61_31 & y1, GF61_31 & y2)
 	{
-		const GF61_31 root3_2 = root3.sqr();
+		const Z61_31 root3_2 = root3.sqr();
 		y0 = x0 + x1 + x2;
-		y1 = x0 + x1.mul(root3) + x2.mul(root3_2);
-		y2 = x0 + x1.mul(root3_2) + x2.mul(root3);
+		y1 = x0 + x1.mul_real(root3) + x2.mul_real(root3_2);
+		y2 = x0 + x1.mul_real(root3_2) + x2.mul_real(root3);
 	}
 
-	__attribute__((noinline)) static void dft7_direct(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root7)
+	__attribute__((noinline)) static void dft7_direct(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root7)
 	{
-		GF61_31 w[7];
-		w[0] = GF61_31(1u);
-		for (size_t i = 1; i < 7; ++i) w[i] = w[i - 1].mul(root7);
+		Z61_31 w[7];
+		w[0] = real_one();
+		for (size_t i = 1; i < 7; ++i) w[i] = w[i - 1] * root7;
 
 		for (size_t k = 0; k < 7; ++k)
 		{
 			GF61_31 sum(0u);
-			for (size_t j = 0; j < 7; ++j) sum = sum + in[j].mul(w[(j * k) % 7]);
+			for (size_t j = 0; j < 7; ++j) sum = sum + in[j].mul_real(w[(j * k) % 7]);
 			out[k] = sum;
 		}
 	}
 
-
-	static inline void dft7_matrix_unrolled(const GF61_31 * const in, GF61_31 * const out, const GF61_31 * const matrix)
+	__attribute__((noinline)) void dft9_radix3(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root9) const
 	{
-		for (size_t k = 0; k < 7; ++k)
-		{
-			const GF61_31 * const m = matrix + 7 * k;
-			GF61_31 sum = in[0];
-			sum = sum + in[1].mul(m[1]);
-			sum = sum + in[2].mul(m[2]);
-			sum = sum + in[3].mul(m[3]);
-			sum = sum + in[4].mul(m[4]);
-			sum = sum + in[5].mul(m[5]);
-			sum = sum + in[6].mul(m[6]);
-			out[k] = sum;
-		}
-	}
-
-	__attribute__((noinline)) void dft9_radix3(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root9) const
-	{
-		const GF61_31 root3 = root9.pow(3);
-		const GF61_31 w1 = root9;
-		const GF61_31 w2 = root9.sqr();
-		const GF61_31 w4 = w2.sqr();
+		const Z61_31 root3 = real_pow(root9, 3);
+		const Z61_31 w1 = root9;
+		const Z61_31 w2 = root9.sqr();
+		const Z61_31 w4 = w2.sqr();
 
 		GF61_31 a00, a01, a02, a10, a11, a12, a20, a21, a22;
 		dft3_direct(in[0], in[3], in[6], root3, a00, a01, a02);
@@ -563,17 +565,17 @@ private:
 		dft3_direct(a00, a10, a20, root3, y0, y1, y2);
 		out[0] = y0; out[3] = y1; out[6] = y2;
 
-		dft3_direct(a01, a11.mul(w1), a21.mul(w2), root3, y0, y1, y2);
+		dft3_direct(a01, a11.mul_real(w1), a21.mul_real(w2), root3, y0, y1, y2);
 		out[1] = y0; out[4] = y1; out[7] = y2;
 
-		dft3_direct(a02, a12.mul(w2), a22.mul(w4), root3, y0, y1, y2);
+		dft3_direct(a02, a12.mul_real(w2), a22.mul_real(w4), root3, y0, y1, y2);
 		out[2] = y0; out[5] = y1; out[8] = y2;
 	}
 
-	__attribute__((noinline)) void dft21_radix3x7(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root21) const
+	__attribute__((noinline)) void dft21_radix3x7(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root21) const
 	{
-		const GF61_31 root7 = root21.pow(3);
-		const GF61_31 root3 = root21.pow(7);
+		const Z61_31 root7 = real_pow(root21, 3);
+		const Z61_31 root3 = real_pow(root21, 7);
 		GF61_31 tmp[21];
 		GF61_31 vin[7], vout[7];
 
@@ -584,25 +586,23 @@ private:
 			for (size_t ks = 0; ks < 7; ++ks) tmp[r * 7 + ks] = vout[ks];
 		}
 
-		GF61_31 tw1 = GF61_31(1u);
-		GF61_31 tw2 = GF61_31(1u);
-		const GF61_31 step2 = root21.sqr();
+		Z61_31 tw1 = real_one();
 		for (size_t ks = 0; ks < 7; ++ks)
 		{
+			const Z61_31 tw2 = tw1.sqr();
 			GF61_31 y0, y1, y2;
-			dft3_direct(tmp[0 * 7 + ks], tmp[1 * 7 + ks].mul(tw1), tmp[2 * 7 + ks].mul(tw2), root3, y0, y1, y2);
+			dft3_direct(tmp[0 * 7 + ks], tmp[1 * 7 + ks].mul_real(tw1), tmp[2 * 7 + ks].mul_real(tw2), root3, y0, y1, y2);
 			out[ks + 7 * 0] = y0;
 			out[ks + 7 * 1] = y1;
 			out[ks + 7 * 2] = y2;
-			tw1 = tw1.mul(root21);
-			tw2 = tw2.mul(step2);
+			tw1 = tw1 * root21;
 		}
 	}
 
-	__attribute__((noinline)) void dft63_radix7x9(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root63) const
+	__attribute__((noinline)) void dft63_radix7x9(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root63) const
 	{
-		const GF61_31 root9 = root63.pow(7);
-		const GF61_31 root7 = root63.pow(9);
+		const Z61_31 root9 = real_pow(root63, 7);
+		const Z61_31 root7 = real_pow(root63, 9);
 		GF61_31 tmp[63];
 		GF61_31 vin9[9], vout9[9];
 
@@ -614,17 +614,18 @@ private:
 		}
 
 		GF61_31 vin7[7], vout7[7];
+		Z61_31 step = real_one();
 		for (size_t ks = 0; ks < 9; ++ks)
 		{
-			GF61_31 tw = GF61_31(1u);
-			const GF61_31 step = root63.pow(uint64_t(ks));
+			Z61_31 tw = real_one();
 			for (size_t r = 0; r < 7; ++r)
 			{
-				vin7[r] = tmp[r * 9 + ks].mul(tw);
-				tw = tw.mul(step);
+				vin7[r] = tmp[r * 9 + ks].mul_real(tw);
+				tw = tw * step;
 			}
 			dft7_direct(vin7, vout7, root7);
 			for (size_t kr = 0; kr < 7; ++kr) out[ks + 9 * kr] = vout7[kr];
+			step = step * root63;
 		}
 	}
 
@@ -632,27 +633,27 @@ private:
 	{
 		if (_odd == 3)
 		{
-			dft3_direct(in[0], in[1], in[2], matrix[4], out[0], out[1], out[2]);
+			dft3_direct(in[0], in[1], in[2], matrix[4].s0(), out[0], out[1], out[2]);
 			return;
 		}
 		if (_odd == 7)
 		{
-			dft7_matrix_unrolled(in, out, matrix);
+			dft7_direct(in, out, matrix[8].s0());
 			return;
 		}
 		if (_odd == 9)
 		{
-			dft9_radix3(in, out, matrix[10]);
+			dft9_radix3(in, out, matrix[10].s0());
 			return;
 		}
 		if (_odd == 21)
 		{
-			dft21_radix3x7(in, out, matrix[22]);
+			dft21_radix3x7(in, out, matrix[22].s0());
 			return;
 		}
 		if (_odd == 63)
 		{
-			dft63_radix7x9(in, out, matrix[64]);
+			dft63_radix7x9(in, out, matrix[64].s0());
 			return;
 		}
 		dft_small_matrix(in, out, matrix);
