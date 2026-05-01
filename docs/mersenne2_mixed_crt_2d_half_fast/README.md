@@ -54,7 +54,7 @@ log2(n) + 2*(q/n + 1) < 92
 `mersenne2 original` means the normal power of two size. `mixed CRT` means the size selected by `mersenne2_mixed_crt_2d_half_fast.cpp`.
 
 
-The last column is only a practical note from CPU tests. GPU can be different.
+The last column is only a practical note from CPU tests
 
 
 | q range | mersenne2 original | mixed CRT size | storage original | storage mixed | gain vs original | note |
