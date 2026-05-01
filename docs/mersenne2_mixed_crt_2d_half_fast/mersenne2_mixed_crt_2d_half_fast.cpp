@@ -1,6 +1,6 @@
 /*
 Copyright 2025, Yves Gallot
-
+Modified by CherubRock (Radix)
 mersenne2.cpp is free source code. You can redistribute, use and/or modify it.
 Please give feedback to the authors if improvement is realized. It is distributed in the hope that it will be useful.
 
@@ -11,8 +11,9 @@ Experimental mixed-radix CRT attempt by Sébastien "cherubrock".
 This variant tries to use odd radix sizes by separating the odd axis with CRT indexing.
 The original power-of-two half-real GF(p^2) transform is kept for the 2^m axis.
 
-Radix 3 and radix 9 use small specialized butterflies.
+Radix 3, 7, 9, 21 and 63 use small specialized butterflies.
 */
+
 
 #include <iostream>
 #include <cstdint>
@@ -514,6 +515,20 @@ private:
 		y2 = x0 + x1.mul(root3_2) + x2.mul(root3);
 	}
 
+	__attribute__((noinline)) static void dft7_direct(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root7)
+	{
+		GF61_31 w[7];
+		w[0] = GF61_31(1u);
+		for (size_t i = 1; i < 7; ++i) w[i] = w[i - 1].mul(root7);
+
+		for (size_t k = 0; k < 7; ++k)
+		{
+			GF61_31 sum(0u);
+			for (size_t j = 0; j < 7; ++j) sum = sum + in[j].mul(w[(j * k) % 7]);
+			out[k] = sum;
+		}
+	}
+
 	__attribute__((noinline)) void dft9_radix3(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root9) const
 	{
 		const GF61_31 root3 = root9.pow(3);
@@ -537,6 +552,61 @@ private:
 		out[2] = y0; out[5] = y1; out[8] = y2;
 	}
 
+	__attribute__((noinline)) void dft21_radix3x7(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root21) const
+	{
+		const GF61_31 root7 = root21.pow(3);
+		const GF61_31 root3 = root21.pow(7);
+		GF61_31 tmp[21];
+		GF61_31 vin[7], vout[7];
+
+		for (size_t r = 0; r < 3; ++r)
+		{
+			for (size_t s = 0; s < 7; ++s) vin[s] = in[r + 3 * s];
+			dft7_direct(vin, vout, root7);
+			for (size_t ks = 0; ks < 7; ++ks) tmp[r * 7 + ks] = vout[ks];
+		}
+
+		for (size_t ks = 0; ks < 7; ++ks)
+		{
+			const GF61_31 tw1 = root21.pow(uint64_t(ks));
+			const GF61_31 tw2 = root21.pow(uint64_t(2 * ks));
+			GF61_31 y0, y1, y2;
+			dft3_direct(tmp[0 * 7 + ks], tmp[1 * 7 + ks].mul(tw1), tmp[2 * 7 + ks].mul(tw2), root3, y0, y1, y2);
+			out[ks + 7 * 0] = y0;
+			out[ks + 7 * 1] = y1;
+			out[ks + 7 * 2] = y2;
+		}
+	}
+
+	__attribute__((noinline)) void dft63_radix7x9(const GF61_31 * const in, GF61_31 * const out, const GF61_31 & root63) const
+	{
+		const GF61_31 root9 = root63.pow(7);
+		const GF61_31 root7 = root63.pow(9);
+		GF61_31 tmp[63];
+		GF61_31 vin9[9], vout9[9];
+
+		for (size_t r = 0; r < 7; ++r)
+		{
+			for (size_t s = 0; s < 9; ++s) vin9[s] = in[r + 7 * s];
+			dft9_radix3(vin9, vout9, root9);
+			for (size_t ks = 0; ks < 9; ++ks) tmp[r * 9 + ks] = vout9[ks];
+		}
+
+		GF61_31 vin7[7], vout7[7];
+		for (size_t ks = 0; ks < 9; ++ks)
+		{
+			GF61_31 tw = GF61_31(1u);
+			const GF61_31 step = root63.pow(uint64_t(ks));
+			for (size_t r = 0; r < 7; ++r)
+			{
+				vin7[r] = tmp[r * 9 + ks].mul(tw);
+				tw = tw.mul(step);
+			}
+			dft7_direct(vin7, vout7, root7);
+			for (size_t kr = 0; kr < 7; ++kr) out[ks + 9 * kr] = vout7[kr];
+		}
+	}
+
 	__attribute__((noinline)) void dft_small_fast(const GF61_31 * const in, GF61_31 * const out, const GF61_31 * const matrix) const
 	{
 		if (_odd == 3)
@@ -544,9 +614,24 @@ private:
 			dft3_direct(in[0], in[1], in[2], matrix[4], out[0], out[1], out[2]);
 			return;
 		}
+		if (_odd == 7)
+		{
+			dft7_direct(in, out, matrix[8]);
+			return;
+		}
 		if (_odd == 9)
 		{
 			dft9_radix3(in, out, matrix[10]);
+			return;
+		}
+		if (_odd == 21)
+		{
+			dft21_radix3x7(in, out, matrix[22]);
+			return;
+		}
+		if (_odd == 63)
+		{
+			dft63_radix7x9(in, out, matrix[64]);
 			return;
 		}
 		dft_small_matrix(in, out, matrix);
