@@ -1,19 +1,28 @@
 /*
-Original Copyright 2025, Yves Gallot
-Copyright 2026, Modified original by Cherubrock (experimental mixed-radix CRT)
+Original copyright 2025, Yves Gallot
+Copyright 2026, modified version by Cherubrock (experimental mixed-radix CRT)
+
 mersenne2.cpp is free source code. You can redistribute, use and/or modify it.
 Please give feedback to the authors if improvement is realized. It is distributed in the hope that it will be useful.
 
 Original code by Yves Gallot:
 https://github.com/galloty/mersenne2
-New version by Cherubrock :
+
+Modified experimental version by Sébastien "cherubrock":
 https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
 
-Experimental mixed-radix CRT attempt by Sébastien "cherubrock".
 This variant tries to use odd radix sizes by separating the odd axis with CRT indexing.
 The original power-of-two half-real GF(p^2) transform is kept for the 2^m axis.
 
-Radix 3, 7, 9, 21 and 63 use small specialized butterflies.
+Odd roots are used as real scalars in GF(p):
+(a+b*i)*r = (a*r)+(b*r)*i.
+
+Radix 3, 7, 9, 11, 21, 33 and 63 use small specialized butterflies.
+Radix 33 is mainly used for jump cases before the next radix-9 size.
+
+Radix 11 alone is not used by default because 3*2^(m+2) is usually faster.
+It can still be forced, for example:
+./mersenne2_mixed_crt_2d_half_fast 194753086 11
 */
 
 #include <iostream>
@@ -476,14 +485,21 @@ private:
 
 	static TransformPlan transformsize(const uint32_t q, const size_t forced_odd = 0)
 	{
-		const size_t odd_list[] = {1, 3, 7, 9, 21, 63};
+		// Default auto mode avoids radix-11 paths.
+		// 33 = 3*11 is smaller in some jump ranges, but it is often slower than the next radix-9 size.
+		// Radix-11 based paths can still be forced from the command line.
+		const size_t odd_list_auto[] = {1, 3, 7, 9, 21, 63};
+		const size_t odd_list_forced[] = {1, 3, 7, 9, 11, 21, 33, 63, 77, 99};
+		const size_t * const odd_list = (forced_odd == 0) ? odd_list_auto : odd_list_forced;
+		const size_t odd_count = (forced_odd == 0) ? (sizeof(odd_list_auto) / sizeof(odd_list_auto[0])) : (sizeof(odd_list_forced) / sizeof(odd_list_forced[0]));
 		TransformPlan best{0, 1, 0, std::numeric_limits<size_t>::max()};
 
 		for (uint8_t ln = 2; ln <= 30; ++ln)
 		{
 			const size_t m = size_t(1) << ln;
-			for (const size_t odd : odd_list)
+			for (size_t oi = 0; oi < odd_count; ++oi)
 			{
+				const size_t odd = odd_list[oi];
 				if ((forced_odd != 0) && (odd != forced_odd)) continue;
 				const size_t n = odd * m;
 				if (n == 0 || n > q) continue;
@@ -550,6 +566,20 @@ private:
 		}
 	}
 
+	__attribute__((noinline)) static void dft11_direct(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root11)
+	{
+		Z61_31 w[11];
+		w[0] = real_one();
+		for (size_t i = 1; i < 11; ++i) w[i] = w[i - 1] * root11;
+
+		for (size_t k = 0; k < 11; ++k)
+		{
+			GF61_31 sum(0u);
+			for (size_t j = 0; j < 11; ++j) sum = sum + in[j].mul_real(w[(j * k) % 11]);
+			out[k] = sum;
+		}
+	}
+
 	__attribute__((noinline)) void dft9_radix3(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root9) const
 	{
 		const Z61_31 root3 = real_pow(root9, 3);
@@ -600,6 +630,93 @@ private:
 		}
 	}
 
+	__attribute__((noinline)) void dft33_radix3x11(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root33) const
+	{
+		const Z61_31 root11 = real_pow(root33, 3);
+		const Z61_31 root3 = real_pow(root33, 11);
+		GF61_31 tmp[33];
+		GF61_31 vin[11], vout[11];
+
+		for (size_t r = 0; r < 3; ++r)
+		{
+			for (size_t s = 0; s < 11; ++s) vin[s] = in[r + 3 * s];
+			dft11_direct(vin, vout, root11);
+			for (size_t ks = 0; ks < 11; ++ks) tmp[r * 11 + ks] = vout[ks];
+		}
+
+		Z61_31 tw1 = real_one();
+		for (size_t ks = 0; ks < 11; ++ks)
+		{
+			const Z61_31 tw2 = tw1.sqr();
+			GF61_31 y0, y1, y2;
+			dft3_direct(tmp[0 * 11 + ks], tmp[1 * 11 + ks].mul_real(tw1), tmp[2 * 11 + ks].mul_real(tw2), root3, y0, y1, y2);
+			out[ks + 11 * 0] = y0;
+			out[ks + 11 * 1] = y1;
+			out[ks + 11 * 2] = y2;
+			tw1 = tw1 * root33;
+		}
+	}
+
+	__attribute__((noinline)) void dft77_radix7x11(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root77) const
+	{
+		const Z61_31 root11 = real_pow(root77, 7);
+		const Z61_31 root7 = real_pow(root77, 11);
+		GF61_31 tmp[77];
+		GF61_31 vin11[11], vout11[11];
+
+		for (size_t r = 0; r < 7; ++r)
+		{
+			for (size_t s = 0; s < 11; ++s) vin11[s] = in[r + 7 * s];
+			dft11_direct(vin11, vout11, root11);
+			for (size_t ks = 0; ks < 11; ++ks) tmp[r * 11 + ks] = vout11[ks];
+		}
+
+		GF61_31 vin7[7], vout7[7];
+		Z61_31 step = real_one();
+		for (size_t ks = 0; ks < 11; ++ks)
+		{
+			Z61_31 tw = real_one();
+			for (size_t r = 0; r < 7; ++r)
+			{
+				vin7[r] = tmp[r * 11 + ks].mul_real(tw);
+				tw = tw * step;
+			}
+			dft7_direct(vin7, vout7, root7);
+			for (size_t kr = 0; kr < 7; ++kr) out[ks + 11 * kr] = vout7[kr];
+			step = step * root77;
+		}
+	}
+
+	__attribute__((noinline)) void dft99_radix9x11(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root99) const
+	{
+		const Z61_31 root11 = real_pow(root99, 9);
+		const Z61_31 root9 = real_pow(root99, 11);
+		GF61_31 tmp[99];
+		GF61_31 vin11[11], vout11[11];
+
+		for (size_t r = 0; r < 9; ++r)
+		{
+			for (size_t s = 0; s < 11; ++s) vin11[s] = in[r + 9 * s];
+			dft11_direct(vin11, vout11, root11);
+			for (size_t ks = 0; ks < 11; ++ks) tmp[r * 11 + ks] = vout11[ks];
+		}
+
+		GF61_31 vin9[9], vout9[9];
+		Z61_31 step = real_one();
+		for (size_t ks = 0; ks < 11; ++ks)
+		{
+			Z61_31 tw = real_one();
+			for (size_t r = 0; r < 9; ++r)
+			{
+				vin9[r] = tmp[r * 11 + ks].mul_real(tw);
+				tw = tw * step;
+			}
+			dft9_radix3(vin9, vout9, root9);
+			for (size_t kr = 0; kr < 9; ++kr) out[ks + 11 * kr] = vout9[kr];
+			step = step * root99;
+		}
+	}
+
 	__attribute__((noinline)) void dft63_radix7x9(const GF61_31 * const in, GF61_31 * const out, const Z61_31 & root63) const
 	{
 		const Z61_31 root9 = real_pow(root63, 7);
@@ -647,14 +764,34 @@ private:
 			dft9_radix3(in, out, matrix[10].s0());
 			return;
 		}
+		if (_odd == 11)
+		{
+			dft11_direct(in, out, matrix[12].s0());
+			return;
+		}
 		if (_odd == 21)
 		{
 			dft21_radix3x7(in, out, matrix[22].s0());
 			return;
 		}
+		if (_odd == 33)
+		{
+			dft33_radix3x11(in, out, matrix[34].s0());
+			return;
+		}
 		if (_odd == 63)
 		{
 			dft63_radix7x9(in, out, matrix[64].s0());
+			return;
+		}
+		if (_odd == 77)
+		{
+			dft77_radix7x11(in, out, matrix[78].s0());
+			return;
+		}
+		if (_odd == 99)
+		{
+			dft99_radix9x11(in, out, matrix[100].s0());
 			return;
 		}
 		dft_small_matrix(in, out, matrix);
@@ -714,7 +851,7 @@ private:
 	void forward_odd() const
 	{
 		if (_odd == 1) return;
-		GF61_31 in[63], out[63];
+		GF61_31 in[128], out[128];
 		for (size_t k = 0; k < _m2; ++k)
 		{
 			for (size_t a = 0; a < _odd; ++a) in[a] = _z[slot(a, k)];
@@ -726,7 +863,7 @@ private:
 	void backward_odd_norm() const
 	{
 		if (_odd == 1) return;
-		GF61_31 in[63], out[63];
+		GF61_31 in[128], out[128];
 		for (size_t k = 0; k < _m2; ++k)
 		{
 			for (size_t a = 0; a < _odd; ++a) in[a] = _z[slot(a, k)];
@@ -1099,7 +1236,7 @@ static void print_usage(const char * exe)
 {
 	std::cout << "Usage:\n"
 		<< "  " << exe << " <p>                 auto choose best mixed size\n"
-		<< "  " << exe << " <p> <odd>           force odd radix: 1,3,7,9,21,63\n"
+		<< "  " << exe << " <p> <odd>           force odd radix: 1,3,7,9,11,21,33,63,77,99\n"
 		<< "  " << exe << " <p> --original      force original power-of-two size\n"
 		<< "  " << exe << " <p> --compare       run auto then original and print perf\n"
 		<< "  " << exe << " <p> --no-progress   disable progress lines\n"
