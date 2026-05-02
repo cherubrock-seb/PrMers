@@ -18,11 +18,11 @@ Odd roots are used as real scalars in GF(p):
 (a+b*i)*r = (a*r)+(b*r)*i.
 
 Radix 3, 7, 9, 11, 21, 33 and 63 use small specialized butterflies.
-Radix 33 is mainly used for jump cases before the next radix-9 size.
-
-Radix 11 alone is not used by default because 3*2^(m+2) is usually faster.
+Radix 99/ 33 / Radix 11 alone is not used by default because 3*2^... or 21*2^... or 9*2^.... or 7*2^....  is usually faster.
 It can still be forced, for example:
 ./mersenne2_mixed_crt_2d_half_fast 194753086 11
+./mersenne2_mixed_crt_2d_half_fast 194753086 33
+./mersenne2_mixed_crt_2d_half_fast 194753086 99
 */
 
 #include <iostream>
