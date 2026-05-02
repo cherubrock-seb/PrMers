@@ -781,6 +781,17 @@ private:
 	void forward_odd() const
 	{
 		if (_odd == 1) return;
+		if (_odd == 21)
+		{
+			GF61_31 in[21], out[21];
+			for (size_t k = 0; k < _m2; ++k)
+			{
+				for (size_t a = 0; a < 21; ++a) in[a] = _z[slot(a, k)];
+				dft21_radix3x7_fast(in, out, _odd_fwd, _dft7_fwd);
+				for (size_t a = 0; a < 21; ++a) _z[slot(a, k)] = out[a];
+			}
+			return;
+		}
 		GF61_31 in[63], out[63];
 		for (size_t k = 0; k < _m2; ++k)
 		{
@@ -793,6 +804,18 @@ private:
 	void backward_odd_norm() const
 	{
 		if (_odd == 1) return;
+		if (_odd == 21)
+		{
+			GF61_31 in[21], out[21];
+			const Z61_31 inv_odd_real = _inv_odd.s0();
+			for (size_t k = 0; k < _m2; ++k)
+			{
+				for (size_t a = 0; a < 21; ++a) in[a] = _z[slot(a, k)];
+				dft21_radix3x7_fast(in, out, _odd_inv, _dft7_inv);
+				for (size_t a = 0; a < 21; ++a) _z[slot(a, k)] = out[a].mul_real(inv_odd_real);
+			}
+			return;
+		}
 		GF61_31 in[63], out[63];
 		for (size_t k = 0; k < _m2; ++k)
 		{
