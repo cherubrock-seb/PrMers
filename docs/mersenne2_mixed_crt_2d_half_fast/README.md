@@ -15,13 +15,13 @@ Odd roots are real scalar, so multiplication is cheaper.
 Compile on Linux:
 
 ```bash
-g++ -std=c++17 -O3 -march=native mersenne2_mixed_crt_2d_half_fast_scalarodd.cpp -o mersenne2_mixed_crt_2d_half_fast
+g++ -std=c++17 -O3 -march=native mersenne2_mixed_crt_2d_half_fast.cpp -o mersenne2_mixed_crt_2d_half_fast
 ```
 
 Compile on Mac:
 
 ```bash
-clang++ -std=c++17 -O3 -march=native mersenne2_mixed_crt_2d_half_fast_scalarodd.cpp -o mersenne2_mixed_crt_2d_half_fast
+clang++ -std=c++17 -O3 -march=native mersenne2_mixed_crt_2d_half_fast.cpp -o mersenne2_mixed_crt_2d_half_fast
 ```
 
 Run:
