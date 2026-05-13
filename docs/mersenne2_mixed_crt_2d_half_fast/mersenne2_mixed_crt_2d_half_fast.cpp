@@ -817,11 +817,12 @@ private:
 			return;
 		}
 		GF61_31 in[63], out[63];
+		const Z61_31 inv_odd_real = _inv_odd.s0();
 		for (size_t k = 0; k < _m2; ++k)
 		{
 			for (size_t a = 0; a < _odd; ++a) in[a] = _z[slot(a, k)];
 			dft_small_fast(in, out, _odd_inv);
-			for (size_t a = 0; a < _odd; ++a) _z[slot(a, k)] = out[a].mul(_inv_odd);
+			for (size_t a = 0; a < _odd; ++a) _z[slot(a, k)] = out[a].mul_real(inv_odd_real);
 		}
 	}
 
