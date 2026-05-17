@@ -1,3 +1,31 @@
+/*
+PrMers BananaNTT Split
+
+Copyright 2026, Sébastien "Cherubrock"
+Experimental GPU mixed-radix CRT/PFA half-real NTT for Mersenne testing.
+
+This code is part of the PrMers experimental branch.
+It is a GPU proof of concept for the mixed CRT/PFA odd-radix approach.
+
+Project:
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split
+
+CPU prototype:
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
+
+Original reference code by Yves Gallot:
+https://github.com/galloty/mersenne2
+
+This version keeps the power-of-two axis as a half-real GF(p^2) transform,
+similar in spirit to mersenne2, and separates the odd axis with CRT/PFA
+indexing. The current GPU POC mainly targets odd radix 3 and 9.
+
+The goal is to test transform sizes of the form odd * 2^m, for example
+9 * 2^19, while still storing two real coefficients per complex value.
+
+This is experimental research code. It is distributed in the hope that it
+will be useful. Please give feedback or improvements if you test it.
+*/
 #define CL_TARGET_OPENCL_VERSION 120
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>

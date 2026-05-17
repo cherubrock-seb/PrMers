@@ -1,3 +1,33 @@
+/*
+PrMers BananaNTT Split OpenCL kernels
+
+Copyright 2026, Sébastien "Cherubrock"
+Experimental OpenCL kernels for mixed CRT/PFA odd-radix half-real NTT.
+
+Project:
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split
+
+CPU prototype:
+https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
+
+Original reference code by Yves Gallot:
+https://github.com/galloty/mersenne2
+
+These kernels implement a GPU proof of concept for the BananaNTT Split
+approach. The transform is split as odd * 2^m. The 2^m axis keeps the
+half-real GF(p^2) packing, while the odd axis is handled with CRT/PFA
+indexing.
+
+The current code includes experimental paths for:
+  - GF(M61^2)
+  - GF(M31^2)
+  - GF(M61^2) x GF(M31^2) CRT/Garner
+  - odd radix 3 and 9
+  - cooperative tile kernels for odd-radix head and tail steps
+
+This is not production code. It is intended for validation, benchmarking,
+and discussion of the mixed-radix CRT/PFA GPU layout.
+*/
 typedef ulong u64;
 typedef uint  u32;
 typedef uchar u8;
