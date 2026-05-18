@@ -704,6 +704,7 @@ struct GpuPrp {
     cl_mem crtInputDigits = nullptr;
     bool crtLastUnweightPending = false;
     bool crtCoeffPending = false;
+    bool crtFirstCarryReady = false;
     cl_mem bufField = nullptr;
     cl_mem bufWidth = nullptr;
     cl_mem bufWidthMask32 = nullptr;
@@ -2235,10 +2236,13 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     
     const cl_uint minw = std::max<cl_uint>(1u, gpu61.min_digit_width);
     cl_uint items = crt_tune::garner_items(digit_n, minw, static_cast<cl_uint>(cfg.items_per_worker));
+    const bool precomputed_first_carry = gpu61.crtFirstCarryReady;
     const bool prefer_coeffhi_x2 = gpu61.crtCoeffPending &&
                                    parse_bool_env("PRMERS_CRT_GARNER_X2", true) &&
                                    gpu61.k_crt_garner_segment_first_oneout_coeffhi_mask32_base32_x2;
-    if (gpu61.crtLastUnweightPending && items != 32u) {
+    if (precomputed_first_carry) {
+        items = 64u;
+    } else if (gpu61.crtLastUnweightPending && items != 32u) {
         items = 32u;
     } else if (gpu61.crtCoeffPending) {
         if (prefer_coeffhi_x2) items = 64u;
@@ -2254,7 +2258,9 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     const cl_uint crt_passes = std::max<cl_uint>(1u, std::min<cl_uint>(8u, (128u + bits_per_segment - 1u) / bits_per_segment));
 
     cl_uint zero = 0;
-    check(clEnqueueWriteBuffer(gpu61.queue, gpu61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr), "crt clear pending");
+    if (!precomputed_first_carry) {
+        check(clEnqueueWriteBuffer(gpu61.queue, gpu61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr), "crt clear pending");
+    }
 
     const cl_mem gpu31_digits = gpu31.bufDigits32 ? gpu31.bufDigits32 : gpu31.bufDigits;
 
@@ -2319,6 +2325,7 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     };
 
     int arg = 0;
+    if (!precomputed_first_carry) {
     if (use_fused_last_garner || use_fused_last_garner_mask32) {
         const cl_uint ntt_n = static_cast<cl_uint>(gpu61.n);
         const cl_uint log_n = static_cast<cl_uint>(gpu61.log_n);
@@ -2366,25 +2373,29 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
         check(clSetKernelArg(k_first, arg++, sizeof(cl_uint), &segments), "crt_first arg7 seg");
         check(clSetKernelArg(k_first, arg++, sizeof(cl_uint), &items), "crt_first arg8 items");
     }
-    cl_event crt_wait_ev = take_pending_wait_event(gpu61);
-    const char* first_label = use_coeffhi_base32_x2
-        ? (gpu61.min_digit_width == 32u ? "crt_garner_first_coeffhi_mask32_base32_x2" : "crt_garner_first_coeffhi_mask32_anybase_x2")
-        : use_coeffhi_base32
-        ? (gpu61.min_digit_width == 32u ? "crt_garner_first_coeffhi_mask32_base32" : "crt_garner_first_coeffhi_mask32_anybase")
-        : use_fused_last_garner_mask32 ? "crt_last_unweight_garner_first_mask32"
-        : use_fused_last_garner ? "crt_last_unweight_garner_first"
-        : use_widthmask64_base32_x2 ? "crt_garner_first_mask32_base32_x2"
-        : use_widthmask32_base32_u32lean ? "crt_garner_first_mask32_base32_u32lean"
-        : use_widthmask32_base32_fast ? "crt_garner_first_mask32_base32_fast"
-        : use_widthmask32_garner ? "crt_garner_first_mask32"
-        : oneout_digits ? "crt_garner_first_oneout"
-        : "crt_garner_first";
-    enqueue_profiled_kernel(k_first, &global, &local,
-                            crt_wait_ev ? 1u : 0u, crt_wait_ev ? &crt_wait_ev : nullptr,
-                            "enqueue crt first", first_label);
+    }
+    if (!precomputed_first_carry) {
+        cl_event crt_wait_ev = take_pending_wait_event(gpu61);
+        const char* first_label = use_coeffhi_base32_x2
+            ? (gpu61.min_digit_width == 32u ? "crt_garner_first_coeffhi_mask32_base32_x2" : "crt_garner_first_coeffhi_mask32_anybase_x2")
+            : use_coeffhi_base32
+            ? (gpu61.min_digit_width == 32u ? "crt_garner_first_coeffhi_mask32_base32" : "crt_garner_first_coeffhi_mask32_anybase")
+            : use_fused_last_garner_mask32 ? "crt_last_unweight_garner_first_mask32"
+            : use_fused_last_garner ? "crt_last_unweight_garner_first"
+            : use_widthmask64_base32_x2 ? "crt_garner_first_mask32_base32_x2"
+            : use_widthmask32_base32_u32lean ? "crt_garner_first_mask32_base32_u32lean"
+            : use_widthmask32_base32_fast ? "crt_garner_first_mask32_base32_fast"
+            : use_widthmask32_garner ? "crt_garner_first_mask32"
+            : oneout_digits ? "crt_garner_first_oneout"
+            : "crt_garner_first";
+        enqueue_profiled_kernel(k_first, &global, &local,
+                                crt_wait_ev ? 1u : 0u, crt_wait_ev ? &crt_wait_ev : nullptr,
+                                "enqueue crt first", first_label);
+        if (crt_wait_ev) clReleaseEvent(crt_wait_ev);
+    }
     gpu61.crtLastUnweightPending = false;
     gpu61.crtCoeffPending = false;
-    if (crt_wait_ev) clReleaseEvent(crt_wait_ev);
+    gpu61.crtFirstCarryReady = false;
 
     cl_mem lo_in = gpu61.bufBlockCarry;
     cl_mem hi_in = gpu61.bufCrtCarryHi1;
@@ -2593,6 +2604,8 @@ struct CrtFusedKernels {
     cl_kernel mixed_pack_odd_fwd_tile14_31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_31 = nullptr;
+    cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_61 = nullptr;
+    cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile7_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift31 = nullptr;
@@ -2603,6 +2616,8 @@ struct CrtFusedKernels {
     cl_kernel mixed_odd_inv_precrt_coeffhi_tile7 = nullptr;
     cl_kernel mixed_odd_inv_precrt_coeffhi_tile14 = nullptr;
     cl_kernel mixed_odd_inv_precrt_coeffhi_tile14_shift = nullptr;
+    cl_kernel mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat = nullptr;
+    cl_kernel mixed_odd9_inv_precrt_garner64_lmat = nullptr;
     cl_kernel mixed_odd_inv_precrt_coeffhi_outpar = nullptr;
     cl_kernel mixed_odd_inv_precrt_coeffhi_shift = nullptr;
     cl_kernel mixed_residues_to_coeffhi = nullptr;
@@ -2729,6 +2744,8 @@ struct CrtFusedKernels {
         mixed_pack_odd_fwd_tile14_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_31");
         mixed_pack_odd_fwd_tile14_shift_61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_61");
         mixed_pack_odd_fwd_tile14_shift_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_31");
+        mixed_pack_odd_fwd_tile14_shift_lmat_61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61");
+        mixed_pack_odd_fwd_tile14_shift_lmat_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31");
         mixed_pack_odd_fwd_tile7_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31");
         mixed_pack_odd_fwd_shift61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_61");
         mixed_pack_odd_fwd_shift31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_31");
@@ -2739,6 +2756,8 @@ struct CrtFusedKernels {
         mixed_odd_inv_precrt_coeffhi_tile7 = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_tile7");
         mixed_odd_inv_precrt_coeffhi_tile14 = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14");
         mixed_odd_inv_precrt_coeffhi_tile14_shift = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14_shift");
+        mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat");
+        mixed_odd9_inv_precrt_garner64_lmat = load_kernel_optional(program, "gf61_crt_mixed_odd9_inv_precrt_garner64_lmat");
         mixed_odd_inv_precrt_coeffhi_outpar = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_outpar");
         mixed_odd_inv_precrt_coeffhi_shift = load_kernel_optional(program, "gf61_crt_mixed_odd_inv_precrt_coeffhi_shift");
         mixed_residues_to_coeffhi = load_kernel_optional(program, "gf61_crt_mixed_residues_to_coeffhi");
@@ -2864,6 +2883,8 @@ struct CrtFusedKernels {
         if (mixed_pack_odd_fwd_tile14_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_31);
         if (mixed_pack_odd_fwd_tile14_shift_61) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_61);
         if (mixed_pack_odd_fwd_tile14_shift_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_31);
+        if (mixed_pack_odd_fwd_tile14_shift_lmat_61) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_61);
+        if (mixed_pack_odd_fwd_tile14_shift_lmat_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_31);
         if (mixed_pack_odd_fwd_tile7_both) clReleaseKernel(mixed_pack_odd_fwd_tile7_both);
         if (mixed_pack_odd_fwd_shift61) clReleaseKernel(mixed_pack_odd_fwd_shift61);
         if (mixed_pack_odd_fwd_shift31) clReleaseKernel(mixed_pack_odd_fwd_shift31);
@@ -2874,6 +2895,8 @@ struct CrtFusedKernels {
         if (mixed_odd_inv_precrt_coeffhi_tile7) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_tile7);
         if (mixed_odd_inv_precrt_coeffhi_tile14) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_tile14);
         if (mixed_odd_inv_precrt_coeffhi_tile14_shift) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_tile14_shift);
+        if (mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat);
+        if (mixed_odd9_inv_precrt_garner64_lmat) clReleaseKernel(mixed_odd9_inv_precrt_garner64_lmat);
         if (mixed_odd_inv_precrt_coeffhi_outpar) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_outpar);
         if (mixed_odd_inv_precrt_coeffhi_shift) clReleaseKernel(mixed_odd_inv_precrt_coeffhi_shift);
         if (mixed_residues_to_coeffhi) clReleaseKernel(mixed_residues_to_coeffhi);
@@ -2900,14 +2923,17 @@ struct CrtFusedKernels {
     bool mixed_odd_pack_tile7_available() const { return mixed_pack_odd_fwd_tile7_61 && mixed_pack_odd_fwd_tile7_31; }
     bool mixed_odd_pack_tile14_available() const { return mixed_pack_odd_fwd_tile14_61 && mixed_pack_odd_fwd_tile14_31; }
     bool mixed_odd_pack_tile14_shift_available() const { return mixed_pack_odd_fwd_tile14_shift_61 && mixed_pack_odd_fwd_tile14_shift_31; }
+    bool mixed_odd_pack_tile14_shift_lmat_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_61 && mixed_pack_odd_fwd_tile14_shift_lmat_31; }
     bool mixed_odd_pack_tile7_both_available() const { return mixed_pack_odd_fwd_tile7_both != nullptr; }
     bool mixed_odd_center_both_available() const { return mixed_lds512_pair_both != nullptr; }
     bool mixed_odd_lds512_both_available() const { return mixed_fwd_lds512_both != nullptr && mixed_inv_lds512_both != nullptr; }
+    bool mixed_odd9_precrt_garner64_available() const { return mixed_odd9_inv_precrt_garner64_lmat != nullptr; }
 
     bool mixed_odd_precrt_coeffhi_available() const {
         return mixed_odd_inv_precrt_coeffhi != nullptr || mixed_odd_inv_precrt_coeffhi_tile7 != nullptr ||
                mixed_odd_inv_precrt_coeffhi_tile14 != nullptr ||
                mixed_odd_inv_precrt_coeffhi_tile14_shift != nullptr ||
+               mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat != nullptr ||
                mixed_odd_inv_precrt_coeffhi_outpar != nullptr || mixed_odd_inv_precrt_coeffhi_shift != nullptr;
     }
     bool available() const {
@@ -3216,6 +3242,14 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                         odd == 9u &&
                                         fk.mixed_odd_pack_tile14_shift_available() &&
                                         fk.mixed_odd_inv_precrt_coeffhi_tile14_shift != nullptr;
+    const bool use_mixed_tile14_shift_lmat = use_mixed_tile14_shift &&
+                                             parse_bool_env("PRMERS_CRT_MIXED_TILE14_LMAT", true) &&
+                                             fk.mixed_odd_pack_tile14_shift_lmat_available() &&
+                                             fk.mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat != nullptr;
+    const bool use_mixed_precrt_garner64 = use_mixed_precrt_coeffhi && use_mixed_tile14_shift_lmat &&
+                                           parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER", false) &&
+                                           g61.bufWidthMask32 && g61.bufUnweightShift && g31.bufUnweightShift &&
+                                           fk.mixed_odd9_precrt_garner64_available();
     const bool use_mixed_tile14 = parse_bool_env("PRMERS_CRT_MIXED_TILE14", true) &&
                                   !use_mixed_shift_lut &&
                                   odd == 9u;
@@ -3327,10 +3361,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     };
 
     auto pack_odd_fwd61 = [&]() {
-        cl_kernel kpack = use_mixed_pack_tile14_shift ? fk.mixed_pack_odd_fwd_tile14_shift_61 :
+        cl_kernel kpack = use_mixed_tile14_shift_lmat ? fk.mixed_pack_odd_fwd_tile14_shift_lmat_61 :
+                          (use_mixed_pack_tile14_shift ? fk.mixed_pack_odd_fwd_tile14_shift_61 :
                           (use_mixed_pack_tile14 ? fk.mixed_pack_odd_fwd_tile14_61 :
                           (use_mixed_pack_tile7 ? fk.mixed_pack_odd_fwd_tile7_61 :
-                          (use_mixed_shift_lut ? fk.mixed_pack_odd_fwd_shift61 : fk.mixed_pack_odd_fwd61)));
+                          (use_mixed_shift_lut ? fk.mixed_pack_odd_fwd_shift61 : fk.mixed_pack_odd_fwd61))));
         cl_uint arg = 0;
         set_karg_mem(kpack, arg, g61.bufDigits, "set mixed fused pack+odd61 digits");
         set_karg_mem(kpack, arg, g61.bufField, "set mixed fused pack+odd61 a");
@@ -3350,17 +3385,19 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             round_up_size(((static_cast<size_t>(row_m) + 13u) / 14u) * 128u, local128) :
             (use_mixed_pack_tile7 ?
             round_up_size(((static_cast<size_t>(row_m) + 6u) / 7u) * 64u, local64) : g_row_m);
-        const char* head_name = use_mixed_pack_tile14_shift ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_61" :
+        const char* head_name = use_mixed_tile14_shift_lmat ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61" :
+                                (use_mixed_pack_tile14_shift ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_61" :
                                 (use_mixed_pack_tile14 ? "crt_mixed_pack_weight_odd_fwd_tile14_61" :
                                 (use_mixed_pack_tile7 ? "crt_mixed_pack_weight_odd_fwd_tile7_61" :
-                                (use_mixed_shift_lut ? "crt_mixed_pack_weight_odd_fwd_shift_61" : "crt_mixed_pack_weight_odd_fwd_61")));
+                                (use_mixed_shift_lut ? "crt_mixed_pack_weight_odd_fwd_shift_61" : "crt_mixed_pack_weight_odd_fwd_61"))));
         enqueue_kernel(g61, kpack, head_global, (use_mixed_pack_tile14 || use_mixed_pack_tile14_shift) ? &local128 : &local64, "enqueue mixed fused pack+odd61", head_name);
     };
     auto pack_odd_fwd31 = [&]() {
-        cl_kernel kpack = use_mixed_pack_tile14_shift ? fk.mixed_pack_odd_fwd_tile14_shift_31 :
+        cl_kernel kpack = use_mixed_tile14_shift_lmat ? fk.mixed_pack_odd_fwd_tile14_shift_lmat_31 :
+                          (use_mixed_pack_tile14_shift ? fk.mixed_pack_odd_fwd_tile14_shift_31 :
                           (use_mixed_pack_tile14 ? fk.mixed_pack_odd_fwd_tile14_31 :
                           (use_mixed_pack_tile7 ? fk.mixed_pack_odd_fwd_tile7_31 :
-                          (use_mixed_shift_lut ? fk.mixed_pack_odd_fwd_shift31 : fk.mixed_pack_odd_fwd31)));
+                          (use_mixed_shift_lut ? fk.mixed_pack_odd_fwd_shift31 : fk.mixed_pack_odd_fwd31))));
         cl_uint arg = 0;
         set_karg_mem(kpack, arg, g31.crtInputDigits ? g31.crtInputDigits : g61.bufDigits, "set mixed fused pack+odd31 digits");
         set_karg_mem(kpack, arg, g31.bufField, "set mixed fused pack+odd31 a");
@@ -3380,10 +3417,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             round_up_size(((static_cast<size_t>(row_m) + 13u) / 14u) * 128u, local128) :
             (use_mixed_pack_tile7 ?
             round_up_size(((static_cast<size_t>(row_m) + 6u) / 7u) * 64u, local64) : g_row_m);
-        const char* head_name = use_mixed_pack_tile14_shift ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_31" :
+        const char* head_name = use_mixed_tile14_shift_lmat ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31" :
+                                (use_mixed_pack_tile14_shift ? "crt_mixed_pack_weight_odd_fwd_tile14_shift_31" :
                                 (use_mixed_pack_tile14 ? "crt_mixed_pack_weight_odd_fwd_tile14_31" :
                                 (use_mixed_pack_tile7 ? "crt_mixed_pack_weight_odd_fwd_tile7_31" :
-                                (use_mixed_shift_lut ? "crt_mixed_pack_weight_odd_fwd_shift_31" : "crt_mixed_pack_weight_odd_fwd_31")));
+                                (use_mixed_shift_lut ? "crt_mixed_pack_weight_odd_fwd_shift_31" : "crt_mixed_pack_weight_odd_fwd_31"))));
         enqueue_kernel(g31, kpack, head_global, (use_mixed_pack_tile14 || use_mixed_pack_tile14_shift) ? &local128 : &local64, "enqueue mixed fused pack+odd31", head_name);
     };
 
@@ -3672,11 +3710,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         set_pending_wait_event(g61, gf31_ready);
         if (g31.queue != g61.queue) clFlush(g31.queue);
 
-        cl_kernel ktail = use_mixed_precrt_tile14_shift ? fk.mixed_odd_inv_precrt_coeffhi_tile14_shift :
+        cl_kernel ktail = use_mixed_tile14_shift_lmat ? fk.mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat :
+                          (use_mixed_precrt_tile14_shift ? fk.mixed_odd_inv_precrt_coeffhi_tile14_shift :
                           (use_mixed_shift_lut ? fk.mixed_odd_inv_precrt_coeffhi_shift :
                           (use_mixed_precrt_tile14 ? fk.mixed_odd_inv_precrt_coeffhi_tile14 :
                           (use_mixed_precrt_tile7 ? fk.mixed_odd_inv_precrt_coeffhi_tile7 :
-                          (use_mixed_precrt_outpar ? fk.mixed_odd_inv_precrt_coeffhi_outpar : fk.mixed_odd_inv_precrt_coeffhi))));
+                          (use_mixed_precrt_outpar ? fk.mixed_odd_inv_precrt_coeffhi_outpar : fk.mixed_odd_inv_precrt_coeffhi)))));
         cl_uint arg = 0;
         set_karg_mem(ktail, arg, g61.bufField, "set mixed preCRT a61");
         set_karg_mem(ktail, arg, g31.bufField, "set mixed preCRT a31");
@@ -3704,14 +3743,54 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             (use_mixed_precrt_tile7 ?
             round_up_size(((static_cast<size_t>(row_m) + 6u) / 7u) * 64u, local64) :
             (use_mixed_precrt_outpar ? g_storage : g_row_m));
-        const char* tail_name = use_mixed_precrt_tile14_shift ? "crt_mixed_odd_inv_precrt_coeffhi_tile14_shift" :
+        const char* tail_name = use_mixed_tile14_shift_lmat ? "crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat" :
+                                (use_mixed_precrt_tile14_shift ? "crt_mixed_odd_inv_precrt_coeffhi_tile14_shift" :
                                 (use_mixed_shift_lut ? "crt_mixed_odd_inv_precrt_coeffhi_shift" :
                                 (use_mixed_precrt_tile14 ? "crt_mixed_odd_inv_precrt_coeffhi_tile14" :
                                 (use_mixed_precrt_tile7 ? "crt_mixed_odd_inv_precrt_coeffhi_tile7" :
-                                (use_mixed_precrt_outpar ? "crt_mixed_odd_inv_precrt_coeffhi_outpar" : "crt_mixed_odd_inv_precrt_coeffhi"))));
+                                (use_mixed_precrt_outpar ? "crt_mixed_odd_inv_precrt_coeffhi_outpar" : "crt_mixed_odd_inv_precrt_coeffhi")))));
         enqueue_kernel(g61, ktail, tail_global, (use_mixed_precrt_tile14 || use_mixed_precrt_tile14_shift) ? &local128 : &local64,
                        "enqueue mixed odd preCRT coeffhi", tail_name);
         g61.crtCoeffPending = true;
+        g61.crtLastUnweightPending = false;
+    };
+
+    auto odd_inv_precrt_garner64 = [&]() {
+        cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for fused preCRT+Garner");
+        set_pending_wait_event(g61, gf31_ready);
+        if (g31.queue != g61.queue) clFlush(g31.queue);
+
+        ensure_carry_buffers(g61);
+        cl_uint zero = 0;
+        check(clEnqueueWriteBuffer(g61.queue, g61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr), "mixed fused precrt-garner clear pending");
+
+        const cl_uint digit_n = static_cast<cl_uint>(g61.n);
+        const cl_uint items = 64u;
+        const cl_uint segments = static_cast<cl_uint>((static_cast<std::size_t>(digit_n) + items - 1u) / items);
+        const size_t local = 64u;
+        const size_t global = round_up_size(static_cast<size_t>(segments) * local, local);
+        const cl_uint width_base = static_cast<cl_uint>(g61.min_digit_width);
+        cl_kernel k = fk.mixed_odd9_inv_precrt_garner64_lmat;
+        cl_uint arg = 0;
+        set_karg_mem(k, arg, g61.bufField, "set mixed fused precrt-garner a61");
+        set_karg_mem(k, arg, g31.bufField, "set mixed fused precrt-garner a31");
+        set_karg_mem(k, arg, g61.bufOddInv, "set mixed fused precrt-garner mat61");
+        set_karg_mem(k, arg, g31.bufOddInv, "set mixed fused precrt-garner mat31");
+        set_karg_mem(k, arg, g61.bufUnweightShift, "set mixed fused precrt-garner shift61");
+        set_karg_mem(k, arg, g31.bufUnweightShift, "set mixed fused precrt-garner shift31");
+        set_karg_mem(k, arg, g61.bufWidthMask32, "set mixed fused precrt-garner width mask");
+        set_karg(k, arg, width_base, "set mixed fused precrt-garner width base");
+        set_karg_mem(k, arg, g61.bufDigits, "set mixed fused precrt-garner digits");
+        set_karg_mem(k, arg, g61.bufBlockCarry, "set mixed fused precrt-garner carry lo");
+        set_karg_mem(k, arg, g61.bufCrtCarryHi1, "set mixed fused precrt-garner carry hi");
+        set_karg_mem(k, arg, g61.bufCarryPending, "set mixed fused precrt-garner pending");
+        set_karg(k, arg, pow2_n, "set mixed fused precrt-garner pow2_n");
+        set_karg(k, arg, log_m, "set mixed fused precrt-garner log_m");
+        set_karg(k, arg, digit_n, "set mixed fused precrt-garner digit_n");
+        set_karg(k, arg, segments, "set mixed fused precrt-garner segments");
+        enqueue_kernel(g61, k, global, &local, "enqueue mixed fused preCRT+Garner", "crt_mixed_odd9_precrt_garner64_lmat");
+        g61.crtFirstCarryReady = true;
+        g61.crtCoeffPending = false;
         g61.crtLastUnweightPending = false;
     };
 
@@ -3789,6 +3868,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         odd_inv_unpack61();
         odd_inv_unpack31();
         residues_to_coeffhi();
+    } else if (use_mixed_precrt_garner64) {
+        odd_inv_precrt_garner64();
     } else if (use_mixed_precrt_coeffhi) {
         odd_inv_precrt_coeffhi();
     } else if (use_mixed_fused_edges) {
@@ -6133,6 +6214,9 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                                           crt_fused.mixed_pack_odd_fwd_tile14_31 &&
                                           crt_fused.mixed_odd_inv_precrt_coeffhi_tile14;
         const bool mixed_precrt_tile14_shift_enabled = mixed_tile14_shift_enabled && mixed_precrt_possible;
+        const bool mixed_precrt_garner64_enabled = mixed_precrt_tile14_shift_enabled &&
+                                                   parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER", false) &&
+                                                   crt_fused.mixed_odd9_precrt_garner64_available();
         const bool mixed_precrt_tile14_enabled = !mixed_precrt_tile14_shift_enabled && mixed_tile14_enabled && mixed_precrt_possible;
         const bool mixed_precrt_tile7_enabled = !mixed_precrt_tile14_shift_enabled &&
                                                  !mixed_precrt_tile14_enabled &&
@@ -6172,6 +6256,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", tile14-shift=" << (mixed_tile14_shift_enabled ? "on" : "off")
                   << ", precrt-tile14=" << (mixed_precrt_tile14_enabled ? "on" : "off")
                   << ", precrt-tile14-shift=" << (mixed_precrt_tile14_shift_enabled ? "on" : "off")
+                  << ", precrt-garner64=" << (mixed_precrt_garner64_enabled ? "on" : "off")
                   << ", precrt-tile7=" << (mixed_precrt_tile7_enabled ? "on" : "off")
                   << ", precrt-outpar=" << (mixed_precrt_outpar_enabled ? "on" : "off")
                   << ", pack-tile14=" << (mixed_pack_tile14_enabled ? "on" : "off")

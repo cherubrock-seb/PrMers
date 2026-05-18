@@ -44,6 +44,7 @@ Default mode:
 PRMERS_CRT_MIXED_TILE14=1
 PRMERS_CRT_MIXED_SHIFT_LUT=1
 PRMERS_CRT_MIXED_TILE14_SHIFT=1
+PRMERS_CRT_MIXED_TILE14_LMAT=1
 PRMERS_CRT_MIXED_PRECRT_COEFFHI=1
 PRMERS_CRT_MIXED_FUSE_PACK_BOTH=0
 PRMERS_CRT_MIXED_FUSE_LDS_BOTH=0
@@ -116,6 +117,7 @@ All switches are optional. They are kept to compare implementations.
 | `PRMERS_CRT_MIXED_TILE14=0/1` | `1` | cooperative LDS odd head/tail tile14 path for radix 9 |
 | `PRMERS_CRT_MIXED_SHIFT_LUT=0/1` | `1` for radix 9 | use precomputed unweight shift table in mixed odd head/tail |
 | `PRMERS_CRT_MIXED_TILE14_SHIFT=0/1` | `1` | tile14 variant using the shift LUT |
+| `PRMERS_CRT_MIXED_TILE14_LMAT=0/1` | `1` | local-matrix tile14-shift head/tail for radix 9; set `0` to compare the previous tile14-shift kernels |
 | `PRMERS_CRT_MIXED_PACK_TILE7=0/1` | fallback | old cooperative LDS odd head for radix 9 |
 | `PRMERS_CRT_MIXED_PRECRT_TILE7=0/1` | fallback | old cooperative LDS odd tail for radix 9 |
 | `PRMERS_CRT_MIXED_PRECRT_COEFFHI=0/1` | `1` | write preCRT coeffhi stream before Garner |
@@ -400,3 +402,59 @@ Aliases:
 ```
 
 The CRT options `--crt-local-square`, `--crt-lds-stage`, `--crt-lds-tile`, `--crt-edge-radix` still apply to the CRT paths.  `--single-center-mode` is only for standalone `gf61` / `gf31`.
+
+### Odd radix 9 fused preCRT/Garner tail
+
+The radix 9 mixed CRT/PFA path now has an optional fast tail that computes the radix 9 inverse output and the first Garner carry segment in one kernel.  It removes one global-memory round trip through the temporary coeffhi buffers.
+
+Default:
+
+```text
+PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=1
+```
+
+Disable only for comparison or rollback:
+
+```bash
+PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=0 ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-flags 48 --device 1 --iters 3000 --profile-kernels
+```
+
+Expected profile label when enabled:
+
+```text
+crt_mixed_odd9_precrt_garner64_lmat
+```
+
+The existing conservative path remains available and all other modes fall back automatically if the fused kernel is not present.
+
+## Odd radix 9 stable default after fused Garner test
+
+The fused preCRT+Garner experiment is now off by default because it was much slower on RTX 3080 for M142606357.
+
+Stable default:
+
+```bash
+./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-flags 48 --device 1 --iters 5000 --profile-kernels
+```
+
+Old experimental fused tail, only for comparison:
+
+```bash
+PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=1 \
+./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-flags 48 --device 1 --iters 5000 --profile-kernels
+```
+
+Expected stable profile uses separate kernels:
+
+```text
+crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat
+crt_garner_first_coeffhi_mask32_anybase_x2
+```
+
+If the fused experiment is enabled you will see:
+
+```text
+crt_mixed_odd9_precrt_garner64_lmat
+```
+
+Keep it disabled unless a later kernel version fixes the register pressure and serialization.

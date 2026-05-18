@@ -8634,6 +8634,97 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_31(__global const ulong* re
 }
 
 
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61(__global const ulong* restrict digits,
+                                                            __global GF* restrict a61,
+                                                            __global const GF* restrict mat,
+                                                            __global const uchar* restrict shift61,
+                                                            uint odd, uint pow2_n)
+{
+    (void)odd;
+    const uint lid = (uint)get_local_id(0);
+    const uint kt = lid / 9u;
+    const uint lane = lid - kt * 9u;
+    const uint row_m = pow2_n >> 1;
+    const uint k = (uint)get_group_id(0) * 14u + kt;
+
+    __local GF l61[14 * 9];
+    __local GF lm61[9 * 9];
+
+    if (lid < 81u) lm61[lid] = mat[lid];
+    if (kt < 14u && k < row_m && lane < 9u) {
+        const uint b0 = k << 1;
+        const uint b1 = b0 + 1u;
+        const uint j0 = crt_mixed_j_from_coord(lane, b0, 9u, pow2_n);
+        const uint j1 = crt_mixed_j_from_coord(lane, b1, 9u, pow2_n);
+        l61[kt * 9u + lane] = (GF)(lshift61(digits[j0], (uint)shift61[j0]),
+                                  lshift61(digits[j1], (uint)shift61[j1]));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (kt >= 14u || k >= row_m || lane >= 9u) return;
+
+    const uint lbase = kt * 9u;
+    const uint mbase = lane * 9u;
+    GF acc = GF_ZERO;
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 0u], lm61[mbase + 0u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 1u], lm61[mbase + 1u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 2u], lm61[mbase + 2u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 3u], lm61[mbase + 3u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 4u], lm61[mbase + 4u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 5u], lm61[mbase + 5u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 6u], lm61[mbase + 6u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 7u], lm61[mbase + 7u]));
+    acc = gf_add(acc, gf_mul_real_odd(l61[lbase + 8u], lm61[mbase + 8u]));
+    a61[lane * row_m + k] = acc;
+}
+
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31(__global const ulong* restrict digits,
+                                                            __global GF31* restrict a31,
+                                                            __global const GF31* restrict mat,
+                                                            __global const uchar* restrict shift31,
+                                                            uint odd, uint pow2_n)
+{
+    (void)odd;
+    const uint lid = (uint)get_local_id(0);
+    const uint kt = lid / 9u;
+    const uint lane = lid - kt * 9u;
+    const uint row_m = pow2_n >> 1;
+    const uint k = (uint)get_group_id(0) * 14u + kt;
+
+    __local GF31 l31[14 * 9];
+    __local GF31 lm31[9 * 9];
+
+    if (lid < 81u) lm31[lid] = mat[lid];
+    if (kt < 14u && k < row_m && lane < 9u) {
+        const uint b0 = k << 1;
+        const uint b1 = b0 + 1u;
+        const uint j0 = crt_mixed_j_from_coord(lane, b0, 9u, pow2_n);
+        const uint j1 = crt_mixed_j_from_coord(lane, b1, 9u, pow2_n);
+        l31[kt * 9u + lane] = (GF31)(f31_lshift_scalar(f31_reduce_ulong(digits[j0]), (uint)shift31[j0]),
+                                    f31_lshift_scalar(f31_reduce_ulong(digits[j1]), (uint)shift31[j1]));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (kt >= 14u || k >= row_m || lane >= 9u) return;
+
+    const uint lbase = kt * 9u;
+    const uint mbase = lane * 9u;
+    GF31 acc = (GF31)(0u, 0u);
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 0u], lm31[mbase + 0u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 1u], lm31[mbase + 1u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 2u], lm31[mbase + 2u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 3u], lm31[mbase + 3u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 4u], lm31[mbase + 4u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 5u], lm31[mbase + 5u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 6u], lm31[mbase + 6u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 7u], lm31[mbase + 7u]));
+    acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 8u], lm31[mbase + 8u]));
+    a31[lane * row_m + k] = acc;
+}
+
+
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31(__global const ulong* restrict digits,
                                                     __global GF* restrict a61,
@@ -9246,6 +9337,194 @@ void gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14_shift(__global const GF* restr
     coeff_hi[j1] = (uint)hi;
 }
 
+
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat(__global const GF* restrict a61,
+                                                            __global const GF31* restrict a31,
+                                                            __global ulong* restrict coeff_lo,
+                                                            __global uint* restrict coeff_hi,
+                                                            __global const GF* restrict mat61,
+                                                            __global const GF31* restrict mat31,
+                                                            __global const uchar* restrict shift61,
+                                                            __global const uchar* restrict shift31,
+                                                            uint odd, uint pow2_n, uint log_m)
+{
+    (void)odd;
+    const uint lid = (uint)get_local_id(0);
+    const uint kt = lid / 9u;
+    const uint lane = lid - kt * 9u;
+    const uint row_m = pow2_n >> 1;
+    const uint k = (uint)get_group_id(0) * 14u + kt;
+
+    __local GF l61[14 * 9];
+    __local GF31 l31[14 * 9];
+    __local GF lm61[9 * 9];
+    __local GF31 lm31[9 * 9];
+
+    if (lid < 81u) {
+        lm61[lid] = mat61[lid];
+        lm31[lid] = mat31[lid];
+    }
+    if (kt < 14u && k < row_m && lane < 9u) {
+        const uint idx = lane * row_m + k;
+        l61[kt * 9u + lane] = a61[idx];
+        l31[kt * 9u + lane] = a31[idx];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (kt >= 14u || k >= row_m || lane >= 9u) return;
+
+    const uint lbase = kt * 9u;
+    const uint mbase = lane * 9u;
+    GF acc61 = GF_ZERO;
+    GF31 acc31 = (GF31)(0u, 0u);
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 0u], lm61[mbase + 0u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 0u], lm31[mbase + 0u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 1u], lm61[mbase + 1u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 1u], lm31[mbase + 1u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 2u], lm61[mbase + 2u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 2u], lm31[mbase + 2u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 3u], lm61[mbase + 3u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 3u], lm31[mbase + 3u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 4u], lm61[mbase + 4u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 4u], lm31[mbase + 4u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 5u], lm61[mbase + 5u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 5u], lm31[mbase + 5u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 6u], lm61[mbase + 6u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 6u], lm31[mbase + 6u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 7u], lm61[mbase + 7u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 7u], lm31[mbase + 7u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 8u], lm61[mbase + 8u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 8u], lm31[mbase + 8u]));
+
+    const uint b0 = k << 1;
+    const uint b1 = b0 + 1u;
+    const uint j0 = crt_mixed_j_from_coord(lane, b0, 9u, pow2_n);
+    const uint j1 = crt_mixed_j_from_coord(lane, b1, 9u, pow2_n);
+
+    const ulong a61_0 = rshift61(norm61(acc61.s0), (uint)shift61[j0] + log_m);
+    const ulong a61_1 = rshift61(norm61(acc61.s1), (uint)shift61[j1] + log_m);
+
+    const uint s0 = f31_mod31_small((uint)shift31[j0] + log_m);
+    const uint s1 = f31_mod31_small((uint)shift31[j1] + log_m);
+    const uint a31_0 = f31_lshift_scalar(acc31.s0, s0 == 0u ? 0u : 31u - s0);
+    const uint a31_1 = f31_lshift_scalar(acc31.s1, s1 == 0u ? 0u : 31u - s1);
+
+    ulong lo, hi;
+    crt_coeff_from_residues(a61_0, (ulong)a31_0, &lo, &hi);
+    coeff_lo[j0] = lo;
+    coeff_hi[j0] = (uint)hi;
+    crt_coeff_from_residues(a61_1, (ulong)a31_1, &lo, &hi);
+    coeff_lo[j1] = lo;
+    coeff_hi[j1] = (uint)hi;
+}
+
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_odd9_inv_precrt_garner64_lmat(__global const GF* restrict a61,
+                                                   __global const GF31* restrict a31,
+                                                   __global const GF* restrict mat61,
+                                                   __global const GF31* restrict mat31,
+                                                   __global const uchar* restrict shift61,
+                                                   __global const uchar* restrict shift31,
+                                                   __global const uint* restrict width_mask32,
+                                                   uint width_base,
+                                                   __global ulong* restrict digits61,
+                                                   __global ulong* restrict carry_lo_out,
+                                                   __global ulong* restrict carry_hi_out,
+                                                   __global uint* restrict pending,
+                                                   uint pow2_n, uint log_m,
+                                                   uint digit_n, uint segments)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint seg = (uint)get_group_id(0);
+    if (seg >= segments) return;
+
+    const uint row_m = pow2_n >> 1;
+    const uint start = seg << 6;
+    const uint i = start + lid;
+    __local ulong coeff_lo[64];
+    __local ulong coeff_hi[64];
+
+    ulong lo = 0ul;
+    ulong hi = 0ul;
+    if (i < digit_n) {
+        const uint b = i & (pow2_n - 1u);
+        const uint k = b >> 1;
+        const uint component = b & 1u;
+        const uint lane = i % 9u;
+        const uint mbase = lane * 9u;
+
+        ulong acc61 = 0ul;
+        uint acc31 = 0u;
+
+        GF v610 = a61[0u * row_m + k];
+        GF31 v310 = a31[0u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v610.s1 : v610.s0, mat61[mbase + 0u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v310.s1 : v310.s0, mat31[mbase + 0u].s0));
+        GF v611 = a61[1u * row_m + k];
+        GF31 v311 = a31[1u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v611.s1 : v611.s0, mat61[mbase + 1u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v311.s1 : v311.s0, mat31[mbase + 1u].s0));
+        GF v612 = a61[2u * row_m + k];
+        GF31 v312 = a31[2u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v612.s1 : v612.s0, mat61[mbase + 2u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v312.s1 : v312.s0, mat31[mbase + 2u].s0));
+        GF v613 = a61[3u * row_m + k];
+        GF31 v313 = a31[3u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v613.s1 : v613.s0, mat61[mbase + 3u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v313.s1 : v313.s0, mat31[mbase + 3u].s0));
+        GF v614 = a61[4u * row_m + k];
+        GF31 v314 = a31[4u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v614.s1 : v614.s0, mat61[mbase + 4u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v314.s1 : v314.s0, mat31[mbase + 4u].s0));
+        GF v615 = a61[5u * row_m + k];
+        GF31 v315 = a31[5u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v615.s1 : v615.s0, mat61[mbase + 5u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v315.s1 : v315.s0, mat31[mbase + 5u].s0));
+        GF v616 = a61[6u * row_m + k];
+        GF31 v316 = a31[6u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v616.s1 : v616.s0, mat61[mbase + 6u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v316.s1 : v316.s0, mat31[mbase + 6u].s0));
+        GF v617 = a61[7u * row_m + k];
+        GF31 v317 = a31[7u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v617.s1 : v617.s0, mat61[mbase + 7u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v317.s1 : v317.s0, mat31[mbase + 7u].s0));
+        GF v618 = a61[8u * row_m + k];
+        GF31 v318 = a31[8u * row_m + k];
+        acc61 = add61_lazy(acc61, mul61(component ? v618.s1 : v618.s0, mat61[mbase + 8u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v318.s1 : v318.s0, mat31[mbase + 8u].s0));
+
+        const ulong r61 = rshift61(norm61(acc61), (uint)shift61[i] + log_m);
+        const uint s31 = f31_mod31_small((uint)shift31[i] + log_m);
+        const uint r31 = f31_lshift_scalar(acc31, s31 == 0u ? 0u : 31u - s31);
+        crt_coeff_from_residues(r61, (ulong)r31, &lo, &hi);
+    }
+    coeff_lo[lid] = lo;
+    coeff_hi[lid] = hi;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (lid == 0u) {
+        const uint mask0 = width_mask32[seg << 1];
+        const uint mask1 = ((start + 32u) < digit_n) ? width_mask32[(seg << 1) + 1u] : 0u;
+        ulong clo = 0ul;
+        ulong chi = 0ul;
+        for (uint j = 0u; j < 64u; ++j) {
+            const uint d = start + j;
+            if (d >= digit_n) break;
+            const uint mask = (j < 32u) ? mask0 : mask1;
+            const uint bit = (mask >> (j & 31u)) & 1u;
+            ulong total_lo, total_hi;
+            crt_add_u128(coeff_lo[j], coeff_hi[j], clo, chi, &total_lo, &total_hi);
+            digits61[d] = crt_take_digit_and_shift_u128(total_lo, total_hi, width_base + bit, &clo, &chi);
+        }
+        const uint next = (seg + 1u < segments) ? (seg + 1u) : 0u;
+        carry_lo_out[next] = clo;
+        carry_hi_out[next] = chi;
+        if ((clo | chi) != 0ul) pending[0] = 1u;
+    }
+}
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_odd_inv_precrt_coeffhi_outpar(__global const GF* restrict a61,
