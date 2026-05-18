@@ -6427,7 +6427,8 @@ struct Options {
     int crt_fwd8_61_wg = 64;
     int crt_defused_edge_fuse = 0;
     uint32_t crt_edge_radix = 4u;
-    uint32_t crt_odd_radix = 9u;
+    uint32_t crt_odd_radix = 0u;
+    bool crt_odd_radix_auto = true;
     int crt_defused_edge_mode = 0;
     bool user_crt_queue = false;
     bool user_crt_schedule = false;
@@ -6549,10 +6550,16 @@ static Options parse_args(int argc, char** argv) {
         } else if (arg == "--crt-odd-radix" || arg == "--crt-pfa-odd" || arg == "--crt-mixed-odd") {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-odd-radix");
             const std::string v = argv[++i];
-            if (v == "off" || v == "none" || v == "1") opt.crt_odd_radix = 1u;
-            else opt.crt_odd_radix = static_cast<uint32_t>(std::stoul(v));
-            if (!(opt.crt_odd_radix == 1u || opt.crt_odd_radix == 3u || opt.crt_odd_radix == 9u)) {
-                throw std::runtime_error("--crt-odd-radix must be 1, 3 or 9 in this GPU prototype");
+            if (v == "auto" || v == "default") {
+                opt.crt_odd_radix = 0u;
+                opt.crt_odd_radix_auto = true;
+            } else {
+                opt.crt_odd_radix_auto = false;
+                if (v == "off" || v == "none" || v == "1") opt.crt_odd_radix = 1u;
+                else opt.crt_odd_radix = static_cast<uint32_t>(std::stoul(v));
+                if (!(opt.crt_odd_radix == 1u || opt.crt_odd_radix == 3u || opt.crt_odd_radix == 9u)) {
+                    throw std::runtime_error("--crt-odd-radix must be auto, 1/off, 3 or 9 in this GPU prototype");
+                }
             }
             if (opt.crt_odd_radix > 1u) {
                 opt.crt_center_mode = "halfreal";
@@ -6576,8 +6583,8 @@ static Options parse_args(int argc, char** argv) {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --single-center-mode");
             opt.single_center_mode = argv[++i];
             if (opt.single_center_mode == "classic") opt.single_center_mode = "normal";
-            if (!(opt.single_center_mode == "normal" || opt.single_center_mode == "halfreal")) {
-                throw std::runtime_error("--single-center-mode must be normal/classic or halfreal");
+            if (!(opt.single_center_mode == "normal" || opt.single_center_mode == "halfreal" || opt.single_center_mode == "auto")) {
+                throw std::runtime_error("--single-center-mode must be normal/classic, halfreal or auto");
             }
         } else if (arg == "--single-halfreal" || arg == "--field-halfreal") {
             opt.single_center_mode = "halfreal";
@@ -6732,7 +6739,7 @@ static Options parse_args(int argc, char** argv) {
                 << "  best : selects gf61 or crt from the transform sizes.\n\n"
                 << "Defaults: CRT defused NTT + fused center are enabled; known AMD/NVIDIA presets are applied unless overridden.\n"
                 << "Autotune: --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; command-line knobs stay priority.\n"
-                << "Tuning: --center-max N, --center-autotune, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
+                << "Tuning: --center-max N, --center-autotune, --single-center-mode normal|halfreal|auto, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
                 << "CRT:    --crt-async-queues/--crt-two-queues default, --crt-shared-queue or --crt-single-queue for debug/contention tests.\n"
                 << "        --crt-radix8 default, --crt-radix4 disables global radix-8 test path.\n"
                 << "        --crt-local-square 16|32|64|128|256|512 uses one LDS block for forward+square+inverse; default is 512.\n"
@@ -7020,6 +7027,40 @@ static cl_uint default_local_block_lds_for_plan(const Options& opt, const ibdwt:
     if (opt.modulus_mode == "crt" || opt.modulus_mode == "crt-cpu") return (layout.n <= 8192u) ? 512u : 1024u;
     if (opt.modulus_mode == "gf61") return (layout.n >= 1048576u) ? 2048u : 0u;
     return 512u;
+}
+
+static cl_uint env_u32_or_default_main(const char* name, cl_uint defv, cl_uint minv, cl_uint maxv) {
+    const char* s = std::getenv(name);
+    if (!s || !*s) return defv;
+    char* end = nullptr;
+    unsigned long v = std::strtoul(s, &end, 10);
+    if (end == s || *end != '\0' || v < minv || v > maxv) return defv;
+    return static_cast<cl_uint>(v);
+}
+
+static std::string resolve_single_center_mode_auto(const Options& opt, const ibdwt::Layout& layout) {
+    if (opt.single_center_mode != "auto") return opt.single_center_mode;
+    if (opt.modulus_mode == "gf31") return "normal";
+    if (opt.modulus_mode == "gf61") {
+        const cl_uint min_n = env_u32_or_default_main("PRMERS_SINGLE_HALFREAL_AUTO_MIN_N", 65536u, 512u, 1u << 30);
+        return (layout.n >= min_n) ? "halfreal" : "normal";
+    }
+    return "normal";
+}
+
+static uint32_t resolve_crt_odd_radix_auto(const Options& opt, std::uint32_t p) {
+    if (opt.crt_odd_radix != 0u) return opt.crt_odd_radix;
+    const auto base = ibdwt::make_layout(p);
+    uint32_t selected = 1u;
+    try {
+        const auto odd9 = ibdwt::make_layout_mixed(p, 9u);
+        const bool small_medium_win = (base.ln >= 13u && base.ln <= 15u);
+        const bool strong_size_win = (odd9.n * std::size_t(4) <= base.n * std::size_t(3));
+        if (small_medium_win || strong_size_win) selected = 9u;
+    } catch (...) {
+        selected = 1u;
+    }
+    return selected;
 }
 
 static bool path_matches_strict_reference(
@@ -7342,6 +7383,15 @@ int main(int argc, char** argv) {
             if (opt.exponent == 0) throw std::runtime_error("missing exponent p");
 
             ibdwt::configure_capacity(92, 61, opt.headroom_bits);
+            const bool crt_odd_was_auto = opt.crt_odd_radix_auto || opt.crt_odd_radix == 0u;
+            opt.crt_odd_radix = resolve_crt_odd_radix_auto(opt, opt.exponent);
+            if (crt_odd_was_auto) {
+                std::cout << "CRT odd-radix auto selected " << (opt.crt_odd_radix > 1u ? std::to_string(opt.crt_odd_radix) : std::string("off")) << "\n";
+            }
+            if (opt.crt_odd_radix > 1u) {
+                opt.crt_center_mode = "halfreal";
+                opt.crt_defused_fast = true;
+            }
             const auto layout = ibdwt::make_layout_mixed(opt.exponent, opt.crt_odd_radix);
             apply_crt_device_preset(opt, dev.name);
             maybe_run_crt_startup_autotune(opt, argv[0]);
@@ -7498,6 +7548,7 @@ int main(int argc, char** argv) {
 
         if (opt.exponent == 0) throw std::runtime_error("missing exponent p");
         const auto layout = ibdwt::make_layout(opt.exponent);
+        opt.single_center_mode = resolve_single_center_mode_auto(opt, layout);
         std::signal(SIGINT, handle_sigint);
         g_stop_requested.store(false, std::memory_order_relaxed);
         auto gpu = clwrap::make_gpu(dev, opt.kernel_path, layout, opt.profile_kernels, opt.prefer_radix4x2);

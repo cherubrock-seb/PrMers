@@ -17,7 +17,7 @@ The odd axis is handled with CRT/PFA indexing. The `2^m` axis keeps the usual ha
 z[k] = coeff(2*k) + i*coeff(2*k + 1)
 ```
 
-The current GPU path supports odd radix `3` and `9`. The default CRT mode is the optimized odd-radix 9 path with LDS512 row kernels, fast half-real center (`flags=48`), tile14 shift-LUT odd head/tail kernels, and preCRT coeffhi output.
+The current GPU path supports odd radix `3` and `9`. The default CRT mode is now `--crt-odd-radix auto`: it keeps the normal power-of-two CRT path when radix-9 is not clearly useful, and selects the optimized odd-radix 9 path when the tested sizes show a win. Explicit `--crt-odd-radix off`, `3`, or `9` still force the old behavior.
 
 ## Build
 
@@ -38,7 +38,7 @@ Default mode:
 
 ```text
 --modulus crt
---crt-odd-radix 9
+--crt-odd-radix auto
 --crt-center-mode halfreal
 --crt-halfreal-flags 48
 PRMERS_CRT_MIXED_TILE14=1
@@ -109,9 +109,10 @@ All switches are optional. They are kept to compare implementations.
 
 | switch | default | purpose |
 |---|---:|---|
+| `--crt-odd-radix auto` | yes | default heuristic: off for cases like M136279841, odd9 for cases like M142606357 and the small/medium tested windows |
 | `--crt-odd-radix off` | no | normal power-of-two CRT path |
 | `--crt-odd-radix 3` | no | mixed CRT/PFA radix 3 path |
-| `--crt-odd-radix 9` | yes | mixed CRT/PFA radix 9 path |
+| `--crt-odd-radix 9` | yes | force mixed CRT/PFA radix 9 path |
 | `PRMERS_CRT_MIXED_TILE14=0/1` | `1` | cooperative LDS odd head/tail tile14 path for radix 9 |
 | `PRMERS_CRT_MIXED_SHIFT_LUT=0/1` | `1` for radix 9 | use precomputed unweight shift table in mixed odd head/tail |
 | `PRMERS_CRT_MIXED_TILE14_SHIFT=0/1` | `1` | tile14 variant using the shift LUT |
@@ -364,11 +365,29 @@ With `--crt-halfreal-flags 48`, the single-field half-real path now uses the fas
 pack+first 512 DIF in LDS -> residual row NTT -> LDS512 pair center -> residual inverse -> last 512 DIT+unpack in LDS
 ```
 
+
+
+Auto mode is available for standalone fields:
+
+```bash
+./prmers_opencl_prp 216091 --modulus gf61 --single-center-mode auto --crt-halfreal-flags 48
+./prmers_opencl_prp 756839 --modulus gf31 --single-center-mode auto
+```
+
+Current policy:
+
+```text
+gf61: normal for very small N, halfreal for N >= PRMERS_SINGLE_HALFREAL_AUTO_MIN_N
+gf31: normal
+default PRMERS_SINGLE_HALFREAL_AUTO_MIN_N=4096
+```
+
 Runtime switches:
 
 ```text
-PRMERS_SINGLE_HALFREAL_FAST512=0      disable the standalone fast LDS512 head/center/tail path
-PRMERS_SINGLE_HALFREAL_LDS_PAIR=0    disable the standalone LDS512 pair center path
+PRMERS_SINGLE_HALFREAL_FAST512=0        disable the standalone fast LDS512 head/center/tail path
+PRMERS_SINGLE_HALFREAL_LDS_PAIR=0      disable the standalone LDS512 pair center path
+PRMERS_SINGLE_HALFREAL_AUTO_MIN_N=65536 auto-mode threshold for gf61
 ```
 
 Aliases:
@@ -377,6 +396,7 @@ Aliases:
 --single-halfreal        same as --single-center-mode halfreal
 --single-normal          same as --single-center-mode normal
 --field-center-mode      alias for --single-center-mode
+--single-center-mode auto keeps gf61 normal for small cases like p=216091 and switches to gf61 halfreal from the medium/large window; gf31 stays normal
 ```
 
 The CRT options `--crt-local-square`, `--crt-lds-stage`, `--crt-lds-tile`, `--crt-edge-radix` still apply to the CRT paths.  `--single-center-mode` is only for standalone `gf61` / `gf31`.
