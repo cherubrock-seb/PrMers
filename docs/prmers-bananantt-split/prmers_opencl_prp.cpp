@@ -1142,6 +1142,7 @@ GpuPrp make_gpu(const DeviceInfo& info,
 }
 
 static bool g_planner_debug = false;
+static std::string g_single_center_mode = "normal";
 static bool g_local_block_lds_disabled = false;
 static cl_uint g_local_block_lds_override = 0;
 static cl_uint g_last_local_block_lds = 0;
@@ -1967,6 +1968,8 @@ static void enqueue_inverse_pipeline_partial(GpuPrp& gpu, cl_uint skip_chunk) {
     enqueue_kernel(gpu, last_kernel.first, global, local_ptr, "enqueue last_stage_dit_unweight", "last_stage_dit_unweight");
 }
 
+static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu);
+
 static void enqueue_square_mod(GpuPrp& gpu, cl_uint center_max = 0) {
     const cl_uint plan_log_n = gpu.log_n ? gpu.log_n : static_cast<cl_uint>(gpu.stages.size());
     const bool cond_log_n_1024 = plan_log_n >= 20u;
@@ -1993,6 +1996,12 @@ static void enqueue_square_mod(GpuPrp& gpu, cl_uint center_max = 0) {
             << " local_block_override=" << g_local_block_lds_override
             << " local_block_disabled=" << (g_local_block_lds_disabled ? 1 : 0)
             << "\n";
+    }
+
+    if (g_single_center_mode == "halfreal") {
+        enqueue_square_mod_single_halfreal(gpu);
+        g_last_local_block_lds = 0;
+        return;
     }
 
     g_last_local_block_lds = 0;
@@ -2072,6 +2081,7 @@ static void enqueue_square_mod(GpuPrp& gpu, cl_uint center_max = 0) {
     }
     enqueue_inverse_pipeline(gpu);
 }
+
 
 static void ensure_carry_buffers(GpuPrp& gpu) {
     const cl_uint n_u32 = static_cast<cl_uint>(gpu.n);
@@ -2995,6 +3005,122 @@ struct CrtLdsPlanStep {
     cl_uint radix;
     bool global_stage;
 };
+
+
+static CrtFusedKernels& single_halfreal_kernels(cl_program program) {
+    static std::map<cl_program, CrtFusedKernels*> cache;
+    auto& ptr = cache[program];
+    if (!ptr) ptr = new CrtFusedKernels(program);
+    return *ptr;
+}
+
+static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
+    if (gpu.n < 2u || (gpu.n & 1u)) throw std::runtime_error("single halfreal mode requires an even transform length");
+    CrtFusedKernels& fk = single_halfreal_kernels(gpu.program);
+    if (!fk.halfreal_pack61 || !fk.halfreal_center61 || !fk.halfreal_unpack61 ||
+        !fk.fwd_r2_61 || !fk.fwd_r4_61 || !fk.fwd_r8_61 || !fk.inv_r2_61 || !fk.inv_r4_61 || !fk.inv_r8_61) {
+        throw std::runtime_error("single halfreal kernels are missing from the OpenCL program");
+    }
+
+    const cl_uint n = static_cast<cl_uint>(gpu.n);
+    const cl_uint m = n >> 1;
+    const cl_uint p = gpu.exponent_p;
+    const cl_uint logm = gpu.log_n - 1u;
+    const size_t local64 = 64u;
+    const size_t g_m64 = round_up_size((size_t)m, local64);
+    const size_t g_center64 = round_up_size((size_t)(m / 2u + 1u), local64);
+    const cl_uint flags = crt_halfreal_effective_flags61();
+    const bool flags_are_linear = ((flags & (1u | 16u)) == 0u);
+    const bool linear_center_default = flags_are_linear;
+    const bool linear_center = parse_bool_env("PRMERS_SINGLE_HALFREAL_LINEAR_CENTER", linear_center_default);
+    if (linear_center && !flags_are_linear) throw std::runtime_error("PRMERS_SINGLE_HALFREAL_LINEAR_CENTER requires flags without digitrev/bitrev bits");
+    if (linear_center && !fk.halfreal_bitrev_swap61) throw std::runtime_error("single halfreal linear-center requested but bitrev-swap kernel is missing");
+
+    auto pack = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_pack61, arg, gpu.bufDigits, "set single half pack digits");
+        set_karg_mem(fk.halfreal_pack61, arg, gpu.bufField, "set single half pack a");
+        set_karg(fk.halfreal_pack61, arg, n, "set single half pack n");
+        set_karg(fk.halfreal_pack61, arg, p, "set single half pack p");
+        set_karg(fk.halfreal_pack61, arg, gpu.lr2, "set single half pack lr2");
+        enqueue_kernel(gpu, fk.halfreal_pack61, g_m64, &local64, "enqueue single half pack", "single_halfreal_pack_weight");
+    };
+    auto center = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_center61, arg, gpu.bufField, "set single half center a");
+        set_karg_mem(fk.halfreal_center61, arg, gpu.bufTwFwd, "set single half center twf");
+        set_karg_mem(fk.halfreal_center61, arg, gpu.bufTwInv, "set single half center twi");
+        set_karg(fk.halfreal_center61, arg, n, "set single half center n");
+        set_karg(fk.halfreal_center61, arg, flags, "set single half center flags");
+        enqueue_kernel(gpu, fk.halfreal_center61, g_center64, &local64, "enqueue single half center", "single_halfreal_center");
+    };
+    auto bitrev_swap = [&](const char* profile_name) {
+        if (!linear_center) return;
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_bitrev_swap61, arg, gpu.bufField, "set single half bitrev swap a");
+        set_karg(fk.halfreal_bitrev_swap61, arg, m, "set single half bitrev swap m");
+        enqueue_kernel(gpu, fk.halfreal_bitrev_swap61, g_m64, &local64, "enqueue single half bitrev swap", profile_name);
+    };
+    auto unpack = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_unpack61, arg, gpu.bufField, "set single half unpack a");
+        set_karg_mem(fk.halfreal_unpack61, arg, gpu.bufDigits, "set single half unpack digits");
+        set_karg(fk.halfreal_unpack61, arg, n, "set single half unpack n");
+        set_karg(fk.halfreal_unpack61, arg, p, "set single half unpack p");
+        set_karg(fk.halfreal_unpack61, arg, gpu.lr2, "set single half unpack lr2");
+        set_karg(fk.halfreal_unpack61, arg, logm, "set single half unpack logm");
+        enqueue_kernel(gpu, fk.halfreal_unpack61, g_m64, &local64, "enqueue single half unpack", "single_halfreal_unpack_unweight");
+    };
+    auto fwd = [&](const StageInfo& st, uint32_t radix) {
+        cl_kernel k = (radix == 8u) ? fk.fwd_r8_61 : (radix == 4u ? fk.fwd_r4_61 : fk.fwd_r2_61);
+        cl_uint arg = 0;
+        set_karg_mem(k, arg, gpu.bufField, "set single half fwd a");
+        set_karg_mem(k, arg, gpu.bufTwFwd, "set single half fwd tw");
+        set_karg(k, arg, m, "set single half fwd n");
+        set_karg(k, arg, st.len, "set single half fwd len");
+        enqueue_kernel(gpu, k, round_up_size(std::max<size_t>(1, m / radix), local64), &local64,
+                       "enqueue single half fwd", radix == 8u ? "single_halfreal_fwd_radix8" : (radix == 4u ? "single_halfreal_fwd_radix4" : "single_halfreal_fwd_radix2"));
+    };
+    auto inv = [&](const StageInfo& st, uint32_t radix) {
+        cl_kernel k = (radix == 8u) ? fk.inv_r8_61 : (radix == 4u ? fk.inv_r4_61 : fk.inv_r2_61);
+        cl_uint arg = 0;
+        set_karg_mem(k, arg, gpu.bufField, "set single half inv a");
+        set_karg_mem(k, arg, gpu.bufTwInv, "set single half inv tw");
+        set_karg(k, arg, m, "set single half inv n");
+        set_karg(k, arg, st.len, "set single half inv len");
+        enqueue_kernel(gpu, k, round_up_size(std::max<size_t>(1, m / radix), local64), &local64,
+                       "enqueue single half inv", radix == 8u ? "single_halfreal_inv_radix8" : (radix == 4u ? "single_halfreal_inv_radix4" : "single_halfreal_inv_radix2"));
+    };
+
+    auto run_forward = [&]() {
+        int i = (int)gpu.stages.size() - 1;
+        while (i >= 0 && gpu.stages[(size_t)i].len > m) --i;
+        while (i >= 0) {
+            const uint32_t len = gpu.stages[(size_t)i].len;
+            if (len >= 8u && i >= 2) { fwd(gpu.stages[(size_t)i], 8u); i -= 3; }
+            else if (len >= 4u && i >= 1) { fwd(gpu.stages[(size_t)i], 4u); i -= 2; }
+            else { fwd(gpu.stages[(size_t)i], 2u); --i; }
+        }
+    };
+    auto run_inverse = [&]() {
+        size_t i = 0;
+        while (i < gpu.stages.size() && gpu.stages[i].len <= m) {
+            const uint32_t len = gpu.stages[i].len;
+            if (len * 4u <= m && i + 2 < gpu.stages.size() && gpu.stages[i + 2].len <= m) { inv(gpu.stages[i], 8u); i += 3; }
+            else if (len * 2u <= m && i + 1 < gpu.stages.size() && gpu.stages[i + 1].len <= m) { inv(gpu.stages[i], 4u); i += 2; }
+            else { inv(gpu.stages[i], 2u); ++i; }
+        }
+    };
+
+    pack();
+    run_forward();
+    bitrev_swap("single_halfreal_bitrev_to_linear");
+    center();
+    bitrev_swap("single_halfreal_bitrev_from_linear");
+    run_inverse();
+    unpack();
+    return true;
+}
 
 
 static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedKernels& fk) {
@@ -6281,6 +6407,7 @@ struct Options {
     cl_uint crt_lds_stage = 0u;
     cl_uint crt_lds_tile = 2u;
     cl_uint crt_head_radix8 = 0u;
+    std::string single_center_mode = "normal";
 };
 
 static Options parse_args(int argc, char** argv) {
@@ -6396,6 +6523,17 @@ static Options parse_args(int argc, char** argv) {
             if (!(opt.crt_center_mode == "normal" || opt.crt_center_mode == "classic" || opt.crt_center_mode == "halfreal")) {
                 throw std::runtime_error("--crt-center-mode must be normal/classic or halfreal");
             }
+        } else if (arg == "--single-center-mode" || arg == "--field-center-mode") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value for --single-center-mode");
+            opt.single_center_mode = argv[++i];
+            if (opt.single_center_mode == "classic") opt.single_center_mode = "normal";
+            if (!(opt.single_center_mode == "normal" || opt.single_center_mode == "halfreal")) {
+                throw std::runtime_error("--single-center-mode must be normal/classic or halfreal");
+            }
+        } else if (arg == "--single-halfreal" || arg == "--field-halfreal") {
+            opt.single_center_mode = "halfreal";
+        } else if (arg == "--single-normal" || arg == "--field-normal") {
+            opt.single_center_mode = "normal";
         } else if (arg == "--crt-halfreal-validate" || arg == "--crt-halfreal-debug") {
             opt.crt_halfreal_validate = true;
         } else if (arg == "--crt-halfreal-validate-iters") {
@@ -7317,6 +7455,9 @@ int main(int argc, char** argv) {
         clwrap::g_planner_debug = opt.planner_debug;
         clwrap::g_local_block_lds_disabled = opt.local_block_lds_disabled;
         clwrap::g_local_block_lds_override = opt.local_block_lds;
+        clwrap::g_single_center_mode = opt.single_center_mode;
+        clwrap::g_crt_halfreal_flags61 = opt.crt_halfreal_flags61;
+        clwrap::g_crt_halfreal_autoprobe = false;
         const auto run_carry_cfg = clwrap::choose_carry_config(dev, layout.n, opt.carry_block, opt.carry_items);
         if (opt.autotune_center && !opt.center_max_user && !opt.selftest_only) {
             opt.center_max = autotune_center_max_gpu(opt.exponent, gpu, run_carry_cfg, opt.autotune_center_iters);
@@ -7341,6 +7482,7 @@ int main(int argc, char** argv) {
         std::cout << "carry config: block=" << run_carry_cfg.block_size << ", items/worker=" << run_carry_cfg.items_per_worker
                   << ", local=" << run_carry_cfg.local_size << ", blocks=" << run_carry_cfg.num_blocks
                   << ", center-max=" << opt.center_max
+                  << ", single-center-mode=" << opt.single_center_mode
                   << ", local-block-lds=" << lds_choice
                   << ", headroom-bits=" << opt.headroom_bits
                   << ", max-digit-width=" << ibdwt::max_digit_width_for_log2(opt.exponent, layout.ln)

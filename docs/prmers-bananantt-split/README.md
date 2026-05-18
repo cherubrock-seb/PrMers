@@ -125,6 +125,51 @@ All switches are optional. They are kept to compare implementations.
 | `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `0` | fused GF61/GF31 LDS512 center test; usually slower on RTX 3080 |
 | `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | `0` | disable LDS512 row core |
 
+
+## LDS and row-core knobs
+
+These options are common to the normal CRT half-real path and the mixed odd-radix row path. In mixed `odd * 2^m`, they act on the power-of-two row NTT, not on the odd PFA mapping itself.
+
+| option | values | default | effect |
+|---|---:|---:|---|
+| `--crt-local-square N` | `8,16,32,64,128,256,512` | `512` | size of the LDS center square block, forward + square + inverse inside one local block |
+| `--crt-lds-square N` | same | alias | alias for `--crt-local-square` |
+| `--crt-center N` | same | alias | older alias for `--crt-local-square` |
+| `--crt-lds-stage N` | `0,16,32,64,128,256,512` | NVIDIA `512`, AMD `0` | enables/disables intermediate LDS forward/inverse row stages |
+| `--crt-local-stage-max N` | same | alias | alias for `--crt-lds-stage` |
+| `--crt-lds-tile N` | `1,2` | `2` | tile factor used by the intermediate LDS stage kernels |
+| `--crt-local-stage-tile N` | same | alias | alias for `--crt-lds-tile` |
+| `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | env | `0` | disables the mixed odd LDS512 row core for comparison |
+
+Useful tests:
+
+```bash
+./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
+  --crt-center-mode halfreal --crt-halfreal-flags 48 \
+  --crt-local-square 512 --crt-lds-stage 512 --crt-lds-tile 2 \
+  --device 1 --iters 5000 --profile-kernels
+```
+
+Disable the intermediate LDS row stage:
+
+```bash
+./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
+  --crt-center-mode halfreal --crt-halfreal-flags 48 \
+  --crt-local-square 512 --crt-lds-stage 0 \
+  --device 1 --iters 5000 --profile-kernels
+```
+
+Try a smaller center square block:
+
+```bash
+./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
+  --crt-center-mode halfreal --crt-halfreal-flags 48 \
+  --crt-local-square 256 --crt-lds-stage 512 \
+  --device 1 --iters 5000 --profile-kernels
+```
+
+Current fastest RTX 3080 mixed-radix tests used `--crt-local-square 512 --crt-lds-stage 512 --crt-lds-tile 2` with the default tile14 shift-LUT odd head/tail.
+
 ## Validation
 
 The validator can compare one or more GPU squarings with an exact CPU square. It needs `-lgmp` at build time.
@@ -302,3 +347,23 @@ Use the normal path for comparison:
 This is not a final PRP implementation. 
 It is a POC validation and benchmarking branch for the mixed CRT/PFA odd-radix GPU layout.
 
+
+
+### Single-field half-real mode
+
+For standalone `--modulus gf61` or `--modulus gf31`, the default path remains the classic full-size field transform to avoid changing existing results.  The half-real single-field path can be selected explicitly:
+
+```bash
+./prmers_opencl_prp 216091 --modulus gf61 --single-center-mode halfreal --crt-halfreal-flags 48
+./prmers_opencl_prp 216091 --modulus gf31 --single-center-mode halfreal --crt-halfreal-flags 48
+```
+
+Aliases:
+
+```text
+--single-halfreal        same as --single-center-mode halfreal
+--single-normal          same as --single-center-mode normal
+--field-center-mode      alias for --single-center-mode
+```
+
+The CRT options `--crt-local-square`, `--crt-lds-stage`, `--crt-lds-tile`, `--crt-edge-radix` still apply to the CRT paths.  `--single-center-mode` is only for standalone `gf61` / `gf31`.
