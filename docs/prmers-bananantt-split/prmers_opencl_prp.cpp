@@ -3036,6 +3036,14 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
     if (linear_center && !flags_are_linear) throw std::runtime_error("PRMERS_SINGLE_HALFREAL_LINEAR_CENTER requires flags without digitrev/bitrev bits");
     if (linear_center && !fk.halfreal_bitrev_swap61) throw std::runtime_error("single halfreal linear-center requested but bitrev-swap kernel is missing");
 
+    const bool fast512_req = parse_bool_env("PRMERS_SINGLE_HALFREAL_FAST512", true);
+    const bool fast512_pair_req = parse_bool_env("PRMERS_SINGLE_HALFREAL_LDS_PAIR", true);
+    const bool fast512 = fast512_req && fast512_pair_req && !linear_center &&
+                         m >= 512u * 512u && ((m & 511u) == 0u) &&
+                         (flags & 16u) && (flags & 32u) &&
+                         fk.halfreal_head_lds512_61 && fk.halfreal_tail_lds512_unpack61 && fk.halfreal_lds512_pair61;
+    const cl_uint fast512_head_base = fast512 ? (m >> 9) : m;
+
     auto pack = [&]() {
         cl_uint arg = 0;
         set_karg_mem(fk.halfreal_pack61, arg, gpu.bufDigits, "set single half pack digits");
@@ -3045,6 +3053,17 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
         set_karg(fk.halfreal_pack61, arg, gpu.lr2, "set single half pack lr2");
         enqueue_kernel(gpu, fk.halfreal_pack61, g_m64, &local64, "enqueue single half pack", "single_halfreal_pack_weight");
     };
+    auto head_lds512_pack = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_head_lds512_61, arg, gpu.bufDigits, "set single half head LDS512 digits");
+        set_karg_mem(fk.halfreal_head_lds512_61, arg, gpu.bufField, "set single half head LDS512 a");
+        set_karg_mem(fk.halfreal_head_lds512_61, arg, gpu.bufTwFwd, "set single half head LDS512 tw");
+        set_karg(fk.halfreal_head_lds512_61, arg, n, "set single half head LDS512 n");
+        set_karg(fk.halfreal_head_lds512_61, arg, p, "set single half head LDS512 p");
+        set_karg(fk.halfreal_head_lds512_61, arg, gpu.lr2, "set single half head LDS512 lr2");
+        const size_t global = (size_t)(m >> 9) * local64;
+        enqueue_kernel(gpu, fk.halfreal_head_lds512_61, global, &local64, "enqueue single half head LDS512", "single_halfreal_head_lds512");
+    };
     auto center = [&]() {
         cl_uint arg = 0;
         set_karg_mem(fk.halfreal_center61, arg, gpu.bufField, "set single half center a");
@@ -3053,6 +3072,17 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
         set_karg(fk.halfreal_center61, arg, n, "set single half center n");
         set_karg(fk.halfreal_center61, arg, flags, "set single half center flags");
         enqueue_kernel(gpu, fk.halfreal_center61, g_center64, &local64, "enqueue single half center", "single_halfreal_center");
+    };
+    auto center_lds512_pair = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_lds512_pair61, arg, gpu.bufField, "set single half LDS512 pair a");
+        set_karg_mem(fk.halfreal_lds512_pair61, arg, gpu.bufTwFwd, "set single half LDS512 pair twf");
+        set_karg_mem(fk.halfreal_lds512_pair61, arg, gpu.bufTwInv, "set single half LDS512 pair twi");
+        set_karg(fk.halfreal_lds512_pair61, arg, n, "set single half LDS512 pair n");
+        set_karg(fk.halfreal_lds512_pair61, arg, flags, "set single half LDS512 pair flags");
+        const cl_uint pair_blocks = (m >> 10) + 1u;
+        const size_t global = (size_t)pair_blocks * local64;
+        enqueue_kernel(gpu, fk.halfreal_lds512_pair61, global, &local64, "enqueue single half LDS512 pair", "single_halfreal_lds512_pair");
     };
     auto bitrev_swap = [&](const char* profile_name) {
         if (!linear_center) return;
@@ -3070,6 +3100,18 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
         set_karg(fk.halfreal_unpack61, arg, gpu.lr2, "set single half unpack lr2");
         set_karg(fk.halfreal_unpack61, arg, logm, "set single half unpack logm");
         enqueue_kernel(gpu, fk.halfreal_unpack61, g_m64, &local64, "enqueue single half unpack", "single_halfreal_unpack_unweight");
+    };
+    auto tail_lds512_unpack = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.halfreal_tail_lds512_unpack61, arg, gpu.bufField, "set single half tail LDS512 a");
+        set_karg_mem(fk.halfreal_tail_lds512_unpack61, arg, gpu.bufTwInv, "set single half tail LDS512 tw");
+        set_karg_mem(fk.halfreal_tail_lds512_unpack61, arg, gpu.bufDigits, "set single half tail LDS512 digits");
+        set_karg(fk.halfreal_tail_lds512_unpack61, arg, n, "set single half tail LDS512 n");
+        set_karg(fk.halfreal_tail_lds512_unpack61, arg, p, "set single half tail LDS512 p");
+        set_karg(fk.halfreal_tail_lds512_unpack61, arg, gpu.lr2, "set single half tail LDS512 lr2");
+        set_karg(fk.halfreal_tail_lds512_unpack61, arg, logm, "set single half tail LDS512 logm");
+        const size_t global = (size_t)(m >> 9) * local64;
+        enqueue_kernel(gpu, fk.halfreal_tail_lds512_unpack61, global, &local64, "enqueue single half tail LDS512", "single_halfreal_tail_lds512");
     };
     auto fwd = [&](const StageInfo& st, uint32_t radix) {
         cl_kernel k = (radix == 8u) ? fk.fwd_r8_61 : (radix == 4u ? fk.fwd_r4_61 : fk.fwd_r2_61);
@@ -3094,9 +3136,10 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
 
     auto run_forward = [&]() {
         int i = (int)gpu.stages.size() - 1;
-        while (i >= 0 && gpu.stages[(size_t)i].len > m) --i;
+        while (i >= 0 && gpu.stages[(size_t)i].len > fast512_head_base) --i;
         while (i >= 0) {
             const uint32_t len = gpu.stages[(size_t)i].len;
+            if (fast512 && len <= 512u) break;
             if (len >= 8u && i >= 2) { fwd(gpu.stages[(size_t)i], 8u); i -= 3; }
             else if (len >= 4u && i >= 1) { fwd(gpu.stages[(size_t)i], 4u); i -= 2; }
             else { fwd(gpu.stages[(size_t)i], 2u); --i; }
@@ -3106,22 +3149,28 @@ static bool enqueue_square_mod_single_halfreal(GpuPrp& gpu) {
         size_t i = 0;
         while (i < gpu.stages.size() && gpu.stages[i].len <= m) {
             const uint32_t len = gpu.stages[i].len;
-            if (len * 4u <= m && i + 2 < gpu.stages.size() && gpu.stages[i + 2].len <= m) { inv(gpu.stages[i], 8u); i += 3; }
-            else if (len * 2u <= m && i + 1 < gpu.stages.size() && gpu.stages[i + 1].len <= m) { inv(gpu.stages[i], 4u); i += 2; }
+            if (fast512 && len <= 512u) { ++i; continue; }
+            if (len > fast512_head_base) break;
+            if (len * 4u <= fast512_head_base && i + 2 < gpu.stages.size() && gpu.stages[i + 2].len <= fast512_head_base) { inv(gpu.stages[i], 8u); i += 3; }
+            else if (len * 2u <= fast512_head_base && i + 1 < gpu.stages.size() && gpu.stages[i + 1].len <= fast512_head_base) { inv(gpu.stages[i], 4u); i += 2; }
             else { inv(gpu.stages[i], 2u); ++i; }
         }
     };
 
-    pack();
+    if (fast512) head_lds512_pack();
+    else pack();
     run_forward();
-    bitrev_swap("single_halfreal_bitrev_to_linear");
-    center();
-    bitrev_swap("single_halfreal_bitrev_from_linear");
+    if (fast512) center_lds512_pair();
+    else {
+        bitrev_swap("single_halfreal_bitrev_to_linear");
+        center();
+        bitrev_swap("single_halfreal_bitrev_from_linear");
+    }
     run_inverse();
-    unpack();
+    if (fast512) tail_lds512_unpack();
+    else unpack();
     return true;
 }
-
 
 static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedKernels& fk) {
     if (!fk.mixed_odd_available()) return false;

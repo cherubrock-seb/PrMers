@@ -358,6 +358,19 @@ For standalone `--modulus gf61` or `--modulus gf31`, the default path remains th
 ./prmers_opencl_prp 216091 --modulus gf31 --single-center-mode halfreal --crt-halfreal-flags 48
 ```
 
+With `--crt-halfreal-flags 48`, the single-field half-real path now uses the fast LDS512 route by default when possible:
+
+```text
+pack+first 512 DIF in LDS -> residual row NTT -> LDS512 pair center -> residual inverse -> last 512 DIT+unpack in LDS
+```
+
+Runtime switches:
+
+```text
+PRMERS_SINGLE_HALFREAL_FAST512=0      disable the standalone fast LDS512 head/center/tail path
+PRMERS_SINGLE_HALFREAL_LDS_PAIR=0    disable the standalone LDS512 pair center path
+```
+
 Aliases:
 
 ```text
