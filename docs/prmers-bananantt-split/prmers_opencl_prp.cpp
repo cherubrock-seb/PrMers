@@ -2571,12 +2571,15 @@ struct CrtFusedKernels {
     cl_kernel mixed_lds512_pair61 = nullptr;
     cl_kernel mixed_lds512_pair31 = nullptr;
     cl_kernel mixed_lds512_pair_both = nullptr;
+    cl_kernel mixed_fwd_lds512_both = nullptr;
+    cl_kernel mixed_inv_lds512_both = nullptr;
     cl_kernel mixed_unpack61 = nullptr;
     cl_kernel mixed_unpack31 = nullptr;
     cl_kernel mixed_pack_odd_fwd61 = nullptr;
     cl_kernel mixed_pack_odd_fwd31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile7_61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile7_31 = nullptr;
+    cl_kernel mixed_pack_odd_fwd_tile7_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_both_shift = nullptr;
@@ -2698,12 +2701,15 @@ struct CrtFusedKernels {
         mixed_lds512_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61");
         mixed_lds512_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_31");
         mixed_lds512_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61x31");
+        mixed_fwd_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61x31_512opt");
+        mixed_inv_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61x31_512opt");
         mixed_unpack61 = load_kernel_optional(program, "gf61_crt_mixed_unpack_unweight_61");
         mixed_unpack31 = load_kernel_optional(program, "gf61_crt_mixed_unpack_unweight_31");
         mixed_pack_odd_fwd61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_61");
         mixed_pack_odd_fwd31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_31");
         mixed_pack_odd_fwd_tile7_61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_61");
         mixed_pack_odd_fwd_tile7_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_31");
+        mixed_pack_odd_fwd_tile7_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31");
         mixed_pack_odd_fwd_shift61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_61");
         mixed_pack_odd_fwd_shift31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_31");
         mixed_pack_odd_fwd_both_shift = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_both_shift");
@@ -2824,12 +2830,15 @@ struct CrtFusedKernels {
         if (mixed_lds512_pair61) clReleaseKernel(mixed_lds512_pair61);
         if (mixed_lds512_pair31) clReleaseKernel(mixed_lds512_pair31);
         if (mixed_lds512_pair_both) clReleaseKernel(mixed_lds512_pair_both);
+        if (mixed_fwd_lds512_both) clReleaseKernel(mixed_fwd_lds512_both);
+        if (mixed_inv_lds512_both) clReleaseKernel(mixed_inv_lds512_both);
         if (mixed_unpack61) clReleaseKernel(mixed_unpack61);
         if (mixed_unpack31) clReleaseKernel(mixed_unpack31);
         if (mixed_pack_odd_fwd61) clReleaseKernel(mixed_pack_odd_fwd61);
         if (mixed_pack_odd_fwd31) clReleaseKernel(mixed_pack_odd_fwd31);
         if (mixed_pack_odd_fwd_tile7_61) clReleaseKernel(mixed_pack_odd_fwd_tile7_61);
         if (mixed_pack_odd_fwd_tile7_31) clReleaseKernel(mixed_pack_odd_fwd_tile7_31);
+        if (mixed_pack_odd_fwd_tile7_both) clReleaseKernel(mixed_pack_odd_fwd_tile7_both);
         if (mixed_pack_odd_fwd_shift61) clReleaseKernel(mixed_pack_odd_fwd_shift61);
         if (mixed_pack_odd_fwd_shift31) clReleaseKernel(mixed_pack_odd_fwd_shift31);
         if (mixed_pack_odd_fwd_both_shift) clReleaseKernel(mixed_pack_odd_fwd_both_shift);
@@ -2859,9 +2868,11 @@ struct CrtFusedKernels {
     bool mixed_odd_shift_lut_available() const {
         return mixed_pack_odd_fwd_shift61 && mixed_pack_odd_fwd_shift31 && mixed_odd_inv_precrt_coeffhi_shift;
     }
-    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr; }
+    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr || mixed_pack_odd_fwd_tile7_both != nullptr; }
     bool mixed_odd_pack_tile7_available() const { return mixed_pack_odd_fwd_tile7_61 && mixed_pack_odd_fwd_tile7_31; }
+    bool mixed_odd_pack_tile7_both_available() const { return mixed_pack_odd_fwd_tile7_both != nullptr; }
     bool mixed_odd_center_both_available() const { return mixed_lds512_pair_both != nullptr; }
+    bool mixed_odd_lds512_both_available() const { return mixed_fwd_lds512_both != nullptr && mixed_inv_lds512_both != nullptr; }
 
     bool mixed_odd_precrt_coeffhi_available() const {
         return mixed_odd_inv_precrt_coeffhi != nullptr || mixed_odd_inv_precrt_coeffhi_tile7 != nullptr ||
@@ -3021,13 +3032,17 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const bool use_mixed_shift_lut = parse_bool_env("PRMERS_CRT_MIXED_SHIFT_LUT", false) &&
                                      fk.mixed_odd_shift_lut_available() &&
                                      g61.bufUnweightShift && g31.bufUnweightShift;
-    const bool use_mixed_pack_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
-                                     use_mixed_fused_edges && use_mixed_shift_lut && fk.mixed_odd_pack_both_available();
     const bool use_mixed_pack_tile7 = parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE7", true) &&
                                       use_mixed_fused_edges && !use_mixed_shift_lut && odd == 9u &&
                                       fk.mixed_odd_pack_tile7_available();
+    const bool use_mixed_pack_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
+                                     use_mixed_fused_edges &&
+                                     ((use_mixed_shift_lut && fk.mixed_pack_odd_fwd_both_shift != nullptr) ||
+                                      (use_mixed_pack_tile7 && fk.mixed_odd_pack_tile7_both_available()));
     const bool use_mixed_center_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false) &&
                                        use_mixed_lds512 && fk.mixed_odd_center_both_available();
+    const bool use_mixed_lds512_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) &&
+                                       use_mixed_lds512 && mixed_lds512_opt && fk.mixed_odd_lds512_both_available();
 
     auto pack61 = [&]() {
         cl_uint arg = 0;
@@ -3052,19 +3067,36 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_pack31, g_storage, &local64, "enqueue mixed pack31", "crt_mixed_pack_weight_31");
     };
     auto pack_odd_fwd_both = [&]() {
-        cl_uint arg = 0;
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufDigits, "set mixed pack+odd both digits");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufField, "set mixed pack+odd both a61");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufField, "set mixed pack+odd both a31");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufOddFwd, "set mixed pack+odd both mat61");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufOddFwd, "set mixed pack+odd both mat31");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufUnweightShift, "set mixed pack+odd both shift61");
-        set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufUnweightShift, "set mixed pack+odd both shift31");
-        set_karg(fk.mixed_pack_odd_fwd_both_shift, arg, odd, "set mixed pack+odd both odd");
-        set_karg(fk.mixed_pack_odd_fwd_both_shift, arg, pow2_n, "set mixed pack+odd both pow2_n");
-        enqueue_kernel(g61, fk.mixed_pack_odd_fwd_both_shift, g_row_m, &local64,
-                       "enqueue mixed fused pack+odd both", "crt_mixed_pack_weight_odd_fwd_both_shift");
-        
+        if (use_mixed_pack_tile7 && fk.mixed_pack_odd_fwd_tile7_both) {
+            cl_uint arg = 0;
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufDigits, "set mixed pack+odd tile7 both digits");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufField, "set mixed pack+odd tile7 both a61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g31.bufField, "set mixed pack+odd tile7 both a31");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufOddFwd, "set mixed pack+odd tile7 both mat61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g31.bufOddFwd, "set mixed pack+odd tile7 both mat31");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, n, "set mixed pack+odd tile7 both n");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, p, "set mixed pack+odd tile7 both p");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.lr2, "set mixed pack+odd tile7 both lr2_61");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, g31.lr2, "set mixed pack+odd tile7 both lr2_31");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, odd, "set mixed pack+odd tile7 both odd");
+            set_karg(fk.mixed_pack_odd_fwd_tile7_both, arg, pow2_n, "set mixed pack+odd tile7 both pow2_n");
+            const size_t head_global = round_up_size(((static_cast<size_t>(row_m) + 6u) / 7u) * 64u, local64);
+            enqueue_kernel(g61, fk.mixed_pack_odd_fwd_tile7_both, head_global, &local64,
+                           "enqueue mixed fused pack+odd tile7 both", "crt_mixed_pack_weight_odd_fwd_tile7_61x31");
+        } else {
+            cl_uint arg = 0;
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufDigits, "set mixed pack+odd both digits");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufField, "set mixed pack+odd both a61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufField, "set mixed pack+odd both a31");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufOddFwd, "set mixed pack+odd both mat61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufOddFwd, "set mixed pack+odd both mat31");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g61.bufUnweightShift, "set mixed pack+odd both shift61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_both_shift, arg, g31.bufUnweightShift, "set mixed pack+odd both shift31");
+            set_karg(fk.mixed_pack_odd_fwd_both_shift, arg, odd, "set mixed pack+odd both odd");
+            set_karg(fk.mixed_pack_odd_fwd_both_shift, arg, pow2_n, "set mixed pack+odd both pow2_n");
+            enqueue_kernel(g61, fk.mixed_pack_odd_fwd_both_shift, g_row_m, &local64,
+                           "enqueue mixed fused pack+odd both", "crt_mixed_pack_weight_odd_fwd_both_shift");
+        }
         cl_event both_ready = enqueue_queue_marker(g61, "mixed odd pack both ready");
         set_pending_wait_event(g31, both_ready);
         if (g61.queue != g31.queue) clFlush(g61.queue);
@@ -3228,6 +3260,47 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
         enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS inv31", radix == 512u ? "crt_mixed_lds512_inverse_31" : "crt_mixed_lds_inverse_31");
     };
+    auto sync_g31_to_g61 = [&](const char* label) {
+        cl_event ev = enqueue_queue_marker(g31, label);
+        set_pending_wait_event(g61, ev);
+        if (g31.queue != g61.queue) clFlush(g31.queue);
+    };
+    auto sync_g61_to_g31 = [&](const char* label) {
+        cl_event ev = enqueue_queue_marker(g61, label);
+        set_pending_wait_event(g31, ev);
+        if (g61.queue != g31.queue) clFlush(g61.queue);
+    };
+    auto lds_fwd_both = [&](cl_uint len, cl_uint radix) {
+        sync_g31_to_g61("mixed odd gf31 ready for fused lds fwd");
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g61.bufField, "set mixed lds fwd both a61");
+        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g31.bufField, "set mixed lds fwd both a31");
+        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g61.bufTwFwd, "set mixed lds fwd both tw61");
+        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g31.bufTwFwd, "set mixed lds fwd both tw31");
+        set_karg(fk.mixed_fwd_lds512_both, arg, storage, "set mixed lds fwd both storage");
+        set_karg(fk.mixed_fwd_lds512_both, arg, len, "set mixed lds fwd both len");
+        set_karg(fk.mixed_fwd_lds512_both, arg, radix, "set mixed lds fwd both radix");
+        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
+        enqueue_kernel(g61, fk.mixed_fwd_lds512_both, groups * local64, &local64,
+                       "enqueue mixed LDS fwd both", "crt_mixed_lds512_forward_61x31");
+        sync_g61_to_g31("mixed odd fused lds fwd ready");
+    };
+    auto lds_inv_both = [&](cl_uint base_len, cl_uint radix) {
+        sync_g31_to_g61("mixed odd gf31 ready for fused lds inv");
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_inv_lds512_both, arg, g61.bufField, "set mixed lds inv both a61");
+        set_karg_mem(fk.mixed_inv_lds512_both, arg, g31.bufField, "set mixed lds inv both a31");
+        set_karg_mem(fk.mixed_inv_lds512_both, arg, g61.bufTwInv, "set mixed lds inv both tw61");
+        set_karg_mem(fk.mixed_inv_lds512_both, arg, g31.bufTwInv, "set mixed lds inv both tw31");
+        set_karg(fk.mixed_inv_lds512_both, arg, storage, "set mixed lds inv both storage");
+        set_karg(fk.mixed_inv_lds512_both, arg, base_len, "set mixed lds inv both base_len");
+        set_karg(fk.mixed_inv_lds512_both, arg, radix, "set mixed lds inv both radix");
+        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
+        enqueue_kernel(g61, fk.mixed_inv_lds512_both, groups * local64, &local64,
+                       "enqueue mixed LDS inv both", "crt_mixed_lds512_inverse_61x31");
+        sync_g61_to_g31("mixed odd fused lds inv ready");
+    };
+
     auto center61 = [&]() {
         cl_uint arg = 0;
         set_karg_mem(fk.mixed_center61, arg, g61.bufField, "set mixed center61 a");
@@ -3433,8 +3506,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         while (cur > 512u) {
             cl_uint radix = floor_pow2_leq(std::min<cl_uint>(512u, cur / 512u));
             if (radix < 2u) radix = 2u;
-            lds_fwd61(cur, radix);
-            lds_fwd31(cur, radix);
+            if (use_mixed_lds512_both && radix == 512u) {
+                lds_fwd_both(cur, radix);
+            } else {
+                lds_fwd61(cur, radix);
+                lds_fwd31(cur, radix);
+            }
             cur /= radix;
         }
         if (use_mixed_center_both) {
@@ -3447,8 +3524,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         while (cur < row_m) {
             cl_uint radix = floor_pow2_leq(std::min<cl_uint>(512u, row_m / cur));
             if (radix < 2u) radix = 2u;
-            lds_inv61(cur, radix);
-            lds_inv31(cur, radix);
+            if (use_mixed_lds512_both && radix == 512u) {
+                lds_inv_both(cur, radix);
+            } else {
+                lds_inv61(cur, radix);
+                lds_inv31(cur, radix);
+            }
             cur *= radix;
         }
     } else {
@@ -5805,19 +5886,27 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                                                   crt_fused.mixed_odd_inv_precrt_coeffhi_outpar;
         const bool mixed_shift_lut_enabled = parse_bool_env("PRMERS_CRT_MIXED_SHIFT_LUT", false) &&
                                              crt_fused.mixed_odd_shift_lut_available();
+        const bool mixed_pack_tile7_enabled = parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE7", true) &&
+                                             !mixed_shift_lut_enabled &&
+                                             clwrap::g_crt_odd_radix == 9u &&
+                                             crt_fused.mixed_odd_pack_tile7_available();
         const bool mixed_pack_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
-                                             crt_fused.mixed_odd_pack_both_available();
+                                             ((mixed_shift_lut_enabled && crt_fused.mixed_pack_odd_fwd_both_shift != nullptr) ||
+                                              (mixed_pack_tile7_enabled && crt_fused.mixed_odd_pack_tile7_both_available()));
         const bool mixed_center_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false) &&
                                                crt_fused.mixed_odd_center_both_available();
+        const bool mixed_lds_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) &&
+                                            crt_fused.mixed_odd_lds512_both_available();
         std::cout << "CRT pipeline: mixed odd CRT/PFA row half-real LDS512; odd=" << clwrap::g_crt_odd_radix
                   << ", rows use power-of-two half-real NTT, Garner/carry stays fused, queues="
                   << ((gpu31.queue != gpu61.queue) ? "async" : "shared")
                   << ", tail=" << (mixed_precrt_split_possible ? "split-preCRT-coeffhi" : (mixed_precrt_possible ? "preCRT-coeffhi-anybase" : "old-unpack+Garner"))
                   << ", precrt-tile7=" << (mixed_precrt_tile7_enabled ? "on" : "off")
                   << ", precrt-outpar=" << (mixed_precrt_outpar_enabled ? "on" : "off")
-                  << ", pack-tile7=" << ((parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE7", true) && crt_fused.mixed_odd_pack_tile7_available()) ? "on" : "off")
+                  << ", pack-tile7=" << (mixed_pack_tile7_enabled ? "on" : "off")
                   << ", shift-lut=" << (mixed_shift_lut_enabled ? "on" : "off")
                   << ", fuse-pack-both=" << (mixed_pack_both_enabled ? "on" : "off")
+                  << ", fuse-lds-both=" << (mixed_lds_both_enabled ? "on" : "off")
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
     } else if (use_crt_defused_fast) {
