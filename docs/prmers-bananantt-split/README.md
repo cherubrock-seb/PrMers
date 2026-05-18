@@ -44,6 +44,9 @@ Default mode:
 PRMERS_CRT_MIXED_PACK_TILE7=1
 PRMERS_CRT_MIXED_PRECRT_TILE7=1
 PRMERS_CRT_MIXED_PRECRT_COEFFHI=1
+PRMERS_CRT_MIXED_FUSE_PACK_BOTH=1
+PRMERS_CRT_MIXED_FUSE_LDS_BOTH=1
+PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=1
 ```
 
 ## Field modes
@@ -114,8 +117,9 @@ All switches are optional. They are kept to compare implementations.
 | `PRMERS_CRT_MIXED_PRECRT_OUTPAR=0/1` | `0` | one-output-per-thread tail test |
 | `PRMERS_CRT_MIXED_PRECRT_SPLIT=0/1` | `0` | split residue tail before preCRT combine |
 | `PRMERS_CRT_MIXED_SHIFT_LUT=0/1` | `0` | shift lookup table test |
-| `PRMERS_CRT_MIXED_FUSE_PACK_BOTH=0/1` | `0` | fused GF61/GF31 pack test |
-| `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `0` | fused GF61/GF31 center test |
+| `PRMERS_CRT_MIXED_FUSE_PACK_BOTH=0/1` | `1` | fused GF61/GF31 tile7 head or shift head |
+| `PRMERS_CRT_MIXED_FUSE_LDS_BOTH=0/1` | `1` | fused GF61/GF31 LDS512 forward/inverse row stages |
+| `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `1` | fused GF61/GF31 LDS512 center |
 | `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | `0` | disable LDS512 row core |
 
 ## Validation
