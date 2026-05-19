@@ -3223,6 +3223,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const bool mixed_lds512_disabled = parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false);
     const bool mixed_lds512_opt = parse_bool_env("PRMERS_CRT_MIXED_LDS512_OPT", true);
     const bool use_mixed_lds512 = !mixed_lds512_disabled && row_m >= 512u &&
+                                  g_crt_lds_stage >= 512u && g_crt_center_chunk >= 512u &&
                                   (flags61 & 16u) && (flags31 & 16u) &&
                                   fk.mixed_odd_lds512_available();
     const bool use_mixed_fused_edges = parse_bool_env("PRMERS_CRT_MIXED_FUSE_ODD_EDGES", true) &&
@@ -4523,14 +4524,22 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             fk.fwd_lds_stage_61_512opt && fk.inv_lds_stage_61_512opt &&
             fk.fwd_lds_stage_31_512opt && fk.inv_lds_stage_31_512opt;
         const bool half_head_lds_req = parse_bool_env("PRMERS_CRT_HALFREAL_HEAD_LDS512", true);
-        const uint32_t half_head_env = crt_tune::env_u32("PRMERS_CRT_HALFREAL_HEAD_LDS", 512u, 0u, 512u);
+        const char* half_head_env_s = std::getenv("PRMERS_CRT_HALFREAL_HEAD_LDS");
+        const bool half_head_exact = (half_head_env_s && *half_head_env_s);
+        const uint32_t half_head_max_raw = crt_tune::env_u32("PRMERS_CRT_HALFREAL_HEAD_LDS_MAX", 1024u, 8u, 1024u);
+        const uint32_t half_head_max = crt_tune::round_pow2_clamped(half_head_max_raw, 8u, 1024u);
+        const uint32_t half_head_default_raw = (g_crt_lds_stage >= 512u) ? 1024u : ((g_crt_lds_stage >= 8u) ? g_crt_lds_stage : 512u);
+        const uint32_t half_head_default = half_head_exact ? half_head_default_raw : std::min<uint32_t>(half_head_default_raw, half_head_max);
+        uint32_t half_head_env = crt_tune::env_u32("PRMERS_CRT_HALFREAL_HEAD_LDS", half_head_default, 0u, 1024u);
+        if (!half_head_exact && half_head_env > half_head_max) half_head_env = half_head_max;
         auto half_valid_head_radix = [&](uint32_t r) -> bool {
-            return r == 512u || r == 256u || r == 128u || r == 64u || r == 32u || r == 16u || r == 8u;
+            return r == 1024u || r == 512u || r == 256u || r == 128u || r == 64u || r == 32u || r == 16u || r == 8u;
         };
         const bool half_force_generic_head = parse_bool_env("PRMERS_CRT_HALFREAL_HEAD_LDS_GENERIC", false);
 
         
-        const bool half_allow_mixed_residual = parse_bool_env("PRMERS_CRT_HALFREAL_ALLOW_MIXED_RESIDUAL", false);
+        const bool half_strict_residual = parse_bool_env("PRMERS_CRT_HALFREAL_STRICT_RESIDUAL", false);
+        const bool half_allow_mixed_residual = parse_bool_env("PRMERS_CRT_HALFREAL_ALLOW_MIXED_RESIDUAL", !half_strict_residual);
         auto half_residual_is_radix8_clean = [&](uint32_t r) -> bool {
             if (!half_use_lds512) return true;
             if (r == 0u || (m % r) != 0u) return false;
@@ -4540,30 +4549,36 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             while (residual > 1u && (residual % 8u) == 0u) residual /= 8u;
             return residual == 1u;
         };
+        auto half_head_can_use = [&](uint32_t r) -> bool {
+            if (!half_valid_head_radix(r)) return false;
+            const bool m_ok = (m >= r * 512u) && ((m % r) == 0u);
+            const bool residual_ok = half_allow_mixed_residual || half_residual_is_radix8_clean(r);
+            const bool have_special_512 = (r == 512u) && !half_force_generic_head &&
+                fk.halfreal_head_lds512_61 && fk.halfreal_head_lds512_31 &&
+                fk.halfreal_tail_lds512_unpack61 && fk.halfreal_tail_lds512_unpack31;
+            const bool have_generic = fk.halfreal_head_ldspow2_61 && fk.halfreal_head_ldspow2_31 &&
+                fk.halfreal_tail_ldspow2_unpack61 && fk.halfreal_tail_ldspow2_unpack31;
+            return m_ok && residual_ok && (have_special_512 || have_generic);
+        };
 
         uint32_t half_head_tail_radix = 0u;
-        if (half_head_lds_req && half_use_lds512) {
-            uint32_t r = half_valid_head_radix(half_head_env) ? half_head_env : 512u;
-            while (r >= 8u) {
-                const bool m_ok = (m >= r * 512u) && ((m % r) == 0u);
-                const bool residual_ok = half_allow_mixed_residual || half_residual_is_radix8_clean(r);
-                const bool have_special_512 = (r == 512u) && !half_force_generic_head &&
-                    fk.halfreal_head_lds512_61 && fk.halfreal_head_lds512_31 &&
-                    fk.halfreal_tail_lds512_unpack61 && fk.halfreal_tail_lds512_unpack31;
-                const bool have_generic = fk.halfreal_head_ldspow2_61 && fk.halfreal_head_ldspow2_31 &&
-                    fk.halfreal_tail_ldspow2_unpack61 && fk.halfreal_tail_ldspow2_unpack31;
-                if (m_ok && residual_ok && (have_special_512 || have_generic)) { half_head_tail_radix = r; break; }
-                
-                
-                r >>= 1u;
+        if (half_head_lds_req && g_crt_lds_stage >= 8u && half_head_env != 0u) {
+            uint32_t r = half_valid_head_radix(half_head_env) ? half_head_env : half_head_default;
+            if (half_head_exact) {
+                half_head_tail_radix = half_head_can_use(r) ? r : 0u;
+            } else {
+                if (!half_valid_head_radix(r)) r = 512u;
+                while (r >= 8u) {
+                    if (half_head_can_use(r)) { half_head_tail_radix = r; break; }
+                    r >>= 1u;
+                }
             }
         }
         const bool half_disable_pow2_headtail = parse_bool_env("PRMERS_CRT_HALFREAL_DISABLE_POW2_HEADTAIL", false);
         const bool half_force_generic_headtail = parse_bool_env("PRMERS_CRT_HALFREAL_FORCE_GENERIC_HEADTAIL", false);
         
         
-        if (half_head_tail_radix != 0u && half_head_tail_radix != 512u && half_head_tail_radix != 8u &&
-            (half_disable_pow2_headtail || !half_force_generic_headtail)) {
+        if (half_head_tail_radix != 0u && half_disable_pow2_headtail) {
             half_head_tail_radix = 0u;
         }
         const bool half_use_head_lds = (half_head_tail_radix != 0u);
@@ -4578,6 +4593,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             parse_bool_env("PRMERS_CRT_HALFREAL_HEAD_PRECRT", false) &&
             fk.halfreal_head_lds512_precrt;
         const uint32_t half_head_base_len = half_use_head_lds ? (m / half_head_tail_radix) : m;
+        (void)half_force_generic_headtail;
 
         
         const bool half_lds_pair_req = parse_bool_env(
@@ -6263,6 +6279,8 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", pack-tile14-shift=" << (mixed_pack_tile14_shift_enabled ? "on" : "off")
                   << ", pack-tile7=" << (mixed_pack_tile7_enabled ? "on" : "off")
                   << ", shift-lut=" << (mixed_shift_lut_enabled ? "on" : "off")
+                  << ", lds-stage=" << clwrap::g_crt_lds_stage
+                  << ", lds-square=" << clwrap::g_crt_center_chunk
                   << ", fuse-pack-both=" << (mixed_pack_both_enabled ? "on" : "off")
                   << ", fuse-lds-both=" << (mixed_lds_both_enabled ? "on" : "off")
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
@@ -6747,16 +6765,16 @@ static Options parse_args(int argc, char** argv) {
             if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
             opt.crt_center_chunk = static_cast<cl_uint>(std::stoul(argv[++i]));
             opt.user_crt_local_square = true;
-            if (opt.crt_center_chunk != 8u && opt.crt_center_chunk != 16u && opt.crt_center_chunk != 32u && opt.crt_center_chunk != 64u && opt.crt_center_chunk != 128u && opt.crt_center_chunk != 256u && opt.crt_center_chunk != 512u) {
-                throw std::runtime_error("--crt-local-square must be 8, 16, 32, 64, 128, 256 or 512");
+            if (opt.crt_center_chunk != 8u && opt.crt_center_chunk != 16u && opt.crt_center_chunk != 32u && opt.crt_center_chunk != 64u && opt.crt_center_chunk != 128u && opt.crt_center_chunk != 256u && opt.crt_center_chunk != 512u && opt.crt_center_chunk != 1024u) {
+                throw std::runtime_error("--crt-local-square must be 8, 16, 32, 64, 128, 256, 512 or 1024");
             }
         } else if (arg == "--crt-lds-stage" || arg == "--crt-local-stage-max") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --crt-lds-stage");
             opt.crt_lds_stage = static_cast<cl_uint>(std::stoul(argv[++i]));
             opt.user_crt_local_stage = true;
             if (opt.crt_lds_stage != 0u && opt.crt_lds_stage != 16u && opt.crt_lds_stage != 32u && opt.crt_lds_stage != 64u &&
-                opt.crt_lds_stage != 128u && opt.crt_lds_stage != 256u && opt.crt_lds_stage != 512u) {
-                throw std::runtime_error("--crt-local-stage-max must be 0, 16, 32, 64, 128, 256 or 512");
+                opt.crt_lds_stage != 128u && opt.crt_lds_stage != 256u && opt.crt_lds_stage != 512u && opt.crt_lds_stage != 1024u) {
+                throw std::runtime_error("--crt-local-stage-max must be 0, 16, 32, 64, 128, 256, 512 or 1024");
             }
         } else if (arg == "--crt-lds-tile" || arg == "--crt-local-stage-tile") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
@@ -6827,13 +6845,13 @@ static Options parse_args(int argc, char** argv) {
                 << "Tuning: --center-max N, --center-autotune, --single-center-mode normal|halfreal|auto, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
                 << "CRT:    --crt-async-queues/--crt-two-queues default, --crt-shared-queue or --crt-single-queue for debug/contention tests.\n"
                 << "        --crt-radix8 default, --crt-radix4 disables global radix-8 test path.\n"
-                << "        --crt-local-square 16|32|64|128|256|512 uses one LDS block for forward+square+inverse; default is 512.\n"
+                << "        --crt-local-square 16|32|64|128|256|512|1024 selects the LDS center block when available; default is 512.\n"
                 << "        --crt-defused-ntt is now default; --crt-no-defused-ntt/--crt-fused-ntt reverts to fused NTT.\n"
                 << "        --crt-edge-radix 2|4|8|16 changes first weighted and last unweighted edge radix; default 4.\n"
                 << "        --crt-odd-radix 3|9 enables experimental CRT/PFA odd x 2^m half-real rows.\n"
                 << "        --crt-edge-mode auto|legacy|generic selects old radix4 split/fuse path or generic edge kernels.\n"
                 << "        --crt-center is kept as an alias; --crt-split-center keeps the older split GF61/GF31 center.\n"
-                << "        --crt-lds-stage 512 enables the intermediate LDS stage path for tests.\n"
+                << "        --crt-lds-stage 16|32|64|128|256|512|1024 enables the intermediate LDS stage path for tests.\n"
                 << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
                 << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n";
             std::exit(0);

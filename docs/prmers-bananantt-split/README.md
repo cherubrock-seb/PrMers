@@ -135,10 +135,10 @@ These options are common to the normal CRT half-real path and the mixed odd-radi
 
 | option | values | default | effect |
 |---|---:|---:|---|
-| `--crt-local-square N` | `8,16,32,64,128,256,512` | `512` | size of the LDS center square block, forward + square + inverse inside one local block |
+| `--crt-local-square N` | `8,16,32,64,128,256,512,1024` | `512` | size of the LDS center square block, forward + square + inverse inside one local block |
 | `--crt-lds-square N` | same | alias | alias for `--crt-local-square` |
 | `--crt-center N` | same | alias | older alias for `--crt-local-square` |
-| `--crt-lds-stage N` | `0,16,32,64,128,256,512` | NVIDIA `512`, AMD `0` | enables/disables intermediate LDS forward/inverse row stages |
+| `--crt-lds-stage N` | `0,16,32,64,128,256,512,1024` | NVIDIA `512`, AMD `0` | enables/disables intermediate LDS forward/inverse row stages |
 | `--crt-local-stage-max N` | same | alias | alias for `--crt-lds-stage` |
 | `--crt-lds-tile N` | `1,2` | `2` | tile factor used by the intermediate LDS stage kernels |
 | `--crt-local-stage-tile N` | same | alias | alias for `--crt-lds-tile` |
@@ -345,6 +345,207 @@ Use the normal path for comparison:
   --profile-kernels
 ```
 
+## Manual path matrix tests without scripts
+
+This release can be shared with only these three files:
+
+```text
+prmers_opencl_prp.cpp
+prmers_opencl_prp.cl
+README.md
+```
+
+No helper script is required. The commands below reproduce the useful path checks manually.
+
+### Build once
+
+```bash
+g++ -O3 -std=c++20 -march=native prmers_opencl_prp.cpp \
+  -o prmers_opencl_prp $(pkg-config --cflags --libs OpenCL) -lgmp
+```
+
+### Quick correctness checks
+
+Radix 3 small case:
+
+```bash
+PRMERS_CRT_HALFREAL_DUMP_ALWAYS=1 \
+PRMERS_CRT_HALFREAL_CPU_REF_ITERS=4 \
+./prmers_opencl_prp 11213 \
+  --modulus crt \
+  --crt-odd-radix 3 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-halfreal-validate-random \
+  --crt-halfreal-validate-iters 4 \
+  --crt-halfreal-dump hr11213_odd3 \
+  --crt-halfreal-dump-count 2048 \
+  --device 1 \
+  --iters 1
+```
+
+Radix 9 small/medium case:
+
+```bash
+PRMERS_CRT_HALFREAL_DUMP_ALWAYS=1 \
+PRMERS_CRT_HALFREAL_CPU_REF_ITERS=1 \
+./prmers_opencl_prp 3021377 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-halfreal-validate-random \
+  --crt-halfreal-validate-iters 1 \
+  --crt-halfreal-dump hr3021377_odd9 \
+  --crt-halfreal-dump-count 4096 \
+  --device 1 \
+  --iters 1
+```
+
+Expected output contains:
+
+```text
+CRT halfreal validator: OK
+```
+
+### Performance comparisons on M142606357
+
+Normal CRT, no odd radix, generic/default planner:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix off \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --device 1 \
+  --iters 3000 \
+  --profile-kernels
+```
+
+Normal CRT, force head/tail LDS512:
+
+```bash
+PRMERS_CRT_HALFREAL_LDS_SPLIT=1 \
+PRMERS_CRT_HALFREAL_LDS_PAIR=1 \
+PRMERS_CRT_HALFREAL_LDS_HOTOPT=1 \
+PRMERS_CRT_HALFREAL_HEAD_LDS=512 \
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix off \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-local-square 512 \
+  --crt-lds-stage 512 \
+  --device 1 \
+  --iters 3000 \
+  --profile-kernels
+```
+
+Expected labels when exact 512 is used:
+
+```text
+crt_halfreal_head_pack_lds512_61
+crt_halfreal_tail_lds512_unpack_61
+```
+
+Normal CRT, force head/tail LDS1024:
+
+```bash
+PRMERS_CRT_HALFREAL_LDS_SPLIT=1 \
+PRMERS_CRT_HALFREAL_LDS_PAIR=1 \
+PRMERS_CRT_HALFREAL_LDS_HOTOPT=1 \
+PRMERS_CRT_HALFREAL_HEAD_LDS=1024 \
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix off \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-local-square 512 \
+  --crt-lds-stage 1024 \
+  --device 1 \
+  --iters 3000 \
+  --profile-kernels
+```
+
+Expected labels when exact 1024 is used:
+
+```text
+crt_halfreal_head_pack_lds1024_61
+crt_halfreal_tail_lds1024_unpack_61
+```
+
+Mixed odd radix 9 stable path:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-local-square 512 \
+  --crt-lds-stage 512 \
+  --device 1 \
+  --iters 5000 \
+  --profile-kernels
+```
+
+Expected stable odd9 labels:
+
+```text
+crt_mixed_lds512_center_61
+crt_mixed_lds512_forward_61
+crt_mixed_lds512_inverse_61
+crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat
+crt_garner_first_coeffhi_mask32_anybase_x2
+```
+
+Mixed odd radix 9 with LDS512 row core disabled:
+
+```bash
+PRMERS_CRT_MIXED_LDS512_DISABLE=1 \
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --device 1 \
+  --iters 1000 \
+  --profile-kernels
+```
+
+This is useful only as a fallback comparison. It should be slower and usually shows radix2 fallback kernels.
+
+### Logging all manual tests in one file
+
+```bash
+LOG=prmers_manual_matrix_$(date +%Y%m%d_%H%M%S).txt
+{
+  echo "===== no odd default ====="
+  ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix off --crt-center-mode halfreal --crt-halfreal-no-autoprobe --crt-halfreal-flags 48 --device 1 --iters 1000 --profile-kernels
+
+  echo "===== no odd head512 ====="
+  PRMERS_CRT_HALFREAL_LDS_SPLIT=1 PRMERS_CRT_HALFREAL_LDS_PAIR=1 PRMERS_CRT_HALFREAL_LDS_HOTOPT=1 PRMERS_CRT_HALFREAL_HEAD_LDS=512 \
+  ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix off --crt-center-mode halfreal --crt-halfreal-no-autoprobe --crt-halfreal-flags 48 --crt-local-square 512 --crt-lds-stage 512 --device 1 --iters 1000 --profile-kernels
+
+  echo "===== no odd head1024 ====="
+  PRMERS_CRT_HALFREAL_LDS_SPLIT=1 PRMERS_CRT_HALFREAL_LDS_PAIR=1 PRMERS_CRT_HALFREAL_LDS_HOTOPT=1 PRMERS_CRT_HALFREAL_HEAD_LDS=1024 \
+  ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix off --crt-center-mode halfreal --crt-halfreal-no-autoprobe --crt-halfreal-flags 48 --crt-local-square 512 --crt-lds-stage 1024 --device 1 --iters 1000 --profile-kernels
+
+  echo "===== odd9 stable ====="
+  ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-no-autoprobe --crt-halfreal-flags 48 --crt-local-square 512 --crt-lds-stage 512 --device 1 --iters 3000 --profile-kernels
+} 2>&1 | tee "$LOG"
+
+echo "saved in $LOG"
+```
+
 ## Notes
 
 This is not a final PRP implementation. 
@@ -403,38 +604,20 @@ Aliases:
 
 The CRT options `--crt-local-square`, `--crt-lds-stage`, `--crt-lds-tile`, `--crt-edge-radix` still apply to the CRT paths.  `--single-center-mode` is only for standalone `gf61` / `gf31`.
 
-### Odd radix 9 fused preCRT/Garner tail
-
-The radix 9 mixed CRT/PFA path now has an optional fast tail that computes the radix 9 inverse output and the first Garner carry segment in one kernel.  It removes one global-memory round trip through the temporary coeffhi buffers.
-
-Default:
-
-```text
-PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=1
-```
-
-Disable only for comparison or rollback:
-
-```bash
-PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=0 ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-flags 48 --device 1 --iters 3000 --profile-kernels
-```
-
-Expected profile label when enabled:
-
-```text
-crt_mixed_odd9_precrt_garner64_lmat
-```
-
-The existing conservative path remains available and all other modes fall back automatically if the fused kernel is not present.
-
 ## Odd radix 9 stable default after fused Garner test
 
-The fused preCRT+Garner experiment is now off by default because it was much slower on RTX 3080 for M142606357.
+The fused preCRT+Garner experiment exists, but it is **off by default** because it was much slower on RTX 3080 for M142606357.
 
 Stable default:
 
 ```bash
 ./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 --crt-center-mode halfreal --crt-halfreal-flags 48 --device 1 --iters 5000 --profile-kernels
+```
+
+Default:
+
+```text
+PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER=0
 ```
 
 Old experimental fused tail, only for comparison:
@@ -458,3 +641,26 @@ crt_mixed_odd9_precrt_garner64_lmat
 ```
 
 Keep it disabled unless a later kernel version fixes the register pressure and serialization.
+
+## LDS planner notes
+
+`--crt-local-square` and `--crt-lds-stage` accept `1024` as well as the older sizes.
+For the half-real CRT path the head/tail LDS radix can be forced with:
+
+```bash
+PRMERS_CRT_HALFREAL_HEAD_LDS=1024 ./prmers_opencl_prp ... --crt-lds-stage 1024
+```
+
+To keep the automatic planner from selecting 1024, cap it at 512:
+
+```bash
+PRMERS_CRT_HALFREAL_HEAD_LDS_MAX=512 ./prmers_opencl_prp ... --crt-lds-stage 512
+```
+
+`PRMERS_CRT_HALFREAL_HEAD_LDS=512` now means exact 512: it will not silently fall back to 256 or 128. `PRMERS_CRT_HALFREAL_HEAD_LDS_MAX=512` is only a cap for auto mode: the planner starts at the largest valid value not above 512. `PRMERS_CRT_HALFREAL_HEAD_LDS=0` disables the head/tail LDS shortcut.
+
+By default the planner allows a mixed residual around the LDS512 middle stage. This is needed for cases such as `ln=23`, where a 512 head leaves a `16*512` residual. Use `PRMERS_CRT_HALFREAL_STRICT_RESIDUAL=1` only if you want the old conservative behaviour that can fall back to 128.
+
+The 1024 head can be useful for sizes such as `ln=23`, where it leaves a clean radix-8 residual before the LDS512 pair center.
+
+In mixed odd-radix mode the fast row core is still the stable LDS512 path by default. Passing `--crt-local-square 256` or `--crt-lds-stage 256` now disables the odd LDS512 row core instead of silently keeping it, so tests really compare the requested mode. `--crt-local-square 1024` is accepted for planner experiments, but the odd row fused center remains LDS512 unless a dedicated 1024 row-center kernel is added.

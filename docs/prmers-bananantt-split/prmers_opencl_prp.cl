@@ -6372,8 +6372,8 @@ void gf61_crt_inv_radix4_last_unweight_31(
 
 
 static inline __attribute__((always_inline)) uint gf61_crt_valid_stage_radix(uint radix) {
-    return (radix == 512u || radix == 256u || radix == 128u || radix == 64u ||
-            radix == 32u || radix == 16u || radix == 8u || radix == 4u || radix == 2u);
+    return (radix == 1024u || radix == 512u || radix == 256u || radix == 128u ||
+            radix == 64u || radix == 32u || radix == 16u || radix == 8u || radix == 4u || radix == 2u);
 }
 
 
@@ -6654,8 +6654,8 @@ void gf61_crt_lds_stage_dif_pow2(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF l61[512];
-    __local GF31 l31[512];
+    __local GF l61[1024];
+    __local GF31 l31[1024];
 
     if (is61) {
         for (uint t = lane; t < radix; t += 64u) l61[t] = a61[base + t * stride];
@@ -6708,8 +6708,8 @@ void gf61_crt_lds_stage_dit_pow2(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF l61[512];
-    __local GF31 l31[512];
+    __local GF l61[1024];
+    __local GF31 l31[1024];
 
     if (is61) {
         for (uint t = lane; t < radix; t += 64u) l61[t] = a61[base + t * stride];
@@ -6924,7 +6924,7 @@ void gf61_crt_lds_stage_dif_pow2_61(
 {
     (void)n;
     const uint lane = get_local_id(0);
-    if (!gf61_crt_valid_stage_radix(radix) || len < radix || (len & (radix - 1u)) != 0u || radix > 512u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || len < radix || (len & (radix - 1u)) != 0u || radix > 1024u) return;
 
     const uint stride = len / radix;
     const uint gid = get_group_id(0);
@@ -6932,7 +6932,7 @@ void gf61_crt_lds_stage_dif_pow2_61(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF l61[512];
+    __local GF l61[1024];
     for (uint t = lane; t < radix; t += 64u) l61[t] = a61[base + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -6959,7 +6959,7 @@ void gf61_crt_lds_stage_dit_pow2_61(
     uint n, uint base_len, uint radix)
 {
     const uint lane = get_local_id(0);
-    if (!gf61_crt_valid_stage_radix(radix) || base_len == 0u || radix > 512u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || base_len == 0u || radix > 1024u) return;
 
     const uint stride = base_len;
     const uint len = base_len * radix;
@@ -6970,7 +6970,7 @@ void gf61_crt_lds_stage_dit_pow2_61(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF l61[512];
+    __local GF l61[1024];
     for (uint t = lane; t < radix; t += 64u) l61[t] = a61[base + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -7002,7 +7002,7 @@ void gf61_crt_lds_stage_dif_pow2_31(
 {
     (void)n;
     const uint lane = get_local_id(0);
-    if (!gf61_crt_valid_stage_radix(radix) || len < radix || (len & (radix - 1u)) != 0u || radix > 512u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || len < radix || (len & (radix - 1u)) != 0u || radix > 1024u) return;
 
     const uint stride = len / radix;
     const uint gid = get_group_id(0);
@@ -7010,7 +7010,7 @@ void gf61_crt_lds_stage_dif_pow2_31(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF31 l31[512];
+    __local GF31 l31[1024];
     for (uint t = lane; t < radix; t += 64u) l31[t] = a31[base + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -7037,7 +7037,7 @@ void gf61_crt_lds_stage_dit_pow2_31(
     uint n, uint base_len, uint radix)
 {
     const uint lane = get_local_id(0);
-    if (!gf61_crt_valid_stage_radix(radix) || base_len == 0u || radix > 512u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || base_len == 0u || radix > 1024u) return;
 
     const uint stride = base_len;
     const uint len = base_len * radix;
@@ -7048,7 +7048,7 @@ void gf61_crt_lds_stage_dit_pow2_31(
     const uint j0 = gid - block * stride;
     const uint base = block * len + j0;
 
-    __local GF31 l31[512];
+    __local GF31 l31[1024];
     for (uint t = lane; t < radix; t += 64u) l31[t] = a31[base + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -10765,13 +10765,13 @@ void gf61_crt_halfreal_pack_ldspow2_dif_61(__global const ulong* restrict digits
                                             uint n, uint p, uint lr2, uint radix)
 {
     const uint m = n >> 1;
-    if (!gf61_crt_valid_stage_radix(radix) || radix > 512u || m < radix || (m % radix) != 0u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || radix > 1024u || m < radix || (m % radix) != 0u) return;
     const uint stride = m / radix;
     const uint j0 = get_group_id(0);
     if (j0 >= stride) return;
     const uint lane = get_local_id(0);
     const uint mask = n - 1u;
-    __local GF l[512];
+    __local GF l[1024];
 
     for (uint t = lane; t < radix; t += 64u) {
         const uint idx = j0 + t * stride;
@@ -10799,12 +10799,12 @@ void gf61_crt_halfreal_pack_ldspow2_dif_31(__global const ulong* restrict digits
                                             uint n, uint p, uint lr2, uint radix)
 {
     const uint m = n >> 1;
-    if (!gf61_crt_valid_stage_radix(radix) || radix > 512u || m < radix || (m % radix) != 0u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || radix > 1024u || m < radix || (m % radix) != 0u) return;
     const uint stride = m / radix;
     const uint j0 = get_group_id(0);
     if (j0 >= stride) return;
     const uint lane = get_local_id(0);
-    __local GF31 l[512];
+    __local GF31 l[1024];
 
     for (uint t = lane; t < radix; t += 64u) {
         const uint idx = j0 + t * stride;
@@ -10829,12 +10829,12 @@ void gf61_crt_halfreal_ditpow2_unpack_61(__global GF* restrict a,
                                           uint n, uint p, uint lr2, uint log_m, uint radix)
 {
     const uint m = n >> 1;
-    if (!gf61_crt_valid_stage_radix(radix) || radix > 512u || m < radix || (m % radix) != 0u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || radix > 1024u || m < radix || (m % radix) != 0u) return;
     const uint stride = m / radix;
     const uint j0 = get_group_id(0);
     if (j0 >= stride) return;
     const uint lane = get_local_id(0);
-    __local GF l[512];
+    __local GF l[1024];
 
     for (uint t = lane; t < radix; t += 64u) l[t] = a[j0 + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -10866,12 +10866,12 @@ void gf61_crt_halfreal_ditpow2_unpack_31(__global GF31* restrict a,
                                           uint n, uint p, uint lr2, uint log_m, uint radix)
 {
     const uint m = n >> 1;
-    if (!gf61_crt_valid_stage_radix(radix) || radix > 512u || m < radix || (m % radix) != 0u) return;
+    if (!gf61_crt_valid_stage_radix(radix) || radix > 1024u || m < radix || (m % radix) != 0u) return;
     const uint stride = m / radix;
     const uint j0 = get_group_id(0);
     if (j0 >= stride) return;
     const uint lane = get_local_id(0);
-    __local GF31 l[512];
+    __local GF31 l[1024];
 
     for (uint t = lane; t < radix; t += 64u) l[t] = a[j0 + t * stride];
     barrier(CLK_LOCAL_MEM_FENCE);
