@@ -13,6 +13,7 @@ VAL_ITERS=${VAL_ITERS:-8}
 VALIDATE=${VALIDATE:-auto}
 CPU_REF_MAX_P=${CPU_REF_MAX_P:-5000000}
 PROFILE=${PROFILE:-1}
+PROFILE_VALIDATOR=${PROFILE_VALIDATOR:-0}
 GPU_REF=${GPU_REF:-0}
 BIN=${BIN:-./prmers_opencl_prp}
 MAX_CASES=${MAX_CASES:-0}
@@ -50,7 +51,7 @@ else
 fi
 
 {
-  echo "# P=$P DEVICE=$DEVICE ODD=$ODD ITERS=$ITERS PROFILE=$PROFILE"
+  echo "# P=$P DEVICE=$DEVICE ODD=$ODD ITERS=$ITERS PROFILE=$PROFILE PROFILE_VALIDATOR=$PROFILE_VALIDATOR"
   echo "# VALIDATE=$VALIDATE VAL_ITERS=$VAL_ITERS CPU_REF_MAX_P=$CPU_REF_MAX_P GPU_REF=$GPU_REF should_validate=$should_validate"
   echo "# STAGES=$STAGES"
   echo "# CENTERS=$CENTERS"
@@ -112,6 +113,9 @@ for FUSE in $FUSE_BOTHS; do
       if (( PROFILE != 0 )); then
         CMD+=(--profile-kernels)
       fi
+      if (( PROFILE_VALIDATOR != 0 )); then
+        CMD+=(--profile-validator)
+      fi
 
       printf 'cmd:' > "$LOG"
       printf ' %q' "${CMD[@]}" >> "$LOG"
@@ -124,8 +128,13 @@ for FUSE in $FUSE_BOTHS; do
       set -e
 
       # Some validation-stop paths return rc=0 but did not actually run the benchmark.
+      # Important: with --iters 1 the program normally prints
+      # "benchmark stopped after 1 iterations; no PRP result computed".
+      # That is NOT a failure. It only means no full PRP residue was produced.
+      # A real no-run is when the program explicitly stopped before the PRP loop,
+      # or when validation could not run because CPU reference was refused.
       bad_success=0
-      if grep -Eqi 'Stopping before the PRP loop|no PRP result computed|validator requires exact CPU reference' "$LOG"; then
+      if grep -Eqi 'Stopping before the PRP loop|validator requires exact CPU reference' "$LOG"; then
         bad_success=1
       fi
 
@@ -171,7 +180,7 @@ with summary_path.open(newline='') as f:
 kernel_re = re.compile(r"^\s{2}(.+?):\s+([0-9.]+)\s+ms total \(([0-9.]+)%.*, launches=([0-9]+)\)")
 iter_re = re.compile(r"it/s\s+([0-9.]+)")
 elapsed_re = re.compile(r"elapsed\s+([0-9.]+)\s+s")
-bad_re = re.compile(r"Stopping before the PRP loop|no PRP result computed|validator requires exact CPU reference", re.I)
+bad_re = re.compile(r"Stopping before the PRP loop|validator requires exact CPU reference", re.I)
 
 with detail_path.open('w', newline='') as df, kernels_path.open('w', newline='') as kf:
     dw = csv.writer(df, delimiter='\t')
@@ -185,7 +194,7 @@ with detail_path.open('w', newline='') as df, kernels_path.open('w', newline='')
         elapsed_s = ''
         for m in iter_re.finditer(text): it_s = m.group(1)
         for m in elapsed_re.finditer(text): elapsed_s = m.group(1)
-        ran_prp_loop = '0' if bad_re.search(text) else ('1' if it_s or 'kernel profile summary' in text else '')
+        ran_prp_loop = '0' if bad_re.search(text) else ('1' if re.search(r'iter\s+[0-9]+/', text) or it_s or 'kernel profile summary' in text else '')
         vlines = [ln.strip() for ln in text.splitlines() if re.search(r'validat|mismatch|FAILED|FAIL|no PRP|Stopping before|\bOK\b', ln, re.I)]
         validation = ' | '.join(vlines[-6:])[:800]
         krows = []
