@@ -7374,6 +7374,112 @@ void gf61_crt_lds_stage_dit_pow2_61x31_512opt(
 
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_61x31_any(
+    __global GF* a61, __global GF31* a31,
+    __global const GF* tw61, __global const GF31* tw31,
+    uint n, uint len, uint radix)
+{
+    (void)n;
+    const uint lane = get_local_id(0);
+    if (!gf61_crt_valid_stage_radix(radix) || len < radix || (len & (radix - 1u)) != 0u || radix > 1024u) return;
+
+    const uint stride = len / radix;
+    const uint gid = get_group_id(0);
+    const uint block = gid / stride;
+    const uint j0 = gid - block * stride;
+    const uint base = block * len + j0;
+
+    __local GF l61[1024];
+    __local GF31 l31[1024];
+    for (uint t = lane; t < radix; t += 64u) {
+        const uint idx = base + t * stride;
+        l61[t] = a61[idx];
+        l31[t] = a31[idx];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint L = radix;
+    while (L >= 8u) {
+        crt_lds_dif8_61(l61, tw61, radix, L, stride, j0, lane);
+        crt_lds_dif8_31(l31, tw31, radix, L, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) { L = 1u; break; }
+        L >>= 3;
+    }
+    if (L == 4u) {
+        crt_lds_dif4_61(l61, tw61, radix, 4u, stride, j0, lane);
+        crt_lds_dif4_31(l31, tw31, radix, 4u, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        crt_lds_dif2_61(l61, tw61, radix, 2u, stride, j0, lane);
+        crt_lds_dif2_31(l31, tw31, radix, 2u, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    for (uint t = lane; t < radix; t += 64u) {
+        const uint idx = base + t * stride;
+        a61[idx] = l61[t];
+        a31[idx] = l31[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_61x31_any(
+    __global GF* a61, __global GF31* a31,
+    __global const GF* tw61, __global const GF31* tw31,
+    uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    if (!gf61_crt_valid_stage_radix(radix) || base_len == 0u || radix > 1024u) return;
+
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+
+    const uint gid = get_group_id(0);
+    const uint block = gid / stride;
+    const uint j0 = gid - block * stride;
+    const uint base = block * len + j0;
+
+    __local GF l61[1024];
+    __local GF31 l31[1024];
+    for (uint t = lane; t < radix; t += 64u) {
+        const uint idx = base + t * stride;
+        l61[t] = a61[idx];
+        l31[t] = a31[idx];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        crt_lds_dit2_61(l61, tw61, radix, L, stride, j0, lane);
+        crt_lds_dit2_31(l31, tw31, radix, L, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        crt_lds_dit4_61(l61, tw61, radix, L, stride, j0, lane);
+        crt_lds_dit4_31(l31, tw31, radix, L, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        crt_lds_dit8_61(l61, tw61, radix, L, stride, j0, lane);
+        crt_lds_dit8_31(l31, tw31, radix, L, stride, j0, lane);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+
+    for (uint t = lane; t < radix; t += 64u) {
+        const uint idx = base + t * stride;
+        a61[idx] = l61[t];
+        a31[idx] = l31[t];
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_lds_stage_dif_pow2_61_tile4(
     __global GF* a61, __global const GF* tw61,
     uint n, uint len, uint radix)
@@ -10707,6 +10813,171 @@ void gf61_crt_mixed_halfreal_lds_pair_any_31(__global GF31* restrict a31,
     for (uint t = lid; t < center_len; t += 64u) {
         a31[baseA + t] = A[t];
         if (!same) a31[baseB + t] = B[t];
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds_pair_any_61x31(__global GF* restrict a61,
+                                                __global GF31* restrict a31,
+                                                __global const GF* restrict twf61,
+                                                __global const GF* restrict twi61,
+                                                __global const GF31* restrict twf31,
+                                                __global const GF31* restrict twi31,
+                                                uint pow2_n, uint odd,
+                                                uint flags61, uint flags31,
+                                                uint center_len)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    // Fused 61x31 pair-center keeps two half-real pair blocks for each field in LDS.
+    // On NVIDIA 48 KiB local memory devices, four 1024-entry arrays exceed the limit.
+    // Keep this generic fused kernel capped at 512; center=1024 automatically falls
+    // back to the separate GF61/GF31 kernels unless --crt-mixed-row-fuse-both force
+    // is requested, in which case the host emits a clear runtime error.
+    if (!gf61_crt_valid_stage_radix(center_len) || center_len < 8u || center_len > 512u || row_m < center_len) return;
+
+    const uint log_m = 31u - (uint)clz(row_m);
+    const uint log_c = 31u - (uint)clz(center_len);
+    if (log_m < log_c) return;
+
+    const uint blocks = row_m >> log_c;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - log_c;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << log_c);
+    const uint baseB = row_base + (blockB << log_c);
+    const int same = (blockA == blockB);
+
+    __local GF A61[512];
+    __local GF B61[512];
+    __local GF31 A31[512];
+    __local GF31 B31[512];
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        A61[t] = a61[baseA + t];
+        A31[t] = a31[baseA + t];
+        if (!same) {
+            B61[t] = a61[baseB + t];
+            B31[t] = a31[baseB + t];
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_61(A61, twf61, center_len, lid);
+    crt_mixed_local_dif_pow2_any_31(A31, twf31, center_len, lid);
+    if (!same) {
+        crt_mixed_local_dif_pow2_any_61(B61, twf61, center_len, lid);
+        crt_mixed_local_dif_pow2_any_31(B31, twf31, center_len, lid);
+    }
+
+    const uint c_mask = center_len - 1u;
+    if (((flags61 & 32u) != 0u) && ((flags31 & 32u) != 0u)) {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z61 = A61[t];
+                const GF zn61 = same ? A61[tm] : B61[tm];
+                const GF31 z31 = A31[t];
+                const GF31 zn31 = same ? A31[tm] : B31[tm];
+                GF E61, O61;
+                GF31 E31, O31;
+                crt_halfreal_center_eo_f48_61(z61, gf_conj_fast(zn61), twf61, pow2_n, k, &E61, &O61);
+                crt_halfreal_center_eo_f48_31(z31, f31_conj_fast(zn31), twf31, pow2_n, k, &E31, &O31);
+                const GF outK61  = gf_pack_e_plus_i_o(E61, O61);
+                const GF outKm61 = gf_pack_conj_e_plus_i_conj_o(E61, O61);
+                const GF31 outK31  = f31_pack_e_plus_i_o(E31, O31);
+                const GF31 outKm31 = f31_pack_conj_e_plus_i_conj_o(E31, O31);
+                A61[t] = outK61;
+                A31[t] = outK31;
+                if (same) {
+                    if (tm != t) { A61[tm] = outKm61; A31[tm] = outKm31; }
+                } else {
+                    B61[tm] = outKm61;
+                    B31[tm] = outKm31;
+                }
+            } else {
+                const GF zsmall61 = B61[tm];
+                const GF zlarge61 = A61[t];
+                const GF31 zsmall31 = B31[tm];
+                const GF31 zlarge31 = A31[t];
+                GF E61, O61;
+                GF31 E31, O31;
+                crt_halfreal_center_eo_f48_61(zsmall61, gf_conj_fast(zlarge61), twf61, pow2_n, km, &E61, &O61);
+                crt_halfreal_center_eo_f48_31(zsmall31, f31_conj_fast(zlarge31), twf31, pow2_n, km, &E31, &O31);
+                B61[tm] = gf_pack_e_plus_i_o(E61, O61);
+                A61[t] = gf_pack_conj_e_plus_i_conj_o(E61, O61);
+                B31[tm] = f31_pack_e_plus_i_o(E31, O31);
+                A31[t] = f31_pack_conj_e_plus_i_conj_o(E31, O31);
+            }
+        }
+    } else {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z61 = A61[t];
+                const GF zn61 = same ? A61[tm] : B61[tm];
+                const GF31 z31 = A31[t];
+                const GF31 zn31 = same ? A31[tm] : B31[tm];
+                A61[t] = crt_halfreal_center_one_61(z61, gf_conj_fast(zn61), twf61, twi61, pow2_n, k, flags61);
+                A31[t] = crt_halfreal_center_one_31(z31, f31_conj_fast(zn31), twf31, twi31, pow2_n, k, flags31);
+                if (km != k) {
+                    const GF outKm61 = crt_halfreal_center_one_61(zn61, gf_conj_fast(z61), twf61, twi61, pow2_n, km, flags61);
+                    const GF31 outKm31 = crt_halfreal_center_one_31(zn31, f31_conj_fast(z31), twf31, twi31, pow2_n, km, flags31);
+                    if (same) { A61[tm] = outKm61; A31[tm] = outKm31; }
+                    else { B61[tm] = outKm61; B31[tm] = outKm31; }
+                }
+            } else {
+                const GF zsmall61 = B61[tm];
+                const GF zlarge61 = A61[t];
+                const GF31 zsmall31 = B31[tm];
+                const GF31 zlarge31 = A31[t];
+                B61[tm] = crt_halfreal_center_one_61(zsmall61, gf_conj_fast(zlarge61), twf61, twi61, pow2_n, km, flags61);
+                A61[t]  = crt_halfreal_center_one_61(zlarge61, gf_conj_fast(zsmall61), twf61, twi61, pow2_n, k, flags61);
+                B31[tm] = crt_halfreal_center_one_31(zsmall31, f31_conj_fast(zlarge31), twf31, twi31, pow2_n, km, flags31);
+                A31[t]  = crt_halfreal_center_one_31(zlarge31, f31_conj_fast(zsmall31), twf31, twi31, pow2_n, k, flags31);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dit_pow2_any_61(A61, twi61, center_len, lid);
+    crt_mixed_local_dit_pow2_any_31(A31, twi31, center_len, lid);
+    if (!same) {
+        crt_mixed_local_dit_pow2_any_61(B61, twi61, center_len, lid);
+        crt_mixed_local_dit_pow2_any_31(B31, twi31, center_len, lid);
+    }
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        a61[baseA + t] = A61[t];
+        a31[baseA + t] = A31[t];
+        if (!same) {
+            a61[baseB + t] = B61[t];
+            a31[baseB + t] = B31[t];
+        }
     }
 }
 

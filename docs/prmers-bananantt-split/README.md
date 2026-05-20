@@ -1,6 +1,108 @@
 # PrMers BananaNTT Split : mixed CRT/PFA odd-radix POC
 
 
+## v10 fused 61x31 LDS safety fix
+
+This fixes the NVIDIA build error:
+
+```text
+ptxas error: Entry function 'gf61_crt_mixed_halfreal_lds_pair_any_61x31' uses too much shared data
+```
+
+The fused 61x31 pair-center needs four LDS arrays: A/B for GF61 and A/B for GF31.
+At center=1024 this exceeds the 48 KiB LDS limit on RTX 3080.
+
+The fix is:
+
+- fused 61x31 **center** is capped at `center <= 512`;
+- `center=1024` automatically falls back to separate GF61 and GF31 center kernels for `off/auto/center/all`;
+- `force` now reports a clear runtime error for `center=1024` instead of letting OpenCL compilation fail; the matrix tester marks this case as `SKIP_UNSUPPORTED`;
+- fused 61x31 **stage** can still use `stage=1024`, because it only needs one GF61 + one GF31 LDS array.
+
+Good quick recheck:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 \
+STAGES="256 512" CENTERS="256 512" FUSE_BOTHS="off all" \
+./test_mixed_row_lds_matrix.sh
+```
+
+Check the previous build-failing cases:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 \
+STAGES="256 512" CENTERS="256 512" FUSE_BOTHS="all" \
+./test_mixed_row_lds_matrix.sh
+```
+
+For `center=1024`, use `all` to allow fallback, not `force`:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 \
+STAGES="512 1024" CENTERS="1024" FUSE_BOTHS="off all" \
+./test_mixed_row_lds_matrix.sh
+```
+
+
+## v9 fused GF61+GF31 row-kernel test mode
+
+This version adds an explicit mixed-row fuse mode:
+
+```bash
+--crt-mixed-row-fuse-both off|auto|center|stage|all|force
+```
+
+It is off by default. Use `all` or `force` to test the GPUOwl-like idea where GF61 and GF31 are processed inside the same LDS kernel. The new generic fused kernels cover row stages from 8 to 1024. Fused row center is limited to 8..512; center=1024 falls back to separate GF61/GF31 kernels:
+
+- `gf61_crt_lds_stage_dif_pow2_61x31_any`
+- `gf61_crt_lds_stage_dit_pow2_61x31_any`
+- `gf61_crt_mixed_halfreal_lds_pair_any_61x31`
+
+The old optimized 512 fused kernels are still used when the exact 512 case matches. Other supported fused sizes use the generic fused kernels.
+
+Example forced benchmark:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-center 512 \
+  --crt-mixed-row-stage 512 \
+  --crt-mixed-row-fuse-both all \
+  --device 1 \
+  --iters 1000 \
+  --profile-kernels
+```
+
+The matrix tester now writes:
+
+```text
+mixed_row_lds_matrix_logs/all_tests_combined.log
+mixed_row_lds_matrix_logs/summary.tsv
+mixed_row_lds_matrix_logs/summary_detail.tsv
+mixed_row_lds_matrix_logs/kernel_profile.tsv
+```
+
+By default it compares `off` and `all`. To test every fuse mode:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 \
+FUSE_BOTHS="off center stage all force" \
+./test_mixed_row_lds_matrix.sh
+```
+
+For a quick subset:
+
+```bash
+DEVICE=1 P=3021377 MAX_CASES=8 STAGES="256 512" CENTERS="256 512" \
+FUSE_BOTHS="off all" ./test_mixed_row_lds_matrix.sh
+```
+
+
 ## v8 mixed row LDS validation fixes
 
 This v8 fixes the failing cases seen in the first full matrix run:
@@ -150,8 +252,9 @@ All switches are optional. They are kept to compare implementations.
 | `PRMERS_CRT_MIXED_PRECRT_OUTPAR=0/1` | `0` | one-output-per-thread tail test |
 | `PRMERS_CRT_MIXED_PRECRT_SPLIT=0/1` | `0` | split residue tail before preCRT combine |
 | `PRMERS_CRT_MIXED_FUSE_PACK_BOTH=0/1` | `0` | fused GF61/GF31 edge test; usually slower on RTX 3080 |
-| `PRMERS_CRT_MIXED_FUSE_LDS_BOTH=0/1` | `0` | fused GF61/GF31 LDS512 forward/inverse test; usually slower on RTX 3080 |
-| `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `0` | fused GF61/GF31 LDS512 center test; usually slower on RTX 3080 |
+| `PRMERS_CRT_MIXED_FUSE_LDS_BOTH=0/1` | `0` | legacy env switch for fused GF61/GF31 LDS forward/inverse tests |
+| `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `0` | legacy env switch for fused GF61/GF31 LDS center tests |
+| `--crt-mixed-row-fuse-both off|auto|center|stage|all|force` | `off` | CLI switch for fused GF61/GF31 row stages and/or center, sizes 8..1024 |
 | `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | `0` | disable LDS512 row core |
 | `--crt-mixed-row-core auto|lds512|lds1024|generic` | `auto` | explicitly selects the mixed odd row core for path tests |
 
@@ -163,7 +266,7 @@ There are two different controls:
 - `--crt-local-square N` or `--crt-mixed-row-center N` chooses the row center size.
 - `--crt-lds-stage N` or `--crt-mixed-row-stage N` chooses the LDS stage used before the center.
 
-For the mixed odd radix path the fast local row cores currently exist for center `512` and center `1024` only. Other center values are still useful to test the generic radix2 path, but they are not a fast LDS center path yet.
+For the mixed odd radix path, forced LDS row centers now exist for `8..1024`. The 512 path still has special optimized kernels; other sizes use the generic LDS kernels and are mainly for validation/performance comparison.
 
 Clear forced syntax:
 
@@ -210,13 +313,13 @@ Equivalent old names still work:
 
 ```text
 auto      default planner
-lds       force the fast LDS row core using --crt-mixed-row-center, only 512 or 1024 today
+lds       force the LDS row core using --crt-mixed-row-center, supports 8..1024
 lds512    shorthand forcing center 512
 lds1024   shorthand forcing center 1024
 generic   force the generic radix2 row path
 ```
 
-Important: the program now refuses misleading combinations. For example `--crt-mixed-row-core lds1024 --crt-mixed-row-center 256` is rejected instead of silently running the 1024 center.
+Important: the program refuses misleading combinations. For example `--crt-mixed-row-core lds1024 --crt-mixed-row-center 256` is rejected instead of silently running the 1024 center.
 
 Useful test grid:
 
@@ -781,3 +884,33 @@ New kernels:
 - `gf61_crt_mixed_halfreal_lds_pair_any_31`
 
 Use `test_mixed_row_lds_matrix.sh` to validate or benchmark all stage/center combinations.
+## v11 mixed GPU validator
+
+Large mixed odd-radix exponents can make the exact CPU validator too slow.  Use
+`--crt-mixed-gpu-reference` to validate the selected LDS/fused mixed row path
+against the generic mixed GPU path instead.  This keeps the same CRT/PFA digit
+order, but uses `--crt-mixed-row-core generic` internally for the reference
+square.
+
+Example:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-halfreal-validate-random \
+  --crt-halfreal-validate-iters 1 \
+  --crt-mixed-gpu-reference \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-stage 512 \
+  --crt-mixed-row-center 512 \
+  --crt-mixed-row-fuse-both stage \
+  --device 1 \
+  --iters 1 \
+  --profile-kernels
+```
+
+Equivalent environment switch: `PRMERS_CRT_MIXED_GPU_REFERENCE=1`.

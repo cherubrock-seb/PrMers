@@ -1163,10 +1163,15 @@ static int g_crt_defused_edge_fuse = 0;
 static uint32_t g_crt_defused_edge_radix = 4u;
 static uint32_t g_crt_odd_radix = 9u;
 static std::string g_crt_mixed_row_core = "auto";
+static std::string g_crt_mixed_row_fuse_both = "off";
 static std::string g_crt_center_mode = "halfreal";
 static bool g_crt_halfreal_validate = false;
 static uint32_t g_crt_halfreal_validate_iters = 1;
 static bool g_crt_halfreal_validate_random = false;
+// For large mixed odd-radix tests the exact CPU reference can be far too slow.
+// This switch validates the selected LDS/fused mixed path against the generic
+// mixed GPU path, keeping the same PFA digit order and avoiding the CPU square.
+static bool g_crt_mixed_gpu_reference = false;
 static std::size_t g_crt_halfreal_dump_count = 32;
 static std::string g_crt_halfreal_dump_prefix = "halfreal_debug";
 
@@ -2596,9 +2601,12 @@ struct CrtFusedKernels {
     cl_kernel mixed_lds1024_pair31 = nullptr;
     cl_kernel mixed_lds_any_pair61 = nullptr;
     cl_kernel mixed_lds_any_pair31 = nullptr;
+    cl_kernel mixed_lds_any_pair_both = nullptr;
     cl_kernel mixed_lds512_pair_both = nullptr;
     cl_kernel mixed_fwd_lds512_both = nullptr;
     cl_kernel mixed_inv_lds512_both = nullptr;
+    cl_kernel mixed_fwd_lds_any_both = nullptr;
+    cl_kernel mixed_inv_lds_any_both = nullptr;
     cl_kernel mixed_unpack61 = nullptr;
     cl_kernel mixed_unpack31 = nullptr;
     cl_kernel mixed_pack_odd_fwd61 = nullptr;
@@ -2740,9 +2748,12 @@ struct CrtFusedKernels {
         mixed_lds1024_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds1024_pair_31");
         mixed_lds_any_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_61");
         mixed_lds_any_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_31");
+        mixed_lds_any_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_61x31");
         mixed_lds512_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61x31");
         mixed_fwd_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61x31_512opt");
         mixed_inv_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61x31_512opt");
+        mixed_fwd_lds_any_both = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61x31_any");
+        mixed_inv_lds_any_both = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61x31_any");
         mixed_unpack61 = load_kernel_optional(program, "gf61_crt_mixed_unpack_unweight_61");
         mixed_unpack31 = load_kernel_optional(program, "gf61_crt_mixed_unpack_unweight_31");
         mixed_pack_odd_fwd61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_61");
@@ -2883,9 +2894,12 @@ struct CrtFusedKernels {
         if (mixed_lds1024_pair31) clReleaseKernel(mixed_lds1024_pair31);
         if (mixed_lds_any_pair61) clReleaseKernel(mixed_lds_any_pair61);
         if (mixed_lds_any_pair31) clReleaseKernel(mixed_lds_any_pair31);
+        if (mixed_lds_any_pair_both) clReleaseKernel(mixed_lds_any_pair_both);
         if (mixed_lds512_pair_both) clReleaseKernel(mixed_lds512_pair_both);
         if (mixed_fwd_lds512_both) clReleaseKernel(mixed_fwd_lds512_both);
         if (mixed_inv_lds512_both) clReleaseKernel(mixed_inv_lds512_both);
+        if (mixed_fwd_lds_any_both) clReleaseKernel(mixed_fwd_lds_any_both);
+        if (mixed_inv_lds_any_both) clReleaseKernel(mixed_inv_lds_any_both);
         if (mixed_unpack61) clReleaseKernel(mixed_unpack61);
         if (mixed_unpack31) clReleaseKernel(mixed_unpack31);
         if (mixed_pack_odd_fwd61) clReleaseKernel(mixed_pack_odd_fwd61);
@@ -2948,8 +2962,10 @@ struct CrtFusedKernels {
     bool mixed_odd_pack_tile14_shift_available() const { return mixed_pack_odd_fwd_tile14_shift_61 && mixed_pack_odd_fwd_tile14_shift_31; }
     bool mixed_odd_pack_tile14_shift_lmat_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_61 && mixed_pack_odd_fwd_tile14_shift_lmat_31; }
     bool mixed_odd_pack_tile7_both_available() const { return mixed_pack_odd_fwd_tile7_both != nullptr; }
-    bool mixed_odd_center_both_available() const { return mixed_lds512_pair_both != nullptr; }
+    bool mixed_odd_center_both_available() const { return mixed_lds_any_pair_both != nullptr || mixed_lds512_pair_both != nullptr; }
+    bool mixed_odd_center_any_both_available() const { return mixed_lds_any_pair_both != nullptr; }
     bool mixed_odd_lds512_both_available() const { return mixed_fwd_lds512_both != nullptr && mixed_inv_lds512_both != nullptr; }
+    bool mixed_odd_lds_any_both_available() const { return mixed_fwd_lds_any_both != nullptr && mixed_inv_lds_any_both != nullptr; }
     bool mixed_odd9_precrt_garner64_available() const { return mixed_odd9_inv_precrt_garner64_lmat != nullptr; }
 
     bool mixed_odd_precrt_coeffhi_available() const {
@@ -3354,10 +3370,32 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                      !use_mixed_pack_tile14_shift &&
                                      ((use_mixed_shift_lut && fk.mixed_pack_odd_fwd_both_shift != nullptr) ||
                                       (use_mixed_pack_tile7 && fk.mixed_odd_pack_tile7_both_available()));
-    const bool use_mixed_center_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false) &&
-                                       use_mixed_lds512 && fk.mixed_odd_center_both_available();
-    const bool use_mixed_lds512_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) &&
-                                       use_mixed_lds512 && mixed_lds512_opt && fk.mixed_odd_lds512_both_available();
+    const std::string fuse_both_mode = g_crt_mixed_row_fuse_both;
+    const bool fuse_both_force = (fuse_both_mode == "force");
+    const bool fuse_center_env = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false);
+    const bool fuse_stage_env = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false);
+    const bool want_mixed_center_both = use_mixed_lds_any &&
+        (fuse_center_env || fuse_both_force || fuse_both_mode == "center" || fuse_both_mode == "all" ||
+         (fuse_both_mode == "auto" && use_mixed_lds512));
+    const bool want_mixed_stage_both = use_mixed_lds_any &&
+        (fuse_stage_env || fuse_both_force || fuse_both_mode == "stage" || fuse_both_mode == "all" ||
+         (fuse_both_mode == "auto" && use_mixed_lds512));
+
+    // A fused 61x31 pair-center needs two pair buffers for each field.
+    // The generic 1024 version would exceed the 48 KiB LDS limit on NVIDIA
+    // (ptxas reports about 0xc010 bytes), so fused center is intentionally
+    // capped at 512 and center=1024 falls back to separate GF61/GF31 kernels.
+    const bool mixed_center_both_len_ok = (mixed_row_center <= 512u);
+    const bool use_mixed_center_both = want_mixed_center_both && mixed_center_both_len_ok &&
+        ((mixed_row_center == 512u && fk.mixed_lds512_pair_both) || fk.mixed_odd_center_any_both_available());
+    const bool use_mixed_stage_both = want_mixed_stage_both &&
+        (fk.mixed_odd_lds_any_both_available() || (use_mixed_lds512 && mixed_lds512_opt && fk.mixed_odd_lds512_both_available()));
+    if (fuse_both_force && use_mixed_lds_any && (!use_mixed_center_both || !use_mixed_stage_both)) {
+        if (want_mixed_center_both && !mixed_center_both_len_ok) {
+            throw std::runtime_error("--crt-mixed-row-fuse-both force requested center=1024, but fused 61x31 pair-center is capped at 512 to stay under the NVIDIA 48 KiB LDS limit");
+        }
+        throw std::runtime_error("--crt-mixed-row-fuse-both force requested but 61x31 center/stage kernels are not available");
+    }
 
     auto pack61 = [&]() {
         cl_uint arg = 0;
@@ -3619,32 +3657,40 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     };
     auto lds_fwd_both = [&](cl_uint len, cl_uint radix) {
         sync_g31_to_g61("mixed odd gf31 ready for fused lds fwd");
+        const bool use512 = (radix == 512u && mixed_lds512_opt && len == radix && fk.mixed_fwd_lds512_both);
+        cl_kernel k = use512 ? fk.mixed_fwd_lds512_both : fk.mixed_fwd_lds_any_both;
+        if (!k) throw std::runtime_error("fused 61x31 LDS forward kernel requested but not available");
         cl_uint arg = 0;
-        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g61.bufField, "set mixed lds fwd both a61");
-        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g31.bufField, "set mixed lds fwd both a31");
-        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g61.bufTwFwd, "set mixed lds fwd both tw61");
-        set_karg_mem(fk.mixed_fwd_lds512_both, arg, g31.bufTwFwd, "set mixed lds fwd both tw31");
-        set_karg(fk.mixed_fwd_lds512_both, arg, storage, "set mixed lds fwd both storage");
-        set_karg(fk.mixed_fwd_lds512_both, arg, len, "set mixed lds fwd both len");
-        set_karg(fk.mixed_fwd_lds512_both, arg, radix, "set mixed lds fwd both radix");
+        set_karg_mem(k, arg, g61.bufField, "set mixed lds fwd both a61");
+        set_karg_mem(k, arg, g31.bufField, "set mixed lds fwd both a31");
+        set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds fwd both tw61");
+        set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds fwd both tw31");
+        set_karg(k, arg, storage, "set mixed lds fwd both storage");
+        set_karg(k, arg, len, "set mixed lds fwd both len");
+        set_karg(k, arg, radix, "set mixed lds fwd both radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
-        enqueue_kernel(g61, fk.mixed_fwd_lds512_both, groups * local64, &local64,
-                       "enqueue mixed LDS fwd both", "crt_mixed_lds512_forward_61x31");
+        const std::string label = mixed_lds_label("forward", radix, "61x31", use512);
+        enqueue_kernel(g61, k, groups * local64, &local64,
+                       "enqueue mixed LDS fwd both", label.c_str());
         sync_g61_to_g31("mixed odd fused lds fwd ready");
     };
     auto lds_inv_both = [&](cl_uint base_len, cl_uint radix) {
         sync_g31_to_g61("mixed odd gf31 ready for fused lds inv");
+        const bool use512 = (radix == 512u && mixed_lds512_opt && base_len == 1u && fk.mixed_inv_lds512_both);
+        cl_kernel k = use512 ? fk.mixed_inv_lds512_both : fk.mixed_inv_lds_any_both;
+        if (!k) throw std::runtime_error("fused 61x31 LDS inverse kernel requested but not available");
         cl_uint arg = 0;
-        set_karg_mem(fk.mixed_inv_lds512_both, arg, g61.bufField, "set mixed lds inv both a61");
-        set_karg_mem(fk.mixed_inv_lds512_both, arg, g31.bufField, "set mixed lds inv both a31");
-        set_karg_mem(fk.mixed_inv_lds512_both, arg, g61.bufTwInv, "set mixed lds inv both tw61");
-        set_karg_mem(fk.mixed_inv_lds512_both, arg, g31.bufTwInv, "set mixed lds inv both tw31");
-        set_karg(fk.mixed_inv_lds512_both, arg, storage, "set mixed lds inv both storage");
-        set_karg(fk.mixed_inv_lds512_both, arg, base_len, "set mixed lds inv both base_len");
-        set_karg(fk.mixed_inv_lds512_both, arg, radix, "set mixed lds inv both radix");
+        set_karg_mem(k, arg, g61.bufField, "set mixed lds inv both a61");
+        set_karg_mem(k, arg, g31.bufField, "set mixed lds inv both a31");
+        set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds inv both tw61");
+        set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds inv both tw31");
+        set_karg(k, arg, storage, "set mixed lds inv both storage");
+        set_karg(k, arg, base_len, "set mixed lds inv both base_len");
+        set_karg(k, arg, radix, "set mixed lds inv both radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
-        enqueue_kernel(g61, fk.mixed_inv_lds512_both, groups * local64, &local64,
-                       "enqueue mixed LDS inv both", "crt_mixed_lds512_inverse_61x31");
+        const std::string label = mixed_lds_label("inverse", radix, "61x31", use512);
+        enqueue_kernel(g61, k, groups * local64, &local64,
+                       "enqueue mixed LDS inv both", label.c_str());
         sync_g61_to_g31("mixed odd fused lds inv ready");
     };
 
@@ -3752,29 +3798,37 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                        "enqueue mixed lds any center31", "crt_mixed_lds_any_center_31");
     };
 
-    auto center_lds512_both = [&]() {
-        
+    auto center_lds_both = [&](cl_uint center_len) {
+        if (center_len > 512u) {
+            throw std::runtime_error("fused 61x31 LDS center supports center_len <= 512 only; use off/auto/all fallback for center=1024");
+        }
         cl_event gf31_fwd_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for fused center");
         set_pending_wait_event(g61, gf31_fwd_ready);
         if (g31.queue != g61.queue) clFlush(g31.queue);
 
-        const size_t blocks = static_cast<size_t>(row_m >> 9);
+        const bool use512 = (center_len == 512u && fk.mixed_lds512_pair_both);
+        cl_kernel k = use512 ? fk.mixed_lds512_pair_both : fk.mixed_lds_any_pair_both;
+        if (!k) throw std::runtime_error("fused 61x31 LDS center kernel requested but not available");
+        const cl_uint log_c = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(center_len));
+        const size_t blocks = static_cast<size_t>(row_m >> log_c);
         const size_t pair_blocks = (blocks >> 1u) + 1u;
         const size_t groups = static_cast<size_t>(odd) * pair_blocks;
         cl_uint arg = 0;
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g61.bufField, "set mixed lds512 both a61");
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g31.bufField, "set mixed lds512 both a31");
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g61.bufTwFwd, "set mixed lds512 both twf61");
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g61.bufTwInv, "set mixed lds512 both twi61");
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g31.bufTwFwd, "set mixed lds512 both twf31");
-        set_karg_mem(fk.mixed_lds512_pair_both, arg, g31.bufTwInv, "set mixed lds512 both twi31");
-        set_karg(fk.mixed_lds512_pair_both, arg, pow2_n, "set mixed lds512 both pow2_n");
-        set_karg(fk.mixed_lds512_pair_both, arg, odd, "set mixed lds512 both odd");
-        set_karg(fk.mixed_lds512_pair_both, arg, flags61, "set mixed lds512 both flags61");
-        set_karg(fk.mixed_lds512_pair_both, arg, flags31, "set mixed lds512 both flags31");
-        enqueue_kernel(g61, fk.mixed_lds512_pair_both, groups * local64, &local64,
-                       "enqueue mixed LDS512 center both", "crt_mixed_lds512_center_61x31");
-        
+        set_karg_mem(k, arg, g61.bufField, "set mixed lds both a61");
+        set_karg_mem(k, arg, g31.bufField, "set mixed lds both a31");
+        set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds both twf61");
+        set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds both twi61");
+        set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds both twf31");
+        set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds both twi31");
+        set_karg(k, arg, pow2_n, "set mixed lds both pow2_n");
+        set_karg(k, arg, odd, "set mixed lds both odd");
+        set_karg(k, arg, flags61, "set mixed lds both flags61");
+        set_karg(k, arg, flags31, "set mixed lds both flags31");
+        if (!use512) set_karg(k, arg, center_len, "set mixed lds both center_len");
+        const std::string label = "crt_mixed_lds" + std::to_string(center_len) + "_center_61x31" + (use512 ? std::string("_opt") : std::string());
+        enqueue_kernel(g61, k, groups * local64, &local64,
+                       "enqueue mixed LDS center both", label.c_str());
+
         cl_event center_ready = enqueue_queue_marker(g61, "mixed odd fused center ready");
         set_pending_wait_event(g31, center_ready);
         if (g61.queue != g31.queue) clFlush(g61.queue);
@@ -3961,7 +4015,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         while (cur > center_len) {
             cl_uint radix = floor_pow2_leq(std::min<cl_uint>(stage_cap, cur / center_len));
             if (radix < 2u) radix = 2u;
-            if (use_mixed_lds512 && use_mixed_lds512_both && radix == 512u && (cur / radix) == 1u) {
+            if (use_mixed_stage_both &&
+                (fk.mixed_fwd_lds_any_both || (use_mixed_lds512 && mixed_lds512_opt && radix == 512u && (cur / radix) == 1u && fk.mixed_fwd_lds512_both))) {
                 lds_fwd_both(cur, radix);
             } else {
                 lds_fwd61(cur, radix);
@@ -3969,11 +4024,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             }
             cur /= radix;
         }
-        if (use_mixed_lds1024) {
+        if (use_mixed_center_both) {
+            center_lds_both(center_len);
+        } else if (use_mixed_lds1024) {
             center_lds1024_61();
             center_lds1024_31();
-        } else if (use_mixed_lds512 && use_mixed_center_both) {
-            center_lds512_both();
         } else if (use_mixed_lds512) {
             center_lds512_61();
             center_lds512_31();
@@ -3985,7 +4040,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         while (cur < row_m) {
             cl_uint radix = floor_pow2_leq(std::min<cl_uint>(stage_cap, row_m / cur));
             if (radix < 2u) radix = 2u;
-            if (use_mixed_lds512 && use_mixed_lds512_both && radix == 512u && cur == 1u) {
+            if (use_mixed_stage_both &&
+                (fk.mixed_inv_lds_any_both || (use_mixed_lds512 && mixed_lds512_opt && radix == 512u && cur == 1u && fk.mixed_inv_lds512_both))) {
                 lds_inv_both(cur, radix);
             } else {
                 lds_inv61(cur, radix);
@@ -5947,17 +6003,22 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
             << " gpu.n=" << g61.n << " odd=" << g_crt_odd_radix;
         throw std::runtime_error(oss.str());
     }
+    const bool mixed_gpu_ref_enabled = mixed_odd_validation &&
+        (g_crt_mixed_gpu_reference || parse_bool_env("PRMERS_CRT_MIXED_GPU_REFERENCE", false));
     const bool exact_cpu_ref_enabled = parse_bool_env("PRMERS_CRT_HALFREAL_CPU_REFERENCE", true);
     const cl_uint exact_cpu_ref_max_p = crt_tune::env_u32("PRMERS_CRT_HALFREAL_CPU_REF_MAX_P", 5000000u, 0u, 200000000u);
-    const bool exact_cpu_ref_available = exact_cpu_ref_enabled && g61.exponent_p <= exact_cpu_ref_max_p;
+    const bool exact_cpu_ref_available = exact_cpu_ref_enabled &&
+        !(mixed_odd_validation && mixed_gpu_ref_enabled) &&
+        g61.exponent_p <= exact_cpu_ref_max_p;
     
     
     const cl_uint exact_cpu_ref_iters = exact_cpu_ref_available
         ? crt_tune::env_u32("PRMERS_CRT_HALFREAL_CPU_REF_ITERS", 1u, 1u, std::max<cl_uint>(1u, steps))
         : 0u;
-    if (mixed_odd_validation && need_validate && !exact_cpu_ref_available) {
-        std::cerr << "mixed CRT/PFA validator requires exact CPU reference; "
-                  << "increase PRMERS_CRT_HALFREAL_CPU_REF_MAX_P or use a smaller p.\n";
+    if (mixed_odd_validation && need_validate && !exact_cpu_ref_available && !mixed_gpu_ref_enabled) {
+        std::cerr << "mixed CRT/PFA validator requires a reference. For large p use "
+                  << "--crt-mixed-gpu-reference, or set PRMERS_CRT_MIXED_GPU_REFERENCE=1. "
+                  << "For exact CPU reference, increase PRMERS_CRT_HALFREAL_CPU_REF_MAX_P.\n";
         return false;
     }
 
@@ -5989,6 +6050,45 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
         if (mode == "normal" || mode == "reference" || mode == "strict") {
             if (exact_cpu_ref_available) {
                 return ibdwt::square_mod_mersenne_exact_digits(input, exact_layout);
+            }
+
+            if (mixed_odd_validation && mixed_gpu_ref_enabled) {
+                const std::string saved_center = g_crt_center_mode;
+                const std::string saved_row_core = g_crt_mixed_row_core;
+                const std::string saved_fuse_both = g_crt_mixed_row_fuse_both;
+                const cl_uint saved_center_chunk = g_crt_center_chunk;
+                const cl_uint saved_lds_stage = g_crt_lds_stage;
+
+                // Same mixed CRT/PFA digit order, but the row transform uses the
+                // slow/simple generic radix-2 path. This gives a practical GPU
+                // reference for huge p where exact CPU squaring is not usable.
+                g_crt_center_mode = "halfreal";
+                g_crt_mixed_row_core = "generic";
+                g_crt_mixed_row_fuse_both = "off";
+                g_crt_center_chunk = 512u;
+                g_crt_lds_stage = 0u;
+
+                auto restore_mixed_ref_options = [&]() {
+                    g_crt_center_mode = saved_center;
+                    g_crt_mixed_row_core = saved_row_core;
+                    g_crt_mixed_row_fuse_both = saved_fuse_both;
+                    g_crt_center_chunk = saved_center_chunk;
+                    g_crt_lds_stage = saved_lds_stage;
+                };
+
+                try {
+                    if (!enqueue_square_mod_crt_defused_fast(g61, g31, fk)) {
+                        throw std::runtime_error("mixed GPU validator: generic mixed reference enqueue failed");
+                    }
+                    enqueue_crt_garner_carry_gpu(g61, g31, carry_cfg, true);
+                    finish_crt_queues(g61, g31);
+                    std::vector<std::uint64_t> out = read_digits(g61);
+                    restore_mixed_ref_options();
+                    return out;
+                } catch (...) {
+                    restore_mixed_ref_options();
+                    throw;
+                }
             }
 
             const std::string saved_center = g_crt_center_mode;
@@ -6164,6 +6264,8 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
                     std::cout << " (requested " << steps
                               << "; exact CPU reference capped by PRMERS_CRT_HALFREAL_CPU_REF_ITERS)";
                 }
+            } else if (mixed_odd_validation && mixed_gpu_ref_enabled) {
+                std::cout << " mixed GPU generic-reference square(s) match selected halfreal path";
             } else {
                 std::cout << " square(s) match fallback GPU strict reference";
             }
@@ -6399,10 +6501,16 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                                              parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
                                              ((mixed_shift_lut_enabled && crt_fused.mixed_pack_odd_fwd_both_shift != nullptr) ||
                                               (mixed_pack_tile7_enabled && crt_fused.mixed_odd_pack_tile7_both_available()));
-        const bool mixed_center_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false) &&
-                                               crt_fused.mixed_odd_center_both_available();
-        const bool mixed_lds_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) &&
-                                            crt_fused.mixed_odd_lds512_both_available();
+        const std::string mixed_fuse_both_mode = clwrap::g_crt_mixed_row_fuse_both;
+        const bool mixed_fuse_center_wanted = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false) ||
+                                              mixed_fuse_both_mode == "center" || mixed_fuse_both_mode == "all" || mixed_fuse_both_mode == "force" ||
+                                              (mixed_fuse_both_mode == "auto" && crt_fused.mixed_odd_center_both_available());
+        const bool mixed_fuse_stage_wanted = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) ||
+                                             mixed_fuse_both_mode == "stage" || mixed_fuse_both_mode == "all" || mixed_fuse_both_mode == "force" ||
+                                             (mixed_fuse_both_mode == "auto" && crt_fused.mixed_odd_lds_any_both_available());
+        const bool mixed_center_both_enabled = mixed_fuse_center_wanted && crt_fused.mixed_odd_center_both_available();
+        const bool mixed_lds_both_enabled = mixed_fuse_stage_wanted &&
+                                            (crt_fused.mixed_odd_lds_any_both_available() || crt_fused.mixed_odd_lds512_both_available());
         const cl_uint mixed_odd = clwrap::g_crt_odd_radix;
         const cl_uint mixed_pow2_n = (mixed_odd > 1u && (gpu61.n % mixed_odd) == 0u) ? (gpu61.n / mixed_odd) : 0u;
         const cl_uint mixed_row_m = mixed_pow2_n >> 1;
@@ -6488,6 +6596,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", row-stage-plan=" << mixed_row_plan
                   << ", fast-row-note=" << mixed_row_note
                   << ", fuse-pack-both=" << (mixed_pack_both_enabled ? "on" : "off")
+                  << ", row-fuse-both-mode=" << mixed_fuse_both_mode
                   << ", fuse-lds-both=" << (mixed_lds_both_enabled ? "on" : "off")
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
@@ -6739,6 +6848,7 @@ struct Options {
     uint32_t crt_odd_radix = 0u;
     bool crt_odd_radix_auto = true;
     std::string crt_mixed_row_core = "auto";
+    std::string crt_mixed_row_fuse_both = "off";
     int crt_defused_edge_mode = 0;
     bool user_crt_queue = false;
     bool user_crt_schedule = false;
@@ -6751,6 +6861,7 @@ struct Options {
     bool crt_halfreal_validate = false;
     uint32_t crt_halfreal_validate_iters = 1;
     bool crt_halfreal_validate_random = false;
+    bool crt_mixed_gpu_reference = false;
     std::size_t crt_halfreal_dump_count = 32;
     std::string crt_halfreal_dump_prefix = "halfreal_debug";
     int crt_halfreal_flags61 = 48;
@@ -6891,6 +7002,24 @@ static Options parse_args(int argc, char** argv) {
             opt.crt_mixed_row_core = "lds512";
         } else if (arg == "--crt-mixed-row-lds1024" || arg == "--crt-odd-row-lds1024") {
             opt.crt_mixed_row_core = "lds1024";
+        } else if (arg == "--crt-mixed-row-fuse-both" || arg == "--crt-odd-row-fuse-both") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.crt_mixed_row_fuse_both = argv[++i];
+            if (opt.crt_mixed_row_fuse_both == "0" || opt.crt_mixed_row_fuse_both == "none") opt.crt_mixed_row_fuse_both = "off";
+            if (opt.crt_mixed_row_fuse_both == "1" || opt.crt_mixed_row_fuse_both == "on" || opt.crt_mixed_row_fuse_both == "yes") opt.crt_mixed_row_fuse_both = "all";
+            if (!(opt.crt_mixed_row_fuse_both == "off" || opt.crt_mixed_row_fuse_both == "auto" ||
+                  opt.crt_mixed_row_fuse_both == "center" || opt.crt_mixed_row_fuse_both == "stage" ||
+                  opt.crt_mixed_row_fuse_both == "all" || opt.crt_mixed_row_fuse_both == "force")) {
+                throw std::runtime_error("--crt-mixed-row-fuse-both must be off, auto, center, stage, all, or force");
+            }
+        } else if (arg == "--crt-mixed-row-fuse-both-center") {
+            opt.crt_mixed_row_fuse_both = "center";
+        } else if (arg == "--crt-mixed-row-fuse-both-stage") {
+            opt.crt_mixed_row_fuse_both = "stage";
+        } else if (arg == "--crt-mixed-row-fuse-both-all") {
+            opt.crt_mixed_row_fuse_both = "all";
+        } else if (arg == "--crt-mixed-row-fuse-both-force") {
+            opt.crt_mixed_row_fuse_both = "force";
         } else if (arg == "--crt-edge-mode" || arg == "--crt-defused-edge-mode") {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-edge-mode");
             std::string v = argv[++i];
@@ -6925,6 +7054,9 @@ static Options parse_args(int argc, char** argv) {
         } else if (arg == "--crt-halfreal-validate-random") {
             opt.crt_halfreal_validate = true;
             opt.crt_halfreal_validate_random = true;
+        } else if (arg == "--crt-mixed-gpu-reference" || arg == "--crt-mixed-gpu-validate" || arg == "--crt-halfreal-gpu-reference") {
+            opt.crt_halfreal_validate = true;
+            opt.crt_mixed_gpu_reference = true;
         } else if (arg == "--crt-halfreal-dump") {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-halfreal-dump");
             opt.crt_halfreal_validate = true;
@@ -7068,7 +7200,7 @@ static Options parse_args(int argc, char** argv) {
                 << "Tuning: --center-max N, --center-autotune, --single-center-mode normal|halfreal|auto, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
                 << "CRT:    --crt-async-queues/--crt-two-queues default, --crt-shared-queue or --crt-single-queue for debug/contention tests.\n"
                 << "        --crt-radix8 default, --crt-radix4 disables global radix-8 test path.\n"
-                << "        --crt-local-square/--crt-mixed-row-center 8|16|32|64|128|256|512|1024 selects the requested center block; fast mixed odd LDS center supports 512 or 1024.\n"
+                << "        --crt-local-square/--crt-mixed-row-center 8|16|32|64|128|256|512|1024 selects the requested center block for mixed odd LDS tests.\n"
                 << "        --crt-defused-ntt is now default; --crt-no-defused-ntt/--crt-fused-ntt reverts to fused NTT.\n"
                 << "        --crt-edge-radix 2|4|8|16 changes first weighted and last unweighted edge radix; default 4.\n"
                 << "        --crt-odd-radix 3|9 enables experimental CRT/PFA odd x 2^m half-real rows.\n"
@@ -7076,6 +7208,8 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-center is kept as an alias; --crt-split-center keeps the older split GF61/GF31 center.\n"
                 << "        --crt-lds-stage/--crt-mixed-row-stage 8|16|32|64|128|256|512|1024 forces the LDS stage before the row center for tests.\n"
                 << "        --crt-mixed-row-core auto|lds|lds512|lds1024|generic selects the odd radix row path; lds uses --crt-mixed-row-center.\n"
+                << "        --crt-mixed-row-fuse-both off|auto|center|stage|all|force optionally runs GF61+GF31 in the same LDS center/stage kernels.\n"
+                << "        --crt-mixed-gpu-reference validates mixed odd LDS/fused paths against the generic mixed GPU path instead of exact CPU.\n"
                 << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
                 << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n";
             std::exit(0);
@@ -7740,11 +7874,13 @@ int main(int argc, char** argv) {
             clwrap::g_crt_defused_edge_radix = opt.crt_edge_radix;
             clwrap::g_crt_odd_radix = opt.crt_odd_radix;
             clwrap::g_crt_mixed_row_core = opt.crt_mixed_row_core;
+            clwrap::g_crt_mixed_row_fuse_both = opt.crt_mixed_row_fuse_both;
             clwrap::g_crt_defused_edge_mode = opt.crt_defused_edge_mode;
             clwrap::g_crt_center_mode = opt.crt_center_mode;
             clwrap::g_crt_halfreal_validate = opt.crt_halfreal_validate;
             clwrap::g_crt_halfreal_validate_iters = opt.crt_halfreal_validate_iters;
             clwrap::g_crt_halfreal_validate_random = opt.crt_halfreal_validate_random;
+            clwrap::g_crt_mixed_gpu_reference = opt.crt_mixed_gpu_reference;
             clwrap::g_crt_halfreal_dump_count = opt.crt_halfreal_dump_count;
             clwrap::g_crt_halfreal_dump_prefix = opt.crt_halfreal_dump_prefix;
             clwrap::g_crt_halfreal_flags61 = opt.crt_halfreal_flags61;
