@@ -1,5 +1,30 @@
 # PrMers BananaNTT Split : mixed CRT/PFA odd-radix POC
 
+
+## v8 mixed row LDS validation fixes
+
+This v8 fixes the failing cases seen in the first full matrix run:
+
+- `center=1024` failed because the specialized 1024 LDS center missed the final radix-2 DIF step and used the wrong inverse order. It is now `1024 -> 128 -> 16 -> 2`, then inverse `2 -> 4 -> 32 -> 256`.
+- The mixed row 512 optimized stage is now used only when its stride is 1. For row slices such as `row_m=8192` with `stage=512`, the stride is normally 16, so the safe generic LDS stage is used instead. This fixes the `stage=512/1024 center=16` and `stage=512 center=8` failures.
+- `test_mixed_row_lds_matrix.sh` now continues by default and writes `mixed_row_lds_matrix_logs/summary.tsv`. Use `STOP_ON_FAIL=1` if you want the old fail-fast behaviour.
+
+Recommended quick recheck of the previously failing set:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 \
+STAGES="8 16 32 64 128 256 512 1024" \
+CENTERS="1024 16 8" \
+./test_mixed_row_lds_matrix.sh
+```
+
+Full matrix:
+
+```bash
+DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=8 ./test_mixed_row_lds_matrix.sh
+```
+
+
 This branch is a GPU POC for the mixed CRT/PFA half-real idea first tested in the CPU prototype:
 
 `docs/mersenne2_mixed_crt_2d_half_fast`
@@ -86,6 +111,7 @@ PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0
   --crt-odd-radix 3 \
   --crt-center-mode halfreal \
   --crt-halfreal-flags 48 \
+  --crt-mixed-row-core generic \
   --device 1 \
   --iters 1000 \
   --profile-kernels
@@ -127,51 +153,111 @@ All switches are optional. They are kept to compare implementations.
 | `PRMERS_CRT_MIXED_FUSE_LDS_BOTH=0/1` | `0` | fused GF61/GF31 LDS512 forward/inverse test; usually slower on RTX 3080 |
 | `PRMERS_CRT_MIXED_FUSE_CENTER_BOTH=0/1` | `0` | fused GF61/GF31 LDS512 center test; usually slower on RTX 3080 |
 | `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | `0` | disable LDS512 row core |
+| `--crt-mixed-row-core auto|lds512|lds1024|generic` | `auto` | explicitly selects the mixed odd row core for path tests |
 
 
 ## LDS and row-core knobs
 
-These options are common to the normal CRT half-real path and the mixed odd-radix row path. In mixed `odd * 2^m`, they act on the power-of-two row NTT, not on the odd PFA mapping itself.
+There are two different controls:
 
-| option | values | default | effect |
-|---|---:|---:|---|
-| `--crt-local-square N` | `8,16,32,64,128,256,512,1024` | `512` | size of the LDS center square block, forward + square + inverse inside one local block |
-| `--crt-lds-square N` | same | alias | alias for `--crt-local-square` |
-| `--crt-center N` | same | alias | older alias for `--crt-local-square` |
-| `--crt-lds-stage N` | `0,16,32,64,128,256,512,1024` | NVIDIA `512`, AMD `0` | enables/disables intermediate LDS forward/inverse row stages |
-| `--crt-local-stage-max N` | same | alias | alias for `--crt-lds-stage` |
-| `--crt-lds-tile N` | `1,2` | `2` | tile factor used by the intermediate LDS stage kernels |
-| `--crt-local-stage-tile N` | same | alias | alias for `--crt-lds-tile` |
-| `PRMERS_CRT_MIXED_LDS512_DISABLE=0/1` | env | `0` | disables the mixed odd LDS512 row core for comparison |
+- `--crt-local-square N` or `--crt-mixed-row-center N` chooses the row center size.
+- `--crt-lds-stage N` or `--crt-mixed-row-stage N` chooses the LDS stage used before the center.
 
-Useful tests:
+For the mixed odd radix path the fast local row cores currently exist for center `512` and center `1024` only. Other center values are still useful to test the generic radix2 path, but they are not a fast LDS center path yet.
+
+Clear forced syntax:
 
 ```bash
-./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
-  --crt-center-mode halfreal --crt-halfreal-flags 48 \
-  --crt-local-square 512 --crt-lds-stage 512 --crt-lds-tile 2 \
-  --device 1 --iters 5000 --profile-kernels
+# stable fast path, center 512, stage 512
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-center 512 \
+  --crt-mixed-row-stage 512 \
+  --device 1 \
+  --iters 5000 \
+  --profile-kernels
 ```
-
-Disable the intermediate LDS row stage:
 
 ```bash
-./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
-  --crt-center-mode halfreal --crt-halfreal-flags 48 \
-  --crt-local-square 512 --crt-lds-stage 0 \
-  --device 1 --iters 5000 --profile-kernels
+# force center 1024 and a 256 stage before the center
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-center 1024 \
+  --crt-mixed-row-stage 256 \
+  --device 1 \
+  --iters 1000 \
+  --profile-kernels
 ```
 
-Try a smaller center square block:
+Equivalent old names still work:
 
 ```bash
-./prmers_opencl_prp 142606357 --modulus crt --crt-odd-radix 9 \
-  --crt-center-mode halfreal --crt-halfreal-flags 48 \
-  --crt-local-square 256 --crt-lds-stage 512 \
-  --device 1 --iters 5000 --profile-kernels
+--crt-local-square 512      # same as --crt-mixed-row-center 512
+--crt-lds-stage 512         # same as --crt-mixed-row-stage 512
 ```
 
-Current fastest RTX 3080 mixed-radix tests used `--crt-local-square 512 --crt-lds-stage 512 --crt-lds-tile 2` with the default tile14 shift-LUT odd head/tail.
+`--crt-mixed-row-core` values:
+
+```text
+auto      default planner
+lds       force the fast LDS row core using --crt-mixed-row-center, only 512 or 1024 today
+lds512    shorthand forcing center 512
+lds1024   shorthand forcing center 1024
+generic   force the generic radix2 row path
+```
+
+Important: the program now refuses misleading combinations. For example `--crt-mixed-row-core lds1024 --crt-mixed-row-center 256` is rejected instead of silently running the 1024 center.
+
+Useful test grid:
+
+```bash
+# compare fast centers
+for C in 512 1024; do
+  for S in 128 256 512 1024; do
+    echo "=== odd9 fast center=$C stage=$S ==="
+    ./prmers_opencl_prp 142606357 \
+      --modulus crt \
+      --crt-odd-radix 9 \
+      --crt-center-mode halfreal \
+      --crt-halfreal-no-autoprobe \
+      --crt-halfreal-flags 48 \
+      --crt-mixed-row-core lds \
+      --crt-mixed-row-center $C \
+      --crt-mixed-row-stage $S \
+      --device 1 \
+      --iters 1000 \
+      --profile-kernels
+  done
+done
+```
+
+```bash
+# generic path sanity test for smaller requested center sizes
+for C in 8 16 32 64 128 256; do
+  echo "=== odd9 generic center=$C ==="
+  ./prmers_opencl_prp 3021377 \
+    --modulus crt \
+    --crt-odd-radix 9 \
+    --crt-center-mode halfreal \
+    --crt-halfreal-no-autoprobe \
+    --crt-halfreal-flags 48 \
+    --crt-mixed-row-core generic \
+    --crt-mixed-row-center $C \
+    --device 1 \
+    --iters 5 \
+    --profile-kernels
+ done
+```
 
 ## Validation
 
@@ -441,6 +527,7 @@ PRMERS_CRT_HALFREAL_HEAD_LDS=512 \
   --crt-halfreal-flags 48 \
   --crt-local-square 512 \
   --crt-lds-stage 512 \
+  --crt-mixed-row-core lds512 \
   --device 1 \
   --iters 3000 \
   --profile-kernels
@@ -506,10 +593,9 @@ crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat
 crt_garner_first_coeffhi_mask32_anybase_x2
 ```
 
-Mixed odd radix 9 with LDS512 row core disabled:
+Mixed odd radix 9 with generic radix2 row core forced:
 
 ```bash
-PRMERS_CRT_MIXED_LDS512_DISABLE=1 \
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
@@ -663,4 +749,35 @@ By default the planner allows a mixed residual around the LDS512 middle stage. T
 
 The 1024 head can be useful for sizes such as `ln=23`, where it leaves a clean radix-8 residual before the LDS512 pair center.
 
-In mixed odd-radix mode the fast row core is still the stable LDS512 path by default. Passing `--crt-local-square 256` or `--crt-lds-stage 256` now disables the odd LDS512 row core instead of silently keeping it, so tests really compare the requested mode. `--crt-local-square 1024` is accepted for planner experiments, but the odd row fused center remains LDS512 unless a dedicated 1024 row-center kernel is added.
+In mixed odd-radix mode the default fast row core is still the stable LDS512 path. For the current fast odd9 path use `--crt-local-square 512 --crt-lds-stage 512` or leave the defaults. For path tests use `--crt-mixed-row-core lds512`, `--crt-mixed-row-core lds1024`, or `--crt-mixed-row-core generic`. The `lds1024` core is a real 1024 center path; for example `--crt-mixed-row-core lds1024 --crt-local-square 1024 --crt-lds-stage 256` should show `row-core=LDS1024` and `crt_mixed_lds1024_center_*` in the profile. There is still no optimized odd-row `center256 + stage1024` path. In the startup line, check `row-core=` and `row-core-request=`.
+
+## v7 mixed row LDS matrix
+
+This version lets `--crt-mixed-row-core lds` use a forced row center in `{8,16,32,64,128,256,512,1024}`.
+`--crt-mixed-row-stage` can also be `{8,16,32,64,128,256,512,1024}`.
+
+The mixed odd row planner now builds a real LDS plan. Example:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-stage 1024 \
+  --crt-mixed-row-center 256 \
+  --device 1 \
+  --iters 1000 \
+  --profile-kernels
+```
+
+If the requested LDS stage does not divide the remaining row size down to the requested center, the planner automatically adds the small completion radix. For example, a 256 stage with a 256 center can become `fwd=256+4,center=256,inv=reverse` when a radix-4 completion is needed.
+
+New kernels:
+
+- `gf61_crt_mixed_halfreal_lds_pair_any_61`
+- `gf61_crt_mixed_halfreal_lds_pair_any_31`
+
+Use `test_mixed_row_lds_matrix.sh` to validate or benchmark all stage/center combinations.

@@ -1162,6 +1162,7 @@ static int g_crt_fwd8_61_wg = 64;
 static int g_crt_defused_edge_fuse = 0;
 static uint32_t g_crt_defused_edge_radix = 4u;
 static uint32_t g_crt_odd_radix = 9u;
+static std::string g_crt_mixed_row_core = "auto";
 static std::string g_crt_center_mode = "halfreal";
 static bool g_crt_halfreal_validate = false;
 static uint32_t g_crt_halfreal_validate_iters = 1;
@@ -2591,6 +2592,10 @@ struct CrtFusedKernels {
     cl_kernel mixed_center31 = nullptr;
     cl_kernel mixed_lds512_pair61 = nullptr;
     cl_kernel mixed_lds512_pair31 = nullptr;
+    cl_kernel mixed_lds1024_pair61 = nullptr;
+    cl_kernel mixed_lds1024_pair31 = nullptr;
+    cl_kernel mixed_lds_any_pair61 = nullptr;
+    cl_kernel mixed_lds_any_pair31 = nullptr;
     cl_kernel mixed_lds512_pair_both = nullptr;
     cl_kernel mixed_fwd_lds512_both = nullptr;
     cl_kernel mixed_inv_lds512_both = nullptr;
@@ -2731,6 +2736,10 @@ struct CrtFusedKernels {
         mixed_center31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_center_31");
         mixed_lds512_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61");
         mixed_lds512_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_31");
+        mixed_lds1024_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds1024_pair_61");
+        mixed_lds1024_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds1024_pair_31");
+        mixed_lds_any_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_61");
+        mixed_lds_any_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_31");
         mixed_lds512_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61x31");
         mixed_fwd_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61x31_512opt");
         mixed_inv_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61x31_512opt");
@@ -2870,6 +2879,10 @@ struct CrtFusedKernels {
         if (mixed_center31) clReleaseKernel(mixed_center31);
         if (mixed_lds512_pair61) clReleaseKernel(mixed_lds512_pair61);
         if (mixed_lds512_pair31) clReleaseKernel(mixed_lds512_pair31);
+        if (mixed_lds1024_pair61) clReleaseKernel(mixed_lds1024_pair61);
+        if (mixed_lds1024_pair31) clReleaseKernel(mixed_lds1024_pair31);
+        if (mixed_lds_any_pair61) clReleaseKernel(mixed_lds_any_pair61);
+        if (mixed_lds_any_pair31) clReleaseKernel(mixed_lds_any_pair31);
         if (mixed_lds512_pair_both) clReleaseKernel(mixed_lds512_pair_both);
         if (mixed_fwd_lds512_both) clReleaseKernel(mixed_fwd_lds512_both);
         if (mixed_inv_lds512_both) clReleaseKernel(mixed_inv_lds512_both);
@@ -2909,6 +2922,16 @@ struct CrtFusedKernels {
 
     bool mixed_odd_lds512_available() const {
         return mixed_lds512_pair61 && mixed_lds512_pair31 &&
+               fwd_lds_stage_61 && fwd_lds_stage_31 &&
+               inv_lds_stage_61 && inv_lds_stage_31;
+    }
+    bool mixed_odd_lds1024_available() const {
+        return mixed_lds1024_pair61 && mixed_lds1024_pair31 &&
+               fwd_lds_stage_61 && fwd_lds_stage_31 &&
+               inv_lds_stage_61 && inv_lds_stage_31;
+    }
+    bool mixed_odd_lds_any_available() const {
+        return mixed_lds_any_pair61 && mixed_lds_any_pair31 &&
                fwd_lds_stage_61 && fwd_lds_stage_31 &&
                inv_lds_stage_61 && inv_lds_stage_31;
     }
@@ -3220,12 +3243,45 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const cl_uint flags31 = crt_halfreal_effective_flags31();
 
     
-    const bool mixed_lds512_disabled = parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false);
+    const bool mixed_lds_disabled = parse_bool_env("PRMERS_CRT_MIXED_LDS_DISABLE", false) ||
+                                    parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false);
     const bool mixed_lds512_opt = parse_bool_env("PRMERS_CRT_MIXED_LDS512_OPT", true);
-    const bool use_mixed_lds512 = !mixed_lds512_disabled && row_m >= 512u &&
-                                  g_crt_lds_stage >= 512u && g_crt_center_chunk >= 512u &&
-                                  (flags61 & 16u) && (flags31 & 16u) &&
-                                  fk.mixed_odd_lds512_available();
+    const bool mixed_row_force_generic = (g_crt_mixed_row_core == "generic");
+    const bool mixed_row_force_lds = (g_crt_mixed_row_core == "lds");
+    const bool mixed_row_force_lds512 = (g_crt_mixed_row_core == "lds512");
+    const bool mixed_row_force_lds1024 = (g_crt_mixed_row_core == "lds1024");
+    const bool mixed_row_center_512 = (g_crt_center_chunk == 512u);
+    const bool mixed_row_center_1024 = (g_crt_center_chunk == 1024u);
+    const cl_uint mixed_row_center = mixed_row_force_lds512 ? 512u :
+                                     (mixed_row_force_lds1024 ? 1024u : g_crt_center_chunk);
+    const auto mixed_valid_pow2_lds = [](cl_uint v) {
+        return v == 8u || v == 16u || v == 32u || v == 64u ||
+               v == 128u || v == 256u || v == 512u || v == 1024u;
+    };
+    const bool mixed_row_center_valid = mixed_valid_pow2_lds(mixed_row_center);
+    const bool mixed_row_force_any_lds = mixed_row_force_lds || mixed_row_force_lds512 || mixed_row_force_lds1024;
+    const bool mixed_row_auto_lds = (g_crt_mixed_row_core == "auto") &&
+                                    (mixed_row_center_512 || mixed_row_center_1024) &&
+                                    g_crt_lds_stage >= 8u;
+    if (mixed_row_force_lds512 && !mixed_row_center_512) {
+        throw std::runtime_error("--crt-mixed-row-core lds512 requires --crt-local-square/--crt-mixed-row-center 512");
+    }
+    if (mixed_row_force_lds1024 && !mixed_row_center_1024) {
+        throw std::runtime_error("--crt-mixed-row-core lds1024 requires --crt-local-square/--crt-mixed-row-center 1024");
+    }
+    if (mixed_row_force_any_lds && (!mixed_row_center_valid || row_m < mixed_row_center)) {
+        throw std::runtime_error("forced mixed odd LDS row core requires --crt-mixed-row-center in 8..1024 and row_m >= center");
+    }
+    const bool use_mixed_lds_any = !mixed_lds_disabled && !mixed_row_force_generic &&
+                                   mixed_row_center_valid && row_m >= mixed_row_center &&
+                                   (mixed_row_force_any_lds || mixed_row_auto_lds) &&
+                                   (flags61 & 16u) && (flags31 & 16u) &&
+                                   fk.mixed_odd_lds_any_available();
+    const bool use_mixed_lds1024 = use_mixed_lds_any && mixed_row_center == 1024u && fk.mixed_odd_lds1024_available();
+    const bool use_mixed_lds512 = use_mixed_lds_any && !use_mixed_lds1024 && mixed_row_center == 512u && fk.mixed_odd_lds512_available();
+    if (mixed_row_force_any_lds && !use_mixed_lds_any) {
+        throw std::runtime_error("forced mixed odd LDS row core requested but mixed LDS any-center kernels are not available for this build/flags");
+    }
     const bool use_mixed_fused_edges = parse_bool_env("PRMERS_CRT_MIXED_FUSE_ODD_EDGES", true) &&
                                        fk.mixed_odd_edge_fused_available();
     const bool use_mixed_precrt_coeffhi = parse_bool_env("PRMERS_CRT_MIXED_PRECRT_COEFFHI", true) &&
@@ -3491,8 +3547,17 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_inv_r2_31, round_up_size(static_cast<size_t>(odd) * static_cast<size_t>(row_m >> 1), local64), &local64, "enqueue mixed inv31", "crt_mixed_inv_radix2_31");
     };
 
+    auto mixed_lds_label = [](const char* dir, cl_uint radix, const char* mod, bool opt512) -> std::string {
+        std::string s = "crt_mixed_lds" + std::to_string(radix) + "_" + dir;
+        if (opt512) s += "_opt";
+        s += "_";
+        s += mod;
+        return s;
+    };
+
     auto lds_fwd61 = [&](cl_uint len, cl_uint radix) {
-        cl_kernel k = (radix == 512u && mixed_lds512_opt && fk.fwd_lds_stage_61_512opt) ? fk.fwd_lds_stage_61_512opt : fk.fwd_lds_stage_61;
+        const bool opt512 = (radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_61_512opt);
+        cl_kernel k = opt512 ? fk.fwd_lds_stage_61_512opt : fk.fwd_lds_stage_61;
         cl_uint arg = 0;
         set_karg_mem(k, arg, g61.bufField, "set mixed lds fwd61 a");
         set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds fwd61 tw");
@@ -3500,10 +3565,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         set_karg(k, arg, len, "set mixed lds fwd61 len");
         set_karg(k, arg, radix, "set mixed lds fwd61 radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
-        enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS fwd61", radix == 512u ? "crt_mixed_lds512_forward_61" : "crt_mixed_lds_forward_61");
+        const std::string label = mixed_lds_label("forward", radix, "61", opt512);
+        enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS fwd61", label.c_str());
     };
     auto lds_fwd31 = [&](cl_uint len, cl_uint radix) {
-        cl_kernel k = (radix == 512u && mixed_lds512_opt && fk.fwd_lds_stage_31_512opt) ? fk.fwd_lds_stage_31_512opt : fk.fwd_lds_stage_31;
+        const bool opt512 = (radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_31_512opt);
+        cl_kernel k = opt512 ? fk.fwd_lds_stage_31_512opt : fk.fwd_lds_stage_31;
         cl_uint arg = 0;
         set_karg_mem(k, arg, g31.bufField, "set mixed lds fwd31 a");
         set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds fwd31 tw");
@@ -3511,10 +3578,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         set_karg(k, arg, len, "set mixed lds fwd31 len");
         set_karg(k, arg, radix, "set mixed lds fwd31 radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
-        enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS fwd31", radix == 512u ? "crt_mixed_lds512_forward_31" : "crt_mixed_lds_forward_31");
+        const std::string label = mixed_lds_label("forward", radix, "31", opt512);
+        enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS fwd31", label.c_str());
     };
     auto lds_inv61 = [&](cl_uint base_len, cl_uint radix) {
-        cl_kernel k = (radix == 512u && mixed_lds512_opt && fk.inv_lds_stage_61_512opt) ? fk.inv_lds_stage_61_512opt : fk.inv_lds_stage_61;
+        const bool opt512 = (radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_61_512opt);
+        cl_kernel k = opt512 ? fk.inv_lds_stage_61_512opt : fk.inv_lds_stage_61;
         cl_uint arg = 0;
         set_karg_mem(k, arg, g61.bufField, "set mixed lds inv61 a");
         set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds inv61 tw");
@@ -3522,10 +3591,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         set_karg(k, arg, base_len, "set mixed lds inv61 base_len");
         set_karg(k, arg, radix, "set mixed lds inv61 radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
-        enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS inv61", radix == 512u ? "crt_mixed_lds512_inverse_61" : "crt_mixed_lds_inverse_61");
+        const std::string label = mixed_lds_label("inverse", radix, "61", opt512);
+        enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS inv61", label.c_str());
     };
     auto lds_inv31 = [&](cl_uint base_len, cl_uint radix) {
-        cl_kernel k = (radix == 512u && mixed_lds512_opt && fk.inv_lds_stage_31_512opt) ? fk.inv_lds_stage_31_512opt : fk.inv_lds_stage_31;
+        const bool opt512 = (radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_31_512opt);
+        cl_kernel k = opt512 ? fk.inv_lds_stage_31_512opt : fk.inv_lds_stage_31;
         cl_uint arg = 0;
         set_karg_mem(k, arg, g31.bufField, "set mixed lds inv31 a");
         set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds inv31 tw");
@@ -3533,7 +3604,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         set_karg(k, arg, base_len, "set mixed lds inv31 base_len");
         set_karg(k, arg, radix, "set mixed lds inv31 radix");
         const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
-        enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS inv31", radix == 512u ? "crt_mixed_lds512_inverse_31" : "crt_mixed_lds_inverse_31");
+        const std::string label = mixed_lds_label("inverse", radix, "31", opt512);
+        enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS inv31", label.c_str());
     };
     auto sync_g31_to_g61 = [&](const char* label) {
         cl_event ev = enqueue_queue_marker(g31, label);
@@ -3622,6 +3694,64 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_lds512_pair31, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
                        "enqueue mixed lds512 center31", "crt_mixed_lds512_center_31");
     };
+    auto center_lds1024_61 = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_lds1024_pair61, arg, g61.bufField, "set mixed lds1024 center61 a");
+        set_karg_mem(fk.mixed_lds1024_pair61, arg, g61.bufTwFwd, "set mixed lds1024 center61 twf");
+        set_karg_mem(fk.mixed_lds1024_pair61, arg, g61.bufTwInv, "set mixed lds1024 center61 twi");
+        set_karg(fk.mixed_lds1024_pair61, arg, pow2_n, "set mixed lds1024 center61 pow2_n");
+        set_karg(fk.mixed_lds1024_pair61, arg, odd, "set mixed lds1024 center61 odd");
+        set_karg(fk.mixed_lds1024_pair61, arg, flags61, "set mixed lds1024 center61 flags");
+        const size_t blocks = static_cast<size_t>(row_m >> 10);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        enqueue_kernel(g61, fk.mixed_lds1024_pair61, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                       "enqueue mixed lds1024 center61", "crt_mixed_lds1024_center_61");
+    };
+    auto center_lds1024_31 = [&]() {
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_lds1024_pair31, arg, g31.bufField, "set mixed lds1024 center31 a");
+        set_karg_mem(fk.mixed_lds1024_pair31, arg, g31.bufTwFwd, "set mixed lds1024 center31 twf");
+        set_karg_mem(fk.mixed_lds1024_pair31, arg, g31.bufTwInv, "set mixed lds1024 center31 twi");
+        set_karg(fk.mixed_lds1024_pair31, arg, pow2_n, "set mixed lds1024 center31 pow2_n");
+        set_karg(fk.mixed_lds1024_pair31, arg, odd, "set mixed lds1024 center31 odd");
+        set_karg(fk.mixed_lds1024_pair31, arg, flags31, "set mixed lds1024 center31 flags");
+        const size_t blocks = static_cast<size_t>(row_m >> 10);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        enqueue_kernel(g31, fk.mixed_lds1024_pair31, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                       "enqueue mixed lds1024 center31", "crt_mixed_lds1024_center_31");
+    };
+
+    auto center_lds_any_61 = [&](cl_uint center_len) {
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_lds_any_pair61, arg, g61.bufField, "set mixed lds any center61 a");
+        set_karg_mem(fk.mixed_lds_any_pair61, arg, g61.bufTwFwd, "set mixed lds any center61 twf");
+        set_karg_mem(fk.mixed_lds_any_pair61, arg, g61.bufTwInv, "set mixed lds any center61 twi");
+        set_karg(fk.mixed_lds_any_pair61, arg, pow2_n, "set mixed lds any center61 pow2_n");
+        set_karg(fk.mixed_lds_any_pair61, arg, odd, "set mixed lds any center61 odd");
+        set_karg(fk.mixed_lds_any_pair61, arg, flags61, "set mixed lds any center61 flags");
+        set_karg(fk.mixed_lds_any_pair61, arg, center_len, "set mixed lds any center61 center_len");
+        const cl_uint log_c = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(center_len));
+        const size_t blocks = static_cast<size_t>(row_m >> log_c);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        enqueue_kernel(g61, fk.mixed_lds_any_pair61, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                       "enqueue mixed lds any center61", "crt_mixed_lds_any_center_61");
+    };
+    auto center_lds_any_31 = [&](cl_uint center_len) {
+        cl_uint arg = 0;
+        set_karg_mem(fk.mixed_lds_any_pair31, arg, g31.bufField, "set mixed lds any center31 a");
+        set_karg_mem(fk.mixed_lds_any_pair31, arg, g31.bufTwFwd, "set mixed lds any center31 twf");
+        set_karg_mem(fk.mixed_lds_any_pair31, arg, g31.bufTwInv, "set mixed lds any center31 twi");
+        set_karg(fk.mixed_lds_any_pair31, arg, pow2_n, "set mixed lds any center31 pow2_n");
+        set_karg(fk.mixed_lds_any_pair31, arg, odd, "set mixed lds any center31 odd");
+        set_karg(fk.mixed_lds_any_pair31, arg, flags31, "set mixed lds any center31 flags");
+        set_karg(fk.mixed_lds_any_pair31, arg, center_len, "set mixed lds any center31 center_len");
+        const cl_uint log_c = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(center_len));
+        const size_t blocks = static_cast<size_t>(row_m >> log_c);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        enqueue_kernel(g31, fk.mixed_lds_any_pair31, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                       "enqueue mixed lds any center31", "crt_mixed_lds_any_center_31");
+    };
+
     auto center_lds512_both = [&]() {
         
         cl_event gf31_fwd_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for fused center");
@@ -3823,12 +3953,15 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         odd_dft31(g31.bufOddFwd, "crt_mixed_odd_fwd_31");
     }
 
-    if (use_mixed_lds512) {
+    if (use_mixed_lds_any) {
+        const cl_uint center_len = mixed_row_center;
+        const cl_uint requested_stage_cap = (g_crt_lds_stage >= 8u) ? g_crt_lds_stage : center_len;
+        const cl_uint stage_cap = std::max<cl_uint>(2u, std::min<cl_uint>(requested_stage_cap, row_m));
         cl_uint cur = row_m;
-        while (cur > 512u) {
-            cl_uint radix = floor_pow2_leq(std::min<cl_uint>(512u, cur / 512u));
+        while (cur > center_len) {
+            cl_uint radix = floor_pow2_leq(std::min<cl_uint>(stage_cap, cur / center_len));
             if (radix < 2u) radix = 2u;
-            if (use_mixed_lds512_both && radix == 512u) {
+            if (use_mixed_lds512 && use_mixed_lds512_both && radix == 512u && (cur / radix) == 1u) {
                 lds_fwd_both(cur, radix);
             } else {
                 lds_fwd61(cur, radix);
@@ -3836,17 +3969,23 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             }
             cur /= radix;
         }
-        if (use_mixed_center_both) {
+        if (use_mixed_lds1024) {
+            center_lds1024_61();
+            center_lds1024_31();
+        } else if (use_mixed_lds512 && use_mixed_center_both) {
             center_lds512_both();
-        } else {
+        } else if (use_mixed_lds512) {
             center_lds512_61();
             center_lds512_31();
+        } else {
+            center_lds_any_61(center_len);
+            center_lds_any_31(center_len);
         }
-        cur = 512u;
+        cur = center_len;
         while (cur < row_m) {
-            cl_uint radix = floor_pow2_leq(std::min<cl_uint>(512u, row_m / cur));
+            cl_uint radix = floor_pow2_leq(std::min<cl_uint>(stage_cap, row_m / cur));
             if (radix < 2u) radix = 2u;
-            if (use_mixed_lds512_both && radix == 512u) {
+            if (use_mixed_lds512 && use_mixed_lds512_both && radix == 512u && cur == 1u) {
                 lds_inv_both(cur, radix);
             } else {
                 lds_inv61(cur, radix);
@@ -6264,7 +6403,72 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                                                crt_fused.mixed_odd_center_both_available();
         const bool mixed_lds_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_LDS_BOTH", false) &&
                                             crt_fused.mixed_odd_lds512_both_available();
-        std::cout << "CRT pipeline: mixed odd CRT/PFA row half-real LDS512; odd=" << clwrap::g_crt_odd_radix
+        const cl_uint mixed_odd = clwrap::g_crt_odd_radix;
+        const cl_uint mixed_pow2_n = (mixed_odd > 1u && (gpu61.n % mixed_odd) == 0u) ? (gpu61.n / mixed_odd) : 0u;
+        const cl_uint mixed_row_m = mixed_pow2_n >> 1;
+        const bool mixed_row_force_generic = (clwrap::g_crt_mixed_row_core == "generic");
+        const bool mixed_row_force_lds = (clwrap::g_crt_mixed_row_core == "lds");
+        const bool mixed_row_force_lds512 = (clwrap::g_crt_mixed_row_core == "lds512");
+        const bool mixed_row_force_lds1024 = (clwrap::g_crt_mixed_row_core == "lds1024");
+        const bool mixed_row_center_512 = (clwrap::g_crt_center_chunk == 512u);
+        const bool mixed_row_center_1024 = (clwrap::g_crt_center_chunk == 1024u);
+        const cl_uint mixed_row_center = mixed_row_force_lds512 ? 512u :
+                                         (mixed_row_force_lds1024 ? 1024u : clwrap::g_crt_center_chunk);
+        const auto mixed_valid_pow2_lds = [](cl_uint v) {
+            return v == 8u || v == 16u || v == 32u || v == 64u ||
+                   v == 128u || v == 256u || v == 512u || v == 1024u;
+        };
+        const bool mixed_row_center_valid = mixed_valid_pow2_lds(mixed_row_center);
+        const bool mixed_row_force_any_lds = mixed_row_force_lds || mixed_row_force_lds512 || mixed_row_force_lds1024;
+        const bool mixed_row_auto_lds = (clwrap::g_crt_mixed_row_core == "auto") &&
+                                        (mixed_row_center_512 || mixed_row_center_1024) &&
+                                        clwrap::g_crt_lds_stage >= 8u;
+        const bool mixed_row_lds_any_enabled =
+            !parse_bool_env("PRMERS_CRT_MIXED_LDS_DISABLE", false) &&
+            !parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false) &&
+            !mixed_row_force_generic &&
+            mixed_row_center_valid && mixed_row_m >= mixed_row_center &&
+            (mixed_row_force_any_lds || mixed_row_auto_lds) &&
+            (clwrap::crt_halfreal_effective_flags61() & 16u) &&
+            (clwrap::crt_halfreal_effective_flags31() & 16u) &&
+            crt_fused.mixed_odd_lds_any_available();
+        const bool mixed_row_lds1024_enabled = mixed_row_lds_any_enabled &&
+                                               mixed_row_center == 1024u &&
+                                               crt_fused.mixed_odd_lds1024_available();
+        const bool mixed_row_lds512_enabled = mixed_row_lds_any_enabled &&
+                                              !mixed_row_lds1024_enabled &&
+                                              mixed_row_center == 512u &&
+                                              crt_fused.mixed_odd_lds512_available();
+        const std::string mixed_row_note = mixed_row_lds_any_enabled
+            ? ((mixed_row_force_any_lds ? "forced-lds" : "auto-lds") + std::string("-center") + std::to_string(mixed_row_center))
+            : (mixed_row_force_generic ? "forced-generic" : "generic-fallback");
+        std::string mixed_row_plan;
+        if (mixed_row_lds_any_enabled) {
+            const cl_uint row_center = mixed_row_center;
+            const cl_uint requested_stage_cap = (clwrap::g_crt_lds_stage >= 8u) ? clwrap::g_crt_lds_stage : row_center;
+            const cl_uint stage_cap = std::max<cl_uint>(2u, std::min<cl_uint>(requested_stage_cap, mixed_row_m));
+            cl_uint cur = mixed_row_m;
+            mixed_row_plan = "fwd=";
+            bool first = true;
+            while (cur > row_center) {
+                cl_uint radix = clwrap::floor_pow2_leq(std::min<cl_uint>(stage_cap, cur / row_center));
+                if (radix < 2u) radix = 2u;
+                if (!first) mixed_row_plan += "+";
+                mixed_row_plan += std::to_string(radix);
+                first = false;
+                cur /= radix;
+            }
+            if (first) mixed_row_plan += "none";
+            mixed_row_plan += ",center=" + std::to_string(row_center) + ",inv=reverse";
+        } else {
+            mixed_row_plan = "generic-radix2";
+        }
+        const std::string mixed_row_core_text = mixed_row_lds_any_enabled
+            ? ("LDS" + std::to_string(mixed_row_center))
+            : std::string("generic-radix2");
+        std::cout << "CRT pipeline: mixed odd CRT/PFA row half-real; odd=" << clwrap::g_crt_odd_radix
+                  << ", row-core=" << mixed_row_core_text
+                  << ", row-core-request=" << clwrap::g_crt_mixed_row_core
                   << ", rows use power-of-two half-real NTT, Garner/carry stays fused, queues="
                   << ((gpu31.queue != gpu61.queue) ? "async" : "shared")
                   << ", tail=" << (mixed_precrt_split_possible ? "split-preCRT-coeffhi" : (mixed_precrt_possible ? "preCRT-coeffhi-anybase" : "old-unpack+Garner"))
@@ -6281,6 +6485,8 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", shift-lut=" << (mixed_shift_lut_enabled ? "on" : "off")
                   << ", lds-stage=" << clwrap::g_crt_lds_stage
                   << ", lds-square=" << clwrap::g_crt_center_chunk
+                  << ", row-stage-plan=" << mixed_row_plan
+                  << ", fast-row-note=" << mixed_row_note
                   << ", fuse-pack-both=" << (mixed_pack_both_enabled ? "on" : "off")
                   << ", fuse-lds-both=" << (mixed_lds_both_enabled ? "on" : "off")
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
@@ -6532,6 +6738,7 @@ struct Options {
     uint32_t crt_edge_radix = 4u;
     uint32_t crt_odd_radix = 0u;
     bool crt_odd_radix_auto = true;
+    std::string crt_mixed_row_core = "auto";
     int crt_defused_edge_mode = 0;
     bool user_crt_queue = false;
     bool user_crt_schedule = false;
@@ -6668,6 +6875,22 @@ static Options parse_args(int argc, char** argv) {
                 opt.crt_center_mode = "halfreal";
                 opt.crt_defused_fast = true;
             }
+        } else if (arg == "--crt-mixed-row-core" || arg == "--crt-odd-row-core") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.crt_mixed_row_core = argv[++i];
+            if (opt.crt_mixed_row_core == "radix2" || opt.crt_mixed_row_core == "generic-radix2" || opt.crt_mixed_row_core == "slow") opt.crt_mixed_row_core = "generic";
+            if (opt.crt_mixed_row_core == "fast") opt.crt_mixed_row_core = "lds";
+            if (!(opt.crt_mixed_row_core == "auto" || opt.crt_mixed_row_core == "lds" || opt.crt_mixed_row_core == "lds512" || opt.crt_mixed_row_core == "lds1024" || opt.crt_mixed_row_core == "generic")) {
+                throw std::runtime_error("--crt-mixed-row-core must be auto, lds, lds512, lds1024 or generic");
+            }
+        } else if (arg == "--crt-mixed-row-generic" || arg == "--crt-odd-row-generic") {
+            opt.crt_mixed_row_core = "generic";
+        } else if (arg == "--crt-mixed-row-lds" || arg == "--crt-odd-row-lds") {
+            opt.crt_mixed_row_core = "lds";
+        } else if (arg == "--crt-mixed-row-lds512" || arg == "--crt-odd-row-lds512") {
+            opt.crt_mixed_row_core = "lds512";
+        } else if (arg == "--crt-mixed-row-lds1024" || arg == "--crt-odd-row-lds1024") {
+            opt.crt_mixed_row_core = "lds1024";
         } else if (arg == "--crt-edge-mode" || arg == "--crt-defused-edge-mode") {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-edge-mode");
             std::string v = argv[++i];
@@ -6761,20 +6984,20 @@ static Options parse_args(int argc, char** argv) {
             opt.crt_radix8_global = true;
         } else if (arg == "--crt-radix4" || arg == "--crt-no-radix8") {
             opt.crt_radix8_global = false;
-        } else if (arg == "--crt-center" || arg == "--crt-local-square" || arg == "--crt-lds-square") {
+        } else if (arg == "--crt-center" || arg == "--crt-local-square" || arg == "--crt-lds-square" || arg == "--crt-mixed-row-center" || arg == "--crt-mixed-row-square") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
             opt.crt_center_chunk = static_cast<cl_uint>(std::stoul(argv[++i]));
             opt.user_crt_local_square = true;
             if (opt.crt_center_chunk != 8u && opt.crt_center_chunk != 16u && opt.crt_center_chunk != 32u && opt.crt_center_chunk != 64u && opt.crt_center_chunk != 128u && opt.crt_center_chunk != 256u && opt.crt_center_chunk != 512u && opt.crt_center_chunk != 1024u) {
                 throw std::runtime_error("--crt-local-square must be 8, 16, 32, 64, 128, 256, 512 or 1024");
             }
-        } else if (arg == "--crt-lds-stage" || arg == "--crt-local-stage-max") {
+        } else if (arg == "--crt-lds-stage" || arg == "--crt-local-stage-max" || arg == "--crt-mixed-row-stage") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --crt-lds-stage");
             opt.crt_lds_stage = static_cast<cl_uint>(std::stoul(argv[++i]));
             opt.user_crt_local_stage = true;
-            if (opt.crt_lds_stage != 0u && opt.crt_lds_stage != 16u && opt.crt_lds_stage != 32u && opt.crt_lds_stage != 64u &&
+            if (opt.crt_lds_stage != 0u && opt.crt_lds_stage != 8u && opt.crt_lds_stage != 16u && opt.crt_lds_stage != 32u && opt.crt_lds_stage != 64u &&
                 opt.crt_lds_stage != 128u && opt.crt_lds_stage != 256u && opt.crt_lds_stage != 512u && opt.crt_lds_stage != 1024u) {
-                throw std::runtime_error("--crt-local-stage-max must be 0, 16, 32, 64, 128, 256, 512 or 1024");
+                throw std::runtime_error("--crt-local-stage-max must be 0, 8, 16, 32, 64, 128, 256, 512 or 1024");
             }
         } else if (arg == "--crt-lds-tile" || arg == "--crt-local-stage-tile") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
@@ -6845,13 +7068,14 @@ static Options parse_args(int argc, char** argv) {
                 << "Tuning: --center-max N, --center-autotune, --single-center-mode normal|halfreal|auto, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
                 << "CRT:    --crt-async-queues/--crt-two-queues default, --crt-shared-queue or --crt-single-queue for debug/contention tests.\n"
                 << "        --crt-radix8 default, --crt-radix4 disables global radix-8 test path.\n"
-                << "        --crt-local-square 16|32|64|128|256|512|1024 selects the LDS center block when available; default is 512.\n"
+                << "        --crt-local-square/--crt-mixed-row-center 8|16|32|64|128|256|512|1024 selects the requested center block; fast mixed odd LDS center supports 512 or 1024.\n"
                 << "        --crt-defused-ntt is now default; --crt-no-defused-ntt/--crt-fused-ntt reverts to fused NTT.\n"
                 << "        --crt-edge-radix 2|4|8|16 changes first weighted and last unweighted edge radix; default 4.\n"
                 << "        --crt-odd-radix 3|9 enables experimental CRT/PFA odd x 2^m half-real rows.\n"
                 << "        --crt-edge-mode auto|legacy|generic selects old radix4 split/fuse path or generic edge kernels.\n"
                 << "        --crt-center is kept as an alias; --crt-split-center keeps the older split GF61/GF31 center.\n"
-                << "        --crt-lds-stage 16|32|64|128|256|512|1024 enables the intermediate LDS stage path for tests.\n"
+                << "        --crt-lds-stage/--crt-mixed-row-stage 8|16|32|64|128|256|512|1024 forces the LDS stage before the row center for tests.\n"
+                << "        --crt-mixed-row-core auto|lds|lds512|lds1024|generic selects the odd radix row path; lds uses --crt-mixed-row-center.\n"
                 << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
                 << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n";
             std::exit(0);
@@ -7515,6 +7739,7 @@ int main(int argc, char** argv) {
             clwrap::g_crt_defused_edge_fuse = opt.crt_defused_edge_fuse;
             clwrap::g_crt_defused_edge_radix = opt.crt_edge_radix;
             clwrap::g_crt_odd_radix = opt.crt_odd_radix;
+            clwrap::g_crt_mixed_row_core = opt.crt_mixed_row_core;
             clwrap::g_crt_defused_edge_mode = opt.crt_defused_edge_mode;
             clwrap::g_crt_center_mode = opt.crt_center_mode;
             clwrap::g_crt_halfreal_validate = opt.crt_halfreal_validate;

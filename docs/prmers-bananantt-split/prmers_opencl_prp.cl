@@ -8056,7 +8056,11 @@ uint crt_bitrev_u32(uint x, uint logn);
 static inline __attribute__((always_inline))
 uint crt_bitrev3_u32_fast(uint x);
 static inline __attribute__((always_inline))
+uint crt_bitrev4_u32_fast(uint x);
+static inline __attribute__((always_inline))
 uint crt_bitrev9_u32_fast(uint x);
+static inline __attribute__((always_inline))
+uint crt_bitrev10_u32_fast(uint x);
 static inline __attribute__((always_inline))
 uint crt_halfreal_perm_u32(uint x, uint logn, uint flags);
 static inline __attribute__((always_inline))
@@ -10121,6 +10125,593 @@ void gf61_crt_mixed_halfreal_lds512_pair_31(__global GF31* restrict a31,
 
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds1024_pair_61(__global GF* restrict a61,
+                                            __global const GF* restrict twf61,
+                                            __global const GF* restrict twi61,
+                                            uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 10u) return;
+
+    const uint blocks = row_m >> 10;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 10u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 10);
+    const uint baseB = row_base + (blockB << 10);
+    const int same = (blockA == blockB);
+
+    __local GF A[1024];
+    __local GF B[1024];
+
+    for (uint t = lid; t < 1024u; t += 64u) {
+        A[t] = a61[baseA + t];
+        if (!same) B[t] = a61[baseB + t];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    
+    uint Lf = 1024u;
+    while (Lf >= 8u) {
+        local_stage_dif_radix8_pow2(A, twf61, 1024u, Lf, lid, 64u);
+        if (!same) local_stage_dif_radix8_pow2(B, twf61, 1024u, Lf, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        Lf >>= 3;
+    }
+    if (Lf == 2u) {
+        local_stage_dif_pow2(A, twf61, 1024u, 2u, lid, 64u);
+        if (!same) local_stage_dif_pow2(B, twf61, 1024u, 2u, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+    if ((flags & 32u) != 0u) {
+        for (uint r = 0u; r < 16u; ++r) {
+            const uint t = (lid << 4) + r;
+            const uint rt = (crt_bitrev4_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (1023u - t)
+                                       : crt_bitrev10_u32_fast((0u - rt) & 1023u);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z = A[t];
+                const GF zn = same ? A[tm] : B[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                const GF outK  = gf_pack_e_plus_i_o(E, O);
+                const GF outKm = gf_pack_conj_e_plus_i_conj_o(E, O);
+                A[t] = outK;
+                if (same) {
+                    if (tm != t) A[tm] = outKm;
+                } else {
+                    B[tm] = outKm;
+                }
+            } else {
+                const GF zsmall = B[tm];
+                const GF zlarge = A[t];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(zsmall, gf_conj_fast(zlarge), twf61, pow2_n, km, &E, &O);
+                const GF outSmall = gf_pack_e_plus_i_o(E, O);
+                const GF outLarge = gf_pack_conj_e_plus_i_conj_o(E, O);
+                B[tm] = outSmall;
+                A[t] = outLarge;
+            }
+        }
+    } else {
+        for (uint r = 0u; r < 16u; ++r) {
+            const uint t = (lid << 4) + r;
+            const uint rt = (crt_bitrev4_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (1023u - t)
+                                       : crt_bitrev10_u32_fast((0u - rt) & 1023u);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z = A[t];
+                const GF zn = same ? A[tm] : B[tm];
+                A[t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                if (km != k) {
+                    const GF outKm = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+                    if (same) A[tm] = outKm;
+                    else B[tm] = outKm;
+                }
+            } else {
+                const GF zsmall = B[tm];
+                const GF zlarge = A[t];
+                B[tm] = crt_halfreal_center_one_61(zsmall, gf_conj_fast(zlarge), twf61, twi61, pow2_n, km, flags);
+                A[t]  = crt_halfreal_center_one_61(zlarge, gf_conj_fast(zsmall), twf61, twi61, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    
+    local_stage_dit_pow2(A, twi61, 1024u, 2u, lid, 64u);
+    if (!same) local_stage_dit_pow2(B, twi61, 1024u, 2u, lid, 64u);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (uint Li = 4u; Li < 1024u; Li <<= 3) {
+        local_stage_dit_radix8_pow2(A, twi61, 1024u, Li, lid, 64u);
+        if (!same) local_stage_dit_radix8_pow2(B, twi61, 1024u, Li, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    for (uint t = lid; t < 1024u; t += 64u) {
+        a61[baseA + t] = A[t];
+        if (!same) a61[baseB + t] = B[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds1024_pair_31(__global GF31* restrict a31,
+                                            __global const GF31* restrict twf31,
+                                            __global const GF31* restrict twi31,
+                                            uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 10u) return;
+
+    const uint blocks = row_m >> 10;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 10u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 10);
+    const uint baseB = row_base + (blockB << 10);
+    const int same = (blockA == blockB);
+
+    __local GF31 A[1024];
+    __local GF31 B[1024];
+
+    for (uint t = lid; t < 1024u; t += 64u) {
+        A[t] = a31[baseA + t];
+        if (!same) B[t] = a31[baseB + t];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint Lf = 1024u;
+    while (Lf >= 8u) {
+        crt_local_stage_dif_radix8_31(A, twf31, 1024u, Lf, lid, 64u);
+        if (!same) crt_local_stage_dif_radix8_31(B, twf31, 1024u, Lf, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        Lf >>= 3;
+    }
+    if (Lf == 2u) {
+        crt_local_stage_dif_pow2_31(A, twf31, 1024u, 2u, lid, 64u);
+        if (!same) crt_local_stage_dif_pow2_31(B, twf31, 1024u, 2u, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+    if ((flags & 32u) != 0u) {
+        for (uint r = 0u; r < 16u; ++r) {
+            const uint t = (lid << 4) + r;
+            const uint rt = (crt_bitrev4_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (1023u - t)
+                                       : crt_bitrev10_u32_fast((0u - rt) & 1023u);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF31 z = A[t];
+                const GF31 zn = same ? A[tm] : B[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                const GF31 outK  = f31_pack_e_plus_i_o(E, O);
+                const GF31 outKm = f31_pack_conj_e_plus_i_conj_o(E, O);
+                A[t] = outK;
+                if (same) {
+                    if (tm != t) A[tm] = outKm;
+                } else {
+                    B[tm] = outKm;
+                }
+            } else {
+                const GF31 zsmall = B[tm];
+                const GF31 zlarge = A[t];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(zsmall, f31_conj_fast(zlarge), twf31, pow2_n, km, &E, &O);
+                const GF31 outSmall = f31_pack_e_plus_i_o(E, O);
+                const GF31 outLarge = f31_pack_conj_e_plus_i_conj_o(E, O);
+                B[tm] = outSmall;
+                A[t] = outLarge;
+            }
+        }
+    } else {
+        for (uint r = 0u; r < 16u; ++r) {
+            const uint t = (lid << 4) + r;
+            const uint rt = (crt_bitrev4_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (1023u - t)
+                                       : crt_bitrev10_u32_fast((0u - rt) & 1023u);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF31 z = A[t];
+                const GF31 zn = same ? A[tm] : B[tm];
+                A[t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                if (km != k) {
+                    const GF31 outKm = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+                    if (same) A[tm] = outKm;
+                    else B[tm] = outKm;
+                }
+            } else {
+                const GF31 zsmall = B[tm];
+                const GF31 zlarge = A[t];
+                B[tm] = crt_halfreal_center_one_31(zsmall, f31_conj_fast(zlarge), twf31, twi31, pow2_n, km, flags);
+                A[t]  = crt_halfreal_center_one_31(zlarge, f31_conj_fast(zsmall), twf31, twi31, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_local_stage_dit_pow2_31(A, twi31, 1024u, 2u, lid, 64u);
+    if (!same) crt_local_stage_dit_pow2_31(B, twi31, 1024u, 2u, lid, 64u);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (uint Li = 4u; Li < 1024u; Li <<= 3) {
+        crt_local_stage_dit_radix8_31(A, twi31, 1024u, Li, lid, 64u);
+        if (!same) crt_local_stage_dit_radix8_31(B, twi31, 1024u, Li, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    for (uint t = lid; t < 1024u; t += 64u) {
+        a31[baseA + t] = A[t];
+        if (!same) a31[baseB + t] = B[t];
+    }
+}
+
+
+
+static inline __attribute__((always_inline)) void crt_mixed_local_dif_pow2_any_61(__local GF* x,
+                                                                                 __global const GF* tw,
+                                                                                 uint center_len,
+                                                                                 uint lane) {
+    uint L = center_len;
+    while (L >= 8u) {
+        local_stage_dif_radix8_pow2(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) { L = 1u; break; }
+        L >>= 3;
+    }
+    if (L == 4u) {
+        local_stage_dif_radix4_pow2(x, tw, center_len, 4u, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        local_stage_dif_pow2(x, tw, center_len, 2u, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+}
+
+static inline __attribute__((always_inline)) void crt_mixed_local_dit_pow2_any_61(__local GF* x,
+                                                                                 __global const GF* tw,
+                                                                                 uint center_len,
+                                                                                 uint lane) {
+    uint tail = center_len;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        local_stage_dit_pow2(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        local_stage_dit_radix4_pow2(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < center_len) {
+        local_stage_dit_radix8_pow2(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+}
+
+static inline __attribute__((always_inline)) void crt_mixed_local_dif_pow2_any_31(__local GF31* x,
+                                                                                 __global const GF31* tw,
+                                                                                 uint center_len,
+                                                                                 uint lane) {
+    uint L = center_len;
+    while (L >= 8u) {
+        crt_local_stage_dif_radix8_31(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) { L = 1u; break; }
+        L >>= 3;
+    }
+    if (L == 4u) {
+        crt_local_stage_dif_radix4_31(x, tw, center_len, 4u, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        crt_local_stage_dif_pow2_31(x, tw, center_len, 2u, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+}
+
+static inline __attribute__((always_inline)) void crt_mixed_local_dit_pow2_any_31(__local GF31* x,
+                                                                                 __global const GF31* tw,
+                                                                                 uint center_len,
+                                                                                 uint lane) {
+    uint tail = center_len;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        crt_local_stage_dit_pow2_31(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        crt_local_stage_dit_radix4_31(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < center_len) {
+        crt_local_stage_dit_radix8_31(x, tw, center_len, L, lane, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds_pair_any_61(__global GF* restrict a61,
+                                             __global const GF* restrict twf61,
+                                             __global const GF* restrict twi61,
+                                             uint pow2_n, uint odd, uint flags,
+                                             uint center_len)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    if (!gf61_crt_valid_stage_radix(center_len) || center_len < 8u || center_len > 1024u || row_m < center_len) return;
+
+    const uint log_m = 31u - (uint)clz(row_m);
+    const uint log_c = 31u - (uint)clz(center_len);
+    if (log_m < log_c) return;
+
+    const uint blocks = row_m >> log_c;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - log_c;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << log_c);
+    const uint baseB = row_base + (blockB << log_c);
+    const int same = (blockA == blockB);
+
+    __local GF A[1024];
+    __local GF B[1024];
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        A[t] = a61[baseA + t];
+        if (!same) B[t] = a61[baseB + t];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_61(A, twf61, center_len, lid);
+    if (!same) crt_mixed_local_dif_pow2_any_61(B, twf61, center_len, lid);
+
+    const uint c_mask = center_len - 1u;
+    if ((flags & 32u) != 0u) {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z = A[t];
+                const GF zn = same ? A[tm] : B[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                const GF outK  = gf_pack_e_plus_i_o(E, O);
+                const GF outKm = gf_pack_conj_e_plus_i_conj_o(E, O);
+                A[t] = outK;
+                if (same) {
+                    if (tm != t) A[tm] = outKm;
+                } else {
+                    B[tm] = outKm;
+                }
+            } else {
+                const GF zsmall = B[tm];
+                const GF zlarge = A[t];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(zsmall, gf_conj_fast(zlarge), twf61, pow2_n, km, &E, &O);
+                const GF outSmall = gf_pack_e_plus_i_o(E, O);
+                const GF outLarge = gf_pack_conj_e_plus_i_conj_o(E, O);
+                B[tm] = outSmall;
+                A[t] = outLarge;
+            }
+        }
+    } else {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF z = A[t];
+                const GF zn = same ? A[tm] : B[tm];
+                A[t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                if (km != k) {
+                    const GF outKm = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+                    if (same) A[tm] = outKm;
+                    else B[tm] = outKm;
+                }
+            } else {
+                const GF zsmall = B[tm];
+                const GF zlarge = A[t];
+                B[tm] = crt_halfreal_center_one_61(zsmall, gf_conj_fast(zlarge), twf61, twi61, pow2_n, km, flags);
+                A[t]  = crt_halfreal_center_one_61(zlarge, gf_conj_fast(zsmall), twf61, twi61, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dit_pow2_any_61(A, twi61, center_len, lid);
+    if (!same) crt_mixed_local_dit_pow2_any_61(B, twi61, center_len, lid);
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        a61[baseA + t] = A[t];
+        if (!same) a61[baseB + t] = B[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds_pair_any_31(__global GF31* restrict a31,
+                                             __global const GF31* restrict twf31,
+                                             __global const GF31* restrict twi31,
+                                             uint pow2_n, uint odd, uint flags,
+                                             uint center_len)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    if (!gf61_crt_valid_stage_radix(center_len) || center_len < 8u || center_len > 1024u || row_m < center_len) return;
+
+    const uint log_m = 31u - (uint)clz(row_m);
+    const uint log_c = 31u - (uint)clz(center_len);
+    if (log_m < log_c) return;
+
+    const uint blocks = row_m >> log_c;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - log_c;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << log_c);
+    const uint baseB = row_base + (blockB << log_c);
+    const int same = (blockA == blockB);
+
+    __local GF31 A[1024];
+    __local GF31 B[1024];
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        A[t] = a31[baseA + t];
+        if (!same) B[t] = a31[baseB + t];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_31(A, twf31, center_len, lid);
+    if (!same) crt_mixed_local_dif_pow2_any_31(B, twf31, center_len, lid);
+
+    const uint c_mask = center_len - 1u;
+    if ((flags & 32u) != 0u) {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF31 z = A[t];
+                const GF31 zn = same ? A[tm] : B[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                const GF31 outK  = f31_pack_e_plus_i_o(E, O);
+                const GF31 outKm = f31_pack_conj_e_plus_i_conj_o(E, O);
+                A[t] = outK;
+                if (same) {
+                    if (tm != t) A[tm] = outKm;
+                } else {
+                    B[tm] = outKm;
+                }
+            } else {
+                const GF31 zsmall = B[tm];
+                const GF31 zlarge = A[t];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(zsmall, f31_conj_fast(zlarge), twf31, pow2_n, km, &E, &O);
+                const GF31 outSmall = f31_pack_e_plus_i_o(E, O);
+                const GF31 outLarge = f31_pack_conj_e_plus_i_conj_o(E, O);
+                B[tm] = outSmall;
+                A[t] = outLarge;
+            }
+        }
+    } else {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (c_mask - t)
+                                       : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+
+            if (same && k > km) continue;
+
+            if (k <= km) {
+                const GF31 z = A[t];
+                const GF31 zn = same ? A[tm] : B[tm];
+                A[t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                if (km != k) {
+                    const GF31 outKm = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+                    if (same) A[tm] = outKm;
+                    else B[tm] = outKm;
+                }
+            } else {
+                const GF31 zsmall = B[tm];
+                const GF31 zlarge = A[t];
+                B[tm] = crt_halfreal_center_one_31(zsmall, f31_conj_fast(zlarge), twf31, twi31, pow2_n, km, flags);
+                A[t]  = crt_halfreal_center_one_31(zlarge, f31_conj_fast(zsmall), twf31, twi31, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dit_pow2_any_31(A, twi31, center_len, lid);
+    if (!same) crt_mixed_local_dit_pow2_any_31(B, twi31, center_len, lid);
+
+    for (uint t = lid; t < center_len; t += 64u) {
+        a31[baseA + t] = A[t];
+        if (!same) a31[baseB + t] = B[t];
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_halfreal_lds512_pair_61x31(__global GF* restrict a61,
                                                __global GF31* restrict a31,
                                                __global const GF* restrict twf61,
@@ -11078,6 +11669,13 @@ uint crt_bitrev3_u32_fast(uint x)
 }
 
 static inline __attribute__((always_inline))
+uint crt_bitrev4_u32_fast(uint x)
+{
+    x &= 15u;
+    return ((x & 1u) << 3) | ((x & 2u) << 1) | ((x & 4u) >> 1) | ((x & 8u) >> 3);
+}
+
+static inline __attribute__((always_inline))
 uint crt_bitrev9_u32_fast(uint x)
 {
     
@@ -11092,6 +11690,22 @@ uint crt_bitrev9_u32_fast(uint x)
            ((x & 0x040u) >> 4) |
            ((x & 0x080u) >> 6) |
            ((x & 0x100u) >> 8);
+}
+
+static inline __attribute__((always_inline))
+uint crt_bitrev10_u32_fast(uint x)
+{
+    x &= 1023u;
+    return ((x & 0x001u) << 9) |
+           ((x & 0x002u) << 7) |
+           ((x & 0x004u) << 5) |
+           ((x & 0x008u) << 3) |
+           ((x & 0x010u) << 1) |
+           ((x & 0x020u) >> 1) |
+           ((x & 0x040u) >> 3) |
+           ((x & 0x080u) >> 5) |
+           ((x & 0x100u) >> 7) |
+           ((x & 0x200u) >> 9);
 }
 
 static inline __attribute__((always_inline))
