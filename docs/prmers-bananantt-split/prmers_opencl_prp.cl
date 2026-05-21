@@ -7735,6 +7735,166 @@ void gf61_crt_lds_stage_dit_pow2_31_tile4(
     }
 }
 
+
+
+// v23 mixed row stage variants: fixed-size, one-LDS per field.
+// The generic stage kernels above reserve a conservative 1024-slot local array.
+// These wrappers specialize the radix at compile time (8..1024).  For small
+// stages this saves LDS and lets the compiler fold loop bounds.  Semantics are
+// identical to gf61_crt_lds_stage_{dif,dit}_pow2_{61,31}.
+#define DEFINE_MIXED_STAGE_1LDS_61(R) \
+__kernel __attribute__((reqd_work_group_size(64,1,1))) \
+void gf61_crt_lds_stage_dif_pow2_61_1lds_##R( \
+    __global GF* a61, __global const GF* tw61, uint n, uint len, uint radix) \
+{ \
+    const uint lane = get_local_id(0); \
+    (void)radix; \
+    if (len < (uint)(R) || (len & ((uint)(R) - 1u)) != 0u) return; \
+    const uint stride = len / (uint)(R); \
+    const uint j = get_group_id(0) % stride; \
+    const uint block = get_group_id(0) / stride; \
+    const uint base = block * len + j; \
+    if (base >= n) return; \
+    __local GF l61[(R)]; \
+    for (uint t = lane; t < (uint)(R); t += 64u) l61[t] = a61[base + t * stride]; \
+    barrier(CLK_LOCAL_MEM_FENCE); \
+    uint L = (uint)(R); \
+    while (L >= 8u) { \
+        crt_lds_dif8_61(l61, tw61, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L >>= 3; \
+    } \
+    if (L == 4u) { \
+        crt_lds_dif4_61(l61, tw61, (uint)(R), 4u, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+    } else if (L == 2u) { \
+        crt_lds_dif2_61(l61, tw61, (uint)(R), 2u, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+    } \
+    for (uint t = lane; t < (uint)(R); t += 64u) a61[base + t * stride] = l61[t]; \
+} \
+__kernel __attribute__((reqd_work_group_size(64,1,1))) \
+void gf61_crt_lds_stage_dit_pow2_61_1lds_##R( \
+    __global GF* a61, __global const GF* tw61, uint n, uint base_len, uint radix) \
+{ \
+    const uint lane = get_local_id(0); \
+    (void)radix; \
+    if (base_len == 0u) return; \
+    const uint stride = base_len; \
+    const uint len = base_len * (uint)(R); \
+    if (len > n) return; \
+    const uint j = get_group_id(0) % stride; \
+    const uint block = get_group_id(0) / stride; \
+    const uint base = block * len + j; \
+    __local GF l61[(R)]; \
+    for (uint t = lane; t < (uint)(R); t += 64u) l61[t] = a61[base + t * stride]; \
+    barrier(CLK_LOCAL_MEM_FENCE); \
+    uint tail = (uint)(R); \
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3; \
+    uint L = 2u; \
+    if (tail == 2u) { \
+        crt_lds_dit2_61(l61, tw61, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 1; \
+    } else if (tail == 4u) { \
+        crt_lds_dit4_61(l61, tw61, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 2; \
+    } \
+    while (L < (uint)(R)) { \
+        crt_lds_dit8_61(l61, tw61, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 3; \
+    } \
+    for (uint t = lane; t < (uint)(R); t += 64u) a61[base + t * stride] = l61[t]; \
+}
+
+#define DEFINE_MIXED_STAGE_1LDS_31(R) \
+__kernel __attribute__((reqd_work_group_size(64,1,1))) \
+void gf61_crt_lds_stage_dif_pow2_31_1lds_##R( \
+    __global GF31* a31, __global const GF31* tw31, uint n, uint len, uint radix) \
+{ \
+    const uint lane = get_local_id(0); \
+    (void)radix; \
+    if (len < (uint)(R) || (len & ((uint)(R) - 1u)) != 0u) return; \
+    const uint stride = len / (uint)(R); \
+    const uint j = get_group_id(0) % stride; \
+    const uint block = get_group_id(0) / stride; \
+    const uint base = block * len + j; \
+    if (base >= n) return; \
+    __local GF31 l31[(R)]; \
+    for (uint t = lane; t < (uint)(R); t += 64u) l31[t] = a31[base + t * stride]; \
+    barrier(CLK_LOCAL_MEM_FENCE); \
+    uint L = (uint)(R); \
+    while (L >= 8u) { \
+        crt_lds_dif8_31(l31, tw31, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L >>= 3; \
+    } \
+    if (L == 4u) { \
+        crt_lds_dif4_31(l31, tw31, (uint)(R), 4u, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+    } else if (L == 2u) { \
+        crt_lds_dif2_31(l31, tw31, (uint)(R), 2u, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+    } \
+    for (uint t = lane; t < (uint)(R); t += 64u) a31[base + t * stride] = l31[t]; \
+} \
+__kernel __attribute__((reqd_work_group_size(64,1,1))) \
+void gf61_crt_lds_stage_dit_pow2_31_1lds_##R( \
+    __global GF31* a31, __global const GF31* tw31, uint n, uint base_len, uint radix) \
+{ \
+    const uint lane = get_local_id(0); \
+    (void)radix; \
+    if (base_len == 0u) return; \
+    const uint stride = base_len; \
+    const uint len = base_len * (uint)(R); \
+    if (len > n) return; \
+    const uint j = get_group_id(0) % stride; \
+    const uint block = get_group_id(0) / stride; \
+    const uint base = block * len + j; \
+    __local GF31 l31[(R)]; \
+    for (uint t = lane; t < (uint)(R); t += 64u) l31[t] = a31[base + t * stride]; \
+    barrier(CLK_LOCAL_MEM_FENCE); \
+    uint tail = (uint)(R); \
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3; \
+    uint L = 2u; \
+    if (tail == 2u) { \
+        crt_lds_dit2_31(l31, tw31, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 1; \
+    } else if (tail == 4u) { \
+        crt_lds_dit4_31(l31, tw31, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 2; \
+    } \
+    while (L < (uint)(R)) { \
+        crt_lds_dit8_31(l31, tw31, (uint)(R), L, stride, j, lane); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+        L <<= 3; \
+    } \
+    for (uint t = lane; t < (uint)(R); t += 64u) a31[base + t * stride] = l31[t]; \
+}
+
+DEFINE_MIXED_STAGE_1LDS_61(8)
+DEFINE_MIXED_STAGE_1LDS_61(16)
+DEFINE_MIXED_STAGE_1LDS_61(32)
+DEFINE_MIXED_STAGE_1LDS_61(64)
+DEFINE_MIXED_STAGE_1LDS_61(128)
+DEFINE_MIXED_STAGE_1LDS_61(256)
+DEFINE_MIXED_STAGE_1LDS_61(512)
+DEFINE_MIXED_STAGE_1LDS_61(1024)
+DEFINE_MIXED_STAGE_1LDS_31(8)
+DEFINE_MIXED_STAGE_1LDS_31(16)
+DEFINE_MIXED_STAGE_1LDS_31(32)
+DEFINE_MIXED_STAGE_1LDS_31(64)
+DEFINE_MIXED_STAGE_1LDS_31(128)
+DEFINE_MIXED_STAGE_1LDS_31(256)
+DEFINE_MIXED_STAGE_1LDS_31(512)
+DEFINE_MIXED_STAGE_1LDS_31(1024)
+#undef DEFINE_MIXED_STAGE_1LDS_61
+#undef DEFINE_MIXED_STAGE_1LDS_31
+
 __kernel __attribute__((reqd_work_group_size(128,1,1)))
 void gf61_crt_forward_lds512_to_center(
     __global GF* a61, __global const GF* twf61,
@@ -10230,6 +10390,329 @@ void gf61_crt_mixed_halfreal_lds512_pair_31(__global GF31* restrict a31,
 }
 
 
+// Experimental center512 variant using only one LDS tile per field.
+// For a non-self conjugate pair, A is kept in private registers while B reuses LDS.
+// This reduces LDS from 2*512 elements to 1*512 elements, at the cost of more registers.
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds512_pair_1lds_61(__global GF* restrict a61,
+                                                 __global const GF* restrict twf61,
+                                                 __global const GF* restrict twi61,
+                                                 uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 9u) return;
+
+    const uint blocks = row_m >> 9;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 9u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 9);
+    const uint baseB = row_base + (blockB << 9);
+    const int same = (blockA == blockB);
+
+    __local GF X[512];
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a61[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        local_stage_dif_radix8_pow2(X, twf61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+
+    // Self-pair path is exactly the one-tile version of the proven 2-LDS kernel.
+    // It covers kb=0 and kb=blocks/2 only.
+    if (same) {
+        if ((flags & 32u) != 0u) {
+            for (uint r = 0u; r < 8u; ++r) {
+                const uint t = (lid << 3) + r;
+                const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (511u - t)
+                                           : crt_bitrev9_u32_fast((0u - rt) & 511u);
+                if (k > km) continue;
+                const GF z = X[t];
+                const GF zn = X[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                const GF outK  = gf_pack_e_plus_i_o(E, O);
+                const GF outKm = gf_pack_conj_e_plus_i_conj_o(E, O);
+                X[t] = outK;
+                if (tm != t) X[tm] = outKm;
+            }
+        } else {
+            for (uint r = 0u; r < 8u; ++r) {
+                const uint t = (lid << 3) + r;
+                const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (511u - t)
+                                           : crt_bitrev9_u32_fast((0u - rt) & 511u);
+                if (k > km) continue;
+                const GF z = X[t];
+                const GF zn = X[tm];
+                X[t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                if (km != k) X[tm] = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+            local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+        return;
+    }
+
+    // Non-self 1-LDS safe path:
+    // save A after DIF temporarily in baseA, reuse X for B, compute center,
+    // finish B, then reload A-center and finish A. This avoids private Areg[8]
+    // dynamic-index lifetime issues and keeps only one LDS tile.
+    for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a61[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        local_stage_dif_radix8_pow2(X, twf61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    if ((flags & 32u) != 0u) {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = 511u - t;
+            if (k <= km) {
+                const GF z = a61[baseA + t];
+                const GF zn = X[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                a61[baseA + t] = gf_pack_e_plus_i_o(E, O);
+                X[tm] = gf_pack_conj_e_plus_i_conj_o(E, O);
+            } else {
+                const GF zsmall = X[tm];
+                const GF zlarge = a61[baseA + t];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(zsmall, gf_conj_fast(zlarge), twf61, pow2_n, km, &E, &O);
+                X[tm] = gf_pack_e_plus_i_o(E, O);
+                a61[baseA + t] = gf_pack_conj_e_plus_i_conj_o(E, O);
+            }
+        }
+    } else {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = 511u - t;
+            if (k <= km) {
+                const GF z = a61[baseA + t];
+                const GF zn = X[tm];
+                a61[baseA + t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                X[tm] = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+            } else {
+                const GF zsmall = X[tm];
+                const GF zlarge = a61[baseA + t];
+                X[tm] = crt_halfreal_center_one_61(zsmall, gf_conj_fast(zlarge), twf61, twi61, pow2_n, km, flags);
+                a61[baseA + t] = crt_halfreal_center_one_61(zlarge, gf_conj_fast(zsmall), twf61, twi61, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a61[baseB + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a61[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds512_pair_1lds_31(__global GF31* restrict a31,
+                                                 __global const GF31* restrict twf31,
+                                                 __global const GF31* restrict twi31,
+                                                 uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 9u) return;
+
+    const uint blocks = row_m >> 9;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 9u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 9);
+    const uint baseB = row_base + (blockB << 9);
+    const int same = (blockA == blockB);
+
+    __local GF31 X[512];
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a31[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        crt_local_stage_dif_radix8_31(X, twf31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+
+    if (same) {
+        if ((flags & 32u) != 0u) {
+            for (uint r = 0u; r < 8u; ++r) {
+                const uint t = (lid << 3) + r;
+                const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (511u - t)
+                                           : crt_bitrev9_u32_fast((0u - rt) & 511u);
+                if (k > km) continue;
+                const GF31 z = X[t];
+                const GF31 zn = X[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                const GF31 outK  = f31_pack_e_plus_i_o(E, O);
+                const GF31 outKm = f31_pack_conj_e_plus_i_conj_o(E, O);
+                X[t] = outK;
+                if (tm != t) X[tm] = outKm;
+            }
+        } else {
+            for (uint r = 0u; r < 8u; ++r) {
+                const uint t = (lid << 3) + r;
+                const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (511u - t)
+                                           : crt_bitrev9_u32_fast((0u - rt) & 511u);
+                if (k > km) continue;
+                const GF31 z = X[t];
+                const GF31 zn = X[tm];
+                X[t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                if (km != k) X[tm] = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+            crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        for (uint t = lid; t < 512u; t += 64u) a31[baseA + t] = X[t];
+        return;
+    }
+
+    for (uint t = lid; t < 512u; t += 64u) a31[baseA + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a31[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        crt_local_stage_dif_radix8_31(X, twf31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    if ((flags & 32u) != 0u) {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = 511u - t;
+            if (k <= km) {
+                const GF31 z = a31[baseA + t];
+                const GF31 zn = X[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                a31[baseA + t] = f31_pack_e_plus_i_o(E, O);
+                X[tm] = f31_pack_conj_e_plus_i_conj_o(E, O);
+            } else {
+                const GF31 zsmall = X[tm];
+                const GF31 zlarge = a31[baseA + t];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(zsmall, f31_conj_fast(zlarge), twf31, pow2_n, km, &E, &O);
+                X[tm] = f31_pack_e_plus_i_o(E, O);
+                a31[baseA + t] = f31_pack_conj_e_plus_i_conj_o(E, O);
+            }
+        }
+    } else {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = 511u - t;
+            if (k <= km) {
+                const GF31 z = a31[baseA + t];
+                const GF31 zn = X[tm];
+                a31[baseA + t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                X[tm] = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+            } else {
+                const GF31 zsmall = X[tm];
+                const GF31 zlarge = a31[baseA + t];
+                X[tm] = crt_halfreal_center_one_31(zsmall, f31_conj_fast(zlarge), twf31, twi31, pow2_n, km, flags);
+                a31[baseA + t] = crt_halfreal_center_one_31(zlarge, f31_conj_fast(zsmall), twf31, twi31, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a31[baseB + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a31[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a31[baseA + t] = X[t];
+}
+
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_halfreal_lds1024_pair_61(__global GF* restrict a61,
                                             __global const GF* restrict twf61,
@@ -10814,6 +11297,292 @@ void gf61_crt_mixed_halfreal_lds_pair_any_31(__global GF31* restrict a31,
         a31[baseA + t] = A[t];
         if (!same) a31[baseB + t] = B[t];
     }
+}
+
+
+// Generic one-LDS half-real pair center for mixed CRT/PFA rows.
+// This is the generalized form of the validated center512 1-LDS path.
+// Non-self pairs use baseA as a temporary global tile: A after DIF is saved,
+// B reuses the single LDS tile, then A-center is reloaded for the inverse stage.
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds_pair_any_1lds_61(__global GF* restrict a61,
+                                                  __global const GF* restrict twf61,
+                                                  __global const GF* restrict twi61,
+                                                  uint pow2_n, uint odd, uint flags,
+                                                  uint center_len)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    if (!gf61_crt_valid_stage_radix(center_len) || center_len < 8u || center_len > 1024u || row_m < center_len) return;
+
+    const uint log_m = 31u - (uint)clz(row_m);
+    const uint log_c = 31u - (uint)clz(center_len);
+    if (log_m < log_c) return;
+
+    const uint blocks = row_m >> log_c;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - log_c;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << log_c);
+    const uint baseB = row_base + (blockB << log_c);
+    const int same = (blockA == blockB);
+
+    __local GF X[1024];
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a61[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_61(X, twf61, center_len, lid);
+
+    const uint c_mask = center_len - 1u;
+
+    if (same) {
+        if ((flags & 32u) != 0u) {
+            for (uint t = lid; t < center_len; t += 64u) {
+                const uint rt = crt_bitrev_u32(t, log_c);
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (c_mask - t)
+                                           : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+                if (k > km) continue;
+                const GF z = X[t];
+                const GF zn = X[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                const GF outK  = gf_pack_e_plus_i_o(E, O);
+                const GF outKm = gf_pack_conj_e_plus_i_conj_o(E, O);
+                X[t] = outK;
+                if (tm != t) X[tm] = outKm;
+            }
+        } else {
+            for (uint t = lid; t < center_len; t += 64u) {
+                const uint rt = crt_bitrev_u32(t, log_c);
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (c_mask - t)
+                                           : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+                if (k > km) continue;
+                const GF z = X[t];
+                const GF zn = X[tm];
+                X[t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                if (km != k) X[tm] = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        crt_mixed_local_dit_pow2_any_61(X, twi61, center_len, lid);
+        for (uint t = lid; t < center_len; t += 64u) a61[baseA + t] = X[t];
+        return;
+    }
+
+    // Save A after local DIF to the same global tile and reuse LDS for B.
+    for (uint t = lid; t < center_len; t += 64u) a61[baseA + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a61[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_61(X, twf61, center_len, lid);
+
+    if ((flags & 32u) != 0u) {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = c_mask - t;
+            if (k <= km) {
+                const GF z = a61[baseA + t];
+                const GF zn = X[tm];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+                a61[baseA + t] = gf_pack_e_plus_i_o(E, O);
+                X[tm] = gf_pack_conj_e_plus_i_conj_o(E, O);
+            } else {
+                const GF zsmall = X[tm];
+                const GF zlarge = a61[baseA + t];
+                GF E, O;
+                crt_halfreal_center_eo_f48_61(zsmall, gf_conj_fast(zlarge), twf61, pow2_n, km, &E, &O);
+                X[tm] = gf_pack_e_plus_i_o(E, O);
+                a61[baseA + t] = gf_pack_conj_e_plus_i_conj_o(E, O);
+            }
+        }
+    } else {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = c_mask - t;
+            if (k <= km) {
+                const GF z = a61[baseA + t];
+                const GF zn = X[tm];
+                a61[baseA + t] = crt_halfreal_center_one_61(z, gf_conj_fast(zn), twf61, twi61, pow2_n, k, flags);
+                X[tm] = crt_halfreal_center_one_61(zn, gf_conj_fast(z), twf61, twi61, pow2_n, km, flags);
+            } else {
+                const GF zsmall = X[tm];
+                const GF zlarge = a61[baseA + t];
+                X[tm] = crt_halfreal_center_one_61(zsmall, gf_conj_fast(zlarge), twf61, twi61, pow2_n, km, flags);
+                a61[baseA + t] = crt_halfreal_center_one_61(zlarge, gf_conj_fast(zsmall), twf61, twi61, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+
+    crt_mixed_local_dit_pow2_any_61(X, twi61, center_len, lid);
+    for (uint t = lid; t < center_len; t += 64u) a61[baseB + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a61[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    crt_mixed_local_dit_pow2_any_61(X, twi61, center_len, lid);
+    for (uint t = lid; t < center_len; t += 64u) a61[baseA + t] = X[t];
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds_pair_any_1lds_31(__global GF31* restrict a31,
+                                                  __global const GF31* restrict twf31,
+                                                  __global const GF31* restrict twi31,
+                                                  uint pow2_n, uint odd, uint flags,
+                                                  uint center_len)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    if (!gf61_crt_valid_stage_radix(center_len) || center_len < 8u || center_len > 1024u || row_m < center_len) return;
+
+    const uint log_m = 31u - (uint)clz(row_m);
+    const uint log_c = 31u - (uint)clz(center_len);
+    if (log_m < log_c) return;
+
+    const uint blocks = row_m >> log_c;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - log_c;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << log_c);
+    const uint baseB = row_base + (blockB << log_c);
+    const int same = (blockA == blockB);
+
+    __local GF31 X[1024];
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a31[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_31(X, twf31, center_len, lid);
+
+    const uint c_mask = center_len - 1u;
+
+    if (same) {
+        if ((flags & 32u) != 0u) {
+            for (uint t = lid; t < center_len; t += 64u) {
+                const uint rt = crt_bitrev_u32(t, log_c);
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (c_mask - t)
+                                           : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+                if (k > km) continue;
+                const GF31 z = X[t];
+                const GF31 zn = X[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                const GF31 outK  = f31_pack_e_plus_i_o(E, O);
+                const GF31 outKm = f31_pack_conj_e_plus_i_conj_o(E, O);
+                X[t] = outK;
+                if (tm != t) X[tm] = outKm;
+            }
+        } else {
+            for (uint t = lid; t < center_len; t += 64u) {
+                const uint rt = crt_bitrev_u32(t, log_c);
+                const uint k = (rt << h) | kb;
+                const uint km = (row_m - k) & (row_m - 1u);
+                const uint tm = (kb != 0u) ? (c_mask - t)
+                                           : crt_bitrev_u32((0u - rt) & c_mask, log_c);
+                if (k > km) continue;
+                const GF31 z = X[t];
+                const GF31 zn = X[tm];
+                X[t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                if (km != k) X[tm] = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        crt_mixed_local_dit_pow2_any_31(X, twi31, center_len, lid);
+        for (uint t = lid; t < center_len; t += 64u) a31[baseA + t] = X[t];
+        return;
+    }
+
+    for (uint t = lid; t < center_len; t += 64u) a31[baseA + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a31[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    crt_mixed_local_dif_pow2_any_31(X, twf31, center_len, lid);
+
+    if ((flags & 32u) != 0u) {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = c_mask - t;
+            if (k <= km) {
+                const GF31 z = a31[baseA + t];
+                const GF31 zn = X[tm];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+                a31[baseA + t] = f31_pack_e_plus_i_o(E, O);
+                X[tm] = f31_pack_conj_e_plus_i_conj_o(E, O);
+            } else {
+                const GF31 zsmall = X[tm];
+                const GF31 zlarge = a31[baseA + t];
+                GF31 E, O;
+                crt_halfreal_center_eo_f48_31(zsmall, f31_conj_fast(zlarge), twf31, pow2_n, km, &E, &O);
+                X[tm] = f31_pack_e_plus_i_o(E, O);
+                a31[baseA + t] = f31_pack_conj_e_plus_i_conj_o(E, O);
+            }
+        }
+    } else {
+        for (uint t = lid; t < center_len; t += 64u) {
+            const uint rt = crt_bitrev_u32(t, log_c);
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = c_mask - t;
+            if (k <= km) {
+                const GF31 z = a31[baseA + t];
+                const GF31 zn = X[tm];
+                a31[baseA + t] = crt_halfreal_center_one_31(z, f31_conj_fast(zn), twf31, twi31, pow2_n, k, flags);
+                X[tm] = crt_halfreal_center_one_31(zn, f31_conj_fast(z), twf31, twi31, pow2_n, km, flags);
+            } else {
+                const GF31 zsmall = X[tm];
+                const GF31 zlarge = a31[baseA + t];
+                X[tm] = crt_halfreal_center_one_31(zsmall, f31_conj_fast(zlarge), twf31, twi31, pow2_n, km, flags);
+                a31[baseA + t] = crt_halfreal_center_one_31(zlarge, f31_conj_fast(zsmall), twf31, twi31, pow2_n, k, flags);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
+
+    crt_mixed_local_dit_pow2_any_31(X, twi31, center_len, lid);
+    for (uint t = lid; t < center_len; t += 64u) a31[baseB + t] = X[t];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+
+    for (uint t = lid; t < center_len; t += 64u) X[t] = a31[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    crt_mixed_local_dit_pow2_any_31(X, twi31, center_len, lid);
+    for (uint t = lid; t < center_len; t += 64u) a31[baseA + t] = X[t];
 }
 
 
