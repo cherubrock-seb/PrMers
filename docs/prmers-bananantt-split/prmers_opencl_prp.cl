@@ -8245,8 +8245,16 @@ __kernel void gf61_crt_last_stage_dit_radix16_unweight(__global const GF* a61,
 }
 
 
+inline GF gf_norm_pair(GF z) {
+    return (GF)(norm61(z.s0), norm61(z.s1));
+}
+
 inline GF gf_half_scalar_pair(GF z) {
     return (GF)(rshift61(norm61(z.s0), 1u), rshift61(norm61(z.s1), 1u));
+}
+
+inline GF gf_quarter_scalar_pair(GF z) {
+    return (GF)(rshift61(norm61(z.s0), 2u), rshift61(norm61(z.s1), 2u));
 }
 
 inline GF gf_conj_fast(GF z) {
@@ -8273,6 +8281,10 @@ inline GF gf_pack_conj_e_minus_i_conj_o(GF e, GF o) {
 
 inline GF31 f31_half_pair(GF31 z) {
     return (GF31)(f31_lshift_scalar(z.s0, 30u), f31_lshift_scalar(z.s1, 30u));
+}
+
+inline GF31 f31_quarter_pair(GF31 z) {
+    return (GF31)(f31_lshift_scalar(z.s0, 29u), f31_lshift_scalar(z.s1, 29u));
 }
 
 inline GF31 f31_conj_fast(GF31 z) {
@@ -13125,6 +13137,21 @@ void crt_halfreal_center_eo_61(GF z, GF zneg_conj,
 }
 
 
+#ifndef CRT_MIXED_F48_DELAYED_SCALE_61
+#ifdef CRT_MIXED_F48_LATE_SCALE_61
+#define CRT_MIXED_F48_DELAYED_SCALE_61 CRT_MIXED_F48_LATE_SCALE_61
+#else
+#define CRT_MIXED_F48_DELAYED_SCALE_61 0
+#endif
+#endif
+#ifndef CRT_MIXED_F48_DELAYED_SCALE_31
+#ifdef CRT_MIXED_F48_LATE_SCALE_31
+#define CRT_MIXED_F48_DELAYED_SCALE_31 CRT_MIXED_F48_LATE_SCALE_31
+#else
+#define CRT_MIXED_F48_DELAYED_SCALE_31 0
+#endif
+#endif
+
 static inline __attribute__((always_inline))
 void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
                                    __global const GF* restrict twf,
@@ -13133,9 +13160,16 @@ void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
                                    __private GF* Eout,
                                    __private GF* Oout)
 {
+    const GF W = twf[(n >> 1) - 1u + k];
+#if CRT_MIXED_F48_DELAYED_SCALE_61
+    const GF U = gf_norm_pair(gf_add(z, zneg_conj));
+    const GF D = gf_mul_minus_i_fast(gf_norm_pair(gf_sub(z, zneg_conj)));
+    const GF WD = gf_mul(D, W);
+    *Eout = gf_quarter_scalar_pair(gf_add(gf_sqr(U), gf_sqr(WD)));
+    *Oout = gf_half_scalar_pair(gf_mul(U, D));
+#else
     GF E = gf_half_scalar_pair(gf_add(z, zneg_conj));
     GF O = gf_mul_minus_i_fast(gf_half_scalar_pair(gf_sub(z, zneg_conj)));
-    const GF W = twf[(n >> 1) - 1u + k];
     const GF WO = gf_mul(O, W);
     const GF E0 = E;
     const GF O0 = O;
@@ -13143,6 +13177,7 @@ void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
     O = gf_dbl_pair(gf_mul(E0, O0));
     *Eout = E;
     *Oout = O;
+#endif
 }
 
 static inline __attribute__((always_inline))
@@ -13153,9 +13188,16 @@ void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
                                    __private GF31* Eout,
                                    __private GF31* Oout)
 {
+    const GF31 W = twf[(n >> 1) - 1u + k];
+#if CRT_MIXED_F48_DELAYED_SCALE_31
+    const GF31 U = f31_add(z, zneg_conj);
+    const GF31 D = f31_mul_minus_i_fast(f31_sub(z, zneg_conj));
+    const GF31 WD = f31_mul(D, W);
+    *Eout = f31_quarter_pair(f31_add(f31_sqr(U), f31_sqr(WD)));
+    *Oout = f31_half_pair(f31_mul(U, D));
+#else
     GF31 E = f31_half_pair(f31_add(z, zneg_conj));
     GF31 O = f31_mul_minus_i_fast(f31_half_pair(f31_sub(z, zneg_conj)));
-    const GF31 W = twf[(n >> 1) - 1u + k];
     const GF31 WO = f31_mul(O, W);
     const GF31 E0 = E;
     const GF31 O0 = O;
@@ -13163,6 +13205,7 @@ void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
     O = f31_dbl_pair(f31_mul(E0, O0));
     *Eout = E;
     *Oout = O;
+#endif
 }
 
 static inline __attribute__((always_inline))

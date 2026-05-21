@@ -73,6 +73,31 @@ static inline bool parse_bool_env(const char* name, bool defv) {
         std::strcmp(s, "OFF") == 0) return false;
     return true;
 }
+
+static inline bool env_has_value(const char* name) {
+    const char* s = std::getenv(name);
+    return s && *s;
+}
+
+static inline bool parse_bool_env_alias(const char* name, const char* legacy_name, bool defv) {
+    if (env_has_value(name)) return parse_bool_env(name, defv);
+    if (legacy_name && env_has_value(legacy_name)) return parse_bool_env(legacy_name, defv);
+    return defv;
+}
+
+static inline bool mixed_center_f48_delayed_scale_61() {
+    const bool all = parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE",
+                                          "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE", false);
+    return parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_61",
+                                "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_61", all);
+}
+
+static inline bool mixed_center_f48_delayed_scale_31() {
+    const bool all = parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE",
+                                          "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE", false);
+    return parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_31",
+                                "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_31", all);
+}
 }
 
 namespace crt_tune {
@@ -961,6 +986,10 @@ GpuPrp make_gpu(const DeviceInfo& info,
     check(err, "clCreateProgramWithSource");
     std::string build_opts = std::string("-DFIELD_BITS=") + std::to_string(gf61::FIELD_BITS);
     if (std::getenv("PRMERS_GF31_4MUL")) build_opts += " -DCRT_GF31_KARATSUBA=0";
+    build_opts += std::string(" -DCRT_MIXED_F48_DELAYED_SCALE_61=") +
+                  (mixed_center_f48_delayed_scale_61() ? "1" : "0");
+    build_opts += std::string(" -DCRT_MIXED_F48_DELAYED_SCALE_31=") +
+                  (mixed_center_f48_delayed_scale_31() ? "1" : "0");
     if (const char* extra = std::getenv("PRMERS_OCL_FLAGS")) {
         build_opts += " ";
         build_opts += extra;
@@ -6873,10 +6902,12 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
                   << ", center-single-lds=61:" << (print_center_1lds_61 ? "on" : "off")
                   << ",31:" << (print_center_1lds_31 ? "on" : "off")
-                  << ", center-split-f48=61:" << (parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
-                                                                    parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true)) ? "on" : "off")
-                  << ",31:" << (parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
-                                                parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true)) ? "on" : "off")
+                  << ", center-split-f48=61:" << ((print_center_1lds_61 && parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
+                                                                    parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true))) ? "on" : "off")
+                  << ",31:" << ((print_center_1lds_31 && parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
+                                                parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true))) ? "on" : "off")
+                  << ", center-f48-delayed-scale=61:" << (mixed_center_f48_delayed_scale_61() ? "on" : "off")
+                  << ",31:" << (mixed_center_f48_delayed_scale_31() ? "on" : "off")
                   << ", stage-single-lds=61:" << (print_stage_1lds_61 ? "on" : "off")
                   << ",31:" << (print_stage_1lds_31 ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
