@@ -1428,6 +1428,16 @@ static void profile_flush_pending(GpuPrp& gpu) {
     gpu.pending_profile_events.clear();
 }
 
+
+static void profile_clear(GpuPrp& gpu) {
+    for (auto& item : gpu.pending_profile_events) {
+        if (item.second) clReleaseEvent(item.second);
+    }
+    gpu.pending_profile_events.clear();
+    gpu.profile_order.clear();
+    gpu.profile_totals.clear();
+}
+
 static bool profile_has_data(const GpuPrp& gpu) {
     return gpu.profile_kernels && !gpu.profile_order.empty();
 }
@@ -6287,6 +6297,36 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
     const bool need_probe = g_crt_halfreal_autoprobe && (g_crt_halfreal_flags61 < 0 || g_crt_halfreal_flags31 < 0);
     const bool need_validate = g_crt_halfreal_validate;
     if (!need_probe && !need_validate) return true;
+
+    struct ValidatorProfileGuard {
+        GpuPrp& g61;
+        GpuPrp& g31;
+        bool saved61;
+        bool saved31;
+        bool muted;
+        ValidatorProfileGuard(GpuPrp& a, GpuPrp& b, bool mute)
+            : g61(a), g31(b), saved61(a.profile_kernels), saved31(b.profile_kernels), muted(mute) {
+            if (muted) {
+                profile_clear(g61);
+                profile_clear(g31);
+                g61.profile_kernels = false;
+                g31.profile_kernels = false;
+            }
+        }
+        ~ValidatorProfileGuard() {
+            if (muted) {
+                profile_clear(g61);
+                profile_clear(g31);
+                g61.profile_kernels = saved61;
+                g31.profile_kernels = saved31;
+                profile_clear(g61);
+                profile_clear(g31);
+            }
+        }
+    };
+
+    const bool profile_validator = parse_bool_env("PRMERS_CRT_PROFILE_VALIDATOR", false);
+    ValidatorProfileGuard validator_profile_guard(g61, g31, !profile_validator);
 
     
     if (g_crt_odd_radix > 1u && need_probe) {
