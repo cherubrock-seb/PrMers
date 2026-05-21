@@ -30,8 +30,9 @@ PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_61=1 \
 PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_31=0 \
 PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_61=1 \
 PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_31=0 \
-PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=1 \
-PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=1 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=0 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=0 \
+PRMERS_CRT_MIXED_CENTER_REGA_61=1 \
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
@@ -53,11 +54,11 @@ The current default keeps the original F48 scaling because it was slightly faste
 PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE=1 ./prmers_opencl_prp ...
 ```
 
-The profile should show labels like:
+The profile can show these labels depending on the selected center policy:
 
 ```text
-crt_mixed_lds512_center_1lds_f48_nonself_61
-crt_mixed_lds512_center_1lds_f48_self_61
+crt_mixed_lds512_center_1lds_rega_f48_61
+crt_mixed_lds512_center_1lds_61
 crt_mixed_lds512_forward_1lds_61
 crt_mixed_lds512_inverse_1lds_61
 ```
@@ -106,8 +107,10 @@ Aliases still accepted:
 
 | env | default | purpose |
 |---|---:|---|
-| `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61` | `1` | split GF61 F48 center into self-pair and non-self-pair kernels |
-| `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31` | `1` | split GF31 F48 center into self-pair and non-self-pair kernels when the matching path is active |
+| `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61` | `0` | split GF61 F48 center into self-pair and non-self-pair kernels |
+| `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31` | `0` | split GF31 F48 center into self-pair and non-self-pair kernels when the matching path is active |
+| `PRMERS_CRT_MIXED_CENTER_REGA_61` | `0` | test GF61 F48 512 center with A-block kept in private registers while B uses the single LDS array |
+| `PRMERS_CRT_MIXED_CENTER_PRIVATE_A_61` | `0` | alias for `PRMERS_CRT_MIXED_CENTER_REGA_61` |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE` | `0` | global delayed-scale shortcut for F48 center algebra |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_61` | inherits global | per-field delayed-scale shortcut for GF61 |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_31` | inherits global | per-field delayed-scale shortcut for GF31 |
@@ -167,8 +170,9 @@ PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_61=1 \
 PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_31=0 \
 PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_61=1 \
 PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_31=0 \
-PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=1 \
-PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=1 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=0 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=0 \
+PRMERS_CRT_MIXED_CENTER_REGA_61=1 \
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
@@ -204,7 +208,7 @@ DEVICE=1 P=3021377 ITERS=1 VAL_ITERS=2 VALIDATE=1 \
 STAGES="256 512 1024" CENTERS="256 512 1024" FUSE_BOTHS="off all" \
 SINGLE_LDS_CENTER_61=1 SINGLE_LDS_CENTER_31=0 \
 SINGLE_LDS_STAGE_61=1 SINGLE_LDS_STAGE_31=0 \
-CENTER_SPLIT_F48_61=1 CENTER_SPLIT_F48_31=1 \
+CENTER_SPLIT_F48_61=0 CENTER_SPLIT_F48_31=0 \
 ./test_mixed_row_lds_matrix.sh
 ```
 
@@ -215,7 +219,7 @@ DEVICE=1 P=142606357 ITERS=1 VAL_ITERS=1 VALIDATE=1 GPU_REF=1 \
 STAGES="512 1024" CENTERS="512" FUSE_BOTHS="off all" \
 SINGLE_LDS_CENTER_61=1 SINGLE_LDS_CENTER_31=0 \
 SINGLE_LDS_STAGE_61=1 SINGLE_LDS_STAGE_31=0 \
-CENTER_SPLIT_F48_61=1 CENTER_SPLIT_F48_31=1 \
+CENTER_SPLIT_F48_61=0 CENTER_SPLIT_F48_31=0 \
 ./test_mixed_row_lds_matrix.sh
 ```
 
@@ -226,7 +230,7 @@ DEVICE=1 P=142606357 ITERS=1000 VALIDATE=0 PROFILE=1 \
 STAGES="256 512 1024" CENTERS="256 512 1024" FUSE_BOTHS="off all" \
 SINGLE_LDS_CENTER_61=1 SINGLE_LDS_CENTER_31=0 \
 SINGLE_LDS_STAGE_61=1 SINGLE_LDS_STAGE_31=0 \
-CENTER_SPLIT_F48_61=1 CENTER_SPLIT_F48_31=1 \
+CENTER_SPLIT_F48_61=0 CENTER_SPLIT_F48_31=0 \
 ./test_mixed_row_lds_matrix.sh
 ```
 

@@ -2631,6 +2631,7 @@ struct CrtFusedKernels {
     cl_kernel mixed_lds512_pair61 = nullptr;
     cl_kernel mixed_lds512_pair31 = nullptr;
     cl_kernel mixed_lds512_pair_1lds61 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_rega_f48_61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds31 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_f48_self61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_f48_nonself61 = nullptr;
@@ -2803,6 +2804,7 @@ struct CrtFusedKernels {
         mixed_lds512_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61");
         mixed_lds512_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_31");
         mixed_lds512_pair_1lds61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_61");
+        mixed_lds512_pair_1lds_rega_f48_61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_f48_61");
         mixed_lds512_pair_1lds31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_31");
         mixed_lds512_pair_1lds_f48_self61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_self_61");
         mixed_lds512_pair_1lds_f48_nonself61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_nonself_61");
@@ -2965,6 +2967,7 @@ struct CrtFusedKernels {
         if (mixed_lds512_pair61) clReleaseKernel(mixed_lds512_pair61);
         if (mixed_lds512_pair31) clReleaseKernel(mixed_lds512_pair31);
         if (mixed_lds512_pair_1lds61) clReleaseKernel(mixed_lds512_pair_1lds61);
+        if (mixed_lds512_pair_1lds_rega_f48_61) clReleaseKernel(mixed_lds512_pair_1lds_rega_f48_61);
         if (mixed_lds512_pair_1lds31) clReleaseKernel(mixed_lds512_pair_1lds31);
         if (mixed_lds512_pair_1lds_f48_self61) clReleaseKernel(mixed_lds512_pair_1lds_f48_self61);
         if (mixed_lds512_pair_1lds_f48_nonself61) clReleaseKernel(mixed_lds512_pair_1lds_f48_nonself61);
@@ -3363,9 +3366,9 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const char* env_center_split_f48_61 = std::getenv("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61");
     const char* env_center_split_f48_31 = std::getenv("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31");
     const bool mixed_center_split_f48_61 = parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
-        env_center_split_f48_61 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true));
+        env_center_split_f48_61 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", false));
     const bool mixed_center_split_f48_31 = parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
-        env_center_split_f48_31 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true));
+        env_center_split_f48_31 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", false));
     const bool mixed_center512_split_f48_61 = mixed_center_split_f48_61;
     const bool mixed_center512_split_f48_31 = mixed_center_split_f48_31;
 
@@ -3880,6 +3883,16 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             set_karg(k, arg, odd, "set mixed lds512 center61 odd");
             set_karg(k, arg, flags61, "set mixed lds512 center61 flags");
         };
+        const bool rega_f48 = mixed_center512_single_lds_61 && flags61 == 48u && fk.mixed_lds512_pair_1lds_rega_f48_61 &&
+                              (parse_bool_env("PRMERS_CRT_MIXED_CENTER_REGA_61", false) ||
+                               parse_bool_env("PRMERS_CRT_MIXED_CENTER_PRIVATE_A_61", false));
+        if (rega_f48) {
+            set_center_args61(fk.mixed_lds512_pair_1lds_rega_f48_61);
+            enqueue_kernel(g61, fk.mixed_lds512_pair_1lds_rega_f48_61,
+                           static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                           "enqueue mixed lds512 center61 regA", "crt_mixed_lds512_center_1lds_rega_f48_61");
+            return;
+        }
         if (split_f48) {
             if (pair_blocks > 2u) {
                 set_center_args61(fk.mixed_lds512_pair_1lds_f48_nonself61);
@@ -6903,11 +6916,12 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", center-single-lds=61:" << (print_center_1lds_61 ? "on" : "off")
                   << ",31:" << (print_center_1lds_31 ? "on" : "off")
                   << ", center-split-f48=61:" << ((print_center_1lds_61 && parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
-                                                                    parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true))) ? "on" : "off")
+                                                                    parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", false))) ? "on" : "off")
                   << ",31:" << ((print_center_1lds_31 && parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
-                                                parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true))) ? "on" : "off")
+                                                parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", false))) ? "on" : "off")
                   << ", center-f48-delayed-scale=61:" << (mixed_center_f48_delayed_scale_61() ? "on" : "off")
                   << ",31:" << (mixed_center_f48_delayed_scale_31() ? "on" : "off")
+                  << ", center-regA-f48=61:" << ((print_center_1lds_61 && (parse_bool_env("PRMERS_CRT_MIXED_CENTER_REGA_61", false) || parse_bool_env("PRMERS_CRT_MIXED_CENTER_PRIVATE_A_61", false))) ? "on" : "off")
                   << ", stage-single-lds=61:" << (print_stage_1lds_61 ? "on" : "off")
                   << ",31:" << (print_stage_1lds_31 ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
