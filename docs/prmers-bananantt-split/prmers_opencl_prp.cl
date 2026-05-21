@@ -8261,6 +8261,10 @@ inline GF gf_conj_fast(GF z) {
     return (GF)(z.s0, sub61(0ul, z.s1));
 }
 
+inline GF gf_neg_conj_fast(GF z) {
+    return (GF)(sub61(0ul, z.s0), z.s1);
+}
+
 inline GF gf_pack_e_plus_i_o(GF e, GF o) {
     return (GF)(sub61(e.s0, o.s1), add61(e.s1, o.s0));
 }
@@ -8289,6 +8293,10 @@ inline GF31 f31_quarter_pair(GF31 z) {
 
 inline GF31 f31_conj_fast(GF31 z) {
     return (GF31)(z.s0, f31_sub_scalar(0u, z.s1));
+}
+
+inline GF31 f31_neg_conj_fast(GF31 z) {
+    return (GF31)(f31_sub_scalar(0u, z.s0), z.s1);
 }
 
 inline GF31 f31_pack_e_plus_i_o(GF31 e, GF31 o) {
@@ -8338,9 +8346,13 @@ uint crt_halfreal_perm_u32(uint x, uint logn, uint flags);
 static inline __attribute__((always_inline))
 void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj, __global const GF* restrict twf, const uint n, const uint k, __private GF* Eout, __private GF* Oout);
 static inline __attribute__((always_inline))
+void crt_halfreal_center_pair_f48_w_61(GF z, GF zneg_conj, GF W, __private GF* out0, __private GF* out1);
+static inline __attribute__((always_inline))
 GF crt_halfreal_center_one_61(GF z, GF zneg_conj, __global const GF* restrict twf, __global const GF* restrict twi, const uint n, const uint k, const uint flags);
 static inline __attribute__((always_inline))
 void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj, __global const GF31* restrict twf, const uint n, const uint k, __private GF31* Eout, __private GF31* Oout);
+static inline __attribute__((always_inline))
+void crt_halfreal_center_pair_f48_w_31(GF31 z, GF31 zneg_conj, GF31 W, __private GF31* out0, __private GF31* out1);
 static inline __attribute__((always_inline))
 GF31 crt_halfreal_center_one_31(GF31 z, GF31 zneg_conj, __global const GF31* restrict twf, __global const GF31* restrict twi, const uint n, const uint k, const uint flags);
 
@@ -10670,6 +10682,156 @@ void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_f48_61(__global GF* restrict 
     CRT_MIXED_CENTER_REGA_ODD_61 (5u, A5);
     CRT_MIXED_CENTER_REGA_EVEN_61(6u, A6);
     CRT_MIXED_CENTER_REGA_ODD_61 (7u, A7);
+
+#undef CRT_MIXED_CENTER_REGA_EVEN_61
+#undef CRT_MIXED_CENTER_REGA_ODD_61
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a61[baseB + t] = X[t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    X[t0 + 0u] = A0;
+    X[t0 + 1u] = A1;
+    X[t0 + 2u] = A2;
+    X[t0 + 3u] = A3;
+    X[t0 + 4u] = A4;
+    X[t0 + 5u] = A5;
+    X[t0 + 6u] = A6;
+    X[t0 + 7u] = A7;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_61(__global GF* restrict a61,
+                                                          __global const GF* restrict twf61,
+                                                          __global const GF* restrict twi61,
+                                                          uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 9u) return;
+
+    const uint blocks = row_m >> 9;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 9u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 9);
+    const uint baseB = row_base + (blockB << 9);
+    const uint same = (pair_id == 0u) || ((pair_id << 1) == blocks);
+
+    __local GF X[512];
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a61[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        local_stage_dif_radix8_pow2(X, twf61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+
+    if (same) {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (511u - t)
+                                       : crt_bitrev9_u32_fast((0u - rt) & 511u);
+            if (k > km) continue;
+            const GF z = X[t];
+            const GF zn = X[tm];
+            GF E, O;
+            crt_halfreal_center_eo_f48_61(z, gf_conj_fast(zn), twf61, pow2_n, k, &E, &O);
+            const GF outK  = gf_pack_e_plus_i_o(E, O);
+            const GF outKm = gf_pack_conj_e_plus_i_conj_o(E, O);
+            X[t] = outK;
+            if (tm != t) X[tm] = outKm;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+            local_stage_dit_radix8_pow2(X, twi61, 512u, L, lid, 64u);
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+        return;
+    }
+
+    const uint t0 = lid << 3;
+    GF A0 = X[t0 + 0u];
+    GF A1 = X[t0 + 1u];
+    GF A2 = X[t0 + 2u];
+    GF A3 = X[t0 + 3u];
+    GF A4 = X[t0 + 4u];
+    GF A5 = X[t0 + 5u];
+    GF A6 = X[t0 + 6u];
+    GF A7 = X[t0 + 7u];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a61[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        local_stage_dif_radix8_pow2(X, twf61, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+#define CRT_MIXED_CENTER_REGA_EVEN_61(R, HI, AR) do { \
+        const uint t = t0 + (uint)(R); \
+        const uint rt = ((uint)(HI) << 6) | rev_lid6; \
+        const uint k = (rt << h) | kb; \
+        const uint tm = 511u - t; \
+        const GF zn = X[tm]; \
+        GF out0, out1; \
+        crt_halfreal_center_pair_f48_w_61((AR), gf_conj_fast(zn), twf61[((pow2_n >> 1) - 1u) + k], &out0, &out1); \
+        (AR) = out0; \
+        X[tm] = out1; \
+    } while (0)
+
+#define CRT_MIXED_CENTER_REGA_ODD_61(R, HI, AR) do { \
+        const uint t = t0 + (uint)(R); \
+        const uint rt = ((uint)(HI) << 6) | rev_lid6; \
+        const uint k = (rt << h) | kb; \
+        const uint tm = 511u - t; \
+        const GF zsmall = X[tm]; \
+        GF out0, out1; \
+        crt_halfreal_center_pair_f48_w_61(zsmall, gf_conj_fast((AR)), gf_neg_conj_fast(twf61[((pow2_n >> 1) - 1u) + k]), &out0, &out1); \
+        X[tm] = out0; \
+        (AR) = out1; \
+    } while (0)
+
+    CRT_MIXED_CENTER_REGA_EVEN_61(0u, 0u, A0);
+    CRT_MIXED_CENTER_REGA_ODD_61 (1u, 4u, A1);
+    CRT_MIXED_CENTER_REGA_EVEN_61(2u, 2u, A2);
+    CRT_MIXED_CENTER_REGA_ODD_61 (3u, 6u, A3);
+    CRT_MIXED_CENTER_REGA_EVEN_61(4u, 1u, A4);
+    CRT_MIXED_CENTER_REGA_ODD_61 (5u, 5u, A5);
+    CRT_MIXED_CENTER_REGA_EVEN_61(6u, 3u, A6);
+    CRT_MIXED_CENTER_REGA_ODD_61 (7u, 7u, A7);
 
 #undef CRT_MIXED_CENTER_REGA_EVEN_61
 #undef CRT_MIXED_CENTER_REGA_ODD_61
@@ -13288,6 +13450,37 @@ void crt_halfreal_center_eo_61(GF z, GF zneg_conj,
 }
 
 
+#ifndef CRT_MIXED_F48_TWIN_SYMMETRY_61
+#define CRT_MIXED_F48_TWIN_SYMMETRY_61 1
+#endif
+#ifndef CRT_MIXED_F48_TWIN_SYMMETRY_31
+#define CRT_MIXED_F48_TWIN_SYMMETRY_31 1
+#endif
+
+static inline __attribute__((always_inline))
+GF crt_halfreal_f48_tw_61(__global const GF* restrict twf, const uint n, const uint k)
+{
+    const uint row_m = n >> 1;
+#if CRT_MIXED_F48_TWIN_SYMMETRY_61
+    const uint km = (row_m - k) & (row_m - 1u);
+    return (k > km) ? gf_neg_conj_fast(twf[(row_m - 1u) + km]) : twf[(row_m - 1u) + k];
+#else
+    return twf[(row_m - 1u) + k];
+#endif
+}
+
+static inline __attribute__((always_inline))
+GF31 crt_halfreal_f48_tw_31(__global const GF31* restrict twf, const uint n, const uint k)
+{
+    const uint row_m = n >> 1;
+#if CRT_MIXED_F48_TWIN_SYMMETRY_31
+    const uint km = (row_m - k) & (row_m - 1u);
+    return (k > km) ? f31_neg_conj_fast(twf[(row_m - 1u) + km]) : twf[(row_m - 1u) + k];
+#else
+    return twf[(row_m - 1u) + k];
+#endif
+}
+
 #ifndef CRT_MIXED_F48_DELAYED_SCALE_61
 #ifdef CRT_MIXED_F48_LATE_SCALE_61
 #define CRT_MIXED_F48_DELAYED_SCALE_61 CRT_MIXED_F48_LATE_SCALE_61
@@ -13311,7 +13504,7 @@ void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
                                    __private GF* Eout,
                                    __private GF* Oout)
 {
-    const GF W = twf[(n >> 1) - 1u + k];
+    const GF W = crt_halfreal_f48_tw_61(twf, n, k);
 #if CRT_MIXED_F48_DELAYED_SCALE_61
     const GF U = gf_norm_pair(gf_add(z, zneg_conj));
     const GF D = gf_mul_minus_i_fast(gf_norm_pair(gf_sub(z, zneg_conj)));
@@ -13332,6 +13525,26 @@ void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
 }
 
 static inline __attribute__((always_inline))
+void crt_halfreal_center_pair_f48_w_61(GF z, GF zneg_conj, GF W, __private GF* out0, __private GF* out1)
+{
+#if CRT_MIXED_F48_DELAYED_SCALE_61
+    const GF U = gf_norm_pair(gf_add(z, zneg_conj));
+    const GF D = gf_mul_minus_i_fast(gf_norm_pair(gf_sub(z, zneg_conj)));
+    const GF WD = gf_mul(D, W);
+    const GF E = gf_quarter_scalar_pair(gf_add(gf_sqr(U), gf_sqr(WD)));
+    const GF O = gf_half_scalar_pair(gf_mul(U, D));
+#else
+    const GF E0 = gf_half_scalar_pair(gf_add(z, zneg_conj));
+    const GF O0 = gf_mul_minus_i_fast(gf_half_scalar_pair(gf_sub(z, zneg_conj)));
+    const GF WO = gf_mul(O0, W);
+    const GF E = gf_add(gf_sqr(E0), gf_sqr(WO));
+    const GF O = gf_dbl_pair(gf_mul(E0, O0));
+#endif
+    *out0 = gf_pack_e_plus_i_o(E, O);
+    *out1 = gf_pack_conj_e_plus_i_conj_o(E, O);
+}
+
+static inline __attribute__((always_inline))
 void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
                                    __global const GF31* restrict twf,
                                    const uint n,
@@ -13339,7 +13552,7 @@ void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
                                    __private GF31* Eout,
                                    __private GF31* Oout)
 {
-    const GF31 W = twf[(n >> 1) - 1u + k];
+    const GF31 W = crt_halfreal_f48_tw_31(twf, n, k);
 #if CRT_MIXED_F48_DELAYED_SCALE_31
     const GF31 U = f31_add(z, zneg_conj);
     const GF31 D = f31_mul_minus_i_fast(f31_sub(z, zneg_conj));
@@ -13357,6 +13570,26 @@ void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
     *Eout = E;
     *Oout = O;
 #endif
+}
+
+static inline __attribute__((always_inline))
+void crt_halfreal_center_pair_f48_w_31(GF31 z, GF31 zneg_conj, GF31 W, __private GF31* out0, __private GF31* out1)
+{
+#if CRT_MIXED_F48_DELAYED_SCALE_31
+    const GF31 U = f31_add(z, zneg_conj);
+    const GF31 D = f31_mul_minus_i_fast(f31_sub(z, zneg_conj));
+    const GF31 WD = f31_mul(D, W);
+    const GF31 E = f31_quarter_pair(f31_add(f31_sqr(U), f31_sqr(WD)));
+    const GF31 O = f31_half_pair(f31_mul(U, D));
+#else
+    const GF31 E0 = f31_half_pair(f31_add(z, zneg_conj));
+    const GF31 O0 = f31_mul_minus_i_fast(f31_half_pair(f31_sub(z, zneg_conj)));
+    const GF31 WO = f31_mul(O0, W);
+    const GF31 E = f31_add(f31_sqr(E0), f31_sqr(WO));
+    const GF31 O = f31_dbl_pair(f31_mul(E0, O0));
+#endif
+    *out0 = f31_pack_e_plus_i_o(E, O);
+    *out1 = f31_pack_conj_e_plus_i_conj_o(E, O);
 }
 
 static inline __attribute__((always_inline))

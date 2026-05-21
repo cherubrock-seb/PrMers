@@ -33,6 +33,7 @@ PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_31=0 \
 PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=0 \
 PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=0 \
 PRMERS_CRT_MIXED_CENTER_REGA_61=1 \
+PRMERS_CRT_MIXED_CENTER_TWINLINE_61=1 \
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
@@ -109,8 +110,12 @@ Aliases still accepted:
 |---|---:|---|
 | `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61` | `0` | split GF61 F48 center into self-pair and non-self-pair kernels |
 | `PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31` | `0` | split GF31 F48 center into self-pair and non-self-pair kernels when the matching path is active |
-| `PRMERS_CRT_MIXED_CENTER_REGA_61` | `0` | test GF61 F48 512 center with A-block kept in private registers while B uses the single LDS array |
+| `PRMERS_CRT_MIXED_CENTER_REGA_61` | `1` | GF61 F48 512 center with A-block kept in private registers while B uses the single LDS array |
 | `PRMERS_CRT_MIXED_CENTER_PRIVATE_A_61` | `0` | alias for `PRMERS_CRT_MIXED_CENTER_REGA_61` |
+| `PRMERS_CRT_MIXED_CENTER_TWINLINE_61` | `1` | pass the GF61 F48 twiddle directly in the regA 512 center and derive the mirror twiddle with `-conj(W)` |
+| `PRMERS_CRT_MIXED_CENTER_F48_TWIN_SYMMETRY` | `1` | global F48 twiddle symmetry shortcut for all F48 center helpers |
+| `PRMERS_CRT_MIXED_CENTER_F48_TWIN_SYMMETRY_61` | inherits global | per-field F48 twiddle symmetry for GF61 |
+| `PRMERS_CRT_MIXED_CENTER_F48_TWIN_SYMMETRY_31` | inherits global | per-field F48 twiddle symmetry for GF31 |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE` | `0` | global delayed-scale shortcut for F48 center algebra |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_61` | inherits global | per-field delayed-scale shortcut for GF61 |
 | `PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_31` | inherits global | per-field delayed-scale shortcut for GF31 |
@@ -123,7 +128,7 @@ PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_61
 PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_31
 ```
 
-The delayed-scale formula is only used by the `flags=48` fast center helper.  The default is off because the extra normalisation was not faster on the latest RTX 3080 odd9 tests.  If enabled, all specialized F48 center kernels call the same helper, so the option applies to self-pair, non-self-pair, one-LDS, two-LDS, fused 61x31 center, and generic F48 center calls.
+The delayed-scale formula is only used by the `flags=48` fast center helper.  The default is off because the extra normalisation was not faster on the latest RTX 3080 odd9 tests.  The twiddle symmetry shortcut is on by default: for the complementary index `row_m-k`, the helper can use `-conj(W(k))` instead of loading an unrelated high-half twiddle.  The option is compile-time and applies to all specialized F48 center helpers, including self-pair, non-self-pair, one-LDS, two-LDS, fused 61x31 center, and generic F48 center calls.
 
 ### Mixed odd head/tail and Garner
 
@@ -173,6 +178,7 @@ PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_31=0 \
 PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=0 \
 PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=0 \
 PRMERS_CRT_MIXED_CENTER_REGA_61=1 \
+PRMERS_CRT_MIXED_CENTER_TWINLINE_61=1 \
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
@@ -304,3 +310,39 @@ crt_mixed_lds512_inverse_31
 crt_mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat
 crt_garner_first_coeffhi_mask32_anybase_x2
 ```
+
+## Extra mixed center tuning
+
+Useful fast path for the current odd9 half-real row core:
+
+```bash
+PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_61=1 \
+PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_31=0 \
+PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_61=1 \
+PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_31=0 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61=0 \
+PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31=0 \
+./prmers_opencl_prp 142606357 \
+  --modulus crt \
+  --crt-odd-radix 9 \
+  --crt-center-mode halfreal \
+  --crt-halfreal-no-autoprobe \
+  --crt-halfreal-flags 48 \
+  --crt-mixed-row-core lds \
+  --crt-mixed-row-stage 512 \
+  --crt-mixed-row-center 512 \
+  --crt-mixed-row-fuse-both off \
+  --device 1 \
+  --iters 3000 \
+  --profile-kernels
+```
+
+Useful F48 twiddle tests:
+
+```bash
+PRMERS_CRT_MIXED_CENTER_TWINLINE_61=1
+PRMERS_CRT_MIXED_CENTER_F48_TWIN_SYMMETRY_61=1
+PRMERS_CRT_MIXED_CENTER_F48_TWIN_SYMMETRY_31=1
+```
+
+The regA 512 GF61 path uses the direct twiddle form when available.  The generic F48 helper also uses the mirror identity, so kernels that still call the common helper get the same algebraic shortcut without changing the selected kernel name.
