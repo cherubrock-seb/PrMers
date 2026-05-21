@@ -2,10 +2,9 @@
 PrMers BananaNTT Split
 
 Copyright 2026, Sébastien "Cherubrock"
-Experimental GPU mixed-radix CRT/PFA half-real NTT for Mersenne testing.
+GPU mixed-radix CRT/PFA half-real NTT for Mersenne testing.
 
 This code is part of the PrMers experimental branch.
-It is a GPU proof of concept for the mixed CRT/PFA odd-radix approach.
 
 Project:
 https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split
@@ -18,7 +17,7 @@ https://github.com/galloty/mersenne2
 
 This version keeps the power-of-two axis as a half-real GF(p^2) transform,
 similar in spirit to mersenne2, and separates the odd axis with CRT/PFA
-indexing. The current GPU POC mainly targets odd radix 3 and 9.
+indexing.
 
 The goal is to test transform sizes of the form odd * 2^m, for example
 9 * 2^19, while still storing two real coefficients per complex value.
@@ -2604,12 +2603,20 @@ struct CrtFusedKernels {
     cl_kernel mixed_lds512_pair31 = nullptr;
     cl_kernel mixed_lds512_pair_1lds61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds31 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_f48_self61 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_f48_nonself61 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_f48_self31 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_f48_nonself31 = nullptr;
     cl_kernel mixed_lds1024_pair61 = nullptr;
     cl_kernel mixed_lds1024_pair31 = nullptr;
     cl_kernel mixed_lds_any_pair61 = nullptr;
     cl_kernel mixed_lds_any_pair31 = nullptr;
     cl_kernel mixed_lds_any_pair_1lds61 = nullptr;
     cl_kernel mixed_lds_any_pair_1lds31 = nullptr;
+    cl_kernel mixed_lds_any_pair_1lds_f48_self61 = nullptr;
+    cl_kernel mixed_lds_any_pair_1lds_f48_nonself61 = nullptr;
+    cl_kernel mixed_lds_any_pair_1lds_f48_self31 = nullptr;
+    cl_kernel mixed_lds_any_pair_1lds_f48_nonself31 = nullptr;
     cl_kernel mixed_lds_any_pair_both = nullptr;
     cl_kernel mixed_lds512_pair_both = nullptr;
     cl_kernel mixed_fwd_lds512_both = nullptr;
@@ -2768,12 +2775,20 @@ struct CrtFusedKernels {
         mixed_lds512_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_31");
         mixed_lds512_pair_1lds61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_61");
         mixed_lds512_pair_1lds31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_31");
+        mixed_lds512_pair_1lds_f48_self61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_self_61");
+        mixed_lds512_pair_1lds_f48_nonself61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_nonself_61");
+        mixed_lds512_pair_1lds_f48_self31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_self_31");
+        mixed_lds512_pair_1lds_f48_nonself31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_nonself_31");
         mixed_lds1024_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds1024_pair_61");
         mixed_lds1024_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds1024_pair_31");
         mixed_lds_any_pair61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_61");
         mixed_lds_any_pair31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_31");
         mixed_lds_any_pair_1lds61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_61");
         mixed_lds_any_pair_1lds31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_31");
+        mixed_lds_any_pair_1lds_f48_self61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_f48_self_61");
+        mixed_lds_any_pair_1lds_f48_nonself61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_f48_nonself_61");
+        mixed_lds_any_pair_1lds_f48_self31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_f48_self_31");
+        mixed_lds_any_pair_1lds_f48_nonself31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_1lds_f48_nonself_31");
         mixed_lds_any_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds_pair_any_61x31");
         mixed_lds512_pair_both = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_61x31");
         mixed_fwd_lds512_both = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61x31_512opt");
@@ -2922,12 +2937,20 @@ struct CrtFusedKernels {
         if (mixed_lds512_pair31) clReleaseKernel(mixed_lds512_pair31);
         if (mixed_lds512_pair_1lds61) clReleaseKernel(mixed_lds512_pair_1lds61);
         if (mixed_lds512_pair_1lds31) clReleaseKernel(mixed_lds512_pair_1lds31);
+        if (mixed_lds512_pair_1lds_f48_self61) clReleaseKernel(mixed_lds512_pair_1lds_f48_self61);
+        if (mixed_lds512_pair_1lds_f48_nonself61) clReleaseKernel(mixed_lds512_pair_1lds_f48_nonself61);
+        if (mixed_lds512_pair_1lds_f48_self31) clReleaseKernel(mixed_lds512_pair_1lds_f48_self31);
+        if (mixed_lds512_pair_1lds_f48_nonself31) clReleaseKernel(mixed_lds512_pair_1lds_f48_nonself31);
         if (mixed_lds1024_pair61) clReleaseKernel(mixed_lds1024_pair61);
         if (mixed_lds1024_pair31) clReleaseKernel(mixed_lds1024_pair31);
         if (mixed_lds_any_pair61) clReleaseKernel(mixed_lds_any_pair61);
         if (mixed_lds_any_pair31) clReleaseKernel(mixed_lds_any_pair31);
         if (mixed_lds_any_pair_1lds61) clReleaseKernel(mixed_lds_any_pair_1lds61);
         if (mixed_lds_any_pair_1lds31) clReleaseKernel(mixed_lds_any_pair_1lds31);
+        if (mixed_lds_any_pair_1lds_f48_self61) clReleaseKernel(mixed_lds_any_pair_1lds_f48_self61);
+        if (mixed_lds_any_pair_1lds_f48_nonself61) clReleaseKernel(mixed_lds_any_pair_1lds_f48_nonself61);
+        if (mixed_lds_any_pair_1lds_f48_self31) clReleaseKernel(mixed_lds_any_pair_1lds_f48_self31);
+        if (mixed_lds_any_pair_1lds_f48_nonself31) clReleaseKernel(mixed_lds_any_pair_1lds_f48_nonself31);
         if (mixed_lds_any_pair_both) clReleaseKernel(mixed_lds_any_pair_both);
         if (mixed_lds512_pair_both) clReleaseKernel(mixed_lds512_pair_both);
         if (mixed_fwd_lds512_both) clReleaseKernel(mixed_fwd_lds512_both);
@@ -3296,11 +3319,6 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const bool mixed_lds_disabled = parse_bool_env("PRMERS_CRT_MIXED_LDS_DISABLE", false) ||
                                     parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false);
     const bool mixed_lds512_opt = parse_bool_env("PRMERS_CRT_MIXED_LDS512_OPT", true);
-    // Mixed CRT/PFA row center LDS policy.
-    // v23 default follows the best current odd9 runs requested for testing:
-    // GF61 uses the validated one-LDS pair-center by default, GF31 keeps the
-    // classic pair center unless explicitly enabled.  Per-field env knobs can
-    // still override this without changing the command line.
     const char* env_center_global = std::getenv("PRMERS_CRT_MIXED_CENTER_SINGLE_LDS");
     const char* env_center_legacy = std::getenv("PRMERS_CRT_MIXED_CENTER512_SINGLE_LDS");
     const bool center_global_set = (env_center_global && *env_center_global) || (env_center_legacy && *env_center_legacy);
@@ -3313,11 +3331,15 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const bool mixed_center_single_lds = mixed_center_single_lds_61 || mixed_center_single_lds_31;
     const bool mixed_center512_single_lds_61 = mixed_center_single_lds_61;
     const bool mixed_center512_single_lds_31 = mixed_center_single_lds_31;
+    const char* env_center_split_f48_61 = std::getenv("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61");
+    const char* env_center_split_f48_31 = std::getenv("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31");
+    const bool mixed_center_split_f48_61 = parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
+        env_center_split_f48_61 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true));
+    const bool mixed_center_split_f48_31 = parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
+        env_center_split_f48_31 ? true : parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true));
+    const bool mixed_center512_split_f48_61 = mixed_center_split_f48_61;
+    const bool mixed_center512_split_f48_31 = mixed_center_split_f48_31;
 
-    // Stage policy.  v23 adds per-size specialized one-LDS stage kernels
-    // (8..1024).  GF61 is enabled by default because it is the hot modulus in
-    // the odd9 CRT path; GF31 is opt-in.  If a fused 61x31 stage is requested,
-    // these flags block it unless the explicit override flag is set.
     const char* env_stage_global = std::getenv("PRMERS_CRT_MIXED_STAGE_SINGLE_LDS");
     const bool stage_global_set = env_stage_global && *env_stage_global;
     const bool stage_global_val = parse_bool_env("PRMERS_CRT_MIXED_STAGE_SINGLE_LDS", false);
@@ -3816,40 +3838,78 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_center31, g_center_scalar, &local64, "enqueue mixed center31", "crt_mixed_halfreal_center_31");
     };
     auto center_lds512_61 = [&]() {
+        const size_t blocks = static_cast<size_t>(row_m >> 9);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        const bool split_f48 = mixed_center512_single_lds_61 && mixed_center512_split_f48_61 && flags61 == 48u &&
+                               fk.mixed_lds512_pair_1lds_f48_self61 && fk.mixed_lds512_pair_1lds_f48_nonself61;
+        auto set_center_args61 = [&](cl_kernel k) {
+            cl_uint arg = 0;
+            set_karg_mem(k, arg, g61.bufField, "set mixed lds512 center61 a");
+            set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds512 center61 twf");
+            set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds512 center61 twi");
+            set_karg(k, arg, pow2_n, "set mixed lds512 center61 pow2_n");
+            set_karg(k, arg, odd, "set mixed lds512 center61 odd");
+            set_karg(k, arg, flags61, "set mixed lds512 center61 flags");
+        };
+        if (split_f48) {
+            if (pair_blocks > 2u) {
+                set_center_args61(fk.mixed_lds512_pair_1lds_f48_nonself61);
+                enqueue_kernel(g61, fk.mixed_lds512_pair_1lds_f48_nonself61,
+                               static_cast<size_t>(odd) * (pair_blocks - 2u) * local64, &local64,
+                               "enqueue mixed lds512 center61 nonself", "crt_mixed_lds512_center_1lds_f48_nonself_61");
+            }
+            const size_t self_pairs = (blocks > 1u) ? 2u : 1u;
+            set_center_args61(fk.mixed_lds512_pair_1lds_f48_self61);
+            enqueue_kernel(g61, fk.mixed_lds512_pair_1lds_f48_self61,
+                           static_cast<size_t>(odd) * self_pairs * local64, &local64,
+                           "enqueue mixed lds512 center61 self", "crt_mixed_lds512_center_1lds_f48_self_61");
+            return;
+        }
         if (mixed_center512_single_lds_61 && !fk.mixed_lds512_pair_1lds61)
             throw std::runtime_error("PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_61=1 requested but center61 one-LDS kernel is not available");
         cl_kernel k = mixed_center512_single_lds_61 ? fk.mixed_lds512_pair_1lds61 : fk.mixed_lds512_pair61;
         const char* label = (k == fk.mixed_lds512_pair_1lds61) ?
             "crt_mixed_lds512_center_1lds_61" : "crt_mixed_lds512_center_61";
         if (!k) throw std::runtime_error("mixed LDS512 center61 kernel requested but not available");
-        cl_uint arg = 0;
-        set_karg_mem(k, arg, g61.bufField, "set mixed lds512 center61 a");
-        set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds512 center61 twf");
-        set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds512 center61 twi");
-        set_karg(k, arg, pow2_n, "set mixed lds512 center61 pow2_n");
-        set_karg(k, arg, odd, "set mixed lds512 center61 odd");
-        set_karg(k, arg, flags61, "set mixed lds512 center61 flags");
-        const size_t blocks = static_cast<size_t>(row_m >> 9);
-        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        set_center_args61(k);
         enqueue_kernel(g61, k, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
                        "enqueue mixed lds512 center61", label);
     };
     auto center_lds512_31 = [&]() {
+        const size_t blocks = static_cast<size_t>(row_m >> 9);
+        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        const bool split_f48 = mixed_center512_single_lds_31 && mixed_center512_split_f48_31 && flags31 == 48u &&
+                               fk.mixed_lds512_pair_1lds_f48_self31 && fk.mixed_lds512_pair_1lds_f48_nonself31;
+        auto set_center_args31 = [&](cl_kernel k) {
+            cl_uint arg = 0;
+            set_karg_mem(k, arg, g31.bufField, "set mixed lds512 center31 a");
+            set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds512 center31 twf");
+            set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds512 center31 twi");
+            set_karg(k, arg, pow2_n, "set mixed lds512 center31 pow2_n");
+            set_karg(k, arg, odd, "set mixed lds512 center31 odd");
+            set_karg(k, arg, flags31, "set mixed lds512 center31 flags");
+        };
+        if (split_f48) {
+            if (pair_blocks > 2u) {
+                set_center_args31(fk.mixed_lds512_pair_1lds_f48_nonself31);
+                enqueue_kernel(g31, fk.mixed_lds512_pair_1lds_f48_nonself31,
+                               static_cast<size_t>(odd) * (pair_blocks - 2u) * local64, &local64,
+                               "enqueue mixed lds512 center31 nonself", "crt_mixed_lds512_center_1lds_f48_nonself_31");
+            }
+            const size_t self_pairs = (blocks > 1u) ? 2u : 1u;
+            set_center_args31(fk.mixed_lds512_pair_1lds_f48_self31);
+            enqueue_kernel(g31, fk.mixed_lds512_pair_1lds_f48_self31,
+                           static_cast<size_t>(odd) * self_pairs * local64, &local64,
+                           "enqueue mixed lds512 center31 self", "crt_mixed_lds512_center_1lds_f48_self_31");
+            return;
+        }
         if (mixed_center512_single_lds_31 && !fk.mixed_lds512_pair_1lds31)
             throw std::runtime_error("PRMERS_CRT_MIXED_CENTER_SINGLE_LDS_31=1 requested but center31 one-LDS kernel is not available");
         cl_kernel k = mixed_center512_single_lds_31 ? fk.mixed_lds512_pair_1lds31 : fk.mixed_lds512_pair31;
         const char* label = (k == fk.mixed_lds512_pair_1lds31) ?
             "crt_mixed_lds512_center_1lds_31" : "crt_mixed_lds512_center_31";
         if (!k) throw std::runtime_error("mixed LDS512 center31 kernel requested but not available");
-        cl_uint arg = 0;
-        set_karg_mem(k, arg, g31.bufField, "set mixed lds512 center31 a");
-        set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds512 center31 twf");
-        set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds512 center31 twi");
-        set_karg(k, arg, pow2_n, "set mixed lds512 center31 pow2_n");
-        set_karg(k, arg, odd, "set mixed lds512 center31 odd");
-        set_karg(k, arg, flags31, "set mixed lds512 center31 flags");
-        const size_t blocks = static_cast<size_t>(row_m >> 9);
-        const size_t pair_blocks = (blocks >> 1u) + 1u;
+        set_center_args31(k);
         enqueue_kernel(g31, k, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
                        "enqueue mixed lds512 center31", label);
     };
@@ -3882,19 +3942,40 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
 
     auto center_lds_any_61 = [&](cl_uint center_len) {
         const bool use1 = mixed_center_single_lds_61 && fk.mixed_lds_any_pair_1lds61;
-        cl_kernel k = use1 ? fk.mixed_lds_any_pair_1lds61 : fk.mixed_lds_any_pair61;
-        if (!k) throw std::runtime_error("mixed LDS any center61 kernel requested but not available");
-        cl_uint arg = 0;
-        set_karg_mem(k, arg, g61.bufField, "set mixed lds any center61 a");
-        set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds any center61 twf");
-        set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds any center61 twi");
-        set_karg(k, arg, pow2_n, "set mixed lds any center61 pow2_n");
-        set_karg(k, arg, odd, "set mixed lds any center61 odd");
-        set_karg(k, arg, flags61, "set mixed lds any center61 flags");
-        set_karg(k, arg, center_len, "set mixed lds any center61 center_len");
         const cl_uint log_c = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(center_len));
         const size_t blocks = static_cast<size_t>(row_m >> log_c);
         const size_t pair_blocks = (blocks >> 1u) + 1u;
+        auto set_center_args61 = [&](cl_kernel k) {
+            cl_uint arg = 0;
+            set_karg_mem(k, arg, g61.bufField, "set mixed lds any center61 a");
+            set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds any center61 twf");
+            set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds any center61 twi");
+            set_karg(k, arg, pow2_n, "set mixed lds any center61 pow2_n");
+            set_karg(k, arg, odd, "set mixed lds any center61 odd");
+            set_karg(k, arg, flags61, "set mixed lds any center61 flags");
+            set_karg(k, arg, center_len, "set mixed lds any center61 center_len");
+        };
+        const bool split_f48 = use1 && mixed_center_split_f48_61 && flags61 == 48u &&
+            fk.mixed_lds_any_pair_1lds_f48_self61 && fk.mixed_lds_any_pair_1lds_f48_nonself61;
+        if (split_f48) {
+            if (pair_blocks > 2u) {
+                set_center_args61(fk.mixed_lds_any_pair_1lds_f48_nonself61);
+                const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) + "_center_1lds_f48_nonself_61";
+                enqueue_kernel(g61, fk.mixed_lds_any_pair_1lds_f48_nonself61,
+                               static_cast<size_t>(odd) * (pair_blocks - 2u) * local64, &local64,
+                               "enqueue mixed lds any center61 nonself", label.c_str());
+            }
+            const size_t self_pairs = (blocks > 1u) ? 2u : 1u;
+            set_center_args61(fk.mixed_lds_any_pair_1lds_f48_self61);
+            const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) + "_center_1lds_f48_self_61";
+            enqueue_kernel(g61, fk.mixed_lds_any_pair_1lds_f48_self61,
+                           static_cast<size_t>(odd) * self_pairs * local64, &local64,
+                           "enqueue mixed lds any center61 self", label.c_str());
+            return;
+        }
+        cl_kernel k = use1 ? fk.mixed_lds_any_pair_1lds61 : fk.mixed_lds_any_pair61;
+        if (!k) throw std::runtime_error("mixed LDS any center61 kernel requested but not available");
+        set_center_args61(k);
         const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) +
                                   (use1 ? "_center_1lds_61" : "_center_61");
         enqueue_kernel(g61, k, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
@@ -3902,19 +3983,40 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     };
     auto center_lds_any_31 = [&](cl_uint center_len) {
         const bool use1 = mixed_center_single_lds_31 && fk.mixed_lds_any_pair_1lds31;
-        cl_kernel k = use1 ? fk.mixed_lds_any_pair_1lds31 : fk.mixed_lds_any_pair31;
-        if (!k) throw std::runtime_error("mixed LDS any center31 kernel requested but not available");
-        cl_uint arg = 0;
-        set_karg_mem(k, arg, g31.bufField, "set mixed lds any center31 a");
-        set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds any center31 twf");
-        set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds any center31 twi");
-        set_karg(k, arg, pow2_n, "set mixed lds any center31 pow2_n");
-        set_karg(k, arg, odd, "set mixed lds any center31 odd");
-        set_karg(k, arg, flags31, "set mixed lds any center31 flags");
-        set_karg(k, arg, center_len, "set mixed lds any center31 center_len");
         const cl_uint log_c = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(center_len));
         const size_t blocks = static_cast<size_t>(row_m >> log_c);
         const size_t pair_blocks = (blocks >> 1u) + 1u;
+        auto set_center_args31 = [&](cl_kernel k) {
+            cl_uint arg = 0;
+            set_karg_mem(k, arg, g31.bufField, "set mixed lds any center31 a");
+            set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds any center31 twf");
+            set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds any center31 twi");
+            set_karg(k, arg, pow2_n, "set mixed lds any center31 pow2_n");
+            set_karg(k, arg, odd, "set mixed lds any center31 odd");
+            set_karg(k, arg, flags31, "set mixed lds any center31 flags");
+            set_karg(k, arg, center_len, "set mixed lds any center31 center_len");
+        };
+        const bool split_f48 = use1 && mixed_center_split_f48_31 && flags31 == 48u &&
+            fk.mixed_lds_any_pair_1lds_f48_self31 && fk.mixed_lds_any_pair_1lds_f48_nonself31;
+        if (split_f48) {
+            if (pair_blocks > 2u) {
+                set_center_args31(fk.mixed_lds_any_pair_1lds_f48_nonself31);
+                const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) + "_center_1lds_f48_nonself_31";
+                enqueue_kernel(g31, fk.mixed_lds_any_pair_1lds_f48_nonself31,
+                               static_cast<size_t>(odd) * (pair_blocks - 2u) * local64, &local64,
+                               "enqueue mixed lds any center31 nonself", label.c_str());
+            }
+            const size_t self_pairs = (blocks > 1u) ? 2u : 1u;
+            set_center_args31(fk.mixed_lds_any_pair_1lds_f48_self31);
+            const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) + "_center_1lds_f48_self_31";
+            enqueue_kernel(g31, fk.mixed_lds_any_pair_1lds_f48_self31,
+                           static_cast<size_t>(odd) * self_pairs * local64, &local64,
+                           "enqueue mixed lds any center31 self", label.c_str());
+            return;
+        }
+        cl_kernel k = use1 ? fk.mixed_lds_any_pair_1lds31 : fk.mixed_lds_any_pair31;
+        if (!k) throw std::runtime_error("mixed LDS any center31 kernel requested but not available");
+        set_center_args31(k);
         const std::string label = std::string("crt_mixed_lds") + std::to_string(center_len) +
                                   (use1 ? "_center_1lds_31" : "_center_31");
         enqueue_kernel(g31, k, static_cast<size_t>(odd) * pair_blocks * local64, &local64,
@@ -6771,6 +6873,10 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", fuse-center-both=" << (mixed_center_both_enabled ? "on" : "off")
                   << ", center-single-lds=61:" << (print_center_1lds_61 ? "on" : "off")
                   << ",31:" << (print_center_1lds_31 ? "on" : "off")
+                  << ", center-split-f48=61:" << (parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_61",
+                                                                    parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_61", true)) ? "on" : "off")
+                  << ",31:" << (parse_bool_env("PRMERS_CRT_MIXED_CENTER_SPLIT_F48_31",
+                                                parse_bool_env("PRMERS_CRT_MIXED_CENTER512_SPLIT_F48_31", true)) ? "on" : "off")
                   << ", stage-single-lds=61:" << (print_stage_1lds_61 ? "on" : "off")
                   << ",31:" << (print_stage_1lds_31 ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
