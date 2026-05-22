@@ -2769,12 +2769,16 @@ inline uint f31_double_scalar(uint a) {
     return (s & CRT_P31) + (s >> 31);
 }
 
-inline uint f31_mul_scalar(uint a, uint b) {
+static inline __attribute__((always_inline)) uint f31_mul_scalar(uint a, uint b) {
     const uint lo = a * b;
     const uint hi = mul_hi(a, b);
     uint r = (lo & CRT_P31) + (lo >> 31) + (hi << 1);
     return (r & CRT_P31) + (r >> 31);
 }
+
+#ifndef CRT_GF31_KARATSUBA
+#define CRT_GF31_KARATSUBA 1
+#endif
 
 inline GF31 f31_add(GF31 x, GF31 y) {
     return (GF31)(f31_add_scalar(x.s0, y.s0),
@@ -2786,13 +2790,25 @@ inline GF31 f31_sub(GF31 x, GF31 y) {
                   f31_sub_scalar(x.s1, y.s1));
 }
 
-inline GF31 f31_mul(GF31 x, GF31 y) {
+static inline __attribute__((always_inline)) GF31 f31_mul(GF31 x, GF31 y) {
+#if CRT_GF31_KARATSUBA
+    // GF31 complex multiply in GF(p^2), i^2=-1.
+    // Karatsuba saves one 32x32 mul_hi path versus the old 4-mul formula.
+    const uint ac = f31_mul_scalar(x.s0, y.s0);
+    const uint bd = f31_mul_scalar(x.s1, y.s1);
+    const uint sx = f31_add_scalar(x.s0, x.s1);
+    const uint sy = f31_add_scalar(y.s0, y.s1);
+    const uint abcd = f31_mul_scalar(sx, sy);
+    return (GF31)(f31_sub_scalar(ac, bd),
+                  f31_sub_scalar(f31_sub_scalar(abcd, ac), bd));
+#else
     const uint ac = f31_mul_scalar(x.s0, y.s0);
     const uint bd = f31_mul_scalar(x.s1, y.s1);
     const uint ad = f31_mul_scalar(x.s0, y.s1);
     const uint bc = f31_mul_scalar(x.s1, y.s0);
     return (GF31)(f31_sub_scalar(ac, bd),
                   f31_add_scalar(ad, bc));
+#endif
 }
 
 inline GF31 f31_sqr(GF31 x) {
@@ -2830,13 +2846,14 @@ inline uint f31_mod31_small(uint s) {
     return s - (31u & (0u - (uint)(s >= 31u)));
 }
 
-inline uint f31_lshift_scalar_norm(uint x, uint s) {
-    return ((x << s) & CRT_P31) | (x >> (31u - s));
+static inline __attribute__((always_inline)) uint f31_lshift_scalar_norm(uint x, uint s) {
+    /* M31: multiplying by 2^s is a rotate in 31 bits.
+       The mask on the right shift makes s=0 and s=31 valid and branchless. */
+    return ((x << s) & CRT_P31) | (x >> ((31u - s) & 31u));
 }
 
-inline uint f31_lshift_scalar(uint x, uint s) {
-    s = f31_mod31_small(s);
-    return (s == 0u) ? x : f31_lshift_scalar_norm(x, s);
+static inline __attribute__((always_inline)) uint f31_lshift_scalar(uint x, uint s) {
+    return f31_lshift_scalar_norm(x, f31_mod31_small(s));
 }
 
 inline uint crt_mod31_u32_fast(uint x) {
@@ -2943,20 +2960,29 @@ inline uint shift_from_r61_residue(uint r61, uint lr2_61) {
     return shift_from_r61_residue_mod(r61, crt_mod61_u32_fast(lr2_61));
 }
 
-inline uint f31_lshift15_scalar(uint x) {
+static inline __attribute__((always_inline)) uint f31_lshift15_scalar(uint x) {
     return ((x << 15u) & CRT_P31) | (x >> 16u);
 }
 
-inline GF31 f31_lshift(GF31 v, uint s) {
+static inline __attribute__((always_inline)) uint f31_lshift29_scalar(uint x) {
+    return ((x << 29u) & CRT_P31) | (x >> 2u);
+}
+
+static inline __attribute__((always_inline)) uint f31_lshift30_scalar(uint x) {
+    return ((x << 30u) & CRT_P31) | (x >> 1u);
+}
+
+static inline __attribute__((always_inline)) GF31 f31_lshift(GF31 v, uint s) {
     s = f31_mod31_small(s);
-    if (s == 0u) return v;
     return (GF31)(f31_lshift_scalar_norm(v.s0, s),
                   f31_lshift_scalar_norm(v.s1, s));
 }
 
-inline GF31 f31_rshift(GF31 v, uint s) {
+static inline __attribute__((always_inline)) GF31 f31_rshift(GF31 v, uint s) {
     s = f31_mod31_small(s);
-    return f31_lshift(v, s == 0u ? 0u : 31u - s);
+    const uint rs = (31u - s) & 31u;
+    return (GF31)(f31_lshift_scalar_norm(v.s0, rs),
+                  f31_lshift_scalar_norm(v.s1, rs));
 }
 
 inline GF31 f31_mul_i_fast(GF31 z) {
@@ -8283,12 +8309,12 @@ inline GF gf_pack_conj_e_minus_i_conj_o(GF e, GF o) {
     return (GF)(sub61(e.s0, o.s1), sub61(0ul, add61(e.s1, o.s0)));
 }
 
-inline GF31 f31_half_pair(GF31 z) {
-    return (GF31)(f31_lshift_scalar(z.s0, 30u), f31_lshift_scalar(z.s1, 30u));
+static inline __attribute__((always_inline)) GF31 f31_half_pair(GF31 z) {
+    return (GF31)(f31_lshift30_scalar(z.s0), f31_lshift30_scalar(z.s1));
 }
 
-inline GF31 f31_quarter_pair(GF31 z) {
-    return (GF31)(f31_lshift_scalar(z.s0, 29u), f31_lshift_scalar(z.s1, 29u));
+static inline __attribute__((always_inline)) GF31 f31_quarter_pair(GF31 z) {
+    return (GF31)(f31_lshift29_scalar(z.s0), f31_lshift29_scalar(z.s1));
 }
 
 inline GF31 f31_conj_fast(GF31 z) {
@@ -9010,6 +9036,78 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31(__global const ulon
     acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 7u], lm31[mbase + 7u]));
     acc = f31_add(acc, f31_mul_real_odd(l31[lbase + 8u], lm31[mbase + 8u]));
     a31[lane * row_m + k] = acc;
+}
+
+
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31(__global const ulong* restrict digits,
+                                                               __global GF* restrict a61,
+                                                               __global GF31* restrict a31,
+                                                               __global const GF* restrict mat61,
+                                                               __global const GF31* restrict mat31,
+                                                               __global const uchar* restrict shift61,
+                                                               __global const uchar* restrict shift31,
+                                                               uint odd, uint pow2_n)
+{
+    (void)odd;
+    const uint lid = (uint)get_local_id(0);
+    const uint kt = lid / 9u;
+    const uint lane = lid - kt * 9u;
+    const uint row_m = pow2_n >> 1;
+    const uint k = (uint)get_group_id(0) * 14u + kt;
+
+    __local GF l61[14 * 9];
+    __local GF31 l31[14 * 9];
+    __local GF lm61[9 * 9];
+    __local GF31 lm31[9 * 9];
+
+    if (lid < 81u) {
+        lm61[lid] = mat61[lid];
+        lm31[lid] = mat31[lid];
+    }
+
+    if (kt < 14u && k < row_m && lane < 9u) {
+        const uint b0 = k << 1;
+        const uint b1 = b0 + 1u;
+        const uint j0 = crt_mixed_j_from_coord(lane, b0, 9u, pow2_n);
+        const uint j1 = crt_mixed_j_from_coord(lane, b1, 9u, pow2_n);
+        const ulong d0 = digits[j0];
+        const ulong d1 = digits[j1];
+        l61[kt * 9u + lane] = (GF)(lshift61(d0, (uint)shift61[j0]),
+                                  lshift61(d1, (uint)shift61[j1]));
+        l31[kt * 9u + lane] = (GF31)(f31_lshift_scalar(f31_reduce_ulong(d0), (uint)shift31[j0]),
+                                    f31_lshift_scalar(f31_reduce_ulong(d1), (uint)shift31[j1]));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (kt >= 14u || k >= row_m || lane >= 9u) return;
+
+    const uint lbase = kt * 9u;
+    const uint mbase = lane * 9u;
+    GF acc61 = GF_ZERO;
+    GF31 acc31 = (GF31)(0u, 0u);
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 0u], lm61[mbase + 0u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 0u], lm31[mbase + 0u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 1u], lm61[mbase + 1u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 1u], lm31[mbase + 1u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 2u], lm61[mbase + 2u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 2u], lm31[mbase + 2u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 3u], lm61[mbase + 3u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 3u], lm31[mbase + 3u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 4u], lm61[mbase + 4u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 4u], lm31[mbase + 4u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 5u], lm61[mbase + 5u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 5u], lm31[mbase + 5u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 6u], lm61[mbase + 6u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 6u], lm31[mbase + 6u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 7u], lm61[mbase + 7u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 7u], lm31[mbase + 7u]));
+    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 8u], lm61[mbase + 8u]));
+    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 8u], lm31[mbase + 8u]));
+
+    const uint out = lane * row_m + k;
+    a61[out] = acc61;
+    a31[out] = acc31;
 }
 
 
@@ -10860,6 +10958,160 @@ void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_61(__global GF* 
         barrier(CLK_LOCAL_MEM_FENCE);
     }
     for (uint t = lid; t < 512u; t += 64u) a61[baseA + t] = X[t];
+}
+
+
+/* v42: GF31-specific regA/twinline LDS512 center.
+   Same scheduling idea as the fast GF61 center: keep block A in registers while
+   block B is transformed through one LDS buffer, then run the two inverse sides. */
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_31(__global GF31* restrict a31,
+                                                          __global const GF31* restrict twf31,
+                                                          __global const GF31* restrict twi31,
+                                                          uint pow2_n, uint odd, uint flags)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint log_m = 31u - (uint)clz(row_m);
+    if (log_m < 9u) return;
+
+    const uint blocks = row_m >> 9;
+    const uint pair_blocks = (blocks >> 1u) + 1u;
+    const uint gid = (uint)get_group_id(0);
+    const uint row = gid / pair_blocks;
+    const uint pair_id = gid - row * pair_blocks;
+    if (row >= odd || pair_id >= pair_blocks) return;
+
+    const uint h = log_m - 9u;
+    const uint kb = (h == 0u) ? 0u : pair_id;
+    const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
+    const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
+
+    const uint row_base = row * row_m;
+    const uint baseA = row_base + (blockA << 9);
+    const uint baseB = row_base + (blockB << 9);
+    const uint same = (pair_id == 0u) || ((pair_id << 1) == blocks);
+
+    __local GF31 X[512];
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a31[baseA + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        crt_local_stage_dif_radix8_31(X, twf31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+    const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
+
+    if (same) {
+        for (uint r = 0u; r < 8u; ++r) {
+            const uint t = (lid << 3) + r;
+            const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
+            const uint k = (rt << h) | kb;
+            const uint km = (row_m - k) & (row_m - 1u);
+            const uint tm = (kb != 0u) ? (511u - t)
+                                       : crt_bitrev9_u32_fast((0u - rt) & 511u);
+            if (k > km) continue;
+            const GF31 z = X[t];
+            const GF31 zn = X[tm];
+            GF31 E, O;
+            crt_halfreal_center_eo_f48_31(z, f31_conj_fast(zn), twf31, pow2_n, k, &E, &O);
+            const GF31 outK  = f31_pack_e_plus_i_o(E, O);
+            const GF31 outKm = f31_pack_conj_e_plus_i_conj_o(E, O);
+            X[t] = outK;
+            if (tm != t) X[tm] = outKm;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+            crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        for (uint t = lid; t < 512u; t += 64u) a31[baseA + t] = X[t];
+        return;
+    }
+
+    const uint t0 = lid << 3;
+    GF31 A0 = X[t0 + 0u];
+    GF31 A1 = X[t0 + 1u];
+    GF31 A2 = X[t0 + 2u];
+    GF31 A3 = X[t0 + 3u];
+    GF31 A4 = X[t0 + 4u];
+    GF31 A5 = X[t0 + 5u];
+    GF31 A6 = X[t0 + 6u];
+    GF31 A7 = X[t0 + 7u];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint t = lid; t < 512u; t += 64u) X[t] = a31[baseB + t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 512u; L >= 8u; L >>= 3) {
+        crt_local_stage_dif_radix8_31(X, twf31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (L == 8u) break;
+    }
+
+#define CRT_MIXED_CENTER_REGA_EVEN_31(R, HI, AR) do { \
+        const uint t = t0 + (uint)(R); \
+        const uint rt = ((uint)(HI) << 6) | rev_lid6; \
+        const uint k = (rt << h) | kb; \
+        const uint tm = 511u - t; \
+        const GF31 zn = X[tm]; \
+        GF31 out0, out1; \
+        crt_halfreal_center_pair_f48_w_31((AR), f31_conj_fast(zn), twf31[((pow2_n >> 1) - 1u) + k], &out0, &out1); \
+        (AR) = out0; \
+        X[tm] = out1; \
+    } while (0)
+
+#define CRT_MIXED_CENTER_REGA_ODD_31(R, HI, AR) do { \
+        const uint t = t0 + (uint)(R); \
+        const uint rt = ((uint)(HI) << 6) | rev_lid6; \
+        const uint k = (rt << h) | kb; \
+        const uint tm = 511u - t; \
+        const GF31 zsmall = X[tm]; \
+        GF31 out0, out1; \
+        crt_halfreal_center_pair_f48_w_31(zsmall, f31_conj_fast((AR)), f31_neg_conj_fast(twf31[((pow2_n >> 1) - 1u) + k]), &out0, &out1); \
+        X[tm] = out0; \
+        (AR) = out1; \
+    } while (0)
+
+    CRT_MIXED_CENTER_REGA_EVEN_31(0u, 0u, A0);
+    CRT_MIXED_CENTER_REGA_ODD_31 (1u, 4u, A1);
+    CRT_MIXED_CENTER_REGA_EVEN_31(2u, 2u, A2);
+    CRT_MIXED_CENTER_REGA_ODD_31 (3u, 6u, A3);
+    CRT_MIXED_CENTER_REGA_EVEN_31(4u, 1u, A4);
+    CRT_MIXED_CENTER_REGA_ODD_31 (5u, 5u, A5);
+    CRT_MIXED_CENTER_REGA_EVEN_31(6u, 3u, A6);
+    CRT_MIXED_CENTER_REGA_ODD_31 (7u, 7u, A7);
+
+#undef CRT_MIXED_CENTER_REGA_EVEN_31
+#undef CRT_MIXED_CENTER_REGA_ODD_31
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a31[baseB + t] = X[t];
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    X[t0 + 0u] = A0;
+    X[t0 + 1u] = A1;
+    X[t0 + 2u] = A2;
+    X[t0 + 3u] = A3;
+    X[t0 + 4u] = A4;
+    X[t0 + 5u] = A5;
+    X[t0 + 6u] = A6;
+    X[t0 + 7u] = A7;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
+        crt_local_stage_dit_radix8_31(X, twi31, 512u, L, lid, 64u);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (uint t = lid; t < 512u; t += 64u) a31[baseA + t] = X[t];
 }
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))

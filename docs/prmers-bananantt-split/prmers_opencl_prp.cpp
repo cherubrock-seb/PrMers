@@ -93,10 +93,16 @@ static inline bool mixed_center_f48_delayed_scale_61() {
 }
 
 static inline bool mixed_center_f48_delayed_scale_31() {
-    const bool all = parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE",
-                                          "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE", false);
+    /* GF31 is cheap in shifts, but the delayed-scale F48 form removes two
+       early pair shifts in the hot center path. Keep it controllable. */
+    bool def31 = true;
+    if (env_has_value("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE") ||
+        env_has_value("PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE")) {
+        def31 = parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE",
+                                     "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE", false);
+    }
     return parse_bool_env_alias("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE_31",
-                                "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_31", all);
+                                "PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE_31", def31);
 }
 
 static inline bool mixed_center_f48_twin_symmetry_61() {
@@ -2661,6 +2667,7 @@ struct CrtFusedKernels {
     cl_kernel mixed_lds512_pair_1lds61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_rega_f48_61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_rega_twinline_f48_61 = nullptr;
+    cl_kernel mixed_lds512_pair_1lds_rega_twinline_f48_31 = nullptr;
     cl_kernel mixed_lds512_pair_1lds31 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_f48_self61 = nullptr;
     cl_kernel mixed_lds512_pair_1lds_f48_nonself61 = nullptr;
@@ -2694,6 +2701,7 @@ struct CrtFusedKernels {
     cl_kernel mixed_pack_odd_fwd_tile14_shift_31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_31 = nullptr;
+    cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile7_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift31 = nullptr;
@@ -2835,6 +2843,7 @@ struct CrtFusedKernels {
         mixed_lds512_pair_1lds61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_61");
         mixed_lds512_pair_1lds_rega_f48_61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_f48_61");
         mixed_lds512_pair_1lds_rega_twinline_f48_61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_61");
+        mixed_lds512_pair_1lds_rega_twinline_f48_31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_31");
         mixed_lds512_pair_1lds31 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_31");
         mixed_lds512_pair_1lds_f48_self61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_self_61");
         mixed_lds512_pair_1lds_f48_nonself61 = load_kernel_optional(program, "gf61_crt_mixed_halfreal_lds512_pair_1lds_f48_nonself_61");
@@ -2868,6 +2877,7 @@ struct CrtFusedKernels {
         mixed_pack_odd_fwd_tile14_shift_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_31");
         mixed_pack_odd_fwd_tile14_shift_lmat_61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61");
         mixed_pack_odd_fwd_tile14_shift_lmat_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31");
+        mixed_pack_odd_fwd_tile14_shift_lmat_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31");
         mixed_pack_odd_fwd_tile7_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31");
         mixed_pack_odd_fwd_shift61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_61");
         mixed_pack_odd_fwd_shift31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_31");
@@ -2999,6 +3009,7 @@ struct CrtFusedKernels {
         if (mixed_lds512_pair_1lds61) clReleaseKernel(mixed_lds512_pair_1lds61);
         if (mixed_lds512_pair_1lds_rega_f48_61) clReleaseKernel(mixed_lds512_pair_1lds_rega_f48_61);
         if (mixed_lds512_pair_1lds_rega_twinline_f48_61) clReleaseKernel(mixed_lds512_pair_1lds_rega_twinline_f48_61);
+        if (mixed_lds512_pair_1lds_rega_twinline_f48_31) clReleaseKernel(mixed_lds512_pair_1lds_rega_twinline_f48_31);
         if (mixed_lds512_pair_1lds31) clReleaseKernel(mixed_lds512_pair_1lds31);
         if (mixed_lds512_pair_1lds_f48_self61) clReleaseKernel(mixed_lds512_pair_1lds_f48_self61);
         if (mixed_lds512_pair_1lds_f48_nonself61) clReleaseKernel(mixed_lds512_pair_1lds_f48_nonself61);
@@ -3032,6 +3043,7 @@ struct CrtFusedKernels {
         if (mixed_pack_odd_fwd_tile14_shift_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_31);
         if (mixed_pack_odd_fwd_tile14_shift_lmat_61) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_61);
         if (mixed_pack_odd_fwd_tile14_shift_lmat_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_31);
+        if (mixed_pack_odd_fwd_tile14_shift_lmat_both) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_both);
         if (mixed_pack_odd_fwd_tile7_both) clReleaseKernel(mixed_pack_odd_fwd_tile7_both);
         if (mixed_pack_odd_fwd_shift61) clReleaseKernel(mixed_pack_odd_fwd_shift61);
         if (mixed_pack_odd_fwd_shift31) clReleaseKernel(mixed_pack_odd_fwd_shift31);
@@ -3076,11 +3088,12 @@ struct CrtFusedKernels {
     bool mixed_odd_shift_lut_available() const {
         return mixed_pack_odd_fwd_shift61 && mixed_pack_odd_fwd_shift31 && mixed_odd_inv_precrt_coeffhi_shift;
     }
-    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr || mixed_pack_odd_fwd_tile7_both != nullptr; }
+    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr || mixed_pack_odd_fwd_tile7_both != nullptr || mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr; }
     bool mixed_odd_pack_tile7_available() const { return mixed_pack_odd_fwd_tile7_61 && mixed_pack_odd_fwd_tile7_31; }
     bool mixed_odd_pack_tile14_available() const { return mixed_pack_odd_fwd_tile14_61 && mixed_pack_odd_fwd_tile14_31; }
     bool mixed_odd_pack_tile14_shift_available() const { return mixed_pack_odd_fwd_tile14_shift_61 && mixed_pack_odd_fwd_tile14_shift_31; }
     bool mixed_odd_pack_tile14_shift_lmat_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_61 && mixed_pack_odd_fwd_tile14_shift_lmat_31; }
+    bool mixed_odd_pack_tile14_shift_lmat_both_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr; }
     bool mixed_odd_pack_tile7_both_available() const { return mixed_pack_odd_fwd_tile7_both != nullptr; }
     bool mixed_odd_center_both_available() const { return mixed_lds_any_pair_both != nullptr || mixed_lds512_pair_both != nullptr; }
     bool mixed_odd_center_any_both_available() const { return mixed_lds_any_pair_both != nullptr; }
@@ -3472,6 +3485,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                            parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER", false) &&
                                            g61.bufWidthMask32 && g61.bufUnweightShift && g31.bufUnweightShift &&
                                            fk.mixed_odd9_precrt_garner64_available();
+    const bool allow_mixed_host_flush = parse_bool_env("PRMERS_CRT_MIXED_ALLOW_HOST_FLUSH",
+                                                       parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false));
+    auto maybe_flush_mixed = [&](cl_command_queue q) {
+        if (allow_mixed_host_flush) clFlush(q);
+    };
     const bool use_mixed_tile14 = parse_bool_env("PRMERS_CRT_MIXED_TILE14", true) &&
                                   !use_mixed_shift_lut &&
                                   odd == 9u;
@@ -3514,11 +3532,16 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                       parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE7", true) &&
                                       use_mixed_fused_edges && !use_mixed_shift_lut && odd == 9u &&
                                       fk.mixed_odd_pack_tile7_available();
-    const bool use_mixed_pack_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
+    const bool use_mixed_pack_tile14_shift_lmat_both = use_mixed_tile14_shift_lmat &&
+                                                       use_mixed_fused_edges &&
+                                                       parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", true) &&
+                                                       fk.mixed_odd_pack_tile14_shift_lmat_both_available();
+    const bool use_mixed_pack_both = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", true) &&
                                      use_mixed_fused_edges &&
-                                     !use_mixed_pack_tile14_shift &&
-                                     ((use_mixed_shift_lut && fk.mixed_pack_odd_fwd_both_shift != nullptr) ||
-                                      (use_mixed_pack_tile7 && fk.mixed_odd_pack_tile7_both_available()));
+                                     (use_mixed_pack_tile14_shift_lmat_both ||
+                                      (!use_mixed_pack_tile14_shift &&
+                                       ((use_mixed_shift_lut && fk.mixed_pack_odd_fwd_both_shift != nullptr) ||
+                                        (use_mixed_pack_tile7 && fk.mixed_odd_pack_tile7_both_available()))));
     const std::string fuse_both_mode = g_crt_mixed_row_fuse_both;
     const bool fuse_both_force = (fuse_both_mode == "force");
     const bool fuse_center_env = parse_bool_env("PRMERS_CRT_MIXED_FUSE_CENTER_BOTH", false);
@@ -3586,7 +3609,21 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_pack31, g_storage, &local64, "enqueue mixed pack31", "crt_mixed_pack_weight_31");
     };
     auto pack_odd_fwd_both = [&]() {
-        if (use_mixed_pack_tile7 && fk.mixed_pack_odd_fwd_tile7_both) {
+        if (use_mixed_pack_tile14_shift_lmat_both) {
+            cl_uint arg = 0;
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufDigits, "set mixed pack+odd tile14 lmat both digits");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufField, "set mixed pack+odd tile14 lmat both a61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufField, "set mixed pack+odd tile14 lmat both a31");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufOddFwd, "set mixed pack+odd tile14 lmat both mat61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufOddFwd, "set mixed pack+odd tile14 lmat both mat31");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufUnweightShift, "set mixed pack+odd tile14 lmat both shift61");
+            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufUnweightShift, "set mixed pack+odd tile14 lmat both shift31");
+            set_karg(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, odd, "set mixed pack+odd tile14 lmat both odd");
+            set_karg(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, pow2_n, "set mixed pack+odd tile14 lmat both pow2_n");
+            const size_t head_global = round_up_size(((static_cast<size_t>(row_m) + 13u) / 14u) * 128u, local128);
+            enqueue_kernel(g61, fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, head_global, &local128,
+                           "enqueue mixed fused pack+odd tile14 lmat both", "crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31");
+        } else if (use_mixed_pack_tile7 && fk.mixed_pack_odd_fwd_tile7_both) {
             cl_uint arg = 0;
             set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufDigits, "set mixed pack+odd tile7 both digits");
             set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufField, "set mixed pack+odd tile7 both a61");
@@ -3618,7 +3655,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         }
         cl_event both_ready = enqueue_queue_marker(g61, "mixed odd pack both ready");
         set_pending_wait_event(g31, both_ready);
-        if (g61.queue != g31.queue) clFlush(g61.queue);
+        if (g61.queue != g31.queue) maybe_flush_mixed(g61.queue);
     };
 
     auto pack_odd_fwd61 = [&]() {
@@ -3834,12 +3871,12 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     auto sync_g31_to_g61 = [&](const char* label) {
         cl_event ev = enqueue_queue_marker(g31, label);
         set_pending_wait_event(g61, ev);
-        if (g31.queue != g61.queue) clFlush(g31.queue);
+        if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
     };
     auto sync_g61_to_g31 = [&](const char* label) {
         cl_event ev = enqueue_queue_marker(g61, label);
         set_pending_wait_event(g31, ev);
-        if (g61.queue != g31.queue) clFlush(g61.queue);
+        if (g61.queue != g31.queue) maybe_flush_mixed(g61.queue);
     };
     auto lds_fwd_both = [&](cl_uint len, cl_uint radix) {
         sync_g31_to_g61("mixed odd gf31 ready for fused lds fwd");
@@ -3972,6 +4009,17 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             set_karg(k, arg, odd, "set mixed lds512 center31 odd");
             set_karg(k, arg, flags31, "set mixed lds512 center31 flags");
         };
+        const bool rega31 = flags31 == 48u &&
+                           parse_bool_env("PRMERS_CRT_MIXED_CENTER_REGA_31", true) &&
+                           parse_bool_env("PRMERS_CRT_MIXED_CENTER_TWINLINE_31", true) &&
+                           fk.mixed_lds512_pair_1lds_rega_twinline_f48_31;
+        if (rega31) {
+            set_center_args31(fk.mixed_lds512_pair_1lds_rega_twinline_f48_31);
+            enqueue_kernel(g31, fk.mixed_lds512_pair_1lds_rega_twinline_f48_31,
+                           static_cast<size_t>(odd) * pair_blocks * local64, &local64,
+                           "enqueue mixed lds512 center31 regA twinline", "crt_mixed_lds512_center_1lds_rega_twinline_f48_31");
+            return;
+        }
         if (split_f48) {
             if (pair_blocks > 2u) {
                 set_center_args31(fk.mixed_lds512_pair_1lds_f48_nonself31);
@@ -4112,7 +4160,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         }
         cl_event gf31_fwd_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for fused center");
         set_pending_wait_event(g61, gf31_fwd_ready);
-        if (g31.queue != g61.queue) clFlush(g31.queue);
+        if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
 
         const bool use512 = (center_len == 512u && fk.mixed_lds512_pair_both);
         cl_kernel k = use512 ? fk.mixed_lds512_pair_both : fk.mixed_lds_any_pair_both;
@@ -4139,7 +4187,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
 
         cl_event center_ready = enqueue_queue_marker(g61, "mixed odd fused center ready");
         set_pending_wait_event(g31, center_ready);
-        if (g61.queue != g31.queue) clFlush(g61.queue);
+        if (g61.queue != g31.queue) maybe_flush_mixed(g61.queue);
     };
 
     auto unpack61 = [&]() {
@@ -4201,7 +4249,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         
         cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for preCRT coeffhi");
         set_pending_wait_event(g61, gf31_ready);
-        if (g31.queue != g61.queue) clFlush(g31.queue);
+        if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
 
         cl_kernel ktail = use_mixed_tile14_shift_lmat ? fk.mixed_odd_inv_precrt_coeffhi_tile14_shift_lmat :
                           (use_mixed_precrt_tile14_shift ? fk.mixed_odd_inv_precrt_coeffhi_tile14_shift :
@@ -4251,7 +4299,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     auto odd_inv_precrt_garner64 = [&]() {
         cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for fused preCRT+Garner");
         set_pending_wait_event(g61, gf31_ready);
-        if (g31.queue != g61.queue) clFlush(g31.queue);
+        if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
 
         ensure_carry_buffers(g61);
         cl_uint zero = 0;
@@ -4292,7 +4340,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         
         cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 residues ready for coeffhi");
         set_pending_wait_event(g61, gf31_ready);
-        if (g31.queue != g61.queue) clFlush(g31.queue);
+        if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
 
         cl_uint arg = 0;
         set_karg_mem(fk.mixed_residues_to_coeffhi, arg, g61.bufDigits, "set mixed residues coeff lo/res61");
@@ -4478,8 +4526,13 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     const cl_uint inverse_stop = inverse_edge_stop;
     const bool use_generic_edge = force_generic_edge || (edge_radix != 4u);
 
+    const bool allow_crt_host_flush = parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false);
     auto flush_async_queues = [&]() {
-        if (g31.queue != g61.queue) {
+        // Host-side flush is disabled by default.  Event dependencies are enough
+        // for correctness; explicit clFlush/clFinish in the hot loop can distort
+        // timing and reduce throughput.  Re-enable only for driver debugging with
+        // PRMERS_CRT_ALLOW_HOST_FLUSH=1.
+        if (allow_crt_host_flush && g31.queue != g61.queue) {
             clFlush(g61.queue);
             clFlush(g31.queue);
         }
@@ -6035,14 +6088,14 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
             if (g31.queue != g61.queue) {
                 cl_event bridge_done = enqueue_queue_marker(g61, "crt fused forward bridge marker");
                 set_pending_wait_event(g31, bridge_done);
-                clFlush(g61.queue);
+                if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false)) clFlush(g61.queue);
             }
             enqueue_center_fused(g61, c61, "crt_split_center61");
             enqueue_center_fused(g31, c31, "crt_split_center31");
             if (g31.queue != g61.queue) {
                 cl_event center31_done = enqueue_queue_marker(g31, "crt fused gf31 center marker");
                 set_pending_wait_event(g61, center31_done);
-                clFlush(g31.queue);
+                if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false)) clFlush(g31.queue);
             }
         }
     }
@@ -6455,7 +6508,7 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
             enqueue_square_mod(g31, 0u);
             cl_event gf31_square_done = enqueue_queue_marker(g31, "halfreal validator strict gf31 square done");
             set_pending_wait_event(g61, gf31_square_done);
-            if (g31.queue != g61.queue) clFlush(g31.queue);
+            if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false) && g31.queue != g61.queue) clFlush(g31.queue);
             enqueue_square_mod(g61, 0u);
 
             enqueue_crt_garner_carry_gpu(g61, g31, carry_cfg, true);
@@ -6653,6 +6706,8 @@ static bool prp_mersenne_pow2_base3_gpu(std::uint32_t p, bool verbose, clwrap::G
     const std::uint32_t run_iters = (max_iters && max_iters < p) ? max_iters : p;
     const bool full_run = (run_iters == p);
     const std::uint32_t effective_profile_every = gpu.profile_kernels ? (profile_every ? profile_every : report_interval) : 0;
+    const bool progress_finish = parse_bool_env("PRMERS_PROGRESS_FINISH", gpu.profile_kernels);
+    const bool periodic_flush = parse_bool_env("PRMERS_PERIODIC_FLUSH", false);
     for (std::uint32_t iter = 0; iter < run_iters; ++iter) {
         clwrap::enqueue_square_mod(gpu, center_max);
         clwrap::enqueue_carry(gpu, carry_cfg);
@@ -6662,8 +6717,11 @@ static bool prp_mersenne_pow2_base3_gpu(std::uint32_t p, bool verbose, clwrap::G
         const bool stop_requested = g_stop_requested.load(std::memory_order_relaxed);
 
         if (do_report || do_profile_report || stop_requested) {
-            clwrap::check(clFinish(gpu.queue), stop_requested ? "clFinish(interrupt)" : "clFinish(progress)");
-            clwrap::profile_flush_pending(gpu);
+            const bool need_finish_now = stop_requested || do_profile_report || progress_finish;
+            if (need_finish_now) {
+                clwrap::check(clFinish(gpu.queue), stop_requested ? "clFinish(interrupt)" : "clFinish(progress)");
+                clwrap::profile_flush_pending(gpu);
+            }
             const auto now = std::chrono::steady_clock::now();
             const double sec = std::chrono::duration<double>(now - t0).count();
             const double rate = static_cast<double>(iter + 1) / std::max(sec, 1e-9);
@@ -6682,12 +6740,20 @@ static bool prp_mersenne_pow2_base3_gpu(std::uint32_t p, bool verbose, clwrap::G
                 clwrap::print_carry_stats_if_changed(gpu, iter + 1);
             }
             if (stop_requested) throw InterruptedRun();
-        } else if (((iter + 1) & 255u) == 0u) {
+        } else if (periodic_flush && (((iter + 1) & 255u) == 0u)) {
             clFlush(gpu.queue);
         }
     }
 
     clwrap::check(clFinish(gpu.queue), "clFinish(final)");
+    const auto done = std::chrono::steady_clock::now();
+    const double completed_sec = std::chrono::duration<double>(done - t0).count();
+    if (max_iters) {
+        const double completed_rate = static_cast<double>(run_iters) / std::max(completed_sec, 1e-9);
+        std::cout << "completed " << run_iters << " iterations in "
+                  << std::fixed << std::setprecision(3) << completed_sec << " s, final it/s "
+                  << std::setprecision(1) << completed_rate << "\n";
+    }
     clwrap::profile_flush_pending(gpu);
     clwrap::profile_print_summary(gpu, "Kernel profile summary (final)");
     if (!full_run) return false;
@@ -6847,10 +6913,15 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                                              !mixed_shift_lut_enabled &&
                                              clwrap::g_crt_odd_radix == 9u &&
                                              crt_fused.mixed_odd_pack_tile7_available();
-        const bool mixed_pack_both_enabled = !mixed_pack_tile14_shift_enabled &&
-                                             parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", false) &&
-                                             ((mixed_shift_lut_enabled && crt_fused.mixed_pack_odd_fwd_both_shift != nullptr) ||
-                                              (mixed_pack_tile7_enabled && crt_fused.mixed_odd_pack_tile7_both_available()));
+        const bool mixed_pack_tile14_lmat_both_enabled = mixed_tile14_shift_enabled &&
+                                                         parse_bool_env("PRMERS_CRT_MIXED_TILE14_LMAT", true) &&
+                                                         parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", true) &&
+                                                         crt_fused.mixed_odd_pack_tile14_shift_lmat_both_available();
+        const bool mixed_pack_both_enabled = parse_bool_env("PRMERS_CRT_MIXED_FUSE_PACK_BOTH", true) &&
+                                             (mixed_pack_tile14_lmat_both_enabled ||
+                                              (!mixed_pack_tile14_shift_enabled &&
+                                               ((mixed_shift_lut_enabled && crt_fused.mixed_pack_odd_fwd_both_shift != nullptr) ||
+                                                (mixed_pack_tile7_enabled && crt_fused.mixed_odd_pack_tile7_both_available()))));
         const std::string mixed_fuse_both_mode = clwrap::g_crt_mixed_row_fuse_both;
         const char* pipe_center_global0 = std::getenv("PRMERS_CRT_MIXED_CENTER_SINGLE_LDS");
         const char* pipe_center_legacy0 = std::getenv("PRMERS_CRT_MIXED_CENTER512_SINGLE_LDS");
@@ -6971,6 +7042,8 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", row-core-request=" << clwrap::g_crt_mixed_row_core
                   << ", rows use power-of-two half-real NTT, Garner/carry stays fused, queues="
                   << ((gpu31.queue != gpu61.queue) ? "async" : "shared")
+                  << ", profile-queue=" << ((gpu61.profile_kernels || gpu31.profile_kernels) ? "on" : "off")
+                  << ", host-sync=" << ((gpu61.profile_kernels || gpu31.profile_kernels) ? "profile-reports" : "final-only")
                   << ", tail=" << (mixed_precrt_split_possible ? "split-preCRT-coeffhi" : (mixed_precrt_possible ? "preCRT-coeffhi-anybase" : "old-unpack+Garner"))
                   << ", tile14=" << (mixed_tile14_enabled ? "on" : "off")
                   << ", tile14-shift=" << (mixed_tile14_shift_enabled ? "on" : "off")
@@ -6981,6 +7054,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", precrt-outpar=" << (mixed_precrt_outpar_enabled ? "on" : "off")
                   << ", pack-tile14=" << (mixed_pack_tile14_enabled ? "on" : "off")
                   << ", pack-tile14-shift=" << (mixed_pack_tile14_shift_enabled ? "on" : "off")
+                  << ", pack-tile14-lmat-61x31=" << (mixed_pack_tile14_lmat_both_enabled ? "on" : "off")
                   << ", pack-tile7=" << (mixed_pack_tile7_enabled ? "on" : "off")
                   << ", shift-lut=" << (mixed_shift_lut_enabled ? "on" : "off")
                   << ", lds-stage=" << clwrap::g_crt_lds_stage
@@ -7003,6 +7077,8 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ",31:" << (mixed_center_f48_twin_symmetry_31() ? "on" : "off")
                   << ", center-regA-f48=61:" << ((print_center_1lds_61 && (parse_bool_env("PRMERS_CRT_MIXED_CENTER_REGA_61", true) || parse_bool_env("PRMERS_CRT_MIXED_CENTER_PRIVATE_A_61", false))) ? "on" : "off")
                   << ", center-twinline-f48=61:" << ((print_center_1lds_61 && parse_bool_env("PRMERS_CRT_MIXED_CENTER_TWINLINE_61", true)) ? "on" : "off")
+                  << ", center-regA-f48=31:" << ((clwrap::crt_halfreal_effective_flags31() == 48u && parse_bool_env("PRMERS_CRT_MIXED_CENTER_REGA_31", true)) ? "on" : "off")
+                  << ", center-twinline-f48=31:" << ((clwrap::crt_halfreal_effective_flags31() == 48u && parse_bool_env("PRMERS_CRT_MIXED_CENTER_TWINLINE_31", true)) ? "on" : "off")
                   << ", stage-single-lds=61:" << (print_stage_1lds_61 ? "on" : "off")
                   << ",31:" << (print_stage_1lds_31 ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
@@ -7065,6 +7141,9 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     const std::uint32_t effective_profile_every = (gpu61.profile_kernels || gpu31.profile_kernels)
         ? (profile_every ? profile_every : report_interval)
         : 0;
+    const bool crt_progress_finish = parse_bool_env("PRMERS_CRT_PROGRESS_FINISH",
+                                                   (gpu61.profile_kernels || gpu31.profile_kernels));
+    const bool crt_periodic_flush = parse_bool_env("PRMERS_CRT_PERIODIC_FLUSH", false);
 
     for (std::uint32_t iter = 0; iter < run_iters; ++iter) {
         if (g_stop_requested.load(std::memory_order_relaxed)) throw InterruptedRun();
@@ -7083,7 +7162,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             clwrap::enqueue_square_mod(gpu31, center_max);
             cl_event gf31_square_done = clwrap::enqueue_queue_marker(gpu31, "crt gf31 square marker");
             clwrap::set_pending_wait_event(gpu61, gf31_square_done);
-            if (gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
+            if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false) && gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
             clwrap::enqueue_square_mod(gpu61, center_max);
         }
         clwrap::enqueue_crt_garner_carry_gpu(gpu61, gpu31, carry_cfg, true);
@@ -7091,9 +7170,12 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
         const bool do_report = verbose && ((iter + 1) % report_interval == 0 || iter + 1 == run_iters);
         const bool do_profile_report = effective_profile_every && (((iter + 1) % effective_profile_every) == 0 || iter + 1 == run_iters);
         if (do_report || do_profile_report) {
-            clwrap::check(clFinish(gpu61.queue), "clFinish(crt report)");
-            clwrap::profile_flush_pending(gpu61);
-            clwrap::profile_flush_pending(gpu31);
+            const bool need_finish_now = do_profile_report || crt_progress_finish;
+            if (need_finish_now) {
+                clwrap::check(clFinish(gpu61.queue), "clFinish(crt report)");
+                clwrap::profile_flush_pending(gpu61);
+                clwrap::profile_flush_pending(gpu31);
+            }
         }
         if (do_report) {
             const auto now = std::chrono::steady_clock::now();
@@ -7108,13 +7190,21 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             clwrap::profile_print_summary(gpu61, "CRT kernel profile summary at iter " + std::to_string(iter + 1));
             if (clwrap::profile_has_data(gpu31))
                 clwrap::profile_print_summary(gpu31, "CRT GF31 auxiliary profile at iter " + std::to_string(iter + 1));
-        } else if (((iter + 1) & 255u) == 0u) {
+        } else if (crt_periodic_flush && (((iter + 1) & 255u) == 0u)) {
             clFlush(gpu61.queue);
             if (gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
         }
     }
 
     clwrap::check(clFinish(gpu61.queue), "clFinish(crt final)");
+    const auto done = std::chrono::steady_clock::now();
+    const double completed_sec = std::chrono::duration<double>(done - t0).count();
+    if (max_iters) {
+        const double completed_rate = static_cast<double>(run_iters) / std::max(completed_sec, 1e-9);
+        std::cout << "completed " << run_iters << " iterations in "
+                  << std::fixed << std::setprecision(3) << completed_sec << " s, final it/s "
+                  << std::setprecision(1) << completed_rate << " [CRT fused GPU-Garner]\n";
+    }
     clwrap::profile_flush_pending(gpu61);
     clwrap::profile_flush_pending(gpu31);
     clwrap::release_pending_wait_event(gpu31);
@@ -8372,6 +8462,8 @@ int main(int argc, char** argv) {
                       << ", segments=" << crt_segments
                       << ", parallel-passes=" << crt_passes
                       << ", queues=" << (opt.crt_async_queues ? "async-event" : "shared-serial")
+                      << ", profile-queue=" << (opt.profile_kernels ? "on" : "off")
+                      << ", host-sync=" << (opt.profile_kernels ? "profile-reports" : "final-only")
                       << ", center-max=" << opt.center_max
                       << ", local-block-lds=" << clwrap::describe_local_block_lds_choice(gpu61)
                       << ", garner=shift-sub-M61"
