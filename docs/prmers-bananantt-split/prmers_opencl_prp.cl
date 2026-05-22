@@ -9058,12 +9058,15 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31(__global const u
 
     __local GF l61[14 * 9];
     __local GF31 l31[14 * 9];
-    __local GF lm61[9 * 9];
-    __local GF31 lm31[9 * 9];
+    /* v51: the odd DFT matrices are real.  Cache only the scalar part
+       instead of full GF/GF31 pairs.  This lowers LDS traffic for the
+       already fused 61x31 pack+oddDFT kernel without changing the layout. */
+    __local ulong lm61r[9 * 9];
+    __local uint lm31r[9 * 9];
 
     if (lid < 81u) {
-        lm61[lid] = mat61[lid];
-        lm31[lid] = mat31[lid];
+        lm61r[lid] = mat61[lid].s0;
+        lm31r[lid] = mat31[lid].s0;
     }
 
     if (kt < 14u && k < row_m && lane < 9u) {
@@ -9086,30 +9089,30 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31(__global const u
     const uint mbase = lane * 9u;
     GF acc61 = GF_ZERO;
     GF31 acc31 = (GF31)(0u, 0u);
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 0u], lm61[mbase + 0u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 0u], lm31[mbase + 0u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 1u], lm61[mbase + 1u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 1u], lm31[mbase + 1u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 2u], lm61[mbase + 2u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 2u], lm31[mbase + 2u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 3u], lm61[mbase + 3u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 3u], lm31[mbase + 3u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 4u], lm61[mbase + 4u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 4u], lm31[mbase + 4u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 5u], lm61[mbase + 5u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 5u], lm31[mbase + 5u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 6u], lm61[mbase + 6u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 6u], lm31[mbase + 6u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 7u], lm61[mbase + 7u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 7u], lm31[mbase + 7u]));
-    acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + 8u], lm61[mbase + 8u]));
-    acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + 8u], lm31[mbase + 8u]));
+
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 0u], lm61r[mbase + 0u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 0u], lm31r[mbase + 0u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 1u], lm61r[mbase + 1u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 1u], lm31r[mbase + 1u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 2u], lm61r[mbase + 2u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 2u], lm31r[mbase + 2u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 3u], lm61r[mbase + 3u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 3u], lm31r[mbase + 3u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 4u], lm61r[mbase + 4u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 4u], lm31r[mbase + 4u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 5u], lm61r[mbase + 5u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 5u], lm31r[mbase + 5u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 6u], lm61r[mbase + 6u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 6u], lm31r[mbase + 6u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 7u], lm61r[mbase + 7u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 7u], lm31r[mbase + 7u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 8u], lm61r[mbase + 8u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 8u], lm31r[mbase + 8u]));
 
     const uint out = lane * row_m + k;
     a61[out] = acc61;
     a31[out] = acc31;
 }
-
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31(__global const ulong* restrict digits,
