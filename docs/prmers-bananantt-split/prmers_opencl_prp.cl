@@ -9830,57 +9830,109 @@ void gf61_crt_mixed_odd9_inv_precrt_garner64_lmat(__global const GF* restrict a6
     const uint row_m = pow2_n >> 1;
     const uint start = seg << 6;
     const uint i = start + lid;
+
+    __local GF l61[32 * 9];
+    __local GF31 l31[32 * 9];
+    __local GF lm61[9 * 9];
+    __local GF31 lm31[9 * 9];
     __local ulong coeff_lo[64];
     __local ulong coeff_hi[64];
+
+    if (lid < 64u) {
+        lm61[lid] = mat61[lid];
+        lm31[lid] = mat31[lid];
+    }
+    if (lid < 17u) {
+        lm61[64u + lid] = mat61[64u + lid];
+        lm31[64u + lid] = mat31[64u + lid];
+    }
+
+    if (lid < 32u) {
+        const uint i0 = start + (lid << 1);
+        const uint base = lid * 9u;
+        if (i0 < digit_n) {
+            const uint b = i0 & (pow2_n - 1u);
+            const uint k = b >> 1;
+            l61[base + 0u] = a61[0u * row_m + k];
+            l31[base + 0u] = a31[0u * row_m + k];
+            l61[base + 1u] = a61[1u * row_m + k];
+            l31[base + 1u] = a31[1u * row_m + k];
+            l61[base + 2u] = a61[2u * row_m + k];
+            l31[base + 2u] = a31[2u * row_m + k];
+            l61[base + 3u] = a61[3u * row_m + k];
+            l31[base + 3u] = a31[3u * row_m + k];
+            l61[base + 4u] = a61[4u * row_m + k];
+            l31[base + 4u] = a31[4u * row_m + k];
+            l61[base + 5u] = a61[5u * row_m + k];
+            l31[base + 5u] = a31[5u * row_m + k];
+            l61[base + 6u] = a61[6u * row_m + k];
+            l31[base + 6u] = a31[6u * row_m + k];
+            l61[base + 7u] = a61[7u * row_m + k];
+            l31[base + 7u] = a31[7u * row_m + k];
+            l61[base + 8u] = a61[8u * row_m + k];
+            l31[base + 8u] = a31[8u * row_m + k];
+        } else {
+            l61[base + 0u] = GF_ZERO; l31[base + 0u] = (GF31)(0u, 0u);
+            l61[base + 1u] = GF_ZERO; l31[base + 1u] = (GF31)(0u, 0u);
+            l61[base + 2u] = GF_ZERO; l31[base + 2u] = (GF31)(0u, 0u);
+            l61[base + 3u] = GF_ZERO; l31[base + 3u] = (GF31)(0u, 0u);
+            l61[base + 4u] = GF_ZERO; l31[base + 4u] = (GF31)(0u, 0u);
+            l61[base + 5u] = GF_ZERO; l31[base + 5u] = (GF31)(0u, 0u);
+            l61[base + 6u] = GF_ZERO; l31[base + 6u] = (GF31)(0u, 0u);
+            l61[base + 7u] = GF_ZERO; l31[base + 7u] = (GF31)(0u, 0u);
+            l61[base + 8u] = GF_ZERO; l31[base + 8u] = (GF31)(0u, 0u);
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
 
     ulong lo = 0ul;
     ulong hi = 0ul;
     if (i < digit_n) {
-        const uint b = i & (pow2_n - 1u);
-        const uint k = b >> 1;
-        const uint component = b & 1u;
+        const uint pair = lid >> 1;
+        const uint component = lid & 1u;
         const uint lane = i % 9u;
+        const uint lbase = pair * 9u;
         const uint mbase = lane * 9u;
 
         ulong acc61 = 0ul;
         uint acc31 = 0u;
 
-        GF v610 = a61[0u * row_m + k];
-        GF31 v310 = a31[0u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v610.s1 : v610.s0, mat61[mbase + 0u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v310.s1 : v310.s0, mat31[mbase + 0u].s0));
-        GF v611 = a61[1u * row_m + k];
-        GF31 v311 = a31[1u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v611.s1 : v611.s0, mat61[mbase + 1u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v311.s1 : v311.s0, mat31[mbase + 1u].s0));
-        GF v612 = a61[2u * row_m + k];
-        GF31 v312 = a31[2u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v612.s1 : v612.s0, mat61[mbase + 2u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v312.s1 : v312.s0, mat31[mbase + 2u].s0));
-        GF v613 = a61[3u * row_m + k];
-        GF31 v313 = a31[3u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v613.s1 : v613.s0, mat61[mbase + 3u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v313.s1 : v313.s0, mat31[mbase + 3u].s0));
-        GF v614 = a61[4u * row_m + k];
-        GF31 v314 = a31[4u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v614.s1 : v614.s0, mat61[mbase + 4u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v314.s1 : v314.s0, mat31[mbase + 4u].s0));
-        GF v615 = a61[5u * row_m + k];
-        GF31 v315 = a31[5u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v615.s1 : v615.s0, mat61[mbase + 5u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v315.s1 : v315.s0, mat31[mbase + 5u].s0));
-        GF v616 = a61[6u * row_m + k];
-        GF31 v316 = a31[6u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v616.s1 : v616.s0, mat61[mbase + 6u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v316.s1 : v316.s0, mat31[mbase + 6u].s0));
-        GF v617 = a61[7u * row_m + k];
-        GF31 v317 = a31[7u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v617.s1 : v617.s0, mat61[mbase + 7u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v317.s1 : v317.s0, mat31[mbase + 7u].s0));
-        GF v618 = a61[8u * row_m + k];
-        GF31 v318 = a31[8u * row_m + k];
-        acc61 = add61_lazy(acc61, mul61(component ? v618.s1 : v618.s0, mat61[mbase + 8u].s0));
-        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v318.s1 : v318.s0, mat31[mbase + 8u].s0));
+        GF v610 = l61[lbase + 0u];
+        GF31 v310 = l31[lbase + 0u];
+        acc61 = add61_lazy(acc61, mul61(component ? v610.s1 : v610.s0, lm61[mbase + 0u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v310.s1 : v310.s0, lm31[mbase + 0u].s0));
+        GF v611 = l61[lbase + 1u];
+        GF31 v311 = l31[lbase + 1u];
+        acc61 = add61_lazy(acc61, mul61(component ? v611.s1 : v611.s0, lm61[mbase + 1u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v311.s1 : v311.s0, lm31[mbase + 1u].s0));
+        GF v612 = l61[lbase + 2u];
+        GF31 v312 = l31[lbase + 2u];
+        acc61 = add61_lazy(acc61, mul61(component ? v612.s1 : v612.s0, lm61[mbase + 2u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v312.s1 : v312.s0, lm31[mbase + 2u].s0));
+        GF v613 = l61[lbase + 3u];
+        GF31 v313 = l31[lbase + 3u];
+        acc61 = add61_lazy(acc61, mul61(component ? v613.s1 : v613.s0, lm61[mbase + 3u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v313.s1 : v313.s0, lm31[mbase + 3u].s0));
+        GF v614 = l61[lbase + 4u];
+        GF31 v314 = l31[lbase + 4u];
+        acc61 = add61_lazy(acc61, mul61(component ? v614.s1 : v614.s0, lm61[mbase + 4u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v314.s1 : v314.s0, lm31[mbase + 4u].s0));
+        GF v615 = l61[lbase + 5u];
+        GF31 v315 = l31[lbase + 5u];
+        acc61 = add61_lazy(acc61, mul61(component ? v615.s1 : v615.s0, lm61[mbase + 5u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v315.s1 : v315.s0, lm31[mbase + 5u].s0));
+        GF v616 = l61[lbase + 6u];
+        GF31 v316 = l31[lbase + 6u];
+        acc61 = add61_lazy(acc61, mul61(component ? v616.s1 : v616.s0, lm61[mbase + 6u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v316.s1 : v316.s0, lm31[mbase + 6u].s0));
+        GF v617 = l61[lbase + 7u];
+        GF31 v317 = l31[lbase + 7u];
+        acc61 = add61_lazy(acc61, mul61(component ? v617.s1 : v617.s0, lm61[mbase + 7u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v317.s1 : v317.s0, lm31[mbase + 7u].s0));
+        GF v618 = l61[lbase + 8u];
+        GF31 v318 = l31[lbase + 8u];
+        acc61 = add61_lazy(acc61, mul61(component ? v618.s1 : v618.s0, lm61[mbase + 8u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v318.s1 : v318.s0, lm31[mbase + 8u].s0));
 
         const ulong r61 = rshift61(norm61(acc61), (uint)shift61[i] + log_m);
         const uint s31 = f31_mod31_small((uint)shift31[i] + log_m);
@@ -9896,14 +9948,85 @@ void gf61_crt_mixed_odd9_inv_precrt_garner64_lmat(__global const GF* restrict a6
         const uint mask1 = ((start + 32u) < digit_n) ? width_mask32[(seg << 1) + 1u] : 0u;
         ulong clo = 0ul;
         ulong chi = 0ul;
-        for (uint j = 0u; j < 64u; ++j) {
-            const uint d = start + j;
-            if (d >= digit_n) break;
-            const uint mask = (j < 32u) ? mask0 : mask1;
-            const uint bit = (mask >> (j & 31u)) & 1u;
-            ulong total_lo, total_hi;
-            crt_add_u128(coeff_lo[j], coeff_hi[j], clo, chi, &total_lo, &total_hi);
-            digits61[d] = crt_take_digit_and_shift_u128(total_lo, total_hi, width_base + bit, &clo, &chi);
+
+        if (width_base == 30u && start + 63u < digit_n) {
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint bit = (mask0 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[j], clo, &c);
+                const ulong total_hi = coeff_hi[j] + chi + c;
+                if (bit == 0u) {
+                    digits61[start + j] = total_lo & 0x3ffffffful;
+                    clo = (total_lo >> 30u) | (total_hi << 34u);
+                    chi = total_hi >> 30u;
+                } else {
+                    digits61[start + j] = total_lo & 0x7ffffffful;
+                    clo = (total_lo >> 31u) | (total_hi << 33u);
+                    chi = total_hi >> 31u;
+                }
+            }
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint jj = 32u + j;
+                const uint bit = (mask1 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[jj], clo, &c);
+                const ulong total_hi = coeff_hi[jj] + chi + c;
+                if (bit == 0u) {
+                    digits61[start + jj] = total_lo & 0x3ffffffful;
+                    clo = (total_lo >> 30u) | (total_hi << 34u);
+                    chi = total_hi >> 30u;
+                } else {
+                    digits61[start + jj] = total_lo & 0x7ffffffful;
+                    clo = (total_lo >> 31u) | (total_hi << 33u);
+                    chi = total_hi >> 31u;
+                }
+            }
+        } else if (width_base == 32u && start + 63u < digit_n) {
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint bit = (mask0 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[j], clo, &c);
+                const ulong total_hi = coeff_hi[j] + chi + c;
+                if (bit == 0u) {
+                    digits61[start + j] = total_lo & 0xfffffffful;
+                    clo = (total_lo >> 32u) | (total_hi << 32u);
+                    chi = total_hi >> 32u;
+                } else {
+                    digits61[start + j] = total_lo & 0x1fffffffful;
+                    clo = (total_lo >> 33u) | (total_hi << 31u);
+                    chi = total_hi >> 33u;
+                }
+            }
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint jj = 32u + j;
+                const uint bit = (mask1 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[jj], clo, &c);
+                const ulong total_hi = coeff_hi[jj] + chi + c;
+                if (bit == 0u) {
+                    digits61[start + jj] = total_lo & 0xfffffffful;
+                    clo = (total_lo >> 32u) | (total_hi << 32u);
+                    chi = total_hi >> 32u;
+                } else {
+                    digits61[start + jj] = total_lo & 0x1fffffffful;
+                    clo = (total_lo >> 33u) | (total_hi << 31u);
+                    chi = total_hi >> 33u;
+                }
+            }
+        } else {
+            for (uint j = 0u; j < 64u; ++j) {
+                const uint d = start + j;
+                if (d >= digit_n) break;
+                const uint mask = (j < 32u) ? mask0 : mask1;
+                const uint bit = (mask >> (j & 31u)) & 1u;
+                ulong total_lo, total_hi;
+                crt_add_u128(coeff_lo[j], coeff_hi[j], clo, chi, &total_lo, &total_hi);
+                digits61[d] = crt_take_digit_and_shift_u128(total_lo, total_hi, width_base + bit, &clo, &chi);
+            }
         }
         const uint next = (seg + 1u < segments) ? (seg + 1u) : 0u;
         carry_lo_out[next] = clo;
@@ -9911,6 +10034,624 @@ void gf61_crt_mixed_odd9_inv_precrt_garner64_lmat(__global const GF* restrict a6
         if ((clo | chi) != 0ul) pending[0] = 1u;
     }
 }
+
+
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gf61_crt_mixed_odd9_inv_precrt_garner9seg_lmat(__global const GF* restrict a61,
+                                                     __global const GF31* restrict a31,
+                                                     __global const GF* restrict mat61,
+                                                     __global const GF31* restrict mat31,
+                                                     __global const uchar* restrict shift61,
+                                                     __global const uchar* restrict shift31,
+                                                     __global const uint* restrict width_mask32,
+                                                     uint width_base,
+                                                     __global ulong* restrict digits61,
+                                                     __global ulong* restrict carry_lo_out,
+                                                     __global ulong* restrict carry_hi_out,
+                                                     __global uint* restrict pending,
+                                                     uint pow2_n, uint log_m,
+                                                     uint digit_n, uint segments)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint bseg = (uint)get_group_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint segs_per_t = pow2_n >> 6;   // pow2_n / 64, current odd9 path only
+    if (bseg >= segs_per_t) return;
+
+    const uint b_start = bseg << 6;
+    const uint mmod = pow2_n % 9u;
+
+    __local GF l61[32 * 9];
+    __local GF31 l31[32 * 9];
+    __local GF lm61[9 * 9];
+    __local GF31 lm31[9 * 9];
+    __local ulong coeff_lo[9 * 64];
+    __local uint coeff_hi[9 * 64];
+
+    for (uint t = lid; t < 81u; t += 256u) {
+        lm61[t] = mat61[t];
+        lm31[t] = mat31[t];
+    }
+
+    for (uint t = lid; t < 32u * 9u; t += 256u) {
+        const uint pair = t / 9u;
+        const uint row = t - pair * 9u;
+        const uint k = (b_start >> 1) + pair;
+        l61[t] = a61[row * row_m + k];
+        l31[t] = a31[row * row_m + k];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Compute 9 natural 64-digit segments together.  This keeps the good odd-axis
+    // reuse: for each b/k pair, the 9 CRT lanes are computed while the 9 input
+    // rows are still in LDS.  The old v43 natural-64 fused kernel lost this reuse.
+    for (uint idx = lid; idx < 9u * 64u; idx += 256u) {
+        const uint t = idx >> 6;          // CRT/PFA block, natural segment in this t
+        const uint q = idx & 63u;         // offset inside the 64-digit segment
+        const uint b = b_start + q;
+        const uint pair = q >> 1;
+        const uint component = q & 1u;
+        const uint lane = (b + mmod * t) % 9u;
+        const uint lbase = pair * 9u;
+        const uint mbase = lane * 9u;
+        const uint j = b + pow2_n * t;
+
+        ulong acc61 = 0ul;
+        uint acc31 = 0u;
+
+        GF v610 = l61[lbase + 0u];
+        GF31 v310 = l31[lbase + 0u];
+        acc61 = add61_lazy(acc61, mul61(component ? v610.s1 : v610.s0, lm61[mbase + 0u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v310.s1 : v310.s0, lm31[mbase + 0u].s0));
+        GF v611 = l61[lbase + 1u];
+        GF31 v311 = l31[lbase + 1u];
+        acc61 = add61_lazy(acc61, mul61(component ? v611.s1 : v611.s0, lm61[mbase + 1u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v311.s1 : v311.s0, lm31[mbase + 1u].s0));
+        GF v612 = l61[lbase + 2u];
+        GF31 v312 = l31[lbase + 2u];
+        acc61 = add61_lazy(acc61, mul61(component ? v612.s1 : v612.s0, lm61[mbase + 2u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v312.s1 : v312.s0, lm31[mbase + 2u].s0));
+        GF v613 = l61[lbase + 3u];
+        GF31 v313 = l31[lbase + 3u];
+        acc61 = add61_lazy(acc61, mul61(component ? v613.s1 : v613.s0, lm61[mbase + 3u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v313.s1 : v313.s0, lm31[mbase + 3u].s0));
+        GF v614 = l61[lbase + 4u];
+        GF31 v314 = l31[lbase + 4u];
+        acc61 = add61_lazy(acc61, mul61(component ? v614.s1 : v614.s0, lm61[mbase + 4u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v314.s1 : v314.s0, lm31[mbase + 4u].s0));
+        GF v615 = l61[lbase + 5u];
+        GF31 v315 = l31[lbase + 5u];
+        acc61 = add61_lazy(acc61, mul61(component ? v615.s1 : v615.s0, lm61[mbase + 5u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v315.s1 : v315.s0, lm31[mbase + 5u].s0));
+        GF v616 = l61[lbase + 6u];
+        GF31 v316 = l31[lbase + 6u];
+        acc61 = add61_lazy(acc61, mul61(component ? v616.s1 : v616.s0, lm61[mbase + 6u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v316.s1 : v316.s0, lm31[mbase + 6u].s0));
+        GF v617 = l61[lbase + 7u];
+        GF31 v317 = l31[lbase + 7u];
+        acc61 = add61_lazy(acc61, mul61(component ? v617.s1 : v617.s0, lm61[mbase + 7u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v317.s1 : v317.s0, lm31[mbase + 7u].s0));
+        GF v618 = l61[lbase + 8u];
+        GF31 v318 = l31[lbase + 8u];
+        acc61 = add61_lazy(acc61, mul61(component ? v618.s1 : v618.s0, lm61[mbase + 8u].s0));
+        acc31 = f31_add_scalar(acc31, f31_mul_scalar(component ? v318.s1 : v318.s0, lm31[mbase + 8u].s0));
+
+        const ulong r61 = rshift61(norm61(acc61), (uint)shift61[j] + log_m);
+        const uint s31 = f31_mod31_small((uint)shift31[j] + log_m);
+        const uint r31 = f31_lshift_scalar(acc31, s31 == 0u ? 0u : 31u - s31);
+        ulong lo, hi;
+        crt_coeff_from_residues(r61, (ulong)r31, &lo, &hi);
+        coeff_lo[idx] = lo;
+        coeff_hi[idx] = (uint)hi;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (lid < 9u) {
+        const uint t = lid;
+        const uint seg = bseg + t * segs_per_t;
+        const uint start_j = b_start + t * pow2_n;
+        const uint mask0 = width_mask32[seg << 1];
+        const uint mask1 = width_mask32[(seg << 1) + 1u];
+        ulong clo = 0ul;
+        ulong chi = 0ul;
+        const uint base = t << 6;
+
+        if (width_base == 30u && start_j + 63u < digit_n) {
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint bit = (mask0 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[base + j], clo, &c);
+                const ulong total_hi = (ulong)coeff_hi[base + j] + chi + c;
+                if (bit == 0u) {
+                    digits61[start_j + j] = total_lo & 0x3ffffffful;
+                    clo = (total_lo >> 30u) | (total_hi << 34u);
+                    chi = total_hi >> 30u;
+                } else {
+                    digits61[start_j + j] = total_lo & 0x7ffffffful;
+                    clo = (total_lo >> 31u) | (total_hi << 33u);
+                    chi = total_hi >> 31u;
+                }
+            }
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint jj = 32u + j;
+                const uint bit = (mask1 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[base + jj], clo, &c);
+                const ulong total_hi = (ulong)coeff_hi[base + jj] + chi + c;
+                if (bit == 0u) {
+                    digits61[start_j + jj] = total_lo & 0x3ffffffful;
+                    clo = (total_lo >> 30u) | (total_hi << 34u);
+                    chi = total_hi >> 30u;
+                } else {
+                    digits61[start_j + jj] = total_lo & 0x7ffffffful;
+                    clo = (total_lo >> 31u) | (total_hi << 33u);
+                    chi = total_hi >> 31u;
+                }
+            }
+        } else if (width_base == 32u && start_j + 63u < digit_n) {
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint bit = (mask0 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[base + j], clo, &c);
+                const ulong total_hi = (ulong)coeff_hi[base + j] + chi + c;
+                if (bit == 0u) {
+                    digits61[start_j + j] = total_lo & 0xfffffffful;
+                    clo = (total_lo >> 32u) | (total_hi << 32u);
+                    chi = total_hi >> 32u;
+                } else {
+                    digits61[start_j + j] = total_lo & 0x1fffffffful;
+                    clo = (total_lo >> 33u) | (total_hi << 31u);
+                    chi = total_hi >> 33u;
+                }
+            }
+            #pragma unroll 32
+            for (uint j = 0u; j < 32u; ++j) {
+                const uint jj = 32u + j;
+                const uint bit = (mask1 >> j) & 1u;
+                ulong c = 0ul;
+                const ulong total_lo = crt_add_carry_lo(coeff_lo[base + jj], clo, &c);
+                const ulong total_hi = (ulong)coeff_hi[base + jj] + chi + c;
+                if (bit == 0u) {
+                    digits61[start_j + jj] = total_lo & 0xfffffffful;
+                    clo = (total_lo >> 32u) | (total_hi << 32u);
+                    chi = total_hi >> 32u;
+                } else {
+                    digits61[start_j + jj] = total_lo & 0x1fffffffful;
+                    clo = (total_lo >> 33u) | (total_hi << 31u);
+                    chi = total_hi >> 33u;
+                }
+            }
+        } else {
+            for (uint j = 0u; j < 64u; ++j) {
+                const uint d = start_j + j;
+                if (d >= digit_n) break;
+                const uint mask = (j < 32u) ? mask0 : mask1;
+                const uint bit = (mask >> (j & 31u)) & 1u;
+                ulong total_lo, total_hi;
+                crt_add_u128(coeff_lo[base + j], (ulong)coeff_hi[base + j], clo, chi, &total_lo, &total_hi);
+                digits61[d] = crt_take_digit_and_shift_u128(total_lo, total_hi, width_base + bit, &clo, &chi);
+            }
+        }
+        const uint next = (seg + 1u < segments) ? (seg + 1u) : 0u;
+        carry_lo_out[next] = clo;
+        carry_hi_out[next] = chi;
+        if ((clo | chi) != 0ul) pending[0] = 1u;
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_odd9_inv_precrt_garner9seg30_pair_lmat(__global const GF* restrict a61,
+                                                           __global const GF31* restrict a31,
+                                                           __global const GF* restrict mat61,
+                                                           __global const GF31* restrict mat31,
+                                                           __global const uchar* restrict shift61,
+                                                           __global const uchar* restrict shift31,
+                                                           __global const uint* restrict width_mask32,
+                                                           uint width_base,
+                                                           __global ulong* restrict digits61,
+                                                           __global ulong* restrict carry_lo_out,
+                                                           __global ulong* restrict carry_hi_out,
+                                                           __global uint* restrict pending,
+                                                           uint pow2_n, uint log_m,
+                                                           uint digit_n, uint segments)
+{
+    (void)width_base;
+    (void)digit_n;
+    (void)segments;
+    const uint lid = (uint)get_local_id(0);
+    const uint bseg = (uint)get_group_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint segs_per_t = pow2_n >> 6;
+    if (bseg >= segs_per_t) return;
+
+    const uint b_start = bseg << 6;
+    const uint mmod = pow2_n % 9u;
+
+    __local GF l61[32 * 9];
+    __local GF31 l31[32 * 9];
+    __local GF lm61[9 * 9];
+    __local GF31 lm31[9 * 9];
+    __local ulong coeff_lo[9 * 64];
+    __local uint coeff_hi[9 * 64];
+
+    for (uint t = lid; t < 81u; t += 128u) {
+        lm61[t] = mat61[t];
+        lm31[t] = mat31[t];
+    }
+
+    for (uint t = lid; t < 32u * 9u; t += 128u) {
+        const uint pair = t / 9u;
+        const uint row = t - pair * 9u;
+        const uint k = (b_start >> 1) + pair;
+        l61[t] = a61[row * row_m + k];
+        l31[t] = a31[row * row_m + k];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    /* v45 fast path for the common digit-width-base=30 case.
+       One work item computes the even and odd component for the same pair.
+       That keeps the same 9-segment layout as v44, but loads the 9 input rows
+       once instead of doing the component 0 and component 1 dot products as
+       two independent work items. */
+    for (uint idx = lid; idx < 9u * 32u; idx += 128u) {
+        const uint t = idx >> 5;          // 0..8
+        const uint pair = idx & 31u;      // 0..31
+        const uint b0 = b_start + (pair << 1);
+        const uint b1 = b0 + 1u;
+        const uint lane0 = (b0 + mmod * t) % 9u;
+        const uint lane1 = (b1 + mmod * t) % 9u;
+        const uint lbase = pair * 9u;
+        const uint mbase0 = lane0 * 9u;
+        const uint mbase1 = lane1 * 9u;
+        const uint j0 = b0 + pow2_n * t;
+        const uint j1 = j0 + 1u;
+
+        ulong acc610 = 0ul;
+        ulong acc611 = 0ul;
+        uint acc310 = 0u;
+        uint acc311 = 0u;
+
+        GF v610 = l61[lbase + 0u];
+        GF31 v310 = l31[lbase + 0u];
+        acc610 = add61_lazy(acc610, mul61(v610.s0, lm61[mbase0 + 0u].s0));
+        acc611 = add61_lazy(acc611, mul61(v610.s1, lm61[mbase1 + 0u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v310.s0, lm31[mbase0 + 0u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v310.s1, lm31[mbase1 + 0u].s0));
+
+        GF v611 = l61[lbase + 1u];
+        GF31 v311 = l31[lbase + 1u];
+        acc610 = add61_lazy(acc610, mul61(v611.s0, lm61[mbase0 + 1u].s0));
+        acc611 = add61_lazy(acc611, mul61(v611.s1, lm61[mbase1 + 1u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v311.s0, lm31[mbase0 + 1u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v311.s1, lm31[mbase1 + 1u].s0));
+
+        GF v612 = l61[lbase + 2u];
+        GF31 v312 = l31[lbase + 2u];
+        acc610 = add61_lazy(acc610, mul61(v612.s0, lm61[mbase0 + 2u].s0));
+        acc611 = add61_lazy(acc611, mul61(v612.s1, lm61[mbase1 + 2u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v312.s0, lm31[mbase0 + 2u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v312.s1, lm31[mbase1 + 2u].s0));
+
+        GF v613 = l61[lbase + 3u];
+        GF31 v313 = l31[lbase + 3u];
+        acc610 = add61_lazy(acc610, mul61(v613.s0, lm61[mbase0 + 3u].s0));
+        acc611 = add61_lazy(acc611, mul61(v613.s1, lm61[mbase1 + 3u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v313.s0, lm31[mbase0 + 3u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v313.s1, lm31[mbase1 + 3u].s0));
+
+        GF v614 = l61[lbase + 4u];
+        GF31 v314 = l31[lbase + 4u];
+        acc610 = add61_lazy(acc610, mul61(v614.s0, lm61[mbase0 + 4u].s0));
+        acc611 = add61_lazy(acc611, mul61(v614.s1, lm61[mbase1 + 4u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v314.s0, lm31[mbase0 + 4u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v314.s1, lm31[mbase1 + 4u].s0));
+
+        GF v615 = l61[lbase + 5u];
+        GF31 v315 = l31[lbase + 5u];
+        acc610 = add61_lazy(acc610, mul61(v615.s0, lm61[mbase0 + 5u].s0));
+        acc611 = add61_lazy(acc611, mul61(v615.s1, lm61[mbase1 + 5u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v315.s0, lm31[mbase0 + 5u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v315.s1, lm31[mbase1 + 5u].s0));
+
+        GF v616 = l61[lbase + 6u];
+        GF31 v316 = l31[lbase + 6u];
+        acc610 = add61_lazy(acc610, mul61(v616.s0, lm61[mbase0 + 6u].s0));
+        acc611 = add61_lazy(acc611, mul61(v616.s1, lm61[mbase1 + 6u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v316.s0, lm31[mbase0 + 6u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v316.s1, lm31[mbase1 + 6u].s0));
+
+        GF v617 = l61[lbase + 7u];
+        GF31 v317 = l31[lbase + 7u];
+        acc610 = add61_lazy(acc610, mul61(v617.s0, lm61[mbase0 + 7u].s0));
+        acc611 = add61_lazy(acc611, mul61(v617.s1, lm61[mbase1 + 7u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v317.s0, lm31[mbase0 + 7u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v317.s1, lm31[mbase1 + 7u].s0));
+
+        GF v618 = l61[lbase + 8u];
+        GF31 v318 = l31[lbase + 8u];
+        acc610 = add61_lazy(acc610, mul61(v618.s0, lm61[mbase0 + 8u].s0));
+        acc611 = add61_lazy(acc611, mul61(v618.s1, lm61[mbase1 + 8u].s0));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v318.s0, lm31[mbase0 + 8u].s0));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v318.s1, lm31[mbase1 + 8u].s0));
+
+        const ulong r610 = rshift61(norm61(acc610), (uint)shift61[j0] + log_m);
+        const ulong r611 = rshift61(norm61(acc611), (uint)shift61[j1] + log_m);
+        const uint s310 = f31_mod31_small((uint)shift31[j0] + log_m);
+        const uint s311 = f31_mod31_small((uint)shift31[j1] + log_m);
+        const uint r310 = f31_lshift_scalar(acc310, s310 == 0u ? 0u : 31u - s310);
+        const uint r311 = f31_lshift_scalar(acc311, s311 == 0u ? 0u : 31u - s311);
+
+        ulong lo0, hi0, lo1, hi1;
+        crt_coeff_from_residues(r610, (ulong)r310, &lo0, &hi0);
+        crt_coeff_from_residues(r611, (ulong)r311, &lo1, &hi1);
+        const uint out = (t << 6) + (pair << 1);
+        coeff_lo[out] = lo0;
+        coeff_hi[out] = (uint)hi0;
+        coeff_lo[out + 1u] = lo1;
+        coeff_hi[out + 1u] = (uint)hi1;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (lid < 9u) {
+        const uint t = lid;
+        const uint seg = bseg + t * segs_per_t;
+        const uint start_j = b_start + t * pow2_n;
+        const uint mask0 = width_mask32[seg << 1];
+        const uint mask1 = width_mask32[(seg << 1) + 1u];
+        ulong clo = 0ul;
+        ulong chi = 0ul;
+        const uint base = t << 6;
+
+        #pragma unroll 32
+        for (uint j = 0u; j < 32u; ++j) {
+            const uint bit = (mask0 >> j) & 1u;
+            ulong c = 0ul;
+            const ulong total_lo = crt_add_carry_lo(coeff_lo[base + j], clo, &c);
+            const ulong total_hi = (ulong)coeff_hi[base + j] + chi + c;
+            if (bit == 0u) {
+                digits61[start_j + j] = total_lo & 0x3ffffffful;
+                clo = (total_lo >> 30u) | (total_hi << 34u);
+                chi = total_hi >> 30u;
+            } else {
+                digits61[start_j + j] = total_lo & 0x7ffffffful;
+                clo = (total_lo >> 31u) | (total_hi << 33u);
+                chi = total_hi >> 31u;
+            }
+        }
+        #pragma unroll 32
+        for (uint j = 0u; j < 32u; ++j) {
+            const uint jj = 32u + j;
+            const uint bit = (mask1 >> j) & 1u;
+            ulong c = 0ul;
+            const ulong total_lo = crt_add_carry_lo(coeff_lo[base + jj], clo, &c);
+            const ulong total_hi = (ulong)coeff_hi[base + jj] + chi + c;
+            if (bit == 0u) {
+                digits61[start_j + jj] = total_lo & 0x3ffffffful;
+                clo = (total_lo >> 30u) | (total_hi << 34u);
+                chi = total_hi >> 30u;
+            } else {
+                digits61[start_j + jj] = total_lo & 0x7ffffffful;
+                clo = (total_lo >> 31u) | (total_hi << 33u);
+                chi = total_hi >> 31u;
+            }
+        }
+
+        const uint next = (seg + 1u < 9u * segs_per_t) ? (seg + 1u) : 0u;
+        carry_lo_out[next] = clo;
+        carry_hi_out[next] = chi;
+        if ((clo | chi) != 0ul) pending[0] = 1u;
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(128,1,1)))
+void gf61_crt_mixed_odd9_inv_precrt_garner9seg30_pair_smat(__global const GF* restrict a61,
+                                                           __global const GF31* restrict a31,
+                                                           __global const GF* restrict mat61,
+                                                           __global const GF31* restrict mat31,
+                                                           __global const uchar* restrict shift61,
+                                                           __global const uchar* restrict shift31,
+                                                           __global const uint* restrict width_mask32,
+                                                           uint width_base,
+                                                           __global ulong* restrict digits61,
+                                                           __global ulong* restrict carry_lo_out,
+                                                           __global ulong* restrict carry_hi_out,
+                                                           __global uint* restrict pending,
+                                                           uint pow2_n, uint log_m,
+                                                           uint digit_n, uint segments)
+{
+    (void)width_base;
+    (void)digit_n;
+    (void)segments;
+    const uint lid = (uint)get_local_id(0);
+    const uint bseg = (uint)get_group_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint segs_per_t = pow2_n >> 6;
+    if (bseg >= segs_per_t) return;
+
+    const uint b_start = bseg << 6;
+    const uint mmod = pow2_n % 9u;
+
+    __local GF l61[32 * 9];
+    __local GF31 l31[32 * 9];
+    __local ulong lm61r[9 * 9];
+    __local uint lm31r[9 * 9];
+    __local ulong coeff_lo[9 * 64];
+    __local uint coeff_hi[9 * 64];
+
+    for (uint t = lid; t < 81u; t += 128u) {
+        lm61r[t] = mat61[t].s0;
+        lm31r[t] = mat31[t].s0;
+    }
+
+    for (uint t = lid; t < 32u * 9u; t += 128u) {
+        const uint pair = t / 9u;
+        const uint row = t - pair * 9u;
+        const uint k = (b_start >> 1) + pair;
+        l61[t] = a61[row * row_m + k];
+        l31[t] = a31[row * row_m + k];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    /* v45 fast path for the common digit-width-base=30 case.
+       One work item computes the even and odd component for the same pair.
+       That keeps the same 9-segment layout as v44, but loads the 9 input rows
+       once instead of doing the component 0 and component 1 dot products as
+       two independent work items. */
+    for (uint idx = lid; idx < 9u * 32u; idx += 128u) {
+        const uint t = idx >> 5;          // 0..8
+        const uint pair = idx & 31u;      // 0..31
+        const uint b0 = b_start + (pair << 1);
+        const uint b1 = b0 + 1u;
+        const uint lane0 = (b0 + mmod * t) % 9u;
+        const uint lane1 = (b1 + mmod * t) % 9u;
+        const uint lbase = pair * 9u;
+        const uint mbase0 = lane0 * 9u;
+        const uint mbase1 = lane1 * 9u;
+        const uint j0 = b0 + pow2_n * t;
+        const uint j1 = j0 + 1u;
+
+        ulong acc610 = 0ul;
+        ulong acc611 = 0ul;
+        uint acc310 = 0u;
+        uint acc311 = 0u;
+
+        GF v610 = l61[lbase + 0u];
+        GF31 v310 = l31[lbase + 0u];
+        acc610 = add61_lazy(acc610, mul61(v610.s0, lm61r[mbase0 + 0u]));
+        acc611 = add61_lazy(acc611, mul61(v610.s1, lm61r[mbase1 + 0u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v310.s0, lm31r[mbase0 + 0u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v310.s1, lm31r[mbase1 + 0u]));
+
+        GF v611 = l61[lbase + 1u];
+        GF31 v311 = l31[lbase + 1u];
+        acc610 = add61_lazy(acc610, mul61(v611.s0, lm61r[mbase0 + 1u]));
+        acc611 = add61_lazy(acc611, mul61(v611.s1, lm61r[mbase1 + 1u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v311.s0, lm31r[mbase0 + 1u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v311.s1, lm31r[mbase1 + 1u]));
+
+        GF v612 = l61[lbase + 2u];
+        GF31 v312 = l31[lbase + 2u];
+        acc610 = add61_lazy(acc610, mul61(v612.s0, lm61r[mbase0 + 2u]));
+        acc611 = add61_lazy(acc611, mul61(v612.s1, lm61r[mbase1 + 2u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v312.s0, lm31r[mbase0 + 2u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v312.s1, lm31r[mbase1 + 2u]));
+
+        GF v613 = l61[lbase + 3u];
+        GF31 v313 = l31[lbase + 3u];
+        acc610 = add61_lazy(acc610, mul61(v613.s0, lm61r[mbase0 + 3u]));
+        acc611 = add61_lazy(acc611, mul61(v613.s1, lm61r[mbase1 + 3u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v313.s0, lm31r[mbase0 + 3u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v313.s1, lm31r[mbase1 + 3u]));
+
+        GF v614 = l61[lbase + 4u];
+        GF31 v314 = l31[lbase + 4u];
+        acc610 = add61_lazy(acc610, mul61(v614.s0, lm61r[mbase0 + 4u]));
+        acc611 = add61_lazy(acc611, mul61(v614.s1, lm61r[mbase1 + 4u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v314.s0, lm31r[mbase0 + 4u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v314.s1, lm31r[mbase1 + 4u]));
+
+        GF v615 = l61[lbase + 5u];
+        GF31 v315 = l31[lbase + 5u];
+        acc610 = add61_lazy(acc610, mul61(v615.s0, lm61r[mbase0 + 5u]));
+        acc611 = add61_lazy(acc611, mul61(v615.s1, lm61r[mbase1 + 5u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v315.s0, lm31r[mbase0 + 5u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v315.s1, lm31r[mbase1 + 5u]));
+
+        GF v616 = l61[lbase + 6u];
+        GF31 v316 = l31[lbase + 6u];
+        acc610 = add61_lazy(acc610, mul61(v616.s0, lm61r[mbase0 + 6u]));
+        acc611 = add61_lazy(acc611, mul61(v616.s1, lm61r[mbase1 + 6u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v316.s0, lm31r[mbase0 + 6u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v316.s1, lm31r[mbase1 + 6u]));
+
+        GF v617 = l61[lbase + 7u];
+        GF31 v317 = l31[lbase + 7u];
+        acc610 = add61_lazy(acc610, mul61(v617.s0, lm61r[mbase0 + 7u]));
+        acc611 = add61_lazy(acc611, mul61(v617.s1, lm61r[mbase1 + 7u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v317.s0, lm31r[mbase0 + 7u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v317.s1, lm31r[mbase1 + 7u]));
+
+        GF v618 = l61[lbase + 8u];
+        GF31 v318 = l31[lbase + 8u];
+        acc610 = add61_lazy(acc610, mul61(v618.s0, lm61r[mbase0 + 8u]));
+        acc611 = add61_lazy(acc611, mul61(v618.s1, lm61r[mbase1 + 8u]));
+        acc310 = f31_add_scalar(acc310, f31_mul_scalar(v318.s0, lm31r[mbase0 + 8u]));
+        acc311 = f31_add_scalar(acc311, f31_mul_scalar(v318.s1, lm31r[mbase1 + 8u]));
+
+        const ulong r610 = rshift61(norm61(acc610), (uint)shift61[j0] + log_m);
+        const ulong r611 = rshift61(norm61(acc611), (uint)shift61[j1] + log_m);
+        const uint s310 = f31_mod31_small((uint)shift31[j0] + log_m);
+        const uint s311 = f31_mod31_small((uint)shift31[j1] + log_m);
+        const uint r310 = f31_lshift_scalar(acc310, s310 == 0u ? 0u : 31u - s310);
+        const uint r311 = f31_lshift_scalar(acc311, s311 == 0u ? 0u : 31u - s311);
+
+        ulong lo0, hi0, lo1, hi1;
+        crt_coeff_from_residues(r610, (ulong)r310, &lo0, &hi0);
+        crt_coeff_from_residues(r611, (ulong)r311, &lo1, &hi1);
+        const uint out = (t << 6) + (pair << 1);
+        coeff_lo[out] = lo0;
+        coeff_hi[out] = (uint)hi0;
+        coeff_lo[out + 1u] = lo1;
+        coeff_hi[out + 1u] = (uint)hi1;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (lid < 9u) {
+        const uint t = lid;
+        const uint seg = bseg + t * segs_per_t;
+        const uint start_j = b_start + t * pow2_n;
+        const uint mask0 = width_mask32[seg << 1];
+        const uint mask1 = width_mask32[(seg << 1) + 1u];
+        ulong clo = 0ul;
+        ulong chi = 0ul;
+        const uint base = t << 6;
+
+        #pragma unroll 32
+        for (uint j = 0u; j < 32u; ++j) {
+            const uint bit = (mask0 >> j) & 1u;
+            ulong c = 0ul;
+            const ulong total_lo = crt_add_carry_lo(coeff_lo[base + j], clo, &c);
+            const ulong total_hi = (ulong)coeff_hi[base + j] + chi + c;
+            if (bit == 0u) {
+                digits61[start_j + j] = total_lo & 0x3ffffffful;
+                clo = (total_lo >> 30u) | (total_hi << 34u);
+                chi = total_hi >> 30u;
+            } else {
+                digits61[start_j + j] = total_lo & 0x7ffffffful;
+                clo = (total_lo >> 31u) | (total_hi << 33u);
+                chi = total_hi >> 31u;
+            }
+        }
+        #pragma unroll 32
+        for (uint j = 0u; j < 32u; ++j) {
+            const uint jj = 32u + j;
+            const uint bit = (mask1 >> j) & 1u;
+            ulong c = 0ul;
+            const ulong total_lo = crt_add_carry_lo(coeff_lo[base + jj], clo, &c);
+            const ulong total_hi = (ulong)coeff_hi[base + jj] + chi + c;
+            if (bit == 0u) {
+                digits61[start_j + jj] = total_lo & 0x3ffffffful;
+                clo = (total_lo >> 30u) | (total_hi << 34u);
+                chi = total_hi >> 30u;
+            } else {
+                digits61[start_j + jj] = total_lo & 0x7ffffffful;
+                clo = (total_lo >> 31u) | (total_hi << 33u);
+                chi = total_hi >> 31u;
+            }
+        }
+
+        const uint next = (seg + 1u < 9u * segs_per_t) ? (seg + 1u) : 0u;
+        carry_lo_out[next] = clo;
+        carry_hi_out[next] = chi;
+        if ((clo | chi) != 0ul) pending[0] = 1u;
+    }
+}
+
 
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_odd_inv_precrt_coeffhi_outpar(__global const GF* restrict a61,
