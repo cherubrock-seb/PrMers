@@ -65,7 +65,7 @@ will be useful. Please give feedback or improvements if you test it.
 namespace {
 
 static constexpr const char* BANANANTT_PROGRAM_NAME = "banana";
-static constexpr const char* BANANANTT_PROGRAM_VERSION = "0.74.00-alpha";
+static constexpr const char* BANANANTT_PROGRAM_VERSION = "0.75.00-alpha";
 static constexpr unsigned BANANANTT_PROGRAM_PORT = 8;
 static constexpr double BANANANTT_DEFAULT_GERBICZ_TARGET_SECONDS = 600.0;
 static constexpr double BANANANTT_DEFAULT_GERBICZ_MIN_SECONDS = 120.0;
@@ -10061,9 +10061,15 @@ static uint32_t resolve_crt_odd_radix_auto(const Options& opt, std::uint32_t p) 
     uint32_t selected = 1u;
     try {
         const auto odd9 = ibdwt::make_layout_mixed(p, 9u);
-        const bool small_medium_win = (base.ln >= 13u && base.ln <= 15u);
+        const std::size_t row_m = (odd9.n / 9u) >> 1u;
+        const std::size_t center = std::max<std::size_t>(512u, opt.crt_center_chunk ? opt.crt_center_chunk : 512u);
+        const std::size_t row_factor = row_m >= center ? row_m / center : 0u;
+        const std::size_t min_stage_radix = env_u32_or_default_main("PRMERS_CRT_MIXED_AUTO_MIN_STAGE_RADIX", 64u, 1u, 1024u);
+        const bool small_win = (base.ln >= 13u && base.ln <= 15u);
+        const bool large_row_win = (row_factor >= min_stage_radix);
+        const bool no_stage_win = (row_factor <= 1u && row_m >= center);
         const bool strong_size_win = (odd9.n * std::size_t(4) <= base.n * std::size_t(3));
-        if (small_medium_win || strong_size_win) selected = 9u;
+        if (small_win || (strong_size_win && (large_row_win || no_stage_win))) selected = 9u;
     } catch (...) {
         selected = 1u;
     }
