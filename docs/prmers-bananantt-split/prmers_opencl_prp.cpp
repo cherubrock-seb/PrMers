@@ -40,22 +40,38 @@ will be useful. Please give feedback or improvements if you test it.
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <map>
-#include <algorithm>
 #include <iostream>
 #include <limits>
 #include <sstream>
+#include <ctime>
 #include <stdexcept>
+#include <system_error>
 #include <string>
 #include <vector>
 #include <utility>
 #include <atomic>
+#include <thread>
 #include <csignal>
 #include <gmp.h>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/utsname.h>
+#endif
 
 namespace {
+
+static constexpr const char* BANANANTT_PROGRAM_NAME = "banana";
+static constexpr const char* BANANANTT_PROGRAM_VERSION = "0.74.00-alpha";
+static constexpr unsigned BANANANTT_PROGRAM_PORT = 8;
+static constexpr double BANANANTT_DEFAULT_GERBICZ_TARGET_SECONDS = 600.0;
+static constexpr double BANANANTT_DEFAULT_GERBICZ_MIN_SECONDS = 120.0;
+static constexpr double BANANANTT_DEFAULT_QUEUE_GUARD_SECONDS = 2.0;
+static constexpr double BANANANTT_DEFAULT_GERBICZ_BOUNDARY_SECONDS = 2.0;
+
 std::atomic<bool> g_stop_requested{false};
 
 void handle_sigint(int) { g_stop_requested.store(true, std::memory_order_relaxed); }
@@ -63,6 +79,65 @@ void handle_sigint(int) { g_stop_requested.store(true, std::memory_order_relaxed
 struct InterruptedRun : public std::exception {
     const char* what() const noexcept override { return "run interrupted"; }
 };
+struct RuntimeHooks {
+    std::uint32_t exponent = 0;
+    std::string mode_label = "BananaNTT mixed CRT";
+    std::uint32_t res64_every = 0;
+    bool json_enabled = true;
+    std::string json_path;
+    std::string output_dir;
+    std::string results_path = "./results.txt";
+    bool append_results = true;
+    bool proof_checkpoints = false;
+    std::uint32_t proof_power = 0;
+    std::string proof_dir;
+    std::string last_proof_file;
+    std::uint32_t gerbicz_interval = 0;
+    bool gerbicz_enabled = true;
+    bool gerbicz_gpu_verify = true;
+    bool gerbicz_user_checklevel = false;
+    std::uint32_t gerbicz_checklevel = 0;
+    std::uint32_t gerbicz_block = 0;
+    double gerbicz_target_seconds = BANANANTT_DEFAULT_GERBICZ_TARGET_SECONDS;
+    double gerbicz_estimated_ips = 0.0;
+    bool gerbicz_user_seconds = false;
+    double gerbicz_boundary_seconds = BANANANTT_DEFAULT_GERBICZ_BOUNDARY_SECONDS;
+    bool gerbicz_verbose = false;
+    bool gerbicz_progress = false;
+    std::uint64_t gerbicz_errors = 0;
+    std::uint32_t error_iter = 0;
+    std::uint32_t error_limb = 0;
+    std::uint64_t error_delta = 1;
+    bool error_injected = false;
+    std::uint32_t last_iter = 0;
+    std::uint64_t last_res64 = 0;
+    bool backup_enabled = true;
+    bool resume_enabled = true;
+    bool save_on_interrupt = true;
+    std::string backup_path;
+    std::string resume_path;
+    std::string backup_dir = "save";
+    std::uint32_t backup_every_iters = 0;
+    double backup_every_seconds = 300.0;
+    std::uint32_t queue_guard_depth = 0;
+    bool queue_guard_auto = true;
+    double queue_guard_seconds = BANANANTT_DEFAULT_QUEUE_GUARD_SECONDS;
+};
+
+RuntimeHooks g_runtime;
+
+static inline std::uint32_t bananantt_clamp_u32(std::uint32_t v, std::uint32_t lo, std::uint32_t hi) {
+    return std::min<std::uint32_t>(hi, std::max<std::uint32_t>(lo, v));
+}
+
+static std::uint32_t bananantt_auto_queue_guard(double ips, double seconds) {
+    if (seconds <= 0.0) return 0u;
+    ips = std::max(1.0, ips);
+    const double raw = std::ceil(ips * seconds);
+    if (raw <= 1.0) return 1u;
+    if (raw >= 65536.0) return 65536u;
+    return bananantt_clamp_u32(static_cast<std::uint32_t>(raw), 256u, 65536u);
+}
 
 static inline bool parse_bool_env(const char* name, bool defv) {
     const char* s = std::getenv(name);
@@ -552,6 +627,87 @@ static std::vector<std::uint64_t> square_mod_mersenne_exact_digits(
     return out;
 }
 
+static void digits_to_mpz(mpz_t out, const std::vector<std::uint64_t>& digits, const Layout& layout) {
+    if (digits.size() != layout.n) throw std::runtime_error("digits_to_mpz: digit/layout size mismatch");
+    mpz_set_ui(out, 0ul);
+    mpz_t tmp;
+    mpz_init(tmp);
+    std::uint64_t off = 0;
+    for (std::size_t i = 0; i < layout.n; ++i) {
+        const unsigned w = layout.digit_width[i];
+        if (digits[i]) {
+            mpz_set_ui(tmp, static_cast<unsigned long>(digits[i]));
+            mpz_mul_2exp(tmp, tmp, static_cast<mp_bitcnt_t>(off));
+            mpz_add(out, out, tmp);
+        }
+        off += w;
+    }
+    mpz_clear(tmp);
+}
+
+static std::vector<std::uint64_t> mpz_to_digits(const mpz_t value, const Layout& layout) {
+    std::vector<std::uint64_t> out(layout.n, 0);
+    mpz_t tmp;
+    mpz_init(tmp);
+    std::uint64_t off = 0;
+    for (std::size_t i = 0; i < layout.n; ++i) {
+        const unsigned w = layout.digit_width[i];
+        mpz_tdiv_q_2exp(tmp, value, static_cast<mp_bitcnt_t>(off));
+        mpz_tdiv_r_2exp(tmp, tmp, static_cast<mp_bitcnt_t>(w));
+        out[i] = static_cast<std::uint64_t>(mpz_get_ui(tmp));
+        off += w;
+    }
+    mpz_clear(tmp);
+    return out;
+}
+
+static void fold_mersenne_mod(mpz_t y, const Layout& layout) {
+    mpz_t mod, low, high;
+    mpz_inits(mod, low, high, nullptr);
+    mpz_set_ui(mod, 1ul);
+    mpz_mul_2exp(mod, mod, static_cast<mp_bitcnt_t>(layout.p));
+    mpz_sub_ui(mod, mod, 1ul);
+    while (mpz_cmp(y, mod) > 0) {
+        mpz_tdiv_r_2exp(low, y, static_cast<mp_bitcnt_t>(layout.p));
+        mpz_tdiv_q_2exp(high, y, static_cast<mp_bitcnt_t>(layout.p));
+        mpz_add(y, low, high);
+    }
+    if (mpz_cmp(y, mod) == 0) mpz_set_ui(y, 0ul);
+    mpz_clears(mod, low, high, nullptr);
+}
+
+static std::vector<std::uint64_t> mul_mod_mersenne_exact_digits(
+    const std::vector<std::uint64_t>& a,
+    const std::vector<std::uint64_t>& b,
+    const Layout& layout)
+{
+    if (a.size() != layout.n || b.size() != layout.n) {
+        throw std::runtime_error("exact multiply: digit/layout size mismatch");
+    }
+    mpz_t x, y, z;
+    mpz_inits(x, y, z, nullptr);
+    try {
+        digits_to_mpz(x, a, layout);
+        digits_to_mpz(y, b, layout);
+        mpz_mul(z, x, y);
+        fold_mersenne_mod(z, layout);
+        auto out = mpz_to_digits(z, layout);
+        mpz_clears(x, y, z, nullptr);
+        return out;
+    } catch (...) {
+        mpz_clears(x, y, z, nullptr);
+        throw;
+    }
+}
+
+static std::vector<std::uint64_t> mul_small_mod_mersenne_exact_digits(
+    const std::vector<std::uint64_t>& a,
+    std::uint64_t k,
+    const Layout& layout)
+{
+    return mul_mod_mersenne_exact_digits(a, from_small(k, layout), layout);
+}
+
 }
 
 namespace clwrap {
@@ -610,6 +766,117 @@ static std::string load_text_file(const std::string& path) {
         throw std::runtime_error("kernel path points to the C++ host file, not to the .cl OpenCL kernel: " + path);
     }
     return s;
+}
+
+static std::uint64_t fnv1a64_bytes(const void* data, std::size_t n) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    std::uint64_t h = 1469598103934665603ull;
+    for (std::size_t i = 0; i < n; ++i) {
+        h ^= static_cast<std::uint64_t>(p[i]);
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static std::uint64_t fnv1a64_string(const std::string& s) {
+    return fnv1a64_bytes(s.data(), s.size());
+}
+
+static std::string hex64(std::uint64_t v) {
+    std::ostringstream os;
+    os << std::hex << std::setw(16) << std::setfill('0') << v;
+    return os.str();
+}
+
+static std::string sanitize_token(std::string s) {
+    for (char& c : s) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (!std::isalnum(u) && c != '_' && c != '-' && c != '.') c = '_';
+    }
+    while (!s.empty() && s.back() == '_') s.pop_back();
+    if (s.empty()) s = "unknown";
+    if (s.size() > 80) s.resize(80);
+    return s;
+}
+
+static std::string cl_device_string(cl_device_id dev, cl_device_info what) {
+    size_t sz = 0;
+    if (clGetDeviceInfo(dev, what, 0, nullptr, &sz) != CL_SUCCESS || sz == 0) return "unknown";
+    std::string s(sz, '\0');
+    if (clGetDeviceInfo(dev, what, sz, s.data(), nullptr) != CL_SUCCESS) return "unknown";
+    while (!s.empty() && (s.back() == '\0' || s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    return s.empty() ? "unknown" : s;
+}
+
+static std::vector<unsigned char> load_binary_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return {};
+    in.seekg(0, std::ios::end);
+    const std::streamoff n = in.tellg();
+    if (n <= 0) return {};
+    in.seekg(0, std::ios::beg);
+    std::vector<unsigned char> out(static_cast<std::size_t>(n));
+    in.read(reinterpret_cast<char*>(out.data()), n);
+    if (!in) return {};
+    return out;
+}
+
+static bool write_binary_file_atomic(const std::filesystem::path& path, const unsigned char* data, std::size_t n) {
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    const auto tmp = path.string() + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) return false;
+        out.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(n));
+        if (!out) return false;
+    }
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(path, ec);
+        ec.clear();
+        std::filesystem::rename(tmp, path, ec);
+    }
+    return !ec;
+}
+
+static std::filesystem::path opencl_cache_dir() {
+    if (const char* e = std::getenv("PRMERS_OCL_CACHE_DIR")) {
+        if (*e) return std::filesystem::path(e);
+    }
+    return std::filesystem::path(".ocl_cache");
+}
+
+static std::filesystem::path opencl_cache_path(cl_device_id dev, const std::string& kernel_path, const std::string& source, const std::string& build_opts, int field_bits) {
+    const std::string name = cl_device_string(dev, CL_DEVICE_NAME);
+    const std::string driver = cl_device_string(dev, CL_DRIVER_VERSION);
+    std::string key;
+    key.reserve(source.size() + build_opts.size() + kernel_path.size() + 256);
+    key += BANANANTT_PROGRAM_VERSION;
+    key.push_back('\n');
+    key += kernel_path;
+    key.push_back('\n');
+    key += source;
+    key.push_back('\n');
+    key += build_opts;
+    key.push_back('\n');
+    key += name;
+    key.push_back('\n');
+    key += driver;
+    key.push_back('\n');
+    key += std::to_string(field_bits);
+    const std::string file = std::string("field") + std::to_string(field_bits) + "_" + sanitize_token(name) + "_" + hex64(fnv1a64_string(key)) + ".bin";
+    return opencl_cache_dir() / file;
+}
+
+static bool save_opencl_binary(cl_program program, const std::filesystem::path& path) {
+    size_t bin_size = 0;
+    if (clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &bin_size, nullptr) != CL_SUCCESS) return false;
+    if (bin_size == 0) return false;
+    std::vector<unsigned char> bin(bin_size);
+    unsigned char* ptr = bin.data();
+    if (clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(unsigned char*), &ptr, nullptr) != CL_SUCCESS) return false;
+    return write_binary_file_atomic(path, bin.data(), bin.size());
 }
 
 struct DeviceInfo {
@@ -1002,10 +1269,6 @@ GpuPrp make_gpu(const DeviceInfo& info,
     }
 
     const std::string source = load_text_file(kernel_path);
-    const char* src_ptr = source.c_str();
-    const size_t src_len = source.size();
-    gpu.program = clCreateProgramWithSource(gpu.context, 1, &src_ptr, &src_len, &err);
-    check(err, "clCreateProgramWithSource");
     std::string build_opts = std::string("-DFIELD_BITS=") + std::to_string(gf61::FIELD_BITS);
     if (std::getenv("PRMERS_GF31_4MUL")) build_opts += " -DCRT_GF31_KARATSUBA=0";
     build_opts += std::string(" -DCRT_MIXED_F48_DELAYED_SCALE_61=") +
@@ -1023,7 +1286,96 @@ GpuPrp make_gpu(const DeviceInfo& info,
         build_opts += " ";
         build_opts += extra;
     }
-    err = clBuildProgram(gpu.program, 1, &info.device, build_opts.c_str(), nullptr, nullptr);
+    const bool show_build = parse_bool_env("PRMERS_SHOW_OCL_BUILD", true);
+    const bool show_spinner = parse_bool_env("PRMERS_OCL_BUILD_SPINNER", true);
+    const bool binary_cache = parse_bool_env("PRMERS_OCL_BINARY_CACHE", true);
+    std::filesystem::path cache_path;
+    bool cache_hit = false;
+    if (binary_cache) {
+        cache_path = opencl_cache_path(info.device, kernel_path, source, build_opts, gf61::FIELD_BITS);
+        const std::vector<unsigned char> bin = load_binary_file(cache_path);
+        if (!bin.empty()) {
+            const unsigned char* bptr = bin.data();
+            size_t bsize = bin.size();
+            cl_int bin_status = CL_SUCCESS;
+            gpu.program = clCreateProgramWithBinary(gpu.context, 1, &info.device, &bsize, &bptr, &bin_status, &err);
+            if (err == CL_SUCCESS && bin_status == CL_SUCCESS && gpu.program) {
+                err = clBuildProgram(gpu.program, 1, &info.device, build_opts.c_str(), nullptr, nullptr);
+                if (err == CL_SUCCESS) {
+                    cache_hit = true;
+                    if (show_build) {
+                        std::cerr << "OpenCL build: loaded binary cache for GF(M" << gf61::FIELD_BITS
+                                  << "^2): " << cache_path.string() << std::endl;
+                    }
+                } else {
+                    clReleaseProgram(gpu.program);
+                    gpu.program = nullptr;
+                    err = CL_SUCCESS;
+                    if (show_build) std::cerr << "OpenCL build: binary cache rejected, compiling source" << std::endl;
+                }
+            } else {
+                if (gpu.program) clReleaseProgram(gpu.program);
+                gpu.program = nullptr;
+                err = CL_SUCCESS;
+                if (show_build) std::cerr << "OpenCL build: binary cache invalid, compiling source" << std::endl;
+            }
+        }
+    }
+    if (!cache_hit) {
+        const char* src_ptr = source.c_str();
+        const size_t src_len = source.size();
+        gpu.program = clCreateProgramWithSource(gpu.context, 1, &src_ptr, &src_len, &err);
+        check(err, "clCreateProgramWithSource");
+        std::atomic<bool> build_done{false};
+        std::thread build_watchdog;
+        if (show_build) {
+            std::cerr << "OpenCL build: compiling " << kernel_path
+                      << " for GF(M" << gf61::FIELD_BITS << "^2)"
+                      << " with options: " << build_opts << "\n" << std::flush;
+            if (show_spinner) {
+                std::cerr << "OpenCL build: waiting for GF(M" << gf61::FIELD_BITS
+                          << "^2) [not stuck] ..." << std::flush;
+            }
+            build_watchdog = std::thread([&build_done, show_spinner]() {
+                using clock = std::chrono::steady_clock;
+                const auto start = clock::now();
+                const char spin[4] = {'|', '/', '-', '\\'};
+                unsigned tick = 0;
+                while (!build_done.load(std::memory_order_relaxed)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    if (build_done.load(std::memory_order_relaxed)) break;
+                    const double sec = std::chrono::duration<double>(clock::now() - start).count();
+                    if (show_spinner) {
+                        std::cerr << "\rOpenCL build: waiting " << spin[tick++ & 3]
+                                  << " " << std::fixed << std::setprecision(1) << sec
+                                  << " s [not stuck]" << std::flush;
+                    } else if (static_cast<int>(sec) > 0 && (static_cast<int>(sec) % 5) == 0) {
+                        std::cerr << "OpenCL build: still compiling after "
+                                  << std::fixed << std::setprecision(0) << sec
+                                  << " s..." << std::endl;
+                    }
+                }
+            });
+        }
+        err = clBuildProgram(gpu.program, 1, &info.device, build_opts.c_str(), nullptr, nullptr);
+        build_done.store(true, std::memory_order_relaxed);
+        if (build_watchdog.joinable()) build_watchdog.join();
+        if (show_build) {
+            if (show_spinner) {
+                std::cerr << "\rOpenCL build: done for GF(M" << gf61::FIELD_BITS
+                          << "^2)                                    " << std::endl;
+            } else {
+                std::cerr << "OpenCL build: done for GF(M" << gf61::FIELD_BITS << "^2)" << std::endl;
+            }
+        }
+        if (err == CL_SUCCESS && binary_cache) {
+            if (save_opencl_binary(gpu.program, cache_path)) {
+                if (show_build) std::cerr << "OpenCL build: saved binary cache: " << cache_path.string() << std::endl;
+            } else if (show_build) {
+                std::cerr << "OpenCL build: could not save binary cache" << std::endl;
+            }
+        }
+    }
     if (err != CL_SUCCESS) {
         size_t log_size = 0;
         clGetProgramBuildInfo(gpu.program, info.device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &log_size);
@@ -6836,6 +7188,630 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
 
 namespace mersenne_prp {
 
+// BananaNTT output helpers are defined later in this namespace.
+// Keep explicit prototypes here because the CRT run loop can optionally
+// print res64, write checkpoints, and emit JSON before the helper bodies.
+static std::string hex64(std::uint64_t x);
+static std::uint64_t residue64_from_digits(const std::vector<std::uint64_t>& digits, const ibdwt::Layout& layout);
+static void write_bananantt_checkpoint(std::uint32_t p, std::uint32_t iter,
+                                       const std::vector<std::uint64_t>& digits,
+                                       const ibdwt::Layout& layout);
+static void write_bananantt_json(std::uint32_t p, const std::string& mode, const std::string& status,
+                                 std::uint32_t iter, std::uint64_t res64, double seconds,
+                                 const ibdwt::Layout& layout);
+static void write_bananantt_json_from_digits(std::uint32_t p, const std::string& status,
+                                             const std::vector<std::uint64_t>& digits,
+                                             const ibdwt::Layout& layout);
+static std::uint32_t best_proof_power_banana(std::uint32_t E);
+static bool proof_is_in_points_banana(std::uint32_t E, std::uint32_t npower, std::uint32_t k);
+
+struct GerbiczLiHostChecker {
+    bool enabled = false;
+    std::uint32_t B = 0;
+    std::uint32_t r = 0;
+    std::uint32_t checklevel = 1;
+    std::uint32_t checkpass = 0;
+    std::uint32_t last_good_iter = 0;
+    std::uint32_t last_good_j = 0;
+    std::uint64_t errors = 0;
+    std::vector<std::uint64_t> D;
+    std::vector<std::uint64_t> last_good_D;
+    std::vector<std::uint64_t> last_good_state;
+
+    static std::uint32_t choose_time_aligned_block(std::uint32_t total_iters,
+                                                    std::uint32_t desired_B,
+                                                    std::uint32_t root_B) {
+        if (total_iters <= 1u) return 1u;
+        desired_B = std::max<std::uint32_t>(desired_B, root_B);
+        desired_B = std::min<std::uint32_t>(desired_B, total_iters);
+        if (desired_B >= total_iters) return total_iters;
+        const std::uint32_t lo = std::max<std::uint32_t>(root_B, desired_B - desired_B / 4u);
+        const std::uint32_t hi = std::min<std::uint32_t>(total_iters, desired_B + desired_B / 2u + 1u);
+        std::uint32_t best_B = desired_B;
+        double best_score = 1e300;
+        const double desired = static_cast<double>(desired_B);
+        for (std::uint32_t cand = lo; cand <= hi; ++cand) {
+            std::uint32_t first = total_iters % cand;
+            if (first == 0u) first = cand;
+            if (first < desired_B / 2u) continue;
+            const double score = std::abs(static_cast<double>(first) - desired)
+                               + 0.05 * std::abs(static_cast<double>(cand) - desired);
+            if (score < best_score) {
+                best_score = score;
+                best_B = cand;
+            }
+            if (cand == std::numeric_limits<std::uint32_t>::max()) break;
+        }
+        return best_B;
+    }
+
+    void init(const ibdwt::Layout& layout, std::uint32_t total_iters) {
+        enabled = g_runtime.gerbicz_enabled;
+        if (!enabled) return;
+        double ips_guess = g_runtime.gerbicz_estimated_ips;
+        if (ips_guess <= 0.0) {
+            ips_guess = (total_iters >= 100000000u) ? 510.0 :
+                        (total_iters >= 10000000u)  ? 900.0 :
+                        (total_iters >= 1000000u)   ? 2500.0 : 8000.0;
+        }
+        const double root = std::sqrt(static_cast<double>(std::max<std::uint32_t>(1u, total_iters)));
+        const std::uint32_t root_B = std::max<std::uint32_t>(1u, static_cast<std::uint32_t>(std::ceil(root)));
+        const double target_seconds = g_runtime.gerbicz_user_seconds ? std::max(1.0, g_runtime.gerbicz_target_seconds) : std::max(BANANANTT_DEFAULT_GERBICZ_MIN_SECONDS, g_runtime.gerbicz_target_seconds);
+        if (g_runtime.gerbicz_block) {
+            B = std::min<std::uint32_t>(std::max<std::uint32_t>(1u, g_runtime.gerbicz_block), total_iters ? total_iters : 1u);
+        } else {
+            const double desired_boundary_seconds = std::max(0.05, g_runtime.gerbicz_boundary_seconds);
+            double desired_raw = std::ceil(ips_guess * desired_boundary_seconds);
+            if (desired_raw < static_cast<double>(root_B)) desired_raw = static_cast<double>(root_B);
+            std::uint32_t max_auto_B = total_iters;
+            if (total_iters >= 8192u) max_auto_B = std::max<std::uint32_t>(root_B, total_iters / 8u);
+            if (desired_raw > static_cast<double>(max_auto_B)) desired_raw = static_cast<double>(max_auto_B);
+            B = choose_time_aligned_block(total_iters, static_cast<std::uint32_t>(desired_raw), root_B);
+        }
+        if (total_iters > 0u) B = std::min<std::uint32_t>(B, total_iters);
+        r = total_iters % B;
+        if (r == 0u) r = B;
+        if (g_runtime.gerbicz_checklevel) {
+            checklevel = std::max<std::uint32_t>(1u, g_runtime.gerbicz_checklevel);
+        } else {
+            const double blocks_per_check = (ips_guess * target_seconds) / std::max<double>(1.0, static_cast<double>(B));
+            checklevel = std::max<std::uint32_t>(1u, static_cast<std::uint32_t>(std::ceil(blocks_per_check)));
+        }
+        D = ibdwt::from_small(1, layout);
+        last_good_D = D;
+        last_good_state = ibdwt::from_small(3, layout);
+        last_good_iter = 0;
+        last_good_j = total_iters ? (total_iters - 1u) : 0u;
+        errors = 0;
+        g_runtime.gerbicz_block = B;
+        g_runtime.gerbicz_checklevel = checklevel;
+        const double ips = ips_guess;
+        const double boundary_seconds = static_cast<double>(r) / std::max(ips, 1.0);
+        const double steady_boundary_seconds = static_cast<double>(B) / std::max(ips, 1.0);
+        const double full_check_seconds = steady_boundary_seconds * static_cast<double>(checklevel);
+        std::cout << "[Gerbicz Li] enabled: B=" << B
+                  << " r=" << r
+                  << " checklevel=" << checklevel
+                  << " first_boundary≈" << std::fixed << std::setprecision(1) << boundary_seconds << "s"
+                  << " next_boundaries≈" << steady_boundary_seconds << "s"
+                  << " full_check≈" << full_check_seconds << "s"
+                  << " boundary_target≈" << g_runtime.gerbicz_boundary_seconds << "s"
+                  << " backend=" << (g_runtime.gerbicz_gpu_verify ? "gpu-fullcheck+gpu-D-update" : "host-exact-GMP") << std::endl;
+    }
+
+    bool boundary(std::uint32_t iter_done, std::uint32_t j_remaining, const std::vector<std::uint64_t>& state,
+                  const ibdwt::Layout& layout, bool final_boundary) {
+        auto host_full_check = [&](const std::vector<std::uint64_t>& D_before,
+                                   std::uint32_t block, std::uint32_t rr,
+                                   const ibdwt::Layout& lay) {
+            std::vector<std::uint64_t> check = D_before;
+            const std::uint32_t first_squares = block - rr;
+            for (std::uint32_t z = 0; z < first_squares; ++z) {
+                check = ibdwt::square_mod_mersenne_exact_digits(check, lay);
+            }
+            check = ibdwt::mul_small_mod_mersenne_exact_digits(check, 3u, lay);
+            for (std::uint32_t z = 0; z < rr; ++z) {
+                check = ibdwt::square_mod_mersenne_exact_digits(check, lay);
+            }
+            return check;
+        };
+        auto host_d_update = [&](const std::vector<std::uint64_t>& a,
+                                 const std::vector<std::uint64_t>& b,
+                                 const ibdwt::Layout& lay) {
+            return ibdwt::mul_mod_mersenne_exact_digits(a, b, lay);
+        };
+        return boundary_with_checker_and_update(iter_done, j_remaining, state, layout, final_boundary, host_full_check, host_d_update);
+    }
+
+    template <class FullCheckFn>
+    bool boundary_with_checker(std::uint32_t iter_done, std::uint32_t j_remaining,
+                               const std::vector<std::uint64_t>& state,
+                               const ibdwt::Layout& layout, bool final_boundary,
+                               FullCheckFn&& full_check) {
+        auto host_d_update = [&](const std::vector<std::uint64_t>& a,
+                                 const std::vector<std::uint64_t>& b,
+                                 const ibdwt::Layout& lay) {
+            return ibdwt::mul_mod_mersenne_exact_digits(a, b, lay);
+        };
+        return boundary_with_checker_and_update(iter_done, j_remaining, state, layout, final_boundary, std::forward<FullCheckFn>(full_check), host_d_update);
+    }
+
+    template <class FullCheckFn, class DUpdateFn>
+    bool boundary_with_checker_and_update(std::uint32_t iter_done, std::uint32_t j_remaining,
+                               const std::vector<std::uint64_t>& state,
+                               const ibdwt::Layout& layout, bool final_boundary,
+                               FullCheckFn&& full_check,
+                               DUpdateFn&& d_update) {
+        if (!enabled) return true;
+        const std::vector<std::uint64_t> D_before = D;
+        const auto d_update_t0 = std::chrono::steady_clock::now();
+        if (g_runtime.gerbicz_verbose) {
+            std::cout << "[Gerbicz Li] boundary: iter=" << iter_done
+                      << " j=" << j_remaining
+                      << " updating D *= state..." << std::flush;
+        }
+        D = d_update(D, state, layout);
+        const double d_update_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - d_update_t0).count();
+        if (g_runtime.gerbicz_verbose) {
+            std::cout << " done in " << std::fixed << std::setprecision(2) << d_update_s << "s" << std::endl;
+        }
+        ++checkpass;
+        const bool condcheck = (checkpass >= checklevel) || final_boundary;
+        if (!condcheck) return true;
+
+        std::cout << "[Gerbicz Li] full Li check start..." << std::endl;
+        const auto full_t0 = std::chrono::steady_clock::now();
+        std::vector<std::uint64_t> check = full_check(D_before, B, r, layout);
+        const double full_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - full_t0).count();
+        std::cout << "[Gerbicz Li] full Li check computed in " << std::fixed << std::setprecision(2) << full_s << "s" << std::endl;
+        ibdwt::canonicalize_zero(check, layout);
+        ibdwt::canonicalize_zero(D, layout);
+
+        checkpass = 0;
+        if (check == D) {
+            last_good_state = state;
+            last_good_D = D;
+            last_good_iter = iter_done;
+            last_good_j = j_remaining;
+            std::cout << "[Gerbicz Li] Check passed! iter=" << iter_done
+                      << (g_runtime.gerbicz_gpu_verify ? " [gpu]" : " [host]") << std::endl;
+            return true;
+        }
+        ++errors;
+        ++g_runtime.gerbicz_errors;
+        std::cout << "[Gerbicz Li] Mismatch\n"
+                  << "[Gerbicz Li] Check FAILED! iter=" << iter_done << "\n"
+                  << "[Gerbicz Li] Restore iter=" << last_good_iter << " (j=" << last_good_j << ")\n";
+        D = last_good_D;
+        return false;
+    }
+};
+
+struct BananaBackupState {
+    bool valid = false;
+    bool has_gerbicz = false;
+    std::uint32_t exponent = 0;
+    std::uint32_t iter = 0;
+    std::uint32_t n = 0;
+    std::uint32_t odd = 0;
+    std::uint32_t ln = 0;
+    std::uint32_t B = 0;
+    std::uint32_t r = 0;
+    std::uint32_t checklevel = 0;
+    std::uint32_t checkpass = 0;
+    std::uint32_t last_good_iter = 0;
+    std::uint32_t last_good_j = 0;
+    std::uint64_t gerbicz_errors = 0;
+    std::vector<std::uint64_t> state;
+    std::vector<std::uint64_t> D;
+    std::vector<std::uint64_t> last_good_D;
+    std::vector<std::uint64_t> last_good_state;
+};
+
+static std::string default_bananantt_backup_path(std::uint32_t p) {
+    if (!g_runtime.backup_path.empty()) return g_runtime.backup_path;
+    std::filesystem::path dir = g_runtime.backup_dir.empty() ? std::filesystem::path("save") : std::filesystem::path(g_runtime.backup_dir);
+    if (!g_runtime.output_dir.empty() && dir.is_relative()) dir = std::filesystem::path(g_runtime.output_dir) / dir;
+    return (dir / ("M" + std::to_string(p) + ".bananantt.chk")).string();
+}
+
+static std::string default_bananantt_resume_path(std::uint32_t p) {
+    if (!g_runtime.resume_path.empty()) return g_runtime.resume_path;
+    return default_bananantt_backup_path(p);
+}
+
+static void backup_write_u32(std::ostream& os, std::uint32_t v) { os.write(reinterpret_cast<const char*>(&v), sizeof(v)); }
+static void backup_write_u64(std::ostream& os, std::uint64_t v) { os.write(reinterpret_cast<const char*>(&v), sizeof(v)); }
+static bool backup_read_u32(std::istream& is, std::uint32_t& v) { return bool(is.read(reinterpret_cast<char*>(&v), sizeof(v))); }
+static bool backup_read_u64(std::istream& is, std::uint64_t& v) { return bool(is.read(reinterpret_cast<char*>(&v), sizeof(v))); }
+
+static void backup_write_vec(std::ostream& os, const std::vector<std::uint64_t>& v) {
+    backup_write_u32(os, static_cast<std::uint32_t>(v.size()));
+    if (!v.empty()) os.write(reinterpret_cast<const char*>(v.data()), static_cast<std::streamsize>(v.size() * sizeof(std::uint64_t)));
+}
+
+static bool backup_read_vec(std::istream& is, std::vector<std::uint64_t>& v, std::uint32_t expected_n) {
+    std::uint32_t n = 0;
+    if (!backup_read_u32(is, n)) return false;
+    if (n != expected_n) return false;
+    v.assign(n, 0);
+    if (n) return bool(is.read(reinterpret_cast<char*>(v.data()), static_cast<std::streamsize>(n * sizeof(std::uint64_t))));
+    return true;
+}
+
+static bool write_bananantt_backup_file(const std::string& path,
+                                        std::uint32_t p,
+                                        std::uint32_t iter_done,
+                                        const ibdwt::Layout& layout,
+                                        const std::vector<std::uint64_t>& state,
+                                        const GerbiczLiHostChecker* gerbicz) {
+    if (path.empty()) return false;
+    std::filesystem::path out(path);
+    if (!out.parent_path().empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(out.parent_path(), ec);
+    }
+    std::filesystem::path tmp = out;
+    tmp += ".tmp";
+    std::ofstream os(tmp, std::ios::binary | std::ios::trunc);
+    if (!os) return false;
+    const char magic[16] = {'B','A','N','A','N','A','C','H','K','P','T','0','0','2','\0','\0'};
+    os.write(magic, sizeof(magic));
+    backup_write_u32(os, 2u);
+    backup_write_u32(os, p);
+    backup_write_u32(os, iter_done);
+    backup_write_u32(os, layout.n);
+    backup_write_u32(os, layout.odd);
+    backup_write_u32(os, layout.ln);
+    const bool has_g = gerbicz && gerbicz->enabled;
+    backup_write_u32(os, has_g ? 1u : 0u);
+    backup_write_u32(os, has_g ? gerbicz->B : 0u);
+    backup_write_u32(os, has_g ? gerbicz->r : 0u);
+    backup_write_u32(os, has_g ? gerbicz->checklevel : 0u);
+    backup_write_u32(os, has_g ? gerbicz->checkpass : 0u);
+    backup_write_u32(os, has_g ? gerbicz->last_good_iter : 0u);
+    backup_write_u32(os, has_g ? gerbicz->last_good_j : 0u);
+    backup_write_u64(os, has_g ? gerbicz->errors : 0u);
+    backup_write_vec(os, state);
+    backup_write_vec(os, has_g ? gerbicz->D : std::vector<std::uint64_t>{});
+    backup_write_vec(os, has_g ? gerbicz->last_good_D : std::vector<std::uint64_t>{});
+    backup_write_vec(os, has_g ? gerbicz->last_good_state : std::vector<std::uint64_t>{});
+    os.close();
+    if (!os) return false;
+    std::error_code ec;
+    std::filesystem::rename(tmp, out, ec);
+    if (ec) {
+        std::filesystem::remove(out, ec);
+        ec.clear();
+        std::filesystem::rename(tmp, out, ec);
+    }
+    return !ec;
+}
+
+static bool read_bananantt_backup_file(const std::string& path,
+                                       std::uint32_t p,
+                                       const ibdwt::Layout& layout,
+                                       BananaBackupState& b) {
+    std::ifstream is(path, std::ios::binary);
+    if (!is) return false;
+    char magic[16] = {};
+    if (!is.read(magic, sizeof(magic))) return false;
+    const char expect[12] = {'B','A','N','A','N','A','C','H','K','P','T','0'};
+    if (std::memcmp(magic, expect, sizeof(expect)) != 0) return false;
+    std::uint32_t version=0, has_g=0;
+    if (!backup_read_u32(is, version) || version != 2u) return false;
+    if (!backup_read_u32(is, b.exponent) || b.exponent != p) return false;
+    if (!backup_read_u32(is, b.iter)) return false;
+    if (!backup_read_u32(is, b.n) || b.n != layout.n) return false;
+    if (!backup_read_u32(is, b.odd) || b.odd != layout.odd) return false;
+    if (!backup_read_u32(is, b.ln) || b.ln != layout.ln) return false;
+    if (!backup_read_u32(is, has_g)) return false;
+    b.has_gerbicz = has_g != 0u;
+    if (!backup_read_u32(is, b.B)) return false;
+    if (!backup_read_u32(is, b.r)) return false;
+    if (!backup_read_u32(is, b.checklevel)) return false;
+    if (!backup_read_u32(is, b.checkpass)) return false;
+    if (!backup_read_u32(is, b.last_good_iter)) return false;
+    if (!backup_read_u32(is, b.last_good_j)) return false;
+    if (!backup_read_u64(is, b.gerbicz_errors)) return false;
+    if (!backup_read_vec(is, b.state, layout.n)) return false;
+    if (b.has_gerbicz) {
+        if (!backup_read_vec(is, b.D, layout.n)) return false;
+        if (!backup_read_vec(is, b.last_good_D, layout.n)) return false;
+        if (!backup_read_vec(is, b.last_good_state, layout.n)) return false;
+    } else {
+        std::uint32_t z=0;
+        if (!backup_read_u32(is, z) || z != 0u) return false;
+        if (!backup_read_u32(is, z) || z != 0u) return false;
+        if (!backup_read_u32(is, z) || z != 0u) return false;
+    }
+    b.valid = true;
+    return true;
+}
+
+static void restore_gerbicz_from_backup(GerbiczLiHostChecker& g, const BananaBackupState& b) {
+    if (!b.valid || !b.has_gerbicz || !g.enabled) return;
+    g.B = b.B;
+    g.r = b.r;
+    g.checklevel = std::max<std::uint32_t>(1u, b.checklevel);
+    g.checkpass = b.checkpass;
+    g.last_good_iter = b.last_good_iter;
+    g.last_good_j = b.last_good_j;
+    g.errors = b.gerbicz_errors;
+    g.D = b.D;
+    g.last_good_D = b.last_good_D;
+    g.last_good_state = b.last_good_state;
+    g_runtime.gerbicz_block = g.B;
+    g_runtime.gerbicz_checklevel = g.checklevel;
+    g_runtime.gerbicz_errors = g.errors;
+}
+
+static void maybe_write_runtime_backup(const char* reason,
+                                       clwrap::GpuPrp& gpu61,
+                                       clwrap::GpuPrp& gpu31,
+                                       const ibdwt::Layout& layout,
+                                       std::uint32_t p,
+                                       std::uint32_t iter_done,
+                                       GerbiczLiHostChecker* gerbicz) {
+    if (!g_runtime.backup_enabled) return;
+    clwrap::finish_crt_queues(gpu61, gpu31);
+    std::vector<std::uint64_t> state = clwrap::read_digits(gpu61);
+    ibdwt::canonicalize_zero(state, layout);
+    const std::string path = default_bananantt_backup_path(p);
+    if (write_bananantt_backup_file(path, p, iter_done, layout, state, gerbicz)) {
+        std::cout << "backup saved: " << path << " iter=" << iter_done;
+        if (reason && *reason) std::cout << " [" << reason << "]";
+        std::cout << std::endl;
+    } else {
+        std::cerr << "warning: could not write backup: " << path << std::endl;
+    }
+}
+
+static void maybe_remove_runtime_backup(std::uint32_t p) {
+    if (!g_runtime.backup_enabled) return;
+    const std::string path = default_bananantt_backup_path(p);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+static void maybe_inject_error_after_iter(clwrap::GpuPrp& gpu, std::uint32_t iter_done) {
+    if (!g_runtime.error_iter || g_runtime.error_injected || iter_done != g_runtime.error_iter) return;
+    clwrap::check(clFinish(gpu.queue), "clFinish(before error injection)");
+    const std::size_t idx = std::min<std::size_t>(g_runtime.error_limb, gpu.n ? gpu.n - 1u : 0u);
+    std::uint64_t limb = 0;
+    clwrap::check(clEnqueueReadBuffer(gpu.queue, gpu.bufDigits, CL_TRUE,
+                                      idx * sizeof(std::uint64_t), sizeof(std::uint64_t),
+                                      &limb, 0, nullptr, nullptr), "read injected limb");
+    limb += g_runtime.error_delta ? g_runtime.error_delta : 1u;
+    clwrap::check(clEnqueueWriteBuffer(gpu.queue, gpu.bufDigits, CL_TRUE,
+                                       idx * sizeof(std::uint64_t), sizeof(std::uint64_t),
+                                       &limb, 0, nullptr, nullptr), "write injected limb");
+    g_runtime.error_injected = true;
+    std::cout << "Injected error at iteration " << iter_done
+              << " limb=" << idx << " delta=" << (g_runtime.error_delta ? g_runtime.error_delta : 1u)
+              << std::endl;
+}
+
+
+static __int128 floor_div_pow2_i128(__int128 v, unsigned shift) {
+    const __int128 base = (__int128(1) << shift);
+    if (v >= 0) return v / base;
+    return -(((-v) + base - 1) / base);
+}
+
+static std::vector<std::uint64_t> normalize_signed_digits_mod(std::vector<__int128> acc,
+                                                              const ibdwt::Layout& layout) {
+    if (acc.size() != layout.n) throw std::runtime_error("digit normalize: size mismatch");
+    std::vector<std::uint64_t> out(layout.n, 0);
+    __int128 carry = 0;
+    for (unsigned pass = 0; pass < 16; ++pass) {
+        carry = 0;
+        for (std::size_t i = 0; i < layout.n; ++i) {
+            const unsigned w = layout.digit_width[i];
+            const __int128 base = (__int128(1) << w);
+            const __int128 v = acc[i] + carry;
+            const __int128 q = floor_div_pow2_i128(v, w);
+            const __int128 rem = v - q * base;
+            out[i] = static_cast<std::uint64_t>(rem);
+            acc[i] = rem;
+            carry = q;
+        }
+        if (carry == 0) break;
+        acc[0] += carry;
+    }
+    if (carry != 0) throw std::runtime_error("digit normalize: carry did not settle");
+    ibdwt::canonicalize_zero(out, layout);
+    return out;
+}
+
+static std::vector<std::uint64_t> add_mod_digits_linear(const std::vector<std::uint64_t>& a,
+                                                        const std::vector<std::uint64_t>& b,
+                                                        const ibdwt::Layout& layout) {
+    if (a.size() != layout.n || b.size() != layout.n) throw std::runtime_error("digit add: size mismatch");
+    std::vector<__int128> acc(layout.n);
+    for (std::size_t i = 0; i < layout.n; ++i) acc[i] = __int128(a[i]) + __int128(b[i]);
+    return normalize_signed_digits_mod(std::move(acc), layout);
+}
+
+static std::vector<std::uint64_t> half_mod_digits_linear(const std::vector<std::uint64_t>& x,
+                                                         const ibdwt::Layout& layout) {
+    if (x.size() != layout.n) throw std::runtime_error("digit half: size mismatch");
+    std::vector<std::uint64_t> out(layout.n, 0);
+    const bool odd = !x.empty() && (x[0] & 1u);
+    std::uint64_t carry = 0;
+    for (std::size_t ri = 0; ri < layout.n; ++ri) {
+        const std::size_t i = layout.n - 1u - ri;
+        const unsigned w = layout.digit_width[i];
+        out[i] = (x[i] >> 1u) | (carry << (w - 1u));
+        carry = x[i] & 1u;
+    }
+    if (odd && layout.n) {
+        const unsigned w = layout.digit_width.back();
+        out.back() += (std::uint64_t(1) << (w - 1u));
+    }
+    ibdwt::canonicalize_zero(out, layout);
+    return out;
+}
+
+static std::vector<std::uint64_t> mul_from_square_identity_digits(const std::vector<std::uint64_t>& sq_sum,
+                                                                  const std::vector<std::uint64_t>& sq_a,
+                                                                  const std::vector<std::uint64_t>& sq_b,
+                                                                  const ibdwt::Layout& layout) {
+    if (sq_sum.size() != layout.n || sq_a.size() != layout.n || sq_b.size() != layout.n) {
+        throw std::runtime_error("square identity multiply: size mismatch");
+    }
+    std::vector<__int128> acc(layout.n);
+    for (std::size_t i = 0; i < layout.n; ++i) acc[i] = __int128(sq_sum[i]) - __int128(sq_a[i]) - __int128(sq_b[i]);
+    auto two_ab = normalize_signed_digits_mod(std::move(acc), layout);
+    return half_mod_digits_linear(two_ab, layout);
+}
+
+static void gerbicz_gpu_square_once_crt(clwrap::GpuPrp& gpu61,
+                                            clwrap::GpuPrp& gpu31,
+                                            clwrap::CrtFusedKernels& crt_fused,
+                                            const clwrap::CarryConfig& carry_cfg,
+                                            cl_uint center_max,
+                                            bool use_crt_defused_fast,
+                                            bool use_crt_fused_pipeline,
+                                            bool crt_split_center,
+                                            bool crt_fused_center_lockstep) {
+    clwrap::g_crt_mixed_skip_pack_this_square = false;
+    clwrap::g_crt_mixed_carry_pack_next_request = false;
+    clwrap::g_crt_mixed_carry_pack_next_done = false;
+    if (use_crt_defused_fast) {
+        if (!clwrap::enqueue_square_mod_crt_defused_fast(gpu61, gpu31, crt_fused)) {
+            throw std::runtime_error("Gerbicz GPU full-check: CRT defused-fast pipeline rejected this transform");
+        }
+    } else if (use_crt_fused_pipeline) {
+        if (!clwrap::enqueue_square_mod_crt_fused_gpuowl_like(gpu61, gpu31, crt_fused,
+                                                              crt_split_center,
+                                                              crt_fused_center_lockstep)) {
+            throw std::runtime_error("Gerbicz GPU full-check: CRT fused pipeline rejected this transform");
+        }
+    } else {
+        clwrap::enqueue_square_mod(gpu31, center_max);
+        cl_event gf31_square_done = clwrap::enqueue_queue_marker(gpu31, "gerbicz crt gf31 square marker");
+        clwrap::set_pending_wait_event(gpu61, gf31_square_done);
+        if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false) && gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
+        clwrap::enqueue_square_mod(gpu61, center_max);
+    }
+    clwrap::enqueue_crt_garner_carry_gpu(gpu61, gpu31, carry_cfg, true);
+}
+
+
+static std::vector<std::uint64_t> gerbicz_gpu_square_digits_crt(
+    clwrap::GpuPrp& gpu61,
+    clwrap::GpuPrp& gpu31,
+    clwrap::CrtFusedKernels& crt_fused,
+    const clwrap::CarryConfig& carry_cfg,
+    cl_uint center_max,
+    bool use_crt_defused_fast,
+    bool use_crt_fused_pipeline,
+    bool crt_split_center,
+    bool crt_fused_center_lockstep,
+    const std::vector<std::uint64_t>& input) {
+    clwrap::upload_digits(gpu61, input);
+    gerbicz_gpu_square_once_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                use_crt_defused_fast, use_crt_fused_pipeline,
+                                crt_split_center, crt_fused_center_lockstep);
+    clwrap::finish_crt_queues(gpu61, gpu31);
+    return clwrap::read_digits(gpu61);
+}
+
+static std::vector<std::uint64_t> gerbicz_gpu_d_update_crt(
+    clwrap::GpuPrp& gpu61,
+    clwrap::GpuPrp& gpu31,
+    clwrap::CrtFusedKernels& crt_fused,
+    const clwrap::CarryConfig& carry_cfg,
+    cl_uint center_max,
+    bool use_crt_defused_fast,
+    bool use_crt_fused_pipeline,
+    bool crt_split_center,
+    bool crt_fused_center_lockstep,
+    const ibdwt::Layout& layout,
+    const std::vector<std::uint64_t>& D,
+    const std::vector<std::uint64_t>& state) {
+    clwrap::finish_crt_queues(gpu61, gpu31);
+    if (gpu31.queue != gpu61.queue) clwrap::release_pending_wait_event(gpu31);
+    clwrap::release_pending_wait_event(gpu61);
+    auto sq_D = gerbicz_gpu_square_digits_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                              use_crt_defused_fast, use_crt_fused_pipeline,
+                                              crt_split_center, crt_fused_center_lockstep, D);
+    auto sq_state = gerbicz_gpu_square_digits_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                                  use_crt_defused_fast, use_crt_fused_pipeline,
+                                                  crt_split_center, crt_fused_center_lockstep, state);
+    auto sum = add_mod_digits_linear(D, state, layout);
+    auto sq_sum = gerbicz_gpu_square_digits_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                                use_crt_defused_fast, use_crt_fused_pipeline,
+                                                crt_split_center, crt_fused_center_lockstep, sum);
+    auto out = mul_from_square_identity_digits(sq_sum, sq_D, sq_state, layout);
+    clwrap::upload_digits(gpu61, state);
+    clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz GPU restore after D update)");
+    if (gpu31.queue != gpu61.queue) clwrap::release_pending_wait_event(gpu31);
+    clwrap::release_pending_wait_event(gpu61);
+    return out;
+}
+
+static std::vector<std::uint64_t> gerbicz_gpu_full_check_crt(
+    clwrap::GpuPrp& gpu61,
+    clwrap::GpuPrp& gpu31,
+    clwrap::CrtFusedKernels& crt_fused,
+    const clwrap::CarryConfig& carry_cfg,
+    cl_uint center_max,
+    bool use_crt_defused_fast,
+    bool use_crt_fused_pipeline,
+    bool crt_split_center,
+    bool crt_fused_center_lockstep,
+    const ibdwt::Layout& layout,
+    const std::vector<std::uint64_t>& start_D,
+    const std::vector<std::uint64_t>& restore_state,
+    std::uint32_t B,
+    std::uint32_t r) {
+    (void)layout;
+    clwrap::finish_crt_queues(gpu61, gpu31);
+    if (gpu31.queue != gpu61.queue) clwrap::release_pending_wait_event(gpu31);
+    clwrap::release_pending_wait_event(gpu61);
+
+    clwrap::upload_digits(gpu61, start_D);
+    clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz GPU upload D)");
+
+    const std::uint32_t first_squares = B - r;
+    for (std::uint32_t z = 0; z < first_squares; ++z) {
+        if (g_stop_requested.load(std::memory_order_relaxed)) throw InterruptedRun();
+        gerbicz_gpu_square_once_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                    use_crt_defused_fast, use_crt_fused_pipeline,
+                                    crt_split_center, crt_fused_center_lockstep);
+        if (g_runtime.gerbicz_progress && (((z + 1u) % 2048u) == 0u || (z + 1u) == first_squares)) {
+            clwrap::check(clFlush(gpu61.queue), "clFlush(Gerbicz GPU first leg progress)");
+            std::cout << "[Gerbicz Li] GPU first leg " << (z + 1u) << "/" << first_squares << std::endl;
+        }
+    }
+
+    clwrap::enqueue_mul_small(gpu61, 3u);
+    clwrap::enqueue_carry(gpu61, carry_cfg);
+    clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz GPU mul3 carry)");
+
+    for (std::uint32_t z = 0; z < r; ++z) {
+        if (g_stop_requested.load(std::memory_order_relaxed)) throw InterruptedRun();
+        gerbicz_gpu_square_once_crt(gpu61, gpu31, crt_fused, carry_cfg, center_max,
+                                    use_crt_defused_fast, use_crt_fused_pipeline,
+                                    crt_split_center, crt_fused_center_lockstep);
+        if (g_runtime.gerbicz_progress && (((z + 1u) % 2048u) == 0u || (z + 1u) == r)) {
+            clwrap::check(clFlush(gpu61.queue), "clFlush(Gerbicz GPU second leg progress)");
+            std::cout << "[Gerbicz Li] GPU second leg " << (z + 1u) << "/" << r << std::endl;
+        }
+    }
+
+    clwrap::finish_crt_queues(gpu61, gpu31);
+    std::vector<std::uint64_t> check = clwrap::read_digits(gpu61);
+
+    clwrap::upload_digits(gpu61, restore_state);
+    clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz GPU restore current state)");
+    if (gpu31.queue != gpu61.queue) clwrap::release_pending_wait_event(gpu31);
+    clwrap::release_pending_wait_event(gpu61);
+    return check;
+}
+
 static bool prp_mersenne_pow2_base3_gpu(std::uint32_t p, bool verbose, clwrap::GpuPrp& gpu, const clwrap::CarryConfig& carry_cfg, cl_uint center_max = 0, std::uint32_t profile_every = 0, std::uint32_t max_iters = 0) {
     if (p < 2) throw std::runtime_error("exponent must be >= 2");
     if (p == 2) return true;
@@ -6986,6 +7962,20 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     bool crt_defused_fast)
 {
     std::vector<std::uint64_t> digits = ibdwt::from_small(3, layout);
+    std::uint32_t start_iter = 0;
+    BananaBackupState resume_backup;
+    if (g_runtime.resume_enabled) {
+        const std::string resume_path = default_bananantt_resume_path(p);
+        if (read_bananantt_backup_file(resume_path, p, layout, resume_backup)) {
+            if (max_iters && resume_backup.iter > max_iters) {
+                std::cout << "backup ignored: iter=" << resume_backup.iter << " is beyond --iters " << max_iters << "\n";
+            } else {
+                digits = resume_backup.state;
+                start_iter = resume_backup.iter;
+                std::cout << "backup restored: " << resume_path << " iter=" << start_iter << "\n";
+            }
+        }
+    }
     clwrap::upload_digits(gpu61, digits);
     gpu31.crtInputDigits = gpu61.bufDigits;
     
@@ -7298,8 +8288,42 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
         parse_bool_env("PRMERS_CRT_MIXED_CARRY_PACK_NEXT_LDS", false);
     bool crt_mixed_prepack_ready = false;
 
-    for (std::uint32_t iter = 0; iter < run_iters; ++iter) {
-        if (g_stop_requested.load(std::memory_order_relaxed)) throw InterruptedRun();
+    GerbiczLiHostChecker gerbicz;
+    gerbicz.init(layout, run_iters);
+    if (start_iter && resume_backup.valid) restore_gerbicz_from_backup(gerbicz, resume_backup);
+
+    auto last_backup_time = std::chrono::steady_clock::now();
+    std::uint32_t last_backup_iter = start_iter;
+    auto estimate_initial_ips = [&]() {
+        if (g_runtime.gerbicz_estimated_ips > 0.0) return g_runtime.gerbicz_estimated_ips;
+        return (run_iters >= 100000000u) ? 510.0 :
+               (run_iters >= 10000000u)  ? 900.0 :
+               (run_iters >= 1000000u)   ? 2500.0 : 8000.0;
+    };
+    std::uint32_t guard_depth = g_runtime.queue_guard_auto ? bananantt_auto_queue_guard(estimate_initial_ips(), g_runtime.queue_guard_seconds) : g_runtime.queue_guard_depth;
+    std::uint32_t next_guard_iter = guard_depth ? (start_iter + guard_depth) : 0u;
+    if (g_runtime.backup_enabled) {
+        std::cout << "backup enabled: " << default_bananantt_backup_path(p)
+                  << " every " << std::fixed << std::setprecision(0) << g_runtime.backup_every_seconds
+                  << "s" << (g_runtime.backup_every_iters ? (" or " + std::to_string(g_runtime.backup_every_iters) + " iters") : "")
+                  << "; resume=" << (g_runtime.resume_enabled ? "on" : "off") << std::endl;
+    }
+    if (guard_depth) {
+        if (g_runtime.queue_guard_auto) {
+            std::cout << "OpenCL queue guard: auto clFinish about every " << std::fixed << std::setprecision(1)
+                      << g_runtime.queue_guard_seconds << "s, initial depth=" << guard_depth
+                      << "; use --queue-guard 0 for pure bench.\n";
+        } else {
+            std::cout << "OpenCL queue guard: clFinish every " << guard_depth
+                      << " iterations; use --queue-guard auto or --queue-guard 0.\n";
+        }
+    }
+
+    for (std::uint32_t iter = start_iter; iter < run_iters; ++iter) {
+        if (g_stop_requested.load(std::memory_order_relaxed)) {
+            if (g_runtime.save_on_interrupt) maybe_write_runtime_backup("interrupt", gpu61, gpu31, layout, p, iter, &gerbicz);
+            throw InterruptedRun();
+        }
 
         clwrap::g_crt_mixed_skip_pack_this_square = crt_mixed_prepack_next && crt_mixed_prepack_ready;
         if (use_crt_defused_fast) {
@@ -7338,6 +8362,63 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             crt_mixed_prepack_ready = false;
         }
 
+        const std::uint32_t iter_done_now = iter + 1u;
+        maybe_inject_error_after_iter(gpu61, iter_done_now);
+        if (gerbicz.enabled) {
+            const std::uint32_t j_remaining_now = run_iters - iter_done_now;
+            const bool gerbicz_boundary = ((j_remaining_now != 0u && (j_remaining_now % gerbicz.B) == 0u) || iter_done_now == run_iters);
+            if (gerbicz_boundary) {
+                clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz-Li boundary)");
+                std::vector<std::uint64_t> gli_state = clwrap::read_digits(gpu61);
+                ibdwt::canonicalize_zero(gli_state, layout);
+                bool gerbicz_ok = true;
+                if (g_runtime.gerbicz_gpu_verify) {
+                    auto gpu_full_check = [&](const std::vector<std::uint64_t>& D_before,
+                                              std::uint32_t block, std::uint32_t rr,
+                                              const ibdwt::Layout& lay) {
+                        if (g_runtime.gerbicz_verbose) {
+                            std::cout << "[Gerbicz Li] GPU full check start: B=" << block
+                                      << " r=" << rr << " iter=" << iter_done_now << std::endl;
+                        }
+                        return gerbicz_gpu_full_check_crt(gpu61, gpu31, crt_fused, carry_cfg,
+                                                          center_max, use_crt_defused_fast,
+                                                          use_crt_fused_pipeline,
+                                                          crt_split_center,
+                                                          crt_fused_center_lockstep,
+                                                          lay, D_before, gli_state, block, rr);
+                    };
+                    auto gpu_d_update = [&](const std::vector<std::uint64_t>& a,
+                                            const std::vector<std::uint64_t>& b,
+                                            const ibdwt::Layout& lay) {
+                        if (g_runtime.gerbicz_verbose) std::cout << " [gpu3sq]" << std::flush;
+                        return gerbicz_gpu_d_update_crt(gpu61, gpu31, crt_fused, carry_cfg,
+                                                        center_max, use_crt_defused_fast,
+                                                        use_crt_fused_pipeline,
+                                                        crt_split_center,
+                                                        crt_fused_center_lockstep,
+                                                        lay, a, b);
+                    };
+                    gerbicz_ok = gerbicz.boundary_with_checker_and_update(iter_done_now, j_remaining_now,
+                                                               gli_state, layout,
+                                                               iter_done_now == run_iters,
+                                                               gpu_full_check,
+                                                               gpu_d_update);
+                } else {
+                    gerbicz_ok = gerbicz.boundary(iter_done_now, j_remaining_now, gli_state,
+                                                  layout, iter_done_now == run_iters);
+                }
+                if (!gerbicz_ok) {
+                    clwrap::upload_digits(gpu61, gerbicz.last_good_state);
+                    clwrap::check(clFinish(gpu61.queue), "clFinish(Gerbicz-Li restore)");
+                    crt_mixed_prepack_ready = false;
+                    if (gpu31.queue != gpu61.queue) clwrap::release_pending_wait_event(gpu31);
+                    iter = (gerbicz.last_good_iter == 0u) ? std::numeric_limits<std::uint32_t>::max()
+                                                          : (gerbicz.last_good_iter - 1u);
+                    continue;
+                }
+            }
+        }
+
         const bool do_report = verbose && ((iter + 1) % report_interval == 0 || iter + 1 == run_iters);
         const bool do_profile_report = effective_profile_every && (((iter + 1) % effective_profile_every) == 0 || iter + 1 == run_iters);
         if (do_report || do_profile_report) {
@@ -7351,7 +8432,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
         if (do_report) {
             const auto now = std::chrono::steady_clock::now();
             const double elapsed = std::chrono::duration<double>(now - t0).count();
-            const double ips = static_cast<double>(iter + 1) / std::max(elapsed, 1e-9);
+            const double ips = static_cast<double>((iter + 1u) - start_iter) / std::max(elapsed, 1e-9);
             std::cout << "iter " << (iter + 1) << "/" << p << " (" << std::fixed << std::setprecision(1)
                       << (100.0 * static_cast<double>(iter + 1) / p) << "%), elapsed "
                       << std::setprecision(2) << elapsed << " s, it/s " << std::setprecision(1) << ips
@@ -7361,9 +8442,56 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             clwrap::profile_print_summary(gpu61, "CRT kernel profile summary at iter " + std::to_string(iter + 1));
             if (clwrap::profile_has_data(gpu31))
                 clwrap::profile_print_summary(gpu31, "CRT GF31 auxiliary profile at iter " + std::to_string(iter + 1));
+        }
+
+        const std::uint32_t iter_done = iter + 1u;
+        const std::uint32_t proof_power_eff = g_runtime.proof_power ? g_runtime.proof_power : best_proof_power_banana(p);
+        const bool want_res64_now = g_runtime.res64_every && ((iter_done % g_runtime.res64_every) == 0u || iter_done == run_iters);
+        const bool want_proof_now = g_runtime.proof_checkpoints && proof_is_in_points_banana(p, proof_power_eff, iter_done);
+        const bool want_gerbicz_note = g_runtime.gerbicz_interval && ((iter_done % g_runtime.gerbicz_interval) == 0u || iter_done == run_iters);
+        if (want_res64_now || want_proof_now || want_gerbicz_note) {
+            clwrap::check(clFinish(gpu61.queue), "clFinish(optional residue/proof checkpoint)");
+            std::vector<std::uint64_t> chk = clwrap::read_digits(gpu61);
+            ibdwt::canonicalize_zero(chk, layout);
+            const std::uint64_t r64 = residue64_from_digits(chk, layout);
+            g_runtime.last_iter = iter_done;
+            g_runtime.last_res64 = r64;
+            if (want_res64_now || want_gerbicz_note) {
+                std::cout << "res64 iter " << iter_done << ": " << hex64(r64);
+                if (want_gerbicz_note) std::cout << "  [Gerbicz checkpoint hook]";
+                std::cout << "\n";
+            }
+            if (want_proof_now) write_bananantt_checkpoint(p, iter_done, chk, layout);
         } else if (crt_periodic_flush && (((iter + 1) & 255u) == 0u)) {
             clFlush(gpu61.queue);
             if (gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
+        }
+
+        const std::uint32_t completed_now = iter + 1u;
+        if (guard_depth && completed_now >= next_guard_iter) {
+            clwrap::finish_crt_queues(gpu61, gpu31);
+            if (g_stop_requested.load(std::memory_order_relaxed)) {
+                if (g_runtime.save_on_interrupt) maybe_write_runtime_backup("interrupt", gpu61, gpu31, layout, p, completed_now, &gerbicz);
+                throw InterruptedRun();
+            }
+            if (g_runtime.queue_guard_auto) {
+                const auto guard_now = std::chrono::steady_clock::now();
+                const double elapsed = std::chrono::duration<double>(guard_now - t0).count();
+                const double ips = static_cast<double>(completed_now - start_iter) / std::max(elapsed, 1e-9);
+                guard_depth = bananantt_auto_queue_guard(ips, g_runtime.queue_guard_seconds);
+            }
+            next_guard_iter = completed_now + guard_depth;
+        }
+        if (g_runtime.backup_enabled && completed_now < run_iters) {
+            const auto backup_now = std::chrono::steady_clock::now();
+            const double since_backup = std::chrono::duration<double>(backup_now - last_backup_time).count();
+            const bool by_time = g_runtime.backup_every_seconds > 0.0 && since_backup >= g_runtime.backup_every_seconds;
+            const bool by_iter = g_runtime.backup_every_iters && (completed_now - last_backup_iter) >= g_runtime.backup_every_iters;
+            if (by_time || by_iter) {
+                maybe_write_runtime_backup(by_time ? "periodic-time" : "periodic-iter", gpu61, gpu31, layout, p, completed_now, &gerbicz);
+                last_backup_time = std::chrono::steady_clock::now();
+                last_backup_iter = completed_now;
+            }
         }
     }
 
@@ -7371,7 +8499,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     const auto done = std::chrono::steady_clock::now();
     const double completed_sec = std::chrono::duration<double>(done - t0).count();
     if (max_iters) {
-        const double completed_rate = static_cast<double>(run_iters) / std::max(completed_sec, 1e-9);
+        const double completed_rate = static_cast<double>(run_iters - start_iter) / std::max(completed_sec, 1e-9);
         std::cout << "completed " << run_iters << " iterations in "
                   << std::fixed << std::setprecision(3) << completed_sec << " s, final it/s "
                   << std::setprecision(1) << completed_rate << " [mixed CRT/PFA half-real]\n";
@@ -7381,10 +8509,29 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     clwrap::release_pending_wait_event(gpu31);
     clwrap::profile_print_summary(gpu61, "CRT kernel profile summary (final)");
     if (clwrap::profile_has_data(gpu31)) clwrap::profile_print_summary(gpu31, "CRT GF31 auxiliary profile (final)");
-    if (!full_run) return false;
+
+    if (!full_run) {
+        if (g_runtime.json_enabled || g_runtime.res64_every || g_runtime.proof_checkpoints) {
+            std::vector<std::uint64_t> out = clwrap::read_digits(gpu61);
+            ibdwt::canonicalize_zero(out, layout);
+            const std::uint64_t r64 = residue64_from_digits(out, layout);
+            g_runtime.last_iter = run_iters;
+            g_runtime.last_res64 = r64;
+            if (g_runtime.proof_checkpoints) write_bananantt_checkpoint(p, run_iters, out, layout);
+            write_bananantt_json_from_digits(p, "benchmark-stopped", out, layout);
+        }
+        return false;
+    }
     std::vector<std::uint64_t> out = clwrap::read_digits(gpu61);
     ibdwt::canonicalize_zero(out, layout);
-    return ibdwt::equals_small(out, layout, 9);
+    const std::uint64_t r64 = residue64_from_digits(out, layout);
+    g_runtime.last_iter = run_iters;
+    g_runtime.last_res64 = r64;
+    if (g_runtime.proof_checkpoints) write_bananantt_checkpoint(p, run_iters, out, layout);
+    const bool prp_ok = ibdwt::equals_small(out, layout, 9);
+    write_bananantt_json_from_digits(p, prp_ok ? "PRP" : "composite-or-error", out, layout);
+    maybe_remove_runtime_backup(p);
+    return prp_ok;
 }
 
 
@@ -7481,6 +8628,409 @@ static void selftest(const clwrap::DeviceInfo& dev, const std::string& kernel_pa
     }
 }
 
+
+static std::string hex64(std::uint64_t x) {
+    std::ostringstream os;
+    os << "0x" << std::hex << std::setw(16) << std::setfill('0') << x;
+    return os.str();
+}
+
+static std::string hex64_plain_upper(std::uint64_t x) {
+    std::ostringstream os;
+    os << std::uppercase << std::hex << std::setw(16) << std::setfill('0') << x;
+    return os.str();
+}
+
+static std::string json_escape_banana(const std::string& s) {
+    std::ostringstream o;
+    o << '"';
+    for (char c : s) {
+        switch (c) {
+            case '"': o << "\\\""; break;
+            case '\\': o << "\\\\"; break;
+            case '\b': o << "\\b"; break;
+            case '\f': o << "\\f"; break;
+            case '\n': o << "\\n"; break;
+            case '\r': o << "\\r"; break;
+            case '\t': o << "\\t"; break;
+            default: o << c; break;
+        }
+    }
+    o << '"';
+    return o.str();
+}
+
+static std::string lower_hex(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+static std::uint64_t residue64_from_digits(const std::vector<std::uint64_t>& digits, const ibdwt::Layout& layout) {
+    std::uint64_t r = 0;
+    std::uint32_t bit = 0;
+    const std::size_t m = std::min(digits.size(), layout.digit_width.size());
+    for (std::size_t i = 0; i < m && bit < 64u; ++i) {
+        const std::uint32_t w = layout.digit_width[i];
+        const std::uint64_t mask = (w >= 64u) ? ~0ull : ((1ull << w) - 1ull);
+        r |= (digits[i] & mask) << bit;
+        bit += w;
+    }
+    return r;
+}
+
+static std::vector<std::uint32_t> residue_words32_from_digits(const std::vector<std::uint64_t>& digits, const ibdwt::Layout& layout) {
+    const std::size_t words = (layout.p + 31u) / 32u;
+    std::vector<std::uint32_t> out(words, 0u);
+    std::uint64_t bitpos = 0;
+    const std::size_t m = std::min(digits.size(), layout.digit_width.size());
+    for (std::size_t i = 0; i < m; ++i) {
+        const std::uint32_t w = layout.digit_width[i];
+        std::uint64_t v = digits[i] & ((w >= 64u) ? ~0ull : ((1ull << w) - 1ull));
+        std::uint32_t remain = w;
+        while (remain && bitpos < layout.p) {
+            const std::size_t wi = static_cast<std::size_t>(bitpos >> 5);
+            const std::uint32_t off = static_cast<std::uint32_t>(bitpos & 31u);
+            const std::uint32_t take = std::min<std::uint32_t>(remain, 32u - off);
+            const std::uint32_t chunk_mask = (take == 32u) ? 0xffffffffu : ((1u << take) - 1u);
+            out[wi] |= static_cast<std::uint32_t>(v & chunk_mask) << off;
+            v >>= take;
+            bitpos += take;
+            remain -= take;
+        }
+    }
+    return out;
+}
+
+static inline std::uint32_t mod3_words_banana(const std::vector<std::uint32_t>& W) {
+    std::uint32_t r = 0;
+    for (std::uint32_t w : W) r = (r + (w % 3u)) % 3u;
+    return r;
+}
+
+static inline void div3_words_banana(std::uint32_t exponent, std::vector<std::uint32_t>& W) {
+    if (W.empty()) return;
+    std::uint32_t r = (3u - mod3_words_banana(W)) % 3u;
+    const int top_bits = static_cast<int>(exponent % 32u);
+    {
+        const std::uint64_t t = (static_cast<std::uint64_t>(r) << top_bits) + W.back();
+        W.back() = static_cast<std::uint32_t>(t / 3u);
+        r = static_cast<std::uint32_t>(t % 3u);
+    }
+    for (auto it = W.rbegin() + 1; it != W.rend(); ++it) {
+        const std::uint64_t t = (static_cast<std::uint64_t>(r) << 32u) + *it;
+        *it = static_cast<std::uint32_t>(t / 3u);
+        r = static_cast<std::uint32_t>(t % 3u);
+    }
+}
+
+static inline void prp3_div9_words_banana(std::uint32_t exponent, std::vector<std::uint32_t>& W) {
+    div3_words_banana(exponent, W);
+    div3_words_banana(exponent, W);
+}
+
+static std::string format_res64_words_plain_upper(const std::vector<std::uint32_t>& W) {
+    const std::uint64_t r64 = (static_cast<std::uint64_t>(W.size() > 1 ? W[1] : 0u) << 32u) |
+                              static_cast<std::uint64_t>(W.empty() ? 0u : W[0]);
+    return hex64_plain_upper(r64);
+}
+
+static std::string format_res2048_words_lower(const std::vector<std::uint32_t>& W) {
+    std::ostringstream oss;
+    oss << std::hex << std::nouppercase << std::setfill('0');
+    for (int i = 63; i >= 0; --i) {
+        const std::uint32_t w = (static_cast<std::size_t>(i) < W.size()) ? W[static_cast<std::size_t>(i)] : 0u;
+        oss << std::setw(8) << w;
+    }
+    return oss.str();
+}
+
+static bool words_equal_one(const std::vector<std::uint32_t>& W) {
+    if (W.empty() || W[0] != 1u) return false;
+    for (std::size_t i = 1; i < W.size(); ++i) if (W[i] != 0u) return false;
+    return true;
+}
+
+static std::uint32_t best_proof_power_banana(std::uint32_t E) {
+    if (E == 0u) return 6u;
+    int power = 10 + static_cast<int>(std::floor(std::log2(static_cast<double>(E) / 60e6) / 2.0));
+    power = std::max(power, 2);
+    power = std::min(power, 12);
+    return static_cast<std::uint32_t>(power);
+}
+
+static bool proof_is_in_points_banana(std::uint32_t E, std::uint32_t npower, std::uint32_t k) {
+    if (k == E) return true;
+    std::uint32_t start = 0;
+    for (std::uint32_t p = 0, span = (E + 1u) / 2u; p < npower; ++p, span = (span + 1u) / 2u) {
+        if (k > start + span) start += span;
+        else if (k == start + span) return true;
+    }
+    return false;
+}
+
+static std::string current_timestamp_utc_banana() {
+    const std::time_t now = std::time(nullptr);
+    std::tm timeinfo{};
+#if defined(_WIN32)
+    gmtime_s(&timeinfo, &now);
+#else
+    std::tm* tmp = std::gmtime(&now);
+    if (tmp) timeinfo = *tmp;
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    return std::string(buf);
+}
+
+static std::string os_name_banana() {
+#if defined(_WIN32)
+    return "Windows";
+#elif defined(__APPLE__)
+    return "macOS";
+#elif defined(__linux__)
+    return "Linux";
+#else
+    return "unknown";
+#endif
+}
+
+static std::string os_arch_banana() {
+#if defined(__x86_64__) || defined(_M_X64)
+    return "x86_64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return "aarch64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#else
+    return "unknown";
+#endif
+}
+
+static std::string shell_quote_banana(const std::string& path) {
+    std::string q = "'";
+    for (char c : path) {
+        if (c == '\'') q += "'\\''";
+        else q += c;
+    }
+    q += "'";
+    return q;
+}
+
+static std::string md5_file_hex_banana(const std::string& path) {
+    if (path.empty()) return "";
+    const std::string cmd = "md5sum " + shell_quote_banana(path) + " 2>/dev/null";
+    FILE* fp = popen(cmd.c_str(), "r");
+    if (!fp) return "";
+    char buf[128] = {0};
+    std::string out;
+    if (fgets(buf, sizeof(buf), fp)) out = buf;
+    pclose(fp);
+    if (out.size() < 32) return "";
+    std::string h = out.substr(0, 32);
+    for (char c : h) if (!std::isxdigit(static_cast<unsigned char>(c))) return "";
+    return lower_hex(h);
+}
+
+static void ensure_parent_dir_exists(const std::string& path) {
+    std::filesystem::path p(path);
+    std::filesystem::path parent = p.parent_path();
+    if (!parent.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+    }
+}
+
+static void ensure_dir_exists(const std::string& dir) {
+    if (dir.empty()) return;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+}
+
+static std::string default_json_path(std::uint32_t p) {
+    const std::string name = "prmers_bananantt_M" + std::to_string(p) + ".json";
+    if (g_runtime.output_dir.empty()) return name;
+    return (std::filesystem::path(g_runtime.output_dir) / name).string();
+}
+
+static std::string default_proof_dir(std::uint32_t p) {
+    // Same tree/checkpoint directory shape as PrMers: <exponent>/proof/...
+    const std::filesystem::path rel = std::filesystem::path(std::to_string(p)) / "proof";
+    if (g_runtime.output_dir.empty()) return rel.string();
+    return (std::filesystem::path(g_runtime.output_dir) / rel).string();
+}
+
+static std::uint32_t bananantt_crc32(const void* data, std::size_t len) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    std::uint32_t crc = 0xffffffffu;
+    for (std::size_t i = 0; i < len; ++i) {
+        crc ^= p[i];
+        for (int j = 0; j < 8; ++j) crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
+static void write_bananantt_checkpoint(std::uint32_t p, std::uint32_t iter,
+                                       const std::vector<std::uint64_t>& digits,
+                                       const ibdwt::Layout& layout) {
+    if (!g_runtime.proof_checkpoints) return;
+    std::string dir = g_runtime.proof_dir.empty() ? default_proof_dir(p) : g_runtime.proof_dir;
+    ensure_dir_exists(dir);
+    const std::string path = dir + "/M" + std::to_string(p) + "_iter_" + std::to_string(iter) + ".chk";
+    const auto words = residue_words32_from_digits(digits, layout);
+
+    // PrMers ProofSet-compatible checkpoint: filename is just the iteration,
+    // content is CRC32 followed by packed little-endian uint32 residue words.
+    {
+        const std::string prm_path = dir + "/" + std::to_string(iter);
+        std::ofstream prm(prm_path, std::ios::binary);
+        if (!prm) throw std::runtime_error("cannot write PrMers-style checkpoint: " + prm_path);
+        const std::uint32_t crc = bananantt_crc32(words.data(), words.size() * sizeof(std::uint32_t));
+        prm.write(reinterpret_cast<const char*>(&crc), sizeof(crc));
+        prm.write(reinterpret_cast<const char*>(words.data()), static_cast<std::streamsize>(words.size() * sizeof(std::uint32_t)));
+        g_runtime.last_proof_file = prm_path;
+    }
+
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("cannot write proof checkpoint: " + path);
+    out << "BANANANTT_PRP_CHECKPOINT_V1\n";
+    out << "p=" << p << "\n";
+    out << "iter=" << iter << "\n";
+    out << "words32=" << words.size() << "\n";
+    out << "crc32=0x" << std::hex << std::setw(8) << std::setfill('0')
+        << bananantt_crc32(words.data(), words.size() * sizeof(std::uint32_t)) << std::dec << "\n";
+    out << "res64=" << hex64(residue64_from_digits(digits, layout)) << "\n";
+    out << "binary_words_le_after_this_line\n";
+    out.write(reinterpret_cast<const char*>(words.data()), static_cast<std::streamsize>(words.size() * sizeof(std::uint32_t)));
+}
+
+static void write_bananantt_json(std::uint32_t p, const std::string& mode, const std::string& status,
+                                 std::uint32_t iter, std::uint64_t res64, double seconds,
+                                 const ibdwt::Layout& layout) {
+    (void)mode; (void)iter; (void)seconds;
+    std::vector<std::uint32_t> words((layout.p + 31u) / 32u, 0u);
+    if (!words.empty()) words[0] = static_cast<std::uint32_t>(res64 & 0xffffffffu);
+    if (words.size() > 1) words[1] = static_cast<std::uint32_t>(res64 >> 32u);
+    prp3_div9_words_banana(p, words);
+    const std::string st = (status == "benchmark-stopped") ? "U" : (words_equal_one(words) ? "P" : "C");
+    const std::string res64_prp = format_res64_words_plain_upper(words);
+    const std::string res2048 = format_res2048_words_lower(words);
+    const std::string timestamp = current_timestamp_utc_banana();
+    const std::uint32_t proof_power = g_runtime.proof_power ? g_runtime.proof_power : best_proof_power_banana(p);
+    const bool have_proof = g_runtime.proof_checkpoints && !g_runtime.last_proof_file.empty();
+    const std::string proof_md5 = have_proof ? md5_file_hex_banana(g_runtime.last_proof_file) : "";
+    std::ostringstream prefix;
+    prefix << "{\"status\":" << json_escape_banana(st)
+           << ",\"exponent\":" << p
+           << ",\"worktype\":\"PRP-3\""
+           << ",\"res64\":" << json_escape_banana(res64_prp)
+           << ",\"res2048\":" << json_escape_banana(res2048)
+           << ",\"residue-type\":1"
+           << ",\"errors\":{\"gerbicz\":" << static_cast<unsigned long long>(g_runtime.gerbicz_errors) << "}"
+           << ",\"shift-count\":0"
+           << ",\"fft-length\":" << layout.n;
+    if (have_proof) {
+        prefix << ",\"proof\":{\"version\":2,\"power\":" << proof_power
+               << ",\"hashsize\":64,\"md5\":" << json_escape_banana(proof_md5) << "}";
+    }
+    prefix << ",\"program\":{\"name\":" << json_escape_banana(BANANANTT_PROGRAM_NAME)
+           << ",\"version\":" << json_escape_banana(BANANANTT_PROGRAM_VERSION)
+           << ",\"port\":" << BANANANTT_PROGRAM_PORT << "}"
+           << ",\"os\":{\"os\":" << json_escape_banana(os_name_banana())
+           << ",\"architecture\":" << json_escape_banana(os_arch_banana()) << "}"
+           << ",\"timestamp\":" << json_escape_banana(timestamp);
+    std::ostringstream canon;
+    canon << p << ";PRP;;;" << lower_hex(res64_prp) << ";" << lower_hex(res2048)
+          << ";0_3_1;" << layout.n << ";gerbicz:" << g_runtime.gerbicz_errors << ";"
+          << BANANANTT_PROGRAM_NAME << ";" << BANANANTT_PROGRAM_VERSION << ";;;"
+          << os_name_banana() << ";" << os_arch_banana() << ";" << timestamp;
+    const std::string canon_str = canon.str();
+    const std::uint32_t crc = bananantt_crc32(canon_str.data(), canon_str.size());
+    std::ostringstream checksum;
+    checksum << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
+    const std::string json = prefix.str() + ",\"checksum\":{\"version\":1,\"checksum\":\"" + checksum.str() + "\"}}";
+    if (g_runtime.json_enabled) {
+        const std::string path = g_runtime.json_path.empty() ? default_json_path(p) : g_runtime.json_path;
+        ensure_parent_dir_exists(path);
+        std::ofstream out(path);
+        if (!out) throw std::runtime_error("cannot write JSON output: " + path);
+        out << json << "\n";
+        std::cout << "JSON written: " << path << "\n";
+    }
+    if (g_runtime.append_results && (st == "P" || st == "C")) {
+        std::string rpath = g_runtime.results_path.empty() ? "./results.txt" : g_runtime.results_path;
+        if (!g_runtime.output_dir.empty() && rpath == "./results.txt") rpath = (std::filesystem::path(g_runtime.output_dir) / "results.txt").string();
+        ensure_parent_dir_exists(rpath);
+        std::ofstream r(rpath, std::ios::app);
+        if (!r) throw std::runtime_error("cannot append results file: " + rpath);
+        r << json << "\n";
+        std::cout << "Result appended: " << rpath << "\n";
+    }
+}
+
+static void write_bananantt_json_from_digits(std::uint32_t p, const std::string& status,
+                                             const std::vector<std::uint64_t>& digits,
+                                             const ibdwt::Layout& layout) {
+    std::vector<std::uint32_t> words = residue_words32_from_digits(digits, layout);
+    prp3_div9_words_banana(p, words);
+    const bool residue_one = words_equal_one(words);
+    const std::string st = (status == "benchmark-stopped") ? "U" : (residue_one ? "P" : "C");
+    const std::string res64_prp = format_res64_words_plain_upper(words);
+    const std::string res2048 = format_res2048_words_lower(words);
+    const std::string timestamp = current_timestamp_utc_banana();
+    const std::uint32_t proof_power = g_runtime.proof_power ? g_runtime.proof_power : best_proof_power_banana(p);
+    const bool have_proof = g_runtime.proof_checkpoints && !g_runtime.last_proof_file.empty();
+    const std::string proof_md5 = have_proof ? md5_file_hex_banana(g_runtime.last_proof_file) : "";
+    std::ostringstream prefix;
+    prefix << "{\"status\":" << json_escape_banana(st)
+           << ",\"exponent\":" << p
+           << ",\"worktype\":\"PRP-3\""
+           << ",\"res64\":" << json_escape_banana(res64_prp)
+           << ",\"res2048\":" << json_escape_banana(res2048)
+           << ",\"residue-type\":1"
+           << ",\"errors\":{\"gerbicz\":" << static_cast<unsigned long long>(g_runtime.gerbicz_errors) << "}"
+           << ",\"shift-count\":0"
+           << ",\"fft-length\":" << layout.n;
+    if (have_proof) {
+        prefix << ",\"proof\":{\"version\":2,\"power\":" << proof_power
+               << ",\"hashsize\":64,\"md5\":" << json_escape_banana(proof_md5) << "}";
+    }
+    prefix << ",\"program\":{\"name\":" << json_escape_banana(BANANANTT_PROGRAM_NAME)
+           << ",\"version\":" << json_escape_banana(BANANANTT_PROGRAM_VERSION)
+           << ",\"port\":" << BANANANTT_PROGRAM_PORT << "}"
+           << ",\"os\":{\"os\":" << json_escape_banana(os_name_banana())
+           << ",\"architecture\":" << json_escape_banana(os_arch_banana()) << "}"
+           << ",\"timestamp\":" << json_escape_banana(timestamp);
+    std::ostringstream canon;
+    canon << p << ";PRP;;;" << lower_hex(res64_prp) << ";" << lower_hex(res2048)
+          << ";0_3_1;" << layout.n << ";gerbicz:" << g_runtime.gerbicz_errors << ";"
+          << BANANANTT_PROGRAM_NAME << ";" << BANANANTT_PROGRAM_VERSION << ";;;"
+          << os_name_banana() << ";" << os_arch_banana() << ";" << timestamp;
+    const std::string canon_str = canon.str();
+    const std::uint32_t crc = bananantt_crc32(canon_str.data(), canon_str.size());
+    std::ostringstream checksum;
+    checksum << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << crc;
+    const std::string json = prefix.str() + ",\"checksum\":{\"version\":1,\"checksum\":\"" + checksum.str() + "\"}}";
+    if (g_runtime.json_enabled) {
+        const std::string path = g_runtime.json_path.empty() ? default_json_path(p) : g_runtime.json_path;
+        ensure_parent_dir_exists(path);
+        std::ofstream out(path);
+        if (!out) throw std::runtime_error("cannot write JSON output: " + path);
+        out << json << "\n";
+        std::cout << "JSON written: " << path << "\n";
+    }
+    if (g_runtime.append_results && (st == "P" || st == "C")) {
+        std::string rpath = g_runtime.results_path.empty() ? "./results.txt" : g_runtime.results_path;
+        if (!g_runtime.output_dir.empty() && rpath == "./results.txt") rpath = (std::filesystem::path(g_runtime.output_dir) / "results.txt").string();
+        ensure_parent_dir_exists(rpath);
+        std::ofstream r(rpath, std::ios::app);
+        if (!r) throw std::runtime_error("cannot append results file: " + rpath);
+        r << json << "\n";
+        std::cout << "Result appended: " << rpath << "\n";
+    }
+}
+
+
+
 }
 
 struct Options {
@@ -7546,10 +9096,177 @@ struct Options {
     cl_uint crt_lds_tile = 2u;
     cl_uint crt_head_radix8 = 0u;
     std::string single_center_mode = "normal";
+
+    std::string config_path;
+    std::string worktodo_path = "worktodo.txt";
+    bool no_worktodo = false;
+    std::uint32_t res64_every = 0;
+    bool json_enabled = true;
+    std::string json_path;
+    std::string output_dir;
+    std::string results_path = "./results.txt";
+    bool append_results = true;
+    bool proof_checkpoints = false;
+    std::uint32_t proof_power = 0;
+    std::string proof_dir;
+    std::uint32_t gerbicz_interval = 0;
+    bool gerbicz_enabled = true;
+    bool gerbicz_gpu_verify = true;
+    bool gerbicz_user_checklevel = false;
+    std::uint32_t gerbicz_checklevel = 0;
+    std::uint32_t gerbicz_block = 0;
+    double gerbicz_target_seconds = BANANANTT_DEFAULT_GERBICZ_TARGET_SECONDS;
+    double gerbicz_estimated_ips = 0.0;
+    bool gerbicz_user_seconds = false;
+    double gerbicz_boundary_seconds = BANANANTT_DEFAULT_GERBICZ_BOUNDARY_SECONDS;
+    bool gerbicz_verbose = false;
+    bool gerbicz_progress = false;
+    std::uint32_t error_iter = 0;
+    std::uint32_t error_limb = 0;
+    std::uint64_t error_delta = 1;
+    bool backup_enabled = true;
+    bool resume_enabled = true;
+    bool save_on_interrupt = true;
+    std::string backup_path;
+    std::string resume_path;
+    std::string backup_dir = "save";
+    std::uint32_t backup_every_iters = 0;
+    double backup_every_seconds = 300.0;
+    std::uint32_t queue_guard_depth = 0;
+    bool queue_guard_auto = true;
+    double queue_guard_seconds = BANANANTT_DEFAULT_QUEUE_GUARD_SECONDS;
 };
+
+
+static std::string trim_copy(std::string s) {
+    auto not_space = [](unsigned char c){ return !std::isspace(c); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+    s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+    return s;
+}
+
+static std::string lower_copy(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+static bool parse_bool_text(const std::string& v, bool defv=false) {
+    const std::string x = lower_copy(trim_copy(v));
+    if (x == "1" || x == "true" || x == "yes" || x == "on") return true;
+    if (x == "0" || x == "false" || x == "no" || x == "off") return false;
+    return defv;
+}
+
+static void apply_config_key_value(Options& opt, std::string key, std::string val) {
+    key = lower_copy(trim_copy(key));
+    val = trim_copy(val);
+    if (key.empty()) return;
+    if (key == "p" || key == "exponent") opt.exponent = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "device") opt.device_index = std::stoi(val);
+    else if (key == "kernel") opt.kernel_path = val;
+    else if (key == "modulus" || key == "field") opt.modulus_mode = lower_copy(val);
+    else if (key == "iters" || key == "max_iters" || key == "benchmark_iters") opt.max_iters = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "quiet") opt.verbose = !parse_bool_text(val, false);
+    else if (key == "profile_kernels" || key == "profile") opt.profile_kernels = parse_bool_text(val, false);
+    else if (key == "profile_every") opt.profile_every = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "crt_odd_radix") opt.crt_odd_radix = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "crt_mixed_row_core") opt.crt_mixed_row_core = val;
+    else if (key == "crt_mixed_row_stage" || key == "crt_lds_stage") { opt.crt_lds_stage = static_cast<cl_uint>(std::stoul(val)); opt.user_crt_local_stage = true; }
+    else if (key == "crt_mixed_row_center" || key == "crt_local_square") { opt.crt_center_chunk = static_cast<cl_uint>(std::stoul(val)); opt.user_crt_local_square = true; }
+    else if (key == "crt_mixed_row_fuse_both") opt.crt_mixed_row_fuse_both = val;
+    else if (key == "res64_every" || key == "res64_interval") opt.res64_every = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "json") opt.json_enabled = parse_bool_text(val, true);
+    else if (key == "no_json") opt.json_enabled = !parse_bool_text(val, true);
+    else if (key == "json_path" || key == "json_file" || key == "json_out") { opt.json_enabled = true; opt.json_path = val; }
+    else if (key == "output_dir" || key == "save_path") opt.output_dir = val;
+    else if (key == "results_path" || key == "results_file") opt.results_path = val;
+    else if (key == "append_results") opt.append_results = parse_bool_text(val, true);
+    else if (key == "no_results") opt.append_results = !parse_bool_text(val, true);
+    else if (key == "proof" || key == "proof_checkpoints") opt.proof_checkpoints = parse_bool_text(val, true);
+    else if (key == "proof_power") opt.proof_power = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "proof_dir") { opt.proof_checkpoints = true; opt.proof_dir = val; }
+    else if (key == "gerbicz" || key == "gerbiczli") opt.gerbicz_enabled = parse_bool_text(val, true);
+    else if (key == "gerbicz_gpu" || key == "gerbicz_gpu_verify") opt.gerbicz_gpu_verify = parse_bool_text(val, true);
+    else if (key == "gerbicz_backend") { auto b = lower_copy(val); opt.gerbicz_gpu_verify = (b != "host" && b != "cpu" && b != "gmp"); }
+    else if (key == "gerbicz_interval" || key == "gerbicz_checklevel" || key == "checklevel") { opt.gerbicz_enabled = true; opt.gerbicz_user_checklevel = true; opt.gerbicz_checklevel = static_cast<std::uint32_t>(std::stoul(val)); }
+    else if (key == "gerbicz_b" || key == "gerbicz_block") { opt.gerbicz_enabled = true; opt.gerbicz_block = static_cast<std::uint32_t>(std::stoul(val)); }
+    else if (key == "gerbicz_target_seconds" || key == "gerbicz_seconds") { opt.gerbicz_enabled = true; opt.gerbicz_user_seconds = true; opt.gerbicz_target_seconds = std::stod(val); }
+    else if (key == "gerbicz_estimate_it_s" || key == "gerbicz_estimated_ips") { opt.gerbicz_enabled = true; opt.gerbicz_estimated_ips = std::stod(val); }
+    else if (key == "gerbicz_boundary_seconds") { opt.gerbicz_enabled = true; opt.gerbicz_boundary_seconds = std::stod(val); }
+    else if (key == "gerbicz_verbose") opt.gerbicz_verbose = parse_bool_text(val, true);
+    else if (key == "gerbicz_progress") opt.gerbicz_progress = parse_bool_text(val, true);
+    else if (key == "erroriter" || key == "error_iter") opt.error_iter = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "error_limb") opt.error_limb = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "error_delta") opt.error_delta = static_cast<std::uint64_t>(std::stoull(val));
+    else if (key == "backup" || key == "save" || key == "checkpoint") opt.backup_enabled = parse_bool_text(val, true);
+    else if (key == "resume") opt.resume_enabled = parse_bool_text(val, true);
+    else if (key == "save_on_interrupt") opt.save_on_interrupt = parse_bool_text(val, true);
+    else if (key == "backup_file" || key == "save_file" || key == "checkpoint_file") opt.backup_path = val;
+    else if (key == "resume_file") { opt.resume_enabled = true; opt.resume_path = val; }
+    else if (key == "backup_dir" || key == "save_dir") opt.backup_dir = val;
+    else if (key == "backup_every" || key == "backup_every_iters" || key == "save_every") opt.backup_every_iters = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "backup_seconds" || key == "backup_every_seconds" || key == "save_seconds") opt.backup_every_seconds = std::stod(val);
+    else if (key == "queue_guard" || key == "queue_guard_depth" || key == "cl_queue_guard") { auto qv = lower_copy(val); if (qv == "auto") { opt.queue_guard_auto = true; opt.queue_guard_depth = 0; } else { opt.queue_guard_auto = false; opt.queue_guard_depth = static_cast<std::uint32_t>(std::stoul(val)); } }
+    else if (key == "queue_guard_seconds" || key == "cl_queue_guard_seconds") { opt.queue_guard_auto = true; opt.queue_guard_seconds = std::stod(val); }
+    else if (key == "worktodo") opt.worktodo_path = val;
+    else if (key == "no_worktodo") opt.no_worktodo = parse_bool_text(val, true);
+}
+
+static void apply_config_file(Options& opt, const std::string& path) {
+    if (path.empty()) return;
+    std::ifstream f(path);
+    if (!f) throw std::runtime_error("cannot open config file: " + path);
+    std::string line;
+    while (std::getline(f, line)) {
+        const std::size_t hash = line.find_first_of("#;");
+        if (hash != std::string::npos) line.resize(hash);
+        line = trim_copy(line);
+        if (line.empty()) continue;
+        std::size_t eq = line.find('=');
+        if (eq == std::string::npos) eq = line.find(':');
+        if (eq == std::string::npos) continue;
+        apply_config_key_value(opt, line.substr(0, eq), line.substr(eq + 1));
+    }
+}
+
+static bool looks_like_prp_worktodo_line(const std::string& line) {
+    const std::string l = lower_copy(line);
+    return l.find("prp") != std::string::npos && l.find("ecm") == std::string::npos && l.find("pminus1") == std::string::npos;
+}
+
+static std::uint32_t parse_first_prp_from_worktodo(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return 0;
+    std::string line;
+    while (std::getline(f, line)) {
+        std::string no_comment = line;
+        const std::size_t hash = no_comment.find_first_of("#;");
+        if (hash != std::string::npos) no_comment.resize(hash);
+        if (!looks_like_prp_worktodo_line(no_comment)) continue;
+        std::vector<std::uint64_t> nums;
+        std::uint64_t cur = 0; bool in = false;
+        for (char c : no_comment) {
+            if (std::isdigit(static_cast<unsigned char>(c))) { in = true; cur = cur * 10u + static_cast<unsigned>(c - '0'); }
+            else { if (in) { nums.push_back(cur); cur = 0; in = false; } }
+        }
+        if (in) nums.push_back(cur);
+        // Worktodo PRP lines can contain small flags before p.  The exponent is normally the largest useful number.
+        std::uint64_t best = 0;
+        for (std::uint64_t v : nums) if (v > best && v <= 0xffffffffULL) best = v;
+        if (best >= 3) return static_cast<std::uint32_t>(best);
+    }
+    return 0;
+}
 
 static Options parse_args(int argc, char** argv) {
     Options opt;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if ((a == "--config" || a == "-config" || a == "--cfg" || a == "-cfg") && i + 1 < argc) {
+            opt.config_path = argv[++i];
+            apply_config_file(opt, opt.config_path);
+        }
+    }
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--modulus" || arg == "--field") {
@@ -7571,6 +9288,138 @@ static Options parse_args(int argc, char** argv) {
         } else if (arg == "--kernel") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --kernel");
             opt.kernel_path = argv[++i];
+        } else if (arg == "--config" || arg == "-config" || arg == "--cfg" || arg == "-cfg") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.config_path = argv[++i];
+        } else if (arg == "--worktodo" || arg == "-worktodo") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.worktodo_path = argv[++i];
+        } else if (arg == "--no-worktodo") {
+            opt.no_worktodo = true;
+        } else if (arg == "--res64-every" || arg == "--res64-display" || arg == "--res64-interval") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.res64_every = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--json") {
+            opt.json_enabled = true;
+        } else if (arg == "--no-json") {
+            opt.json_enabled = false;
+        } else if (arg == "--json-file" || arg == "--json-out") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.json_enabled = true;
+            opt.json_path = argv[++i];
+        } else if (arg == "--output-dir" || arg == "--save-path") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.output_dir = argv[++i];
+        } else if (arg == "--results-file" || arg == "--results-path") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.results_path = argv[++i];
+        } else if (arg == "--no-results") {
+            opt.append_results = false;
+        } else if (arg == "--proof" || arg == "--prp-proof" || arg == "--proof-checkpoints") {
+            opt.proof_checkpoints = true;
+        } else if (arg == "--proof-power") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after --proof-power");
+            opt.proof_checkpoints = true;
+            opt.proof_power = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--proof-dir") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after --proof-dir");
+            opt.proof_checkpoints = true;
+            opt.proof_dir = argv[++i];
+        } else if (arg == "--gerbicz" || arg == "--gerbicz-li" || arg == "--gerbiczli") {
+            opt.gerbicz_enabled = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                opt.gerbicz_user_checklevel = true;
+                opt.gerbicz_checklevel = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+            }
+        } else if (arg == "--no-gerbicz" || arg == "-gerbiczli") {
+            opt.gerbicz_enabled = false;
+        } else if (arg == "--gerbicz-checklevel" || arg == "-checklevel") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_user_checklevel = true;
+            opt.gerbicz_checklevel = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--gerbicz-seconds" || arg == "--gerbicz-target-seconds") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_user_seconds = true;
+            opt.gerbicz_target_seconds = std::stod(argv[++i]);
+        } else if (arg == "--gerbicz-backend") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            std::string b = lower_copy(argv[++i]);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_gpu_verify = (b != "host" && b != "cpu" && b != "gmp");
+        } else if (arg == "--gerbicz-gpu") {
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_gpu_verify = true;
+        } else if (arg == "--gerbicz-host") {
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_gpu_verify = false;
+        } else if (arg == "--gerbicz-estimate-it-s" || arg == "--gerbicz-estimated-ips") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_estimated_ips = std::stod(argv[++i]);
+        } else if (arg == "--gerbicz-boundary-seconds") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_boundary_seconds = std::stod(argv[++i]);
+        } else if (arg == "--gerbicz-verbose") {
+            opt.gerbicz_verbose = true;
+        } else if (arg == "--gerbicz-progress") {
+            opt.gerbicz_progress = true;
+        } else if (arg == "--gerbicz-b" || arg == "--gerbicz-block") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.gerbicz_enabled = true;
+            opt.gerbicz_block = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--error-iter" || arg == "--erroriter" || arg == "-erroriter") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.error_iter = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--error-limb") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.error_limb = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--error-delta") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.error_delta = static_cast<std::uint64_t>(std::stoull(argv[++i]));
+        } else if (arg == "--no-backup" || arg == "--no-save" || arg == "--no-checkpoint") {
+            opt.backup_enabled = false;
+        } else if (arg == "--backup" || arg == "--save" || arg == "--checkpoint") {
+            opt.backup_enabled = true;
+        } else if (arg == "--no-resume") {
+            opt.resume_enabled = false;
+        } else if (arg == "--resume") {
+            opt.resume_enabled = true;
+        } else if (arg == "--save-file" || arg == "--backup-file" || arg == "--checkpoint-file") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.backup_enabled = true;
+            opt.backup_path = argv[++i];
+        } else if (arg == "--resume-file") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after --resume-file");
+            opt.resume_enabled = true;
+            opt.resume_path = argv[++i];
+        } else if (arg == "--backup-dir" || arg == "--save-dir") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.backup_dir = argv[++i];
+        } else if (arg == "--backup-every" || arg == "--save-every" || arg == "--backup-every-iters") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.backup_every_iters = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+        } else if (arg == "--backup-seconds" || arg == "--save-seconds" || arg == "--backup-every-seconds") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.backup_every_seconds = std::stod(argv[++i]);
+        } else if (arg == "--no-save-on-interrupt") {
+            opt.save_on_interrupt = false;
+        } else if (arg == "--queue-guard" || arg == "--cl-queue-guard") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            std::string qv = lower_copy(argv[++i]);
+            if (qv == "auto") {
+                opt.queue_guard_auto = true;
+                opt.queue_guard_depth = 0;
+            } else {
+                opt.queue_guard_auto = false;
+                opt.queue_guard_depth = static_cast<std::uint32_t>(std::stoul(qv));
+            }
+        } else if (arg == "--queue-guard-seconds" || arg == "--cl-queue-guard-seconds") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
+            opt.queue_guard_auto = true;
+            opt.queue_guard_seconds = std::stod(argv[++i]);
         } else if (arg == "--carry-block") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --carry-block");
             opt.carry_block = static_cast<cl_uint>(std::stoul(argv[++i]));
@@ -7879,6 +9728,19 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-mixed-row-fuse-both off|auto|center|stage|all|force optionally runs GF61+GF31 in the same LDS center/stage kernels.\n"
                 << "        --crt-mixed-gpu-reference validates mixed odd LDS/fused paths against the generic mixed GPU path instead of exact CPU.\n"
                 << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
+                << "I/O:    --config FILE reads simple key=value options before CLI overrides.\n"
+                << "        --worktodo FILE loads the first PRP assignment if no exponent is given; --no-worktodo disables this.\n"
+                << "        --json or --json-file FILE writes a small run/result JSON file.\n"
+                << "        --res64-every N prints res64 every N iterations; this intentionally reads back from the GPU.\n"
+                << "        --proof/--proof-dir DIR [--proof-power k] writes experimental residue checkpoints every 2^k iterations.\n"
+                << "        --gerbicz/--gerbicz-li [N] enables true Gerbicz-Li; N is checklevel in block boundaries.\n"
+                << "        --gerbicz-backend gpu|host selects GPU full-check or GMP host full-check; default gpu.\n"
+                << "        --gerbicz-seconds S targets a full Li check about every S seconds; default 600.\n"
+                << "        --gerbicz-boundary-seconds S targets quiet D updates about every S seconds when B is automatic; default 2.\n"
+                << "        --gerbicz-verbose shows every D update; --gerbicz-progress shows full-check leg progress.\n"
+                << "        --gerbicz-b B forces B; --no-gerbicz or -gerbiczli disables it.\n"
+                << "        --error-iter I [--error-limb L] [--error-delta D] injects a state error for Gerbicz testing.\n"
+                << "        --queue-guard auto|N and --queue-guard-seconds S control clFinish cadence; default auto, 2s.\n"
                 << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n"
                 << "Sync:   default benchmark path avoids hot-loop clFlush/clFinish; profiling queues are enabled only with --profile-kernels.\n";
             std::exit(0);
@@ -7889,10 +9751,25 @@ static Options parse_args(int argc, char** argv) {
         }
     }
 
+    if (opt.modulus_mode == "m61" || opt.modulus_mode == "gf61" || opt.modulus_mode == "GF61") opt.modulus_mode = "gf61";
+    else if (opt.modulus_mode == "m31" || opt.modulus_mode == "gf31" || opt.modulus_mode == "GF31") opt.modulus_mode = "gf31";
+    else if (opt.modulus_mode == "crt" || opt.modulus_mode == "gf61xgf31" || opt.modulus_mode == "GF61xGF31") opt.modulus_mode = "crt";
+    else if (opt.modulus_mode == "crt-cpu" || opt.modulus_mode == "cpu-crt") opt.modulus_mode = "crt-cpu";
+    else if (opt.modulus_mode == "best" || opt.modulus_mode == "auto") opt.modulus_mode = "best";
+
+    if (opt.exponent == 0 && !opt.no_worktodo) {
+        const std::uint32_t wp = parse_first_prp_from_worktodo(opt.worktodo_path);
+        if (wp != 0) {
+            opt.exponent = wp;
+            std::cout << "worktodo: selected PRP exponent p=" << wp << " from " << opt.worktodo_path << "\n";
+        }
+    }
+
     return opt;
 }
 
 static const char* yesno(bool v) { return v ? "on" : "off"; }
+
 
 static std::string crt_schedule_name(int v) {
     switch (v) {
@@ -8654,6 +10531,57 @@ int main(int argc, char** argv) {
                       << "\n";
 
             print_crt_transform_plan(opt, layout);
+
+            g_runtime.exponent = opt.exponent;
+            g_runtime.mode_label = (layout.odd > 1u) ? "BananaNTT mixed CRT/PFA half-real" : "PrMers CRT";
+            g_runtime.res64_every = opt.res64_every;
+            g_runtime.json_enabled = opt.json_enabled;
+            g_runtime.json_path = opt.json_path;
+            g_runtime.output_dir = opt.output_dir;
+            g_runtime.results_path = opt.results_path;
+            g_runtime.append_results = opt.append_results;
+            g_runtime.proof_checkpoints = opt.proof_checkpoints;
+            g_runtime.proof_power = opt.proof_power;
+            g_runtime.proof_dir = opt.proof_dir;
+            g_runtime.gerbicz_interval = opt.gerbicz_interval;
+            g_runtime.gerbicz_enabled = opt.gerbicz_enabled;
+            g_runtime.gerbicz_gpu_verify = opt.gerbicz_gpu_verify;
+            g_runtime.gerbicz_user_checklevel = opt.gerbicz_user_checklevel;
+            g_runtime.gerbicz_checklevel = opt.gerbicz_checklevel;
+            g_runtime.gerbicz_block = opt.gerbicz_block;
+            g_runtime.gerbicz_target_seconds = opt.gerbicz_target_seconds;
+            g_runtime.gerbicz_estimated_ips = opt.gerbicz_estimated_ips;
+            g_runtime.gerbicz_user_seconds = opt.gerbicz_user_seconds;
+            g_runtime.gerbicz_boundary_seconds = opt.gerbicz_boundary_seconds;
+            g_runtime.gerbicz_verbose = opt.gerbicz_verbose;
+            g_runtime.gerbicz_progress = opt.gerbicz_progress;
+            g_runtime.gerbicz_errors = 0;
+            g_runtime.last_proof_file.clear();
+            g_runtime.error_iter = opt.error_iter;
+            g_runtime.error_limb = opt.error_limb;
+            g_runtime.error_delta = opt.error_delta;
+            g_runtime.error_injected = false;
+            g_runtime.backup_enabled = opt.backup_enabled;
+            g_runtime.resume_enabled = opt.resume_enabled;
+            g_runtime.save_on_interrupt = opt.save_on_interrupt;
+            g_runtime.backup_path = opt.backup_path;
+            g_runtime.resume_path = opt.resume_path;
+            g_runtime.backup_dir = opt.backup_dir;
+            g_runtime.backup_every_iters = opt.backup_every_iters;
+            g_runtime.backup_every_seconds = opt.backup_every_seconds;
+            g_runtime.queue_guard_depth = opt.queue_guard_depth;
+            g_runtime.queue_guard_auto = opt.queue_guard_auto;
+            g_runtime.queue_guard_seconds = opt.queue_guard_seconds;
+            if (g_runtime.res64_every)
+                std::cout << "optional res64 display every " << g_runtime.res64_every << " iteration(s); this reads data back from the GPU.\n";
+            if (g_runtime.proof_checkpoints)
+                std::cout << "experimental PRP checkpoint output enabled; this writes residue checkpoints, not a PrimeNet upload.\n";
+            if (g_runtime.gerbicz_enabled)
+                std::cout << "Gerbicz-Li enabled by default: Li relation, backend="
+                          << (g_runtime.gerbicz_gpu_verify ? "gpu-fullcheck+gpu-D-update" : "host-exact-GMP")
+                          << "; use --gerbicz-host for GMP full-check or --no-gerbicz/-gerbiczli to disable.\n";
+            if (g_runtime.error_iter)
+                std::cout << "error injection armed at iteration " << g_runtime.error_iter << " limb=" << g_runtime.error_limb << " delta=" << g_runtime.error_delta << "\n";
 
             bool prp = false;
             if (opt.modulus_mode == "crt") {
