@@ -68,3 +68,25 @@ PRMERS_CRT_MIXED_FUSE_PACK_BOTH=0|1
 ```
 
 The default path keeps GF31 center/stage single-LDS disabled.  The v51 change is limited to the fused pack+oddDFT kernel: the odd DFT matrices are cached as scalar values in LDS instead of full GF/GF31 pairs.
+
+## V57 experimental prepack-next
+
+`PRMERS_CRT_MIXED_PREPACK_NEXT=1` moves the pack of iteration `n+1` to the end of
+iteration `n`, immediately after carry. The next iteration skips the usual head
+pack and starts from the already packed `a61/a31` buffers.
+
+This is a safe scheduling experiment based on the existing tile28 61x31 pack
+kernel. It is not yet the final carry+pack fused kernel, so speedup may be small
+or neutral. Use it only for A/B testing.
+
+## V58 experimental carry-pack-next LDS
+
+This build adds an optional fused carry + next-pack path. It is off unless both variables are set:
+
+```bash
+PRMERS_CRT_MIXED_PREPACK_NEXT=1
+PRMERS_CRT_MIXED_CARRY_PACK_NEXT_LDS=1
+```
+
+The path tries to avoid the separate next-iteration pack kernel by building the next GF61/GF31 packed rows inside the carry pass using LDS. Validate it before long runs. See `V58_CARRY_PACK_NEXT_LDS.md`.
+

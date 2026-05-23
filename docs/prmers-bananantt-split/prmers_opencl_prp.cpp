@@ -741,6 +741,7 @@ struct GpuPrp {
     cl_kernel k_crt_carry_segment_pass_oneout = nullptr;
     cl_kernel k_crt_carry_cleanup_serial_oneout = nullptr;
     cl_kernel k_crt_carry_cleanup_parallel_oneout = nullptr;
+    cl_kernel k_crt_mixed_carry_pack_next_lds_61x31 = nullptr;
 
     cl_mem bufDigits = nullptr;
     cl_mem bufDigits32 = nullptr;
@@ -832,6 +833,7 @@ struct GpuPrp {
         if (bufDigits) clReleaseMemObject(bufDigits);
         if (bufDigits32) clReleaseMemObject(bufDigits32);
         if (k_carry_clear_pending) clReleaseKernel(k_carry_clear_pending);
+        if (k_crt_mixed_carry_pack_next_lds_61x31) clReleaseKernel(k_crt_mixed_carry_pack_next_lds_61x31);
         if (k_crt_carry_cleanup_parallel_oneout) clReleaseKernel(k_crt_carry_cleanup_parallel_oneout);
         if (k_crt_carry_cleanup_serial_oneout) clReleaseKernel(k_crt_carry_cleanup_serial_oneout);
         if (k_crt_carry_segment_pass_oneout) clReleaseKernel(k_crt_carry_segment_pass_oneout);
@@ -1109,6 +1111,7 @@ GpuPrp make_gpu(const DeviceInfo& info,
     make_kernel("gf61_crt_carry_segment_pass_oneout", &gpu.k_crt_carry_segment_pass_oneout);
     make_kernel("gf61_crt_carry_cleanup_serial_oneout", &gpu.k_crt_carry_cleanup_serial_oneout);
     make_kernel("gf61_crt_carry_cleanup_parallel_oneout", &gpu.k_crt_carry_cleanup_parallel_oneout);
+    make_kernel("gf61_crt_mixed_carry_pack_next_lds_61x31", &gpu.k_crt_mixed_carry_pack_next_lds_61x31);
 
     gpu.n = layout.n;
     gpu.exponent_p = static_cast<cl_uint>(layout.p);
@@ -1225,6 +1228,14 @@ static bool g_crt_halfreal_validate_random = false;
 // This switch validates the selected LDS/fused mixed path against the generic
 // mixed GPU path, keeping the same PFA digit order and avoiding the CPU square.
 static bool g_crt_mixed_gpu_reference = false;
+// v57 experimental: carry boundary can pre-pack the next iteration.
+// The next square then starts directly from a61/a31 and skips the head pack.
+static bool g_crt_mixed_skip_pack_this_square = false;
+// v58 experimental: fuse the post-Garner carry pass with the next mixed pack.
+// This is only armed by the main mixed loop for iter+1 and only when the tail
+// already produced the first carry vectors.
+static bool g_crt_mixed_carry_pack_next_request = false;
+static bool g_crt_mixed_carry_pack_next_done = false;
 static std::size_t g_crt_halfreal_dump_count = 32;
 static std::string g_crt_halfreal_dump_prefix = "halfreal_debug";
 
@@ -2374,6 +2385,15 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     cl_kernel k_pass  = oneout_digits ? gpu61.k_crt_carry_segment_pass_oneout  : gpu61.k_crt_carry_segment_pass;
     cl_kernel k_clean = oneout_digits ? gpu61.k_crt_carry_cleanup_serial_oneout : gpu61.k_crt_carry_cleanup_serial;
 
+    const bool can_carry_pack_next_lds = g_crt_mixed_carry_pack_next_request && oneout_digits && precomputed_first_carry &&
+        parse_bool_env("PRMERS_CRT_MIXED_CARRY_PACK_NEXT_LDS", false) &&
+        parse_bool_env("PRMERS_CRT_MIXED_CARRY_PACK_ASSUME_NO_WRAP", true) &&
+        gpu61.k_crt_mixed_carry_pack_next_lds_61x31 &&
+        gpu61.n == gpu31.n && g_crt_odd_radix == 9u && (items == 32u || items == 64u) && crt_passes == 1u &&
+        gpu61.bufField && gpu31.bufField && gpu61.bufOddFwd && gpu31.bufOddFwd &&
+        gpu61.bufUnweightShift && gpu31.bufUnweightShift && gpu61.bufWidth;
+    g_crt_mixed_carry_pack_next_done = false;
+
     auto enqueue_profiled_kernel = [&](cl_kernel kernel,
                                        const std::size_t* global_ptr,
                                        const std::size_t* local_ptr,
@@ -2474,20 +2494,50 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
         
         
         check(clEnqueueWriteBuffer(gpu61.queue, gpu61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr), "crt reset pass pending");
-        arg = 0;
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufDigits), "crt_pass arg0");
-        if (!oneout_digits) check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu31_digits), "crt_pass arg1");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufWidth), "crt_pass arg2");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &lo_in), "crt_pass arg3 lo_in");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &hi_in), "crt_pass arg4 hi_in");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &lo_out), "crt_pass arg5 lo_out");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &hi_out), "crt_pass arg6 hi_out");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufCarryPending), "crt_pass arg7 pending");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &digit_n), "crt_pass arg8 n");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &segments), "crt_pass arg9 seg");
-        check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &items), "crt_pass arg10 items");
-        enqueue_profiled_kernel(k_pass, &global, &local, 0, nullptr,
-                                "enqueue crt pass", oneout_digits ? "crt_carry_pass_oneout" : "crt_carry_pass");
+        if (pass == 0u && can_carry_pack_next_lds) {
+            const cl_uint odd = 9u;
+            const cl_uint pow2_n = digit_n / odd;
+            const cl_uint bseg_count = pow2_n / items;
+            const std::size_t carry_pack_local = 256u;
+            const std::size_t carry_pack_global = round_up_size(static_cast<std::size_t>(bseg_count) * carry_pack_local, carry_pack_local);
+            cl_kernel k_cp = gpu61.k_crt_mixed_carry_pack_next_lds_61x31;
+            arg = 0;
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufDigits), "carry_pack arg0 digits");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufWidth), "carry_pack arg1 width");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &lo_in), "carry_pack arg2 lo_in");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &hi_in), "carry_pack arg3 hi_in");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &lo_out), "carry_pack arg4 lo_out");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &hi_out), "carry_pack arg5 hi_out");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufCarryPending), "carry_pack arg6 pending");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufField), "carry_pack arg7 a61");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu31.bufField), "carry_pack arg8 a31");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufOddFwd), "carry_pack arg9 mat61");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu31.bufOddFwd), "carry_pack arg10 mat31");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu61.bufUnweightShift), "carry_pack arg11 shift61");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_mem), &gpu31.bufUnweightShift), "carry_pack arg12 shift31");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_uint), &digit_n), "carry_pack arg13 n");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_uint), &segments), "carry_pack arg14 segments");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_uint), &items), "carry_pack arg15 items");
+            check(clSetKernelArg(k_cp, arg++, sizeof(cl_uint), &pow2_n), "carry_pack arg16 pow2_n");
+            enqueue_profiled_kernel(k_cp, &carry_pack_global, &carry_pack_local, 0, nullptr,
+                                    "enqueue crt carry-pack-next lds", "crt_mixed_carry_pack_next_lds_61x31");
+            g_crt_mixed_carry_pack_next_done = true;
+        } else {
+            arg = 0;
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufDigits), "crt_pass arg0");
+            if (!oneout_digits) check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu31_digits), "crt_pass arg1");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufWidth), "crt_pass arg2");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &lo_in), "crt_pass arg3 lo_in");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &hi_in), "crt_pass arg4 hi_in");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &lo_out), "crt_pass arg5 lo_out");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &hi_out), "crt_pass arg6 hi_out");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_mem), &gpu61.bufCarryPending), "crt_pass arg7 pending");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &digit_n), "crt_pass arg8 n");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &segments), "crt_pass arg9 seg");
+            check(clSetKernelArg(k_pass, arg++, sizeof(cl_uint), &items), "crt_pass arg10 items");
+            enqueue_profiled_kernel(k_pass, &global, &local, 0, nullptr,
+                                    "enqueue crt pass", oneout_digits ? "crt_carry_pass_oneout" : "crt_carry_pass");
+        }
         std::swap(lo_in, lo_out);
         std::swap(hi_in, hi_out);
     }
@@ -2702,6 +2752,7 @@ struct CrtFusedKernels {
     cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_31 = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile14_shift_lmat_both = nullptr;
+    cl_kernel mixed_pack_odd_fwd_tile28_shift_lmat_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_tile7_both = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift61 = nullptr;
     cl_kernel mixed_pack_odd_fwd_shift31 = nullptr;
@@ -2881,6 +2932,7 @@ struct CrtFusedKernels {
         mixed_pack_odd_fwd_tile14_shift_lmat_61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61");
         mixed_pack_odd_fwd_tile14_shift_lmat_31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31");
         mixed_pack_odd_fwd_tile14_shift_lmat_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31");
+        mixed_pack_odd_fwd_tile28_shift_lmat_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31");
         mixed_pack_odd_fwd_tile7_both = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_tile7_61x31");
         mixed_pack_odd_fwd_shift61 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_61");
         mixed_pack_odd_fwd_shift31 = load_kernel_optional(program, "gf61_crt_mixed_pack_weight_odd_fwd_shift_31");
@@ -3050,6 +3102,7 @@ struct CrtFusedKernels {
         if (mixed_pack_odd_fwd_tile14_shift_lmat_61) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_61);
         if (mixed_pack_odd_fwd_tile14_shift_lmat_31) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_31);
         if (mixed_pack_odd_fwd_tile14_shift_lmat_both) clReleaseKernel(mixed_pack_odd_fwd_tile14_shift_lmat_both);
+        if (mixed_pack_odd_fwd_tile28_shift_lmat_both) clReleaseKernel(mixed_pack_odd_fwd_tile28_shift_lmat_both);
         if (mixed_pack_odd_fwd_tile7_both) clReleaseKernel(mixed_pack_odd_fwd_tile7_both);
         if (mixed_pack_odd_fwd_shift61) clReleaseKernel(mixed_pack_odd_fwd_shift61);
         if (mixed_pack_odd_fwd_shift31) clReleaseKernel(mixed_pack_odd_fwd_shift31);
@@ -3097,12 +3150,12 @@ struct CrtFusedKernels {
     bool mixed_odd_shift_lut_available() const {
         return mixed_pack_odd_fwd_shift61 && mixed_pack_odd_fwd_shift31 && mixed_odd_inv_precrt_coeffhi_shift;
     }
-    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr || mixed_pack_odd_fwd_tile7_both != nullptr || mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr; }
+    bool mixed_odd_pack_both_available() const { return mixed_pack_odd_fwd_both_shift != nullptr || mixed_pack_odd_fwd_tile7_both != nullptr || mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr || mixed_pack_odd_fwd_tile28_shift_lmat_both != nullptr; }
     bool mixed_odd_pack_tile7_available() const { return mixed_pack_odd_fwd_tile7_61 && mixed_pack_odd_fwd_tile7_31; }
     bool mixed_odd_pack_tile14_available() const { return mixed_pack_odd_fwd_tile14_61 && mixed_pack_odd_fwd_tile14_31; }
     bool mixed_odd_pack_tile14_shift_available() const { return mixed_pack_odd_fwd_tile14_shift_61 && mixed_pack_odd_fwd_tile14_shift_31; }
     bool mixed_odd_pack_tile14_shift_lmat_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_61 && mixed_pack_odd_fwd_tile14_shift_lmat_31; }
-    bool mixed_odd_pack_tile14_shift_lmat_both_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr; }
+    bool mixed_odd_pack_tile14_shift_lmat_both_available() const { return mixed_pack_odd_fwd_tile14_shift_lmat_both != nullptr || mixed_pack_odd_fwd_tile28_shift_lmat_both != nullptr; }
     bool mixed_odd_pack_tile7_both_available() const { return mixed_pack_odd_fwd_tile7_both != nullptr; }
     bool mixed_odd_center_both_available() const { return mixed_lds_any_pair_both != nullptr || mixed_lds512_pair_both != nullptr; }
     bool mixed_odd_center_any_both_available() const { return mixed_lds_any_pair_both != nullptr; }
@@ -3396,6 +3449,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const cl_uint log_m = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(row_m));
     const size_t local64 = 64u;
     const size_t local128 = 128u;
+    const size_t local256 = 256u;
     const size_t g_storage = round_up_size(static_cast<size_t>(storage), local64);
     const size_t g_row_m = round_up_size(static_cast<size_t>(row_m), local64);
     const size_t g_center_scalar = round_up_size(static_cast<size_t>(odd) * static_cast<size_t>(row_m), local64);
@@ -3620,19 +3674,28 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     };
     auto pack_odd_fwd_both = [&]() {
         if (use_mixed_pack_tile14_shift_lmat_both) {
+            const bool use_pack_tile28 = (odd == 9u) && parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE28_61X31", true) &&
+                                         fk.mixed_pack_odd_fwd_tile28_shift_lmat_both;
+            cl_kernel kpack = use_pack_tile28 ? fk.mixed_pack_odd_fwd_tile28_shift_lmat_both : fk.mixed_pack_odd_fwd_tile14_shift_lmat_both;
+            const size_t* local_pack = use_pack_tile28 ? &local256 : &local128;
+            const size_t tile = use_pack_tile28 ? 28u : 14u;
+            const size_t wg = use_pack_tile28 ? 256u : 128u;
+            const char* label = use_pack_tile28 ?
+                "crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31" :
+                "crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31";
             cl_uint arg = 0;
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufDigits, "set mixed pack+odd tile14 lmat both digits");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufField, "set mixed pack+odd tile14 lmat both a61");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufField, "set mixed pack+odd tile14 lmat both a31");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufOddFwd, "set mixed pack+odd tile14 lmat both mat61");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufOddFwd, "set mixed pack+odd tile14 lmat both mat31");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g61.bufUnweightShift, "set mixed pack+odd tile14 lmat both shift61");
-            set_karg_mem(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, g31.bufUnweightShift, "set mixed pack+odd tile14 lmat both shift31");
-            set_karg(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, odd, "set mixed pack+odd tile14 lmat both odd");
-            set_karg(fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, arg, pow2_n, "set mixed pack+odd tile14 lmat both pow2_n");
-            const size_t head_global = round_up_size(((static_cast<size_t>(row_m) + 13u) / 14u) * 128u, local128);
-            enqueue_kernel(g61, fk.mixed_pack_odd_fwd_tile14_shift_lmat_both, head_global, &local128,
-                           "enqueue mixed fused pack+odd tile14 lmat both", "crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31");
+            set_karg_mem(kpack, arg, g61.bufDigits, "set mixed pack+odd lmat both digits");
+            set_karg_mem(kpack, arg, g61.bufField, "set mixed pack+odd lmat both a61");
+            set_karg_mem(kpack, arg, g31.bufField, "set mixed pack+odd lmat both a31");
+            set_karg_mem(kpack, arg, g61.bufOddFwd, "set mixed pack+odd lmat both mat61");
+            set_karg_mem(kpack, arg, g31.bufOddFwd, "set mixed pack+odd lmat both mat31");
+            set_karg_mem(kpack, arg, g61.bufUnweightShift, "set mixed pack+odd lmat both shift61");
+            set_karg_mem(kpack, arg, g31.bufUnweightShift, "set mixed pack+odd lmat both shift31");
+            set_karg(kpack, arg, odd, "set mixed pack+odd lmat both odd");
+            set_karg(kpack, arg, pow2_n, "set mixed pack+odd lmat both pow2_n");
+            const size_t head_global = round_up_size(((static_cast<size_t>(row_m) + tile - 1u) / tile) * wg, *local_pack);
+            enqueue_kernel(g61, kpack, head_global, local_pack,
+                           "enqueue mixed fused pack+odd lmat both", label);
         } else if (use_mixed_pack_tile7 && fk.mixed_pack_odd_fwd_tile7_both) {
             cl_uint arg = 0;
             set_karg_mem(fk.mixed_pack_odd_fwd_tile7_both, arg, g61.bufDigits, "set mixed pack+odd tile7 both digits");
@@ -4381,7 +4444,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         g61.crtLastUnweightPending = false;
     };
 
-    if (use_mixed_pack_both) {
+    const bool use_prepacked_head = g_crt_mixed_skip_pack_this_square && use_mixed_pack_both;
+    if (use_prepacked_head) {
+        // a61/a31 already contain pack+weight+oddDFT from the previous carry boundary.
+        // Keep this limited to the fused 61x31 pack path so both queues see the same marker logic.
+    } else if (use_mixed_pack_both) {
         pack_odd_fwd_both();
     } else if (use_mixed_fused_edges) {
         pack_odd_fwd61(); pack_odd_fwd31();
@@ -4473,6 +4540,53 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     if (parse_bool_env("PRMERS_CRT_MIXED_FINISH_AFTER_SQUARE", false)) {
         check(clFinish(g61.queue), "clFinish mixed odd gf61");
         check(clFinish(g31.queue), "clFinish mixed odd gf31");
+    }
+    return true;
+}
+
+
+// v57 safe pre-pack test: after carry has stabilized digits, build the
+// pack+weight+oddDFT input for the next iteration.  This deliberately reuses
+// the proven v53 tile28 61x31 pack kernel; the next square skips only the head
+// pack enqueue.  It does not fuse carry arithmetic yet, so it is a correctness
+// and scheduling experiment rather than the final memory-pass-saving kernel.
+static bool enqueue_crt_mixed_pack_next_after_carry(GpuPrp& g61, GpuPrp& g31, CrtFusedKernels& fk) {
+    const cl_uint odd = g_crt_odd_radix;
+    if (odd != 9u) return false;
+    if (g61.n != g31.n) return false;
+    const cl_uint n = g61.n;
+    if ((n % odd) != 0u) return false;
+    const cl_uint pow2_n = n / odd;
+    if (pow2_n < 4u || (pow2_n & (pow2_n - 1u)) != 0u) return false;
+    const cl_uint row_m = pow2_n >> 1;
+    if (!fk.mixed_pack_odd_fwd_tile28_shift_lmat_both) return false;
+    if (!g61.bufUnweightShift || !g31.bufUnweightShift || !g61.bufOddFwd || !g31.bufOddFwd) return false;
+
+    const size_t local256 = 256u;
+    const size_t tile = 28u;
+    const size_t wg = 256u;
+    const size_t head_global = round_up_size(((static_cast<size_t>(row_m) + tile - 1u) / tile) * wg, local256);
+    cl_kernel kpack = fk.mixed_pack_odd_fwd_tile28_shift_lmat_both;
+
+    cl_uint arg = 0;
+    set_karg_mem(kpack, arg, g61.bufDigits, "set mixed pack-next digits");
+    set_karg_mem(kpack, arg, g61.bufField, "set mixed pack-next a61");
+    set_karg_mem(kpack, arg, g31.bufField, "set mixed pack-next a31");
+    set_karg_mem(kpack, arg, g61.bufOddFwd, "set mixed pack-next mat61");
+    set_karg_mem(kpack, arg, g31.bufOddFwd, "set mixed pack-next mat31");
+    set_karg_mem(kpack, arg, g61.bufUnweightShift, "set mixed pack-next shift61");
+    set_karg_mem(kpack, arg, g31.bufUnweightShift, "set mixed pack-next shift31");
+    set_karg(kpack, arg, odd, "set mixed pack-next odd");
+    set_karg(kpack, arg, pow2_n, "set mixed pack-next pow2_n");
+
+    enqueue_kernel(g61, kpack, head_global, &local256,
+                   "enqueue mixed pack-next tile28 61x31",
+                   "crt_mixed_pack_next_tile28_shift_lmat_61x31");
+    cl_event both_ready = enqueue_queue_marker(g61, "mixed pack-next both ready");
+    set_pending_wait_event(g31, both_ready);
+    if (parse_bool_env("PRMERS_CRT_MIXED_ALLOW_HOST_FLUSH",
+                       parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false)) && g61.queue != g31.queue) {
+        clFlush(g61.queue);
     }
     return true;
 }
@@ -7078,11 +7192,14 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", precrt-garner64=" << (mixed_precrt_garner64_enabled ? "on" : "off")
                   << ", precrt-garner-pair30=" << ((mixed_precrt_garner64_enabled && parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER_PAIR30", true)) ? "on" : "off")
                   << ", precrt-garner-pair30-smat=" << ((mixed_precrt_garner64_enabled && parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER_PAIR30", true) && parse_bool_env("PRMERS_CRT_MIXED_FUSE_PRECRT_GARNER_PAIR30_SMAT", true)) ? "on" : "off")
+                  << ", carry-pack-next-lds=" << ((parse_bool_env("PRMERS_CRT_MIXED_PREPACK_NEXT", false) && parse_bool_env("PRMERS_CRT_MIXED_CARRY_PACK_NEXT_LDS", false)) ? "on" : "off")
                   << ", precrt-tile7=" << (mixed_precrt_tile7_enabled ? "on" : "off")
                   << ", precrt-outpar=" << (mixed_precrt_outpar_enabled ? "on" : "off")
                   << ", pack-tile14=" << (mixed_pack_tile14_enabled ? "on" : "off")
                   << ", pack-tile14-shift=" << (mixed_pack_tile14_shift_enabled ? "on" : "off")
                   << ", pack-tile14-lmat-61x31=" << (mixed_pack_tile14_lmat_both_enabled ? "on" : "off")
+                  << ", pack-tile28-lmat-61x31=" << ((mixed_pack_tile14_lmat_both_enabled && parse_bool_env("PRMERS_CRT_MIXED_PACK_TILE28_61X31", true)) ? "on" : "off")
+                  << ", prepack-next=" << ((layout.odd > 1u && parse_bool_env("PRMERS_CRT_MIXED_PREPACK_NEXT", false)) ? "on" : "off")
                   << ", pack-tile7=" << (mixed_pack_tile7_enabled ? "on" : "off")
                   << ", shift-lut=" << (mixed_shift_lut_enabled ? "on" : "off")
                   << ", lds-stage=" << clwrap::g_crt_lds_stage
@@ -7172,12 +7289,19 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     const bool crt_progress_finish = parse_bool_env("PRMERS_CRT_PROGRESS_FINISH",
                                                    (gpu61.profile_kernels || gpu31.profile_kernels));
     const bool crt_periodic_flush = parse_bool_env("PRMERS_CRT_PERIODIC_FLUSH", false);
+    const bool crt_mixed_prepack_next = use_crt_defused_fast && layout.odd > 1u &&
+        parse_bool_env("PRMERS_CRT_MIXED_PREPACK_NEXT", false);
+    const bool crt_mixed_carry_pack_next_lds = crt_mixed_prepack_next &&
+        parse_bool_env("PRMERS_CRT_MIXED_CARRY_PACK_NEXT_LDS", false);
+    bool crt_mixed_prepack_ready = false;
 
     for (std::uint32_t iter = 0; iter < run_iters; ++iter) {
         if (g_stop_requested.load(std::memory_order_relaxed)) throw InterruptedRun();
 
+        clwrap::g_crt_mixed_skip_pack_this_square = crt_mixed_prepack_next && crt_mixed_prepack_ready;
         if (use_crt_defused_fast) {
             if (!clwrap::enqueue_square_mod_crt_defused_fast(gpu61, gpu31, crt_fused)) {
+                clwrap::g_crt_mixed_skip_pack_this_square = false;
                 throw std::runtime_error("CRT defused-fast pipeline rejected this transform");
             }
         } else if (use_crt_fused_pipeline) {
@@ -7193,7 +7317,23 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             if (parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false) && gpu31.queue != gpu61.queue) clFlush(gpu31.queue);
             clwrap::enqueue_square_mod(gpu61, center_max);
         }
+        clwrap::g_crt_mixed_skip_pack_this_square = false;
+        clwrap::g_crt_mixed_carry_pack_next_request = crt_mixed_carry_pack_next_lds && ((iter + 1u) < run_iters);
+        clwrap::g_crt_mixed_carry_pack_next_done = false;
         clwrap::enqueue_crt_garner_carry_gpu(gpu61, gpu31, carry_cfg, true);
+        clwrap::g_crt_mixed_carry_pack_next_request = false;
+        if (crt_mixed_prepack_next && (iter + 1u) < run_iters) {
+            if (crt_mixed_carry_pack_next_lds && clwrap::g_crt_mixed_carry_pack_next_done) {
+                crt_mixed_prepack_ready = true;
+            } else {
+                if (!clwrap::enqueue_crt_mixed_pack_next_after_carry(gpu61, gpu31, crt_fused)) {
+                    throw std::runtime_error("PRMERS_CRT_MIXED_PREPACK_NEXT requested but pack-next tile28 61x31 path is unavailable");
+                }
+                crt_mixed_prepack_ready = true;
+            }
+        } else {
+            crt_mixed_prepack_ready = false;
+        }
 
         const bool do_report = verbose && ((iter + 1) % report_interval == 0 || iter + 1 == run_iters);
         const bool do_profile_report = effective_profile_every && (((iter + 1) % effective_profile_every) == 0 || iter + 1 == run_iters);

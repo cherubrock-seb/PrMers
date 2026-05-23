@@ -9039,6 +9039,188 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_31(__global const ulon
 }
 
 
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const ulong* restrict digits,
+                                                               __global GF* restrict a61,
+                                                               __global GF31* restrict a31,
+                                                               __global const GF* restrict mat61,
+                                                               __global const GF31* restrict mat31,
+                                                               __global const uchar* restrict shift61,
+                                                               __global const uchar* restrict shift31,
+                                                               uint odd, uint pow2_n)
+{
+    (void)odd;
+    const uint lid = (uint)get_local_id(0);
+    const uint kt = lid / 9u;
+    const uint lane = lid - kt * 9u;
+    const uint row_m = pow2_n >> 1;
+    const uint k = (uint)get_group_id(0) * 28u + kt;
+
+    __local GF l61[28 * 9];
+    __local GF31 l31[28 * 9];
+    /* v53: tile28 variant of the v51 scalar-matrix pack.
+       One workgroup handles 28 row positions x 9 odd lanes.
+       This halves the number of workgroups and matrix-cache reloads
+       versus tile14, while keeping the same output layout. */
+    __local ulong lm61r[9 * 9];
+    __local uint lm31r[9 * 9];
+
+    if (lid < 81u) {
+        lm61r[lid] = mat61[lid].s0;
+        lm31r[lid] = mat31[lid].s0;
+    }
+
+    if (kt < 28u && k < row_m && lane < 9u) {
+        const uint b0 = k << 1;
+        const uint b1 = b0 + 1u;
+        const uint j0 = crt_mixed_j_from_coord(lane, b0, 9u, pow2_n);
+        const uint j1 = crt_mixed_j_from_coord(lane, b1, 9u, pow2_n);
+        const ulong d0 = digits[j0];
+        const ulong d1 = digits[j1];
+        l61[kt * 9u + lane] = (GF)(lshift61(d0, (uint)shift61[j0]),
+                                  lshift61(d1, (uint)shift61[j1]));
+        l31[kt * 9u + lane] = (GF31)(f31_lshift_scalar(f31_reduce_ulong(d0), (uint)shift31[j0]),
+                                    f31_lshift_scalar(f31_reduce_ulong(d1), (uint)shift31[j1]));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (kt >= 28u || k >= row_m || lane >= 9u) return;
+
+    const uint lbase = kt * 9u;
+    const uint mbase = lane * 9u;
+    GF acc61 = GF_ZERO;
+    GF31 acc31 = (GF31)(0u, 0u);
+
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 0u], lm61r[mbase + 0u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 0u], lm31r[mbase + 0u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 1u], lm61r[mbase + 1u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 1u], lm31r[mbase + 1u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 2u], lm61r[mbase + 2u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 2u], lm31r[mbase + 2u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 3u], lm61r[mbase + 3u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 3u], lm31r[mbase + 3u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 4u], lm61r[mbase + 4u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 4u], lm31r[mbase + 4u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 5u], lm61r[mbase + 5u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 5u], lm31r[mbase + 5u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 6u], lm61r[mbase + 6u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 6u], lm31r[mbase + 6u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 7u], lm61r[mbase + 7u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 7u], lm31r[mbase + 7u]));
+    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 8u], lm61r[mbase + 8u]));
+    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 8u], lm31r[mbase + 8u]));
+
+    const uint out = lane * row_m + k;
+    a61[out] = acc61;
+    a31[out] = acc31;
+}
+
+// v58 experimental fast path.
+// One workgroup processes one contiguous b-segment on the 2^m axis and the 9
+// physical CRT/PFA lanes.  It applies the carry incoming from the fused
+// preCRT+Garner tail, writes the normalized digits, and immediately builds the
+// pack+weight+oddDFT input for the next iteration from LDS.
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
+                                             __global const uchar* restrict widths,
+                                             __global const ulong* restrict carry_lo_in,
+                                             __global const ulong* restrict carry_hi_in,
+                                             __global ulong* restrict carry_lo_out,
+                                             __global ulong* restrict carry_hi_out,
+                                             __global uint* restrict pending,
+                                             __global GF* restrict a61,
+                                             __global GF31* restrict a31,
+                                             __global const GF* restrict mat61,
+                                             __global const GF31* restrict mat31,
+                                             __global const uchar* restrict shift61,
+                                             __global const uchar* restrict shift31,
+                                             uint digit_n,
+                                             uint segments,
+                                             uint items_per_segment,
+                                             uint pow2_n)
+{
+    const uint lid = (uint)get_local_id(0);
+    const uint bseg = (uint)get_group_id(0);
+    const uint row_m = pow2_n >> 1;
+    const uint pairs = items_per_segment >> 1;
+    const uint segs_per_lane = pow2_n / items_per_segment;
+    if (items_per_segment != 32u && items_per_segment != 64u) return;
+    if (bseg >= segs_per_lane) return;
+
+    __local ulong l61r[32u * 9u];
+    __local ulong l61i[32u * 9u];
+    __local uint  l31r[32u * 9u];
+    __local uint  l31i[32u * 9u];
+    __local ulong lm61r[9u * 9u];
+    __local uint  lm31r[9u * 9u];
+
+    if (lid < 81u) {
+        lm61r[lid] = mat61[lid].s0;
+        lm31r[lid] = mat31[lid].s0;
+    }
+
+    // Nine work-items carry-normalize the nine physical PFA lanes for this
+    // b-segment.  The PFA input coordinate a is reconstructed from j mod 9.
+    if (lid < 9u) {
+        const uint phys = lid;
+        const uint seg = bseg + phys * segs_per_lane;
+        const uint start = seg * items_per_segment;
+        ulong clo = carry_lo_in[seg];
+        ulong chi = carry_hi_in[seg];
+        const uint p2mod9 = pow2_n % 9u;
+
+        for (uint off = 0u; off < items_per_segment; ++off) {
+            const uint j = start + off;
+            if (j < digit_n) {
+                crt_scan_digit_add_carry_oneout(digits, widths, j, &clo, &chi);
+                const ulong d = digits[j];
+                const uint b = bseg * items_per_segment + off;
+                const uint a = (b + p2mod9 * phys) % 9u;
+                const uint pair = off >> 1;
+                const uint slot = pair * 9u + a;
+                if ((off & 1u) == 0u) {
+                    l61r[slot] = lshift61(d, (uint)shift61[j]);
+                    l31r[slot] = f31_lshift_scalar(f31_reduce_ulong(d), (uint)shift31[j]);
+                } else {
+                    l61i[slot] = lshift61(d, (uint)shift61[j]);
+                    l31i[slot] = f31_lshift_scalar(f31_reduce_ulong(d), (uint)shift31[j]);
+                }
+            }
+        }
+        const uint next = (seg + 1u < segments) ? (seg + 1u) : 0u;
+        carry_lo_out[next] = clo;
+        carry_hi_out[next] = chi;
+        if ((clo | chi) != 0ul) pending[0] = 1u;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Build the next iteration head: pack + weight + odd DFT.  Same output
+    // layout as gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31.
+    for (uint idx = lid; idx < pairs * 9u; idx += 256u) {
+        const uint pair = idx / 9u;
+        const uint lane = idx - pair * 9u;
+        const uint k = bseg * pairs + pair;
+        if (k >= row_m) continue;
+
+        const uint lbase = pair * 9u;
+        const uint mbase = lane * 9u;
+        GF acc61 = GF_ZERO;
+        GF31 acc31 = (GF31)(0u, 0u);
+
+        #pragma unroll
+        for (uint s = 0u; s < 9u; ++s) {
+            const GF x61 = (GF)(l61r[lbase + s], l61i[lbase + s]);
+            const GF31 x31 = (GF31)(l31r[lbase + s], l31i[lbase + s]);
+            acc61 = gf_add(acc61, gf_mul_real_c61(x61, lm61r[mbase + s]));
+            acc31 = f31_add(acc31, f31_mul_real_c31(x31, lm31r[mbase + s]));
+        }
+
+        const uint out = lane * row_m + k;
+        a61[out] = acc61;
+        a31[out] = acc31;
+    }
+}
+
 __kernel __attribute__((reqd_work_group_size(128,1,1)))
 void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31(__global const ulong* restrict digits,
                                                                __global GF* restrict a61,
