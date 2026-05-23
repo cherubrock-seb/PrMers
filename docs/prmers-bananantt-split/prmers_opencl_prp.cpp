@@ -1016,6 +1016,9 @@ GpuPrp make_gpu(const DeviceInfo& info,
                   (mixed_center_f48_twin_symmetry_61() ? "1" : "0");
     build_opts += std::string(" -DCRT_MIXED_F48_TWIN_SYMMETRY_31=") +
                   (mixed_center_f48_twin_symmetry_31() ? "1" : "0");
+    if (parse_bool_env("PRMERS_OCL_FAST_BUILD_OPTS", true)) {
+        build_opts += " -cl-std=CL1.2 -cl-mad-enable -cl-no-signed-zeros -cl-fast-relaxed-math";
+    }
     if (const char* extra = std::getenv("PRMERS_OCL_FLAGS")) {
         build_opts += " ";
         build_opts += extra;
@@ -7352,7 +7355,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
             std::cout << "iter " << (iter + 1) << "/" << p << " (" << std::fixed << std::setprecision(1)
                       << (100.0 * static_cast<double>(iter + 1) / p) << "%), elapsed "
                       << std::setprecision(2) << elapsed << " s, it/s " << std::setprecision(1) << ips
-                      << " [CRT fused GPU-Garner]\n";
+                      << " [mixed CRT/PFA half-real]\n";
         }
         if (do_profile_report) {
             clwrap::profile_print_summary(gpu61, "CRT kernel profile summary at iter " + std::to_string(iter + 1));
@@ -7371,7 +7374,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
         const double completed_rate = static_cast<double>(run_iters) / std::max(completed_sec, 1e-9);
         std::cout << "completed " << run_iters << " iterations in "
                   << std::fixed << std::setprecision(3) << completed_sec << " s, final it/s "
-                  << std::setprecision(1) << completed_rate << " [CRT fused GPU-Garner]\n";
+                  << std::setprecision(1) << completed_rate << " [mixed CRT/PFA half-real]\n";
     }
     clwrap::profile_flush_pending(gpu61);
     clwrap::profile_flush_pending(gpu31);
@@ -7867,7 +7870,8 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-local-square/--crt-mixed-row-center 8|16|32|64|128|256|512|1024 selects the requested center block for mixed odd LDS tests.\n"
                 << "        --crt-defused-ntt is now default; --crt-no-defused-ntt/--crt-fused-ntt reverts to fused NTT.\n"
                 << "        --crt-edge-radix 2|4|8|16 changes first weighted and last unweighted edge radix; default 4.\n"
-                << "        --crt-odd-radix 3|9 enables experimental CRT/PFA odd x 2^m half-real rows.\n"
+                << "        --crt-odd-radix auto|1|3|9 enables CRT/PFA odd x 2^m half-real rows; 9 is the tuned mixed path.\n"
+                << "        odd=9 uses the 2D mixed CRT half-real scheme and a DFT3x3 odd transform.\n"
                 << "        --crt-edge-mode auto|legacy|generic selects old radix4 split/fuse path or generic edge kernels.\n"
                 << "        --crt-center is kept as an alias; --crt-split-center keeps the older split GF61/GF31 center.\n"
                 << "        --crt-lds-stage/--crt-mixed-row-stage 8|16|32|64|128|256|512|1024 forces the LDS stage before the row center for tests.\n"
@@ -7875,7 +7879,8 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-mixed-row-fuse-both off|auto|center|stage|all|force optionally runs GF61+GF31 in the same LDS center/stage kernels.\n"
                 << "        --crt-mixed-gpu-reference validates mixed odd LDS/fused paths against the generic mixed GPU path instead of exact CPU.\n"
                 << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
-                << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n";
+                << "Debug:  --profile-kernels [--profile-every N], --iters N, --planner-debug, --headroom-bits N.\n"
+                << "Sync:   default benchmark path avoids hot-loop clFlush/clFinish; profiling queues are enabled only with --profile-kernels.\n";
             std::exit(0);
         } else if (!arg.empty() && arg[0] != '-') {
             opt.exponent = static_cast<std::uint32_t>(std::stoul(arg));

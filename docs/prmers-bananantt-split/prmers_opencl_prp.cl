@@ -9056,18 +9056,25 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     const uint row_m = pow2_n >> 1;
     const uint k = (uint)get_group_id(0) * 28u + kt;
 
-    __local GF l61[28 * 9];
-    __local GF31 l31[28 * 9];
-    /* v53: tile28 variant of the v51 scalar-matrix pack.
-       One workgroup handles 28 row positions x 9 odd lanes.
-       This halves the number of workgroups and matrix-cache reloads
-       versus tile14, while keeping the same output layout. */
-    __local ulong lm61r[9 * 9];
-    __local uint lm31r[9 * 9];
+    __local GF l61[28u * 9u];
+    __local GF31 l31[28u * 9u];
+    __local GF t61[28u * 9u];
+    __local GF31 t31[28u * 9u];
+    // v60: the 3x3 factorized odd-9 DFT needs only two non-trivial
+    // real constants per output row.  Cache 6 constants for stage 1
+    // (rows 0,3,6) and 18 constants for stage 2 (rows 0..8), instead
+    // of copying the full 9x9 matrix in every workgroup.
+    __local ulong lm61r[24u];
+    __local uint lm31r[24u];
 
-    if (lid < 81u) {
-        lm61r[lid] = mat61[lid].s0;
-        lm31r[lid] = mat31[lid].s0;
+    if (lid < 24u) {
+        const uint stage2 = (lid >= 6u);
+        const uint t = stage2 ? (lid - 6u) : lid;
+        const uint row = stage2 ? (t >> 1) : (3u * (t >> 1));
+        const uint col = 1u + (t & 1u);
+        const uint midx = row * 9u + col;
+        lm61r[lid] = mat61[midx].s0;
+        lm31r[lid] = mat31[midx].s0;
     }
 
     if (kt < 28u && k < row_m && lane < 9u) {
@@ -9084,31 +9091,44 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // v60: factor the length-9 odd DFT as 3 x 3 with compact constants.
+    // Stage 1: for each pair and each (j0,k1), transform x[j0],x[j0+3],x[j0+6].
+    if (kt < 28u && k < row_m && lane < 9u) {
+        const uint j0 = lane / 3u;
+        const uint k1 = lane - j0 * 3u;
+        const uint lbase = kt * 9u;
+        const uint cbase = 2u * k1;
+        const ulong c61_1 = lm61r[cbase + 0u];
+        const ulong c61_2 = lm61r[cbase + 1u];
+        const uint  c31_1 = lm31r[cbase + 0u];
+        const uint  c31_2 = lm31r[cbase + 1u];
+        GF x610 = l61[lbase + j0];
+        GF x611 = l61[lbase + j0 + 3u];
+        GF x612 = l61[lbase + j0 + 6u];
+        GF31 x310 = l31[lbase + j0];
+        GF31 x311 = l31[lbase + j0 + 3u];
+        GF31 x312 = l31[lbase + j0 + 6u];
+        t61[lbase + lane] = gf_add(x610, gf_add(gf_mul_real_c61(x611, c61_1), gf_mul_real_c61(x612, c61_2)));
+        t31[lbase + lane] = f31_add(x310, f31_add(f31_mul_real_c31(x311, c31_1), f31_mul_real_c31(x312, c31_2)));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Stage 2: output lane k = k1 + 3*k2 from the three j0 intermediates.
     if (kt >= 28u || k >= row_m || lane >= 9u) return;
-
+    const uint k1 = lane % 3u;
     const uint lbase = kt * 9u;
-    const uint mbase = lane * 9u;
-    GF acc61 = GF_ZERO;
-    GF31 acc31 = (GF31)(0u, 0u);
+    const uint mbase = 6u + 2u * lane;
+    const GF a610 = t61[lbase + k1];
+    const GF a611 = t61[lbase + 3u + k1];
+    const GF a612 = t61[lbase + 6u + k1];
+    const GF31 a310 = t31[lbase + k1];
+    const GF31 a311 = t31[lbase + 3u + k1];
+    const GF31 a312 = t31[lbase + 6u + k1];
 
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 0u], lm61r[mbase + 0u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 0u], lm31r[mbase + 0u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 1u], lm61r[mbase + 1u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 1u], lm31r[mbase + 1u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 2u], lm61r[mbase + 2u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 2u], lm31r[mbase + 2u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 3u], lm61r[mbase + 3u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 3u], lm31r[mbase + 3u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 4u], lm61r[mbase + 4u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 4u], lm31r[mbase + 4u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 5u], lm61r[mbase + 5u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 5u], lm31r[mbase + 5u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 6u], lm61r[mbase + 6u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 6u], lm31r[mbase + 6u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 7u], lm61r[mbase + 7u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 7u], lm31r[mbase + 7u]));
-    acc61 = gf_add(acc61, gf_mul_real_c61(l61[lbase + 8u], lm61r[mbase + 8u]));
-    acc31 = f31_add(acc31, f31_mul_real_c31(l31[lbase + 8u], lm31r[mbase + 8u]));
+    GF acc61 = gf_add(a610, gf_add(gf_mul_real_c61(a611, lm61r[mbase + 0u]),
+                                  gf_mul_real_c61(a612, lm61r[mbase + 1u])));
+    GF31 acc31 = f31_add(a310, f31_add(f31_mul_real_c31(a311, lm31r[mbase + 0u]),
+                                      f31_mul_real_c31(a312, lm31r[mbase + 1u])));
 
     const uint out = lane * row_m + k;
     a61[out] = acc61;
@@ -9151,16 +9171,23 @@ void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
     __local ulong l61i[32u * 9u];
     __local uint  l31r[32u * 9u];
     __local uint  l31i[32u * 9u];
-    __local ulong lm61r[9u * 9u];
-    __local uint  lm31r[9u * 9u];
+    __local GF    t61[32u * 9u];
+    __local GF31  t31[32u * 9u];
+    // Same compact 3x3 constants as the normal tile28 pack kernel.
+    __local ulong lm61r[24u];
+    __local uint  lm31r[24u];
 
-    if (lid < 81u) {
-        lm61r[lid] = mat61[lid].s0;
-        lm31r[lid] = mat31[lid].s0;
+    if (lid < 24u) {
+        const uint stage2 = (lid >= 6u);
+        const uint t = stage2 ? (lid - 6u) : lid;
+        const uint row = stage2 ? (t >> 1) : (3u * (t >> 1));
+        const uint col = 1u + (t & 1u);
+        const uint midx = row * 9u + col;
+        lm61r[lid] = mat61[midx].s0;
+        lm31r[lid] = mat31[midx].s0;
     }
 
-    // Nine work-items carry-normalize the nine physical PFA lanes for this
-    // b-segment.  The PFA input coordinate a is reconstructed from j mod 9.
+    // Carry-normalize the nine physical PFA lanes for this b-segment.
     if (lid < 9u) {
         const uint phys = lid;
         const uint seg = bseg + phys * segs_per_lane;
@@ -9194,26 +9221,49 @@ void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Build the next iteration head: pack + weight + odd DFT.  Same output
-    // layout as gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31.
+    // v60: length-9 DFT as 3x3, all pairs in the segment in parallel.
+    for (uint idx = lid; idx < pairs * 9u; idx += 256u) {
+        const uint pair = idx / 9u;
+        const uint lane = idx - pair * 9u;
+        const uint j0 = lane / 3u;
+        const uint k1 = lane - j0 * 3u;
+        const uint lbase = pair * 9u;
+        const uint cbase = 2u * k1;
+
+        const GF x610 = (GF)(l61r[lbase + j0],      l61i[lbase + j0]);
+        const GF x611 = (GF)(l61r[lbase + j0 + 3u], l61i[lbase + j0 + 3u]);
+        const GF x612 = (GF)(l61r[lbase + j0 + 6u], l61i[lbase + j0 + 6u]);
+        const GF31 x310 = (GF31)(l31r[lbase + j0],      l31i[lbase + j0]);
+        const GF31 x311 = (GF31)(l31r[lbase + j0 + 3u], l31i[lbase + j0 + 3u]);
+        const GF31 x312 = (GF31)(l31r[lbase + j0 + 6u], l31i[lbase + j0 + 6u]);
+
+        t61[lbase + lane] = gf_add(x610, gf_add(gf_mul_real_c61(x611, lm61r[cbase + 0u]),
+                                               gf_mul_real_c61(x612, lm61r[cbase + 1u])));
+        t31[lbase + lane] = f31_add(x310, f31_add(f31_mul_real_c31(x311, lm31r[cbase + 0u]),
+                                                 f31_mul_real_c31(x312, lm31r[cbase + 1u])));
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
     for (uint idx = lid; idx < pairs * 9u; idx += 256u) {
         const uint pair = idx / 9u;
         const uint lane = idx - pair * 9u;
         const uint k = bseg * pairs + pair;
         if (k >= row_m) continue;
-
+        const uint k1 = lane % 3u;
         const uint lbase = pair * 9u;
-        const uint mbase = lane * 9u;
-        GF acc61 = GF_ZERO;
-        GF31 acc31 = (GF31)(0u, 0u);
+        const uint mbase = 6u + 2u * lane;
 
-        #pragma unroll
-        for (uint s = 0u; s < 9u; ++s) {
-            const GF x61 = (GF)(l61r[lbase + s], l61i[lbase + s]);
-            const GF31 x31 = (GF31)(l31r[lbase + s], l31i[lbase + s]);
-            acc61 = gf_add(acc61, gf_mul_real_c61(x61, lm61r[mbase + s]));
-            acc31 = f31_add(acc31, f31_mul_real_c31(x31, lm31r[mbase + s]));
-        }
+        const GF a610 = t61[lbase + k1];
+        const GF a611 = t61[lbase + 3u + k1];
+        const GF a612 = t61[lbase + 6u + k1];
+        const GF31 a310 = t31[lbase + k1];
+        const GF31 a311 = t31[lbase + 3u + k1];
+        const GF31 a312 = t31[lbase + 6u + k1];
+
+        const GF acc61 = gf_add(a610, gf_add(gf_mul_real_c61(a611, lm61r[mbase + 0u]),
+                                            gf_mul_real_c61(a612, lm61r[mbase + 1u])));
+        const GF31 acc31 = f31_add(a310, f31_add(f31_mul_real_c31(a311, lm31r[mbase + 0u]),
+                                                f31_mul_real_c31(a312, lm31r[mbase + 1u])));
 
         const uint out = lane * row_m + k;
         a61[out] = acc61;
