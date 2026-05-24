@@ -1,98 +1,53 @@
 # PrMers BananaNTT Split
 
-GPU PRP prototype for Mersenne numbers using a mixed CRT/PFA odd-radix layout.
+GPU PRP prototype for Mersenne numbers using the PrMers OpenCL CRT engine and a mixed odd-radix BananaNTT path.
 
-This branch is part of PrMers. It is not meant to replace the stable PrMers/PrimeNet-compatible path yet. The goal is to test a GPU implementation of the mixed-radix idea described in:
+Repository: [https://github.com/cherubrock-seb/PrMers/](https://github.com/cherubrock-seb/PrMers/)
 
-```text
-docs/mersenne2_mixed_crt_2d_half_fast
-docs/prmers-bananantt-split
-```
+CPU prototype / original mixed 2D idea: [https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast](https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast)
 
-Main repository:
+BananaNTT split notes: [https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split](https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split)
 
-```text
-https://github.com/cherubrock-seb/PrMers
-```
+## Goal
 
-## Idea
-
-The tuned path uses two NTT fields and CRT:
-
-```text
-GF(M61^2) x GF(M31^2)
-M61 = 2^61 - 1
-M31 = 2^31 - 1
-```
-
-Instead of always using a pure power-of-two transform, BananaNTT can use:
+This branch tests a GPU implementation of the mixed-radix idea:
 
 ```text
 N = odd * 2^m
 ```
 
-The current GPU path targets:
+The odd axis is handled by a small radix `3` or `9` transform.  
+The `2^m` axis keeps the half-real NTT layout.  
+The result is reconstructed through CRT / Garner / carry.
+
+Current main path:
 
 ```text
-odd = 3
-odd = 9
-```
-
-The hot path is usually:
-
-```text
-pack digits + odd DFT
--> half-real row transforms on the 2^m axis
--> odd inverse DFT + unweight
--> CRT/Garner
--> carry
-```
-
-For `odd=9`, the odd DFT is implemented as a compact `3 x 3` decomposition.
-
-## About the half-real point
-
-This is not Yves Gallot's newer Four-Step method.
-
-Yves' Four-Step method keeps the odd radix in the center of the transform. That is mathematically cleaner and can preserve the half-real symmetry better across the rows.
-
-BananaNTT currently uses a direct 2D CRT/PFA split:
-
-```text
-odd axis     : small DFT / inverse DFT
-power2 axis  : half-real NTT rows
-```
-
-So the half-real symmetry is used on the `2^m` axis only. The code does not assume that odd rows are simple conjugate copies. For radix 9 this means the path may compute all odd rows instead of using a `9 -> 5` symmetry shortcut.
-
-This is still useful because the total transform can be smaller in radix-9 windows. In some exponent ranges, this can already beat the pure power-of-two CRT path even before the Four-Step version is implemented.
-
-## Status
-
-Current status:
-
-```text
-experimental
-OpenCL GPU path
-CRT GF(M61^2) x GF(M31^2)
-odd radix 3 and 9
+GF(M61^2) x GF(M31^2)
+odd radix 9
 half-real rows
-Gerbicz-Li enabled by default
-backup / resume
-PrMers-style JSON result
-results.txt append
-intermediate res64 readback
-OpenCL binary cache
-startup autotune
+OpenCL GPU kernels
+CRT Garner bridge
+Gerbicz-Li checks
+PrMers-style result files
 ```
 
-Recent RTX 3080 tests were around:
+## Relation to Yves Gallot's Four-Step method
+
+This is not the same method as Yves Gallot's new `3*2^n` half-size NTT in `mersenne2`.
+
+Yves' method keeps the odd radix in the center of a Four-Step transform. This preserves a cleaner half-real structure and can reduce the number of independent odd rows.
+
+BananaNTT Split uses a direct 2D layout:
 
 ```text
-M142606357 odd9 path: about 600 it/s class, depending on options and checks
+odd axis first
+half-real transform on the 2^m axis
+odd inverse axis
+CRT/Garner/carry
 ```
 
-Use `--no-gerbicz --no-backup --no-resume --quiet` for pure speed tests.
+So it does not assume that the odd rows are simple conjugate copies. For radix 9 it computes the odd rows directly. Even without the extra odd-axis symmetry shortcut, the transform can still be useful because the global transform size is smaller in some exponent windows.
 
 ## Build
 
@@ -101,22 +56,9 @@ g++ -O3 -DNDEBUG -std=c++20 -march=native -pthread prmers_opencl_prp.cpp \
   -o prmers_opencl_prp $(pkg-config --cflags --libs OpenCL) -lgmp
 ```
 
-`-lgmp` is needed for CPU reference validation and host-side debug checks.
+`-lgmp` is used by the exact CPU reference checks and some validation paths.
 
-Default OpenCL build flags:
-
-```text
--cl-std=CL1.2 -cl-mad-enable -cl-no-signed-zeros -cl-fast-relaxed-math
-```
-
-Optional controls:
-
-```bash
-PRMERS_OCL_FAST_BUILD_OPTS=0 ./prmers_opencl_prp ...
-PRMERS_OCL_FLAGS="-cl-opt-disable" ./prmers_opencl_prp ...
-```
-
-## Default run
+## Quick run
 
 ```bash
 ./prmers_opencl_prp 142606357 --device 1
@@ -128,16 +70,16 @@ Default behavior:
 --modulus crt
 --crt-odd-radix auto
 --crt-center-mode halfreal
-Gerbicz-Li on
-backup/resume on
-JSON output on
-results.txt append on
-OpenCL binary cache on
-adaptive queue guard on
-startup autotune on for full runs
+Gerbicz-Li enabled
+backup/resume enabled
+JSON result enabled
+append to results.txt enabled
+OpenCL binary cache enabled
+adaptive queue guard enabled
+startup autotune enabled for full runs
 ```
 
-For a clean benchmark:
+For a pure benchmark, disable safety and output overhead:
 
 ```bash
 ./prmers_opencl_prp 142606357 \
@@ -154,70 +96,48 @@ For a clean benchmark:
 ## Main modes
 
 ```text
---modulus best      planner chooses the available mode
---modulus crt       GF(M61^2) x GF(M31^2), CRT/Garner
---modulus gf61      GF(M61^2) only
---modulus gf31      GF(M31^2) only, when safe for the exponent
+--modulus gf61       use only GF(M61^2)
+--modulus gf31       use only GF(M31^2)
+--modulus crt        use GF(M61^2) x GF(M31^2)
+--modulus best       planner choice
 ```
 
-For the current BananaNTT path:
+Odd-radix controls:
 
 ```text
---modulus crt --crt-odd-radix 9 --crt-center-mode halfreal
+--crt-odd-radix auto   automatic planner
+--crt-odd-radix off    normal power-of-two CRT path
+--crt-odd-radix 1      same idea as off for the mixed planner
+--crt-odd-radix 3      force mixed radix 3
+--crt-odd-radix 9      force mixed radix 9
 ```
 
-## Odd-radix controls
-
-```text
---crt-odd-radix auto      automatic planner
---crt-odd-radix off       pure power-of-two CRT path
---crt-odd-radix 1         alias for no odd split
---crt-odd-radix 3         force mixed radix 3
---crt-odd-radix 9         force mixed radix 9
-```
-
-Recommended explicit odd9 test:
+The main tuned path is usually:
 
 ```bash
 ./prmers_opencl_prp 142606357 \
   --modulus crt \
   --crt-odd-radix 9 \
   --crt-center-mode halfreal \
-  --crt-halfreal-no-autoprobe \
-  --device 1 \
-  --iters 5000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume
+  --device 1
 ```
 
-Pure power-of-two comparison:
+## Mixed CRT/PFA odd-radix path
 
-```bash
-./prmers_opencl_prp 142606357 \
-  --modulus crt \
-  --crt-odd-radix off \
-  --crt-center-mode halfreal \
-  --crt-halfreal-no-autoprobe \
-  --device 1 \
-  --iters 5000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume
-```
-
-## Row core and LDS controls
-
-The mixed odd path has two axes:
+Hot-loop shape:
 
 ```text
-odd axis    : radix 3 or 9
-row axis    : power-of-two half-real NTT
+pack digits + odd DFT
+2^m half-real row NTT
+row center square
+inverse 2^m half-real row NTT
+odd inverse DFT + unweight
+CRT/Garner/carry
 ```
 
-The important controls are:
+The current radix 9 path uses a compact `3 x 3` decomposition for the odd transform.
+
+Useful row controls:
 
 ```text
 --crt-mixed-row-core auto|lds|lds512|lds1024|generic
@@ -227,127 +147,37 @@ The important controls are:
 --crt-lds-stage N
 ```
 
-Aliases:
-
-```text
---crt-local-square N       same role as --crt-mixed-row-center N
---crt-lds-stage N          same role as --crt-mixed-row-stage N
-```
-
-Stable RTX 3080 setting:
-
-```bash
-./prmers_opencl_prp 142606357 \
-  --modulus crt \
-  --crt-odd-radix 9 \
-  --crt-center-mode halfreal \
-  --crt-halfreal-no-autoprobe \
-  --crt-mixed-row-core lds \
-  --crt-mixed-row-stage 512 \
-  --crt-mixed-row-center 512 \
-  --device 1 \
-  --iters 5000 \
-  --profile-kernels
-```
-
-Test 1024 center or stage:
-
-```bash
-./prmers_opencl_prp 142606357 \
-  --modulus crt \
-  --crt-odd-radix 9 \
-  --crt-center-mode halfreal \
-  --crt-halfreal-no-autoprobe \
-  --crt-mixed-row-core lds \
-  --crt-mixed-row-stage 1024 \
-  --crt-mixed-row-center 1024 \
-  --device 1 \
-  --iters 2000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume
-```
+The `512` row center is the most optimized path today.  
+Small stages such as `32` are now batched, but still need more tuning.
 
 ## Startup autotune
 
-Startup autotune is intended to make the default run pick a good row center/stage on different GPUs.
-
-Typical full run:
+Startup autotune can test a few row-center / row-stage combinations at launch and keep the fastest one for the current GPU.
 
 ```bash
-./prmers_opencl_prp 142606357 --device 1
+./prmers_opencl_prp 142606357 --device 1 --startup-autotune
 ```
 
-Force autotune even for a short test:
-
-```bash
-./prmers_opencl_prp 9437189 \
-  --device 1 \
-  --iters 5000 \
-  --startup-autotune \
-  --crt-autotune-iters 1200 \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume
-```
-
-Disable autotune:
+Disable it:
 
 ```bash
 ./prmers_opencl_prp 142606357 --device 1 --no-startup-autotune
 ```
 
-or:
+Tune the amount of work:
 
 ```bash
-./prmers_opencl_prp 142606357 --device 1 --no-autotune
-```
-
-## Small row stages
-
-The 512 row kernels are the most tuned path.
-
-For smaller row stages such as 8, 16, 32, 64, 128 and 256, the code has batch variants to reduce overhead. The user-visible label is:
-
-```text
-small32-batch8=on
-```
-
-This means several radix-32 style row transforms are batched together. It does not mean the row stage became radix 8.
-
-Useful A/B test:
-
-```bash
-./prmers_opencl_prp 9437189 \
+./prmers_opencl_prp 142606357 \
   --device 1 \
-  --crt-odd-radix 9 \
-  --iters 5000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume \
-  --no-startup-autotune
+  --startup-autotune \
+  --crt-autotune-iters 1200
 ```
 
-Disable the batch8 path:
-
-```bash
-PRMERS_CRT_MIXED_SMALL32_X8=0 \
-./prmers_opencl_prp 9437189 \
-  --device 1 \
-  --crt-odd-radix 9 \
-  --iters 5000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume \
-  --no-startup-autotune
-```
+Useful when comparing RTX 30/40/50, RDNA, MI-series or Intel Arc GPUs.
 
 ## Validation
 
-Quick odd9 GPU reference validation:
+Fast validation against the mixed GPU reference:
 
 ```bash
 ./prmers_opencl_prp 142606357 \
@@ -371,11 +201,9 @@ Expected line:
 CRT halfreal validator: OK
 ```
 
-Small radix 3 validation:
+Small radix 3 test:
 
 ```bash
-PRMERS_CRT_HALFREAL_DUMP_ALWAYS=1 \
-PRMERS_CRT_HALFREAL_CPU_REF_ITERS=4 \
 ./prmers_opencl_prp 11213 \
   --modulus crt \
   --crt-odd-radix 3 \
@@ -383,63 +211,90 @@ PRMERS_CRT_HALFREAL_CPU_REF_ITERS=4 \
   --crt-halfreal-no-autoprobe \
   --crt-halfreal-validate-random \
   --crt-halfreal-validate-iters 4 \
-  --crt-halfreal-dump hr11213_odd3 \
-  --crt-halfreal-dump-count 2048 \
   --device 1 \
   --iters 1
 ```
 
-Small radix 9 validation:
+Small radix 9 test:
 
 ```bash
-PRMERS_CRT_HALFREAL_DUMP_ALWAYS=1 \
-PRMERS_CRT_HALFREAL_CPU_REF_ITERS=1 \
-./prmers_opencl_prp 3021377 \
+./prmers_opencl_prp 216091 \
   --modulus crt \
   --crt-odd-radix 9 \
   --crt-center-mode halfreal \
   --crt-halfreal-no-autoprobe \
   --crt-halfreal-validate-random \
-  --crt-halfreal-validate-iters 1 \
-  --crt-halfreal-dump hr3021377_odd9 \
-  --crt-halfreal-dump-count 4096 \
+  --crt-halfreal-validate-iters 4 \
   --device 1 \
   --iters 1
 ```
 
-## Intermediate residue readback
+## Benchmark examples
 
-To print a residue during a run:
+Radix 9 profile:
 
 ```bash
-./prmers_opencl_prp 10000019 \
-  --device 0 \
-  --res64-every 1000
+./prmers_opencl_prp 142606357 \
+  --device 1 \
+  --crt-odd-radix 9 \
+  --iters 5000 \
+  --profile-kernels \
+  --no-gerbicz \
+  --no-backup \
+  --no-resume \
+  --no-startup-autotune
 ```
 
-Note:
+Normal CRT comparison:
+
+```bash
+./prmers_opencl_prp 142606357 \
+  --device 1 \
+  --crt-odd-radix off \
+  --iters 5000 \
+  --profile-kernels \
+  --no-gerbicz \
+  --no-backup \
+  --no-resume \
+  --no-startup-autotune
+```
+
+Small-stage case:
+
+```bash
+./prmers_opencl_prp 9437189 \
+  --device 1 \
+  --crt-odd-radix 9 \
+  --iters 5000 \
+  --profile-kernels \
+  --no-gerbicz \
+  --no-backup \
+  --no-resume \
+  --no-startup-autotune
+```
+
+Expected labels for the batched small row path:
 
 ```text
---res64-every N
+crt_mixed_lds32_forward_batch8_61
+crt_mixed_lds32_inverse_batch8_61
+crt_mixed_lds32_forward_batch8_31
+crt_mixed_lds32_inverse_batch8_31
 ```
 
-forces regular readback and synchronization. It is useful for debugging, but it slows benchmarks.
+`batch8` means eight radix-32 row transforms per workgroup. It is still a radix/LDS32 stage.
 
 ## Gerbicz-Li
 
-Gerbicz-Li is enabled by default.
+Gerbicz-Li is enabled by default for full runs.
 
-Default behavior:
+Default backend:
 
 ```text
-quiet boundary updates
-GPU full-check path
-GPU D update
-full checks printed
-errors printed
+gpu-fullcheck + gpu-D-update
 ```
 
-Disable for benchmarks:
+Disable it for benchmarks:
 
 ```bash
 ./prmers_opencl_prp 142606357 --device 1 --no-gerbicz
@@ -448,20 +303,36 @@ Disable for benchmarks:
 Main controls:
 
 ```text
---gerbicz-seconds S            target full Li check spacing
---gerbicz-boundary-seconds S   target D update spacing when B is automatic
---gerbicz-b B                  force Li block size
---gerbicz-checklevel N         force full check every N boundaries
---gerbicz-verbose              print every boundary update
---gerbicz-progress             print full-check progress
---gerbicz-host                 use host GMP full-check
---no-gerbicz                   disable Gerbicz-Li
+--gerbicz-seconds S
+--gerbicz-boundary-seconds S
+--gerbicz-b B
+--gerbicz-checklevel N
+--gerbicz-verbose
+--gerbicz-progress
+--gerbicz-host
+--no-gerbicz
 ```
 
-Fast injected-error test:
+Fast error-injection test:
 
 ```bash
-./prmers_opencl_prp 10000019 --device 0 \
+./prmers_opencl_prp 10000019 \
+  --device 0 \
+  --iters 8000 \
+  --no-resume \
+  --no-backup \
+  --gerbicz-b 1024 \
+  --gerbicz-checklevel 1 \
+  --error-iter 2000 \
+  --error-limb 0 \
+  --error-delta 1
+```
+
+More visible check progress:
+
+```bash
+./prmers_opencl_prp 10000019 \
+  --device 0 \
   --iters 8000 \
   --no-resume \
   --no-backup \
@@ -473,7 +344,21 @@ Fast injected-error test:
   --gerbicz-progress
 ```
 
-## Backup and resume
+## Intermediate residues
+
+Print a residue regularly:
+
+```bash
+./prmers_opencl_prp 10000019 \
+  --device 0 \
+  --res64-every 1000
+```
+
+This is useful for debugging and comparing runs, but it forces readbacks and synchronization. Do not use it for final speed measurements.
+
+## Backup and restore
+
+Backup and resume are enabled by default.
 
 Default backup file:
 
@@ -481,7 +366,11 @@ Default backup file:
 save/M<p>.bananantt.chk
 ```
 
-Resume is automatic.
+Run with backup every 120 seconds:
+
+```bash
+./prmers_opencl_prp 142606357 --device 1 --backup-seconds 120
+```
 
 Disable resume for clean tests:
 
@@ -489,7 +378,7 @@ Disable resume for clean tests:
 ./prmers_opencl_prp 216091 --device 1 --no-resume
 ```
 
-Disable backup and resume for benchmarks:
+Disable backup and resume for benchmark:
 
 ```bash
 ./prmers_opencl_prp 142606357 \
@@ -500,56 +389,26 @@ Disable backup and resume for benchmarks:
   --no-resume
 ```
 
-Backup controls:
+Output path controls:
 
 ```text
---backup-seconds S
 --backup-dir DIR
 --save-file FILE
 --resume-file FILE
---no-backup
---no-resume
 ```
 
-Ctrl-C should save a backup before exit when backup is enabled.
+## Ctrl-C and queue guard
 
-## OpenCL binary cache
+The queue guard limits how much OpenCL work can be queued ahead, so Ctrl-C does not wait forever for a huge queue to drain.
 
-The first run compiles OpenCL and writes a binary cache in:
-
-```text
-.ocl_cache/
-```
-
-Next runs with the same GPU, driver, kernel source and build options should load the cache.
-
-Controls:
-
-```text
-PRMERS_OCL_BINARY_CACHE=0       disable binary cache
-PRMERS_OCL_CACHE_DIR=/path      choose cache directory
-PRMERS_SHOW_OCL_BUILD=0         hide build/cache messages
-PRMERS_OCL_BUILD_SPINNER=0      simple build messages
-```
-
-Reset cache:
-
-```bash
-rm -rf .ocl_cache
-```
-
-## Queue guard and Ctrl-C
-
-Default queue guard is adaptive:
+Default:
 
 ```text
 --queue-guard auto
 --queue-guard-seconds 2
 ```
 
-It limits Ctrl-C latency without forcing a fixed `clFinish` every few iterations.
-
-Pure benchmark:
+Disable for pure benchmark:
 
 ```bash
 ./prmers_opencl_prp 142606357 \
@@ -562,15 +421,34 @@ Pure benchmark:
   --queue-guard 0
 ```
 
-## Output files
+## OpenCL binary cache
 
-Default output:
+The first run compiles OpenCL kernels and stores binaries in `.ocl_cache/`. Later runs with the same GPU, driver, source, build options and program version load the cached binaries.
+
+Controls:
 
 ```text
-./prmers_bananantt_M<p>.json
-./results.txt
-./save/M<p>.bananantt.chk
-./<p>/proof/
+PRMERS_OCL_BINARY_CACHE=0
+PRMERS_OCL_CACHE_DIR=/path/to/cache
+PRMERS_SHOW_OCL_BUILD=0
+PRMERS_OCL_BUILD_SPINNER=0
+```
+
+Clear cache:
+
+```bash
+rm -rf .ocl_cache
+```
+
+## Output files
+
+Default files:
+
+```text
+prmers_bananantt_M<p>.json
+results.txt
+save/M<p>.bananantt.chk
+<p>/proof/
 ```
 
 Path controls:
@@ -579,112 +457,78 @@ Path controls:
 --output-dir DIR
 --json-file FILE
 --results-file FILE
---backup-dir DIR
---save-file FILE
---resume-file FILE
 --proof-dir DIR
+--no-json
+--no-results
 ```
 
-The JSON is intentionally close to the PrMers result shape, with:
-
-```json
-"program": {
-  "name": "banana",
-  "version": "0.79.00-alpha"
-}
-```
-
-The version should be kept in one global program-version variable and bumped for each release.
-
-## Profiling
-
-Use profiling only for kernel breakdowns:
-
-```bash
-./prmers_opencl_prp 142606357 \
-  --device 1 \
-  --crt-odd-radix 9 \
-  --iters 5000 \
-  --profile-kernels \
-  --no-gerbicz \
-  --no-backup \
-  --no-resume
-```
-
-Do not use `--profile-kernels` for final throughput numbers.
-
-Expected odd9 labels include:
+The JSON is PrMers-style and includes:
 
 ```text
-crt_mixed_pack_weight_odd_fwd...
-crt_mixed_lds512_forward...
-crt_mixed_lds512_center...
-crt_mixed_lds512_inverse...
-crt_mixed_odd...precrt...
-crt_garner...
-crt_carry...
+status
+exponent
+worktype
+res64
+res2048
+residue-type
+errors
+shift-count
+fft-length
+proof
+program
+os
+timestamp
+checksum
 ```
 
-For small row stages, labels may include:
+`program.name` is `banana`.
+
+## Worktodo
+
+If no exponent is given, the program can read a PrMers-style `worktodo.txt` from the current directory.
+
+Example:
+
+```bash
+./prmers_opencl_prp --device 1
+```
+
+## Current status
+
+This is still experimental code.
+
+Working features:
 
 ```text
-crt_mixed_lds32_forward_batch8...
-crt_mixed_lds32_inverse_batch8...
+CRT GF(M61^2) x GF(M31^2)
+odd radix 3/9
+half-real row path
+OpenCL binary cache
+startup autotune
+Gerbicz-Li checks
+backup/restore
+Ctrl-C backup
+PrMers-style JSON/results
+intermediate res64 output
+error injection
 ```
 
-## Useful quick commands
-
-Compile:
-
-```bash
-g++ -O3 -DNDEBUG -std=c++20 -march=native -pthread prmers_opencl_prp.cpp \
-  -o prmers_opencl_prp $(pkg-config --cflags --libs OpenCL) -lgmp
-```
-
-Warm OpenCL cache:
-
-```bash
-./prmers_opencl_prp 216091 --device 1 --iters 1 --no-gerbicz --no-backup --no-resume
-```
-
-Fast benchmark:
-
-```bash
-./prmers_opencl_prp 142606357 --device 1 --iters 30000 --quiet --no-gerbicz --no-backup --no-resume --queue-guard 0
-```
-
-Odd9 profile:
-
-```bash
-./prmers_opencl_prp 142606357 --device 1 --crt-odd-radix 9 --iters 5000 --profile-kernels --no-gerbicz --no-backup --no-resume
-```
-
-Normal CRT comparison:
-
-```bash
-./prmers_opencl_prp 142606357 --device 1 --crt-odd-radix off --iters 5000 --profile-kernels --no-gerbicz --no-backup --no-resume
-```
-
-Full run:
-
-```bash
-./prmers_opencl_prp 142606357 --device 1
-```
-
-## Notes for contributors
-
-This is a research branch.
-
-Important points:
+Known optimization work:
 
 ```text
-The current path works as a direct 2D odd x 2^m GPU transform.
-It is not the same as Yves' Four-Step method.
-Half-real symmetry is used on the power-of-two axis.
-Odd-axis row conjugate symmetry is not assumed.
-Radix 9 can still win because it reduces transform size.
-The 512 LDS row path is the most optimized path today.
-Small row stages still need more work.
+small row stages below 512
+better radix32 leaf kernels
+async Gerbicz full-check with separate buffers
+more GPU-specific tuning
+more testing outside RTX 3080
 ```
 
-Testing on more GPUs is useful, especially RTX 40/50, RDNA, MI-series and Intel Arc.
+## Credits
+
+Original `mersenne2` ideas and reference work by Yves Gallot:
+
+[https://github.com/galloty/mersenne2](https://github.com/galloty/mersenne2)
+
+PrMers / BananaNTT GPU experiments by cherubrock:
+
+[https://github.com/cherubrock-seb/PrMers/](https://github.com/cherubrock-seb/PrMers/)
