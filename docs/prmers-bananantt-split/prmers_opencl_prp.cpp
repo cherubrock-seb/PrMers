@@ -65,7 +65,7 @@ will be useful. Please give feedback or improvements if you test it.
 namespace {
 
 static constexpr const char* BANANANTT_PROGRAM_NAME = "banana";
-static constexpr const char* BANANANTT_PROGRAM_VERSION = "0.75.00-alpha";
+static constexpr const char* BANANANTT_PROGRAM_VERSION = "0.79.00-alpha";
 static constexpr unsigned BANANANTT_PROGRAM_PORT = 8;
 static constexpr double BANANANTT_DEFAULT_GERBICZ_TARGET_SECONDS = 600.0;
 static constexpr double BANANANTT_DEFAULT_GERBICZ_MIN_SECONDS = 120.0;
@@ -2996,6 +2996,9 @@ struct CrtFusedKernels {
     cl_kernel fwd_r8_61_wg128 = nullptr;
     cl_kernel fwd_lds_stage_61 = nullptr;
     cl_kernel fwd_lds_stage_61_512opt = nullptr;
+    cl_kernel fwd_lds_stage_61_32x2 = nullptr;
+    cl_kernel fwd_lds_stage_61_32x4 = nullptr;
+    cl_kernel fwd_lds_stage_61_32x8 = nullptr;
     cl_kernel fwd_lds_stage_61_tile4 = nullptr;
     std::array<cl_kernel, 8> fwd_lds_stage_61_1lds{};
     std::array<cl_kernel, 8> inv_lds_stage_61_1lds{};
@@ -3004,6 +3007,9 @@ struct CrtFusedKernels {
     cl_kernel inv_r8_61 = nullptr;
     cl_kernel inv_lds_stage_61 = nullptr;
     cl_kernel inv_lds_stage_61_512opt = nullptr;
+    cl_kernel inv_lds_stage_61_32x2 = nullptr;
+    cl_kernel inv_lds_stage_61_32x4 = nullptr;
+    cl_kernel inv_lds_stage_61_32x8 = nullptr;
     cl_kernel inv_lds_stage_61_tile4 = nullptr;
     cl_kernel center512_61 = nullptr;
     cl_kernel center512_61_opt = nullptr;
@@ -3014,6 +3020,9 @@ struct CrtFusedKernels {
     cl_kernel fwd_r8_31 = nullptr;
     cl_kernel fwd_lds_stage_31 = nullptr;
     cl_kernel fwd_lds_stage_31_512opt = nullptr;
+    cl_kernel fwd_lds_stage_31_32x2 = nullptr;
+    cl_kernel fwd_lds_stage_31_32x4 = nullptr;
+    cl_kernel fwd_lds_stage_31_32x8 = nullptr;
     cl_kernel fwd_lds_stage_31_tile4 = nullptr;
     std::array<cl_kernel, 8> fwd_lds_stage_31_1lds{};
     std::array<cl_kernel, 8> inv_lds_stage_31_1lds{};
@@ -3022,6 +3031,9 @@ struct CrtFusedKernels {
     cl_kernel inv_r8_31 = nullptr;
     cl_kernel inv_lds_stage_31 = nullptr;
     cl_kernel inv_lds_stage_31_512opt = nullptr;
+    cl_kernel inv_lds_stage_31_32x2 = nullptr;
+    cl_kernel inv_lds_stage_31_32x4 = nullptr;
+    cl_kernel inv_lds_stage_31_32x8 = nullptr;
     cl_kernel inv_lds_stage_31_tile4 = nullptr;
     cl_kernel center512_31 = nullptr;
     cl_kernel center512_31_opt = nullptr;
@@ -3168,12 +3180,18 @@ struct CrtFusedKernels {
         fwd_r8_61_wg128 = load_kernel_optional(program, "gf61_crt_ntt_stage_dif_radix8_61_wg128");
         fwd_lds_stage_61 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61");
         fwd_lds_stage_61_512opt = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61_512opt");
+        fwd_lds_stage_61_32x2 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61_32x2");
+        fwd_lds_stage_61_32x4 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61_32x4");
+        fwd_lds_stage_61_32x8 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61_32x8");
         fwd_lds_stage_61_tile4 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_61_tile4");
         inv_r2_61 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix2_61");
         inv_r4_61 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix4_61");
         inv_r8_61 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix8_61");
         inv_lds_stage_61 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61");
         inv_lds_stage_61_512opt = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61_512opt");
+        inv_lds_stage_61_32x2 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61_32x2");
+        inv_lds_stage_61_32x4 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61_32x4");
+        inv_lds_stage_61_32x8 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61_32x8");
         inv_lds_stage_61_tile4 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_61_tile4");
         center512_61 = load_kernel_optional(program, "gf61_crt_center_fused_512_61");
         center512_61_opt = load_kernel_optional(program, "gf61_crt_center_fused_512_61_opt");
@@ -3184,12 +3202,18 @@ struct CrtFusedKernels {
         fwd_r8_31 = load_kernel_optional(program, "gf61_crt_ntt_stage_dif_radix8_31");
         fwd_lds_stage_31 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31");
         fwd_lds_stage_31_512opt = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31_512opt");
+        fwd_lds_stage_31_32x2 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31_32x2");
+        fwd_lds_stage_31_32x4 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31_32x4");
+        fwd_lds_stage_31_32x8 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31_32x8");
         fwd_lds_stage_31_tile4 = load_kernel_optional(program, "gf61_crt_lds_stage_dif_pow2_31_tile4");
         inv_r2_31 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix2_31");
         inv_r4_31 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix4_31");
         inv_r8_31 = load_kernel_optional(program, "gf61_crt_ntt_stage_dit_radix8_31");
         inv_lds_stage_31 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31");
         inv_lds_stage_31_512opt = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31_512opt");
+        inv_lds_stage_31_32x2 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31_32x2");
+        inv_lds_stage_31_32x4 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31_32x4");
+        inv_lds_stage_31_32x8 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31_32x8");
         inv_lds_stage_31_tile4 = load_kernel_optional(program, "gf61_crt_lds_stage_dit_pow2_31_tile4");
 
         const char* mixed_stage_sizes[8] = {"8", "16", "32", "64", "128", "256", "512", "1024"};
@@ -3347,6 +3371,9 @@ struct CrtFusedKernels {
         if (fwd_r8_61_wg128) clReleaseKernel(fwd_r8_61_wg128);
         if (fwd_lds_stage_61) clReleaseKernel(fwd_lds_stage_61);
         if (fwd_lds_stage_61_512opt) clReleaseKernel(fwd_lds_stage_61_512opt);
+        if (fwd_lds_stage_61_32x2) clReleaseKernel(fwd_lds_stage_61_32x2);
+        if (fwd_lds_stage_61_32x4) clReleaseKernel(fwd_lds_stage_61_32x4);
+        if (fwd_lds_stage_61_32x8) clReleaseKernel(fwd_lds_stage_61_32x8);
         if (fwd_lds_stage_61_tile4) clReleaseKernel(fwd_lds_stage_61_tile4);
         for (cl_kernel k : fwd_lds_stage_61_1lds) if (k) clReleaseKernel(k);
         for (cl_kernel k : inv_lds_stage_61_1lds) if (k) clReleaseKernel(k);
@@ -3355,6 +3382,9 @@ struct CrtFusedKernels {
         if (inv_r8_61) clReleaseKernel(inv_r8_61);
         if (inv_lds_stage_61) clReleaseKernel(inv_lds_stage_61);
         if (inv_lds_stage_61_512opt) clReleaseKernel(inv_lds_stage_61_512opt);
+        if (inv_lds_stage_61_32x2) clReleaseKernel(inv_lds_stage_61_32x2);
+        if (inv_lds_stage_61_32x4) clReleaseKernel(inv_lds_stage_61_32x4);
+        if (inv_lds_stage_61_32x8) clReleaseKernel(inv_lds_stage_61_32x8);
         if (inv_lds_stage_61_tile4) clReleaseKernel(inv_lds_stage_61_tile4);
         if (center512_61) clReleaseKernel(center512_61);
         if (center512_61_opt) clReleaseKernel(center512_61_opt);
@@ -3365,6 +3395,9 @@ struct CrtFusedKernels {
         if (fwd_r8_31) clReleaseKernel(fwd_r8_31);
         if (fwd_lds_stage_31) clReleaseKernel(fwd_lds_stage_31);
         if (fwd_lds_stage_31_512opt) clReleaseKernel(fwd_lds_stage_31_512opt);
+        if (fwd_lds_stage_31_32x2) clReleaseKernel(fwd_lds_stage_31_32x2);
+        if (fwd_lds_stage_31_32x4) clReleaseKernel(fwd_lds_stage_31_32x4);
+        if (fwd_lds_stage_31_32x8) clReleaseKernel(fwd_lds_stage_31_32x8);
         if (fwd_lds_stage_31_tile4) clReleaseKernel(fwd_lds_stage_31_tile4);
         for (cl_kernel k : fwd_lds_stage_31_1lds) if (k) clReleaseKernel(k);
         for (cl_kernel k : inv_lds_stage_31_1lds) if (k) clReleaseKernel(k);
@@ -3373,6 +3406,9 @@ struct CrtFusedKernels {
         if (inv_r8_31) clReleaseKernel(inv_r8_31);
         if (inv_lds_stage_31) clReleaseKernel(inv_lds_stage_31);
         if (inv_lds_stage_31_512opt) clReleaseKernel(inv_lds_stage_31_512opt);
+        if (inv_lds_stage_31_32x2) clReleaseKernel(inv_lds_stage_31_32x2);
+        if (inv_lds_stage_31_32x4) clReleaseKernel(inv_lds_stage_31_32x4);
+        if (inv_lds_stage_31_32x8) clReleaseKernel(inv_lds_stage_31_32x8);
         if (inv_lds_stage_31_tile4) clReleaseKernel(inv_lds_stage_31_tile4);
         if (center512_31) clReleaseKernel(center512_31);
         if (center512_31_opt) clReleaseKernel(center512_31_opt);
@@ -4235,65 +4271,96 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         const int idx = lds_radix_slot(radix);
         return (idx >= 0) ? ks[static_cast<size_t>(idx)] : nullptr;
     };
+    const bool mixed_small32_x2 = parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X2", true);
+    const bool mixed_small32_x4 = parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X4", true);
+    const bool mixed_small32_x8 = parse_bool_env("PRMERS_CRT_MIXED_SMALL32_BATCH8", parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X8", true));
 
     auto lds_fwd61 = [&](cl_uint len, cl_uint radix) {
-        const bool opt512 = (radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_61_512opt);
-        const cl_kernel k1 = mixed_stage_single_lds_61 ? pick_stage_1lds(fk.fwd_lds_stage_61_1lds, radix) : nullptr;
-        const bool one_lds = (!opt512 && k1 != nullptr);
-        cl_kernel k = opt512 ? fk.fwd_lds_stage_61_512opt : (one_lds ? k1 : fk.fwd_lds_stage_61);
+        const bool small32x8 = (mixed_small32_x8 && radix >= 8u && radix <= 32u && fk.fwd_lds_stage_61_32x8);
+        const bool small32x4 = (!small32x8 && mixed_small32_x4 && radix >= 8u && radix <= 32u && fk.fwd_lds_stage_61_32x4);
+        const bool small32x2 = (!small32x8 && !small32x4 && mixed_small32_x2 && radix >= 8u && radix <= 64u && fk.fwd_lds_stage_61_32x2);
+        const bool opt512 = (!small32x8 && !small32x4 && !small32x2 && radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_61_512opt);
+        const cl_kernel k1 = (!small32x8 && !small32x4 && !small32x2 && mixed_stage_single_lds_61) ? pick_stage_1lds(fk.fwd_lds_stage_61_1lds, radix) : nullptr;
+        const bool one_lds = (!opt512 && !small32x8 && !small32x4 && !small32x2 && k1 != nullptr);
+        cl_kernel k = small32x8 ? fk.fwd_lds_stage_61_32x8 : (small32x4 ? fk.fwd_lds_stage_61_32x4 : (small32x2 ? fk.fwd_lds_stage_61_32x2 : (opt512 ? fk.fwd_lds_stage_61_512opt : (one_lds ? k1 : fk.fwd_lds_stage_61))));
         cl_uint arg = 0;
         set_karg_mem(k, arg, g61.bufField, "set mixed lds fwd61 a");
         set_karg_mem(k, arg, g61.bufTwFwd, "set mixed lds fwd61 tw");
         set_karg(k, arg, storage, "set mixed lds fwd61 storage");
         set_karg(k, arg, len, "set mixed lds fwd61 len");
         set_karg(k, arg, radix, "set mixed lds fwd61 radix");
-        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
-        const std::string label = mixed_lds_label("forward", radix, "61", opt512, one_lds);
+        const size_t groups0 = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
+        const size_t groups = small32x8 ? ((groups0 + 7u) >> 3u) : (small32x4 ? ((groups0 + 3u) >> 2u) : (small32x2 ? ((groups0 + 1u) >> 1u) : groups0));
+        std::string label = mixed_lds_label("forward", radix, "61", opt512, one_lds);
+        if (small32x8) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_batch8_61";
+        else if (small32x4) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_x4_61";
+        else if (small32x2) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_x2_61";
         enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS fwd61", label.c_str());
     };
     auto lds_fwd31 = [&](cl_uint len, cl_uint radix) {
-        const bool opt512 = (radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_31_512opt);
-        const cl_kernel k1 = mixed_stage_single_lds_31 ? pick_stage_1lds(fk.fwd_lds_stage_31_1lds, radix) : nullptr;
-        const bool one_lds = (!opt512 && k1 != nullptr);
-        cl_kernel k = opt512 ? fk.fwd_lds_stage_31_512opt : (one_lds ? k1 : fk.fwd_lds_stage_31);
+        const bool small32x8 = (mixed_small32_x8 && radix >= 8u && radix <= 32u && fk.fwd_lds_stage_31_32x8);
+        const bool small32x4 = (!small32x8 && mixed_small32_x4 && radix >= 8u && radix <= 32u && fk.fwd_lds_stage_31_32x4);
+        const bool small32x2 = (!small32x8 && !small32x4 && mixed_small32_x2 && radix >= 8u && radix <= 64u && fk.fwd_lds_stage_31_32x2);
+        const bool opt512 = (!small32x8 && !small32x4 && !small32x2 && radix == 512u && mixed_lds512_opt && len == radix && fk.fwd_lds_stage_31_512opt);
+        const cl_kernel k1 = (!small32x8 && !small32x4 && !small32x2 && mixed_stage_single_lds_31) ? pick_stage_1lds(fk.fwd_lds_stage_31_1lds, radix) : nullptr;
+        const bool one_lds = (!opt512 && !small32x8 && !small32x4 && !small32x2 && k1 != nullptr);
+        cl_kernel k = small32x8 ? fk.fwd_lds_stage_31_32x8 : (small32x4 ? fk.fwd_lds_stage_31_32x4 : (small32x2 ? fk.fwd_lds_stage_31_32x2 : (opt512 ? fk.fwd_lds_stage_31_512opt : (one_lds ? k1 : fk.fwd_lds_stage_31))));
         cl_uint arg = 0;
         set_karg_mem(k, arg, g31.bufField, "set mixed lds fwd31 a");
         set_karg_mem(k, arg, g31.bufTwFwd, "set mixed lds fwd31 tw");
         set_karg(k, arg, storage, "set mixed lds fwd31 storage");
         set_karg(k, arg, len, "set mixed lds fwd31 len");
         set_karg(k, arg, radix, "set mixed lds fwd31 radix");
-        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
-        const std::string label = mixed_lds_label("forward", radix, "31", opt512, one_lds);
+        const size_t groups0 = (static_cast<size_t>(storage) / static_cast<size_t>(len)) * static_cast<size_t>(len / radix);
+        const size_t groups = small32x8 ? ((groups0 + 7u) >> 3u) : (small32x4 ? ((groups0 + 3u) >> 2u) : (small32x2 ? ((groups0 + 1u) >> 1u) : groups0));
+        std::string label = mixed_lds_label("forward", radix, "31", opt512, one_lds);
+        if (small32x8) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_batch8_31";
+        else if (small32x4) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_x4_31";
+        else if (small32x2) label = "crt_mixed_lds" + std::to_string(radix) + "_forward_x2_31";
         enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS fwd31", label.c_str());
     };
     auto lds_inv61 = [&](cl_uint base_len, cl_uint radix) {
-        const bool opt512 = (radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_61_512opt);
-        const cl_kernel k1 = mixed_stage_single_lds_61 ? pick_stage_1lds(fk.inv_lds_stage_61_1lds, radix) : nullptr;
-        const bool one_lds = (!opt512 && k1 != nullptr);
-        cl_kernel k = opt512 ? fk.inv_lds_stage_61_512opt : (one_lds ? k1 : fk.inv_lds_stage_61);
+        const bool small32x8 = (mixed_small32_x8 && radix >= 8u && radix <= 32u && fk.inv_lds_stage_61_32x8);
+        const bool small32x4 = (!small32x8 && mixed_small32_x4 && radix >= 8u && radix <= 32u && fk.inv_lds_stage_61_32x4);
+        const bool small32x2 = (!small32x8 && !small32x4 && mixed_small32_x2 && radix >= 8u && radix <= 64u && fk.inv_lds_stage_61_32x2);
+        const bool opt512 = (!small32x8 && !small32x4 && !small32x2 && radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_61_512opt);
+        const cl_kernel k1 = (!small32x8 && !small32x4 && !small32x2 && mixed_stage_single_lds_61) ? pick_stage_1lds(fk.inv_lds_stage_61_1lds, radix) : nullptr;
+        const bool one_lds = (!opt512 && !small32x8 && !small32x4 && !small32x2 && k1 != nullptr);
+        cl_kernel k = small32x8 ? fk.inv_lds_stage_61_32x8 : (small32x4 ? fk.inv_lds_stage_61_32x4 : (small32x2 ? fk.inv_lds_stage_61_32x2 : (opt512 ? fk.inv_lds_stage_61_512opt : (one_lds ? k1 : fk.inv_lds_stage_61))));
         cl_uint arg = 0;
         set_karg_mem(k, arg, g61.bufField, "set mixed lds inv61 a");
         set_karg_mem(k, arg, g61.bufTwInv, "set mixed lds inv61 tw");
         set_karg(k, arg, storage, "set mixed lds inv61 storage");
         set_karg(k, arg, base_len, "set mixed lds inv61 base_len");
         set_karg(k, arg, radix, "set mixed lds inv61 radix");
-        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
-        const std::string label = mixed_lds_label("inverse", radix, "61", opt512, one_lds);
+        const size_t groups0 = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
+        const size_t groups = small32x8 ? ((groups0 + 7u) >> 3u) : (small32x4 ? ((groups0 + 3u) >> 2u) : (small32x2 ? ((groups0 + 1u) >> 1u) : groups0));
+        std::string label = mixed_lds_label("inverse", radix, "61", opt512, one_lds);
+        if (small32x8) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_batch8_61";
+        else if (small32x4) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_x4_61";
+        else if (small32x2) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_x2_61";
         enqueue_kernel(g61, k, groups * local64, &local64, "enqueue mixed LDS inv61", label.c_str());
     };
     auto lds_inv31 = [&](cl_uint base_len, cl_uint radix) {
-        const bool opt512 = (radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_31_512opt);
-        const cl_kernel k1 = mixed_stage_single_lds_31 ? pick_stage_1lds(fk.inv_lds_stage_31_1lds, radix) : nullptr;
-        const bool one_lds = (!opt512 && k1 != nullptr);
-        cl_kernel k = opt512 ? fk.inv_lds_stage_31_512opt : (one_lds ? k1 : fk.inv_lds_stage_31);
+        const bool small32x8 = (mixed_small32_x8 && radix >= 8u && radix <= 32u && fk.inv_lds_stage_31_32x8);
+        const bool small32x4 = (!small32x8 && mixed_small32_x4 && radix >= 8u && radix <= 32u && fk.inv_lds_stage_31_32x4);
+        const bool small32x2 = (!small32x8 && !small32x4 && mixed_small32_x2 && radix >= 8u && radix <= 64u && fk.inv_lds_stage_31_32x2);
+        const bool opt512 = (!small32x8 && !small32x4 && !small32x2 && radix == 512u && mixed_lds512_opt && base_len == 1u && fk.inv_lds_stage_31_512opt);
+        const cl_kernel k1 = (!small32x8 && !small32x4 && !small32x2 && mixed_stage_single_lds_31) ? pick_stage_1lds(fk.inv_lds_stage_31_1lds, radix) : nullptr;
+        const bool one_lds = (!opt512 && !small32x8 && !small32x4 && !small32x2 && k1 != nullptr);
+        cl_kernel k = small32x8 ? fk.inv_lds_stage_31_32x8 : (small32x4 ? fk.inv_lds_stage_31_32x4 : (small32x2 ? fk.inv_lds_stage_31_32x2 : (opt512 ? fk.inv_lds_stage_31_512opt : (one_lds ? k1 : fk.inv_lds_stage_31))));
         cl_uint arg = 0;
         set_karg_mem(k, arg, g31.bufField, "set mixed lds inv31 a");
         set_karg_mem(k, arg, g31.bufTwInv, "set mixed lds inv31 tw");
         set_karg(k, arg, storage, "set mixed lds inv31 storage");
         set_karg(k, arg, base_len, "set mixed lds inv31 base_len");
         set_karg(k, arg, radix, "set mixed lds inv31 radix");
-        const size_t groups = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
-        const std::string label = mixed_lds_label("inverse", radix, "31", opt512, one_lds);
+        const size_t groups0 = (static_cast<size_t>(storage) / static_cast<size_t>(base_len * radix)) * static_cast<size_t>(base_len);
+        const size_t groups = small32x8 ? ((groups0 + 7u) >> 3u) : (small32x4 ? ((groups0 + 3u) >> 2u) : (small32x2 ? ((groups0 + 1u) >> 1u) : groups0));
+        std::string label = mixed_lds_label("inverse", radix, "31", opt512, one_lds);
+        if (small32x8) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_batch8_31";
+        else if (small32x4) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_x4_31";
+        else if (small32x2) label = "crt_mixed_lds" + std::to_string(radix) + "_inverse_x2_31";
         enqueue_kernel(g31, k, groups * local64, &local64, "enqueue mixed LDS inv31", label.c_str());
     };
     auto sync_g31_to_g61 = [&](const char* label) {
@@ -8219,6 +8286,9 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                   << ", center-twinline-f48=31:" << ((print_center_1lds_31 && clwrap::crt_halfreal_effective_flags31() == 48u && parse_bool_env("PRMERS_CRT_MIXED_CENTER_TWINLINE_31", true)) ? "on" : "off")
                   << ", stage-single-lds=61:" << (print_stage_1lds_61 ? "on" : "off")
                   << ",31:" << (print_stage_1lds_31 ? "on" : "off")
+                  << ", small32-batch8=" << (parse_bool_env("PRMERS_CRT_MIXED_SMALL32_BATCH8", parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X8", true)) ? "on" : "off")
+                  << ", small32-x4=" << (parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X4", true) ? "on" : "off")
+                  << ", small32-x2=" << (parse_bool_env("PRMERS_CRT_MIXED_SMALL32_X2", true) ? "on" : "off")
                   << ", digit-width-base=" << gpu61.min_digit_width << "\n";
     } else if (use_crt_defused_fast) {
         const char* sched_name = "grouped";
@@ -9085,8 +9155,9 @@ struct Options {
     int crt_halfreal_flags31 = 48;
     bool crt_halfreal_autoprobe = false;
     bool crt_halfreal_probe_exhaustive = true;
-    bool crt_startup_autotune = false;
-    int crt_autotune_iters = 1000;
+    bool crt_startup_autotune = true;
+    bool crt_startup_autotune_user = false;
+    int crt_autotune_iters = 1200;
     bool crt_autotune_wide = false;
     bool crt_split_center = false;
     bool crt_fused_center_lockstep = false;
@@ -9657,10 +9728,12 @@ static Options parse_args(int argc, char** argv) {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --crt-head-radix8");
             opt.crt_head_radix8 = static_cast<cl_uint>(std::stoul(argv[++i]));
             if (opt.crt_head_radix8 > 1u) throw std::runtime_error("--crt-head-radix8 must be 0 or 1");
-        } else if (arg == "--crt-startup-autotune" || arg == "--crt-autotune-startup") {
+        } else if (arg == "--crt-startup-autotune" || arg == "--crt-autotune-startup" || arg == "--startup-autotune") {
             opt.crt_startup_autotune = true;
-        } else if (arg == "--crt-no-startup-autotune") {
+            opt.crt_startup_autotune_user = true;
+        } else if (arg == "--crt-no-startup-autotune" || arg == "--no-startup-autotune" || arg == "--no-autotune") {
             opt.crt_startup_autotune = false;
+            opt.crt_startup_autotune_user = true;
         } else if (arg == "--crt-autotune-iters") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --crt-autotune-iters");
             opt.crt_autotune_iters = std::max(1000, std::stoi(argv[++i]));
@@ -9712,7 +9785,7 @@ static Options parse_args(int argc, char** argv) {
                 << "  crt  : GF(M61^2) x GF(M31^2), GPU Garner carry, smaller transform when possible.\n"
                 << "  best : selects gf61 or crt from the transform sizes.\n\n"
                 << "Defaults: CRT defused NTT + fused center are enabled; known AMD/NVIDIA presets are applied unless overridden.\n"
-                << "Autotune: --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; command-line knobs stay priority.\n"
+                << "Autotune: startup autotune is default for full CRT runs; --no-startup-autotune disables it; --startup-autotune forces it in benchmarks.\n"
                 << "Tuning: --center-max N, --center-autotune, --single-center-mode normal|halfreal|auto, --local-block-lds 512|1024|2048, --no-local-block-lds.\n"
                 << "CRT:    --crt-async-queues/--crt-two-queues default, --crt-shared-queue or --crt-single-queue for debug/contention tests.\n"
                 << "        --crt-radix8 default, --crt-radix4 disables global radix-8 test path.\n"
@@ -9721,13 +9794,14 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-edge-radix 2|4|8|16 changes first weighted and last unweighted edge radix; default 4.\n"
                 << "        --crt-odd-radix auto|1|3|9 enables CRT/PFA odd x 2^m half-real rows; 9 is the tuned mixed path.\n"
                 << "        odd=9 uses the 2D mixed CRT half-real scheme and a DFT3x3 odd transform.\n"
+                << "        env: PRMERS_CRT_MIXED_SMALL32_BATCH8=0 disables the radix<=32 batch8 path; legacy PRMERS_CRT_MIXED_SMALL32_X8 also works.\n"
                 << "        --crt-edge-mode auto|legacy|generic selects old radix4 split/fuse path or generic edge kernels.\n"
                 << "        --crt-center is kept as an alias; --crt-split-center keeps the older split GF61/GF31 center.\n"
                 << "        --crt-lds-stage/--crt-mixed-row-stage 8|16|32|64|128|256|512|1024 forces the LDS stage before the row center for tests.\n"
                 << "        --crt-mixed-row-core auto|lds|lds512|lds1024|generic selects the odd radix row path; lds uses --crt-mixed-row-center.\n"
                 << "        --crt-mixed-row-fuse-both off|auto|center|stage|all|force optionally runs GF61+GF31 in the same LDS center/stage kernels.\n"
                 << "        --crt-mixed-gpu-reference validates mixed odd LDS/fused paths against the generic mixed GPU path instead of exact CPU.\n"
-                << "        --crt-startup-autotune [--crt-autotune-iters N] tests CRT plans at startup; --crt-autotune-wide adds more candidates.\n"
+                << "        --startup-autotune [--crt-autotune-iters N] tests mixed row plans at startup; --no-startup-autotune disables it.\n"
                 << "I/O:    --config FILE reads simple key=value options before CLI overrides.\n"
                 << "        --worktodo FILE loads the first PRP assignment if no exponent is given; --no-worktodo disables this.\n"
                 << "        --json or --json-file FILE writes a small run/result JSON file.\n"
@@ -9900,6 +9974,69 @@ static double run_child_bench(const std::string& cmd) {
 
 static void maybe_run_crt_startup_autotune(Options& opt, const char* argv0) {
     if (!opt.crt_startup_autotune || opt.modulus_mode != "crt") return;
+    if (opt.max_iters != 0 && !opt.crt_startup_autotune_user) return;
+    if (opt.crt_halfreal_validate || opt.crt_halfreal_validate_random || opt.crt_mixed_gpu_reference) return;
+
+    auto common_cmd = [&](std::ostringstream& cmd) {
+        cmd << shell_quote(argv0) << " " << opt.exponent
+            << " --modulus crt --device " << opt.device_index
+            << " --crt-no-startup-autotune --iters " << opt.crt_autotune_iters
+            << " --no-gerbicz --no-backup --no-resume --no-json --no-results --quiet --queue-guard 0";
+        if (!opt.kernel_path.empty()) cmd << " --kernel " << shell_quote(opt.kernel_path);
+    };
+
+    if (opt.crt_odd_radix > 1u || opt.crt_odd_radix_auto) {
+        const uint32_t odd = opt.crt_odd_radix > 1u ? opt.crt_odd_radix : 9u;
+        auto layout = ibdwt::make_layout_mixed(opt.exponent, odd);
+        const uint32_t row_m = layout.pow2_n >> 1u;
+        struct MixedCand { uint32_t center; uint32_t stage; std::string core; };
+        std::vector<MixedCand> cands;
+        auto add = [&](uint32_t center, uint32_t stage, const std::string& core) {
+            if (row_m < center) return;
+            if (opt.user_crt_local_square && opt.crt_center_chunk != center) return;
+            if (opt.user_crt_local_stage && opt.crt_lds_stage != stage) return;
+            cands.push_back({center, stage, core});
+        };
+        add(512u, 512u, "auto");
+        add(1024u, 1024u, "auto");
+        add(512u, 1024u, "auto");
+        add(256u, 512u, "auto");
+        if (opt.crt_autotune_wide) {
+            add(128u, 512u, "auto");
+            add(512u, 256u, "auto");
+            add(1024u, 512u, "auto");
+        }
+        if (cands.empty()) return;
+        double best = -1.0;
+        MixedCand bestc{opt.crt_center_chunk, opt.crt_lds_stage, opt.crt_mixed_row_core};
+        std::cout << "mixed CRT startup autotune: " << cands.size() << " candidates, " << opt.crt_autotune_iters << " iterations each";
+        if (!opt.crt_startup_autotune_user && opt.max_iters != 0) std::cout << " skipped for short bench";
+        std::cout << "\n";
+        int idx = 0;
+        for (const auto& c : cands) {
+            std::ostringstream cmd;
+            common_cmd(cmd);
+            cmd << " --crt-odd-radix " << odd
+                << " --crt-halfreal-no-autoprobe"
+                << " --crt-mixed-row-center " << c.center
+                << " --crt-mixed-row-stage " << c.stage
+                << " --crt-mixed-row-core " << c.core
+                << " 2>/dev/null";
+            std::cout << "  autotune " << (++idx) << "/" << cands.size()
+                      << ": center=" << c.center << ", stage=" << c.stage << " ... " << std::flush;
+            double speed = run_child_bench(cmd.str());
+            std::cout << speed << " it/s\n";
+            if (speed > best) { best = speed; bestc = c; }
+        }
+        if (best > 0.0) {
+            if (!opt.user_crt_local_square) opt.crt_center_chunk = bestc.center;
+            if (!opt.user_crt_local_stage) opt.crt_lds_stage = bestc.stage;
+            opt.crt_mixed_row_core = bestc.core;
+            std::cout << "mixed CRT startup autotune selected: " << best << " it/s, center="
+                      << opt.crt_center_chunk << ", stage=" << opt.crt_lds_stage << "\n";
+        }
+        return;
+    }
 
     struct Cand { bool twoq; int sched; std::uint32_t lds; std::uint32_t edge; int mode; int fuse; };
     std::vector<bool> queues = opt.user_crt_queue ? std::vector<bool>{opt.crt_async_queues} : std::vector<bool>{true, false};
@@ -9919,10 +10056,8 @@ static void maybe_run_crt_startup_autotune(Options& opt, const char* argv0) {
     for (bool q : queues) for (int sc : scheds) for (auto lds : ldss) for (auto er : edges) for (int em : modes) for (int fu : fuses) {
         if (er != 4 && fu != 0) continue;
         std::ostringstream cmd;
-        cmd << shell_quote(argv0) << " " << opt.exponent
-            << " --modulus crt --device " << opt.device_index
-            << " --crt-no-startup-autotune --iters " << opt.crt_autotune_iters
-            << " --crt-defused-ntt --crt-fused-center-experimental"
+        common_cmd(cmd);
+        cmd << " --crt-defused-ntt --crt-fused-center-experimental"
             << (q ? " --crt-two-queues" : " --crt-single-queue")
             << " --crt-defused-schedule " << crt_schedule_name(sc)
             << " --crt-local-square 512 --crt-local-stage-max " << lds
@@ -10057,24 +10192,15 @@ static std::string resolve_single_center_mode_auto(const Options& opt, const ibd
 
 static uint32_t resolve_crt_odd_radix_auto(const Options& opt, std::uint32_t p) {
     if (opt.crt_odd_radix != 0u) return opt.crt_odd_radix;
-    const auto base = ibdwt::make_layout(p);
-    uint32_t selected = 1u;
     try {
         const auto odd9 = ibdwt::make_layout_mixed(p, 9u);
         const std::size_t row_m = (odd9.n / 9u) >> 1u;
-        const std::size_t center = std::max<std::size_t>(512u, opt.crt_center_chunk ? opt.crt_center_chunk : 512u);
-        const std::size_t row_factor = row_m >= center ? row_m / center : 0u;
-        const std::size_t min_stage_radix = env_u32_or_default_main("PRMERS_CRT_MIXED_AUTO_MIN_STAGE_RADIX", 64u, 1u, 1024u);
-        const bool small_win = (base.ln >= 13u && base.ln <= 15u);
-        const bool large_row_win = (row_factor >= min_stage_radix);
-        const bool no_stage_win = (row_factor <= 1u && row_m >= center);
-        const bool strong_size_win = (odd9.n * std::size_t(4) <= base.n * std::size_t(3));
-        if (small_win || (strong_size_win && (large_row_win || no_stage_win))) selected = 9u;
+        if (row_m >= 8u) return 9u;
     } catch (...) {
-        selected = 1u;
     }
-    return selected;
+    return 1u;
 }
+
 
 static bool path_matches_strict_reference(
     std::uint32_t p,

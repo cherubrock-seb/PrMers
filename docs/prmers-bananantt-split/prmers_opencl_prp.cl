@@ -7762,6 +7762,551 @@ void gf61_crt_lds_stage_dit_pow2_31_tile4(
 
 
 
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_61_32x2(
+    __global GF* a61, __global const GF* tw61, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 5;
+    const uint lane32 = lane & 31u;
+    if (radix < 8u || radix > 64u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 1) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[128];
+    __local GF* x = l61 + row * 64u;
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_61(x, tw61, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_61(x, tw61, radix, 4u, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_61(x, tw61, radix, 2u, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_61_32x2(
+    __global GF* a61, __global const GF* tw61, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 5;
+    const uint lane32 = lane & 31u;
+    if (radix < 8u || radix > 64u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 1) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[128];
+    __local GF* x = l61 + row * 64u;
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_61(x, tw61, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_61(x, tw61, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_61(x, tw61, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_31_32x2(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 5;
+    const uint lane32 = lane & 31u;
+    if (radix < 8u || radix > 64u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 1) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[128];
+    __local GF31* x = l31 + row * 64u;
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_31(x, tw31, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_31(x, tw31, radix, 4u, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_31(x, tw31, radix, 2u, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) a31[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_31_32x2(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 5;
+    const uint lane32 = lane & 31u;
+    if (radix < 8u || radix > 64u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 1) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[128];
+    __local GF31* x = l31 + row * 64u;
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_31(x, tw31, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_31(x, tw31, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_31(x, tw31, radix, L, stride, j, lane32);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane32; t < radix; t += 32u) a31[base + t * stride] = x[t];
+    }
+}
+
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_61_32x4(
+    __global GF* a61, __global const GF* tw61, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 4;
+    const uint lane16 = lane & 15u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 2) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[128];
+    __local GF* x = l61 + row * 32u;
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_61(x, tw61, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_61(x, tw61, radix, 4u, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_61(x, tw61, radix, 2u, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_61_32x4(
+    __global GF* a61, __global const GF* tw61, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 4;
+    const uint lane16 = lane & 15u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 2) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[128];
+    __local GF* x = l61 + row * 32u;
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_61(x, tw61, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_61(x, tw61, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_61(x, tw61, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_31_32x4(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 4;
+    const uint lane16 = lane & 15u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 2) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[128];
+    __local GF31* x = l31 + row * 32u;
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_31(x, tw31, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_31(x, tw31, radix, 4u, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_31(x, tw31, radix, 2u, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) a31[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_31_32x4(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 4;
+    const uint lane16 = lane & 15u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 2) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[128];
+    __local GF31* x = l31 + row * 32u;
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_31(x, tw31, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_31(x, tw31, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_31(x, tw31, radix, L, stride, j, lane16);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane16; t < radix; t += 16u) a31[base + t * stride] = x[t];
+    }
+}
+
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_61_32x8(
+    __global GF* a61, __global const GF* tw61, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 3;
+    const uint lane8 = lane & 7u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 3) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[256];
+    __local GF* x = l61 + row * 32u;
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_61(x, tw61, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_61(x, tw61, radix, 4u, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_61(x, tw61, radix, 2u, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_61_32x8(
+    __global GF* a61, __global const GF* tw61, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 3;
+    const uint lane8 = lane & 7u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 3) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF l61[256];
+    __local GF* x = l61 + row * 32u;
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) x[t] = a61[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_61(x, tw61, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_61(x, tw61, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_61(x, tw61, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) a61[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dif_pow2_31_32x8(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 3;
+    const uint lane8 = lane & 7u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || len < radix || (len & (radix - 1u)) != 0u) return;
+    const uint stride = len / radix;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 3) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[256];
+    __local GF31* x = l31 + row * 32u;
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint L = radix;
+    while (L >= 8u) {
+        if (active) crt_lds_dif8_31(x, tw31, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L >>= 3;
+    }
+    if (L == 4u) {
+        if (active) crt_lds_dif4_31(x, tw31, radix, 4u, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    } else if (L == 2u) {
+        if (active) crt_lds_dif2_31(x, tw31, radix, 2u, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) a31[base + t * stride] = x[t];
+    }
+}
+
+__kernel __attribute__((reqd_work_group_size(64,1,1)))
+void gf61_crt_lds_stage_dit_pow2_31_32x8(
+    __global GF31* a31, __global const GF31* tw31, uint n, uint base_len, uint radix)
+{
+    const uint lane = get_local_id(0);
+    const uint row = lane >> 3;
+    const uint lane8 = lane & 7u;
+    if (radix < 8u || radix > 32u || (radix & (radix - 1u)) != 0u || base_len == 0u) return;
+    const uint stride = base_len;
+    const uint len = base_len * radix;
+    if (len > n) return;
+    const uint groups0 = (n / len) * stride;
+    const uint old_gid = (get_group_id(0) << 3) + row;
+    const uint active = old_gid < groups0;
+    uint block = 0u, j = 0u, base = 0u;
+    if (active) {
+        block = old_gid / stride;
+        j = old_gid - block * stride;
+        base = block * len + j;
+    }
+    __local GF31 l31[256];
+    __local GF31* x = l31 + row * 32u;
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) x[t] = a31[base + t * stride];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    uint tail = radix;
+    while ((tail & 7u) == 0u && tail > 1u) tail >>= 3;
+    uint L = 2u;
+    if (tail == 2u) {
+        if (active) crt_lds_dit2_31(x, tw31, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 1;
+    } else if (tail == 4u) {
+        if (active) crt_lds_dit4_31(x, tw31, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 2;
+    }
+    while (L < radix) {
+        if (active) crt_lds_dit8_31(x, tw31, radix, L, stride, j, lane8);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        L <<= 3;
+    }
+    if (active) {
+        for (uint t = lane8; t < radix; t += 8u) a31[base + t * stride] = x[t];
+    }
+}
+
 #define DEFINE_MIXED_STAGE_1LDS_61(R) \
 __kernel __attribute__((reqd_work_group_size(64,1,1))) \
 void gf61_crt_lds_stage_dif_pow2_61_1lds_##R( \
