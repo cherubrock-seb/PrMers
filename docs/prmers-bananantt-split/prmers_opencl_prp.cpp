@@ -168,8 +168,8 @@ static inline bool mixed_center_f48_delayed_scale_61() {
 }
 
 static inline bool mixed_center_f48_delayed_scale_31() {
-    /* GF31 is cheap in shifts, but the delayed-scale F48 form removes two
-       early pair shifts in the hot center path. Keep it controllable. */
+
+
     bool def31 = true;
     if (env_has_value("PRMERS_CRT_MIXED_CENTER_F48_DELAYED_SCALE") ||
         env_has_value("PRMERS_CRT_MIXED_CENTER_F48_LATE_SCALE")) {
@@ -224,8 +224,8 @@ static inline cl_uint garner_items(cl_uint digit_n, cl_uint min_digit_width, cl_
 }
 
 static inline cl_uint garner_local(cl_uint segments) {
-    
-    
+
+
     cl_uint defv = 16u;
     return round_pow2_clamped(env_u32("PRMERS_CRT_GARNER_LOCAL", defv, 16u, 256u), 16u, 256u);
 }
@@ -252,8 +252,8 @@ inline void configure_field(unsigned bits) {
         FIELD_NAME = "GF(M61^2)";
     } else if (bits == 31) {
         P = (std::uint64_t(1) << 31) - 1;
-        
-        
+
+
         ROOT_H0 = 2105104135ULL;
         ROOT_H1 = 2126293891ULL;
         ROOT_ORDER_LOG2 = 32;
@@ -378,11 +378,16 @@ static unsigned g_shift_mod_bits = 61;
 
 
 static unsigned g_recovery_headroom_bits = 2;
+static unsigned g_recovery_pointwise_power = 2;
 
 inline void configure_capacity(unsigned capacity_bits, unsigned shift_mod_bits, unsigned recovery_headroom_bits = 2) {
     g_capacity_bits = capacity_bits;
     g_shift_mod_bits = shift_mod_bits;
     g_recovery_headroom_bits = recovery_headroom_bits;
+}
+
+inline void configure_pointwise_power(unsigned power) {
+    g_recovery_pointwise_power = std::max(2u, power);
 }
 
 struct Layout {
@@ -401,7 +406,8 @@ inline unsigned max_digit_width_for_log2(std::uint32_t p, unsigned ln) {
 
 inline unsigned required_recovery_bits(std::uint32_t p, unsigned ln) {
     const unsigned max_w = max_digit_width_for_log2(p, ln);
-    return ln + 2u * max_w + g_recovery_headroom_bits;
+    const unsigned power = std::max(2u, g_recovery_pointwise_power);
+    return (power - 1u) * ln + power * max_w + g_recovery_headroom_bits;
 }
 
 inline unsigned transform_size_log2(std::uint32_t p) {
@@ -430,8 +436,8 @@ inline std::uint64_t inv_mod_u64(std::uint64_t a, std::uint64_t m) {
 }
 
 inline std::uint8_t log2_root_two(std::size_t n) {
-    
-    
+
+
     return static_cast<std::uint8_t>(inv_mod_u64(n % g_shift_mod_bits, g_shift_mod_bits));
 }
 
@@ -488,7 +494,8 @@ inline unsigned required_recovery_bits_mixed(std::uint32_t p, std::size_t n) {
     unsigned log2n_ceil = 0;
     std::size_t t = 1;
     while (t < n) { t <<= 1; ++log2n_ceil; }
-    return log2n_ceil + 2u * max_w + g_recovery_headroom_bits;
+    const unsigned power = std::max(2u, g_recovery_pointwise_power);
+    return (power - 1u) * log2n_ceil + power * max_w + g_recovery_headroom_bits;
 }
 
 inline Layout make_layout_mixed(std::uint32_t p, std::uint32_t forced_odd) {
@@ -579,8 +586,8 @@ static std::vector<std::uint64_t> square_mod_mersenne_exact_digits(
 
     std::vector<std::uint64_t> out(layout.n, 0);
     try {
-        
-        
+
+
         std::uint64_t off = 0;
         for (std::size_t i = 0; i < layout.n; ++i) {
             const unsigned w = layout.digit_width[i];
@@ -592,14 +599,14 @@ static std::vector<std::uint64_t> square_mod_mersenne_exact_digits(
             off += w;
         }
 
-        
+
         mpz_set_ui(mod, 1ul);
         mpz_mul_2exp(mod, mod, static_cast<mp_bitcnt_t>(layout.p));
         mpz_sub_ui(mod, mod, 1ul);
 
         mpz_mul(y, x, x);
 
-        
+
         mpz_tdiv_r_2exp(low, y, static_cast<mp_bitcnt_t>(layout.p));
         mpz_tdiv_q_2exp(high, y, static_cast<mp_bitcnt_t>(layout.p));
         mpz_add(y, low, high);
@@ -1012,8 +1019,8 @@ struct GpuPrp {
 
     cl_mem bufDigits = nullptr;
     cl_mem bufDigits32 = nullptr;
-    
-    
+
+
     cl_mem crtInputDigits = nullptr;
     bool crtLastUnweightPending = false;
     bool crtCoeffPending = false;
@@ -1062,7 +1069,7 @@ struct GpuPrp {
     bool prefer_radix4x2 = true;
     unsigned field_bits = 61;
     std::size_t field_elem_size = sizeof(gf61::Elem);
-    
+
     cl_event pending_wait_event = nullptr;
     std::vector<StageInfo> stages;
     std::vector<std::pair<std::string, cl_event>> pending_profile_events;
@@ -1227,6 +1234,8 @@ static std::vector<std::uint8_t> pack_field_elems(const std::vector<gf61::Elem>&
     return out;
 }
 
+static int g_crt_mixed_center_power = 2;
+
 GpuPrp make_gpu(const DeviceInfo& info,
                 const std::string& kernel_path,
                 const ibdwt::Layout& layout,
@@ -1279,6 +1288,8 @@ GpuPrp make_gpu(const DeviceInfo& info,
                   (mixed_center_f48_twin_symmetry_61() ? "1" : "0");
     build_opts += std::string(" -DCRT_MIXED_F48_TWIN_SYMMETRY_31=") +
                   (mixed_center_f48_twin_symmetry_31() ? "1" : "0");
+    build_opts += std::string(" -DCRT_MIXED_CENTER_POWER=") +
+                  std::to_string(g_crt_mixed_center_power);
     if (parse_bool_env("PRMERS_OCL_FAST_BUILD_OPTS", true)) {
         build_opts += " -cl-std=CL1.2 -cl-mad-enable -cl-no-signed-zeros -cl-fast-relaxed-math";
     }
@@ -1486,8 +1497,8 @@ GpuPrp make_gpu(const DeviceInfo& info,
     gpu.bufDigits = clCreateBuffer(gpu.context, CL_MEM_READ_WRITE, n * sizeof(std::uint64_t), nullptr, &err);
     check(err, "clCreateBuffer(bufDigits)");
     if (gpu.field_bits == 31) {
-        
-        
+
+
         gpu.bufDigits32 = clCreateBuffer(gpu.context, CL_MEM_READ_WRITE, n * sizeof(std::uint32_t), nullptr, &err);
         check(err, "clCreateBuffer(bufDigits32)");
     }
@@ -1501,7 +1512,7 @@ GpuPrp make_gpu(const DeviceInfo& info,
                                           n * sizeof(std::uint8_t), const_cast<std::uint8_t*>(shift_table.data()), &err);
     check(err, "clCreateBuffer(bufUnweightShift)");
 
-    
+
     std::vector<std::uint32_t> width_mask32((n + 31u) >> 5, 0u);
     for (std::size_t i = 0; i < n; ++i) {
         if (layout.digit_width[i] != gpu.min_digit_width) width_mask32[i >> 5] |= (std::uint32_t(1) << (i & 31u));
@@ -1579,16 +1590,21 @@ static std::string g_crt_center_mode = "halfreal";
 static bool g_crt_halfreal_validate = false;
 static uint32_t g_crt_halfreal_validate_iters = 1;
 static bool g_crt_halfreal_validate_random = false;
-// For large mixed odd-radix tests the exact CPU reference can be far too slow.
-// This switch validates the selected LDS/fused mixed path against the generic
-// mixed GPU path, keeping the same PFA digit order and avoiding the CPU square.
+
+
+
 static bool g_crt_mixed_gpu_reference = false;
-// v57 experimental: carry boundary can pre-pack the next iteration.
-// The next square then starts directly from a61/a31 and skips the head pack.
+
+
+
+
+static bool g_crt_mixed_double_pointwise_square = false;
+
+
 static bool g_crt_mixed_skip_pack_this_square = false;
-// v58 experimental: fuse the post-Garner carry pass with the next mixed pack.
-// This is only armed by the main mixed loop for iter+1 and only when the tail
-// already produced the first carry vectors.
+
+
+
 static bool g_crt_mixed_carry_pack_next_request = false;
 static bool g_crt_mixed_carry_pack_next_done = false;
 static std::size_t g_crt_halfreal_dump_count = 32;
@@ -1604,8 +1620,8 @@ static bool g_crt_halfreal_probe_exhaustive = true;
 static int g_crt_defused_edge_mode = 0;
 
 static inline cl_uint crt_halfreal_effective_flags61() {
-    
-    
+
+
     return static_cast<cl_uint>((g_crt_halfreal_flags61 < 0) ? 16 : (g_crt_halfreal_flags61 & 63));
 }
 
@@ -1712,8 +1728,8 @@ static CarryConfig choose_crt_carry_config(const DeviceInfo& dev, std::size_t n,
     const bool user_overrode = (block_override != 0 || items_override != 0);
     if (!user_overrode) {
         const std::pair<cl_uint, cl_uint> preferred[] = {
-            
-            
+
+
             {512u,32u}, {256u,16u}, {256u,8u}, {1024u,64u}, {256u,4u}, {128u,4u}, {64u,2u}
         };
         bool found = false;
@@ -1981,8 +1997,8 @@ static BridgeKernelConfig choose_local_block_lds_kernel(GpuPrp& gpu) {
     };
     for (const auto& cand : candidates) {
         if (g_local_block_lds_override && cand.outer_chunk != g_local_block_lds_override) continue;
-        
-        
+
+
         if (gpu.n < std::size_t(cand.outer_chunk) * 2u) continue;
         if ((gpu.n % cand.outer_chunk) != 0u) continue;
         const std::size_t local_bytes = std::size_t(cand.outer_chunk) * gpu.field_elem_size;
@@ -2667,8 +2683,8 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     }
     ensure_carry_buffers(gpu61);
     const cl_uint digit_n = static_cast<cl_uint>(gpu61.n);
-    
-    
+
+
     const cl_uint minw = std::max<cl_uint>(1u, gpu61.min_digit_width);
     cl_uint items = crt_tune::garner_items(digit_n, minw, static_cast<cl_uint>(cfg.items_per_worker));
     const bool precomputed_first_carry = gpu61.crtFirstCarryReady;
@@ -2688,8 +2704,8 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     const std::size_t global = round_up_size(std::max<std::size_t>(1u, segments), local);
 
     const cl_uint bits_per_segment = std::max<cl_uint>(1u, items * minw);
-    
-    
+
+
     const cl_uint crt_passes = std::max<cl_uint>(1u, std::min<cl_uint>(8u, (128u + bits_per_segment - 1u) / bits_per_segment));
 
     cl_uint zero = 0;
@@ -2846,8 +2862,8 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     cl_mem lo_out = gpu61.bufBlockIncoming;
     cl_mem hi_out = gpu61.bufCrtCarryHi2;
     for (cl_uint pass = 0; pass < crt_passes; ++pass) {
-        
-        
+
+
         check(clEnqueueWriteBuffer(gpu61.queue, gpu61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr), "crt reset pass pending");
         if (pass == 0u && can_carry_pack_next_lds) {
             const cl_uint odd = 9u;
@@ -2900,18 +2916,18 @@ static void enqueue_crt_garner_carry_gpu(GpuPrp& gpu61, GpuPrp& gpu31, const Car
     const std::size_t one = 1;
     cl_event crt_done_ev = nullptr;
 
-    
+
     const bool force_serial_cleanup = (std::getenv("PRMERS_CRT_SERIAL_CLEANUP") != nullptr);
     const bool force_parallel_cleanup = (std::getenv("PRMERS_CRT_PARALLEL_CLEANUP") != nullptr);
-    
-    
+
+
     const bool enable_parallel_cleanup = oneout_digits && force_parallel_cleanup && !force_serial_cleanup &&
                                          gpu61.k_crt_carry_cleanup_parallel_oneout;
     if (enable_parallel_cleanup) {
         check(clEnqueueWriteBuffer(gpu61.queue, gpu61.bufCarryPending, CL_FALSE, 0, sizeof(zero), &zero, 0, nullptr, nullptr),
               "crt reset parallel cleanup pending");
-        
-        
+
+
         arg = 0;
         check(clSetKernelArg(gpu61.k_crt_carry_cleanup_parallel_oneout, arg++, sizeof(cl_mem), &gpu61.bufDigits), "crt_parallel_cleanup arg0 digits");
         check(clSetKernelArg(gpu61.k_crt_carry_cleanup_parallel_oneout, arg++, sizeof(cl_mem), &gpu61.bufWidth), "crt_parallel_cleanup arg1 widths");
@@ -2985,7 +3001,7 @@ struct CrtFusedKernels {
     cl_kernel last_unweight = nullptr;
     cl_kernel last_unweight16 = nullptr;
 
-    
+
     cl_kernel weight_first61 = nullptr;
     cl_kernel weight_first31 = nullptr;
     cl_kernel weight_edge61 = nullptr;
@@ -3847,7 +3863,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     const cl_uint flags61 = crt_halfreal_effective_flags61();
     const cl_uint flags31 = crt_halfreal_effective_flags31();
 
-    
+
     const bool mixed_lds_disabled = parse_bool_env("PRMERS_CRT_MIXED_LDS_DISABLE", false) ||
                                     parse_bool_env("PRMERS_CRT_MIXED_LDS512_DISABLE", false);
     const bool mixed_lds512_opt = parse_bool_env("PRMERS_CRT_MIXED_LDS512_OPT", true);
@@ -3922,8 +3938,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                           g31.bufDigits32 &&
                                           g61.bufWidthMask32 &&
                                           fk.mixed_odd_precrt_coeffhi_available();
-    
-    
+
+
     const bool use_mixed_shift_lut = parse_bool_env("PRMERS_CRT_MIXED_SHIFT_LUT", odd == 9u) &&
                                      fk.mixed_odd_shift_lut_available() &&
                                      g61.bufUnweightShift && g31.bufUnweightShift;
@@ -3961,8 +3977,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                         !use_mixed_shift_lut &&
                                         odd == 9u &&
                                         fk.mixed_odd_inv_precrt_coeffhi_tile7 != nullptr;
-    
-    
+
+
     const bool use_mixed_precrt_outpar = parse_bool_env("PRMERS_CRT_MIXED_PRECRT_OUTPAR", false) &&
                                          use_mixed_precrt_coeffhi &&
                                          !use_mixed_precrt_tile14_shift &&
@@ -3970,8 +3986,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
                                          !use_mixed_precrt_tile7 &&
                                          !use_mixed_shift_lut &&
                                          fk.mixed_odd_inv_precrt_coeffhi_outpar != nullptr;
-    
-    
+
+
     const bool use_mixed_precrt_split = parse_bool_env("PRMERS_CRT_MIXED_PRECRT_SPLIT", false) &&
                                         use_mixed_fused_edges &&
                                         g31.bufDigits32 &&
@@ -4025,10 +4041,10 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         throw std::runtime_error("--crt-mixed-row-fuse-both force conflicts with PRMERS_CRT_MIXED_STAGE_SINGLE_LDS_61/31; set PRMERS_CRT_MIXED_STAGE_FUSE_OVERRIDES_SINGLE_LDS=1 or clear the stage single-LDS flags");
     }
 
-    // A fused 61x31 pair-center needs two pair buffers for each field.
-    // The generic 1024 version would exceed the 48 KiB LDS limit on NVIDIA
-    // (ptxas reports about 0xc010 bytes), so fused center is intentionally
-    // capped at 512 and center=1024 falls back to separate GF61/GF31 kernels.
+
+
+
+
     const bool mixed_center_both_len_ok = (mixed_row_center <= 512u);
     const bool use_mixed_center_both = want_mixed_center_both && mixed_center_both_len_ok &&
         ((mixed_row_center == 512u && fk.mixed_lds512_pair_both) || fk.mixed_odd_center_any_both_available());
@@ -4206,7 +4222,7 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         enqueue_kernel(g31, fk.mixed_odd_dft31, g_row_m, &local64, "enqueue mixed odd31", label);
     };
 
-    
+
     auto fwd61 = [&](const StageInfo& st) {
         cl_uint arg = 0;
         set_karg_mem(fk.mixed_fwd_r2_61, arg, g61.bufField, "set mixed fwd61 a");
@@ -4740,8 +4756,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
 
 
     auto odd_inv_precrt_coeffhi = [&]() {
-        
-        
+
+
         cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 ready for preCRT coeffhi");
         set_pending_wait_event(g61, gf31_ready);
         if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
@@ -4849,8 +4865,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
     };
 
     auto residues_to_coeffhi = [&]() {
-        
-        
+
+
         cl_event gf31_ready = enqueue_queue_marker(g31, "mixed odd gf31 residues ready for coeffhi");
         set_pending_wait_event(g61, gf31_ready);
         if (g31.queue != g61.queue) maybe_flush_mixed(g31.queue);
@@ -4868,8 +4884,8 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
 
     const bool use_prepacked_head = g_crt_mixed_skip_pack_this_square && use_mixed_pack_both;
     if (use_prepacked_head) {
-        // a61/a31 already contain pack+weight+oddDFT from the previous carry boundary.
-        // Keep this limited to the fused 61x31 pack path so both queues see the same marker logic.
+
+
     } else if (use_mixed_pack_both) {
         pack_odd_fwd_both();
     } else if (use_mixed_fused_edges) {
@@ -4897,23 +4913,26 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
             }
             cur /= radix;
         }
-        if (use_mixed_center_both) {
-            center_lds_both(center_len);
-        } else if (use_mixed_lds512) {
-            center_lds512_61();
-            center_lds512_31();
-        } else if ((mixed_center_single_lds_61 || mixed_center_single_lds_31) &&
-                   ((mixed_center_single_lds_61 ? fk.mixed_lds_any_pair_1lds61 : fk.mixed_lds_any_pair61) || fk.mixed_lds_any_pair61) &&
-                   ((mixed_center_single_lds_31 ? fk.mixed_lds_any_pair_1lds31 : fk.mixed_lds_any_pair31) || fk.mixed_lds_any_pair31)) {
-            center_lds_any_61(center_len);
-            center_lds_any_31(center_len);
-        } else if (use_mixed_lds1024) {
-            center_lds1024_61();
-            center_lds1024_31();
-        } else {
-            center_lds_any_61(center_len);
-            center_lds_any_31(center_len);
-        }
+        auto run_row_center_square_once = [&]() {
+            if (use_mixed_center_both) {
+                center_lds_both(center_len);
+            } else if (use_mixed_lds512) {
+                center_lds512_61();
+                center_lds512_31();
+            } else if ((mixed_center_single_lds_61 || mixed_center_single_lds_31) &&
+                       ((mixed_center_single_lds_61 ? fk.mixed_lds_any_pair_1lds61 : fk.mixed_lds_any_pair61) || fk.mixed_lds_any_pair61) &&
+                       ((mixed_center_single_lds_31 ? fk.mixed_lds_any_pair_1lds31 : fk.mixed_lds_any_pair31) || fk.mixed_lds_any_pair31)) {
+                center_lds_any_61(center_len);
+                center_lds_any_31(center_len);
+            } else if (use_mixed_lds1024) {
+                center_lds1024_61();
+                center_lds1024_31();
+            } else {
+                center_lds_any_61(center_len);
+                center_lds_any_31(center_len);
+            }
+        };
+        run_row_center_square_once();
         cur = center_len;
         while (cur < row_m) {
             cl_uint radix = floor_pow2_leq(std::min<cl_uint>(stage_cap, row_m / cur));
@@ -4954,11 +4973,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
         unpack61(); unpack31();
     }
 
-    // Do not force a host/GPU sync at the end of the mixed odd square by default.
-    // The following Garner/carry kernels are enqueued on the GF61 queue, and the
-    // mixed odd tail already inserts the GF31->GF61 marker when it reads a31.
-    // enqueue_crt_garner_carry_gpu() then publishes the cleanup event back to GF31
-    // for the next iteration.  Keep the old behaviour available for debugging.
+
+
+
+
+
     if (parse_bool_env("PRMERS_CRT_MIXED_FINISH_AFTER_SQUARE", false)) {
         check(clFinish(g61.queue), "clFinish mixed odd gf61");
         check(clFinish(g31.queue), "clFinish mixed odd gf31");
@@ -4967,11 +4986,11 @@ static bool enqueue_square_mod_crt_mixed_odd(GpuPrp& g61, GpuPrp& g31, CrtFusedK
 }
 
 
-// v57 safe pre-pack test: after carry has stabilized digits, build the
-// pack+weight+oddDFT input for the next iteration.  This deliberately reuses
-// the proven v53 tile28 61x31 pack kernel; the next square skips only the head
-// pack enqueue.  It does not fuse carry arithmetic yet, so it is a correctness
-// and scheduling experiment rather than the final memory-pass-saving kernel.
+
+
+
+
+
 static bool enqueue_crt_mixed_pack_next_after_carry(GpuPrp& g61, GpuPrp& g31, CrtFusedKernels& fk) {
     const cl_uint odd = g_crt_odd_radix;
     if (odd != 9u) return false;
@@ -5027,7 +5046,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     const cl_uint center_chunk = 512u;
     const auto& stages = g61.stages;
 
-    
+
     const cl_uint requested_lds = floor_pow2_leq(std::min<cl_uint>(g_crt_lds_stage, 512u));
     const cl_uint max_ratio = (n / 4u) / center_chunk;
     cl_uint defused_lds_radix = 0u;
@@ -5035,8 +5054,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         fk.fwd_lds_stage_61 && fk.inv_lds_stage_61 && fk.fwd_lds_stage_31 && fk.inv_lds_stage_31) {
         defused_lds_radix = floor_pow2_leq(std::min<cl_uint>(requested_lds, std::min<cl_uint>(512u, max_ratio)));
     }
-    
-    
+
+
     const bool allow_defused_lds_lt512 = parse_bool_env("PRMERS_CRT_LDS_STAGE_LT512", false);
     const bool use_defused_lds_stage = (defused_lds_radix == 512u) ||
         (allow_defused_lds_lt512 && defused_lds_radix >= 16u);
@@ -5046,11 +5065,11 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
                                       ? g_crt_defused_edge_radix : 4u;
     const cl_uint edge_log = (edge_radix == 2u) ? 1u : (edge_radix == 4u) ? 2u : (edge_radix == 8u) ? 3u : 4u;
 
-    
+
     const bool force_generic_edge = (g_crt_defused_edge_mode == 2);
     const bool legacy_radix4_edge = (edge_radix == 4u) && !force_generic_edge;
 
-    
+
     const bool fuse_forward_edge = ((g_crt_defused_edge_fuse & 1) != 0) &&
                                    legacy_radix4_edge &&
                                    fk.defused_forward_edge_available() &&
@@ -5059,8 +5078,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
                                 legacy_radix4_edge &&
                                 fk.defused_tail_edge_available() &&
                                 (n >= 4096u);
-    
-    
+
+
     const bool request_precrt_block16 = parse_bool_env("PRMERS_CRT_TAIL_PRECRT_BLOCK16", false);
     const bool use_precrt_block16 = fuse_tail_edge && request_precrt_block16 &&
                                     (g_crt_defused_schedule == 0) &&
@@ -5072,8 +5091,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
                                   fk.inv4_last_unweight16_61 && fk.inv4_last_unweight16_31;
 
     const bool lds_hotopt = parse_bool_env("PRMERS_CRT_LDS_HOTOPT", true);
-    
-    
+
+
     const bool use_lds_tile4 = use_defused_lds_stage && defused_lds_radix == 512u &&
                                parse_bool_env("PRMERS_CRT_LDS_TILE4", false) &&
                                fk.fwd_lds_stage_61_tile4 && fk.inv_lds_stage_61_tile4 &&
@@ -5092,10 +5111,10 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
 
     const bool allow_crt_host_flush = parse_bool_env("PRMERS_CRT_ALLOW_HOST_FLUSH", false);
     auto flush_async_queues = [&]() {
-        // Host-side flush is disabled by default.  Event dependencies are enough
-        // for correctness; explicit clFlush/clFinish in the hot loop can distort
-        // timing and reduce throughput.  Re-enable only for driver debugging with
-        // PRMERS_CRT_ALLOW_HOST_FLUSH=1.
+
+
+
+
         if (allow_crt_host_flush && g31.queue != g61.queue) {
             clFlush(g61.queue);
             clFlush(g31.queue);
@@ -5244,8 +5263,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[idx];
             if (st.len > forward_edge_stop) continue;
             if (st.len <= global_stop_chunk) break;
-            
-            
+
+
             if (fuse_forward_edge && (st.len == (n >> 2) || st.len == (n >> 3) || st.len == (n >> 4))) continue;
             cl_uint radix = 2u;
             if ((st.len > 4u * global_stop_chunk) && idx >= 2) radix = 8u;
@@ -5262,8 +5281,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[idx];
             if (st.len > forward_edge_stop) continue;
             if (st.len <= global_stop_chunk) break;
-            
-            
+
+
             if (fuse_forward_edge && (st.len == (n >> 2) || st.len == (n >> 3) || st.len == (n >> 4))) continue;
             cl_uint radix = 2u;
             if ((st.len > 4u * global_stop_chunk) && idx >= 2) radix = 8u;
@@ -5279,8 +5298,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[idx];
             if (st.len > forward_edge_stop) continue;
             if (st.len <= global_stop_chunk) break;
-            
-            
+
+
             if (fuse_forward_edge && (st.len == (n >> 2) || st.len == (n >> 3) || st.len == (n >> 4))) continue;
             cl_uint radix = 2u;
             if ((st.len > 4u * global_stop_chunk) && idx >= 2) radix = 8u;
@@ -5293,8 +5312,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
 
 
     auto enqueue_forward_top_radix8_61 = [&]() -> bool {
-        
-        
+
+
         if (fuse_forward_edge) return false;
         const cl_uint top_len = n >> 2;
         for (std::size_t idx = stages.size(); idx-- > 0;) {
@@ -5310,8 +5329,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     };
 
     auto enqueue_forward_after_top61 = [&]() {
-        
-        
+
+
         const cl_uint top0 = n >> 2;
         const cl_uint top1 = n >> 3;
         const cl_uint top2 = n >> 4;
@@ -5468,8 +5487,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[si];
             if (st.len <= global_stop_chunk) continue;
             if (st.len >= inverse_stop) break;
-            
-            
+
+
             if (fuse_tail_edge && (st.len == (n >> 3) || st.len == (n >> 2))) continue;
             cl_uint radix = 2u;
             if ((st.len * 4u < inverse_stop) && (st.len >= global_stop_chunk)) radix = 8u;
@@ -5486,8 +5505,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[si];
             if (st.len <= global_stop_chunk) continue;
             if (st.len >= inverse_stop) break;
-            
-            
+
+
             if (fuse_tail_edge && (st.len == (n >> 3) || st.len == (n >> 2))) continue;
             cl_uint radix = 2u;
             if ((st.len * 4u < inverse_stop) && (st.len >= global_stop_chunk)) radix = 8u;
@@ -5503,8 +5522,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             const StageInfo& st = stages[si];
             if (st.len <= global_stop_chunk) continue;
             if (st.len >= inverse_stop) break;
-            
-            
+
+
             if (fuse_tail_edge && (st.len == (n >> 3) || st.len == (n >> 2))) continue;
             cl_uint radix = 2u;
             if ((st.len * 4u < inverse_stop) && (st.len >= global_stop_chunk)) radix = 8u;
@@ -5632,8 +5651,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         const uint32_t m = n >> 1;
         const uint32_t logm = log_n - 1u;
         const size_t g_m64 = round_up_size((size_t)m, local64);
-        
-        
+
+
         const size_t g_center64 = round_up_size((size_t)(m / 2u + 1u), local64);
         const cl_uint half_flags61 = crt_halfreal_effective_flags61();
         const cl_uint half_flags31 = crt_halfreal_effective_flags31();
@@ -5647,7 +5666,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             throw std::runtime_error("halfreal linear-center requested but bitrev-swap kernels are missing");
         }
 
-        
+
         const bool half_lds_hotopt = parse_bool_env("PRMERS_CRT_HALFREAL_LDS_HOTOPT", false);
         const bool half_use_lds512 = (m >= 512u) && (g_crt_lds_stage >= 512u) &&
             fk.fwd_lds_stage_61 && fk.inv_lds_stage_61 &&
@@ -5669,7 +5688,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         };
         const bool half_force_generic_head = parse_bool_env("PRMERS_CRT_HALFREAL_HEAD_LDS_GENERIC", false);
 
-        
+
         const bool half_strict_residual = parse_bool_env("PRMERS_CRT_HALFREAL_STRICT_RESIDUAL", false);
         const bool half_allow_mixed_residual = parse_bool_env("PRMERS_CRT_HALFREAL_ALLOW_MIXED_RESIDUAL", !half_strict_residual);
         auto half_residual_is_radix8_clean = [&](uint32_t r) -> bool {
@@ -5708,8 +5727,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         }
         const bool half_disable_pow2_headtail = parse_bool_env("PRMERS_CRT_HALFREAL_DISABLE_POW2_HEADTAIL", false);
         const bool half_force_generic_headtail = parse_bool_env("PRMERS_CRT_HALFREAL_FORCE_GENERIC_HEADTAIL", false);
-        
-        
+
+
         if (half_head_tail_radix != 0u && half_disable_pow2_headtail) {
             half_head_tail_radix = 0u;
         }
@@ -5727,7 +5746,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         const uint32_t half_head_base_len = half_use_head_lds ? (m / half_head_tail_radix) : m;
         (void)half_force_generic_headtail;
 
-        
+
         const bool half_lds_pair_req = parse_bool_env(
             "PRMERS_CRT_HALFREAL_LDS_PAIR",
             half_head_tail_use_special512);
@@ -5736,7 +5755,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             ? false
             : parse_bool_env("PRMERS_CRT_HALFREAL_LDS_SPLIT", half_use_head_lds);
 
-        
+
         const bool half_allow_lds_without_head = parse_bool_env("PRMERS_CRT_HALFREAL_LDS_NOHEAD", false) ||
             parse_bool_env("PRMERS_CRT_HALFREAL_LDS_SPLIT_NOHEAD", false);
         const bool half_local_layout_safe = half_use_head_lds || half_allow_lds_without_head;
@@ -5867,7 +5886,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             enqueue_kernel(g61, fk.halfreal_head_lds512_precrt, global, &local64,
                            "enqueue half head LDS precrt", "crt_halfreal_head_pack_lds512_precrt");
 
-            
+
             cl_event head_done = enqueue_queue_marker(g61, "half head precrt ready for gf31");
             set_pending_wait_event(g31, head_done);
         };
@@ -5955,8 +5974,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
             set_karg(k, arg, st.len, "set half inv31 len");
             enqueue_kernel(g31, k, round_up_size(std::max<size_t>(1, m / radix), local64), &local64, "enqueue half inv31", radix == 8u ? "crt_halfreal_inv_radix8_31" : (radix == 4u ? "crt_halfreal_inv_radix4_31" : "crt_halfreal_inv_radix2_31"));
         };
-        
-        
+
+
         auto enqueue_half_lds_forward61 = [&]() {
             cl_kernel k = half_use_mid_lds512_opt ? fk.fwd_lds_stage_61_512opt : fk.fwd_lds_stage_61;
             cl_uint arg = 0;
@@ -6089,18 +6108,18 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         }
         run_forward_m(fwd61_m, fwd31_m);
         if (half_use_lds512_pair) {
-            
-            
+
+
             enqueue_half_lds_pair61();
             enqueue_half_lds_pair31();
         } else if (half_use_lds512_split) {
-            
-            
+
+
             enqueue_half_center512_pair61();
             enqueue_half_center512_pair31();
         } else {
-            
-            
+
+
             bitrev_swap61("crt_halfreal_bitrev_to_linear_61");
             bitrev_swap31("crt_halfreal_bitrev_to_linear_31");
             center61(); center31();
@@ -6120,8 +6139,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         } else {
             unpack61(); unpack31();
         }
-        
-        
+
+
         if (parse_bool_env("PRMERS_CRT_HALFREAL_FINISH", false)) {
             cl_int ferr = clFlush(g61.queue);
             if (ferr != CL_SUCCESS) {
@@ -6156,10 +6175,10 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
 
     const int schedule = g_crt_defused_schedule;
 
-    
+
     if (schedule == 6) {
-        
-        
+
+
         enqueue_weight61();
         enqueue_weight31();
         cl_event gf31_weight_done = enqueue_queue_marker(g31, "defused gf31 weight done");
@@ -6192,8 +6211,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     }
 
     if (schedule == 3) {
-        
-        
+
+
         enqueue_weight61();
         enqueue_weight31();
         cl_event gf31_weight_done = enqueue_queue_marker(g31, "defused gf31 weight done");
@@ -6223,8 +6242,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     }
 
     if (schedule == 5) {
-        
-        
+
+
         enqueue_weight61();
         enqueue_weight31();
         cl_event gf31_weight_done = enqueue_queue_marker(g31, "defused gf31 weight done");
@@ -6256,8 +6275,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
     }
 
     if (schedule == 4) {
-        
-        
+
+
         enqueue_weight31();
         enqueue_forward_all31();
         if (use_defused_lds_stage) enqueue_defused_lds_forward31();
@@ -6276,7 +6295,7 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         enqueue_inverse_all61();
         enqueue_last61();
 
-        
+
         cl_event gf31_done = enqueue_queue_marker(g31, "defused gf31 done");
         set_pending_wait_event(g61, gf31_done);
         flush_async_queues();
@@ -6285,13 +6304,13 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
 
     enqueue_weight61();
     enqueue_weight31();
-    
+
     cl_event gf31_weight_done = enqueue_queue_marker(g31, "defused gf31 weight done");
     flush_async_queues();
 
     if (schedule == 1) {
-        
-        
+
+
         enqueue_forward_interleaved();
         if (use_defused_lds_stage) {
             enqueue_defused_lds_forward61();
@@ -6308,8 +6327,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         set_pending_wait_event(g61, gf31_weight_done);
         enqueue_last61();
     } else if (schedule == 2) {
-        
-        
+
+
         enqueue_forward_all31();
         if (use_defused_lds_stage) enqueue_defused_lds_forward31();
         enqueue_center31();
@@ -6325,8 +6344,8 @@ static bool enqueue_square_mod_crt_defused_fast(GpuPrp& g61, GpuPrp& g31, CrtFus
         set_pending_wait_event(g61, gf31_weight_done);
         enqueue_last61();
     } else {
-        
-        
+
+
         enqueue_forward_all61();
         if (use_defused_lds_stage) enqueue_defused_lds_forward61();
         enqueue_center61();
@@ -6369,14 +6388,14 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
     const cl_uint log_n = ([](cl_uint v){ cl_uint r=0; while (v > 1u) { v >>= 1; ++r; } return r; }(n));
     const size_t local64 = 64u;
     const size_t local128 = 128u;
-    
-    
+
+
     const size_t local_bridge512 = 128u;
     const size_t local_bridge1024 = 256u;
     const bool use_boundary1024 = fk.boundary1024_available() && (std::getenv("PRMERS_CRT_BOUNDARY512") == nullptr) && ((log_n & 1u) == 0u) && n >= 16384u;
     const bool use_last16_unweight = use_boundary1024 && fk.last16_available() && (std::getenv("PRMERS_CRT_LAST16_UNWEIGHT") != nullptr);
 
-    
+
     {
         const StageInfo& first = g61.stages.back();
         cl_uint arg = 0;
@@ -6398,8 +6417,8 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
     const bool use_global_radix8 = g_crt_radix8_global && fk.fwd_r8 && fk.inv_r8 && fk.fwd_r4 && fk.inv_r4 && fk.fwd_r2 && fk.inv_r2 && n >= 2048u;
     const cl_uint center_chunk = use_global_radix8 ? std::min<cl_uint>(std::max<cl_uint>(g_crt_center_chunk, 8u), 1024u) : 256u;
     const cl_uint local_stage_max = std::min<cl_uint>(std::max<cl_uint>(g_crt_lds_stage, 0u), 512u);
-    
-    
+
+
     const bool allow_strided_lds_stage = parse_bool_env("PRMERS_CRT_ALLOW_STRIDED_LDS_STAGE", false);
     const bool use_multi_lds_stage = allow_strided_lds_stage && use_global_radix8 && fk.fwd_lds_stage && fk.inv_lds_stage && local_stage_max >= 16u && n >= 512u;
     const bool use_lds512_stage = !use_multi_lds_stage && use_global_radix8 && fk.fwd_lds512 && fk.inv_lds512 && g_crt_lds_stage >= 512u && center_chunk < 512u && n >= 512u;
@@ -6455,8 +6474,8 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
             enqueue_kernel(g61, fk.fwd_r2, global, &local64, "enqueue crt fused fwd radix2", "crt_fused_fwd_radix2");
         }
     } else {
-        
-        
+
+
         for (std::size_t idx = stages.size(); idx-- > 0;) {
             const StageInfo& st = stages[idx];
             if (st.len == n || st.len == n / 2u) continue;
@@ -6600,8 +6619,8 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
                     k_center = fk.center1024_dualwave;
                     label = "crt_lds_square1024";
                 } else if (center_chunk == 512u) {
-                    
-                    
+
+
                     const bool use_reglds_center512 = parse_bool_env("PRMERS_CRT_USE_REGLDS_CENTER512", false);
                     if (use_reglds_center512 && fk.center512_reglds) {
                         k_center = fk.center512_reglds;
@@ -6817,7 +6836,7 @@ static bool enqueue_square_mod_crt_fused_gpuowl_like(GpuPrp& g61, GpuPrp& g31, C
             enqueue_kernel(g61, fk.inv_r2, global, &local64, "enqueue crt fused inv radix2", "crt_fused_inv_radix2");
         }
     } else {
-        
+
         for (std::size_t si = 0; si < stages.size(); ++si) {
             const StageInfo& st = stages[si];
             if (st.len <= (use_boundary1024 ? 1024u : 512u)) continue;
@@ -6945,7 +6964,7 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
     const bool profile_validator = parse_bool_env("PRMERS_CRT_PROFILE_VALIDATOR", false);
     ValidatorProfileGuard validator_profile_guard(g61, g31, !profile_validator);
 
-    
+
     if (g_crt_odd_radix > 1u && need_probe) {
         std::cout << "mixed CRT/PFA odd-radix path: classic halfreal autoprobe skipped "
                   << "(N is odd*2^m and digit order is CRT/PFA).\n";
@@ -6959,8 +6978,8 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
     const std::vector<std::uint64_t> original = read_digits(g61);
 
     const bool mixed_odd_validation = (g_crt_odd_radix > 1u);
-    
-    
+
+
     const ibdwt::Layout exact_layout = mixed_odd_validation
         ? ibdwt::make_layout_mixed(g61.exponent_p, g_crt_odd_radix)
         : ibdwt::make_layout_for_n(g61.exponent_p, g61.n);
@@ -6977,8 +6996,8 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
     const bool exact_cpu_ref_available = exact_cpu_ref_enabled &&
         !(mixed_odd_validation && mixed_gpu_ref_enabled) &&
         g61.exponent_p <= exact_cpu_ref_max_p;
-    
-    
+
+
     const cl_uint exact_cpu_ref_iters = exact_cpu_ref_available
         ? crt_tune::env_u32("PRMERS_CRT_HALFREAL_CPU_REF_ITERS", 1u, 1u, std::max<cl_uint>(1u, steps))
         : 0u;
@@ -7013,7 +7032,7 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
                               const std::string& mode) -> std::vector<std::uint64_t> {
         upload_state(input);
 
-        
+
         if (mode == "normal" || mode == "reference" || mode == "strict") {
             if (exact_cpu_ref_available) {
                 return ibdwt::square_mod_mersenne_exact_digits(input, exact_layout);
@@ -7026,9 +7045,9 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
                 const cl_uint saved_center_chunk = g_crt_center_chunk;
                 const cl_uint saved_lds_stage = g_crt_lds_stage;
 
-                // Same mixed CRT/PFA digit order, but the row transform uses the
-                // slow/simple generic radix-2 path. This gives a practical GPU
-                // reference for huge p where exact CPU squaring is not usable.
+
+
+
                 g_crt_center_mode = "halfreal";
                 g_crt_mixed_row_core = "generic";
                 g_crt_mixed_row_fuse_both = "off";
@@ -7068,7 +7087,7 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
             g_local_block_lds_disabled = true;
             g_local_block_lds_override = 0u;
 
-            
+
             enqueue_square_mod(g31, 0u);
             cl_event gf31_square_done = enqueue_queue_marker(g31, "halfreal validator strict gf31 square done");
             set_pending_wait_event(g61, gf31_square_done);
@@ -7089,8 +7108,8 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
         if (!enqueue_square_mod_crt_defused_fast(g61, g31, fk)) {
             throw std::runtime_error("halfreal validation: square enqueue failed in mode " + mode);
         }
-        
-        
+
+
         enqueue_crt_garner_carry_gpu(g61, g31, carry_cfg, true);
         finish_crt_queues(g61, g31);
         return read_digits(g61);
@@ -7130,8 +7149,8 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
             struct Candidate { int f61; int f31; };
             std::vector<Candidate> candidates;
             candidates.reserve(g_crt_halfreal_probe_exhaustive ? 1056 : 32);
-            
-            
+
+
             candidates.push_back({48, 48});
             candidates.push_back({16, 16});
             for (int f = 0; f < 32; ++f) candidates.push_back({f, f});
@@ -7186,7 +7205,7 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
                 return false;
             }
         } else {
-            
+
             g_crt_halfreal_flags61 = (saved_flags61 < 0) ? 16 : (saved_flags61 & 63);
             g_crt_halfreal_flags31 = (saved_flags31 < 0) ? g_crt_halfreal_flags61 : (saved_flags31 & 63);
         }
@@ -7255,9 +7274,9 @@ static bool validate_crt_halfreal_one_square(GpuPrp& g61,
 
 namespace mersenne_prp {
 
-// BananaNTT output helpers are defined later in this namespace.
-// Keep explicit prototypes here because the CRT run loop can optionally
-// print res64, write checkpoints, and emit JSON before the helper bodies.
+
+
+
 static std::string hex64(std::uint64_t x);
 static std::uint64_t residue64_from_digits(const std::vector<std::uint64_t>& digits, const ibdwt::Layout& layout);
 static void write_bananantt_checkpoint(std::uint32_t p, std::uint32_t iter,
@@ -8000,7 +8019,7 @@ static void crt_garner_carry_cpu(
         carry = total >> w;
     }
 
-    
+
     for (unsigned pass = 0; carry != 0 && pass < 8; ++pass) {
         for (std::size_t i = 0; i < n && carry != 0; ++i) {
             const unsigned w = layout.digit_width[i];
@@ -8045,7 +8064,7 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
     }
     clwrap::upload_digits(gpu61, digits);
     gpu31.crtInputDigits = gpu61.bufDigits;
-    
+
     clwrap::CrtFusedKernels crt_fused(gpu61.program);
     const bool use_crt_mixed_odd = (clwrap::g_crt_odd_radix > 1u) &&
                                    crt_fused.mixed_odd_available() &&
@@ -8406,8 +8425,8 @@ static bool prp_mersenne_pow2_base3_gpu_crt_garner(
                 throw std::runtime_error("CRT fused pipeline rejected this transform");
             }
         } else {
-            
-            
+
+
             clwrap::enqueue_square_mod(gpu31, center_max);
             cl_event gf31_square_done = clwrap::enqueue_queue_marker(gpu31, "crt gf31 square marker");
             clwrap::set_pending_wait_event(gpu61, gf31_square_done);
@@ -8923,7 +8942,7 @@ static std::string default_json_path(std::uint32_t p) {
 }
 
 static std::string default_proof_dir(std::uint32_t p) {
-    // Same tree/checkpoint directory shape as PrMers: <exponent>/proof/...
+
     const std::filesystem::path rel = std::filesystem::path(std::to_string(p)) / "proof";
     if (g_runtime.output_dir.empty()) return rel.string();
     return (std::filesystem::path(g_runtime.output_dir) / rel).string();
@@ -8948,8 +8967,8 @@ static void write_bananantt_checkpoint(std::uint32_t p, std::uint32_t iter,
     const std::string path = dir + "/M" + std::to_string(p) + "_iter_" + std::to_string(iter) + ".chk";
     const auto words = residue_words32_from_digits(digits, layout);
 
-    // PrMers ProofSet-compatible checkpoint: filename is just the iteration,
-    // content is CRC32 followed by packed little-endian uint32 residue words.
+
+
     {
         const std::string prm_path = dir + "/" + std::to_string(iter);
         std::ofstream prm(prm_path, std::ios::binary);
@@ -9123,6 +9142,7 @@ struct Options {
     cl_uint local_block_lds = 0;
     std::uint32_t profile_every = 0;
     std::uint32_t max_iters = 0;
+    bool max_iters_user = false;
     std::string modulus_mode = "crt";
     std::uint32_t headroom_bits = 2;
     bool crt_async_queues = true;
@@ -9149,6 +9169,8 @@ struct Options {
     uint32_t crt_halfreal_validate_iters = 1;
     bool crt_halfreal_validate_random = false;
     bool crt_mixed_gpu_reference = false;
+    bool crt_mixed_double_pointwise_square = false;
+    int crt_mixed_center_power = 2;
     std::size_t crt_halfreal_dump_count = 32;
     std::string crt_halfreal_dump_prefix = "halfreal_debug";
     int crt_halfreal_flags61 = 48;
@@ -9236,7 +9258,7 @@ static void apply_config_key_value(Options& opt, std::string key, std::string va
     else if (key == "device") opt.device_index = std::stoi(val);
     else if (key == "kernel") opt.kernel_path = val;
     else if (key == "modulus" || key == "field") opt.modulus_mode = lower_copy(val);
-    else if (key == "iters" || key == "max_iters" || key == "benchmark_iters") opt.max_iters = static_cast<std::uint32_t>(std::stoul(val));
+    else if (key == "iters" || key == "max_iters" || key == "benchmark_iters") { opt.max_iters = static_cast<std::uint32_t>(std::stoul(val)); opt.max_iters_user = true; }
     else if (key == "quiet") opt.verbose = !parse_bool_text(val, false);
     else if (key == "profile_kernels" || key == "profile") opt.profile_kernels = parse_bool_text(val, false);
     else if (key == "profile_every") opt.profile_every = static_cast<std::uint32_t>(std::stoul(val));
@@ -9321,7 +9343,7 @@ static std::uint32_t parse_first_prp_from_worktodo(const std::string& path) {
             else { if (in) { nums.push_back(cur); cur = 0; in = false; } }
         }
         if (in) nums.push_back(cur);
-        // Worktodo PRP lines can contain small flags before p.  The exponent is normally the largest useful number.
+
         std::uint64_t best = 0;
         for (std::uint64_t v : nums) if (v > best && v <= 0xffffffffULL) best = v;
         if (best >= 3) return static_cast<std::uint32_t>(best);
@@ -9510,8 +9532,8 @@ static Options parse_args(int argc, char** argv) {
             opt.autotune_center_iters = static_cast<cl_uint>(std::stoul(argv[++i]));
             if (opt.autotune_center_iters == 0u) opt.autotune_center_iters = 1u;
         } else if (arg == "--crt-shared-queue" || arg == "--crt-single-queue" || arg == "--crt-defused-single-queue") {
-            
-            
+
+
             opt.crt_async_queues = false;
             opt.user_crt_queue = true;
         } else if (arg == "--crt-async-queues" || arg == "--crt-two-queues") {
@@ -9644,6 +9666,25 @@ static Options parse_args(int argc, char** argv) {
         } else if (arg == "--crt-mixed-gpu-reference" || arg == "--crt-mixed-gpu-validate" || arg == "--crt-halfreal-gpu-reference") {
             opt.crt_halfreal_validate = true;
             opt.crt_mixed_gpu_reference = true;
+        } else if (arg == "--crt-mixed-double-pointwise-square" || arg == "--crt-double-pointwise-square") {
+            opt.crt_mixed_double_pointwise_square = true;
+            opt.crt_mixed_center_power = 4;
+            opt.crt_defused_fast = true;
+            opt.crt_center_mode = "halfreal";
+        } else if (arg == "--no-crt-mixed-double-pointwise-square" || arg == "--no-crt-double-pointwise-square") {
+            opt.crt_mixed_double_pointwise_square = false;
+            if (opt.crt_mixed_center_power == 4) opt.crt_mixed_center_power = 2;
+        } else if (arg == "--crt-mixed-pointwise-cube" || arg == "--crt-pointwise-cube") {
+            opt.crt_mixed_center_power = 3;
+            opt.crt_mixed_double_pointwise_square = false;
+            opt.crt_defused_fast = true;
+            opt.crt_center_mode = "halfreal";
+        } else if (arg == "--crt-mixed-pointwise-power" || arg == "--crt-pointwise-power") {
+            if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-mixed-pointwise-power");
+            opt.crt_mixed_center_power = std::stoi(argv[++i]);
+            opt.crt_mixed_double_pointwise_square = (opt.crt_mixed_center_power == 4);
+            opt.crt_defused_fast = true;
+            opt.crt_center_mode = "halfreal";
         } else if (arg == "--crt-halfreal-dump") {
             if (i + 1 >= argc) throw std::runtime_error("missing value for --crt-halfreal-dump");
             opt.crt_halfreal_validate = true;
@@ -9769,6 +9810,7 @@ static Options parse_args(int argc, char** argv) {
         } else if (arg == "--iters" || arg == "--max-iters" || arg == "--benchmark-iters") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after " + arg);
             opt.max_iters = static_cast<std::uint32_t>(std::stoul(argv[++i]));
+            opt.max_iters_user = true;
             if (opt.max_iters == 0u) throw std::runtime_error(arg + " must be > 0");
         } else if (arg == "--headroom-bits") {
             if (i + 1 >= argc) throw std::runtime_error("missing value after --headroom-bits");
@@ -9801,6 +9843,8 @@ static Options parse_args(int argc, char** argv) {
                 << "        --crt-mixed-row-core auto|lds|lds512|lds1024|generic selects the odd radix row path; lds uses --crt-mixed-row-center.\n"
                 << "        --crt-mixed-row-fuse-both off|auto|center|stage|all|force optionally runs GF61+GF31 in the same LDS center/stage kernels.\n"
                 << "        --crt-mixed-gpu-reference validates mixed odd LDS/fused paths against the generic mixed GPU path instead of exact CPU.\n"
+                << "        --crt-mixed-pointwise-cube experimental: center computes pointwise cube; one loop iter becomes x^3.\n"
+                << "        --crt-mixed-double-pointwise-square experimental: true pointwise fourth-power center; one loop iter becomes x^4.\n"
                 << "        --startup-autotune [--crt-autotune-iters N] tests mixed row plans at startup; --no-startup-autotune disables it.\n"
                 << "I/O:    --config FILE reads simple key=value options before CLI overrides.\n"
                 << "        --worktodo FILE loads the first PRP assignment if no exponent is given; --no-worktodo disables this.\n"
@@ -9837,6 +9881,26 @@ static Options parse_args(int argc, char** argv) {
             opt.exponent = wp;
             std::cout << "worktodo: selected PRP exponent p=" << wp << " from " << opt.worktodo_path << "\n";
         }
+    }
+
+    if (!(opt.crt_mixed_center_power == 2 || opt.crt_mixed_center_power == 3 || opt.crt_mixed_center_power == 4)) {
+        throw std::runtime_error("--crt-mixed-pointwise-power supports only 2, 3, or 4 in this experiment");
+    }
+    if (opt.crt_mixed_center_power != 2 || opt.crt_mixed_double_pointwise_square) {
+
+
+
+
+        if (opt.crt_mixed_center_power == 4 && !opt.max_iters_user && opt.exponent != 0u) {
+            opt.max_iters = (opt.exponent + 1u) / 2u;
+            if (opt.res64_every == 0u) opt.res64_every = opt.max_iters;
+        }
+        opt.crt_halfreal_validate = false;
+        opt.gerbicz_enabled = false;
+        opt.json_enabled = false;
+        opt.append_results = false;
+        opt.backup_enabled = false;
+        opt.resume_enabled = false;
     }
 
     return opt;
@@ -9885,8 +9949,8 @@ static bool device_name_has(const std::string& name, const std::string& needle) 
 }
 
 static void apply_crt_device_preset(Options& opt, const std::string& device_name) {
-    
-    
+
+
     const bool is_nvidia = device_name_has(device_name, "nvidia") || device_name_has(device_name, "geforce") || device_name_has(device_name, "rtx");
     const bool is_amd = device_name_has(device_name, "amd") || device_name_has(device_name, "gfx") || device_name_has(device_name, "radeon");
 
@@ -9922,7 +9986,9 @@ static void print_crt_transform_plan(const Options& opt, const ibdwt::Layout& la
     std::cout << "local: center-square=" << opt.crt_center_chunk
               << ", intermediate-lds-stage=" << opt.crt_lds_stage
               << ", lds-tile=" << opt.crt_lds_tile
-              << ", center-mode=" << opt.crt_center_mode << "\n";
+              << ", center-mode=" << opt.crt_center_mode
+              << ", pointwise-power=" << opt.crt_mixed_center_power
+              << ", double-pointwise-square=" << yesno(opt.crt_mixed_double_pointwise_square) << "\n";
     if (opt.crt_center_mode == "halfreal") {
         std::cout << "halfreal: autoprobe=" << yesno(opt.crt_halfreal_autoprobe)
                   << ", flags61=" << (opt.crt_halfreal_flags61 < 0 ? std::string("auto") : std::to_string(opt.crt_halfreal_flags61))
@@ -9930,7 +9996,9 @@ static void print_crt_transform_plan(const Options& opt, const ibdwt::Layout& la
                   << ", lds512=on" << "\n";
         if (layout.odd > 1u) {
             std::cout << "mixed odd: CRT/PFA, odd=" << layout.odd << ", power2 axis=2^" << layout.ln
-                      << ", sequence=pack+oddDFT -> row halfreal -> oddIDFT+unweight -> Garner/carry\n";
+                      << ", sequence=pack+oddDFT -> row halfreal"
+                      << (opt.crt_mixed_center_power == 3 ? " center-cube" : (opt.crt_mixed_center_power == 4 ? " center-fourth-power" : ""))
+                      << " -> oddIDFT+unweight -> Garner/carry\n";
         } else {
             std::cout << "sequence: pack -> halfreal NTT -> center -> inverse -> unpack -> Garner/carry\n";
         }
@@ -9962,7 +10030,7 @@ static double run_child_bench(const std::string& cmd) {
         std::string line(buf);
         std::size_t p = line.find("it/s");
         if (p != std::string::npos) {
-            
+
             p += 4;
             while (p < line.size() && std::isspace(static_cast<unsigned char>(line[p]))) ++p;
             try { best = std::stod(line.substr(p)); } catch (...) {}
@@ -10158,8 +10226,8 @@ static cl_uint default_center_max_for_plan(const Options& opt, const ibdwt::Layo
     if (opt.center_max_user) return opt.center_max;
     if (opt.modulus_mode == "crt" || opt.modulus_mode == "crt-cpu") return (layout.n <= 8192u) ? 16u : 8u;
     if (opt.modulus_mode == "gf31") return 8u;
-    
-    
+
+
     return 0u;
 }
 
@@ -10456,8 +10524,8 @@ static cl_uint validate_and_select_local_block_lds(
     if (preferred != 0u) candidates.push_back(preferred);
 
     if (opt.modulus_mode == "gf61") {
-        
-        
+
+
         if (preferred != 0u) {
             for (cl_uint c : {2048u, 1024u, 512u}) {
                 if (std::find(candidates.begin(), candidates.end(), c) == candidates.end()) candidates.push_back(c);
@@ -10497,7 +10565,7 @@ int main(int argc, char** argv) {
             gf61::configure_field(31);
             ibdwt::configure_capacity(31, 31, opt.headroom_bits);
         } else if (opt.modulus_mode == "crt" || opt.modulus_mode == "crt-cpu") {
-            
+
             gf61::configure_field(61);
             ibdwt::configure_capacity(92, 61, opt.headroom_bits);
         }
@@ -10522,6 +10590,7 @@ int main(int argc, char** argv) {
             if (opt.exponent == 0) throw std::runtime_error("missing exponent p");
 
             ibdwt::configure_capacity(92, 61, opt.headroom_bits);
+            ibdwt::configure_pointwise_power(static_cast<unsigned>(std::max(2, opt.crt_mixed_center_power)));
             const bool crt_odd_was_auto = opt.crt_odd_radix_auto || opt.crt_odd_radix == 0u;
             opt.crt_odd_radix = resolve_crt_odd_radix_auto(opt, opt.exponent);
             if (crt_odd_was_auto) {
@@ -10531,6 +10600,7 @@ int main(int argc, char** argv) {
                 opt.crt_center_mode = "halfreal";
                 opt.crt_defused_fast = true;
             }
+            ibdwt::configure_pointwise_power(static_cast<unsigned>(std::max(2, opt.crt_mixed_center_power)));
             const auto layout = ibdwt::make_layout_mixed(opt.exponent, opt.crt_odd_radix);
             apply_crt_device_preset(opt, dev.name);
             maybe_run_crt_startup_autotune(opt, argv[0]);
@@ -10559,6 +10629,8 @@ int main(int argc, char** argv) {
             clwrap::g_crt_halfreal_validate_iters = opt.crt_halfreal_validate_iters;
             clwrap::g_crt_halfreal_validate_random = opt.crt_halfreal_validate_random;
             clwrap::g_crt_mixed_gpu_reference = opt.crt_mixed_gpu_reference;
+            clwrap::g_crt_mixed_center_power = opt.crt_mixed_center_power;
+            clwrap::g_crt_mixed_double_pointwise_square = opt.crt_mixed_double_pointwise_square;
             clwrap::g_crt_halfreal_dump_count = opt.crt_halfreal_dump_count;
             clwrap::g_crt_halfreal_dump_prefix = opt.crt_halfreal_dump_prefix;
             clwrap::g_crt_halfreal_flags61 = opt.crt_halfreal_flags61;
@@ -10578,7 +10650,7 @@ int main(int argc, char** argv) {
 
             auto carry_cfg_crt = clwrap::choose_crt_carry_config(dev, layout.n, opt.carry_block, opt.carry_items);
 
-            
+
             gf61::configure_field(61);
             ibdwt::configure_capacity(92, 61, opt.headroom_bits);
             if (opt.autotune_center && !opt.center_max_user) {
@@ -10635,6 +10707,36 @@ int main(int argc, char** argv) {
                           << ", row-complex=" << (layout.pow2_n / 2u)
                           << ", storage=" << (layout.n / 2u)
                           << ", kernels=fused(pack+oddDFT)+row LDS512 halfreal+fused(oddIDFT+unpack) (fallback radix2 below 512)\n";
+                if (opt.crt_mixed_center_power != 2 || opt.crt_mixed_double_pointwise_square) {
+                    const unsigned max_w = *std::max_element(layout.digit_width.begin(), layout.digit_width.end());
+                    unsigned log2n_ceil = 0;
+                    std::size_t t = 1;
+                    while (t < layout.n) { t <<= 1; ++log2n_ceil; }
+                    const unsigned square_bits = log2n_ceil + 2u * max_w + opt.headroom_bits;
+                    const unsigned cube_bits = 2u * log2n_ceil + 3u * max_w + opt.headroom_bits;
+                    const unsigned fourth_bits = 3u * log2n_ceil + 4u * max_w + opt.headroom_bits;
+                    const unsigned active_bits = (opt.crt_mixed_center_power == 3) ? cube_bits : fourth_bits;
+                    std::cout << "POINTWISE-POWER TEST: one loop iteration computes x^" << opt.crt_mixed_center_power
+                              << "; this is not a normal PRP iteration unless power=2.\n";
+                    if (opt.crt_mixed_center_power == 4) {
+                        std::cout << "DOUBLE-POINTWISE-SQUARE NOTE: x^4 can be compared with two normal square iterations.\n";
+                        if (opt.max_iters == ((opt.exponent + 1u) / 2u)) {
+                            std::cout << "DOUBLE-POINTWISE-SQUARE CHECK: running ceil(p/2) x^4 steps; expected low residue is "
+                                      << ((opt.exponent & 1u) ? "0x0000000000000051" : "0x0000000000000009")
+                                      << " for a base-3 PRP.\n";
+                        }
+                    } else if (opt.crt_mixed_center_power == 3) {
+                        std::cout << "POINTWISE-CUBE NOTE: compare against exact pow(3, 3^iters, 2^p-1) residues, not against normal PRP squares.\n";
+                    }
+                    std::cout << "POINTWISE-POWER BOUND: square_bits=" << square_bits
+                              << ", cube_bits=" << cube_bits
+                              << ", fourth_power_bits=" << fourth_bits
+                              << ", active_bits=" << active_bits
+                              << ", CRT_capacity=92, max_digit_width=" << max_w
+                              << ", log2ceil(N)=" << log2n_ceil
+                              << ((active_bits < 92u) ? " [arithmetically plausible]\n"
+                                                     : " [UNSAFE: CRT aliasing expected]\n");
+                }
             }
             std::cout << "carry config CRT: block=" << carry_cfg_crt.block_size
                       << ", items/worker=" << carry_cfg_crt.items_per_worker
@@ -10723,6 +10825,21 @@ int main(int argc, char** argv) {
                 std::cout << "WARNING: --modulus crt-cpu keeps the old validation path and performs Garner+carry on CPU after each iteration.\n";
                 prp = mersenne_prp::prp_mersenne_pow2_base3_gpu_crt_cpu_garner(
                     opt.exponent, opt.verbose, gpu61, gpu31, layout, opt.center_max, opt.profile_every, opt.max_iters);
+            }
+            const bool pointwise_power_experiment = (opt.crt_mixed_center_power != 2 || opt.crt_mixed_double_pointwise_square);
+            if (pointwise_power_experiment) {
+                if (opt.crt_mixed_center_power == 4 && opt.max_iters == ((opt.exponent + 1u) / 2u)) {
+                    std::cout << "double-square x^4 check completed after ceil(p/2)=" << opt.max_iters
+                              << " iterations; expected final res64 for base-3 PRP is "
+                              << ((opt.exponent & 1u) ? "0x0000000000000051" : "0x0000000000000009")
+                              << ". This is a residue check, not a normal PRP proof.\n";
+                } else if (opt.max_iters && opt.max_iters < opt.exponent) {
+                    std::cout << "benchmark stopped after " << opt.max_iters << " iterations; no PRP result computed.\n";
+                } else {
+                    std::cout << "experimental pointwise-power run completed after " << opt.exponent
+                              << " iterations; no PRP result computed.\n";
+                }
+                return 0;
             }
             if (opt.max_iters && opt.max_iters < opt.exponent) {
                 std::cout << "benchmark stopped after " << opt.max_iters << " iterations; no PRP result computed.\n";

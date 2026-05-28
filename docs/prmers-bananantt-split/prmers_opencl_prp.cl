@@ -162,6 +162,26 @@ inline GF gf_dbl_pair(GF x) {
     return (GF)(dbl61(x.s0), dbl61(x.s1));
 }
 
+inline GF gf_triple_pair(GF x) {
+    return gf_add(gf_dbl_pair(x), x);
+}
+
+inline GF gf_quad_pair(GF x) {
+    return gf_dbl_pair(gf_dbl_pair(x));
+}
+
+inline GF gf_six_pair(GF x) {
+    return gf_dbl_pair(gf_triple_pair(x));
+}
+
+inline GF gf_cube(GF x) {
+    return gf_mul(gf_sqr(x), x);
+}
+
+inline GF gf_pow4(GF x) {
+    return gf_sqr(gf_sqr(x));
+}
+
 
 #define GF_ADD_SUB(A, B, S, D) do { \
     const GF _gf_a = (A); \
@@ -182,8 +202,8 @@ inline GF gf_dbl_pair(GF x) {
 } while (0)
 
 inline u64 lshift61(u64 x, u32 s) {
-    
-    
+
+
     x = (x & P61) + (x >> (u32)FIELD_BITS);
     x = (x & P61) + (x >> (u32)FIELD_BITS);
     if (x == P61) x = 0ul;
@@ -207,11 +227,11 @@ inline GF gf_mul_minus_i_fast(GF z) {
 inline GF gf_mul_w8_fast(GF z) {
     const u32 sh = ((u32)FIELD_BITS - 1u) >> 1;
 #if FIELD_BITS == 31
-    
+
     return (GF)(lshift61(add61_lazy(z.s0, z.s1), sh),
                 lshift61(sub61(z.s1, z.s0), sh));
 #else
-    
+
     return (GF)(lshift61(sub61(z.s1, z.s0), sh),
                 lshift61(sub61(0ul, add61_lazy(z.s0, z.s1)), sh));
 #endif
@@ -220,11 +240,11 @@ inline GF gf_mul_w8_3_fast(GF z) {
     const u32 sh = ((u32)FIELD_BITS - 1u) >> 1;
     const u64 sum = add61_lazy(z.s0, z.s1);
 #if FIELD_BITS == 31
-    
+
     return (GF)(lshift61(sub61(z.s1, z.s0), sh),
                 lshift61(sub61(0ul, sum), sh));
 #else
-    
+
     return (GF)(lshift61(sum, sh),
                 lshift61(sub61(z.s1, z.s0), sh));
 #endif
@@ -232,11 +252,11 @@ inline GF gf_mul_w8_3_fast(GF z) {
 inline GF gf_mul_w8_inv_fast(GF z) {
     const u32 sh = ((u32)FIELD_BITS - 1u) >> 1;
 #if FIELD_BITS == 31
-    
+
     return (GF)(lshift61(sub61(z.s0, z.s1), sh),
                 lshift61(add61_lazy(z.s0, z.s1), sh));
 #else
-    
+
     return (GF)(lshift61(sub61(0ul, add61_lazy(z.s0, z.s1)), sh),
                 lshift61(sub61(z.s0, z.s1), sh));
 #endif
@@ -245,11 +265,11 @@ inline GF gf_mul_w8_inv3_fast(GF z) {
     const u32 sh = ((u32)FIELD_BITS - 1u) >> 1;
     const u64 sum = add61_lazy(z.s0, z.s1);
 #if FIELD_BITS == 31
-    
+
     return (GF)(lshift61(sub61(0ul, sum), sh),
                 lshift61(sub61(z.s0, z.s1), sh));
 #else
-    
+
     return (GF)(lshift61(sub61(z.s0, z.s1), sh),
                 lshift61(sum, sh));
 #endif
@@ -1031,8 +1051,8 @@ static inline __attribute__((always_inline)) void local_stage_dif_radix8_pow2(__
         GF x4 = x[i4], x5 = x[i5], x6 = x[i6], x7 = x[i7];
 
         if (len == 8u) {
-            
-            
+
+
             GF t0 = gf_add(x0, x4); GF t4 = gf_sub(x0, x4);
             GF t1 = gf_add(x1, x5); GF t5 = gf_mul_w8_fast(gf_sub(x1, x5));
 #if FIELD_BITS == 31
@@ -1165,7 +1185,7 @@ static inline __attribute__((always_inline)) void local_stage_dit_radix8_pow2(__
         GF x4 = x[i4], x5 = x[i5], x6 = x[i6], x7 = x[i7];
 
         if (len == 2u) {
-            
+
             GF y0 = x1;
             GF y1 = x3;
             GF y2 = x5;
@@ -1878,8 +1898,8 @@ inline u64 crt_add_carry_lo(u64 a, u64 b, __private u64* carry)
 
 inline void crt_coeff_from_residues(u64 a61, u64 a31, __private u64* lo, __private u64* hi)
 {
-    
-    
+
+
     u64 a61m31 = (a61 & CRT_M31) + (a61 >> 31);
     a61m31 = (a61m31 & CRT_M31) + (a61m31 >> 31);
     if (a61m31 >= CRT_M31) a61m31 -= CRT_M31;
@@ -1888,7 +1908,7 @@ inline void crt_coeff_from_residues(u64 a61, u64 a31, __private u64* lo, __priva
     if (twice >= CRT_M31) twice -= CRT_M31;
     u64 t = (twice == 0ul) ? 0ul : (CRT_M31 - twice);
 
-    
+
     u64 prod_lo = t << 61;
     u64 prod_hi = t >> 3;
     u64 old_lo = prod_lo;
@@ -1938,8 +1958,8 @@ inline u64 crt_take_digit_and_shift_u128(u64 total_lo, u64 total_hi, u32 w,
                                          __private u64* carry_lo,
                                          __private u64* carry_hi)
 {
-    
-    
+
+
     if (w == 31u) {
         *carry_lo = (total_lo >> 31u) | (total_hi << 33u);
         *carry_hi = (total_hi >> 31u);
@@ -2047,7 +2067,7 @@ __kernel void gf61_crt_carry_segment_pass(
     if ((clo | chi) == 0ul) {
         carry_lo_out[next] = 0ul;
         carry_hi_out[next] = 0ul;
-        
+
         return;
     }
     const u32 start = seg * items_per_segment;
@@ -2088,7 +2108,7 @@ __kernel void gf61_crt_carry_cleanup_serial(
             crt_scan_digit_add_carry(digits61, digits31, widths, i, &clo, &chi);
         }
     }
-    
+
     for (u32 iter = 0u; iter < 4u && ((clo | chi) != 0ul); ++iter) {
         for (u32 i = 0u; i < digit_n && ((clo | chi) != 0ul); ++i) {
             crt_scan_digit_add_carry(digits61, digits31, widths, i, &clo, &chi);
@@ -2226,7 +2246,7 @@ __kernel void gf61_crt_garner_segment_first_oneout_mask32(
 
     u64 clo = 0ul, chi = 0ul;
 
-    
+
     if (start + 31u < digit_n) {
         #pragma unroll 32
         for (u32 j = 0u; j < 32u; ++j) {
@@ -2260,7 +2280,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_f
     const u64 a61 = digits61[i];
     const u64 a31 = (u64)digits31[i];
 
-    
+
     u64 a61m31 = (a61 & CRT_M31) + (a61 >> 31);
     a61m31 = (a61m31 & CRT_M31) + (a61m31 >> 31);
     if (a61m31 >= CRT_M31) a61m31 -= CRT_M31;
@@ -2270,7 +2290,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_f
     if (twice >= CRT_M31) twice -= CRT_M31;
     const u64 t = (twice == 0ul) ? 0ul : (CRT_M31 - twice);
 
-    
+
     u64 prod_lo = t << 61;
     u64 prod_hi = t >> 3;
     const u64 old_lo = prod_lo;
@@ -2285,7 +2305,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_f
     const u64 total_lo = crt_add_carry_lo(xlo, *clo, &c1);
     const u64 total_hi = xhi + *chi + c1;
 
-    
+
     const u32 sh = 32u + width_bit;
     const u64 digit_mask = 0xfffffffful | (((u64)width_bit) << 32);
     digits61[i] = total_lo & digit_mask;
@@ -2305,7 +2325,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_u
     const u64 a61 = digits61[i];
     const u32 a31 = digits31[i];
 
-    
+
     u32 a61m31 = (u32)(a61 & 0x7ffffffful) + (u32)(a61 >> 31u);
     a61m31 = (a61m31 & 0x7fffffffu) + (a61m31 >> 31u);
     if (a61m31 >= 0x7fffffffu) a61m31 -= 0x7fffffffu;
@@ -2316,7 +2336,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_u
     const u32 t32 = (twice == 0u) ? 0u : (0x7fffffffu - twice);
     const u64 t = (u64)t32;
 
-    
+
     u64 prod_lo = t << 61u;
     u64 prod_hi = (u64)(t32 >> 3u);
     const u64 old_lo = prod_lo;
@@ -2331,7 +2351,7 @@ static inline __attribute__((always_inline)) void crt_scan_digit_oneout_base32_u
     const u64 total_lo = crt_add_carry_lo(xlo, *clo, &c1);
     const u64 total_hi = xhi + *chi + c1;
 
-    
+
     if (width_bit == 0u) {
         digits61[i] = total_lo & 0xfffffffful;
         *clo = (total_lo >> 32u) | (total_hi << 32u);
@@ -2411,7 +2431,7 @@ __kernel void gf61_crt_garner_segment_first_oneout_mask32_base32_fast(
     const u32 seg = get_global_id(0);
     if (seg >= segments) return;
 
-    
+
     if (width_base != 32u) {
         const u32 start_fallback = seg << 5;
         const u32 mask_fallback = width_mask32[seg];
@@ -2721,7 +2741,7 @@ __kernel void gf61_crt_carry_cleanup_parallel_oneout(
     u32 end = start + items_per_segment;
     if (end > digit_n) end = digit_n;
 
-    
+
     for (u32 i = start; i < end; ++i) {
         crt_scan_digit_add_carry_oneout(digits61, widths, i, &clo, &chi);
         if ((clo | chi) == 0ul) break;
@@ -2792,8 +2812,8 @@ inline GF31 f31_sub(GF31 x, GF31 y) {
 
 static inline __attribute__((always_inline)) GF31 f31_mul(GF31 x, GF31 y) {
 #if CRT_GF31_KARATSUBA
-    // GF31 complex multiply in GF(p^2), i^2=-1.
-    // Karatsuba saves one 32x32 mul_hi path versus the old 4-mul formula.
+
+
     const uint ac = f31_mul_scalar(x.s0, y.s0);
     const uint bd = f31_mul_scalar(x.s1, y.s1);
     const uint sx = f31_add_scalar(x.s0, x.s1);
@@ -2823,6 +2843,26 @@ inline GF31 f31_dbl_pair(GF31 x) {
     return (GF31)(f31_double_scalar(x.s0), f31_double_scalar(x.s1));
 }
 
+inline GF31 f31_triple_pair(GF31 x) {
+    return f31_add(f31_dbl_pair(x), x);
+}
+
+inline GF31 f31_quad_pair(GF31 x) {
+    return f31_dbl_pair(f31_dbl_pair(x));
+}
+
+inline GF31 f31_six_pair(GF31 x) {
+    return f31_dbl_pair(f31_triple_pair(x));
+}
+
+inline GF31 f31_cube(GF31 x) {
+    return f31_mul(f31_sqr(x), x);
+}
+
+inline GF31 f31_pow4(GF31 x) {
+    return f31_sqr(f31_sqr(x));
+}
+
 #define F31_ADD_SUB(A, B, S, D) do { \
     const GF31 _f31_a = (A); \
     const GF31 _f31_b = (B); \
@@ -2847,8 +2887,8 @@ inline uint f31_mod31_small(uint s) {
 }
 
 static inline __attribute__((always_inline)) uint f31_lshift_scalar_norm(uint x, uint s) {
-    /* M31: multiplying by 2^s is a rotate in 31 bits.
-       The mask on the right shift makes s=0 and s=31 valid and branchless. */
+
+
     return ((x << s) & CRT_P31) | (x >> ((31u - s) & 31u));
 }
 
@@ -3277,7 +3317,7 @@ inline void crt_radix4_dit_61(__global GF* a, __global const GF* tw, uint n, uin
     GF F = gf_mul(a[i3], tw[((len >> 1) - 1u) + j]);
     GF G = gf_add(E, F);
     GF H = gf_sub(E, F);
-    
+
 
     GF TG = gf_mul(G, tw[(len - 1u) + j]);
     GF TH = gf_mul(H, tw[(len - 1u) + j + q]);
@@ -3900,8 +3940,8 @@ static inline __attribute__((always_inline)) void crt_local_stage_dif_radix8_31(
         GF31 x4 = x[i4], x5 = x[i5], x6 = x[i6], x7 = x[i7];
 
         if (len == 8u) {
-            
-            
+
+
             GF31 t0 = f31_add(x0, x4); GF31 t4 = f31_sub(x0, x4);
             GF31 t1 = f31_add(x1, x5); GF31 t5 = f31_mul_w8_fast(f31_sub(x1, x5));
             GF31 t2 = f31_add(x2, x6); GF31 t6 = f31_mul_minus_i_fast(f31_sub(x2, x6));
@@ -3970,7 +4010,7 @@ static inline __attribute__((always_inline)) void crt_local_stage_dit_radix8_31(
         GF31 x4 = x[i4], x5 = x[i5], x6 = x[i6], x7 = x[i7];
 
         if (len == 2u) {
-            
+
             GF31 y0 = x1;
             GF31 y1 = x3;
             GF31 y2 = x5;
@@ -8680,7 +8720,7 @@ __kernel void gf61_crt_forward_bridge_1024_to_256(__global GF* a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint t = lid; t < 512u; t += get_local_size(0)) {
         uint i0 = t;
         uint i1 = t + 512u;
@@ -8695,7 +8735,7 @@ __kernel void gf61_crt_forward_bridge_1024_to_256(__global GF* a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint t = lid; t < 512u; t += get_local_size(0)) {
         uint g = t >> 8;
         uint j = t & 255u;
@@ -8735,7 +8775,7 @@ __kernel void gf61_crt_inverse_bridge_256_to_1024(__global GF* a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint t = lid; t < 512u; t += get_local_size(0)) {
         uint g = t >> 8;
         uint j = t & 255u;
@@ -8752,7 +8792,7 @@ __kernel void gf61_crt_inverse_bridge_256_to_1024(__global GF* a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint t = lid; t < 512u; t += get_local_size(0)) {
         uint i0 = t;
         uint i1 = t + 512u;
@@ -8828,6 +8868,14 @@ inline GF gf_quarter_scalar_pair(GF z) {
     return (GF)(rshift61(norm61(z.s0), 2u), rshift61(norm61(z.s1), 2u));
 }
 
+inline GF gf_eighth_scalar_pair(GF z) {
+    return (GF)(rshift61(norm61(z.s0), 3u), rshift61(norm61(z.s1), 3u));
+}
+
+inline GF gf_sixteenth_scalar_pair(GF z) {
+    return (GF)(rshift61(norm61(z.s0), 4u), rshift61(norm61(z.s1), 4u));
+}
+
 inline GF gf_conj_fast(GF z) {
     return (GF)(z.s0, sub61(0ul, z.s1));
 }
@@ -8845,12 +8893,12 @@ inline GF gf_pack_e_minus_i_o(GF e, GF o) {
 }
 
 inline GF gf_pack_conj_e_plus_i_conj_o(GF e, GF o) {
-    
+
     return (GF)(add61(e.s0, o.s1), sub61(o.s0, e.s1));
 }
 
 inline GF gf_pack_conj_e_minus_i_conj_o(GF e, GF o) {
-    
+
     return (GF)(sub61(e.s0, o.s1), sub61(0ul, add61(e.s1, o.s0)));
 }
 
@@ -8860,6 +8908,14 @@ static inline __attribute__((always_inline)) GF31 f31_half_pair(GF31 z) {
 
 static inline __attribute__((always_inline)) GF31 f31_quarter_pair(GF31 z) {
     return (GF31)(f31_lshift29_scalar(z.s0), f31_lshift29_scalar(z.s1));
+}
+
+static inline __attribute__((always_inline)) GF31 f31_eighth_pair(GF31 z) {
+    return f31_rshift(z, 3u);
+}
+
+static inline __attribute__((always_inline)) GF31 f31_sixteenth_pair(GF31 z) {
+    return f31_rshift(z, 4u);
 }
 
 inline GF31 f31_conj_fast(GF31 z) {
@@ -8929,12 +8985,12 @@ GF31 crt_halfreal_center_one_31(GF31 z, GF31 zneg_conj, __global const GF31* res
 
 
 static inline __attribute__((always_inline)) uint crt_mixed_inv_pow2_mod_odd(uint pow2_n, uint odd) {
-    
-    
+
+
     const uint r = pow2_n % odd;
     if (odd == 3u) return (r == 2u) ? 2u : 1u;
     if (odd == 9u) {
-        
+
         if (r == 1u) return 1u;
         if (r == 2u) return 5u;
         if (r == 4u) return 7u;
@@ -8942,7 +8998,7 @@ static inline __attribute__((always_inline)) uint crt_mixed_inv_pow2_mod_odd(uin
         if (r == 7u) return 4u;
         if (r == 8u) return 8u;
     }
-    
+
     for (uint x = 1u; x < odd; ++x) if (((r * x) % odd) == 1u) return x;
     return 1u;
 }
@@ -8955,8 +9011,8 @@ static inline __attribute__((always_inline)) uint crt_mixed_j_from_coord(uint a,
     return b + pow2_n * t;
 }
 static inline __attribute__((always_inline)) uint crt_mixed_r_from_coord_fast_pre(uint a, uint b, uint odd, uint pow2_n, uint p2, uint podd, uint inv_m) {
-    
-    
+
+
     const uint mask = pow2_n - 1u;
     const uint r2 = (uint)(((ulong)(b & mask) * (ulong)p2) & (ulong)mask);
     const uint ro = (a * podd) % odd;
@@ -9605,10 +9661,10 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     __local GF31 l31[28u * 9u];
     __local GF t61[28u * 9u];
     __local GF31 t31[28u * 9u];
-    // v60: the 3x3 factorized odd-9 DFT needs only two non-trivial
-    // real constants per output row.  Cache 6 constants for stage 1
-    // (rows 0,3,6) and 18 constants for stage 2 (rows 0..8), instead
-    // of copying the full 9x9 matrix in every workgroup.
+
+
+
+
     __local ulong lm61r[24u];
     __local uint lm31r[24u];
 
@@ -9636,8 +9692,8 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // v60: factor the length-9 odd DFT as 3 x 3 with compact constants.
-    // Stage 1: for each pair and each (j0,k1), transform x[j0],x[j0+3],x[j0+6].
+
+
     if (kt < 28u && k < row_m && lane < 9u) {
         const uint j0 = lane / 3u;
         const uint k1 = lane - j0 * 3u;
@@ -9658,7 +9714,7 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Stage 2: output lane k = k1 + 3*k2 from the three j0 intermediates.
+
     if (kt >= 28u || k >= row_m || lane >= 9u) return;
     const uint k1 = lane % 3u;
     const uint lbase = kt * 9u;
@@ -9680,11 +9736,11 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile28_shift_lmat_61x31(__global const u
     a31[out] = acc31;
 }
 
-// v58 experimental fast path.
-// One workgroup processes one contiguous b-segment on the 2^m axis and the 9
-// physical CRT/PFA lanes.  It applies the carry incoming from the fused
-// preCRT+Garner tail, writes the normalized digits, and immediately builds the
-// pack+weight+oddDFT input for the next iteration from LDS.
+
+
+
+
+
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
                                              __global const uchar* restrict widths,
@@ -9718,7 +9774,7 @@ void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
     __local uint  l31i[32u * 9u];
     __local GF    t61[32u * 9u];
     __local GF31  t31[32u * 9u];
-    // Same compact 3x3 constants as the normal tile28 pack kernel.
+
     __local ulong lm61r[24u];
     __local uint  lm31r[24u];
 
@@ -9732,7 +9788,7 @@ void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
         lm31r[lid] = mat31[midx].s0;
     }
 
-    // Carry-normalize the nine physical PFA lanes for this b-segment.
+
     if (lid < 9u) {
         const uint phys = lid;
         const uint seg = bseg + phys * segs_per_lane;
@@ -9766,7 +9822,7 @@ void gf61_crt_mixed_carry_pack_next_lds_61x31(__global ulong* restrict digits,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // v60: length-9 DFT as 3x3, all pairs in the segment in parallel.
+
     for (uint idx = lid; idx < pairs * 9u; idx += 256u) {
         const uint pair = idx / 9u;
         const uint lane = idx - pair * 9u;
@@ -9835,9 +9891,9 @@ void gf61_crt_mixed_pack_weight_odd_fwd_tile14_shift_lmat_61x31(__global const u
 
     __local GF l61[14 * 9];
     __local GF31 l31[14 * 9];
-    /* v51: the odd DFT matrices are real.  Cache only the scalar part
-       instead of full GF/GF31 pairs.  This lowers LDS traffic for the
-       already fused 61x31 pack+oddDFT kernel without changing the layout. */
+
+
+
     __local ulong lm61r[9 * 9];
     __local uint lm31r[9 * 9];
 
@@ -10266,7 +10322,7 @@ void gf61_crt_mixed_odd_inv_precrt_coeffhi(__global const GF* restrict a61,
         }
     }
 
-    
+
     const uint p2 = p & (pow2_n - 1u);
     const uint podd = p % odd;
     const uint inv_m = crt_mixed_inv_pow2_mod_odd(pow2_n, odd);
@@ -10334,7 +10390,7 @@ void gf61_crt_mixed_odd_inv_precrt_coeffhi_tile7(__global const GF* restrict a61
     const uint mat_base = out * odd;
     const uint lbase = kt * 9u;
 
-    
+
     for (uint in = 0u; in < odd; ++in) {
         acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + in], mat61[mat_base + in]));
         acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + in], mat31[mat_base + in]));
@@ -10406,7 +10462,7 @@ void gf61_crt_mixed_odd_inv_precrt_coeffhi_tile14(__global const GF* restrict a6
     const uint mat_base = out * odd;
     const uint lbase = kt * 9u;
 
-    
+
     for (uint in = 0u; in < odd; ++in) {
         acc61 = gf_add(acc61, gf_mul_real_odd(l61[lbase + in], mat61[mat_base + in]));
         acc31 = f31_add(acc31, f31_mul_real_odd(l31[lbase + in], mat31[mat_base + in]));
@@ -10835,7 +10891,7 @@ void gf61_crt_mixed_odd9_inv_precrt_garner9seg_lmat(__global const GF* restrict 
     const uint lid = (uint)get_local_id(0);
     const uint bseg = (uint)get_group_id(0);
     const uint row_m = pow2_n >> 1;
-    const uint segs_per_t = pow2_n >> 6;   // pow2_n / 64, current odd9 path only
+    const uint segs_per_t = pow2_n >> 6;
     if (bseg >= segs_per_t) return;
 
     const uint b_start = bseg << 6;
@@ -10862,12 +10918,12 @@ void gf61_crt_mixed_odd9_inv_precrt_garner9seg_lmat(__global const GF* restrict 
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // Compute 9 natural 64-digit segments together.  This keeps the good odd-axis
-    // reuse: for each b/k pair, the 9 CRT lanes are computed while the 9 input
-    // rows are still in LDS.  The old v43 natural-64 fused kernel lost this reuse.
+
+
+
     for (uint idx = lid; idx < 9u * 64u; idx += 256u) {
-        const uint t = idx >> 6;          // CRT/PFA block, natural segment in this t
-        const uint q = idx & 63u;         // offset inside the 64-digit segment
+        const uint t = idx >> 6;
+        const uint q = idx & 63u;
         const uint b = b_start + q;
         const uint pair = q >> 1;
         const uint component = q & 1u;
@@ -11072,14 +11128,14 @@ void gf61_crt_mixed_odd9_inv_precrt_garner9seg30_pair_lmat(__global const GF* re
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    /* v45 fast path for the common digit-width-base=30 case.
-       One work item computes the even and odd component for the same pair.
-       That keeps the same 9-segment layout as v44, but loads the 9 input rows
-       once instead of doing the component 0 and component 1 dot products as
-       two independent work items. */
+
+
+
+
+
     for (uint idx = lid; idx < 9u * 32u; idx += 128u) {
-        const uint t = idx >> 5;          // 0..8
-        const uint pair = idx & 31u;      // 0..31
+        const uint t = idx >> 5;
+        const uint pair = idx & 31u;
         const uint b0 = b_start + (pair << 1);
         const uint b1 = b0 + 1u;
         const uint lane0 = (b0 + mmod * t) % 9u;
@@ -11277,14 +11333,14 @@ void gf61_crt_mixed_odd9_inv_precrt_garner9seg30_pair_smat(__global const GF* re
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    /* v45 fast path for the common digit-width-base=30 case.
-       One work item computes the even and odd component for the same pair.
-       That keeps the same 9-segment layout as v44, but loads the 9 input rows
-       once instead of doing the component 0 and component 1 dot products as
-       two independent work items. */
+
+
+
+
+
     for (uint idx = lid; idx < 9u * 32u; idx += 128u) {
-        const uint t = idx >> 5;          // 0..8
-        const uint pair = idx & 31u;      // 0..31
+        const uint t = idx >> 5;
+        const uint pair = idx & 31u;
         const uint b0 = b_start + (pair << 1);
         const uint b1 = b0 + 1u;
         const uint lane0 = (b0 + mmod * t) % 9u;
@@ -11454,7 +11510,7 @@ void gf61_crt_mixed_odd_inv_precrt_coeffhi_outpar(__global const GF* restrict a6
     const uint b0 = k << 1;
     const uint b1 = b0 + 1u;
 
-    
+
     GF acc61 = GF_ZERO;
     GF31 acc31 = (GF31)(0u, 0u);
     const uint mat_base = out * odd;
@@ -11817,7 +11873,7 @@ void gf61_crt_mixed_halfreal_lds512_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint L = 512u; L >= 8u; L >>= 3) {
         local_stage_dif_radix8_pow2(A, twf61, 512u, L, lid, 64u);
         if (!same) local_stage_dif_radix8_pow2(B, twf61, 512u, L, lid, 64u);
@@ -11891,7 +11947,7 @@ void gf61_crt_mixed_halfreal_lds512_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
         local_stage_dit_radix8_pow2(A, twi61, 512u, L, lid, 64u);
         if (!same) local_stage_dit_radix8_pow2(B, twi61, 512u, L, lid, 64u);
@@ -12482,9 +12538,9 @@ void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_61(__global GF* 
 }
 
 
-/* v42: GF31-specific regA/twinline LDS512 center.
-   Same scheduling idea as the fast GF61 center: keep block A in registers while
-   block B is transformed through one LDS buffer, then run the two inverse sides. */
+
+
+
 __kernel __attribute__((reqd_work_group_size(64,1,1)))
 void gf61_crt_mixed_halfreal_lds512_pair_1lds_rega_twinline_f48_31(__global GF31* restrict a31,
                                                           __global const GF31* restrict twf31,
@@ -13140,7 +13196,7 @@ void gf61_crt_mixed_halfreal_lds1024_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     uint Lf = 1024u;
     while (Lf >= 8u) {
         local_stage_dif_radix8_pow2(A, twf61, 1024u, Lf, lid, 64u);
@@ -13220,7 +13276,7 @@ void gf61_crt_mixed_halfreal_lds1024_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     local_stage_dit_pow2(A, twi61, 1024u, 2u, lid, 64u);
     if (!same) local_stage_dit_pow2(B, twi61, 1024u, 2u, lid, 64u);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -14653,7 +14709,7 @@ void gf61_crt_halfreal_pack_weight_31(__global const ulong* restrict digits,
 
 static inline __attribute__((always_inline)) uint crt_shift61_from_prod(uint prod61)
 {
-    
+
     uint s = 62u - prod61;
     s -= 61u & (0u - (uint)(s >= 61u));
     return s;
@@ -14661,7 +14717,7 @@ static inline __attribute__((always_inline)) uint crt_shift61_from_prod(uint pro
 
 static inline __attribute__((always_inline)) uint crt_shift31_from_prod(uint r, uint prod31)
 {
-    
+
     const uint s = f31_mod31_small(32u - prod31);
     return s & (0u - (uint)(r != 0u));
 }
@@ -14692,7 +14748,7 @@ void gf61_crt_halfreal_pack_lds512_dif_precrt(__global const ulong* restrict dig
     __local GF   l61[512];
     __local GF31 l31[512];
 
-    
+
     const uint lr2_61_mod = crt_mod61_u32_fast(lr2_61);
     const uint n61_lr2    = crt_mod61_small(crt_mod61_u32_fast(n) * lr2_61_mod);
     const uint p61_lr2    = crt_mod61_small(crt_mod61_u32_fast(pmod) * lr2_61_mod);
@@ -14777,7 +14833,7 @@ void gf61_crt_halfreal_pack_lds512_dif_61(__global const ulong* restrict digits,
 
     __local GF l61[512];
 
-    
+
     const uint pmod = p & mask;
     const uint lr2_61_mod = crt_mod61_u32_fast(lr2_61);
     const uint n61_lr2 = crt_mod61_small(crt_mod61_u32_fast(n) * lr2_61_mod);
@@ -14837,7 +14893,7 @@ void gf61_crt_halfreal_pack_lds512_dif_31(__global const ulong* restrict digits,
     const uint r_step = (uint)(((ulong)i_step * (ulong)p) & (ulong)mask);
     const uint lr2_31_mod = f31_mod31_small(lr2_31);
 
-    
+
     const uint n31_lr2 = crt_mod31_u32_fast(crt_mod31_u32_fast(n) * lr2_31_mod);
     const uint p31_lr2 = crt_mod31_u32_fast(crt_mod31_u32_fast(pmod) * lr2_31_mod);
     const uint step31_lr2 = crt_mod31_u32_fast(crt_mod31_u32_fast(r_step) * lr2_31_mod);
@@ -14999,7 +15055,7 @@ void gf61_crt_halfreal_dit512_unpack_precrt(
     const uint lr2_31_mod = f31_mod31_small(lr2_31);
     const uint log_m31 = f31_mod31_small(log_m);
 
-    
+
     const uint n61_lr2 = crt_mod61_small(crt_mod61_u32_fast(n) * lr2_61_mod);
     const uint p61_lr2 = crt_mod61_small(crt_mod61_u32_fast(pmod) * lr2_61_mod);
     const uint step61_lr2 = crt_mod61_small(crt_mod61_u32_fast(r_step) * lr2_61_mod);
@@ -15181,6 +15237,10 @@ void gf61_crt_halfreal_ditpow2_unpack_31(__global GF31* restrict a,
 }
 
 
+#ifndef CRT_MIXED_CENTER_POWER
+#define CRT_MIXED_CENTER_POWER 2
+#endif
+
 static inline __attribute__((always_inline))
 void crt_halfreal_center_eo_61(GF z, GF zneg_conj,
                                __global const GF* restrict twf,
@@ -15191,8 +15251,8 @@ void crt_halfreal_center_eo_61(GF z, GF zneg_conj,
                                __private GF* Eout,
                                __private GF* Oout)
 {
-    
-    
+
+
     GF E = gf_half_scalar_pair(gf_add(z, zneg_conj));
     GF D = gf_half_scalar_pair(gf_sub(z, zneg_conj));
     GF O = (flags & 4u) ? gf_mul_i_fast(D) : gf_mul_minus_i_fast(D);
@@ -15205,16 +15265,42 @@ void crt_halfreal_center_eo_61(GF z, GF zneg_conj,
 #define CRT_HALFREAL_CENTER_DIRECT 1
 #endif
 #if CRT_HALFREAL_CENTER_DIRECT
-    
-    
+
+
     const GF E0 = E;
     const GF O0 = O;
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    E = gf_add(gf_add(gf_sqr(E2), gf_six_pair(gf_mul(E2, WO2))), gf_sqr(WO2));
+    O = gf_quad_pair(gf_mul(gf_mul(E0, O0), gf_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    E = gf_add(gf_mul(E2, E0), gf_triple_pair(gf_mul(E0, WO2)));
+    O = gf_add(gf_triple_pair(gf_mul(E2, O0)), gf_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     E = gf_add(gf_sqr(E0), gf_sqr(WO));
     O = gf_dbl_pair(gf_mul(E0, O0));
 #else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
+#else
     const GF Wi = gf_conj_fast(W);
-    const GF X0 = gf_sqr(gf_add(E, WO));
-    const GF X1 = gf_sqr(gf_sub(E, WO));
+    const GF A = gf_add(E, WO);
+    const GF B = gf_sub(E, WO);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF X0 = gf_pow4(A);
+    const GF X1 = gf_pow4(B);
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF X0 = gf_cube(A);
+    const GF X1 = gf_cube(B);
+#elif CRT_MIXED_CENTER_POWER == 2
+    const GF X0 = gf_sqr(A);
+    const GF X1 = gf_sqr(B);
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
     E = gf_half_scalar_pair(gf_add(X0, X1));
     O = gf_mul(gf_half_scalar_pair(gf_sub(X0, X1)), Wi);
 #endif
@@ -15282,16 +15368,44 @@ void crt_halfreal_center_eo_f48_61(GF z, GF zneg_conj,
     const GF U = gf_norm_pair(gf_add(z, zneg_conj));
     const GF D = gf_mul_minus_i_fast(gf_norm_pair(gf_sub(z, zneg_conj)));
     const GF WD = gf_mul(D, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF U2 = gf_sqr(U);
+    const GF WD2 = gf_sqr(WD);
+    *Eout = gf_sixteenth_scalar_pair(gf_add(gf_add(gf_sqr(U2), gf_six_pair(gf_mul(U2, WD2))), gf_sqr(WD2)));
+    *Oout = gf_quarter_scalar_pair(gf_mul(gf_mul(U, D), gf_add(U2, WD2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF U2 = gf_sqr(U);
+    const GF WD2 = gf_sqr(WD);
+    *Eout = gf_eighth_scalar_pair(gf_add(gf_mul(U2, U), gf_triple_pair(gf_mul(U, WD2))));
+    *Oout = gf_eighth_scalar_pair(gf_add(gf_triple_pair(gf_mul(U2, D)), gf_mul(WD2, D)));
+#elif CRT_MIXED_CENTER_POWER == 2
     *Eout = gf_quarter_scalar_pair(gf_add(gf_sqr(U), gf_sqr(WD)));
     *Oout = gf_half_scalar_pair(gf_mul(U, D));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #else
     GF E = gf_half_scalar_pair(gf_add(z, zneg_conj));
     GF O = gf_mul_minus_i_fast(gf_half_scalar_pair(gf_sub(z, zneg_conj)));
     const GF WO = gf_mul(O, W);
     const GF E0 = E;
     const GF O0 = O;
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    E = gf_add(gf_add(gf_sqr(E2), gf_six_pair(gf_mul(E2, WO2))), gf_sqr(WO2));
+    O = gf_quad_pair(gf_mul(gf_mul(E0, O0), gf_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    E = gf_add(gf_mul(E2, E0), gf_triple_pair(gf_mul(E0, WO2)));
+    O = gf_add(gf_triple_pair(gf_mul(E2, O0)), gf_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     E = gf_add(gf_sqr(E0), gf_sqr(WO));
     O = gf_dbl_pair(gf_mul(E0, O0));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
     *Eout = E;
     *Oout = O;
 #endif
@@ -15304,14 +15418,42 @@ void crt_halfreal_center_pair_f48_w_61(GF z, GF zneg_conj, GF W, __private GF* o
     const GF U = gf_norm_pair(gf_add(z, zneg_conj));
     const GF D = gf_mul_minus_i_fast(gf_norm_pair(gf_sub(z, zneg_conj)));
     const GF WD = gf_mul(D, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF U2 = gf_sqr(U);
+    const GF WD2 = gf_sqr(WD);
+    const GF E = gf_sixteenth_scalar_pair(gf_add(gf_add(gf_sqr(U2), gf_six_pair(gf_mul(U2, WD2))), gf_sqr(WD2)));
+    const GF O = gf_quarter_scalar_pair(gf_mul(gf_mul(U, D), gf_add(U2, WD2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF U2 = gf_sqr(U);
+    const GF WD2 = gf_sqr(WD);
+    const GF E = gf_eighth_scalar_pair(gf_add(gf_mul(U2, U), gf_triple_pair(gf_mul(U, WD2))));
+    const GF O = gf_eighth_scalar_pair(gf_add(gf_triple_pair(gf_mul(U2, D)), gf_mul(WD2, D)));
+#elif CRT_MIXED_CENTER_POWER == 2
     const GF E = gf_quarter_scalar_pair(gf_add(gf_sqr(U), gf_sqr(WD)));
     const GF O = gf_half_scalar_pair(gf_mul(U, D));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #else
     const GF E0 = gf_half_scalar_pair(gf_add(z, zneg_conj));
     const GF O0 = gf_mul_minus_i_fast(gf_half_scalar_pair(gf_sub(z, zneg_conj)));
     const GF WO = gf_mul(O0, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    const GF E = gf_add(gf_add(gf_sqr(E2), gf_six_pair(gf_mul(E2, WO2))), gf_sqr(WO2));
+    const GF O = gf_quad_pair(gf_mul(gf_mul(E0, O0), gf_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF E2 = gf_sqr(E0);
+    const GF WO2 = gf_sqr(WO);
+    const GF E = gf_add(gf_mul(E2, E0), gf_triple_pair(gf_mul(E0, WO2)));
+    const GF O = gf_add(gf_triple_pair(gf_mul(E2, O0)), gf_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     const GF E = gf_add(gf_sqr(E0), gf_sqr(WO));
     const GF O = gf_dbl_pair(gf_mul(E0, O0));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #endif
     *out0 = gf_pack_e_plus_i_o(E, O);
     *out1 = gf_pack_conj_e_plus_i_conj_o(E, O);
@@ -15330,16 +15472,44 @@ void crt_halfreal_center_eo_f48_31(GF31 z, GF31 zneg_conj,
     const GF31 U = f31_add(z, zneg_conj);
     const GF31 D = f31_mul_minus_i_fast(f31_sub(z, zneg_conj));
     const GF31 WD = f31_mul(D, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 U2 = f31_sqr(U);
+    const GF31 WD2 = f31_sqr(WD);
+    *Eout = f31_sixteenth_pair(f31_add(f31_add(f31_sqr(U2), f31_six_pair(f31_mul(U2, WD2))), f31_sqr(WD2)));
+    *Oout = f31_quarter_pair(f31_mul(f31_mul(U, D), f31_add(U2, WD2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 U2 = f31_sqr(U);
+    const GF31 WD2 = f31_sqr(WD);
+    *Eout = f31_eighth_pair(f31_add(f31_mul(U2, U), f31_triple_pair(f31_mul(U, WD2))));
+    *Oout = f31_eighth_pair(f31_add(f31_triple_pair(f31_mul(U2, D)), f31_mul(WD2, D)));
+#elif CRT_MIXED_CENTER_POWER == 2
     *Eout = f31_quarter_pair(f31_add(f31_sqr(U), f31_sqr(WD)));
     *Oout = f31_half_pair(f31_mul(U, D));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #else
     GF31 E = f31_half_pair(f31_add(z, zneg_conj));
     GF31 O = f31_mul_minus_i_fast(f31_half_pair(f31_sub(z, zneg_conj)));
     const GF31 WO = f31_mul(O, W);
     const GF31 E0 = E;
     const GF31 O0 = O;
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    E = f31_add(f31_add(f31_sqr(E2), f31_six_pair(f31_mul(E2, WO2))), f31_sqr(WO2));
+    O = f31_quad_pair(f31_mul(f31_mul(E0, O0), f31_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    E = f31_add(f31_mul(E2, E0), f31_triple_pair(f31_mul(E0, WO2)));
+    O = f31_add(f31_triple_pair(f31_mul(E2, O0)), f31_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     E = f31_add(f31_sqr(E0), f31_sqr(WO));
     O = f31_dbl_pair(f31_mul(E0, O0));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
     *Eout = E;
     *Oout = O;
 #endif
@@ -15352,14 +15522,42 @@ void crt_halfreal_center_pair_f48_w_31(GF31 z, GF31 zneg_conj, GF31 W, __private
     const GF31 U = f31_add(z, zneg_conj);
     const GF31 D = f31_mul_minus_i_fast(f31_sub(z, zneg_conj));
     const GF31 WD = f31_mul(D, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 U2 = f31_sqr(U);
+    const GF31 WD2 = f31_sqr(WD);
+    const GF31 E = f31_sixteenth_pair(f31_add(f31_add(f31_sqr(U2), f31_six_pair(f31_mul(U2, WD2))), f31_sqr(WD2)));
+    const GF31 O = f31_quarter_pair(f31_mul(f31_mul(U, D), f31_add(U2, WD2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 U2 = f31_sqr(U);
+    const GF31 WD2 = f31_sqr(WD);
+    const GF31 E = f31_eighth_pair(f31_add(f31_mul(U2, U), f31_triple_pair(f31_mul(U, WD2))));
+    const GF31 O = f31_eighth_pair(f31_add(f31_triple_pair(f31_mul(U2, D)), f31_mul(WD2, D)));
+#elif CRT_MIXED_CENTER_POWER == 2
     const GF31 E = f31_quarter_pair(f31_add(f31_sqr(U), f31_sqr(WD)));
     const GF31 O = f31_half_pair(f31_mul(U, D));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #else
     const GF31 E0 = f31_half_pair(f31_add(z, zneg_conj));
     const GF31 O0 = f31_mul_minus_i_fast(f31_half_pair(f31_sub(z, zneg_conj)));
     const GF31 WO = f31_mul(O0, W);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    const GF31 E = f31_add(f31_add(f31_sqr(E2), f31_six_pair(f31_mul(E2, WO2))), f31_sqr(WO2));
+    const GF31 O = f31_quad_pair(f31_mul(f31_mul(E0, O0), f31_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    const GF31 E = f31_add(f31_mul(E2, E0), f31_triple_pair(f31_mul(E0, WO2)));
+    const GF31 O = f31_add(f31_triple_pair(f31_mul(E2, O0)), f31_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     const GF31 E = f31_add(f31_sqr(E0), f31_sqr(WO));
     const GF31 O = f31_dbl_pair(f31_mul(E0, O0));
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
 #endif
     *out0 = f31_pack_e_plus_i_o(E, O);
     *out1 = f31_pack_conj_e_plus_i_conj_o(E, O);
@@ -15388,8 +15586,8 @@ void crt_halfreal_center_eo_31(GF31 z, GF31 zneg_conj,
                                __private GF31* Eout,
                                __private GF31* Oout)
 {
-    
-    
+
+
     GF31 E = f31_half_pair(f31_add(z, zneg_conj));
     GF31 D = f31_half_pair(f31_sub(z, zneg_conj));
     GF31 O = (flags & 4u) ? f31_mul_i_fast(D) : f31_mul_minus_i_fast(D);
@@ -15401,12 +15599,38 @@ void crt_halfreal_center_eo_31(GF31 z, GF31 zneg_conj,
 #if CRT_HALFREAL_CENTER_DIRECT
     const GF31 E0 = E;
     const GF31 O0 = O;
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    E = f31_add(f31_add(f31_sqr(E2), f31_six_pair(f31_mul(E2, WO2))), f31_sqr(WO2));
+    O = f31_quad_pair(f31_mul(f31_mul(E0, O0), f31_add(E2, WO2)));
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 E2 = f31_sqr(E0);
+    const GF31 WO2 = f31_sqr(WO);
+    E = f31_add(f31_mul(E2, E0), f31_triple_pair(f31_mul(E0, WO2)));
+    O = f31_add(f31_triple_pair(f31_mul(E2, O0)), f31_mul(WO2, O0));
+#elif CRT_MIXED_CENTER_POWER == 2
     E = f31_add(f31_sqr(E0), f31_sqr(WO));
     O = f31_dbl_pair(f31_mul(E0, O0));
 #else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
+#else
     const GF31 Wi = f31_conj_fast(W);
-    const GF31 X0 = f31_sqr(f31_add(E, WO));
-    const GF31 X1 = f31_sqr(f31_sub(E, WO));
+    const GF31 A = f31_add(E, WO);
+    const GF31 B = f31_sub(E, WO);
+#if CRT_MIXED_CENTER_POWER == 4
+    const GF31 X0 = f31_pow4(A);
+    const GF31 X1 = f31_pow4(B);
+#elif CRT_MIXED_CENTER_POWER == 3
+    const GF31 X0 = f31_cube(A);
+    const GF31 X1 = f31_cube(B);
+#elif CRT_MIXED_CENTER_POWER == 2
+    const GF31 X0 = f31_sqr(A);
+    const GF31 X1 = f31_sqr(B);
+#else
+#error Unsupported CRT_MIXED_CENTER_POWER
+#endif
     E = f31_half_pair(f31_add(X0, X1));
     O = f31_mul(f31_half_pair(f31_sub(X0, X1)), Wi);
 #endif
@@ -15447,8 +15671,8 @@ uint crt_radix8_digitrev_u32(uint x, uint logn)
 static inline __attribute__((always_inline))
 uint crt_bitrev_u32(uint x, uint logn)
 {
-    
-    
+
+
     if (logn == 0u) return 0u;
     x = ((x & 0x55555555u) << 1u) | ((x >> 1u) & 0x55555555u);
     x = ((x & 0x33333333u) << 2u) | ((x >> 2u) & 0x33333333u);
@@ -15462,7 +15686,7 @@ uint crt_bitrev_u32(uint x, uint logn)
 static inline __attribute__((always_inline))
 uint crt_bitrev3_u32_fast(uint x)
 {
-    
+
     return ((x & 1u) << 2) | (x & 2u) | ((x & 4u) >> 2);
 }
 
@@ -15476,8 +15700,8 @@ uint crt_bitrev4_u32_fast(uint x)
 static inline __attribute__((always_inline))
 uint crt_bitrev9_u32_fast(uint x)
 {
-    
-    
+
+
     x &= 511u;
     return ((x & 0x001u) << 8) |
            ((x & 0x002u) << 6) |
@@ -15509,8 +15733,8 @@ uint crt_bitrev10_u32_fast(uint x)
 static inline __attribute__((always_inline))
 uint crt_halfreal_perm_u32(uint x, uint logn, uint flags)
 {
-    
-    
+
+
     if (flags & 16u) return crt_bitrev_u32(x, logn);
     if (flags & 1u) return crt_radix8_digitrev_u32(x, logn);
     return x;
@@ -15623,7 +15847,7 @@ void gf61_crt_halfreal_center512_pair_61(__global GF* restrict a61,
     const uint blocks = m >> 9;
     if (blockA >= blocks) return;
 
-    
+
     const uint h = log_m - 9u;
     const uint kb = (h == 0u) ? 0u : crt_bitrev_u32(blockA, h);
     const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
@@ -15642,15 +15866,15 @@ void gf61_crt_halfreal_center512_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     const uint rev_lid6 = crt_bitrev_u32(lid, 6u);
     for (uint r = 0u; r < 8u; ++r) {
         const uint t = (lid << 3) + r;
         const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
         const uint k = (rt << h) | kb;
         const uint km = (m - k) & (m - 1u);
-        
-        
+
+
         const uint tm = (kb != 0u) ? (511u - t)
                                    : crt_bitrev9_u32_fast((0u - rt) & 511u);
 
@@ -15727,8 +15951,8 @@ void gf61_crt_halfreal_center512_pair_31(__global GF31* restrict a31,
         const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
         const uint k = (rt << h) | kb;
         const uint km = (m - k) & (m - 1u);
-        
-        
+
+
         const uint tm = (kb != 0u) ? (511u - t)
                                    : crt_bitrev9_u32_fast((0u - rt) & 511u);
 
@@ -15783,8 +16007,8 @@ void gf61_crt_halfreal_lds512_pair_61(__global GF* restrict a61,
     if (pair_id >= pair_blocks) return;
 
     const uint h = log_m - 9u;
-    
-    
+
+
     const uint kb = (h == 0u) ? 0u : pair_id;
     const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
     const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
@@ -15802,7 +16026,7 @@ void gf61_crt_halfreal_lds512_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint L = 512u; L >= 8u; L >>= 3) {
         local_stage_dif_radix8_pow2(A, twf61, 512u, L, lid, 64u);
         if (!same) local_stage_dif_radix8_pow2(B, twf61, 512u, L, lid, 64u);
@@ -15816,8 +16040,8 @@ void gf61_crt_halfreal_lds512_pair_61(__global GF* restrict a61,
         const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
         const uint k = (rt << h) | kb;
         const uint km = (m - k) & (m - 1u);
-        
-        
+
+
         const uint tm = (kb != 0u) ? (511u - t)
                                    : crt_bitrev9_u32_fast((0u - rt) & 511u);
 
@@ -15837,8 +16061,8 @@ void gf61_crt_halfreal_lds512_pair_61(__global GF* restrict a61,
                 B[tm] = outKm;
             }
         } else {
-            
-            
+
+
             const GF zsmall = B[tm];
             const GF zlarge = A[t];
             GF E, O;
@@ -15851,7 +16075,7 @@ void gf61_crt_halfreal_lds512_pair_61(__global GF* restrict a61,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    
+
     for (uint L = 2u; (L << 2) <= 512u; L <<= 3) {
         local_stage_dit_radix8_pow2(A, twi61, 512u, L, lid, 64u);
         if (!same) local_stage_dit_radix8_pow2(B, twi61, 512u, L, lid, 64u);
@@ -15881,8 +16105,8 @@ void gf61_crt_halfreal_lds512_pair_31(__global GF31* restrict a31,
     if (pair_id >= pair_blocks) return;
 
     const uint h = log_m - 9u;
-    
-    
+
+
     const uint kb = (h == 0u) ? 0u : pair_id;
     const uint blockA = (h == 0u) ? 0u : crt_bitrev_u32(kb, h);
     const uint blockB = (h == 0u) ? 0u : crt_bitrev_u32((0u - kb) & (blocks - 1u), h);
@@ -15913,8 +16137,8 @@ void gf61_crt_halfreal_lds512_pair_31(__global GF31* restrict a31,
         const uint rt = (crt_bitrev3_u32_fast(r) << 6) | rev_lid6;
         const uint k = (rt << h) | kb;
         const uint km = (m - k) & (m - 1u);
-        
-        
+
+
         const uint tm = (kb != 0u) ? (511u - t)
                                    : crt_bitrev9_u32_fast((0u - rt) & 511u);
 
