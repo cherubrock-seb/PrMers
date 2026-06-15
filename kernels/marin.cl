@@ -1084,7 +1084,7 @@ void backward320_0(__global uint64 * restrict const reg, __global const uint64 *
 
 #define ATTR_FB_1024()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))
 
-/*__kernel
+__kernel
 ATTR_FB_1024()
 void forward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset,
 	const sz_t s, const uint32 lm)
@@ -1104,7 +1104,7 @@ void backward1024(__global uint64 * restrict const reg, __global const uint64 * 
 
 	BACKWARD_1024_1280();
 	backward_4o(256u << lm, &x[ki], 256, &X[i], r2i[sj / 256], r4i[sj / 256]);
-}*/
+}
 
 #if (N_SZ % 5 != 0) && (N_SZ >= 524288) && (N_SZ <= 1048576)
 

@@ -17,6 +17,8 @@ public:
 	static constexpr size_t transform_size(const uint32_t exponent)
 	{
 		// Make sure the transform is long enough so that each 'digit' can't overflow after the convolution.
+		// Goldilocks validity: n must divide (MOD_P-1)/192 = 2^26*5*17*257*65537.
+		// Therefore pure 2^27 is invalid; MM31 must choose 5*2^25 instead.
 		uint32_t w = 0, log2_n = 1, log2_n5 = 2;
 		do
 		{
@@ -34,7 +36,10 @@ public:
 		// log2(5) ~ 2.3219 < 2.4
 		} while ((w + 1) * 2 + (log2_n5 + 2.4) >= 64);
 
-		return std::min(size_t(1) << log2_n, size_t(5) << log2_n5);	// must be >= 4
+		const size_t invalid = size_t(-1);
+		const size_t n2 = (log2_n <= 26) ? (size_t(1) << log2_n) : invalid;
+		const size_t n5 = (log2_n5 <= 26) ? (size_t(5) << log2_n5) : invalid;
+		return std::min(n2, n5);	// must be >= 4 and divide (MOD_P-1)/192
 	}
 
 	static constexpr bool is_even(const size_t n)

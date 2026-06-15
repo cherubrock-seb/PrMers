@@ -44,7 +44,7 @@ private:
 
 	// cl_kernel _forward4 = nullptr, _backward4 = nullptr, _forward16 = nullptr, _backward16 = nullptr;
 	cl_kernel _forward64 = nullptr, _backward64 = nullptr, _forward256 = nullptr, _backward256 = nullptr;
-	// cl_kernel _forward1024 = nullptr, _backward1024 = nullptr;
+	cl_kernel _forward1024 = nullptr, _backward1024 = nullptr;
 
 	cl_kernel _forward4_0 = nullptr, _backward4_0 = nullptr, _forward5_0 = nullptr, _backward5_0 = nullptr;
 	cl_kernel _forward16_0 = nullptr, _backward16_0 = nullptr, _forward20_0 = nullptr, _backward20_0 = nullptr;
@@ -119,11 +119,26 @@ public:
 		const size_t n = _n;
 		if (n != 0)
 		{
-			_reg = _create_buffer(CL_MEM_READ_WRITE, _reg_count * n * sizeof(uint64));
-			_carry = _create_buffer(CL_MEM_READ_WRITE, n / 4 * sizeof(uint64));
-			_root = _create_buffer(CL_MEM_READ_ONLY, 3 * n * sizeof(uint64));
-			_weight = _create_buffer(CL_MEM_READ_ONLY, 2 * n * sizeof(uint64));
-			_digit_width = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint8));
+			const size_t reg_bytes = _reg_count * n * sizeof(uint64);
+			const size_t carry_bytes = n / 4 * sizeof(uint64);
+			const size_t root_bytes = 3 * n * sizeof(uint64);
+			const size_t weight_bytes = 2 * n * sizeof(uint64);
+			const size_t width_bytes = n * sizeof(uint8);
+			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
+			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
+			std::cout << "[GPU memory plan] regs=" << _reg_count
+			          << " reg=" << gib(reg_bytes) << " GiB"
+			          << " root=" << gib(root_bytes) << " GiB"
+			          << " weight=" << gib(weight_bytes) << " GiB"
+			          << " carry=" << gib(carry_bytes) << " GiB"
+			          << " width=" << gib(width_bytes) << " GiB"
+			          << " total=" << gib(total_bytes) << " GiB before driver overhead" << std::endl;
+			_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes);
+			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
+			// root/weight/width are overwritten immediately; do not allocate giant host zero vectors for them.
+			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+			_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+			_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
 		}
 	}
 
@@ -226,8 +241,11 @@ public:
 			CREATE_KERNEL_TRANSFORM(backward320_0);
 		}
 
-		// CREATE_KERNEL_TRANSFORM(forward1024);
-		// CREATE_KERNEL_TRANSFORM(backward1024);
+		if (get_max_workgroup_size() >= 1024 / 4)
+		{
+			CREATE_KERNEL_TRANSFORM(forward1024);
+			CREATE_KERNEL_TRANSFORM(backward1024);
+		}
 		if ((n % 5 != 0) && (n >= 524288) && (n <= 1048576))
 		{
 			CREATE_KERNEL_TRANSFORM(forward1024_0);
@@ -430,8 +448,8 @@ public:
 	DEFINE_FORWARD_0(320);
 	DEFINE_BACKWARD_0(320);
 
-	// DEFINE_FORWARD(1024);
-	// DEFINE_BACKWARD(1024);
+	DEFINE_FORWARD(1024);
+	DEFINE_BACKWARD(1024);
 	DEFINE_FORWARD_0(1024);
 	DEFINE_BACKWARD_0(1024);
 	// DEFINE_FORWARD_0(1280);
@@ -705,13 +723,27 @@ public:
 		_gpu->write_width(_digit_width.data());
 	}
 
-	virtual ~engine_gpu()
+	void release_gpu_resources_for_lowmem_handoff() override
 	{
+		if (_gpu == nullptr) return;
+		// Make every queued kernel/read/write visible to the driver before releasing
+		// the huge MM31 buffers. This is intentionally used by the PM1 low-memory
+		// Stage1 -> Stage2 handoff, where a second large engine is allocated on the
+		// same GPU immediately afterwards.
+		_gpu->finish_all_queues();
 		_gpu->release_kernels();
 		_gpu->free_memory();
+		_gpu->finish_all_queues();
 		_gpu->clear_program();
-
 		delete _gpu;
+		_gpu = nullptr;
+		std::vector<uint64>().swap(_weight);
+		std::vector<uint8>().swap(_digit_width);
+	}
+
+	virtual ~engine_gpu()
+	{
+		release_gpu_resources_for_lowmem_handoff();
 	}
 
 	size_t get_size() const override { return _n; }
@@ -832,6 +864,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 9); _gpu->sqr1024(src); _gpu->backward256(src, 5120, 9); _gpu->backward80_0(src); break;
 			case 5u << 23: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 8); _gpu->sqr512(src); _gpu->backward256(src, 20480, 8); _gpu->backward320_0(src); break;
 			case 5u << 24: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 9); _gpu->sqr1024(src); _gpu->backward256(src, 20480, 9); _gpu->backward320_0(src); break;
+			case 5u << 25: _gpu->forward320_0(src); _gpu->forward1024(src, 81920, 8); _gpu->sqr512(src); _gpu->backward1024(src, 81920, 8); _gpu->backward320_0(src); break;
+			case 5u << 26: _gpu->forward320_0(src); _gpu->forward1024(src, 81920, 9); _gpu->sqr1024(src); _gpu->backward1024(src, 81920, 9); _gpu->backward320_0(src); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -893,6 +927,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(src); _gpu->forward256(src, 5120, 9); _gpu->sqr1024(src); _gpu->backward256(src, 5120, 9); _gpu->backward80_0(src); break;
 			case 5u << 23: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 8); _gpu->sqr512(src); _gpu->backward256(src, 20480, 8); _gpu->backward320_0(src); break;
 			case 5u << 24: _gpu->forward320_0(src); _gpu->forward256(src, 20480, 9); _gpu->sqr1024(src); _gpu->backward256(src, 20480, 9); _gpu->backward320_0(src); break;
+			case 5u << 25: _gpu->forward320_0(src); _gpu->forward1024(src, 81920, 8); _gpu->sqr512(src); _gpu->backward1024(src, 81920, 8); _gpu->backward320_0(src); break;
+			case 5u << 26: _gpu->forward320_0(src); _gpu->forward1024(src, 81920, 9); _gpu->sqr1024(src); _gpu->backward1024(src, 81920, 9); _gpu->backward320_0(src); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -956,6 +992,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); _gpu->forward_mul1024(dst); break;
 			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); _gpu->forward_mul512(dst); break;
 			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); _gpu->forward_mul1024(dst); break;
+			case 5u << 25: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 8); _gpu->forward_mul512(dst); break;
+			case 5u << 26: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 9); _gpu->forward_mul1024(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -1019,6 +1057,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); break;
 			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); break;
 			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); break;
+			case 5u << 25: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 8); break;
+			case 5u << 26: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 9); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -1078,6 +1118,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
 			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
 			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
+			case 5u << 25: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 8); _gpu->mul512(dst, src); _gpu->backward1024(dst, 81920, 8); _gpu->backward320_0(dst); break;
+			case 5u << 26: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 9); _gpu->mul1024(dst, src); _gpu->backward1024(dst, 81920, 9); _gpu->backward320_0(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -1139,6 +1181,8 @@ public:
 			case 5u << 22: _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
 			case 5u << 23: _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
 			case 5u << 24: _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
+			case 5u << 25: _gpu->mul512(dst, src); _gpu->backward1024(dst, 81920, 8); _gpu->backward320_0(dst); break;
+			case 5u << 26: _gpu->mul1024(dst, src); _gpu->backward1024(dst, 81920, 9); _gpu->backward320_0(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -1211,6 +1255,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
 			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
 			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
+			case 5u << 25: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 8); _gpu->mul512(dst, src); _gpu->backward1024(dst, 81920, 8); _gpu->backward320_0(dst); break;
+			case 5u << 26: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 9); _gpu->mul1024(dst, src); _gpu->backward1024(dst, 81920, 9); _gpu->backward320_0(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}
@@ -1271,6 +1317,8 @@ public:
 			case 5u << 22: _gpu->forward80_0(dst); _gpu->forward256(dst, 5120, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 5120, 9); _gpu->backward80_0(dst); break;
 			case 5u << 23: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 8); _gpu->mul512(dst, src); _gpu->backward256(dst, 20480, 8); _gpu->backward320_0(dst); break;
 			case 5u << 24: _gpu->forward320_0(dst); _gpu->forward256(dst, 20480, 9); _gpu->mul1024(dst, src); _gpu->backward256(dst, 20480, 9); _gpu->backward320_0(dst); break;
+			case 5u << 25: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 8); _gpu->mul512(dst, src); _gpu->backward1024(dst, 81920, 8); _gpu->backward320_0(dst); break;
+			case 5u << 26: _gpu->forward320_0(dst); _gpu->forward1024(dst, 81920, 9); _gpu->mul1024(dst, src); _gpu->backward1024(dst, 81920, 9); _gpu->backward320_0(dst); break;
 
 			default: throw std::runtime_error("An unexpected error has occurred.");
 		}

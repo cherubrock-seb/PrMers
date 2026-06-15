@@ -298,11 +298,18 @@ public:
 	}
 
 public:
+	void finish_all_queues()
+	{
+		if (_queueF != nullptr) fatal(clFinish(_queueF));
+		if (_queueP != nullptr && _queueP != _queueF) fatal(clFinish(_queueP));
+	}
+
 	virtual ~device()
 	{
 #if defined(ocl_debug)
 		std::cout << "Delete ocl device " << _d << "." << std::endl;
 #endif
+		if (_queueF != nullptr || _queueP != nullptr) finish_all_queues();
 		fatal(clReleaseCommandQueue(_queueP));
 		fatal(clReleaseCommandQueue(_queueF));
 		fatal(clReleaseContext(_context));

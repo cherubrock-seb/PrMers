@@ -23,6 +23,10 @@ public:
 	engine() {}
 	virtual ~engine() {}
 
+	// Explicit resource release hook used by ultra/low-memory stage handoff.
+	// Default is a no-op for non-GPU engines.
+	virtual void release_gpu_resources_for_lowmem_handoff() {}
+
 	// a register
 	typedef size_t Reg;
 

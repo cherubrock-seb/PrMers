@@ -82,6 +82,9 @@ void printUsage(const char* progName) {
     std::cout << "  -iterforce <iter>    : (Optional) forces a GPU queue synchronization (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -iterforce2 <iter>   : (Optional) forces a GPU queue synchronization in P-1 stage 2 (clFinish) every <iter> iterations to improve stability or allow interruption checks." << std::endl;
     std::cout << "  -gerbiczli           : (Optional) deactivate gerbicz li error check" << std::endl;
+    std::cout << "  -pm1-lowmem          : (Optional) P-1 stage 1 low-memory mode: 3 GPU registers, Gerbicz-Li disabled" << std::endl;
+    std::cout << "  -pm1-ultralowmem     : (Optional) P-1 stage 1 ultra-low-memory mode: 1 GPU register, fast3 only, Gerbicz-Li disabled" << std::endl;
+    std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
@@ -464,6 +467,27 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-gerbiczli") == 0 || std::strcmp(argv[i], "-gerbiczli") == 0) {
             opts.gerbiczli = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-lowmem") == 0 ||
+                 std::strcmp(argv[i], "--pm1-lowmem") == 0 ||
+                 std::strcmp(argv[i], "-pm1lowmem") == 0 ||
+                 std::strcmp(argv[i], "-lowmem") == 0) {
+            opts.pm1_lowmem = true;
+            opts.gerbiczli = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-ultralowmem") == 0 ||
+                 std::strcmp(argv[i], "--pm1-ultralowmem") == 0 ||
+                 std::strcmp(argv[i], "-pm1ultralowmem") == 0 ||
+                 std::strcmp(argv[i], "-pm1-1reg") == 0) {
+            opts.pm1_lowmem = true;
+            opts.pm1_ultralowmem = true;
+            opts.gerbiczli = false;
+        }
+        else if (std::strcmp(argv[i], "-nogcd-stage1") == 0 ||
+                 std::strcmp(argv[i], "--nogcd-stage1") == 0 ||
+                 std::strcmp(argv[i], "-no-gcd-stage1") == 0 ||
+                 std::strcmp(argv[i], "-nogcdstage1") == 0) {
+            opts.pm1_no_stage1_gcd = true;
         }
         else if (strcmp(argv[i], "-factors") == 0 && i + 1 < argc) {
             opts.knownFactors = util::split(argv[++i], ',');

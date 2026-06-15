@@ -59,6 +59,7 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <cctype>
 #include <numeric>
 #include <climits>
 #include <gmpxx.h>
@@ -1278,7 +1279,288 @@ static void primes_to_ke(const std::vector<uint64_t>& primes,
 }*/
 
 
+
+
+static bool read_pm1_resume_x_hex(const std::string& path,
+                                  uint64_t expectedB1,
+                                  uint32_t expectedP,
+                                  mpz_class& Xout)
+{
+    std::ifstream in(path);
+    if (!in) return false;
+    std::string line;
+    if (!std::getline(in, line)) return false;
+
+    auto get_field = [&](const std::string& key)->std::string {
+        const std::string pat = key + "=";
+        size_t a = line.find(pat);
+        if (a == std::string::npos) return {};
+        a += pat.size();
+        size_t b = line.find(';', a);
+        if (b == std::string::npos) b = line.size();
+        while (a < b && std::isspace((unsigned char)line[a])) ++a;
+        while (b > a && std::isspace((unsigned char)line[b-1])) --b;
+        return line.substr(a, b-a);
+    };
+
+    const std::string b1s = get_field("B1");
+    if (!b1s.empty()) {
+        try {
+            uint64_t gotB1 = std::stoull(b1s);
+            if (gotB1 != expectedB1) {
+                std::cerr << "Stage 2 ultralowmem: resume B1 mismatch in " << path
+                          << " (got " << gotB1 << ", expected " << expectedB1 << ").\n";
+                return false;
+            }
+        } catch (...) { return false; }
+    }
+
+    const std::string ns = get_field("N");
+    const std::string expectedN = "2^" + std::to_string(expectedP) + "-1";
+    if (!ns.empty() && ns != expectedN) {
+        std::cerr << "Stage 2 ultralowmem: resume N mismatch in " << path
+                  << " (got " << ns << ", expected " << expectedN << ").\n";
+        return false;
+    }
+
+    std::string xs = get_field("X");
+    if (xs.empty()) return false;
+    if (xs.size() >= 2 && xs[0] == '0' && (xs[1] == 'x' || xs[1] == 'X')) xs = xs.substr(2);
+    if (xs.empty()) return false;
+    if (mpz_set_str(Xout.get_mpz_t(), xs.c_str(), 16) != 0) return false;
+    return true;
+}
+
+
+// Forward declarations for loading PM1 Stage-1 textual resume files without creating
+// a temporary OpenCL engine.  Used by the ultralowmem Stage-2 GPU path.
+static bool load_pm1_s1_from_save(const std::string& path, uint64_t& B1_out, uint32_t& p_out, mpz_class& X_out);
+static bool load_pm1_s1_from_p95(const std::string& path, uint64_t& B1_out, uint32_t& p_out, mpz_class& X_out);
+static inline void mpz_mul_u64(mpz_class& a, uint64_t x);
+
+int App::runPM1Stage2MarinLowMem() {
+    using namespace std::chrono;
+
+    const uint64_t B1u = options.B1, B2u = options.B2;
+    const uint32_t pexp = static_cast<uint32_t>(options.exponent);
+    const bool verbose = true;
+
+    if (B2u <= B1u) {
+        std::cerr << "Stage 2 error B2 <= B1.\n";
+        return -1;
+    }
+
+    std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1u << ", B2 = " << B2u << std::endl;
+    std::cout << "[PM1] Low-memory Stage 2 enabled. ";
+    if (options.pm1_ultralowmem) {
+        std::cout << "Using 1-register GPU product-exponent Stage 2 (no baby-table BSGS).\n";
+    } else {
+        std::cout << "Using 3 GPU registers and streamed product accumulator (no baby-table BSGS).\n";
+    }
+
+    // Load Stage 1 state H only for the 3-register lowmem path.
+    // In -pm1-ultralowmem v21, Stage 2 is computed as one GPU exponentiation:
+    //     3^( E(B1) * 2*p * prod_{B1 < q <= B2} q ) mod M_p
+    // This is mathematically H^Q with H=3^(E(B1)*2*p), but avoids storing H as a
+    // separate multiplicand/register. It therefore needs only one Marin register.
+    std::vector<char> hData;
+    if (options.pm1_ultralowmem) {
+        std::cout << "[PM1] Ultra-low-memory Stage 2 does not reload H: it recomputes "
+                  << "3^(E*Q) directly on GPU with the fast3 one-register path.\n";
+    } else {
+        const size_t s1Regs = 3u;
+        auto load_h_from = [&](const std::string& file)->int {
+            engine* e = nullptr;
+            try {
+                e = engine::create_gpu(pexp, s1Regs, (size_t)options.device_id, verbose);
+            } catch (const std::exception& ex) {
+                std::cerr << "Stage 2 lowmem: cannot allocate temporary " << s1Regs
+                          << "-register checkpoint loader: " << ex.what() << "\n";
+                return -2;
+            }
+            File f(file);
+            if (!f.exists()) { delete e; return -1; }
+            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) { delete e; return -2; }
+            if (version != 3) { delete e; return -2; }
+            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) { delete e; return -2; }
+            if (rp != pexp) { delete e; return -2; }
+            uint32_t ri = 0; double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) { delete e; return -2; }
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) { delete e; return -2; }
+
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) { delete e; return -2; }
+            if (!e->set_checkpoint(data)) { delete e; return -2; }
+            hData.resize(e->get_register_data_size());
+            if (!e->get_data(hData, (engine::Reg)0)) { delete e; return -2; }
+            delete e;
+            return 0;
+        };
+
+        std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+        std::string ckpt_file = ck.str();
+        int rr = load_h_from(ckpt_file);
+        if (rr < 0) rr = load_h_from(ckpt_file + ".old");
+        if (rr != 0) {
+            std::cerr << "Stage 2 lowmem: cannot load PM1 Stage 1 checkpoint " << ckpt_file
+                      << " using " << s1Regs << " register(s).\n";
+            return -2;
+        }
+        std::cout << "[PM1] Low-memory Stage 2 loaded H from " << ckpt_file
+                  << " through the Marin checkpoint path.\n";
+    }
+
+    const uint64_t root = isqrt_u64(B2u);
+    const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
+    std::vector<uint64_t> primes;
+    segmented_primes_odd(B1u + 1, B2u, basePrimes, primes);
+    if (primes.empty()) {
+        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2u << " (no primes in range)\n";
+        return 1;
+    }
+
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+    auto t0 = high_resolution_clock::now();
+    auto lastDisplay = high_resolution_clock::now();
+
+    if (options.pm1_ultralowmem) {
+        // Ultra-lowmem GPU path v21: one-register product-exponent Stage 2.
+        // Compute directly:
+        //     3^( E(B1) * 2*p * Q ) mod M_p,
+        // where Q = product of primes in (B1, B2]. Since Stage 1 H is
+        // 3^(E(B1)*2*p), this equals H^Q and is a valid P-1 Stage-2 extension.
+        // It uses the Marin fast3 path only: square_mul(R,3) when a bit is set.
+        static constexpr size_t RSTATE = 0;
+
+        std::cout << "[PM1] Ultra-low-memory Stage 2: GPU product-exponent with 1 register "
+                  << "(no BSGS baby-table, no CPU powm, no multicarte, no H multiplicand register).\n";
+        std::cout << "[PM1] Method: compute 3^(E(B1)*2*p*prod_primes(B1,B2]) directly using fast3.\n";
+
+        std::cout << "[PM1] Building Stage 2 product exponent E2 = E(B1)*2*p*Q..." << std::flush;
+        mpz_class E2 = buildE(B1u);
+        E2 *= mpz_class(2) * mpz_from_u64(options.exponent);
+        for (uint64_t q : primes) mpz_mul_u64(E2, q);
+        const mp_bitcnt_t bits = mpz_sizeinbase(E2.get_mpz_t(), 2);
+        std::cout << " done. bits=" << bits << ", primes=" << primes.size() << "\n";
+
+        engine* eng = nullptr;
+        try {
+            std::cout << "[PM1] Allocating Stage 2 GPU engine with 1 register..." << std::flush;
+            eng = engine::create_gpu(pexp, 1, (size_t)options.device_id, verbose);
+            std::cout << " done.\n";
+        } catch (const std::exception& ex) {
+            std::cout << " failed.\n";
+            std::cerr << "[PM1] Ultra-low-memory one-register GPU Stage 2 allocation failed: "
+                      << ex.what() << "\n";
+            return -2;
+        }
+
+        eng->set((engine::Reg)RSTATE, 1u);
+        auto texp0 = high_resolution_clock::now();
+        auto last = high_resolution_clock::now();
+        for (mp_bitcnt_t i = bits; i > 0; --i) {
+            const int b = mpz_tstbit(E2.get_mpz_t(), i - 1) ? 1 : 0;
+            if (b) eng->square_mul((engine::Reg)RSTATE, 3u);
+            else   eng->square_mul((engine::Reg)RSTATE);
+
+            auto now = high_resolution_clock::now();
+            if (duration_cast<seconds>(now - last).count() >= 3) {
+                const mp_bitcnt_t doneBits = bits - i + 1;
+                const double pct = 100.0 * double(doneBits) / double(bits);
+                const double elapsed = duration<double>(now - texp0).count();
+                const double ips = elapsed > 0.0 ? double(doneBits) / elapsed : 0.0;
+                const double eta = ips > 0.0 ? double(i - 1) / ips : 0.0;
+                std::cout << "Progress: " << std::fixed << std::setprecision(2) << pct
+                          << "% | Stage2 bits: " << doneBits << "/" << bits
+                          << " | Elapsed: " << elapsed << "s | IPS: " << ips
+                          << " | ETA: " << eta << "s\r" << std::flush;
+                last = now;
+            }
+            if (interrupted) {
+                std::cout << "\nInterrupted by user during Stage 2 ultralowmem one-register exponentiation.\n";
+                delete eng;
+                interrupted = false;
+                return 0;
+            }
+        }
+        std::cout << "\n[PM1] Stage 2 one-register exponentiation done. Computing GCD of (X-1, M_p)...\n";
+
+        mpz_class X = compute_X_with_dots(eng, (engine::Reg)RSTATE, Mp);
+        // P-1 test condition: if q-1 divides the exponent for a factor q of M_p,
+        // then X = 3^E2 == 1 (mod q).  The factor is therefore in gcd(X-1, M_p),
+        // not in gcd(X, M_p).  v21/v22 accidentally tested gcd(X, M_p).
+        X -= 1;
+        if (X < 0) X += Mp;
+        mpz_class g = gcd_with_dots(X, Mp);
+        const bool found = (g != 1 && g != Mp);
+        if (found) {
+            std::string f = g.get_str(10);
+            std::cout << "\n>>>  Factor P-1 (stage 2 ultralowmem GPU one-register product exponent) found : " << f << "\n";
+            options.knownFactors.push_back(f);
+            delete eng;
+            return 0;
+        }
+        std::cout << "\nNo factor P-1 (stage 2 ultralowmem GPU one-register product exponent) until B2 = " << B2u << "\n";
+        delete eng;
+        return 1;
+    }
+
+    // 3-register streamed product path: H is restored from CPU data for each prime,
+    // RACC accumulates Π(H^q - 1).  One final GCD only.  This avoids the BSGS baby table.
+    static constexpr size_t RH = 0;
+    static constexpr size_t RACC = 1;
+    static constexpr size_t RQ = 2;
+    engine* eng = engine::create_gpu(pexp, 3, (size_t)options.device_id, verbose);
+    eng->set((engine::Reg)RACC, 1);
+
+    for (size_t i = 0; i < primes.size(); ++i) {
+        const uint64_t q = primes[i];
+        eng->set_data((engine::Reg)RH, hData);
+        eng->pow((engine::Reg)RQ, (engine::Reg)RH, q);
+        eng->sub((engine::Reg)RQ, 1);
+        eng->set_multiplicand((engine::Reg)RQ, (engine::Reg)RQ);
+        eng->mul((engine::Reg)RACC, (engine::Reg)RQ);
+
+        auto now = high_resolution_clock::now();
+        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+            double percent = 100.0 * double(i + 1) / double(primes.size());
+            double elapsed = duration<double>(now - t0).count();
+            double ips = elapsed > 0.0 ? double(i + 1) / elapsed : 0.0;
+            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+                      << "% | prime: " << q << " | Iter: " << (i + 1)
+                      << "/" << primes.size() << " | Elapsed: " << elapsed
+                      << "s | IPS: " << ips << "\r" << std::flush;
+            lastDisplay = now;
+        }
+        if (interrupted) {
+            std::cout << "\nInterrupted by user during Stage 2 lowmem streamed product.\n";
+            delete eng;
+            interrupted = false;
+            return 0;
+        }
+    }
+    std::cout << "\n";
+
+    mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
+    mpz_class g = gcd_with_dots(X, Mp);
+    bool found = (g != 1 && g != Mp);
+    if (found) {
+        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
+        std::cout << "\n>>>  Factor P-1 (stage 2 lowmem streamed product) found : " << fstr << "\n";
+        options.knownFactors.push_back(std::string(fstr));
+        std::free(fstr);
+    } else {
+        std::cout << "\nNo factor P-1 (stage 2 lowmem streamed product) until B2 = " << B2u << "\n";
+    }
+    delete eng;
+    return found ? 0 : 1;
+}
+
 int App::runPM1Stage2Marin() {
+    if (options.pm1_lowmem) {
+        return runPM1Stage2MarinLowMem();
+    }
     using namespace std::chrono;
 
     if (guiServer_) guiServer_->setStatus("P-1 factoring stage 2 (BSGS)");
@@ -2836,8 +3118,30 @@ int App::runPM1Marin() {
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     //const uint32_t p = static_cast<uint32_t>(options.exponent);
     //const bool verbose = true;//options.debug;
-    engine* eng = engine::create_gpu(p, static_cast<size_t>(11), static_cast<size_t>(options.device_id), verbose);
-    const size_t RSTATE=0, RACC_L=1, RACC_R=2, RCHK=3, RPOW=4, RTMP=5, RSTART=6, RSAVE_S=7, RSAVE_L=8, RSAVE_R=9, RBASE=10;
+    const bool pm1_ultralowmem_stage1 = options.pm1_ultralowmem && options.pm1_lowmem && !doExtend;
+    const bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
+    if (pm1_ultralowmem_stage1) {
+        options.gerbiczli = false;
+        std::cout << "[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n");
+    } else if (pm1_lowmem_stage1) {
+        options.gerbiczli = false;
+        std::cout << "[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
+    }
+    const size_t stage1RegCount = pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u);
+    engine* eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
+    const size_t RSTATE=0;
+    const size_t RACC_L = pm1_lowmem_stage1 ? 0u : 1u;
+    const size_t RACC_R = pm1_lowmem_stage1 ? 0u : 2u;
+    const size_t RCHK   = pm1_lowmem_stage1 ? 0u : 3u;
+    const size_t RPOW   = pm1_lowmem_stage1 ? 1u : 4u;
+    const size_t RTMP   = pm1_lowmem_stage1 ? 1u : 5u;
+    const size_t RSTART = pm1_lowmem_stage1 ? 0u : 6u;
+    const size_t RSAVE_S= pm1_lowmem_stage1 ? 0u : 7u;
+    const size_t RSAVE_L= pm1_lowmem_stage1 ? 0u : 8u;
+    const size_t RSAVE_R= pm1_lowmem_stage1 ? 0u : 9u;
+    const size_t RBASE  = pm1_ultralowmem_stage1 ? 0u : (pm1_lowmem_stage1 ? 2u : 10u);
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
     auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
@@ -2896,21 +3200,25 @@ int App::runPM1Marin() {
         mpz_clear(Xtmp);
 
         eng->set(static_cast<engine::Reg>(RSTATE), 1);
-        eng->set(static_cast<engine::Reg>(RACC_L), 1);
-        eng->set(static_cast<engine::Reg>(RACC_R), 1);
-        eng->set(static_cast<engine::Reg>(RSTART), 1);
-        eng->copy(static_cast<engine::Reg>(RSAVE_S), static_cast<engine::Reg>(RSTATE));
-        eng->copy(static_cast<engine::Reg>(RSAVE_L), static_cast<engine::Reg>(RACC_L));
-        eng->copy(static_cast<engine::Reg>(RSAVE_R), static_cast<engine::Reg>(RACC_R));
+        if (options.gerbiczli) {
+            eng->set(static_cast<engine::Reg>(RACC_L), 1);
+            eng->set(static_cast<engine::Reg>(RACC_R), 1);
+            eng->set(static_cast<engine::Reg>(RSTART), 1);
+            eng->copy(static_cast<engine::Reg>(RSAVE_S), static_cast<engine::Reg>(RSTATE));
+            eng->copy(static_cast<engine::Reg>(RSAVE_L), static_cast<engine::Reg>(RACC_L));
+            eng->copy(static_cast<engine::Reg>(RSAVE_R), static_cast<engine::Reg>(RACC_R));
+        }
     }
     else{
         eng->set(RSTATE, 1);
-        eng->set(RACC_L, 1);
-        eng->set(RACC_R, 1);
-        eng->copy(RSTART, RSTATE);
-        eng->copy(RSAVE_S, RSTATE);
-        eng->copy(RSAVE_L, RACC_L);
-        eng->copy(RSAVE_R, RACC_R);
+        if (options.gerbiczli) {
+            eng->set(RACC_L, 1);
+            eng->set(RACC_R, 1);
+            eng->copy(RSTART, RSTATE);
+            eng->copy(RSAVE_S, RSTATE);
+            eng->copy(RSAVE_L, RACC_L);
+            eng->copy(RSAVE_R, RACC_R);
+        }
     }
     uint64_t chunkIndex = 0;
     uint64_t startPrime = 3;
@@ -3176,7 +3484,7 @@ int App::runPM1Marin() {
                 
                 bool end_block = (bits_in_block == current_block_len);
                 if (end_block) {
-                    if (current_block_len == B) {
+                    if (options.gerbiczli && current_block_len == B) {
                         eng->set_multiplicand(RTMP, RSTART);
                         eng->mul(RACC_L, RTMP);
                         eng->set_multiplicand(RTMP, RSTATE);
@@ -3587,6 +3895,9 @@ int App::runPM1Marin() {
             }
             if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
             bool useFast3 = useFast3Candidate && (nextStart == 0);
+            if (pm1_ultralowmem_stage1 && !useFast3) {
+                throw std::runtime_error("-pm1-ultralowmem requires the fast3 single-chunk path; use a smaller B1 or a larger -maxebits value, or use -pm1-lowmem");
+            }
             mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
             if (bits == 0) break;
             if (restored && bits_in_chunk_ck) bits = (mp_bitcnt_t)bits_in_chunk_ck;
@@ -3632,8 +3943,16 @@ int App::runPM1Marin() {
                 true
             );
             if (!restored) {
-                if (firstChunk) { eng->set(RBASE, 3); eng->set(RSTATE, 1); }
-                else { eng->copy(RBASE, RSTATE); eng->set(RSTATE, 1); }
+                if (firstChunk) {
+                    if (!pm1_ultralowmem_stage1) eng->set(RBASE, 3);
+                    eng->set(RSTATE, 1);
+                } else {
+                    if (pm1_ultralowmem_stage1) {
+                        throw std::runtime_error("-pm1-ultralowmem supports only a single fast3 chunk; increase MAX_E_BITS or use -pm1-lowmem");
+                    }
+                    eng->copy(RBASE, RSTATE);
+                    eng->set(RSTATE, 1);
+                }
             }
             for (mp_bitcnt_t i = (mp_bitcnt_t)resumeI; i > 0; --i) {
                 lastIter = i;
@@ -3653,36 +3972,41 @@ int App::runPM1Marin() {
                 }
                 if (bits_in_block == 0) {
                     current_block_len = ((uint64_t)((i - 1) % B)) + 1;
-                    if (current_block_len == B) {
-                        if (gl_checkpass == 0 && blocks_since_check == 0 && wbits == 0 && eacc == 0) {
-                            eng->set(RACC_L, 1);
-                            eng->set(RACC_R, 1);
-                            eng->copy(RSAVE_S, RSTATE);
-                            eng->set(RSAVE_L, 1);
-                            eng->set(RSAVE_R, 1);
+                    if (options.gerbiczli) {
+                        if (current_block_len == B) {
+                            if (gl_checkpass == 0 && blocks_since_check == 0 && wbits == 0 && eacc == 0) {
+                                eng->set(RACC_L, 1);
+                                eng->set(RACC_R, 1);
+                                eng->copy(RSAVE_S, RSTATE);
+                                eng->set(RSAVE_L, 1);
+                                eng->set(RSAVE_R, 1);
+                                eacc = 0;
+                                blocks_since_check = 0;
+                                wbits = 0;
+                                in_lot = true;
+                            }
+                        } else {
+                            in_lot = false;
+                            gl_checkpass = 0;
                             eacc = 0;
                             blocks_since_check = 0;
                             wbits = 0;
-                            in_lot = true;
                         }
-                    } else {
-                        in_lot = false;
-                        gl_checkpass = 0;
-                        eacc = 0;
-                        blocks_since_check = 0;
-                        wbits = 0;
+                        eng->copy(RSTART, RSTATE);
                     }
-                    eng->copy(RSTART, RSTATE);
                 }
                 int b = mpz_tstbit(Echunk.get_mpz_t(), i - 1) ? 1 : 0;
                 if (useFast3) { if (b) eng->square_mul(RSTATE, 3); else eng->square_mul(RSTATE); }
-                else { eng->square_mul(RSTATE); if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); } }
+                else {
+                    if (pm1_ultralowmem_stage1) throw std::runtime_error("internal error: ultra-low-memory entered non-fast3 path");
+                    eng->square_mul(RSTATE); if (b) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RSTATE, RTMP); }
+                }
                 wbits <<= 1; if (b) wbits += 1;
                 bits_in_block += 1;
                 if (options.erroriter > 0 && (resumeI - i + 1) == options.erroriter && !errordone) { errordone = true; eng->sub(RSTATE, 2); std::cout << "Injected error at iteration " << (resumeI - i + 1) << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Injected error at iteration " << (resumeI - i + 1); guiServer_->appendLog(oss.str()); } }
                 bool end_block = (bits_in_block == current_block_len);
                 if (end_block) {
-                    if (current_block_len == B) {
+                    if (options.gerbiczli && current_block_len == B) {
                         eng->set_multiplicand(RTMP, RSTART);
                         eng->mul(RACC_L, RTMP);
                         eng->set_multiplicand(RTMP, RSTATE);
@@ -3701,7 +4025,7 @@ int App::runPM1Marin() {
                                 tunedCheckpass = true;
                             }
                         }*/
-                        bool doCheck = options.gerbiczli && in_lot && (gl_checkpass == checkpass || i == 1);
+                        bool doCheck = in_lot && (gl_checkpass == checkpass || i == 1);
                         if (doCheck) {
                             std::cout << "[Gerbicz Li] Start a Gerbicz Li check....\n";
                             eng->copy(RCHK, RACC_L);
@@ -3726,8 +4050,8 @@ int App::runPM1Marin() {
                             if (!ok) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSAVE_S); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eng->copy(RSTART, RSTATE); i = (mp_bitcnt_t)(i + blocks_since_check * B); eacc = 0; blocks_since_check = 0; wbits = 0; gl_checkpass = 0; bits_in_block = 0; continue; }
                             else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                         }
-                    } else {
-                        if (options.gerbiczli) {
+                    } else if (options.gerbiczli) {
+                        {
                             eng->copy(RCHK, RSTART);
                             for (uint64_t k = 0; k < current_block_len; ++k) eng->square_mul(RCHK);
                             eng->set(RPOW, 1);
@@ -3860,22 +4184,30 @@ int App::runPM1Marin() {
         writeEcmResumeLine(resume_save_path, options.B1, options.exponent, X);
         convertEcmResumeToPrime95(resume_save_path, resume_p95_path, ds, de);
     }
-    X -= 1;
-    mpz_class g = gcd_with_dots(X, Mp);
-    bool factorFound = (g != 1) && (g != Mp);
+    bool factorFound = false;
     std::string filename = "stage1_result_B1_" + std::to_string(B1) + "_p_" + std::to_string(options.exponent) + ".txt";
-    if (factorFound) {
-        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
-        writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
-        std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
-        if (guiServer_) { std::ostringstream oss; oss << "\nP-1 factor stage 1 found: " << fstr << std::endl; guiServer_->appendLog(oss.str()); }
-        options.knownFactors.push_back(std::string(fstr));
-        std::free(fstr);
-        std::cout << "\n";
+    if (options.pm1_no_stage1_gcd) {
+        writeStageResult(filename, "Stage 1 GCD skipped at B1=" + std::to_string(B1));
+        std::cout << "\n[PM1] Stage 1 ordinary GCD skipped by -nogcd-stage1.\n";
+        std::cout << "[PM1] PM1 resume/checkpoint was still written; continuing to Stage 2 if requested.\n\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Stage 1 ordinary GCD skipped by -nogcd-stage1.");
     } else {
-        writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
-        std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
-        if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
+        X -= 1;
+        mpz_class g = gcd_with_dots(X, Mp);
+        factorFound = (g != 1) && (g != Mp);
+        if (factorFound) {
+            char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
+            writeStageResult(filename, "B1=" + std::to_string(B1) + "  factor=" + std::string(fstr));
+            std::cout << "\nP-1 factor stage 1 found: " << fstr << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "\nP-1 factor stage 1 found: " << fstr << std::endl; guiServer_->appendLog(oss.str()); }
+            options.knownFactors.push_back(std::string(fstr));
+            std::free(fstr);
+            std::cout << "\n";
+        } else {
+            writeStageResult(filename, "No factor up to B1=" + std::to_string(B1));
+            std::cout << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl;
+            if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
+        }
     }
     uint64_t B2save = options.B2; 
     options.B2 = 0;
@@ -3917,6 +4249,27 @@ int App::runPM1Marin() {
             factorFound = ext_found || factorFound;
         }
         if (!external_used) {
+            // Stage 2 may need to allocate a fresh GPU engine.  In PM1 low-memory
+            // modes we perform an aggressive and observable GPU handoff: finish queues,
+            // release kernels/buffers/program/context, clear host-side large vectors,
+            // then leave a short delay for NVIDIA/ROCm drivers to actually retire the
+            // freed VRAM before allocating the Stage 2 engine.  Normal PM1 mode keeps
+            // the original simple destruction path to avoid regressions.
+            if (options.pm1_lowmem) {
+                std::cout << "[PM1] Low-memory GPU handoff: explicitly releasing Stage 1 engine before Stage 2..." << std::flush;
+                if (eng != nullptr) {
+                    eng->release_gpu_resources_for_lowmem_handoff();
+                    delete eng;
+                    eng = nullptr;
+                }
+                std::cout << " done.\n";
+                std::cout << "[PM1] Low-memory GPU handoff: waiting briefly for driver VRAM retirement before Stage 2 allocation..." << std::flush;
+                std::this_thread::sleep_for(std::chrono::milliseconds(options.pm1_ultralowmem ? 2500 : 1000));
+                std::cout << " done.\n";
+            } else {
+                delete eng;
+                eng = nullptr;
+            }
             factorFound = runPM1Stage2Marin() || factorFound;
         }
     }
@@ -3946,11 +4299,15 @@ int App::runPM1Marin() {
             );
         }
         //options.B2 = 214439;
+        if (eng != nullptr) {
+            delete eng;
+            eng = nullptr;
+        }
         factorFound = runPM1Stage2MarinNKVersion() || factorFound;
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
-    delete eng;
+    if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";

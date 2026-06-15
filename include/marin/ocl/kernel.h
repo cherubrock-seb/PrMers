@@ -1094,7 +1094,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "#define ATTR_FB_1024()	__attribute__((reqd_work_group_size(1024 / 4, 1, 1)))\n" \
 "\n" \
-"/*__kernel\n" \
+"__kernel\n" \
 "ATTR_FB_1024()\n" \
 "void forward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root, const sz_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
@@ -1114,7 +1114,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "	BACKWARD_1024_1280();\n" \
 "	backward_4o(256u << lm, &x[ki], 256, &X[i], r2i[sj / 256], r4i[sj / 256]);\n" \
-"}*/\n" \
+"}\n" \
 "\n" \
 "#if (N_SZ % 5 != 0) && (N_SZ >= 524288) && (N_SZ <= 1048576)\n" \
 "\n" \
