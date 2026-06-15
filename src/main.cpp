@@ -37,6 +37,12 @@ protected:
         const int r2 = b_ ? b_->sputc(ch) : ch;
         return (r1 == EOF || r2 == EOF) ? EOF : ch;
     }
+    std::streamsize xsputn(const char* s, std::streamsize count) override {
+        const std::streamsize r1 = a_ ? a_->sputn(s, count) : count;
+        const std::streamsize r2 = b_ ? b_->sputn(s, count) : count;
+        return (r1 == count && r2 == count) ? count : 0;
+    }
+
     int sync() override {
         const int s1 = a_ ? a_->pubsync() : 0;
         const int s2 = b_ ? b_->pubsync() : 0;

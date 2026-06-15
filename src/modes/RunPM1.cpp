@@ -2998,7 +2998,14 @@ int App::runPM1Marin() {
 
         const std::string known_csv = p95_join_known_factors_csv(options.knownFactors);
         std::ostringstream wt;
-        wt << "Pminus1=1,2," << p << ",-1," << options.B1 << "," << options.B2 << ",68";
+        wt << "Pminus1=1,2," << p << ",-1," << options.B1 << "," << options.B2;
+        if (options.sieveDepth > 0.0) {
+            wt << "," << std::setprecision(12) << options.sieveDepth;
+        }
+        if (options.B2Start > 0) {
+            if (options.sieveDepth <= 0.0) wt << ",0";
+            wt << "," << options.B2Start;
+        }
         if (!known_csv.empty()) {
             wt << ",\"" << known_csv << "\"";
         }
@@ -3114,7 +3121,7 @@ int App::runPM1Marin() {
     if (guiServer_) { std::ostringstream oss; oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl; guiServer_->appendLog(oss.str()); }
     const double L_est_bits = 1.4426950408889634 * static_cast<double>(B1);
     const uint64_t MAX_E_BITS = options.max_e_bits;
-    std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (≈ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
+    std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (~ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     //const uint32_t p = static_cast<uint32_t>(options.exponent);
     //const bool verbose = true;//options.debug;
@@ -4328,7 +4335,7 @@ int App::runPM1Marin() {
 
 /*
 2025 - Cherubrock
-P-1 Stage 3 — Paired Multiplicative Offsets (k = 0, ±1, ±2, …)
+P-1 Stage 3 — Paired Multiplicative Offsets (k = 0, +/-1, +/-2, …)
 */
 
 int App::runPM1Stage3Marin() {
@@ -4556,8 +4563,8 @@ int App::runPM1Stage3Marin() {
     const uint64_t Kmax = std::min<uint64_t>(3, std::max<uint64_t>(1, options.B4));
     uint64_t b = resumed_s3 ? resume_b : 0;
     if (!resumed_s3) {
-        std::cout << "Start P-1 Stage 3 up to B3=" << B3u << " [±k, k≤" << Kmax << "]\n";
-        if (guiServer_) { std::ostringstream oss; oss << "Start P-1 Stage 3 up to B3=" << B3u << " [±k, k≤" << Kmax << "]"; guiServer_->appendLog(oss.str()); }
+        std::cout << "Start P-1 Stage 3 up to B3=" << B3u << " [+/-k, k<=" << Kmax << "]\n";
+        if (guiServer_) { std::ostringstream oss; oss << "Start P-1 Stage 3 up to B3=" << B3u << " [+/-k, k<=" << Kmax << "]"; guiServer_->appendLog(oss.str()); }
     }
 
     // --- Inverses : RHINV = H^{-1}, RHINV_2 = H^{-2}, RHINV_3 = H^{-3}
@@ -4565,7 +4572,7 @@ int App::runPM1Stage3Marin() {
     eng->set_multiplicand((engine::Reg)RHINV, (engine::Reg)RHIK);  // mul(..., RHINV) = *H^{-1}
     eng->square_mul((engine::Reg)RHIK);                            // RHIK = (H^{-1})^2 = H^{-2}
     eng->set_multiplicand((engine::Reg)RHINV_2, (engine::Reg)RHIK);// RHINV_2 = H^{-2}
-    eng->mul((engine::Reg)RHIK, (engine::Reg)RHINV);               // RHIK *= H^{-1} → H^{-3}
+    eng->mul((engine::Reg)RHIK, (engine::Reg)RHINV);               // RHIK *= H^{-1} -> H^{-3}
     eng->set_multiplicand((engine::Reg)RHINV_3, (engine::Reg)RHIK);// RHINV_3 = H^{-3}
 
     // --- Puissances positives : RHK = H, RHK_2 = H^2, RHK_3 = H^3
@@ -4575,7 +4582,7 @@ int App::runPM1Stage3Marin() {
     eng->square_mul((engine::Reg)RPOW);                            // RPOW = H^2
     eng->set_multiplicand((engine::Reg)RHK_2, (engine::Reg)RPOW);  // RHK_2 = H^2
 
-    eng->mul((engine::Reg)RPOW, (engine::Reg)RHK);                 // RPOW *= H → H^3
+    eng->mul((engine::Reg)RPOW, (engine::Reg)RHK);                 // RPOW *= H -> H^3
     eng->set_multiplicand((engine::Reg)RHK_3, (engine::Reg)RPOW);  // RHK_3 = H^3
 
     eng->square_mul(static_cast<engine::Reg>(RSQ));
@@ -4617,7 +4624,7 @@ int App::runPM1Stage3Marin() {
             eng->copy((engine::Reg)RSTART_SQ, (engine::Reg)RSQ);
         }
 
-        // RSQ := RSQ^2  (RSQ = H^{2^b} → H^{2^{b+1}})
+        // RSQ := RSQ^2  (RSQ = H^{2^b} -> H^{2^{b+1}})
         eng->square_mul(static_cast<engine::Reg>(RSQ));
 
         if (options.erroriter > 0 &&

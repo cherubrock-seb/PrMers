@@ -322,7 +322,7 @@ inline mpz_class buildE(uint64_t B1) {
 
         for (auto &p : part) E *= p;
         mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
-        std::cout << "\nlog2(E) ≈ " << bits << " bits" << std::endl;
+        std::cout << "\nlog2(E) ~ " << bits << " bits" << std::endl;
         interrupted = false; 
         return E;
     }
@@ -1027,7 +1027,7 @@ done:
     if (interrupted) {
         std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
         mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
-        std::cout << "\nlog2(E) ≈ " << bits << " bits" << std::endl;
+        std::cout << "\nlog2(E) ~ " << bits << " bits" << std::endl;
         interrupted = false;
         return E;
     }

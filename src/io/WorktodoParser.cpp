@@ -170,26 +170,36 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 entry.B1 = static_cast<uint64_t>(std::stoull(parts[4]));
                 entry.B2 = static_cast<uint64_t>(std::stoull(parts[5]));
 
-                if (parts.size() >= 7) {
-                    std::vector<std::string> kf;
-                    auto q = parseFactors(parts.back());
-                    if (!q.empty()) {
-                        kf = std::move(q);
-                    } else {
-                        for (size_t i = 6; i < parts.size(); ++i) {
-                            std::string s = parts[i];
-                            if (!s.empty() && s.front() == '"' && s.back() == '"')
-                                s = s.substr(1, s.size() - 2);
-                            trim_inplace(s);
-                            if (!s.empty()) kf.push_back(std::move(s));
-                        }
-                    }
-                    if (!kf.empty()) entry.knownFactors = std::move(kf);
+                // Prime95-compatible Pminus1 format:
+                // Pminus1=k,b,n,c,B1,B2[,how_far_factored][,B2_start][,"factors"]
+                // If an assignment id is present, it has already been removed above.
+                size_t next = 6;
+                if (next < parts.size() && !isQuoted(parts[next])) {
+                    std::string s = parts[next];
+                    trim_inplace(s);
+                    if (!s.empty()) entry.sieveDepth = std::stod(s);
+                    ++next;
+                }
+                if (next < parts.size() && !isQuoted(parts[next])) {
+                    std::string s = parts[next];
+                    trim_inplace(s);
+                    if (!s.empty()) entry.B2Start = static_cast<uint64_t>(std::stoull(s));
+                    ++next;
+                }
+                if (next < parts.size()) {
+                    auto factors = parseFactors(parts[next]);
+                    if (!factors.empty()) entry.knownFactors = std::move(factors);
                 }
 
                 std::cout << "Loaded entry: Pminus1 exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
+                if (entry.sieveDepth > 0.0) {
+                    std::cout << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
+                }
+                if (entry.B2Start > 0) {
+                    std::cout << "Stage 2 start bound: " << entry.B2Start << "\n";
+                }
                 if (!entry.knownFactors.empty()) {
                     std::cout << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {

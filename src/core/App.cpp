@@ -285,6 +285,8 @@ App::App(int argc, char** argv)
         if (e->pm1Test) {
             o.B1 = e->B1;
             o.B2 = e->B2;
+            o.sieveDepth = e->sieveDepth;
+            o.B2Start = e->B2Start;
         }
 
         if (e->ecmTest) {
@@ -359,9 +361,8 @@ App::App(int argc, char** argv)
   , timer2()
 {
     worktodoParser_ = std::make_unique<io::WorktodoParser>(options.worktodo_path);
-    if (auto e = worktodoParser_->parse()) {
-        hasWorktodoEntry_ = true;
-    }
+    // The worktodo entry was parsed once in the options initializer.  Do not
+    // parse it again here, otherwise startup diagnostics are printed twice.
     
     context.computeOptimalSizes(
         precompute.getN(),
@@ -841,7 +842,7 @@ int App::run() {
             if(options.s3only){
                 std::ostringstream msg;
                 msg << "S3 only requested " 
-                    << "→ jumping to runPM1Stage3Marin()";
+                    << "-> jumping to runPM1Stage3Marin()";
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage 3 only"); }
 
@@ -851,7 +852,7 @@ int App::run() {
             if(options.s4only){
                 std::ostringstream msg;
                 msg << "S4 only requested " 
-                    << "→ jumping to runPM1Stage4Marin()";
+                    << "-> jumping to runPM1Stage4Marin()";
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage 4 only"); }
 
@@ -862,7 +863,7 @@ int App::run() {
                 //options.torus = runPM1Stage1SLnTorusMarin();
                 std::ostringstream msg;
                 msg << "TORUS only requested " 
-                    << "→ jumping to runPM1Stage1SLnTorusMarin()";
+                    << "-> jumping to runPM1Stage1SLnTorusMarin()";
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Stage TORUS only"); }
 
@@ -874,22 +875,24 @@ int App::run() {
                 msg << "Detected P-1 checkpoint(s): "
                     << (haveS2 ? "[Stage 2] " : "")
                     << (haveS1 ? "[Stage 1] " : "")
-                    << "→ jumping to runPM1Stage2Marin()";
+                    << "-> jumping to runPM1Stage2Marin()";
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Resuming P-1 Stage 2"); }
 
                 rc_local = runPM1Stage2Marin();
                 ran_local = true;
             } else {
-                if(haveS1){
-                    std::ostringstream msg;
-                    msg << "Detected P-1 checkpoint(s): "
-                    << (haveS2 ? "[Stage 2] " : "")
-                    << (haveS1 ? "[Stage 1] " : "")
-                    << "→ jumping to Stage1()";
-                    std::cout << msg.str() << std::endl;
+                std::string msg;
+                if (haveS1) {
+                    std::ostringstream oss;
+                    oss << "Detected P-1 checkpoint(s): "
+                        << (haveS2 ? "[Stage 2] " : "")
+                        << (haveS1 ? "[Stage 1] " : "")
+                        << "-> running Stage 1 (runPM1Marin)";
+                    msg = oss.str();
+                } else {
+                    msg = "No P-1 checkpoints found -> running Stage 1 (runPM1Marin)";
                 }
-                std::string msg = "No P-1 checkpoints found → running Stage 1 (runPM1Marin)";
                 std::cout << msg << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg); guiServer_->setStatus("Running P-1 Stage 1"); }
 
