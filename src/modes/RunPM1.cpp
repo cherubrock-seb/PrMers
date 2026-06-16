@@ -2921,13 +2921,36 @@ int App::runPM1Marin() {
     uint64_t B1_old = options.B1old;
     bool doExtend = (B1_old > 0 && B1_new > B1_old);
 
+    // In ultra-low-memory mode MM31 cannot use the generic resume-extension path:
+    // that path needs many logical registers because it exponentiates an arbitrary
+    // saved residue H. For Mersenne P-1 we can instead recompute the target state
+    // directly as 3^(E(B1_new)*2*p) with the fast3 one-register path. This keeps
+    // the RTX-compatible memory profile and is limited to -pm1-ultralowmem only.
+    const bool ultralowmem_fast3_recompute_extend =
+        doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
+    if (ultralowmem_fast3_recompute_extend) {
+        std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
+                  << B1_old << " -> B1=" << B1_new << "\n";
+        std::cout << "[PM1] Ultra-low-memory extension will recompute the target state "
+                  << "directly with the fast3 one-register path instead of loading "
+                  << "the arbitrary resume residue.\n";
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
+                << B1_old << " -> B1=" << B1_new
+                << "\n[PM1] Recomputing 3^(E(B1)*2*p) with fast3 one-register path.\n";
+            guiServer_->appendLog(oss.str());
+        }
+        doExtend = false;
+    }
+
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-              << B1_new << (doExtend ? " (EXTEND mode)" : "") << std::endl;
+              << B1_new << (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
         oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-            << B1_new << (doExtend ? " (EXTEND mode)" : "");
+            << B1_new << (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""));
         guiServer_->appendLog(oss.str());
     }
 
