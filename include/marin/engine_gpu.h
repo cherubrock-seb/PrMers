@@ -9,6 +9,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "engine.h"
 #include "ibdwt.h"
@@ -93,7 +94,14 @@ public:
 		// 1024: 1024 uint64_2 = 16KB, workgroup size = 1024 / 4 = 256, 1280: 1280 uint64_2 = 20KB, workgroup size = 1280 / 4 = 320
  	{}
 
-	virtual ~gpu() {}
+	virtual ~gpu()
+	{
+		// Constructors may throw after some large OpenCL objects have already
+		// been created. Release what exists so a PM1 ultralowmem 2-reg
+		// allocation failure does not poison the following 1-reg fallback.
+		try { release_kernels(); } catch (...) {}
+		try { free_memory(); } catch (...) {}
+	}
 
 	int get_lcwm_wg_size() const { return _lcwm_wg_size; }
 	size_t get_blk16() const { return _blk16; }
@@ -133,7 +141,11 @@ public:
 			          << " carry=" << gib(carry_bytes) << " GiB"
 			          << " width=" << gib(width_bytes) << " GiB"
 			          << " total=" << gib(total_bytes) << " GiB before driver overhead" << std::endl;
-			_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes);
+			// Do not clear the huge register slab here. PM1 low-memory paths
+			// explicitly initialize every register they use (R0/R1), and
+			// clEnqueueFillBuffer on multi-GiB buffers can fail on Kaggle P100
+			// with CL_INVALID_COMMAND_QUEUE before the real run even starts.
+			_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
 			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
 			// root/weight/width are overwritten immediately; do not allocate giant host zero vectors for them.
 			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
@@ -669,7 +681,8 @@ public:
 		const size_t n = _n;
 
 		const ocl::platform eng_platform = ocl::platform();
-		_gpu = new gpu(eng_platform, device, n, _reg_count, verbose);
+		std::unique_ptr<gpu> gpu_owner(new gpu(eng_platform, device, n, _reg_count, verbose));
+		_gpu = gpu_owner.get();
 
 		std::ostringstream src;
 		src << "#define N_SZ\t" << n << "u" << std::endl;
@@ -727,6 +740,11 @@ public:
 		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
 		_gpu->write_weight(_weight.data());
 		_gpu->write_width(_digit_width.data());
+
+		// Only transfer ownership after every large allocation/upload completed.
+		// If construction throws before this point, gpu_owner cleans the OpenCL
+		// context/buffers and the caller can safely create a fallback engine.
+		gpu_owner.release();
 	}
 
 	void release_gpu_resources_for_lowmem_handoff() override

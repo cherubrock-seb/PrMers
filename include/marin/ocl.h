@@ -309,10 +309,15 @@ public:
 #if defined(ocl_debug)
 		std::cout << "Delete ocl device " << _d << "." << std::endl;
 #endif
-		if (_queueF != nullptr || _queueP != nullptr) finish_all_queues();
-		fatal(clReleaseCommandQueue(_queueP));
-		fatal(clReleaseCommandQueue(_queueF));
-		fatal(clReleaseContext(_context));
+		// Destructors must not throw. This is especially important when a large
+		// OpenCL allocation fails during construction: throwing from cleanup would
+		// abort the process before PM1 can fall back to a smaller engine.
+		if (_queueF != nullptr) (void)clFinish(_queueF);
+		if (_queueP != nullptr && _queueP != _queueF) (void)clFinish(_queueP);
+		if (_program != nullptr) { (void)clReleaseProgram(_program); _program = nullptr; }
+		if (_queueP != nullptr) { (void)clReleaseCommandQueue(_queueP); _queueP = nullptr; }
+		if (_queueF != nullptr && _queueF != _queueP) { (void)clReleaseCommandQueue(_queueF); _queueF = nullptr; }
+		if (_context != nullptr) { (void)clReleaseContext(_context); _context = nullptr; }
 	}
 
 public:
