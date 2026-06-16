@@ -1,551 +1,548 @@
-PrMers: GPU-accelerated Mersenne Primality Testing
-==================================================
-https://github.com/cherubrock-seb/PrMers/
-
-Releases (linux/macos/windows build) : https://github.com/cherubrock-seb/PrMers/tags
-
-PrMers is a high-performance GPU application for Lucas-Lehmer (LL), PRP, P‑1 and ECM
-testing of Mersenne numbers. It uses OpenCL and an integer NTT / IBDWT engine modulo 2^64 − 2^32 + 1 (Uses IBDWT-style transforms over Z / (2^64 − 2^32 + 1) Z) and is designed for long, reliable runs with checkpointing.
-
-The project also supports PRP tests of cofactors and Wagstaff numbers, and includes
-a web-based GUI and a GPU VRAM tester.
-
-## Try the PrMers Demo on Google Colab
-
-You can test **PrMers** directly in your browser with GPU acceleration by opening the interactive notebook below:
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](
-https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
-
-
-
-Overview of Algorithms and Backends
------------------------------------
-
-PrMers has two main computational backends:
-
-- Marin backend (default)
-  - External library: https://github.com/galloty/marin
-  - Efficient modular exponentiation with Gerbicz-Li style error checking (in PRP and LL safe).
-  - Uses IBDWT-style transforms over Z / (2^64 − 2^32 + 1) Z.
-  - Supports PRP, LL, P‑1 and ECM on Mersenne numbers.
-
-- Internal NTT backend
-  - Integer NTT / IBDWT implementation inside PrMers.
-  - Used when the Marin backend is disabled.
-  - Option for experimentation and comparison.
-
-Select backend:
-- Default: Marin backend enabled.
-- `-marin`: disable Marin and use the internal NTT backend instead.
-
-
-Supported Modes
----------------
-
-Numbers
-- **Mersenne**:            N = 2^p − 1
-- **Wagstaff**:            W = (2^p + 1) / 3  (via `-wagstaff`)
-- **Cofactors**:           N / product(known factors), PRP‑tested as generic integer
-
-Main modes
-- **PRP (default)**
-  - Probable-prime test with Gerbicz-Li error checking.
-  - Works for Mersenne, Wagstaff and cofactors.
-  - Produces Res64 and full residue (optionally a proof).
-
-- **Lucas-Lehmer (LL)**
-  - Three LL modes exist (GPU). See the dedicated section *“Lucas-Lehmer modes and safety”* below.
-    - `-ll`        → **LL (safe)** (default LL mode)
-    - `-llunsafe`  → **LL (classic/unsafe)**
-    - `-llsafe2`   → **LL (safe, “doubling” variant)**
-
-- **P‑1 factoring**
-  - Stage 1 and Stage 2 on N = 2^p − 1.
-  - Stage is error checked with Gerbicz-Li.
-  - Targets factors q of N such that q − 1 is B1‑smooth (with Stage 2 extension).
-  - **GPU (Marin) only.** Stage 2 supports both the classic prime-sweep and an **n^K (Crandall) variant** (see `-K` and `-nmax`).
-  - **Interoperability & resume files** (after Stage 1 or Stage 2, see `-resume` / `-p95`):
-    - Export a **GMP‑ECM `.save`** resume and/or a **Prime95 `.p95`** resume.
-    - You can **extend Stage 1** from an existing **`.save` or `.p95`** using `-b1old <B1old>` (auto‑detects the matching file).
-
-- **ECM**
-  - Elliptic Curve Method on N = 2^p − 1.
-  - Multiple curve models (Edwards/Montgomery) and torsion variants.
-
-- **Wagstaff**
-  - With `-wagstaff`, runs PRP/ECM/P‑1 on W = (2^p + 1) / 3.
-
-
-Requirements
-------------
-
-- OpenCL 1.2 runtime (OpenCL 2.0 recommended) and a supported GPU.
-- C++20 compiler (g++/clang++ on Linux/macOS; MSVC or MinGW on Windows).
-- GMP (ECM and CPU‑side helpers).
-
-Debian/Ubuntu packages:
-
-    sudo apt-get update
-    sudo apt-get install -y g++ make \
-        ocl-icd-opencl-dev opencl-headers \
-        libgmp-dev
-
-
-Building from Source
---------------------
-
-Clone the repository:
-
-    git clone https://github.com/cherubrock-seb/PrMers.git
-    cd PrMers
-
-Linux / macOS (Makefile)
-- Build:
-
-    make -j$(nproc)
-
-- Install executable and kernels:
-
-    sudo make install
-
-This installs:
-- Executable:   /usr/local/bin/prmers
-- Kernels:      /usr/local/share/prmers/
-
-The binary embeds a `KERNEL_PATH` pointing to the installation directory so that
-PrMers can find its OpenCL kernels after installation.
-
-Windows with CMake + vcpkg (recommended)
-- Install CMake, Visual Studio and vcpkg.
-- From the PrMers directory:
-
-    git clone https://github.com/microsoft/vcpkg.git
-    cd vcpkg
-    .\bootstrap-vcpkg.bat
-    cd ..
-
-    cmake -S . -B build ^
-      -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake ^
-      -DCMAKE_BUILD_TYPE=Release
-
-    cmake --build build --config Release
-
-Copy the required DLLs from `vcpkg\installed\x64-windows\bin` next to `prmers.exe`
-or add that directory to your PATH.
-
-Windows with MSYS2 / MinGW (UCRT64)
-- In MSYS2 UCRT64 shell:
-
-    pacman -Syu
-    pacman -S --noconfirm make \
-        mingw-w64-ucrt-x86_64-gcc \
-        mingw-w64-ucrt-x86_64-opencl-headers \
-        mingw-w64-ucrt-x86_64-opencl-icd-loader \
-        mingw-w64-ucrt-x86_64-gmp
-
-- Build:
-
-    make -j$(nproc)
-
-Prebuilt binaries
-- Linux / Windows / macOS builds are on GitHub Releases:
-  https://github.com/cherubrock-seb/PrMers/releases
-
-macOS notes
-- OpenCL is present on supported macOS versions.
-- On first run, Gatekeeper may block the binary (not notarized). Allow it in
-  *System Settings → Security & Privacy*, then run again.
-
-
-Quick Start
------------
-
-Basic PRP on a Mersenne exponent:
-
-    ./prmers 136279841
-
-- Mode: PRP (default, Marin backend).
-- Checkpoint every 120 s (default).
-- Results go to `results.txt` and `<exponent>_prp_result.json`.
-
-Lucas-Lehmer test (safe mode):
-
-    ./prmers 127 -ll
-
-P‑1 (stage 1 and stage 2):
-
-    ./prmers 367 -pm1 -b1 11981 -b2 38971
-
-Export Stage‑1 resume to GMP‑ECM `.save` and Prime95 `.p95`:
-
-    ./prmers 367 -pm1 -b1 11981 -resume      # both .save and .p95
-    ./prmers 367 -pm1 -b1 11981 -p95         # .p95 only
-
-Extend Stage‑1 from a previous B1 using `.save` or `.p95` (auto‑detected):
-
-    ./prmers 367 -pm1 -b1 38971 -b1old 11981
-
-ECM on a Mersenne number:
-
-    ./prmers 701 -ecm -b1 6000 -K 8
-    ./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
-
-Test a Wagstaff number W = (2^p + 1) / 3:
-
-    ./prmers 100003 -wagstaff
-
-Use worktodo.txt:
-
-    ./prmers -worktodo ./worktodo.txt
-
-Use a config file:
-
-    ./prmers -config ./settings.cfg
-
-Disable Marin and use the internal backend:
-
-    ./prmers 136279841 -marin
-
-
-AutoPrimeNet
-------------
-
-[AutoPrimeNet](https://github.com/tdulcet/AutoPrimeNet) can automate assignment
-fetching, progress check-ins, result submission and proof uploads for PrMers.
-It is recommended to use when contributing to GIMPS.
-
-### Windows
-
-Download and unzip an exectuable [from mersenne.ca](https://download.mersenne.ca/AutoPrimeNet).
-
-Put `autoprimenet.exe` in the same directory as `prmers.exe`.
-
-Run setup once and select PrMers as the GIMPS software:
-
-    autoprimenet.exe --setup`
-
-Then start AutoPrimeNet in monitoring mode:
-
-    autoprimenet.exe
-
-Start PrMers so it reads the assignments AutoPrimeNet writes:
-
-    prmers.exe -worktodo worktodo.txt
-
-### macOS / Linux
-
-Download `autoprimenet.py` [from mersenne.ca](https://download.mersenne.ca/AutoPrimeNet).
-
-Save it in your PrMers working directory.
-
-Run setup once and select PrMers as the GIMPS software:
-
-    python3 autoprimenet.py --setup
-
-Then start AutoPrimeNet in monitoring mode:
-
-    python3 -OO autoprimenet.py
-
-Start PrMers so it reads the assignments AutoPrimeNet writes:
-
-    ./prmers -worktodo worktodo.txt
-
-Notes
-- AutoPrimeNet saves its configuration to `prime.ini` by default, so you
-  usually only need to pass the options once.
-- For multiple GPUs/workers, give each worker its own directory.
-- Use `--timeout 0` if you only want AutoPrimeNet to fetch/report once and exit
-  instead of running continuously.
-
-
-Lucas-Lehmer modes and safety
------------------------------
-
-PrMers implements three LL variants:
-
-1) **LL (safe)** - `-ll`  
-   - Uses the split representation *s = a + b√3* so each squaring is computed as:
-     (a + b√3)^2 = (a^2 + 3b^2) + (2ab)√3.  
-     Implemented as four transforms per iteration:  
-     A=T(a), B=T(b), invT(A^2 + T(3)·B^2), 2·invT(A·B) (start from (a,b)=(2,1); final check is (−1,0)).  
-   - **Error checking:** protected by Gerbicz-Li style verification with periodic
-     roll‑back/restore to the last verified checkpoint. Default check cadence is
-     ~10 minutes; tune with `-checklevel <k>` (higher = more frequent). Disable
-     with `-gerbiczli` (not recommended except for benchmarking).
-   - **Speed:** safer but slower than the classic LL (more transforms per step).
-   - **When to use:** when you need a reliable LL run on GPU.
-
-2) **LL (classic / unsafe)** - `-llunsafe`  
-   - Classical recurrence S_0=4; S_{i+1}=S_i^2−2 modulo M_p.  
-   - **Error checking:** *none*. Fastest LL but susceptible to silent errors on
-     marginal hardware or aggressive overclocks.
-   - **When to use:** quick checks / debugging. Prefer PRP or LL safe for proofs.
-
-3) **LL (safe2, doubling)** - `-llsafe2` [optional `-llsafeb <B>`]  
-   - Block‑doubling consistency check variant. Work is split into blocks of size *B*
-     (by default B≈⌊√p⌋); at block boundaries a
-     doubling identity is used to verify progress and roll back on mismatch.
-   - **Error checking:** periodic; lighter‑weight than full GL but still robust.
-   - **Tuning:** set block size with `-llsafeb <B>` (auto if omitted).
-
-**Notes**
-- LL modes are only for genuine Mersenne numbers. For cofactors, use PRP.
-- You can inject an error to test detection/restart with `-erroriter <i>`.
-- `-res64_display_interval N` prints Res64 every N iterations (0 disables).
-
-
-Command Line Options (summary)
-------------------------------
-
-For the full list, run:
-
-    ./prmers -h
-
-Common options
-
-Positional
-- `<p>`                   Exponent of the Mersenne or Wagstaff number.
-
-Device and performance
-- `-d <id>`               OpenCL device id (default: 0).
-- `-O <flags>`            OpenCL compiler opts, e.g. `fastmath mad`.
-- `-c <depth>`            Local carry propagation depth.
-- `-profile`              Enable kernel profiling.
-- `-memtest`              Run GPU VRAM test.
-
-Modes
-- `-prp`                  Force PRP (default).
-- `-ll`                   LL safe (a + b√3 with GL checks).
-- `-llunsafe`             LL classic (no checks).
-- `-llsafe2`              LL safe “doubling” variant (block checks).
-- `-wagstaff`             Test W = (2^p + 1)/3 instead of 2^p − 1.
-
-LL safety / diagnostics
-- `-checklevel <k>`       Force GL check every ~B×k iters (B≈√p by default).
-- `-gerbiczli`            Disable Gerbicz-Li checks (PRP/LL‑safe). Not recommended.
-- `-llsafeb <B>`          Block size for `-llsafe2` (default ≈ √p).
-- `-erroriter <i>`        Inject an error at iteration *i* to test detection.
-- `-res64_display_interval <N>`  Show Res64 every N iterations (0=off).
-
-P‑1
-- `-pm1`                  P‑1 factoring mode.
-- `-b1 <B1>`              Stage 1 bound.
-- `-b2 <B2>`              Stage 2 bound.
-- `-b1old <B1old>`        Extend an existing Stage 1 run (auto‑loads `.save` or `.p95`).
-- `-resume`               After Stage 1/2, write GMP‑ECM `.save` and Prime95 `.p95` resumes.
-- `-p95`                  After Stage 1/2, write Prime95 `.p95` only.
-- `-filemers <path>`      Convert `<p>pm<B1>.mers` → GMP‑ECM `.save` (helper).
-- `-K <K>`                Enable n^K (Crandall) Stage‑2 variant with K powers.
-- `-nmax <n>`             Upper bound for the n^K variant.
-
-ECM
-- `-ecm`                  ECM on 2^p − 1.
-- `-b1 <B1>`              Stage 1 bound.
-- `-b2 <B2>`              Stage 2 bound (optional).
-- `-K <curves>`           Number of curves.
-- `-montgomery`           Use a Montgomery model.
-- `-torsion16`            Force torsion‑16 (or `-notorsion` to disable).
-
-Checkpoints and backup
-- `-t <sec>`              Checkpoint interval (default: 120s).
-- `-f <path>`             Directory for checkpoints (default: current).
-
-Worktodo / config
-- `-worktodo [path]`      Read GIMPS‑style `worktodo.txt` (first PRP= line).
-- `-config <path>`        Read options from a config file.
-
-Backend / expert
-- `-marin`                Disable Marin; use internal NTT backend.
-- More expert flags exist (local sizes, enqueue caps, etc.). See `-h`.
-
-
-Web-based GUI
--------------
-
-Start:
-
-    ./prmers -gui -http 3131
-
-- Default host: first non‑loopback IPv4; default port: 3131.
-- Override host/port with `-host` and `-http`.
-- Then open the printed URL, e.g. http://127.0.0.1:3131/
-
-The GUI lets you:
-- Monitor progress, residues and logs in real time.
-- Build and edit `worktodo.txt` entries.
-- Inspect results and settings.
-
-
-worktodo.txt
-------------
-
-PrMers understands GIMPS‑style `PRP=` lines. Example:
-
-    PRP=DEADBEEFCAFEBABEDEADBEEFCAFEBABE,1,2,197493337,-1,76,0;
-
-This is k*b^n+c with k=1, b=2, n=197493337, c=−1 → the Mersenne 2^197493337−1.
-
-Usage:
-
-    ./prmers -worktodo
-    ./prmers -worktodo ./worktodo.txt
-
-- If no exponent is on the CLI and a valid `PRP=` is found, that exponent is used.
-- Only the first valid `PRP=` line is read currently.
-
-
-Gerbicz-Li Error Checking (PRP & LL safe)
------------------------------------------
-
-Principle
-- Split long exponentiations into blocks of size B≈√p.
-- Maintain a *current* rolling product and a *reference* product from the last
-  verified checkpoint.
-- Every ~10 minutes (tunable via `-checklevel`), recompute the theoretical product
-  from the stored checkpoint, compare, and either advance the “last‑correct”
-  marker or roll back and replay.
-
-Persistence
-- Files `.bufd`, `.lbufd`, `.gli`, `.isav`, `.jsav` and the state file contain
-  everything needed for deterministic restart after a mismatch, crash, or Ctrl‑C.
-
-Testing
-- Inject an error to validate recovery:
-
-    ./prmers 6972593 -erroriter 19500
-
-Disabling
-- Use `-gerbiczli` to disable (benchmarks only; not recommended for production).
-
-
-P‑1 Factoring
--------------
-
-Target: N = 2^p − 1 with q | N such that q = 2kp + 1.
-
-Stage 1
-- Choose B1. Let E = lcm(1,…,B1). Compute x = 3^(E·2p) mod N and g = gcd(x − 1, N).
-- If 1 < g < N, a non‑trivial factor is found.
-- **Export resumes** (optional): with `-resume` PrMers writes `resume_p<p>_B1_<B1>.save` (GMP‑ECM) and `resume_p<p>_B1_<B1>.p95` (Prime95). With `-p95`, write only the `.p95`.
-
-Example:
-
-    ./prmers 541 -pm1 -b1 8099
-    ./prmers 541 -pm1 -b1 8099 -resume
-
-**Extend Stage 1**
-- To extend from B1old to a higher B1 using an existing `.save` or `.p95`:
-  
-    ./prmers 541 -pm1 -b1 20000 -b1old 8099
-
-  The program auto‑detects the matching `resume_p<p>_B1_<B1old>.save` or `.p95` in the current directory.
-
-Stage 2
-- Choose B2 > B1.
-- From Stage 1’s state H, compute
-
-  Q = ∏_{q ∈ (B1,B2]} (H^q − 1) mod N,
-
-  with standard optimizations (prime gaps, cached powers).
-- **n^K (Crandall) variant**: enable with `-K <K>` and optionally bound exponents with `-nmax <n>`.
-- **Export resumes** (optional): with `-resume`, PrMers writes `resume_p<p>_B1_<B1>_B2_<B2>.save` and `.p95` after Stage 2.
-
-Example:
-
-    ./prmers 367 -pm1 -b1 11981 -b2 38971
-    ./prmers 367 -pm1 -b1 11981 -b2 38971 -resume
-    ./prmers 367 -pm1 -b1 11981 -b2 38971 -K 8 -nmax 200000   # n^K variant
-
-Implementations
-- **GPU P‑1 using the Marin backend** (Stage 1 and Stage 2, including n^K).
-
-
-ECM on Mersenne Numbers
------------------------
-
-    ./prmers p -ecm -b1 B1 -b2 B2 -K curves [curve options]
-
-- Stage 1 bound B1, optional Stage 2 bound B2, K curves.
-- Defaults: Edwards curve with torsion optimizations.
-- Options: `-montgomery`, `-torsion16`, `-notorsion`, `-seed <val>`.
-- Interoperability: P‑1 resumes use **GMP‑ECM**’s `.save` textual format in addition to Prime95’s `.p95` when requested via `-resume`.
-
-
-## Prime95 ECM Stage 2 interop
-
-PrMers can run ECM Stage 1 and delegate ECM Stage 2 to Prime95.
-
-Use `-p95path` to enable it.
-
-### Linux
+# PrMers
+
+GPU-accelerated PRP, Lucas-Lehmer, P-1 and ECM testing for Mersenne numbers.
+
+https://github.com/cherubrock-seb/PrMers
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
+
+Releases for Linux, macOS and Windows are available here:
+
+https://github.com/cherubrock-seb/PrMers/releases
+
+PrMers is an OpenCL GPU program focused on long modular arithmetic runs for numbers of the form `2^p - 1`. It supports PRP, Lucas-Lehmer, P-1 and ECM workflows, with checkpointing, result JSON output, Prime95 compatible handoff files, worktodo parsing, and an optional web GUI.
+
+The default computation engine is the Marin backend by Yves Gallot. It uses an integer IBDWT style transform modulo `2^64 - 2^32 + 1`, avoiding floating point roundoff in the core modular arithmetic.
+
+## Contents
+
+- [What PrMers can do](#what-prmers-can-do)
+- [Quick start](#quick-start)
+- [Build from source](#build-from-source)
+- [Command line options](#command-line-options)
+- [PRP and proof generation](#prp-and-proof-generation)
+- [Lucas-Lehmer modes](#lucas-lehmer-modes)
+- [P-1 factoring](#p-1-factoring)
+- [ECM factoring](#ecm-factoring)
+- [worktodo.txt and AutoPrimeNet](#worktodotxt-and-autoprimenet)
+- [Prime95 and mprime interop](#prime95-and-mprime-interop)
+- [Web GUI](#web-gui)
+- [GPU memory test](#gpu-memory-test)
+- [NTT and IBDWT transform sizes](#ntt-and-ibdwt-transform-sizes)
+- [Benchmarks](#benchmarks)
+- [Backend and code](#backend-and-code)
+- [Related inspiration](#related-inspiration)
+- [Must read papers](#must-read-papers)
+
+## What PrMers can do
+
+| Area | Status | Notes |
+|---|---|---|
+| Mersenne PRP | Supported | Default mode, GPU, Marin backend by default |
+| Mersenne Lucas-Lehmer | Supported | Safe GL mode, classic unsafe mode, doubling safe mode |
+| P-1 factoring | Supported | Stage 1, Stage 2, resume export, Prime95 handoff |
+| P-1 ultra-low-memory mode | Supported | 1-register Stage 1 and 1-register Stage 2 product-exponent path |
+| ECM factoring | Supported | Edwards and Montgomery variants, optional Prime95 Stage 2 handoff |
+| Wagstaff PRP | Supported | `W = (2^p + 1) / 3` with `-wagstaff` |
+| Mersenne cofactors | Supported | PRP with known factors using `-factors` |
+| worktodo.txt | Supported | PRP and Pminus1 parsing, including Prime95 compatible Pminus1 metadata |
+| Web GUI | Supported | Local browser interface for monitoring and worktodo editing |
+| GPU memory test | Supported | OpenCL VRAM and stability test |
+
+## Quick start
+
+Run a PRP test on a Mersenne number:
 
 ```bash
-./prmers 757 -ecm -b1 97 -b2 9500 -K 15 -p95path /home/sebastien/gimps/v31_31.04_b05c
+./prmers 136279841
 ```
 
-### Windows
+Run a safe Lucas-Lehmer test:
 
-```powershell
-prmers.exe 757 -ecm -b1 97 -b2 9500 -K 15 -p95path C:\gimps\v31_31.04_b05c
+```bash
+./prmers 127 -ll
 ```
 
-### What happens
+Run P-1 factoring with Stage 1 and Stage 2:
 
-1. PrMers runs ECM Stage 1.
-2. PrMers writes a `.p95` resume file.
-3. PrMers appends an `ECMSTAGE2` line to Prime95 `worktodo.txt`.
-4. Prime95 runs Stage 2.
-5. PrMers reads `results.json.txt` and reports `NF` or `F`.
+```bash
+./prmers 367 -pm1 -b1 11981 -b2 38971
+```
 
-### Example worktodo line (used only by Prime 95 / MPRIME !!)
+Run the MM31 ultra-low-memory P-1 example that uses a 1-register GPU Stage 2:
+
+```bash
+./prmers 2147483647 -pm1 -b1 100 -b2 5000 -pm1-ultralowmem -nogcd-stage1
+```
+
+Expected test factor for that example:
 
 ```text
-ECMSTAGE2=N/A,1,2,757,-1,"resume_p757_ECM_TE_B1_97_c000006.p95",9500
+295257526626031
 ```
 
-### Notes
+Run ECM:
 
-- Stage 1 is done by PrMers.
-- Stage 2 is done by Prime95 or mprime.
-- `-p95path` must point to the Prime95 directory.
-- On Windows, Prime95 can be launched hidden.
+```bash
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
+```
 
+Use a worktodo file:
 
-## Prime95 P-1 Stage 2 interop
+```bash
+./prmers -worktodo ./worktodo.txt
+```
 
-PrMers can run P-1 Stage 1 and delegate P-1 Stage 2 to Prime95.
+Start the web GUI:
 
-Use with `-p95path` to enable it.
+```bash
+./prmers -gui -http 3131
+```
 
-### Linux
+Then open the URL printed by the program.
+
+## Build from source
+
+### Requirements
+
+- C++20 compiler
+- OpenCL runtime and headers
+- GMP development library
+- Make or CMake
+
+Ubuntu or Debian:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y g++ make ocl-icd-opencl-dev opencl-headers libgmp-dev
+```
+
+### Linux and macOS with Makefile
+
+```bash
+git clone https://github.com/cherubrock-seb/PrMers.git
+cd PrMers
+make -j"$(nproc)"
+```
+
+Install system-wide:
+
+```bash
+sudo make install
+```
+
+Installed paths:
+
+```text
+/usr/local/bin/prmers
+/usr/local/share/prmers/
+```
+
+When building a local zip or test copy, pass the kernel path explicitly:
+
+```bash
+make clean
+make -j"$(nproc)" KERNEL_PATH=./kernels/
+```
+
+### Windows with CMake and vcpkg
+
+```powershell
+git clone https://github.com/cherubrock-seb/PrMers.git
+cd PrMers
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat
+cd ..
+
+cmake -S . -B build ^
+  -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake ^
+  -DCMAKE_BUILD_TYPE=Release
+
+cmake --build build --config Release
+```
+
+Copy required DLLs from `vcpkg\installed\x64-windows\bin` next to `prmers.exe`, or add that directory to `PATH`.
+
+### Windows with MSYS2 UCRT64
+
+```bash
+pacman -Syu
+pacman -S --noconfirm make \
+  mingw-w64-ucrt-x86_64-gcc \
+  mingw-w64-ucrt-x86_64-opencl-headers \
+  mingw-w64-ucrt-x86_64-opencl-icd-loader \
+  mingw-w64-ucrt-x86_64-gmp
+
+make -j"$(nproc)"
+```
+
+## Command line options
+
+Run the built-in help for the exact option list supported by your binary:
+
+```bash
+./prmers -h
+```
+
+### General options
+
+| Option | Meaning |
+|---|---|
+| `<p>` | Exponent for `2^p - 1`, unless `-worktodo` supplies it |
+| `-d <id>` | OpenCL device id, default `0` |
+| `-c <depth>` | Local carry propagation depth |
+| `-t <seconds>` | Checkpoint interval |
+| `-f <path>` | Checkpoint and state directory |
+| `-config <path>` | Read options from a config file |
+| `-worktodo [path]` | Read assignment from worktodo.txt |
+| `-profile` | Enable kernel profiling |
+| `-debug` | Verbose debug output |
+| `-bench` | Run benchmark over supported transform sizes |
+| `-v`, `--version` | Print version |
+| `-h`, `--help` | Print help |
+
+### Device and stability options
+
+| Option | Meaning |
+|---|---|
+| `-iterforce <n>` | Force GPU queue synchronization every `n` iterations |
+| `-iterforce2 <n>` | Force queue synchronization in P-1 Stage 2 |
+| `-memtest` | Run GPU memory and stability test |
+| `-memlim <percent>` | Limit memory used by some precompute paths |
+| `-maxe <MiB>` | Maximum P-1 exponent chunk size in MiB |
+| `-res64_display_interval <n>` | Print Res64 every `n` iterations in Marin mode |
+
+### Mode selection
+
+| Option | Meaning |
+|---|---|
+| `-prp` | PRP mode, default |
+| `-ll` | Lucas-Lehmer safe mode with Gerbicz-Li style checks |
+| `-llunsafe` | Classic Lucas-Lehmer mode without error checking |
+| `-llsafe2` | Lucas-Lehmer block-doubling safe mode |
+| `-wagstaff` | Test `W = (2^p + 1) / 3` |
+| `-pm1` | P-1 factoring mode |
+| `-ecm` | ECM factoring mode |
+| `-marin` | Disable Marin and use the internal NTT backend |
+
+Note: the option name `-marin` currently disables the Marin backend. The default is Marin enabled.
+
+### PRP and proof options
+
+| Option | Meaning |
+|---|---|
+| `-proof <level>` | Proof power, `1` to `12`, or `0` to disable proof generation |
+| `-noverify` | Skip verification of generated PRP proof |
+| `-factors <f1,f2,...>` | Test the remaining cofactor after known Mersenne factors |
+| `-gerbiczli` | Disable Gerbicz-Li checks, mainly for benchmarking |
+| `-checklevel <k>` | Tune Gerbicz-Li check frequency |
+| `-erroriter <i>` | Inject an error at iteration `i` to test recovery |
+
+### Lucas-Lehmer options
+
+| Option | Meaning |
+|---|---|
+| `-ll` | Safe LL mode |
+| `-llunsafe` | Fast classic LL mode, no error checking |
+| `-llsafe2` | Block-doubling safe LL mode |
+| `-llsafeb <B>` | Override block size for `-llsafe2` |
+
+### P-1 options
+
+| Option | Meaning |
+|---|---|
+| `-pm1` | Enable P-1 factoring |
+| `-b1 <B1>` | Stage 1 bound |
+| `-b2 <B2>` | Stage 2 bound |
+| `-b1old <B1old>` | Extend Stage 1 from an existing `.save` or `.p95` file |
+| `-resume` | Write GMP-ECM `.save` and Prime95 `.p95` resume files |
+| `-p95` | Write Prime95 `.p95` resume file |
+| `-p95path <path>` | Delegate P-1 Stage 2 to Prime95 or mprime |
+| `-nop95stage2` | Disable Prime95 Stage 2 handoff even if `-p95path` is set |
+| `-filemers <path>` | Convert a `.mers` state to GMP-ECM `.save` |
+| `-K <K>` | Enable the `n^K` Stage 2 variant |
+| `-nmax <n>` | Upper bound for the `n^K` variant |
+| `-pm1-lowmem` | P-1 low-memory mode, fewer GPU registers |
+| `-pm1-ultralowmem` | P-1 ultra-low-memory mode, 1-register Stage 1 and 1-register product-exponent Stage 2 |
+| `-nogcd-stage1` | Skip ordinary Stage 1 GCD after writing resume data, useful before Stage 2 |
+
+### ECM options
+
+| Option | Meaning |
+|---|---|
+| `-ecm` | Enable ECM mode |
+| `-b1 <B1>` | ECM Stage 1 bound |
+| `-b2 <B2>` | ECM Stage 2 bound |
+| `-K <curves>` | Number of curves |
+| `-montgomery` | Use Montgomery curve model |
+| `-edwards` | Use Edwards curve setup |
+| `-ced` | Compute directly in Twisted Edwards coordinates |
+| `-cmont` | Compute in Montgomery coordinates |
+| `-torsion8` | Use torsion-8 family |
+| `-torsion16` | Use torsion-16 family |
+| `-notorsion` | Disable torsion family |
+| `-iv163` | Use family IV 163 curves |
+| `-seed <value>` | Force curve seed |
+| `-sigma <value>` | Force Montgomery sigma |
+| `-ecm_check_interval <seconds>` | ECM error-check interval |
+| `-ecm_progress_ms <ms>` | ECM progress update interval |
+| `-p95path <path>` | Delegate ECM Stage 2 to Prime95 or mprime |
+
+### Web GUI options
+
+| Option | Meaning |
+|---|---|
+| `-gui` | Enable embedded web GUI |
+| `-http <port>` | HTTP port, default `3131` |
+| `-host <ip>` | HTTP host, default `localhost` |
+
+## PRP and proof generation
+
+Default PRP mode tests `2^p - 1` using GPU modular exponentiation and Gerbicz-Li style checking. Results are written to `results.txt` and to a JSON result file.
+
+Example:
+
+```bash
+./prmers 136279841
+```
+
+Useful files include:
+
+| File | Purpose |
+|---|---|
+| `results.txt` | Human-readable result history |
+| `<p>_prp_result.json` | JSON result for automation |
+| proof files | Optional PRP proof output depending on proof settings |
+
+Cofactor PRP:
+
+```bash
+./prmers 10449497 -factors 62696983
+```
+
+## Lucas-Lehmer modes
+
+PrMers implements three GPU LL variants.
+
+| Mode | Option | Safety | Notes |
+|---|---|---|---|
+| LL safe | `-ll` | Gerbicz-Li style checking | Recommended safe LL mode |
+| LL classic | `-llunsafe` | No checking | Fast, for quick checks and debugging |
+| LL safe2 | `-llsafe2` | Block-doubling checks | Lighter safe mode with block verification |
+
+Safe LL uses the split representation `s = a + b*sqrt(3)` and checks progress periodically. `-llunsafe` uses the classic recurrence `S_{i+1} = S_i^2 - 2` and should not be used for production runs on unstable hardware.
+
+## P-1 factoring
+
+For a factor `q` of `M_p = 2^p - 1`, factors have the form:
+
+```text
+q = 2*k*p + 1
+```
+
+### Stage 1
+
+Stage 1 computes:
+
+```text
+x = 3^(E(B1)*2*p) mod M_p
+```
+
+where `E(B1)` is the product of prime powers up to `B1`. Then it tests:
+
+```text
+gcd(x - 1, M_p)
+```
+
+Example:
+
+```bash
+./prmers 541 -pm1 -b1 8099
+```
+
+Write resume files:
+
+```bash
+./prmers 541 -pm1 -b1 8099 -resume
+./prmers 541 -pm1 -b1 8099 -p95
+```
+
+Extend from an older Stage 1 bound:
+
+```bash
+./prmers 541 -pm1 -b1 20000 -b1old 8099
+```
+
+### Stage 2
+
+Standard Stage 2 extends the search from `B1` to `B2`.
+
+```bash
+./prmers 367 -pm1 -b1 11981 -b2 38971
+```
+
+The classic Stage 2 path uses GPU precomputation and prime sweeps. The `n^K` variant can be enabled with:
+
+```bash
+./prmers 367 -pm1 -b1 11981 -b2 38971 -K 8 -nmax 200000
+```
+
+### Ultra-low-memory P-1
+
+`-pm1-ultralowmem` is designed for huge transforms where a normal multi-register Stage 2 does not fit in VRAM.
+
+Current behavior:
+
+| Stage | Method |
+|---|---|
+| Stage 1 | 1 GPU register, fast3 path, Gerbicz-Li disabled |
+| Stage 2 | 1 GPU register, product-exponent path |
+
+The Stage 2 ultra-low-memory path computes the product of Stage 2 primes into the exponent and runs one direct GPU exponentiation:
+
+```text
+3^(E(B1)*2*p*product_primes(B1,B2]) mod M_p
+```
+
+It then tests `gcd(x - 1, M_p)`. This is slower than a full-memory BSGS-style Stage 2, but it fits on GPUs where a 2-register or table-based Stage 2 does not fit.
+
+MM31 validation example:
+
+```bash
+./prmers 2147483647 -pm1 -b1 100 -b2 5000 -pm1-ultralowmem -nogcd-stage1
+```
+
+Expected known factor:
+
+```text
+295257526626031
+```
+
+## ECM factoring
+
+Basic ECM:
+
+```bash
+./prmers p -ecm -b1 B1 -b2 B2 -K curves
+```
+
+Examples:
+
+```bash
+./prmers 701 -ecm -b1 6000 -K 8
+./prmers 701 -ecm -b1 6000 -b2 33333 -K 8
+```
+
+Curve and arithmetic options include Montgomery, Edwards, torsion variants, seeds and sigma values. Use `./prmers -h` for the exact list supported by your build.
+
+## worktodo.txt and AutoPrimeNet
+
+PrMers can read GIMPS-style `worktodo.txt` assignments.
+
+```bash
+./prmers -worktodo
+./prmers -worktodo ./worktodo.txt
+```
+
+### PRP format
+
+```text
+PRP=AID,k,b,n,c,tf_bits,tests_saved
+```
+
+Example:
+
+```text
+PRP=DEADBEEFCAFEBABEDEADBEEFCAFEBABE,1,2,197493337,-1,76,0
+```
+
+### Pminus1 format
+
+Prime95-compatible P-1 format:
+
+```text
+Pminus1=k,b,n,c,B1,B2[,how_far_factored][,B2_start][,"factors"]
+Pminus1=AID,k,b,n,c,B1,B2[,how_far_factored][,B2_start][,"factors"]
+```
+
+Examples:
+
+```text
+Pminus1=AID,1,2,160575647,-1,900000,32000000
+Pminus1=AID,1,2,160575647,-1,900000,32000000,79
+Pminus1=AID,1,2,160575647,-1,900000,32000000,79,5000000
+Pminus1=AID,1,2,11,-1,100,200,79,"23"
+```
+
+The parser keeps these fields separate:
+
+| Field | Meaning |
+|---|---|
+| `how_far_factored` | Trial factoring depth, for example `79` means TF completed to `2^79` |
+| `B2_start` | Optional Stage 2 start bound |
+| `"factors"` | Quoted known-factor list |
+
+So the trailing `79` in this line is not a known factor:
+
+```text
+Pminus1=AID,1,2,160575647,-1,900000,32000000,79
+```
+
+It is interpreted as trial factoring completed to `2^79`.
+
+### AutoPrimeNet
+
+AutoPrimeNet can fetch assignments, monitor progress and submit results.
+
+Project:
+
+https://github.com/tdulcet/AutoPrimeNet
+
+Windows:
+
+```powershell
+autoprimenet.exe --setup
+autoprimenet.exe
+prmers.exe -worktodo worktodo.txt
+```
+
+Linux or macOS:
+
+```bash
+python3 autoprimenet.py --setup
+python3 -OO autoprimenet.py
+./prmers -worktodo worktodo.txt
+```
+
+For multiple GPUs or workers, use one working directory per worker.
+
+## Prime95 and mprime interop
+
+### P-1 Stage 2 handoff
+
+PrMers can run P-1 Stage 1 and let Prime95 or mprime run Stage 2.
 
 ```bash
 ./prmers 75931 -pm1 -b1 100 -b2 200000000 -p95path /home/sebastien/gimps/v31_31.04_b05c
 ```
 
-### Windows
+Windows:
 
 ```powershell
 prmers.exe 75931 -pm1 -b1 100 -b2 200000000 -p95path C:\gimps\v31_31.04_b05c
 ```
 
-### What happens
+What happens:
 
 1. PrMers runs P-1 Stage 1.
-2. PrMers writes the Prime95 Stage 1 state file.
-3. PrMers copies and renames it as `mXXXXXXX` in the Prime95 directory.
+2. PrMers writes a Prime95 Stage 1 state file.
+3. PrMers copies it as `mXXXXXXX` in the Prime95 directory.
 4. PrMers writes a `Pminus1` line to Prime95 `worktodo.txt`.
-5. Prime95 runs Stage 2.
+5. Prime95 or mprime runs Stage 2.
 6. PrMers reads `results.json.txt` and reports `NF` or `F`.
 
-### Example Prime95 state filename
-
-```text
-m0075931
-```
-
-### Example worktodo line
+Example Prime95 line:
 
 ```text
 Pminus1=1,2,75931,-1,100,200000000,68
@@ -557,30 +554,47 @@ With known factors:
 Pminus1=1,2,10449497,-1,1440000,1440000,68,"62696983"
 ```
 
-### Notes
+### ECM Stage 2 handoff
 
-- Stage 1 is done by PrMers.
-- Stage 2 is done by Prime95 or mprime.
-- `-p95path` must point to the Prime95 directory.
-- The Prime95 state filename uses the exponent with leading zeroes when needed, for example `m0075931`.
-- PrMers temporarily adjusts `prime.txt` for the handoff and restores it afterwards.
-- On Windows, Prime95 can be launched hidden.
+PrMers can run ECM Stage 1 and let Prime95 or mprime run ECM Stage 2.
 
+```bash
+./prmers 757 -ecm -b1 97 -b2 9500 -K 15 -p95path /home/sebastien/gimps/v31_31.04_b05c
+```
 
-GPU Memory Test (-memtest)
---------------------------
+Example Prime95 line:
 
-    ./prmers -memtest
-    ./prmers -memtest -d 2
+```text
+ECMSTAGE2=N/A,1,2,757,-1,"resume_p757_ECM_TE_B1_97_c000006.p95",9500
+```
 
-- Scans as much VRAM as possible (subject to device limits).
-- Patterns include address‑derived values, inversion toggles, and modulo‑stride
-  sequences with multiple offsets.
-- Reports coverage, traffic, bandwidth and any detected errors.
+## Web GUI
 
+Start the GUI:
 
-NTT Transform Sizes
--------------------
+```bash
+./prmers -gui -http 3131
+```
+
+Common options:
+
+```bash
+./prmers -gui -host 127.0.0.1 -http 3131
+./prmers -gui -host 0.0.0.0 -http 3131
+```
+
+The GUI can monitor progress, show logs, inspect results and help edit `worktodo.txt`.
+
+## GPU memory test
+
+```bash
+./prmers -memtest
+./prmers -memtest -d 1
+```
+
+The memory test scans GPU VRAM with several patterns and reports bandwidth, coverage and errors.
+
+## NTT and IBDWT transform sizes
 
 For a given exponent p, PrMers chooses an NTT/IBDWT size N:
 
@@ -590,300 +604,176 @@ For a given exponent p, PrMers chooses an NTT/IBDWT size N:
 | 127-239 | 8 | 2^3 |
 | 241-463 | 16 | 2^4 |
 | 467-919 | 32 | 2^5 |
-| 929-1153 | 40 | 5·2^3 |
+| 929-1153 | 40 | 5*2^3 |
 | 1163-1789 | 64 | 2^6 |
-| 1801-2239 | 80 | 5·2^4 |
+| 1801-2239 | 80 | 5*2^4 |
 | 2243-3583 | 128 | 2^7 |
-| 3593-4463 | 160 | 5·2^5 |
+| 3593-4463 | 160 | 5*2^5 |
 | 4481-6911 | 256 | 2^8 |
-| 6917-8629 | 320 | 5·2^6 |
+| 6917-8629 | 320 | 5*2^6 |
 | 8641-13807 | 512 | 2^9 |
-| 13829-17257 | 640 | 5·2^7 |
+| 13829-17257 | 640 | 5*2^7 |
 | 17291-26597 | 1024 | 2^10 |
-| 26627-33247 | 1280 | 5·2^8 |
+| 26627-33247 | 1280 | 5*2^8 |
 | 33287-53239 | 2048 | 2^11 |
-| 53267-66553 | 2560 | 5·2^9 |
+| 53267-66553 | 2560 | 5*2^9 |
 | 66569-102397 | 4096 | 2^12 |
-| 102407-127997 | 5120 | 5·2^10 |
+| 102407-127997 | 5120 | 5*2^10 |
 | 128021-204797 | 8192 | 2^13 |
-| 204803-255989 | 10240 | 5·2^11 |
+| 204803-255989 | 10240 | 5*2^11 |
 | 256019-393209 | 16384 | 2^14 |
-| 393241-491503 | 20480 | 5·2^12 |
+| 393241-491503 | 20480 | 5*2^12 |
 | 491527-786431 | 32768 | 2^15 |
-| 786433-982981 | 40960 | 5·2^13 |
+| 786433-982981 | 40960 | 5*2^13 |
 | 983063-1507321 | 65536 | 2^16 |
-| 1507369-1884133 | 81920 | 5·2^14 |
+| 1507369-1884133 | 81920 | 5*2^14 |
 | 1884193-3014653 | 131072 | 2^17 |
-| 3014659-3768311 | 163840 | 5·2^15 |
+| 3014659-3768311 | 163840 | 5*2^15 |
 | 3768341-5767129 | 262144 | 2^18 |
-| 5767169-7208951 | 327680 | 5·2^16 |
+| 5767169-7208951 | 327680 | 5*2^16 |
 | 7208977-11534329 | 524288 | 2^19 |
-| 11534351-14417881 | 655360 | 5·2^17 |
+| 11534351-14417881 | 655360 | 5*2^17 |
 | 14417927-22020091 | 1048576 | 2^20 |
-| 22020127-27525109 | 1310720 | 5·2^18 |
+| 22020127-27525109 | 1310720 | 5*2^18 |
 | 27525131-44040187 | 2097152 | 2^21 |
-| 44040253-55050217 | 2621440 | 5·2^19 |
+| 44040253-55050217 | 2621440 | 5*2^19 |
 | 55050253-83886053 | 4194304 | 2^22 |
-| 83886091-104857589 | 5242880 | 5·2^20 |
+| 83886091-104857589 | 5242880 | 5*2^20 |
 | 104857601-167772107 | 8388608 | 2^23 |
-| 167772161-209715199 | 10485760 | 5·2^21 |
+| 167772161-209715199 | 10485760 | 5*2^21 |
 | 209715263-318767093 | 16777216 | 2^24 |
-| 318767107-398458859 | 20971520 | 5·2^22 |
+| 318767107-398458859 | 20971520 | 5*2^22 |
 | 398458889-637534199 | 33554432 | 2^25 |
-| 637534277-796917757 | 41943040 | 5·2^23 |
+| 637534277-796917757 | 41943040 | 5*2^23 |
 | 796917763-1207959503 | 67108864 | 2^26 |
-| 1207959559-1509949421 | 83886080 | 5·2^24 |
+| 1207959559-1509949421 | 83886080 | 5*2^24 |
+| 1509949440 and above, including MM31 | 167772160 | 5*2^25 |
 
 
-Benchmarks
-----------
+Note: for MM31 (`p = 2147483647`), the valid Marin transform size is `167772160 = 5*2^25`. Pure `2^27` is not valid for the Goldilocks root layout used here.
 
-PrMers performance depends on
+## Benchmarks
 
-- GPU model
-- clock rates and power limits
-- OpenCL driver
-- code version and options
+Performance depends on GPU, clocks, power limits, OpenCL driver, thermal behavior and PrMers version. Treat the following values as rough guidance.
 
-Numbers below are approximate and obtained on specific setups. Treat them as
-order‑of‑magnitude guidance only. For more detail, see the Mersenne Forum thread:
+Mersenne Forum discussion:
 
-    https://www.mersenneforum.org/node/1086124/page3
+https://www.mersenneforum.org/node/1086124/page3
 
-### Quick overview (PRP on Mersenne exponents, Marin backend)
+### Quick PRP overview, Marin backend
 
-PRP throughput for p ≈ 136,279,841 (PRP mode, Marin, auto NTT).
+PRP throughput for `p` near `136279841`.
 
-| GPU                                       | User / system                | PRMERS_SCORE | Iter/s @ p ≈ 1.36e8 | Approx PRP ETA | Notes                                  |
-|-------------------------------------------|------------------------------|--------------|---------------------|----------------|----------------------------------------|
-| NVIDIA GeForce RTX 5090                   | Resolver (vast.ai)           | n/a          | ≈ 2230              | ≈ 17 h         | High‑end NVIDIA Ada/Blackwell          |
-| NVIDIA GeForce RTX 4090                   | Resolver                     | 100.00/100   | ≈ 1225              | ≈ 31 h         | Reference 100/100 score                |
-| NVIDIA GeForce RTX 5070 Laptop            | beepthebee                   | 62.69/100    | ≈ 356               | ≈ 4.4-4.6 days | +200 MHz core, +500 MHz VRAM (OC)      |
-| NVIDIA GeForce RTX 4060 Ti                | Lorenzo                      | 69.14/100    | ≈ 318               | ≈ 5 days       | Desktop midrange                       |
-| NVIDIA GeForce RTX 4070 Laptop GPU        | Phantomas                    | 52.24/100    | ≈ 255               | ≈ 6 days       | Gaming laptop GPU                      |
-| NVIDIA GeForce RTX 2060                   | hwt; Artoria2e5              | 45.76/100    | ≈ 240-259           | ≈ 5.9-6.7 days | Undervolt / power cap in some reports  |
-| NVIDIA GeForce GTX 1660 Ti                | Phantomas (MSI GL73)         | n/a          | ≈ 234               | ≈ 6.8 days     | Older Turing GPU                       |
-| AMD Radeon VII                            | cherubrock (author)          | 50.57/100    | ≈ 350               | ≈ 4.5 days     | Reference dev card                     |
-| Apple M4 Pro (Mac mini / MacBook)         | wigglefruit                  | 30.29/100    | ≈ 164               | ≈ 9.6 days     | Apple silicon, 18‑core GPU             |
-| Apple M2 (MacBook Air, 8 GB unified RAM)  | cherubrock (author)          | n/a          | ≈ 25                | ≈ 62 days      | Thin‑and‑light laptop                  |
+| GPU | User or system | PRMERS_SCORE | Iter/s | Approx PRP ETA | Notes |
+|---|---:|---:|---:|---:|---|
+| NVIDIA GeForce RTX 5090 | Resolver, vast.ai | n/a | about 2230 | about 17 h | High-end NVIDIA |
+| NVIDIA GeForce RTX 4090 | Resolver | 100.00/100 | about 1225 | about 31 h | Reference score |
+| NVIDIA GeForce RTX 5070 Laptop | beepthebee | 62.69/100 | about 356 | about 4.5 d | OC reported |
+| NVIDIA GeForce RTX 4060 Ti | Lorenzo | 69.14/100 | about 318 | about 5 d | Desktop midrange |
+| NVIDIA GeForce RTX 4070 Laptop | Phantomas | 52.24/100 | about 255 | about 6 d | Laptop GPU |
+| NVIDIA GeForce RTX 2060 | hwt, Artoria2e5 | 45.76/100 | about 240-259 | about 6 d | Some undervolt or power cap runs |
+| NVIDIA GeForce GTX 1660 Ti | Phantomas | n/a | about 234 | about 6.8 d | Older Turing GPU |
+| AMD Radeon VII | cherubrock | 50.57/100 | about 350 | about 4.5 d | Development card |
+| Apple M4 Pro | wigglefruit | 30.29/100 | about 164 | about 9.6 d | Apple silicon |
+| Apple M2 | cherubrock | n/a | about 25 | about 62 d | MacBook Air 8 GB |
 
-All runs above:
-- use the Marin backend in PRP mode;
-- let PrMers choose NTT sizes automatically;
-- were executed with reasonably tuned (not extreme) power settings.
+### Detailed examples
 
-Your results will vary with clocks, thermals, drivers and PrMers version.
+| GPU | p = 57885161 | p = 74207281 | p = 82589933 | p = 136279841 |
+|---|---:|---:|---:|---:|
+| RTX 5090 | about 2350 iter/s | about 2230 iter/s | about 1970 iter/s | about 2230 iter/s |
+| Radeon VII | about 510 iter/s | about 436 iter/s | about 402 iter/s | about 350 iter/s |
+| RTX 4090 | about 1030 iter/s | about 910 iter/s | about 840 iter/s | about 1225 iter/s |
+| RTX 4060 Ti | about 420 iter/s | about 366 iter/s | about 337 iter/s | about 318 iter/s |
+| RTX 4070 Laptop | about 370 iter/s | about 320 iter/s | about 283 iter/s | about 255 iter/s |
+| GTX 1660 Ti | about 330 iter/s | about 288 iter/s | about 262 iter/s | about 234 iter/s |
+| RTX 5070 Laptop | about 858 iter/s | about 882 iter/s | about 875 iter/s | about 356 iter/s |
+| Apple M4 Pro | about 264 iter/s | about 231 iter/s | about 213 iter/s | about 164 iter/s |
+| Apple M2 | about 42 iter/s | about 38 iter/s | about 32 iter/s | about 25 iter/s |
 
-Cleaning and Uninstall
-----------------------
+## Backend and code
 
-Clean build artifacts:
-
-    make clean
-
-Uninstall installed files:
-
-    sudo make uninstall
-
-
-Backend and code
-----------------
-
-- Marin backend by Yves Gallot  
+- Marin backend by Yves Gallot
   - https://github.com/galloty/marin
+- Integer NTT and IBDWT techniques
+  - PrMers uses integer modular arithmetic modulo `2^64 - 2^32 + 1`.
+  - The transform and weighting ideas are inspired by DWT and IBDWT work for Mersenne arithmetic.
+- Gerbicz-Li proof scheme
+  - Used for PRP error checking and safe long exponentiation workflows.
 
-- Integer NTT / IBDWT techniques  
-  - Based on ideas discussed by Nick Craig-Wood and others in the context of
-    modular arithmetic for Mersenne numbers. In particular, NTT and IBDWT
-    using modular arithmetic modulo 2^64 - 2^32 + 1.
+## Related inspiration
 
-- Gerbicz-Li proof scheme  
-  - Used for PRP error checking in PrMers (see the paper in the "Must read papers"
-    section below).
-
-Related inspiration
--------------------
-
-- GPUOwl (Preda)  
-- Genefer22 (Yves Gallot)  
-- GIMPS and the Mersenne Forum community  
-- GMP-ECM and related work on elliptic curve factoring:  
+- GPUOwl by Preda
+  - https://github.com/preda/gpuowl
+- Genefer22 by Yves Gallot
+  - https://github.com/galloty/genefer22
+- Marin by Yves Gallot
+  - https://github.com/galloty/marin
+- GIMPS and the Mersenne Forum community
+  - https://www.mersenne.org/
+  - https://www.mersenneforum.org/
+- GMP-ECM
   - https://gitlab.inria.fr/zimmerma/ecm
-
-- Repositories by Yves Gallot containing many useful resources:  
-  - https://github.com/galloty  
-  - https://github.com/galloty/f12ecm  
+- Yves Gallot repositories
+  - https://github.com/galloty
+  - https://github.com/galloty/f12ecm
   - https://github.com/galloty/FastMultiplication
+- Nick Craig-Wood work
+  - IOCCC 2012 entry: https://github.com/ncw/ioccc2012
+  - GitHub: https://github.com/ncw/
+  - ARM Prime Math: https://www.craig-wood.com/nick/armprime/math/
 
-- Work by Nick Craig-Wood:  
-  - IOCCC 2012 entry: https://github.com/ncw/ioccc2012  
-  - Armprime project: https://github.com/ncw/  
-  - ARM Prime Math (background on the math behind Armprime):  
-    https://www.craig-wood.com/nick/armprime/math/
+## Must read papers
 
-Must read papers
-----------------
+### Multiplication by FFT and weighted transforms
 
-### Multiplication by FFT
+Discrete Weighted Transforms and Large Integer Arithmetic  
+Richard Crandall and Barry Fagin, 1994  
+https://www.ams.org/journals/mcom/1994-62-205/S0025-5718-1994-1185244-1/S0025-5718-1994-1185244-1.pdf
 
-- Discrete Weighted Transforms and Large Integer Arithmetic  
-  Richard Crandall and Barry Fagin, 1994  
-  https://www.ams.org/journals/mcom/1994-62-205/S0025-5718-1994-1185244-1/S0025-5718-1994-1185244-1.pdf
-
-- Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers  
-  Colin Percival, 2002  
-  https://www.daemonology.net/papers/fft.pdf
+Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers  
+Colin Percival, 2002  
+https://www.daemonology.net/papers/fft.pdf
 
 ### P-1 factoring
 
-- An FFT Extension to the P-1 Factoring Algorithm  
-  Peter L. Montgomery and Robert D. Silverman, 1990  
-  https://www.ams.org/journals/mcom/1990-54-190/S0025-5718-1990-1011444-3/S0025-5718-1990-1011444-3.pdf
+An FFT Extension to the P-1 Factoring Algorithm  
+Peter L. Montgomery and Robert D. Silverman, 1990  
+https://www.ams.org/journals/mcom/1990-54-190/S0025-5718-1990-1011444-3/S0025-5718-1990-1011444-3.pdf
 
-- Improved Stage 2 to P+/-1 Factoring Algorithms  
-  Peter L. Montgomery and Alexander Kruppa, 2008  
-  https://inria.hal.science/inria-00188192v3/document
+Improved Stage 2 to P+/-1 Factoring Algorithms  
+Peter L. Montgomery and Alexander Kruppa, 2008  
+https://inria.hal.science/inria-00188192v3/document
 
-### Proof schemes (Gerbicz-Li)
+### Proof schemes
 
-- An Efficient Modular Exponentiation Proof Scheme  
-  Darren Li, Yves Gallot, 2022-2023  
-  arXiv: https://arxiv.org/abs/2209.15623  
+An Efficient Modular Exponentiation Proof Scheme  
+Darren Li and Yves Gallot, 2022-2023  
+https://arxiv.org/abs/2209.15623
 
-  Presents an efficient proof scheme for left-to-right modular exponentiation,
-  generalizing the Gerbicz-Pietrzak approach to arbitrary exponents. It allows
-  an = r (mod m) to be proven with overhead negligible compared to the
-  exponentiation itself and has been deployed at PrimeGrid to validate long
-  runs.
+The paper describes a proof scheme for left-to-right modular exponentiation, generalizing the Gerbicz-Pietrzak approach to arbitrary exponents. It is relevant to long PRP runs and validation of large modular exponentiations.
 
-Author
-------
+## Cleaning and uninstall
 
-Author of PrMers:
+```bash
+make clean
+sudo make uninstall
+```
 
-- cherubrock (Sebastien), with contributions and feedback from users on
-  mersenneforum.org and GitHub.
+## Contributing and issues
 
-For bug reports, feature requests, or contributions, please use:
+Bug reports, feature requests and pull requests are welcome:
 
-    https://github.com/cherubrock-seb/PrMers/issues
+https://github.com/cherubrock-seb/PrMers/issues
 
+When reporting a problem, include:
 
-    ### Example PRP throughput (Marin backend, PRP mode)
+- OS and GPU
+- OpenCL driver version
+- Full command line
+- Relevant `worktodo.txt` line, if any
+- Last lines of terminal output and `prmers.log`
 
-Below are some concrete examples for different GPUs and exponents. All are for
-Mersenne numbers M_p = 2^p − 1 in PRP mode.
+## Author
 
-#### NVIDIA GeForce RTX 5090 (Resolver, vast.ai instance)
-
-Transform sizes were chosen automatically by PrMers.
-
-- p = 57 885 161, NTT size 8  
-  - About 2350 iter/s, ETA around 6 h 50 min.
-- p = 74 207 281, NTT size 8  
-  - About 2230 iter/s, ETA around 9 h 15 min.
-- p = 82 589 933, NTT size 8  
-  - About 1970 iter/s, ETA around 11 h 40 min.
-- p = 136 279 841, NTT size 8  
-  - About 2230 iter/s, ETA around 17 h.
-
-#### AMD Radeon VII (cherubrock, local dev machine)
-
-- p = 57 885 161, NTT size 8  
-  - About 510 iter/s, ETA around 31 h.
-- p = 74 207 281, NTT size 8  
-  - About 436 iter/s, ETA around 48 h.
-- p = 82 589 933, NTT size 8  
-  - About 402 iter/s, ETA around 52 h.
-- p = 136 279 841, NTT size 8  
-  - About 350 iter/s, ETA around 4.5 days.
-
-#### NVIDIA GeForce RTX 4090 (Resolver)
-
-- p = 57 885 161, NTT size 8  
-  - About 1030 iter/s, ETA around 15 h.
-- p = 74 207 281, NTT size 8  
-  - About 910 iter/s, ETA around 22 h.
-- p = 82 589 933, NTT size 8  
-  - About 840 iter/s, ETA around 27 h.
-- p = 136 279 841, NTT size 8  
-  - About 1225 iter/s, ETA around 31 h.
-
-#### NVIDIA GeForce RTX 4060 Ti (Lorenzo)
-
-- p = 57 885 161, NTT size 8  
-  - About 420 iter/s, ETA around 37 h.
-- p = 74 207 281, NTT size 8  
-  - About 366 iter/s, ETA around 55 h.
-- p = 82 589 933, NTT size 8  
-  - About 337 iter/s, ETA around 59 h.
-- p = 136 279 841, NTT size 8  
-  - About 318 iter/s, ETA just under 5 days.
-
-#### NVIDIA GeForce RTX 4070 Laptop GPU (Phantomas)
-
-- p = 57 885 161, NTT size 8  
-  - About 370 iter/s, ETA around 42 h.
-- p = 74 207 281, NTT size 8  
-  - About 320 iter/s, ETA around 63 h.
-- p = 82 589 933, NTT size 8  
-  - About 283 iter/s, ETA around 71 h.
-- p = 136 279 841, NTT size 8  
-  - About 255 iter/s, ETA a bit over 6 days.
-
-#### NVIDIA GeForce GTX 1660 Ti (Phantomas, MSI GL73 notebook)
-
-- p = 57 885 161, NTT size 8  
-  - About 330 iter/s, ETA around 47 h.
-- p = 74 207 281, NTT size 8  
-  - About 288 iter/s, ETA around 69 h.
-- p = 82 589 933, NTT size 8  
-  - About 262 iter/s, ETA around 76 h.
-- p = 136 279 841, NTT size 8  
-  - About 234 iter/s, ETA around 6.8 days.
-
-#### NVIDIA GeForce RTX 2060 (hwt; Artoria2e5)
-
-Typical ranges seen (power-capped / undervolted in some runs):
-
-- p = 57 885 161  
-  - ≈ 491-502 iter/s, ETA ≈ 1 d 7 h - 1 d 20 h.
-- p = 74 207 281  
-  - ≈ 499 iter/s, ETA ≈ 1 d 16 h.
-- p = 82 589 933  
-  - ≈ 499-502 iter/s, ETA ≈ 1 d 15 h - 1 d 20 h.
-- p = 136 279 841  
-  - ≈ 240-259 iter/s, ETA ≈ 5 d 21 h - 6 d 18 h.
-
-#### NVIDIA GeForce RTX 5070 Laptop (beepthebee)
-
-- p = 57 885 161, NTT size 8  
-  - About 858 iter/s, ETA around 18 h 45 min.
-- p = 74 207 281, NTT size 8  
-  - About 882 iter/s, ETA around 1 d 0 h.
-- p = 82 589 933, NTT size 8  
-  - About 875 iter/s, ETA around 1 d 2 h.
-- p = 136 279 841, NTT size 8  
-  - About 356 iter/s, ETA around 4 d 10 h.
-
-#### Apple M4 Pro (wigglefruit)
-
-- p = 57 885 161, NTT size 8  
-  - About 264 iter/s, ETA around 58 h.
-- p = 74 207 281, NTT size 8  
-  - About 231 iter/s, ETA around 87 h.
-- p = 82 589 933, NTT size 8  
-  - About 213 iter/s, ETA around 94 h.
-- p = 136 279 841, NTT size 8  
-  - About 164 iter/s, ETA around 9.6 days.
-
-#### Apple M2 (MacBook Air 8 GB, cherubrock)
-
-- p = 57 885 161, NTT size 8  
-  - About 42 iter/s, ETA around 15 h.
-- p = 74 207 281, NTT size 8  
-  - About 38 iter/s, ETA around 25 h.
-- p = 82 589 933, NTT size 8  
-  - About 32 iter/s, ETA around 29 h.
-- p = 136 279 841, NTT size 8  
-  - About 25 iter/s, ETA around 62 days.
+PrMers is developed by cherubrock-seb, with feedback and contributions from users on GitHub and mersenneforum.org.
