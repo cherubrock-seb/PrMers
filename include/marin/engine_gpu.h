@@ -737,12 +737,16 @@ public:
 		_gpu->create_kernels();
 
 		{
-			// V30: staged root generation.  The old code allocated a 3*n uint64
-			// host table (3.75 GiB at MM31).  Kaggle can kill the process with
-			// rc=137 before OpenCL reports a clean allocation error.  Keep only
-			// r2/r2i (n entries) plus a per-stage temporary block.
-			std::cout << "[host memory] building/uploading roots in staged mode" << std::endl;
-			std::vector<uint64> r2pack(n);
+			// V31: staged root generation, corrected.
+			// The original compact layout deliberately lets r2i start at root[n/2]
+			// and later reads r2i indices up to n - 2, so the temporary r2/r2i
+			// staging area must cover n/2 + n entries = 3*n/2 entries.
+			// V30 used only n entries and could segfault during staged root build.
+			// This still avoids the old full 3*n host table: at MM31 this is
+			// ~1.875 GiB transient instead of ~3.75 GiB.
+			std::cout << "[host memory] building/uploading roots in staged mode (v31 3n/2 pack)" << std::endl;
+			const size_t r2pack_elems = n + n / 2;
+			std::vector<uint64> r2pack(r2pack_elems, 0);
 			uint64 * const r2 = &r2pack[0];
 			uint64 * const r2i = &r2pack[n / 2];
 			for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
@@ -752,16 +756,20 @@ public:
 				for (size_t j = 0; j < s; ++j)
 				{
 					const size_t jr = ibdwt::inv_reversal(j, s);
-					r2[s + jr] = rsj; r2i[s + jr] = rsji;
-					rsj = mod_mul(rsj, rs); rsji = mod_mul(rsji, rsi);
+					r2[s + jr] = rsj;
+					r2i[s + jr] = rsji;
+					rsj = mod_mul(rsj, rs);
+					rsji = mod_mul(rsji, rsi);
 				}
 			}
+			// Upload root[0..n).  The extra n/2 tail is only a host-side
+			// scratch area needed to reproduce the original compact root formula.
 			_gpu->write_root_part(r2pack.data(), n, 0);
 
 			for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
 			{
 				const size_t elems = 2 * s;
-				std::vector<uint64> block(elems);
+				std::vector<uint64> block(elems, 0);
 				for (size_t j = 0; j < s; ++j)
 				{
 					const size_t sj = s + j;
@@ -769,6 +777,7 @@ public:
 					block[2 * j + 1] = mod_mul(r2[sj], r2[2 * sj]);
 				}
 				_gpu->write_root_part(block.data(), elems, n + 2 * s);
+
 				for (size_t j = 0; j < s; ++j)
 				{
 					const size_t sj = s + j;
