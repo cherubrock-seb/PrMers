@@ -3251,6 +3251,7 @@ int App::runPM1Marin() {
     interrupted.store(false, std::memory_order_relaxed);
 
     if (doExtend) {    
+        if (ultralowmem_delta_extend) std::cout << "[PM1] Loading H_old into RBASE using lowmem streamed set_mpz..." << std::endl;
         mpz_t Xtmp;
         mpz_init(Xtmp);
         mpz_set(Xtmp, X_old.get_mpz_t()); 
@@ -3258,8 +3259,10 @@ int App::runPM1Marin() {
         eng->set_mpz(static_cast<engine::Reg>(RBASE), Xtmp);
 
         mpz_clear(Xtmp);
+        if (ultralowmem_delta_extend) std::cout << "[PM1] H_old loaded; initializing RSTATE=1..." << std::endl;
 
         eng->set(static_cast<engine::Reg>(RSTATE), 1);
+        if (ultralowmem_delta_extend) std::cout << "[PM1] RSTATE initialized; building E_diff next." << std::endl;
         if (options.gerbiczli) {
             eng->set(static_cast<engine::Reg>(RACC_L), 1);
             eng->set(static_cast<engine::Reg>(RACC_R), 1);

@@ -133,6 +133,7 @@ public:
 			const size_t weight_bytes = 2 * n * sizeof(uint64);
 			const size_t width_bytes = n * sizeof(uint8);
 			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
+			const bool lowmem_host_staging = (_reg_count <= 2);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
 			std::cout << "[GPU memory plan] regs=" << _reg_count
 			          << " reg=" << gib(reg_bytes) << " GiB"
@@ -141,26 +142,38 @@ public:
 			          << " carry=" << gib(carry_bytes) << " GiB"
 			          << " width=" << gib(width_bytes) << " GiB"
 			          << " total=" << gib(total_bytes) << " GiB before driver overhead" << std::endl;
-			// Do not clear the huge register slab here. PM1 low-memory paths
-			// explicitly initialize every register they use (R0/R1), and
-			// clEnqueueFillBuffer on multi-GiB buffers can fail on Kaggle P100
-			// with CL_INVALID_COMMAND_QUEUE before the real run even starts.
-			std::cout << "[GPU memory alloc] allocating reg..." << std::endl;
-			_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
-			std::cout << "[GPU memory alloc] reg OK" << std::endl;
-			std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
-			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
-			std::cout << "[GPU memory alloc] carry OK" << std::endl;
-			// root/weight/width are overwritten immediately; do not allocate giant host zero vectors for them.
-			std::cout << "[GPU memory alloc] allocating root..." << std::endl;
-			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
-			std::cout << "[GPU memory alloc] root OK" << std::endl;
-			std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
-			_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
-			std::cout << "[GPU memory alloc] weight OK" << std::endl;
-			std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
-			_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
-			std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
+
+			if (lowmem_host_staging)
+			{
+				// Low-memory PM1 paths explicitly initialize every register they use
+				// (R0/R1).  Avoid clearing the multi-GiB register slab here; on
+				// Kaggle P100 the driver can otherwise kill the process before the
+				// delta extension even starts.
+				std::cout << "[GPU memory alloc] allocating reg..." << std::endl;
+				_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
+				std::cout << "[GPU memory alloc] reg OK" << std::endl;
+				std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
+				_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
+				std::cout << "[GPU memory alloc] carry OK" << std::endl;
+				std::cout << "[GPU memory alloc] allocating root..." << std::endl;
+				_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+				std::cout << "[GPU memory alloc] root OK" << std::endl;
+				std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
+				_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+				std::cout << "[GPU memory alloc] weight OK" << std::endl;
+				std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
+				_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
+				std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
+			}
+			else
+			{
+				// Original/default Marin behaviour for normal PRP/LL/PM1/ECM modes.
+				_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes);
+				_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
+				_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+				_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+				_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
+			}
 		}
 	}
 
@@ -405,6 +418,21 @@ public:
 	void write_regs(const uint64 * const ptr) { _write_buffer(_reg, ptr, _reg_count * _n * sizeof(uint64)); }
 	void read_reg(uint64 * const ptr, const size_t index) { _read_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
 	void write_reg(const uint64 * const ptr, const size_t index) { _write_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
+	void write_reg_part(const uint64 * const ptr, const size_t elems, const size_t index, const size_t offset_elems)
+	{
+		_write_buffer(_reg, ptr, elems * sizeof(uint64), (index * _n + offset_elems) * sizeof(uint64));
+	}
+	void fill_reg_zero(const size_t index)
+	{
+		const uint64 zero = 0;
+		static constexpr size_t CHUNK = size_t(1) << 20;
+		std::vector<uint64> z(CHUNK, zero);
+		for (size_t off = 0; off < _n; off += CHUNK)
+		{
+			const size_t len = std::min(CHUNK, _n - off);
+			write_reg_part(z.data(), len, index, off);
+		}
+	}
 
 	void write_root(const uint64 * const ptr) { _write_buffer(_root, ptr, 3 * _n * sizeof(uint64)); }
 	void write_root_part(const uint64 * const ptr, const size_t elems, const size_t offset_elems) { _write_buffer(_root, ptr, elems * sizeof(uint64), offset_elems * sizeof(uint64)); }
@@ -736,15 +764,12 @@ public:
 		_gpu->alloc_memory();
 		_gpu->create_kernels();
 
+		if (_reg_count <= 2)
 		{
-			// V31: staged root generation, corrected.
-			// The original compact layout deliberately lets r2i start at root[n/2]
-			// and later reads r2i indices up to n - 2, so the temporary r2/r2i
-			// staging area must cover n/2 + n entries = 3*n/2 entries.
-			// V30 used only n entries and could segfault during staged root build.
-			// This still avoids the old full 3*n host table: at MM31 this is
-			// ~1.875 GiB transient instead of ~3.75 GiB.
-			std::cout << "[host memory] building/uploading roots in staged mode (v31 3n/2 pack)" << std::endl;
+			// V32: staged root generation is confined to low-memory 1/2-register
+			// paths only.  Normal Marin modes keep the original full-root build below
+			// to avoid behaviour changes outside PM1 low/ultralowmem.
+			std::cout << "[host memory] building/uploading roots in staged mode (v33 lowmem-only 3n/2 pack)" << std::endl;
 			const size_t r2pack_elems = n + n / 2;
 			std::vector<uint64> r2pack(r2pack_elems, 0);
 			uint64 * const r2 = &r2pack[0];
@@ -762,8 +787,6 @@ public:
 					rsji = mod_mul(rsji, rsi);
 				}
 			}
-			// Upload root[0..n).  The extra n/2 tail is only a host-side
-			// scratch area needed to reproduce the original compact root formula.
 			_gpu->write_root_part(r2pack.data(), n, 0);
 
 			for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
@@ -789,15 +812,22 @@ public:
 			std::vector<uint64>().swap(r2pack);
 			std::cout << "[host memory] roots uploaded; host root staging released" << std::endl;
 		}
+		else
+		{
+			// Original/default Marin root generation for non-low-memory modes.
+			std::vector<uint64> root(3 * n);
+			ibdwt::roots(n, root.data());
+			_gpu->write_root(root.data());
+		}
 
-		std::cout << "[host memory] allocating/building weight + digit_width host tables" << std::endl;
+		if (_reg_count <= 2) std::cout << "[host memory] allocating/building weight + digit_width host tables" << std::endl;
 		_weight.resize(2 * n);
 		_digit_width.resize(n);
 		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
-		std::cout << "[host memory] uploading weight + digit_width" << std::endl;
+		if (_reg_count <= 2) std::cout << "[host memory] uploading weight + digit_width" << std::endl;
 		_gpu->write_weight(_weight.data());
 		_gpu->write_width(_digit_width.data());
-		std::cout << "[host memory] engine transform tables ready" << std::endl;
+		if (_reg_count <= 2) std::cout << "[host memory] engine transform tables ready" << std::endl;
 
 		// Only transfer ownership after every large allocation/upload completed.
 		// If construction throws before this point, gpu_owner cleans the OpenCL
@@ -833,6 +863,15 @@ public:
 	void set(const Reg dst, const uint32 a) const override
 	{
 		const size_t n = _n;
+		if (_reg_count <= 2)
+		{
+			std::cout << "[host memory] lowmem streamed set(reg=" << size_t(dst) << ", const=" << a << ")" << std::endl;
+			_gpu->fill_reg_zero(size_t(dst));
+			uint64 first = a; // weight[0] = 1
+			_gpu->write_reg_part(&first, 1, size_t(dst), 0);
+			return;
+		}
+
 		std::vector<uint64> x(n);
 
 		x[0] = a;	// weight[0] = 1
@@ -846,6 +885,25 @@ public:
 		const size_t n = _n;
 		const uint64 * const weight = _weight.data();
 
+		if (_reg_count <= 2)
+		{
+			std::cout << "[host memory] lowmem streamed weighted register upload(reg=" << size_t(dst) << ")" << std::endl;
+			static constexpr size_t CHUNK = size_t(1) << 20;
+			std::vector<uint64> x(CHUNK);
+			for (size_t off = 0; off < n; off += CHUNK)
+			{
+				const size_t len = std::min(CHUNK, n - off);
+				for (size_t t = 0; t < len; ++t)
+				{
+					const size_t k = off + t;
+					const uint64 w = weight[2 * (k / 4 + (k % 4) * (n / 4)) + 0];
+					x[t] = mod_mul(uint32(d[k]), w);
+				}
+				_gpu->write_reg_part(x.data(), len, size_t(dst), off);
+			}
+			return;
+		}
+
 		// weight
 		std::vector<uint64> x(n);
 		for (size_t k = 0; k < n; ++k)
@@ -855,6 +913,53 @@ public:
 		}
 
 		_gpu->write_reg(x.data(), size_t(dst));
+	}
+
+	void set_mpz(const Reg dst, const mpz_t & z) const override
+	{
+		if (_reg_count > 2)
+		{
+			engine::set_mpz(dst, z);
+			return;
+		}
+
+		const size_t n = _n;
+		const uint64 * const weight = _weight.data();
+		const uint8 * const width = _digit_width.data();
+		std::cout << "[host memory] lowmem streamed set_mpz(reg=" << size_t(dst) << ") begin" << std::endl;
+
+		const size_t zbits = (mpz_sgn(z) == 0) ? 0 : mpz_sizeinbase(z, 2);
+		const size_t words32 = zbits / 32 + 3;
+		std::vector<uint32> v(words32, 0);
+		size_t d_size = 0;
+		mpz_export(v.data(), &d_size, -1, sizeof(uint32), 0, 0, z);
+
+		static constexpr size_t CHUNK = size_t(1) << 20;
+		std::vector<uint64> x(CHUNK);
+		size_t bit_index = 0;
+		for (size_t off = 0; off < n; off += CHUNK)
+		{
+			const size_t len = std::min(CHUNK, n - off);
+			for (size_t t = 0; t < len; ++t)
+			{
+				const size_t k = off + t;
+				const uint8 wdt = width[k];
+				const size_t i = bit_index / (8 * sizeof(uint32));
+				const size_t s = bit_index % (8 * sizeof(uint32));
+				uint32 u = 0;
+				if (i < v.size())
+				{
+					u = v[i] >> s;
+					if (s != 0 && i + 1 < v.size()) u |= v[i + 1] << (32 - s);
+				}
+				u &= ((uint32(1) << wdt) - 1);
+				const uint64 ww = weight[2 * (k / 4 + (k % 4) * (n / 4)) + 0];
+				x[t] = mod_mul(u, ww);
+				bit_index += wdt;
+			}
+			_gpu->write_reg_part(x.data(), len, size_t(dst), off);
+		}
+		std::cout << "[host memory] lowmem streamed set_mpz(reg=" << size_t(dst) << ") done" << std::endl;
 	}
 
 	void get(uint64 * const d, const Reg src) const override
