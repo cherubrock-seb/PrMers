@@ -145,12 +145,22 @@ public:
 			// explicitly initialize every register they use (R0/R1), and
 			// clEnqueueFillBuffer on multi-GiB buffers can fail on Kaggle P100
 			// with CL_INVALID_COMMAND_QUEUE before the real run even starts.
+			std::cout << "[GPU memory alloc] allocating reg..." << std::endl;
 			_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
+			std::cout << "[GPU memory alloc] reg OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
 			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
+			std::cout << "[GPU memory alloc] carry OK" << std::endl;
 			// root/weight/width are overwritten immediately; do not allocate giant host zero vectors for them.
+			std::cout << "[GPU memory alloc] allocating root..." << std::endl;
 			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+			std::cout << "[GPU memory alloc] root OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
 			_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+			std::cout << "[GPU memory alloc] weight OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
 			_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
+			std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
 		}
 	}
 
@@ -397,6 +407,7 @@ public:
 	void write_reg(const uint64 * const ptr, const size_t index) { _write_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
 
 	void write_root(const uint64 * const ptr) { _write_buffer(_root, ptr, 3 * _n * sizeof(uint64)); }
+	void write_root_part(const uint64 * const ptr, const size_t elems, const size_t offset_elems) { _write_buffer(_root, ptr, elems * sizeof(uint64), offset_elems * sizeof(uint64)); }
 	void write_weight(const uint64 * const ptr) { _write_buffer(_weight, ptr, 2 * _n * sizeof(uint64)); }
 	void write_width(const uint8 * const ptr) { _write_buffer(_digit_width, ptr, _n * sizeof(uint8)); }
 
@@ -726,20 +737,58 @@ public:
 		_gpu->create_kernels();
 
 		{
-			// Keep the large MM31 root table transient.  Holding root (3*n*8)
-			// while also building weight/width and OpenCL buffers can push
-			// Kaggle P100 sessions into host OOM even though VRAM is enough.
-			std::vector<uint64> root(3 * n);
-			ibdwt::roots(n, root.data());
-			_gpu->write_root(root.data());
-			std::vector<uint64>().swap(root);
+			// V30: staged root generation.  The old code allocated a 3*n uint64
+			// host table (3.75 GiB at MM31).  Kaggle can kill the process with
+			// rc=137 before OpenCL reports a clean allocation error.  Keep only
+			// r2/r2i (n entries) plus a per-stage temporary block.
+			std::cout << "[host memory] building/uploading roots in staged mode" << std::endl;
+			std::vector<uint64> r2pack(n);
+			uint64 * const r2 = &r2pack[0];
+			uint64 * const r2i = &r2pack[n / 2];
+			for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
+			{
+				const uint64 rs = mod_root_nth(2 * s), rsi = mod_invert(rs);
+				uint64 rsj = 1, rsji = 1;
+				for (size_t j = 0; j < s; ++j)
+				{
+					const size_t jr = ibdwt::inv_reversal(j, s);
+					r2[s + jr] = rsj; r2i[s + jr] = rsji;
+					rsj = mod_mul(rsj, rs); rsji = mod_mul(rsji, rsi);
+				}
+			}
+			_gpu->write_root_part(r2pack.data(), n, 0);
+
+			for (size_t s = (n % 5 == 0) ? 5 : 1; s <= n / 4; s *= 2)
+			{
+				const size_t elems = 2 * s;
+				std::vector<uint64> block(elems);
+				for (size_t j = 0; j < s; ++j)
+				{
+					const size_t sj = s + j;
+					block[2 * j + 0] = r2[2 * sj];
+					block[2 * j + 1] = mod_mul(r2[sj], r2[2 * sj]);
+				}
+				_gpu->write_root_part(block.data(), elems, n + 2 * s);
+				for (size_t j = 0; j < s; ++j)
+				{
+					const size_t sj = s + j;
+					block[2 * j + 0] = r2i[2 * sj];
+					block[2 * j + 1] = mod_mul(r2i[sj], r2i[2 * sj]);
+				}
+				_gpu->write_root_part(block.data(), elems, 2 * n + 2 * s);
+			}
+			std::vector<uint64>().swap(r2pack);
+			std::cout << "[host memory] roots uploaded; host root staging released" << std::endl;
 		}
 
+		std::cout << "[host memory] allocating/building weight + digit_width host tables" << std::endl;
 		_weight.resize(2 * n);
 		_digit_width.resize(n);
 		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
+		std::cout << "[host memory] uploading weight + digit_width" << std::endl;
 		_gpu->write_weight(_weight.data());
 		_gpu->write_width(_digit_width.data());
+		std::cout << "[host memory] engine transform tables ready" << std::endl;
 
 		// Only transfer ownership after every large allocation/upload completed.
 		// If construction throws before this point, gpu_owner cleans the OpenCL
