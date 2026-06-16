@@ -8,7 +8,7 @@ https://github.com/cherubrock-seb/PrMers
 
 Releases for Linux, macOS and Windows are available here:
 
-https://github.com/cherubrock-seb/PrMers/releases
+[https://github.com/cherubrock-seb/PrMers/releases](https://github.com/cherubrock-seb/PrMers/tags)
 
 PrMers is an OpenCL GPU program focused on long modular arithmetic runs for numbers of the form `2^p - 1`. It supports PRP, Lucas-Lehmer, P-1 and ECM workflows, with checkpointing, result JSON output, Prime95 compatible handoff files, worktodo parsing, and an optional web GUI.
 
