@@ -712,9 +712,15 @@ public:
 		_gpu->alloc_memory();
 		_gpu->create_kernels();
 
-		std::vector<uint64> root(3 * n);
-		ibdwt::roots(n, root.data());
-		_gpu->write_root(root.data());
+		{
+			// Keep the large MM31 root table transient.  Holding root (3*n*8)
+			// while also building weight/width and OpenCL buffers can push
+			// Kaggle P100 sessions into host OOM even though VRAM is enough.
+			std::vector<uint64> root(3 * n);
+			ibdwt::roots(n, root.data());
+			_gpu->write_root(root.data());
+			std::vector<uint64>().swap(root);
+		}
 
 		_weight.resize(2 * n);
 		_digit_width.resize(n);

@@ -7,7 +7,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 
 #pragma once
 
-#define CL_TARGET_OPENCL_VERSION 110
+#define CL_TARGET_OPENCL_VERSION 120
 #if defined(__APPLE__)
 	#include <OpenCL/cl.h>
 	#include <OpenCL/cl_ext.h>
@@ -498,11 +498,30 @@ public:
 		cl_int err;
 		cl_mem mem = clCreateBuffer(_context, flags, size, nullptr, &err);
 		fatal(err);
-		if (clear)
+		if (clear && size != 0)
 		{
-			std::vector<uint8_t> ptr(size);
-			for (size_t i = 0; i < size; ++i) ptr[i] = 0x00;	// debug 0xff;
-			fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, 0, size, ptr.data(), 0, nullptr, nullptr));
+			// Avoid allocating a gigantic host-side zero vector for MM31-sized
+			// buffers.  Kaggle/Colab can kill the process with rc=137 even when
+			// GPU memory is sufficient, because the old path temporarily created
+			// multi-GiB CPU buffers just to clear OpenCL memory.  OpenCL 1.2+
+			// provides clEnqueueFillBuffer, which clears directly on the device.
+			const uint8_t zero = 0x00;
+			err = clEnqueueFillBuffer(_queue, mem, &zero, sizeof(zero), 0, size, 0, nullptr, nullptr);
+			if (err != CL_SUCCESS)
+			{
+				// Conservative fallback: chunked host writes, never a single huge vector.
+				static constexpr size_t CHUNK = size_t(8) * 1024 * 1024;
+				std::vector<uint8_t> ptr(CHUNK, 0x00);
+				for (size_t off = 0; off < size; off += CHUNK)
+				{
+					const size_t len = std::min(CHUNK, size - off);
+					fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, off, len, ptr.data(), 0, nullptr, nullptr));
+				}
+			}
+			else
+			{
+				fatal(clFinish(_queue));
+			}
 		}
 		return mem;
 	}
