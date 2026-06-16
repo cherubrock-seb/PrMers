@@ -2921,36 +2921,39 @@ int App::runPM1Marin() {
     uint64_t B1_old = options.B1old;
     bool doExtend = (B1_old > 0 && B1_new > B1_old);
 
-    // In ultra-low-memory mode MM31 cannot use the generic resume-extension path:
-    // that path needs many logical registers because it exponentiates an arbitrary
-    // saved residue H. For Mersenne P-1 we can instead recompute the target state
-    // directly as 3^(E(B1_new)*2*p) with the fast3 one-register path. This keeps
-    // the RTX-compatible memory profile and is limited to -pm1-ultralowmem only.
-    const bool ultralowmem_fast3_recompute_extend =
-        doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
-    if (ultralowmem_fast3_recompute_extend) {
+    // In ultra-low-memory mode a normal resume extension uses the generic path
+    // and historically allocated many logical registers.  For large transforms
+    // such as MM31 we instead use a dedicated low-memory strategy:
+    //   1) Try the real delta extension H_new = H_old^Delta using two registers.
+    //      This is the preferred path on 16 GB GPUs such as P100 because it pays
+    //      only for the B1 delta.
+    //   2) If the two-register engine cannot be allocated, fall back to the
+    //      RTX-safe one-register fast3 recompute of 3^(E(B1_new)*2*p).
+    bool ultralowmem_delta_extend = doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
+    bool ultralowmem_fast3_recompute_extend = false;
+    if (ultralowmem_delta_extend) {
+        options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                   << B1_old << " -> B1=" << B1_new << "\n";
-        std::cout << "[PM1] Ultra-low-memory extension will recompute the target state "
-                  << "directly with the fast3 one-register path instead of loading "
-                  << "the arbitrary resume residue.\n";
+        std::cout << "[PM1] Ultra-low-memory extension will first try the true "
+                  << "delta path H_old^Delta with 2 GPU registers. If allocation "
+                  << "fails, it will fall back to the 1-register fast3 recompute.\n";
         if (guiServer_) {
             std::ostringstream oss;
             oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                 << B1_old << " -> B1=" << B1_new
-                << "\n[PM1] Recomputing 3^(E(B1)*2*p) with fast3 one-register path.\n";
+                << "\n[PM1] Trying true delta extension H_old^Delta with 2 GPU registers.\n";
             guiServer_->appendLog(oss.str());
         }
-        doExtend = false;
     }
 
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-              << B1_new << (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")) << std::endl;
+              << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 2-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
         oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-            << B1_new << (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""));
+            << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 2-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
         guiServer_->appendLog(oss.str());
     }
 
@@ -3148,9 +3151,13 @@ int App::runPM1Marin() {
     uint64_t estChunks = std::max<uint64_t>(1, (uint64_t)std::ceil(L_est_bits / (double)MAX_E_BITS));
     //const uint32_t p = static_cast<uint32_t>(options.exponent);
     //const bool verbose = true;//options.debug;
-    const bool pm1_ultralowmem_stage1 = options.pm1_ultralowmem && options.pm1_lowmem && !doExtend;
-    const bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
-    if (pm1_ultralowmem_stage1) {
+    bool pm1_ultralowmem_stage1 = options.pm1_ultralowmem && options.pm1_lowmem && !doExtend;
+    bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
+    if (ultralowmem_delta_extend) {
+        options.gerbiczli = false;
+        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using 2 GPU registers; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory delta extension enabled: using 2 GPU registers; Gerbicz-Li disabled.\n");
+    } else if (pm1_ultralowmem_stage1) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n";
         if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n");
@@ -3159,19 +3166,42 @@ int App::runPM1Marin() {
         std::cout << "[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n";
         if (guiServer_) guiServer_->appendLog("[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
     }
-    const size_t stage1RegCount = pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u);
-    engine* eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
+
+    size_t stage1RegCount = ultralowmem_delta_extend ? 2u : (pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u));
+    engine* eng = nullptr;
+    try {
+        eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
+    } catch (const std::exception& ex) {
+        if (!ultralowmem_delta_extend) throw;
+        std::cerr << "[PM1] Ultra-low-memory delta extension could not allocate the 2-register engine: "
+                  << ex.what() << "\n";
+        std::cerr << "[PM1] Falling back to RTX-safe 1-register fast3 recompute for B1="
+                  << B1_new << ". This is slower but preserves low memory.\n";
+        if (guiServer_) {
+            std::ostringstream oss;
+            oss << "[PM1] 2-register delta extension allocation failed; falling back to 1-register fast3 recompute.\n";
+            guiServer_->appendLog(oss.str());
+        }
+        ultralowmem_delta_extend = false;
+        ultralowmem_fast3_recompute_extend = true;
+        doExtend = false;
+        pm1_ultralowmem_stage1 = true;
+        pm1_lowmem_stage1 = true;
+        stage1RegCount = 1u;
+        eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
+    }
+
     const size_t RSTATE=0;
-    const size_t RACC_L = pm1_lowmem_stage1 ? 0u : 1u;
-    const size_t RACC_R = pm1_lowmem_stage1 ? 0u : 2u;
-    const size_t RCHK   = pm1_lowmem_stage1 ? 0u : 3u;
-    const size_t RPOW   = pm1_lowmem_stage1 ? 1u : 4u;
-    const size_t RTMP   = pm1_lowmem_stage1 ? 1u : 5u;
-    const size_t RSTART = pm1_lowmem_stage1 ? 0u : 6u;
-    const size_t RSAVE_S= pm1_lowmem_stage1 ? 0u : 7u;
-    const size_t RSAVE_L= pm1_lowmem_stage1 ? 0u : 8u;
-    const size_t RSAVE_R= pm1_lowmem_stage1 ? 0u : 9u;
-    const size_t RBASE  = pm1_ultralowmem_stage1 ? 0u : (pm1_lowmem_stage1 ? 2u : 10u);
+    const size_t RACC_L = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 1u;
+    const size_t RACC_R = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 2u;
+    const size_t RCHK   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 3u;
+    const size_t RPOW   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 1u : 4u;
+    const size_t RTMP   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 1u : 5u;
+    const size_t RSTART = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 6u;
+    const size_t RSAVE_S= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 7u;
+    const size_t RSAVE_L= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 8u;
+    const size_t RSAVE_R= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 9u;
+    const size_t RBASE  = ultralowmem_delta_extend ? 1u : (pm1_ultralowmem_stage1 ? 0u : (pm1_lowmem_stage1 ? 2u : 10u));
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
     auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
