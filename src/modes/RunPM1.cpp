@@ -2936,24 +2936,24 @@ int App::runPM1Marin() {
         std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                   << B1_old << " -> B1=" << B1_new << "\n";
         std::cout << "[PM1] Ultra-low-memory extension will first try the true "
-                  << "delta path H_old^Delta with 2 GPU registers. If allocation "
+                  << "delta path H_old^Delta with 3 GPU registers. If allocation "
                   << "fails, it will fall back to the 1-register fast3 recompute.\n";
         if (guiServer_) {
             std::ostringstream oss;
             oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                 << B1_old << " -> B1=" << B1_new
-                << "\n[PM1] Trying true delta extension H_old^Delta with 2 GPU registers.\n";
+                << "\n[PM1] Trying true delta extension H_old^Delta with 3 GPU registers.\n";
             guiServer_->appendLog(oss.str());
         }
     }
 
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-              << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 2-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
+              << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 3-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
         oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-            << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 2-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
+            << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 3-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
         guiServer_->appendLog(oss.str());
     }
 
@@ -3155,8 +3155,8 @@ int App::runPM1Marin() {
     bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
-        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using 2 GPU registers; Gerbicz-Li disabled.\n";
-        if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory delta extension enabled: using 2 GPU registers; Gerbicz-Li disabled.\n");
+        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using 3 GPU registers; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory delta extension enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
     } else if (pm1_ultralowmem_stage1) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n";
@@ -3167,19 +3167,19 @@ int App::runPM1Marin() {
         if (guiServer_) guiServer_->appendLog("[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
     }
 
-    size_t stage1RegCount = ultralowmem_delta_extend ? 2u : (pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u));
+    size_t stage1RegCount = ultralowmem_delta_extend ? 3u : (pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u));
     engine* eng = nullptr;
     try {
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     } catch (const std::exception& ex) {
         if (!ultralowmem_delta_extend) throw;
-        std::cerr << "[PM1] Ultra-low-memory delta extension could not allocate the 2-register engine: "
+        std::cerr << "[PM1] Ultra-low-memory delta extension could not allocate the 3-register engine: "
                   << ex.what() << "\n";
         std::cerr << "[PM1] Falling back to RTX-safe 1-register fast3 recompute for B1="
                   << B1_new << ". This is slower but preserves low memory.\n";
         if (guiServer_) {
             std::ostringstream oss;
-            oss << "[PM1] 2-register delta extension allocation failed; falling back to 1-register fast3 recompute.\n";
+            oss << "[PM1] 3-register delta extension allocation failed; falling back to 1-register fast3 recompute.\n";
             guiServer_->appendLog(oss.str());
         }
         ultralowmem_delta_extend = false;
@@ -3195,8 +3195,8 @@ int App::runPM1Marin() {
     const size_t RACC_L = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 1u;
     const size_t RACC_R = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 2u;
     const size_t RCHK   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 3u;
-    const size_t RPOW   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 1u : 4u;
-    const size_t RTMP   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 1u : 5u;
+    const size_t RPOW   = ultralowmem_delta_extend ? 2u : (pm1_lowmem_stage1 ? 1u : 4u);
+    const size_t RTMP   = ultralowmem_delta_extend ? 2u : (pm1_lowmem_stage1 ? 1u : 5u);
     const size_t RSTART = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 6u;
     const size_t RSAVE_S= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 7u;
     const size_t RSAVE_L= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 8u;
@@ -3436,8 +3436,11 @@ int App::runPM1Marin() {
 
             uint64_t lastIter_ext = (uint64_t)resumeI;
 
-            eng->copy(RTMP, RBASE);
-            eng->set_multiplicand(RBASE, RTMP);
+            // v36: keep RBASE in normal representation.  The previous 2-register
+            // attempt stored RBASE itself in multiplicand representation and reused it.
+            // That was compact but proved unreliable for the MM31 extension test.
+            // With 3 registers on 16 GB devices, use the canonical Marin pattern:
+            // prepare RTMP = multiplicand(RBASE) immediately before each multiply.
             for (mp_bitcnt_t i = resumeI; i > 0; --i) {
                 lastIter_ext = (uint64_t)i;
 
@@ -3493,37 +3496,47 @@ int App::runPM1Marin() {
 
                 if (bits_in_block == 0) {
                     current_block_len = ((uint64_t)((i - 1) % B)) + 1;
-                    if (current_block_len == B) {
-                        if (gl_checkpass == 0 &&
-                            blocks_since_check == 0 &&
-                            wbits == 0 &&
-                            eacc == 0)
-                        {
-                            eng->set(RACC_L, 1);
-                            eng->set(RACC_R, 1);
-                            eng->copy(RSAVE_S, RSTATE);
-                            eng->set(RSAVE_L, 1);
-                            eng->set(RSAVE_R, 1);
+
+                    // In the ultra-low-memory delta path we only use a compact register set
+                    // RSTATE=0, RBASE=1, RTMP=2.  The Gerbicz/checkpoint
+                    // helper registers are intentionally aliased away above
+                    // so they MUST NOT be touched unless Gerbicz-Li is actually
+                    // enabled.  v33/v34 reset RACC_L/RSAVE_* here even though
+                    // Gerbicz-Li was disabled, which aliased to RSTATE and
+                    // periodically did set(RSTATE, 1), corrupting H_old^Delta.
+                    if (options.gerbiczli) {
+                        if (current_block_len == B) {
+                            if (gl_checkpass == 0 &&
+                                blocks_since_check == 0 &&
+                                wbits == 0 &&
+                                eacc == 0)
+                            {
+                                eng->set(RACC_L, 1);
+                                eng->set(RACC_R, 1);
+                                eng->copy(RSAVE_S, RSTATE);
+                                eng->set(RSAVE_L, 1);
+                                eng->set(RSAVE_R, 1);
+                                eacc = 0;
+                                blocks_since_check = 0;
+                                wbits = 0;
+                                in_lot = true;
+                            }
+                        } else {
+                            in_lot = false;
+                            gl_checkpass = 0;
                             eacc = 0;
                             blocks_since_check = 0;
                             wbits = 0;
-                            in_lot = true;
                         }
-                    } else {
-                        in_lot = false;
-                        gl_checkpass = 0;
-                        eacc = 0;
-                        blocks_since_check = 0;
-                        wbits = 0;
+                        eng->copy(RSTART, RSTATE);
                     }
-                    eng->copy(RSTART, RSTATE);
                 }
 
                 eng->square_mul(RSTATE);
                 int b = mpz_tstbit(E_diff.get_mpz_t(), i - 1) ? 1 : 0;
                 if (b) {
-                    //eng->set_multiplicand(RTMP, RBASE);
-                    eng->mul(RSTATE, RBASE);
+                    eng->set_multiplicand(RTMP, RBASE);
+                    eng->mul(RSTATE, RTMP);
                 }
 
                 // Injection d'erreur comme dans la branche normale
@@ -3823,6 +3836,16 @@ int App::runPM1Marin() {
         // Do gcd and results file exactly as in the normal Stage1 end:
         X -= 1;
         mpz_class g = gcd_with_dots(X, Mp);
+        if (options.exponent == 2147483647ULL) {
+            mpz_class q1("295257526626031");
+            mpz_class q2("87054709261955177");
+            mpz_class r1, r2;
+            mpz_mod(r1.get_mpz_t(), X.get_mpz_t(), q1.get_mpz_t());
+            mpz_mod(r2.get_mpz_t(), X.get_mpz_t(), q2.get_mpz_t());
+            std::cout << "[DBG MM31] (X-1) mod q1 = " << r1 << "\n";
+            std::cout << "[DBG MM31] (X-1) mod q2 = " << r2 << "\n";
+            std::cout << "[DBG MM31] gcd bits = " << mpz_sizeinbase(g.get_mpz_t(), 2) << "\n";
+        }
         bool factorFound = (g != 1) && (g != Mp);
 
         std::string filename = "stage1_result_B1_" + std::to_string(B1_new) +

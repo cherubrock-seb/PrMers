@@ -214,6 +214,7 @@ private:
 
 	const cl_platform_id _platform;
 	const cl_device_id _device;
+	cl_ulong _global_mem_size = 0;
 #if defined(ocl_debug)
 	const size_t _d;
 #endif
@@ -264,6 +265,7 @@ public:
 		cl_uint compute_units; fatal(clGetDeviceInfo(_device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr));
 		cl_uint max_clock_frequency; fatal(clGetDeviceInfo(_device, CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(max_clock_frequency), &max_clock_frequency, nullptr));
 		cl_ulong mem_size; fatal(clGetDeviceInfo(_device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(mem_size), &mem_size, nullptr));
+		_global_mem_size = mem_size;
 		cl_ulong mem_cache_size; fatal(clGetDeviceInfo(_device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(mem_cache_size), &mem_cache_size, nullptr));
 		cl_uint mem_cache_line_size; fatal(clGetDeviceInfo(_device, CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE, sizeof(mem_cache_line_size), &mem_cache_line_size, nullptr));
 		fatal(clGetDeviceInfo(_device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(_local_mem_size), &_local_mem_size, nullptr));
@@ -303,6 +305,8 @@ public:
 		if (_queueF != nullptr) fatal(clFinish(_queueF));
 		if (_queueP != nullptr && _queueP != _queueF) fatal(clFinish(_queueP));
 	}
+
+	cl_ulong get_global_mem_size() const { return _global_mem_size; }
 
 	virtual ~device()
 	{

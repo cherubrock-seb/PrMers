@@ -10,6 +10,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <sstream>
 
 #include "engine.h"
 #include "ibdwt.h"
@@ -135,13 +136,35 @@ public:
 			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
 			const bool lowmem_host_staging = (_reg_count <= 2);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
+			const cl_ulong device_mem_bytes = get_global_mem_size();
 			std::cout << "[GPU memory plan] regs=" << _reg_count
 			          << " reg=" << gib(reg_bytes) << " GiB"
 			          << " root=" << gib(root_bytes) << " GiB"
 			          << " weight=" << gib(weight_bytes) << " GiB"
 			          << " carry=" << gib(carry_bytes) << " GiB"
 			          << " width=" << gib(width_bytes) << " GiB"
-			          << " total=" << gib(total_bytes) << " GiB before driver overhead" << std::endl;
+			          << " total=" << gib(total_bytes) << " GiB before driver overhead";
+			if (device_mem_bytes != 0) std::cout << " | device=" << gib(static_cast<size_t>(device_mem_bytes)) << " GiB";
+			std::cout << std::endl;
+
+			// V34 safety gate: on 10 GB RTX-class cards the 2-register MM31 plan can
+			// allocate the OpenCL buffers but still fail during the first streamed
+			// register upload because the CUDA/OpenCL driver needs extra pinned/mirror
+			// memory. Throw early so PM1 ultralowmem can fall back cleanly to the
+			// one-register fast3 recompute instead of aborting inside set_mpz().
+			if (_reg_count == 2 && device_mem_bytes != 0)
+			{
+				const bool force_tight = (std::getenv("PRMERS_PM1_ALLOW_TIGHT_DELTA2REG") != nullptr);
+				const long double safe_limit = static_cast<long double>(device_mem_bytes) * 0.80L;
+				if (!force_tight && static_cast<long double>(total_bytes) > safe_limit)
+				{
+					std::ostringstream ss;
+					ss << "2-reg lowmem plan too tight for device memory: plan="
+					   << gib(total_bytes) << " GiB, device=" << gib(static_cast<size_t>(device_mem_bytes))
+					   << " GiB, safety_limit=80%. Set PRMERS_PM1_ALLOW_TIGHT_DELTA2REG=1 to force.";
+					throw std::runtime_error(ss.str());
+				}
+			}
 
 			if (lowmem_host_staging)
 			{
