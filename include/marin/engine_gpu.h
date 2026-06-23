@@ -134,7 +134,7 @@ public:
 			const size_t weight_bytes = 2 * n * sizeof(uint64);
 			const size_t width_bytes = n * sizeof(uint8);
 			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
-			const bool lowmem_host_staging = (_reg_count <= 2);
+			const bool lowmem_host_staging = (_reg_count <= 3);
 			const bool delta3reg_no_giant_clear = (_reg_count == 3);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
 			const cl_ulong device_mem_bytes = get_global_mem_size();
@@ -170,7 +170,7 @@ public:
 			if (lowmem_host_staging || delta3reg_no_giant_clear)
 			{
 				// Low-memory PM1 paths explicitly initialize every register they use.
-				// V40 extends the no-clear allocation to the canonical 3-register
+				// V41 keeps the no-clear allocation for the canonical 3-register
 				// delta path.  On CUDA/OpenCL P100, clEnqueueFillBuffer on the
 				// 3.75 GiB MM31 register slab can fail as CL_INVALID_COMMAND_QUEUE
 				// even though allocation itself succeeds.  Avoid the giant clear;
@@ -790,12 +790,13 @@ public:
 		_gpu->alloc_memory();
 		_gpu->create_kernels();
 
-		if (_reg_count <= 2)
+		if (_reg_count <= 3)
 		{
-			// V32: staged root generation is confined to low-memory 1/2-register
-			// paths only.  Normal Marin modes keep the original full-root build below
-			// to avoid behaviour changes outside PM1 low/ultralowmem.
-			std::cout << "[host memory] building/uploading roots in staged mode (v33 lowmem-only 3n/2 pack)" << std::endl;
+			// V41: staged root generation is used by low-memory 1/2-register paths
+			// and by the canonical PM1 delta 3-register path.  This avoids a
+			// 3.75 GiB host root vector on Kaggle/P100.  Normal Marin modes with
+			// higher register counts keep the original full-root build below.
+			std::cout << "[host memory] building/uploading roots in staged mode (v41 lowmem/delta3 3n/2 pack)" << std::endl;
 			const size_t r2pack_elems = n + n / 2;
 			std::vector<uint64> r2pack(r2pack_elems, 0);
 			uint64 * const r2 = &r2pack[0];
@@ -846,14 +847,14 @@ public:
 			_gpu->write_root(root.data());
 		}
 
-		if (_reg_count <= 2) std::cout << "[host memory] allocating/building weight + digit_width host tables" << std::endl;
+		if (_reg_count <= 3) std::cout << "[host memory] allocating/building weight + digit_width host tables" << std::endl;
 		_weight.resize(2 * n);
 		_digit_width.resize(n);
 		ibdwt::weights_widths(n, q, _weight.data(), _digit_width.data());
-		if (_reg_count <= 2) std::cout << "[host memory] uploading weight + digit_width" << std::endl;
+		if (_reg_count <= 3) std::cout << "[host memory] uploading weight + digit_width" << std::endl;
 		_gpu->write_weight(_weight.data());
 		_gpu->write_width(_digit_width.data());
-		if (_reg_count <= 2) std::cout << "[host memory] engine transform tables ready" << std::endl;
+		if (_reg_count <= 3) std::cout << "[host memory] engine transform tables ready" << std::endl;
 
 		// Only transfer ownership after every large allocation/upload completed.
 		// If construction throws before this point, gpu_owner cleans the OpenCL
@@ -889,7 +890,7 @@ public:
 	void set(const Reg dst, const uint32 a) const override
 	{
 		const size_t n = _n;
-		if (_reg_count <= 2)
+		if (_reg_count <= 3)
 		{
 			std::cout << "[host memory] lowmem streamed set(reg=" << size_t(dst) << ", const=" << a << ")" << std::endl;
 			_gpu->fill_reg_zero(size_t(dst));
@@ -911,7 +912,7 @@ public:
 		const size_t n = _n;
 		const uint64 * const weight = _weight.data();
 
-		if (_reg_count <= 2)
+		if (_reg_count <= 3)
 		{
 			std::cout << "[host memory] lowmem streamed weighted register upload(reg=" << size_t(dst) << ")" << std::endl;
 			static constexpr size_t CHUNK = size_t(1) << 20;
@@ -943,7 +944,7 @@ public:
 
 	void set_mpz(const Reg dst, const mpz_t & z) const override
 	{
-		if (_reg_count > 2)
+		if (_reg_count > 3)
 		{
 			engine::set_mpz(dst, z);
 			return;
