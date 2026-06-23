@@ -135,6 +135,7 @@ public:
 			const size_t width_bytes = n * sizeof(uint8);
 			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
 			const bool lowmem_host_staging = (_reg_count <= 2);
+			const bool delta3reg_no_giant_clear = (_reg_count == 3);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
 			const cl_ulong device_mem_bytes = get_global_mem_size();
 			std::cout << "[GPU memory plan] regs=" << _reg_count
@@ -166,13 +167,15 @@ public:
 				}
 			}
 
-			if (lowmem_host_staging)
+			if (lowmem_host_staging || delta3reg_no_giant_clear)
 			{
-				// Low-memory PM1 paths explicitly initialize every register they use
-				// (R0/R1).  Avoid clearing the multi-GiB register slab here; on
-				// Kaggle P100 the driver can otherwise kill the process before the
-				// delta extension even starts.
-				std::cout << "[GPU memory alloc] allocating reg..." << std::endl;
+				// Low-memory PM1 paths explicitly initialize every register they use.
+				// V40 extends the no-clear allocation to the canonical 3-register
+				// delta path.  On CUDA/OpenCL P100, clEnqueueFillBuffer on the
+				// 3.75 GiB MM31 register slab can fail as CL_INVALID_COMMAND_QUEUE
+				// even though allocation itself succeeds.  Avoid the giant clear;
+				// RSTATE/RBASE/RTMP are initialized explicitly before use.
+				std::cout << "[GPU memory alloc] allocating reg (no giant clear)..." << std::endl;
 				_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
 				std::cout << "[GPU memory alloc] reg OK" << std::endl;
 				std::cout << "[GPU memory alloc] allocating carry..." << std::endl;

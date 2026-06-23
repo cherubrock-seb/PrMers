@@ -2927,17 +2927,16 @@ int App::runPM1Marin() {
     //   1) Run the real delta extension H_new = H_old^Delta using the compact canonical 3-register path.
     //      This is the preferred path on 16 GB GPUs such as P100 because it pays
     //      only for the B1 delta.
-    //   2) If the two-register engine cannot be allocated, fall back to the
-    //      RTX-safe one-register fast3 recompute of 3^(E(B1_new)*2*p).
+    //   2) No automatic recompute fallback in this diagnostic path: P100 must run
+    //      the true delta extension, otherwise -b1old has no value.
     bool ultralowmem_delta_extend = doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
     bool ultralowmem_fast3_recompute_extend = false;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                   << B1_old << " -> B1=" << B1_new << "\n";
-        std::cout << "[PM1] Ultra-low-memory extension will first try the true "
-                  << "delta path H_old^Delta with 3 GPU registers. If allocation "
-                  << "fails, it will fall back to the 1-register fast3 recompute.\n";
+        std::cout << "[PM1] Ultra-low-memory extension will run the true "
+                  << "delta path H_old^Delta with 3 GPU registers; no automatic fast3 recompute fallback.\n";
         if (guiServer_) {
             std::ostringstream oss;
             oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
