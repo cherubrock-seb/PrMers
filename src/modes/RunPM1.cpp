@@ -2924,7 +2924,7 @@ int App::runPM1Marin() {
     // In ultra-low-memory mode a normal resume extension uses the generic path
     // and historically allocated many logical registers.  For large transforms
     // such as MM31 we instead use a dedicated low-memory strategy:
-    //   1) Try the real delta extension H_new = H_old^Delta using two registers.
+    //   1) Run the real delta extension H_new = H_old^Delta using the compact canonical 3-register path.
     //      This is the preferred path on 16 GB GPUs such as P100 because it pays
     //      only for the B1 delta.
     //   2) If the two-register engine cannot be allocated, fall back to the
@@ -3173,13 +3173,20 @@ int App::runPM1Marin() {
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     } catch (const std::exception& ex) {
         if (!ultralowmem_delta_extend) throw;
-        std::cerr << "[PM1] Ultra-low-memory delta extension could not allocate the 3-register engine: "
+        std::cerr << "[PM1] Ultra-low-memory delta extension failed before start: "
                   << ex.what() << "\n";
-        std::cerr << "[PM1] Falling back to RTX-safe 1-register fast3 recompute for B1="
-                  << B1_new << ". This is slower but preserves low memory.\n";
+        std::cerr << "[PM1] No automatic fast3 recompute fallback in this build. "
+                     "The goal is to diagnose/fix the true B1 extension path.\n";
+        std::cerr << "[PM1] If you explicitly want the old fallback behaviour, set "
+                     "PRMERS_PM1_FALLBACK_FAST3=1.\n";
+        if (std::getenv("PRMERS_PM1_FALLBACK_FAST3") == nullptr) {
+            throw;
+        }
+        std::cerr << "[PM1] PRMERS_PM1_FALLBACK_FAST3=1 set: falling back to 1-register fast3 recompute for B1="
+                  << B1_new << ".\n";
         if (guiServer_) {
             std::ostringstream oss;
-            oss << "[PM1] 3-register delta extension allocation failed; falling back to 1-register fast3 recompute.\n";
+            oss << "[PM1] 3-register delta extension failed; explicit fallback requested.\n";
             guiServer_->appendLog(oss.str());
         }
         ultralowmem_delta_extend = false;

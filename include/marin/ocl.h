@@ -290,11 +290,22 @@ public:
 		cl_int err_cc;
 		_context = clCreateContext(context_properties, 1, &_device, nullptr, nullptr, &err_cc);
 		fatal(err_cc);
-		cl_int err_ccq;
-		_queueF = clCreateCommandQueue(_context, _device, 0, &err_ccq);
-		_queueP = clCreateCommandQueue(_context, _device, CL_QUEUE_PROFILING_ENABLE, &err_ccq);
+		// Create and validate each queue independently.  The old code reused
+		// the same error variable for both clCreateCommandQueue calls and only
+		// checked it after the second call.  On some CUDA OpenCL stacks this can
+		// leave _queueF null/invalid while _queue still points to it, and the
+		// first buffer transfer then fails with CL_INVALID_COMMAND_QUEUE.
+		cl_int err_ccqF = CL_SUCCESS;
+		_queueF = clCreateCommandQueue(_context, _device, 0, &err_ccqF);
+		fatal(err_ccqF, "clCreateCommandQueue fast");
+		if (_queueF == nullptr) fatal(CL_INVALID_COMMAND_QUEUE, "fast queue is null");
+
+		cl_int err_ccqP = CL_SUCCESS;
+		_queueP = clCreateCommandQueue(_context, _device, CL_QUEUE_PROFILING_ENABLE, &err_ccqP);
+		fatal(err_ccqP, "clCreateCommandQueue profiling");
+		if (_queueP == nullptr) fatal(CL_INVALID_COMMAND_QUEUE, "profiling queue is null");
+
 		_queue = _queueF;	// default queue is fast
-		fatal(err_ccq);
 
 		if (_vendor != EVendor::NVIDIA) _is_sync = true;
 	}
