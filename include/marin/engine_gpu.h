@@ -887,6 +887,11 @@ public:
 
 	size_t get_size() const override { return _n; }
 
+	void sync() const override
+	{
+		if (_gpu != nullptr) _gpu->finish_all_queues();
+	}
+
 	void set(const Reg dst, const uint32 a) const override
 	{
 		const size_t n = _n;

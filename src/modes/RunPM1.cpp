@@ -1563,9 +1563,20 @@ int App::runPM1Stage2MarinLowMem() {
                 if (v >= 1ULL) progressBits = v;
             } catch (...) {}
         }
+
+        bool syncProgress = true;
+        if (const char* env = std::getenv("PRMERS_PM1_S2_SYNC_PROGRESS")) {
+            try {
+                uint64_t v = std::stoull(env);
+                syncProgress = (v != 0ULL);
+            } catch (...) {}
+        }
         std::cout << "[PM1] Stage2 resume2reg progress: newline report every "
                   << progressSecs << "s or " << progressBits
                   << " exponent bits. Override with PRMERS_PM1_S2_PROGRESS_SECS/BITS.\n";
+        std::cout << "[PM1] Stage2 resume2reg progress timing is "
+                  << (syncProgress ? "SYNCHRONIZED" : "ENQUEUE-ONLY")
+                  << ". Override with PRMERS_PM1_S2_SYNC_PROGRESS=0/1.\n";
 
         while (primeIndex < primes.size()) {
             const size_t chunkPrimeStartIndex = primeIndex;
@@ -1614,6 +1625,14 @@ int App::runPM1Stage2MarinLowMem() {
                                          (doneBitsInChunk - lastChunkBitsPrinted) >= progressBits ||
                                          doneBitsInChunk == (uint64_t)qbits;
                 if (printByTime || printByBits) {
+                    // OpenCL command queues are asynchronous.  Without a finish here,
+                    // progress reports measure enqueue speed and then the process
+                    // appears to “block” later at get_mpz/GCD.  Synchronize before
+                    // timing so IPS/ETA are based on completed GPU work.
+                    if (syncProgress) {
+                        eng->sync();
+                        now = high_resolution_clock::now();
+                    }
                     const double pctChunk = 100.0 * double(doneBitsInChunk) / double(qbits);
                     const double pctPrime = 100.0 * double(primeIndex) / double(primes.size());
                     const double elapsedTotal = duration<double>(now - texp0).count();
@@ -1644,6 +1663,7 @@ int App::runPM1Stage2MarinLowMem() {
                 }
             }
 
+            eng->sync();
             std::cout << "\n[PM1] Stage2 resume2reg chunk " << chunkNo << " done.\n";
             if (stopAfterChunk) {
                 std::cout << "[PM1] Stopped after a clean chunk boundary. Re-run the same command to restart from the original S1 resume.\n";
