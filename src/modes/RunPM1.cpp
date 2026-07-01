@@ -1342,31 +1342,43 @@ int App::runPM1Stage2MarinLowMem() {
     using namespace std::chrono;
 
     const uint64_t B1u = options.B1, B2u = options.B2;
+    const uint64_t stage2Low = (options.B2Start > 0) ? options.B2Start : B1u;
     const uint32_t pexp = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
 
-    if (B2u <= B1u) {
-        std::cerr << "Stage 2 error B2 <= B1.\n";
+    if (B2u <= stage2Low) {
+        std::cerr << "Stage 2 error B2 <= stage2 lower bound. B1/resume=" << B1u
+                  << " stage2Low=" << stage2Low << " B2=" << B2u << "\n";
+        return -1;
+    }
+    if (options.pm1_s2_resume2reg && stage2Low < B1u) {
+        std::cerr << "Stage 2 resume2reg error: -b2start must be >= -b1 resume bound. B1/resume="
+                  << B1u << " stage2Low=" << stage2Low << "\n";
         return -1;
     }
 
-    std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1u << ", B2 = " << B2u << std::endl;
+    std::cout << "\nStart a P-1 factoring : Stage 2 Resume B1 = " << B1u
+              << ", Stage2 range = (" << stage2Low << ", " << B2u << "]" << std::endl;
     std::cout << "[PM1] Low-memory Stage 2 enabled. ";
-    if (options.pm1_ultralowmem) {
-        std::cout << "Using 1-register GPU product-exponent Stage 2 (no baby-table BSGS).\n";
+    if (options.pm1_ultralowmem && options.pm1_s2_resume2reg) {
+        std::cout << "Using TRUE resume2reg mode: load Stage-1 H and compute H^Q with 2 GPU registers.\n";
+    } else if (options.pm1_ultralowmem) {
+        std::cout << "Using legacy 1-register GPU product-exponent Stage 2 (base-3 recompute, no baby-table BSGS).\n";
     } else {
         std::cout << "Using 3 GPU registers and streamed product accumulator (no baby-table BSGS).\n";
     }
 
-    // Load Stage 1 state H only for the 3-register lowmem path.
-    // In -pm1-ultralowmem v21, Stage 2 is computed as one GPU exponentiation:
-    //     3^( E(B1) * 2*p * prod_{B1 < q <= B2} q ) mod M_p
-    // This is mathematically H^Q with H=3^(E(B1)*2*p), but avoids storing H as a
-    // separate multiplicand/register. It therefore needs only one Marin register.
+    // Legacy Stage 2 path checkpoint loading.
+    // Important: the new -pm1-s2-resume2reg path below is a TRUE resume path:
+    // it loads H from resume_p<p>_B1_<B1>.p95/.save and computes H^Q.
+    // Therefore the old one-register ultralowmem message/recompute path must not
+    // run when options.pm1_s2_resume2reg is set.
     std::vector<char> hData;
-    if (options.pm1_ultralowmem) {
-        std::cout << "[PM1] Ultra-low-memory Stage 2 does not reload H: it recomputes "
-                  << "3^(E*Q) directly on GPU with the fast3 one-register path.\n";
+    if (options.pm1_ultralowmem && options.pm1_s2_resume2reg) {
+        std::cout << "[PM1] Stage 2 resume2reg selected: skipping legacy one-register recompute path.\n";
+    } else if (options.pm1_ultralowmem) {
+        std::cout << "[PM1] Ultra-low-memory Stage 2 legacy one-register mode: recomputes "
+                  << "3^(E*Q) directly on GPU with the fast3 path.\n";
     } else {
         const size_t s1Regs = 3u;
         auto load_h_from = [&](const std::string& file)->int {
@@ -1414,15 +1426,283 @@ int App::runPM1Stage2MarinLowMem() {
     const uint64_t root = isqrt_u64(B2u);
     const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
     std::vector<uint64_t> primes;
-    segmented_primes_odd(B1u + 1, B2u, basePrimes, primes);
+    segmented_primes_odd(stage2Low + 1, B2u, basePrimes, primes);
     if (primes.empty()) {
-        std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2u << " (no primes in range)\n";
+        std::cout << "\nNo factor P-1 (stage 2) in range (" << stage2Low << ", " << B2u
+                  << "] (no primes in range)\n";
         return 1;
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
     auto t0 = high_resolution_clock::now();
     auto lastDisplay = high_resolution_clock::now();
+
+    if (options.pm1_ultralowmem && options.pm1_s2_resume2reg) {
+        // v42 RTX-safe true Stage 2 from an existing Stage-1 resume.
+        // This is not the old 1-register recompute from base 3.  It loads H from
+        // resume_p<exp>_B1_<B1>.p95/.save and computes:
+        //      H <- H^Q, Q = prod_{stage2Low < q <= B2, q prime} q
+        // using only two GPU registers.  It is slower than BSGS, but it is the
+        // realistic no-baby-table path that fits 10GB GPUs such as RTX 3080.
+        static constexpr size_t RSTATE = 0; // current H/product state, digits
+        static constexpr size_t RBASE  = 1; // multiplicand copy of current state for each Q chunk
+
+        auto ends_with = [](const std::string& x, const std::string& suf)->bool{
+            return x.size() >= suf.size() && x.compare(x.size() - suf.size(), suf.size(), suf) == 0;
+        };
+
+        std::string basePath = options.pm1_extend_save_path;
+        if (basePath.empty()) {
+            basePath = "resume_p" + std::to_string(options.exponent) +
+                       "_B1_" + std::to_string(B1u);
+        }
+
+        std::string resumeSave = basePath;
+        std::string resumeP95  = basePath;
+        if (ends_with(basePath, ".save")) {
+            resumeSave = basePath;
+            resumeP95  = basePath.substr(0, basePath.size() - 5) + ".p95";
+        } else if (ends_with(basePath, ".p95")) {
+            resumeP95  = basePath;
+            resumeSave = basePath.substr(0, basePath.size() - 4) + ".save";
+        } else {
+            resumeSave += ".save";
+            resumeP95  += ".p95";
+        }
+
+        uint64_t B1_file = 0;
+        uint32_t p_file = 0;
+        mpz_class H_old;
+        std::string usedPath;
+        if (load_pm1_s1_from_save(resumeSave, B1_file, p_file, H_old)) {
+            usedPath = resumeSave;
+        } else if (load_pm1_s1_from_p95(resumeP95, B1_file, p_file, H_old)) {
+            usedPath = resumeP95;
+        } else {
+            std::cerr << "[PM1] Stage2 resume2reg: cannot load Stage-1 state from "
+                      << resumeSave << " nor " << resumeP95 << "\n";
+            return -2;
+        }
+        if (p_file != pexp) {
+            std::cerr << "[PM1] Stage2 resume2reg: resume exponent mismatch: file p="
+                      << p_file << ", expected p=" << pexp << "\n";
+            return -2;
+        }
+        if (B1_file != B1u) {
+            std::cerr << "[PM1] Stage2 resume2reg: resume B1 mismatch: file B1="
+                      << B1_file << ", expected B1=" << B1u << "\n";
+            return -2;
+        }
+
+        uint64_t chunkBitLimit = 200000ULL;
+        if (const char* env = std::getenv("PRMERS_PM1_S2_CHUNK_BITS")) {
+            try {
+                uint64_t v = std::stoull(env);
+                if (v >= 1024ULL) chunkBitLimit = v;
+            } catch (...) {}
+        }
+        if (options.max_e_bits > 0) chunkBitLimit = std::min<uint64_t>(chunkBitLimit, options.max_e_bits);
+        chunkBitLimit = std::max<uint64_t>(chunkBitLimit, 1024ULL);
+
+        std::cout << "[PM1] Ultra-low-memory Stage 2 resume2reg TRUE mode.\n";
+        std::cout << "[PM1] Loaded Stage-1 state H from " << usedPath << "\n";
+        std::cout << "[PM1] Method: H <- H^prod(primes in (stage2Low,B2]) with 2 GPU registers; no base-3 recompute.\n";
+        std::cout << "[PM1] Resume B1=" << B1u << " | Stage2 lower/start=" << stage2Low
+                  << " | Stage2 upper B2=" << B2u << "\n";
+        std::cout << "[PM1] 2-reg exponentiation detail: RBASE stores multiplicand(H); RSTATE is then reset to 1 as accumulator.\n";
+        std::cout << "[PM1] Prime count=" << primes.size()
+                  << " | product chunk limit=" << chunkBitLimit << " bits\n";
+
+        engine* eng = nullptr;
+        try {
+            std::cout << "[PM1] Allocating Stage 2 resume2reg GPU engine with 2 registers..." << std::flush;
+            eng = engine::create_gpu(pexp, 2, (size_t)options.device_id, verbose);
+            std::cout << " done.\n";
+        } catch (const std::exception& ex) {
+            std::cout << " failed.\n";
+            std::cerr << "[PM1] Stage2 resume2reg: 2-register GPU allocation failed: "
+                      << ex.what() << "\n";
+            return -2;
+        }
+
+        try {
+            std::cout << "[PM1] Loading H into RSTATE using lowmem streamed set_mpz...\n";
+            // engine::set_mpz takes a const mpz_t& (GMP array reference),
+            // while mpz_class::get_mpz_t() is an mpz_ptr. Use a short-lived
+            // mpz_t copy so the code compiles cleanly on GCC/Clang.
+            mpz_t H_upload;
+            mpz_init_set(H_upload, H_old.get_mpz_t());
+            eng->set_mpz((engine::Reg)RSTATE, H_upload);
+            mpz_clear(H_upload);
+            // Free the host mpz payload before the long GPU loop.
+            H_old = 0;
+        } catch (const std::exception& ex) {
+            std::cerr << "[PM1] Stage2 resume2reg: failed to upload H: " << ex.what() << "\n";
+            delete eng;
+            return -2;
+        }
+
+        const auto texp0 = high_resolution_clock::now();
+        auto last = high_resolution_clock::now();
+        size_t primeIndex = 0;
+        uint64_t chunkNo = 0;
+        uint64_t totalBitsDone = 0;
+        bool stopAfterChunk = false;
+
+        uint64_t progressSecs = 10;
+        if (const char* env = std::getenv("PRMERS_PM1_S2_PROGRESS_SECS")) {
+            try {
+                uint64_t v = std::stoull(env);
+                if (v >= 1ULL) progressSecs = v;
+            } catch (...) {}
+        }
+        uint64_t progressBits = 32;
+        if (const char* env = std::getenv("PRMERS_PM1_S2_PROGRESS_BITS")) {
+            try {
+                uint64_t v = std::stoull(env);
+                if (v >= 1ULL) progressBits = v;
+            } catch (...) {}
+        }
+        std::cout << "[PM1] Stage2 resume2reg progress: newline report every "
+                  << progressSecs << "s or " << progressBits
+                  << " exponent bits. Override with PRMERS_PM1_S2_PROGRESS_SECS/BITS.\n";
+
+        while (primeIndex < primes.size()) {
+            const size_t chunkPrimeStartIndex = primeIndex;
+            const uint64_t chunkPrimeStart = primes[primeIndex];
+            mpz_class Q(1);
+            mp_bitcnt_t qbits = 1;
+
+            while (primeIndex < primes.size()) {
+                mpz_class cand = Q;
+                mpz_mul_u64(cand, primes[primeIndex]);
+                const mp_bitcnt_t cbits = mpz_sizeinbase(cand.get_mpz_t(), 2);
+                if (primeIndex > chunkPrimeStartIndex && cbits > chunkBitLimit) break;
+                Q = cand;
+                qbits = cbits;
+                ++primeIndex;
+                if (cbits >= chunkBitLimit) break;
+            }
+
+            const uint64_t chunkPrimeEnd = primes[primeIndex - 1];
+            ++chunkNo;
+            const auto chunkStartTime = high_resolution_clock::now();
+            uint64_t lastChunkBitsPrinted = 0;
+            std::cout << "\n[PM1] Stage2 resume2reg chunk " << chunkNo
+                      << " | primes " << chunkPrimeStart << ".." << chunkPrimeEnd
+                      << " | count=" << (primeIndex - chunkPrimeStartIndex)
+                      << " | Q bits=" << (unsigned long long)qbits << "\n";
+
+            // Compute RSTATE <- RSTATE^Q with only two registers.
+            // RBASE becomes an independent transformed multiplicand copy of the
+            // current RSTATE (the loaded Stage-1 H for chunk 1, then H^previousQ
+            // for later chunks).  RSTATE is then reset to 1 only as the normal
+            // square-and-multiply accumulator.  This is not a base-3 recompute.
+            std::cout << "[PM1] Preparing chunk base: copy current RSTATE/H into RBASE multiplicand, then reset RSTATE accumulator to 1.\n";
+            eng->set_multiplicand((engine::Reg)RBASE, (engine::Reg)RSTATE);
+            eng->set((engine::Reg)RSTATE, 1u);
+
+            for (mp_bitcnt_t i = qbits; i > 0; --i) {
+                eng->square_mul((engine::Reg)RSTATE);
+                if (mpz_tstbit(Q.get_mpz_t(), i - 1)) eng->mul((engine::Reg)RSTATE, (engine::Reg)RBASE);
+
+                ++totalBitsDone;
+                auto now = high_resolution_clock::now();
+                const uint64_t doneBitsInChunk = (uint64_t)(qbits - i + 1);
+                const bool printByTime = duration_cast<seconds>(now - last).count() >= (long long)progressSecs;
+                const bool printByBits = doneBitsInChunk == 1 ||
+                                         (doneBitsInChunk - lastChunkBitsPrinted) >= progressBits ||
+                                         doneBitsInChunk == (uint64_t)qbits;
+                if (printByTime || printByBits) {
+                    const double pctChunk = 100.0 * double(doneBitsInChunk) / double(qbits);
+                    const double pctPrime = 100.0 * double(primeIndex) / double(primes.size());
+                    const double elapsedTotal = duration<double>(now - texp0).count();
+                    const double elapsedChunk = duration<double>(now - chunkStartTime).count();
+                    const double ipsTotal = elapsedTotal > 0.0 ? double(totalBitsDone) / elapsedTotal : 0.0;
+                    const double ipsChunk = elapsedChunk > 0.0 ? double(doneBitsInChunk) / elapsedChunk : 0.0;
+                    const double remainChunk = ipsChunk > 0.0 ? double((uint64_t)qbits - doneBitsInChunk) / ipsChunk : 0.0;
+                    const uint64_t etaSec = remainChunk > 0.0 ? (uint64_t)(remainChunk + 0.5) : 0ULL;
+                    const uint64_t etaH = etaSec / 3600ULL;
+                    const uint64_t etaM = (etaSec % 3600ULL) / 60ULL;
+                    const uint64_t etaS = etaSec % 60ULL;
+                    std::cout << "[PM1] Stage2 chunk " << chunkNo
+                              << " progress " << doneBitsInChunk << "/" << (uint64_t)qbits
+                              << " bits (" << std::fixed << std::setprecision(2) << pctChunk << "%)"
+                              << " | chunkIPS=" << std::fixed << std::setprecision(2) << ipsChunk
+                              << " | totalIPS=" << std::fixed << std::setprecision(2) << ipsTotal
+                              << " | ETA chunk=" << etaH << "h" << etaM << "m" << etaS << "s"
+                              << " | primes=" << std::fixed << std::setprecision(2) << pctPrime << "%"
+                              << " | totalBits=" << totalBitsDone
+                              << "\n" << std::flush;
+                    last = now;
+                    lastChunkBitsPrinted = doneBitsInChunk;
+                }
+
+                if (interrupted && !stopAfterChunk) {
+                    std::cout << "\n[PM1] Interrupt received; finishing current Stage2 product chunk before stopping.\n";
+                    stopAfterChunk = true;
+                }
+            }
+
+            std::cout << "\n[PM1] Stage2 resume2reg chunk " << chunkNo << " done.\n";
+            if (stopAfterChunk) {
+                std::cout << "[PM1] Stopped after a clean chunk boundary. Re-run the same command to restart from the original S1 resume.\n";
+                interrupted = false;
+                delete eng;
+                return 0;
+            }
+        }
+
+        std::cout << "\n[PM1] Stage2 resume2reg product exponent done. Computing GCD of (X-1, M_p)...\n";
+        mpz_class X = compute_X_with_dots(eng, (engine::Reg)RSTATE, Mp);
+        X -= 1;
+        if (X < 0) X += Mp;
+        mpz_class g = gcd_with_dots(X, Mp);
+
+        auto gcd_mpz = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
+            mpz_class r;
+            mpz_gcd(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t());
+            return r;
+        };
+
+        mpz_class gNew = g;
+        for (const std::string& fs : options.knownFactors) {
+            if (gNew == 1) break;
+            mpz_class f;
+            try { f = mpz_class(fs); } catch (...) { continue; }
+            if (f <= 1) continue;
+            mpz_class d = gcd_mpz(gNew, f);
+            while (d != 1) { gNew /= d; d = gcd_mpz(gNew, f); }
+        }
+
+        const bool found = (gNew != 1 && gNew != Mp);
+        const double elapsed = duration<double>(high_resolution_clock::now() - texp0).count();
+        std::cout << "\nElapsed time (stage 2 resume2reg) = " << std::fixed << std::setprecision(2) << elapsed << " s.\n";
+
+        std::string filename = "stage2_resume2reg_result_B1_" + std::to_string(B1u) +
+                               "_from_" + std::to_string(stage2Low) +
+                               "_to_" + std::to_string(B2u) +
+                               "_p_" + std::to_string(options.exponent) + ".txt";
+        if (found) {
+            std::string f = gNew.get_str(10);
+            writeStageResult(filename, "B1=" + std::to_string(B1u) + " B2Start=" + std::to_string(stage2Low) + " B2=" + std::to_string(B2u) + " factor=" + f);
+            std::cout << "\n>>>  Factor P-1 (stage 2 resume2reg product exponent) found : " << f << "\n";
+            options.knownFactors.push_back(f);
+        } else {
+            writeStageResult(filename, "No factor P-1 stage2 resume2reg in range (" + std::to_string(stage2Low) + "," + std::to_string(B2u) + "] from B1=" + std::to_string(B1u));
+            std::cout << "\nNo factor P-1 (stage 2 resume2reg product exponent) in range ("
+                      << stage2Low << ", " << B2u << "] from resume B1=" << B1u << "\n";
+        }
+
+        std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+        std::cout << "Manual submission JSON:\n" << json << "\n";
+        io::WorktodoManager wm(options);
+        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_resume2reg", json);
+        wm.appendToResultsTxt(json);
+
+        delete eng;
+        return found ? 0 : 1;
+    }
 
     if (options.pm1_ultralowmem) {
         // Ultra-lowmem GPU path v21: one-register product-exponent Stage 2.

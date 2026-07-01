@@ -870,6 +870,16 @@ int App::run() {
                 rc_local = runPM1Stage1SLnTorusMarin();
                 ran_local = true;
             }
+            else if (options.pm1_s2_resume2reg && options.B2 > options.B1 && options.nmax == 0 && options.K == 0) {
+                std::ostringstream msg;
+                msg << "P-1 Stage 2 resume2reg requested "
+                    << "-> jumping directly to runPM1Stage2Marin()";
+                std::cout << msg.str() << std::endl;
+                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("P-1 Stage 2 resume2reg"); }
+
+                rc_local = runPM1Stage2Marin();
+                ran_local = true;
+            }
             else if ((haveS2) && options.nmax == 0  && options.K == 0) {
                 std::ostringstream msg;
                 msg << "Detected P-1 checkpoint(s): "

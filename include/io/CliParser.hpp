@@ -72,6 +72,12 @@ struct CliOptions {
     bool p95stage2 = false;
     bool pm1_lowmem = false;
     bool pm1_ultralowmem = false;
+    // True low-memory P-1 Stage 2 from an existing Stage-1 resume.
+    // Uses 2 GPU registers and computes H^Q where Q=prod primes(stage2Low,B2].
+    // B1 remains the Stage-1 resume bound; B2Start optionally selects stage2Low
+    // for split ranges such as B1=1500000, B2Start=2000000, B2=2500000.
+    // This is intended for 10GB GPUs such as RTX 3080 and does not recompute from base 3.
+    bool pm1_s2_resume2reg = false;
     bool pm1_no_stage1_gcd = false;
     std::string p95path;
     int max_local_size1 = 0;
