@@ -166,7 +166,7 @@ int App::runPrpOrLl() {
     );
 
     // Display proof disk usage estimate at start of computation
-    if (options.proof) {
+    if (options.mode == "prp" && options.proof) {
         uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSet::bestPower(options.exponent);
         options.proofPower = proofPower;
         double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
@@ -559,7 +559,7 @@ int App::runPrpOrLl() {
         }
 
 
-        if (options.proof && iter + 1 < totalIters) {
+        if (options.mode == "prp" && options.proof && iter + 1 < totalIters) {
             proofManager.checkpoint(buffers->input, iter + 1);
         }
 
@@ -889,7 +889,7 @@ int App::runPrpOrLl() {
                                 guiServer_->appendLog(oss.str());
     }
     // Generate proof file after successful completion
-    if (options.proof) {
+    if (options.mode == "prp" && options.proof) {
         int proofPower = static_cast<int>(options.proofPower);
         while (proofPower >= 0) {
             try {

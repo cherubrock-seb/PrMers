@@ -123,7 +123,7 @@ int App::runPrpOrLlMarin()
             oss << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words...";
             guiServer_->appendLog(oss.str());
     }
-    if (options.proof) {
+    if (options.mode == "prp" && options.proof) {
         uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSetMarin::bestPower(options.exponent);
         options.proofPower = proofPower;
         double diskUsageGB = ProofSetMarin::diskUsageGB(options.exponent, proofPower);
@@ -407,7 +407,7 @@ int App::runPrpOrLlMarin()
 
     }
 
-    if (options.proof) {
+    if (options.mode == "prp" && options.proof) {
         engine::digit d(eng, R0);
         proofManagerMarin.checkpointMarin(d, totalIters);
     }
@@ -544,7 +544,7 @@ int App::runPrpOrLlMarin()
     }		
     logger.logEnd(elapsed_time);
 
-    if (options.proof) {
+    if (options.mode == "prp" && options.proof) {
         cl_command_queue queue = context.getQueue();
         math::Carry carry(
             context,

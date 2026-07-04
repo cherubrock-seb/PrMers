@@ -40,6 +40,7 @@
 #include <cstdio>
 #include <map>
 #include <future>
+#include <algorithm>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -264,6 +265,8 @@ App::App(int argc, char** argv)
         }
     }
 
+    const bool cliForceLlUnsafe = std::find(merged.begin() + 1, merged.end(), "-llunsafe") != merged.end();
+
     std::vector<char*> c_argv;
     for (auto& s : merged)
         c_argv.push_back(const_cast<char*>(s.c_str()));
@@ -275,9 +278,27 @@ App::App(int argc, char** argv)
         o.exponent     = e->exponent;
         o.mode         = e->ecmTest ? "ecm"
                         : (e->prpTest ? "prp"
-                        : (e->llTest ? "ll"
+                        : (e->llTest ? ((e->doubleCheck && !cliForceLlUnsafe) ? "llsafe" : "ll")
                         : (e->pm1Test ? "pm1" : "")));
         o.aid          = e->aid;
+        o.doubleCheck  = e->doubleCheck;
+
+        // Prime95/PrimeNet DoubleCheck= entries are Lucas-Lehmer
+        // double-check work. By default, route them to the checked
+        // LL-SAFE GPU path (same as CLI -ll). If the user explicitly
+        // adds -llunsafe, honor that CLI override and run the faster
+        // unsafe LL path. Never attempt PRP proof generation for LL work.
+        if (e->llTest) {
+            o.proof = false;
+            if (e->doubleCheck) {
+                if (cliForceLlUnsafe) {
+                    std::cout << "DoubleCheck worktodo + -llunsafe -> LL-UNSAFE GPU path, no PRP proof generation.\n";
+                } else {
+                    std::cout << "DoubleCheck worktodo -> LL-SAFE GPU path (Gerbicz-Li), no PRP proof generation.\n";
+                }
+            }
+        }
+        o.sieveDepth   = e->sieveDepth;
         o.knownFactors = e->knownFactors;
         o.knownFactors_start.assign(e->knownFactors.begin(), e->knownFactors.end());
 

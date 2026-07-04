@@ -10,6 +10,7 @@
 #include <optional>
 #include <limits>
 #include <cctype>
+#include <algorithm>
 
 namespace io {
 
@@ -88,11 +89,18 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         auto top = util::split(line, '=');
         if (top.size() < 2) continue;
 
-        bool isPRP  = (top[0] == "PRP" || top[0] == "PRPDC");
-        bool isLL   = (top[0] == "Test" || top[0] == "DoubleCheck");
-        bool isPF   = (top[0] == "PFactor");
-        bool isPM1  = (top[0] == "Pminus1");
-        bool isECM2 = (top[0] == "ECM2");
+        std::string keyword = top[0];
+        trim_inplace(keyword);
+        std::string keywordUpper = keyword;
+        std::transform(keywordUpper.begin(), keywordUpper.end(), keywordUpper.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+
+        bool isPRP  = (keywordUpper == "PRP" || keywordUpper == "PRPDC");
+        bool isLL   = (keywordUpper == "TEST" || keywordUpper == "DOUBLECHECK");
+        bool isDoubleCheck = (keywordUpper == "DOUBLECHECK");
+        bool isPF   = (keywordUpper == "PFACTOR");
+        bool isPM1  = (keywordUpper == "PMINUS1");
+        bool isECM2 = (keywordUpper == "ECM2");
         if (!(isPRP || isLL || isPF || isPM1 || isECM2)) continue;
 
         auto parts = splitRespectingQuotes(top[1], ',');
@@ -103,6 +111,52 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         if (!parts.empty() && (isHex(parts[0]) || parts[0] == "AID" || parts[0] == "N/A")) {
             aid = parts[0];
             parts.erase(parts.begin());
+        }
+
+        // Prime95-compatible LL worktodo formats:
+        //   Test=exponent[,how_far_factored[,has_been_pminus1ed]]
+        //   DoubleCheck=exponent[,how_far_factored[,has_been_pminus1ed]]
+        // Assignment IDs may precede the exponent and are stripped above:
+        //   DoubleCheck=<32-hex-aid>,85473391,76,1
+        // Keep supporting the older PrMers/Proth-style k,b,n,c form:
+        //   Test=1,2,n,-1
+        const bool looksLikeKbncMersenne =
+            (parts.size() >= 4 && parts[0] == "1" && parts[1] == "2" && parts[3] == "-1");
+        if (isLL && !looksLikeKbncMersenne && !parts.empty() && isIntegerToken(parts[0])) {
+            try {
+                uint64_t exp64 = std::stoull(parts[0]);
+                if (exp64 == 0 || exp64 > std::numeric_limits<uint32_t>::max()) continue;
+
+                WorktodoEntry entry;
+                entry.llTest      = true;
+                entry.doubleCheck = isDoubleCheck;
+                entry.exponent    = static_cast<uint32_t>(exp64);
+                entry.rawLine     = line;
+                entry.aid         = aid;
+
+                if (parts.size() >= 2) {
+                    std::string sdepth = parts[1];
+                    trim_inplace(sdepth);
+                    if (!sdepth.empty() && !isQuoted(sdepth)) entry.sieveDepth = std::stod(sdepth);
+                }
+                if (parts.size() >= 3) {
+                    std::string spm1 = parts[2];
+                    trim_inplace(spm1);
+                    if (!spm1.empty() && !isQuoted(spm1)) entry.pminus1ed = (std::stoul(spm1) != 0);
+                }
+
+                std::cout << "Loaded entry: " << (entry.doubleCheck ? "DoubleCheck" : "Test")
+                          << " exponent=" << entry.exponent
+                          << (aid.empty() ? "" : " (AID=" + aid + ")")
+                          << "\n";
+                if (entry.sieveDepth > 0.0) {
+                    std::cout << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
+                }
+                std::cout << "P-1 pretest flag: " << (entry.pminus1ed ? 1 : 0) << "\n";
+                return entry;
+            } catch (...) {
+                continue;
+            }
         }
 
         try {

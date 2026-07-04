@@ -12,6 +12,8 @@ struct WorktodoEntry {
     bool llTest    = false;
     bool pm1Test   = false; 
     bool ecmTest   = false; 
+    bool doubleCheck = false;        // Prime95 DoubleCheck= LL worktodo entry
+    bool pminus1ed = true;           // Prime95 Test/DoubleCheck third field; informational for now
     uint32_t exponent = 0;
     std::string aid;
     std::string rawLine;  

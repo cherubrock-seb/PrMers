@@ -85,6 +85,7 @@ struct CliOptions {
     int max_local_size3 = 0;
     int max_local_size5 = 0;
     bool noAsk = false;
+    bool doubleCheck = false;        // Worktodo DoubleCheck= task; still runs LL but preserves task kind
     std::string kernel_path;
     std::string output_path;
     std::string build_options = "";
