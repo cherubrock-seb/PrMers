@@ -1873,7 +1873,7 @@ int App::runPM1Stage2MarinVTrace() {
         return -1;
     }
 
-    uint64_t D = options.pm1_vtrace_D ? options.pm1_vtrace_D : 630ULL;
+    uint64_t D = options.pm1_vtrace_D ? options.pm1_vtrace_D : 30030ULL;
     if (D < 4 || (D & 1ULL)) {
         std::cerr << "[PM1-VTRACE] D must be even and >= 4. Use e.g. -pm1-vtrace-d 210, 630 or 2310.\n";
         return -1;
@@ -1892,6 +1892,17 @@ int App::runPM1Stage2MarinVTrace() {
         oss << "Start P-1 Stage 2 V-trace: B1=" << B1 << " B2=" << B2 << " D=" << D;
         guiServer_->appendLog(oss.str());
     }
+
+    // v62 safety contract:
+    //   - the default path stays the v61 stable path: primorial-aware D=30030
+    //     selection plus negative-baby/add term construction.
+    //   - product-tree accumulation is real but opt-in only via
+    //     -pm1-vtrace-product-tree, so the normal 42-43s regression level cannot
+    //     be lost by default.  The product-tree path is also restricted to the
+    //     dense-prime-map case for exact bucket construction.
+    const bool useNegBabyAdd = !options.pm1_vtrace_negadd_off;
+    const bool requestedProductTree = options.pm1_vtrace_product_tree;
+    bool useProductTree = false;
 
     auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
         while (b) { uint64_t t = a % b; a = b; b = t; }
@@ -1937,6 +1948,18 @@ int App::runPM1Stage2MarinVTrace() {
                   << (densePrimeMark.size() / (1024.0 * 1024.0)) << " MiB.\n";
     }
 
+    useProductTree = requestedProductTree && !denseStage2Primes.empty();
+    if (requestedProductTree && !useProductTree) {
+        std::cout << "[PM1-VTRACE-PRODUCT-TREE] requested, but dense prime map is unavailable for this B2; "
+                  << "falling back to the stable linear V-trace accumulator.\n";
+    } else if (useProductTree) {
+        uint32_t w = options.pm1_vtrace_product_tree_width;
+        if (w < 2u) w = 2u;
+        if (w > 64u) w = 64u;
+        std::cout << "[PM1-VTRACE-PRODUCT-TREE] v62 experimental bucket product-tree enabled "
+                  << "(opt-in, width=" << w << "). Default runs remain on the stable v61 path.\n";
+    }
+
     auto is_prime_fast = [&](uint64_t n)->bool{
         if (!densePrimeMark.empty() && n < densePrimeMark.size()) return densePrimeMark[(size_t)n] != 0;
         return is_prime_trial(n);
@@ -1970,17 +1993,30 @@ int App::runPM1Stage2MarinVTrace() {
     const bool autoDEnabled = options.pm1_vtrace_auto_d || defaultAutoD;
     if (autoDEnabled) {
         const uint64_t maxRegs = options.pm1_vtrace_max_regs ? options.pm1_vtrace_max_regs :
-                                 (options.pm1_vtrace_auto_d_aggressive ? 4096ULL : 1024ULL);
+                                 ((options.pm1_vtrace_auto_d_aggressive || options.pm1_vtrace_deep_d_auto) ? 8192ULL : 4096ULL);
         static constexpr uint64_t BASE_REGS_VTRACE_AUTO = 14ULL;
+        static constexpr uint64_t VTRACE_PRIMORIAL_DEFAULT_D = 30030ULL;
         const std::vector<uint64_t> candidates = {
+            // conservative/highly-composite small-D fallback
             210, 420, 630, 840, 1050, 1260, 1470, 1680, 1890, 2100,
             2310, 2730, 3570, 3990, 4620, 5460, 6930, 8190, 9240,
-            11550, 13860, 18480, 23100, 30030, 60060, 120120
+            11550, 13860, 18480, 23100,
+            // v61 primorial-aware plateau scan around the measured sweet spot
+            30030, 60060, 90090, 120120, 150150, 180180, 210210, 240240
+        };
+        auto primorial_tier = [](uint64_t cand)->int {
+            if (cand == 30030ULL) return 0;
+            if (cand == 60060ULL || cand == 90090ULL || cand == 120120ULL) return 1;
+            if (cand == 150150ULL || cand == 180180ULL || cand == 210210ULL || cand == 240240ULL) return 2;
+            if (cand == 4620ULL || cand == 13860ULL || cand == 23100ULL) return 3;
+            return 4;
         };
         if (denseStage2Primes.empty()) {
-            std::cout << "[PM1-VTRACE] auto-D requested but dense prime map is disabled for this B2; keeping D=" << D << ".\n";
+            std::cout << "[PM1-VTRACE] primorial auto-D requested but dense prime map is disabled for this B2; "
+                      << "keeping default D=" << D << ".\n";
         } else {
             uint64_t bestD = D, bestTerms = 0, bestSkips = 0, bestMaxK = 0;
+            size_t bestBabyCount = 0;
             double bestScore = std::numeric_limits<double>::infinity();
             for (uint64_t cand : candidates) {
                 if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
@@ -1989,35 +2025,38 @@ int App::runPM1Stage2MarinVTrace() {
                 uint64_t terms = 0, skips = 0, maxk = 0;
                 trace_stats_for_D(cand, terms, skips, maxk);
                 if (!terms) continue;
-                // v55 balanced empirical GPU model.  v54 minimized mostly the
-                // trace term count and often picked very large D (30030/60060).
-                // The M1362763 Radeon VII benchmark showed a plateau: larger
-                // baby tables consume much more VRAM/global-memory bandwidth but
-                // reduce very few additional terms.  Penalize baby residues so
-                // auto-D selects the smallest D near the measured throughput sweet
-                // spot instead of blindly filling VRAM.
-                const double babyPenalty = 5.0 * double(bc);
-                const double score = 2.0 * double(terms)
-                                   + double(maxk)
-                                   + 0.20 * double(cand)
-                                   + babyPenalty;
+
+                // v61 primorial-aware empirical model.  The regression sweep on
+                // M1362763 showed D=30030 is the useful plateau: 60060..240240
+                // consume 2.8..11.3 GiB but produce equal or more terms.  Score
+                // by exact term count first, then lightly penalize table size,
+                // giant span, and distance from the 30030 primorial anchor.
+                const double babyPenalty = 0.08 * double(bc);
+                const double giantPenalty = 0.04 * double(maxk);
+                const double distancePenalty = 0.003 * double(cand > VTRACE_PRIMORIAL_DEFAULT_D
+                                                            ? cand - VTRACE_PRIMORIAL_DEFAULT_D
+                                                            : VTRACE_PRIMORIAL_DEFAULT_D - cand);
+                const double tierPenalty = 25.0 * double(primorial_tier(cand));
+                const double score = double(terms) + babyPenalty + giantPenalty + distancePenalty + tierPenalty;
                 if (score < bestScore) {
-                    bestScore = score; bestD = cand; bestTerms = terms; bestSkips = skips; bestMaxK = maxk;
+                    bestScore = score; bestD = cand; bestTerms = terms; bestSkips = skips; bestMaxK = maxk; bestBabyCount = bc;
                 }
             }
             if (bestD != D) {
-                std::cout << "[PM1-VTRACE] auto-D selected D=" << bestD
-                          << (defaultAutoD ? " (default)" : (options.pm1_vtrace_auto_d_aggressive ? " (aggressive)" : ""))
+                std::cout << "[PM1-VTRACE] primorial-aware auto-D selected D=" << bestD
+                          << (defaultAutoD ? " (default)" : (options.pm1_vtrace_deep_d_auto ? " (deep-auto)" : (options.pm1_vtrace_auto_d_aggressive ? " (aggressive)" : "")))
                           << " under max-regs=" << maxRegs
                           << " (terms=" << bestTerms
                           << ", paired-skip=" << bestSkips
                           << ", max-k=" << bestMaxK
-                          << ", balanced-score=" << bestScore << ").\n";
+                          << ", baby=" << bestBabyCount
+                          << ", primorial-score=" << bestScore << ").\n";
                 D = bestD;
             } else {
-                std::cout << "[PM1-VTRACE] auto-D kept D=" << D
-                          << (defaultAutoD ? " (default)" : "")
-                          << " under max-regs=" << maxRegs << ".\n";
+                std::cout << "[PM1-VTRACE] primorial-aware auto-D kept D=" << D
+                          << (defaultAutoD ? " (default)" : (options.pm1_vtrace_deep_d_auto ? " (deep-auto)" : ""))
+                          << " under max-regs=" << maxRegs
+                          << ".\n";
             }
         }
     }
@@ -2049,7 +2088,59 @@ int App::runPM1Stage2MarinVTrace() {
         return -2;
     }
 
-    // Register layout.  Baby registers store scalar traces V_j in normal digit form.
+    struct ProductTreeBucket {
+        uint64_t k = 0;
+        uint64_t primeCount = 0;
+        uint64_t skippedUpper = 0;
+        std::vector<int32_t> babyIndex; // -1 means V_0=2, otherwise index in baby table
+    };
+    std::vector<ProductTreeBucket> productTreeBuckets;
+    if (useProductTree) {
+        std::map<uint64_t, ProductTreeBucket> tmpBuckets;
+        for (uint64_t q : denseStage2Primes) {
+            const TracePair tp = make_pair_for_prime(q);
+            auto& b = tmpBuckets[tp.k];
+            b.k = tp.k;
+            ++b.primeCount;
+            bool processPair = true;
+            if (tp.j != 0 && q == tp.qplus && tp.qminus > B1u && is_prime_fast(tp.qminus)) {
+                processPair = false;
+                ++b.skippedUpper;
+            }
+            if (!processPair) continue;
+            int32_t bi = -1;
+            if (tp.j != 0) {
+                if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
+                    std::cerr << "[PM1-VTRACE-PRODUCT-TREE] INTERNAL ERROR: no baby V_j for q="
+                              << q << " j=" << tp.j << " D=" << D << "\n";
+                    return -4;
+                }
+                bi = j2i[(size_t)tp.j];
+            }
+            b.babyIndex.push_back(bi);
+        }
+        productTreeBuckets.reserve(tmpBuckets.size());
+        uint64_t ptTerms = 0, ptPrimes = 0, ptSkips = 0;
+        size_t maxBucketTerms = 0;
+        for (auto& kv : tmpBuckets) {
+            ptTerms += (uint64_t)kv.second.babyIndex.size();
+            ptPrimes += kv.second.primeCount;
+            ptSkips += kv.second.skippedUpper;
+            maxBucketTerms = std::max(maxBucketTerms, kv.second.babyIndex.size());
+            productTreeBuckets.push_back(std::move(kv.second));
+        }
+        std::cout << "[PM1-VTRACE-PRODUCT-TREE] exact buckets=" << productTreeBuckets.size()
+                  << " | terms=" << ptTerms
+                  << " | paired upper skips=" << ptSkips
+                  << " | max terms/bucket=" << maxBucketTerms
+                  << " | avg terms/bucket="
+                  << std::fixed << std::setprecision(2)
+                  << (productTreeBuckets.empty() ? 0.0 : double(ptTerms) / double(productTreeBuckets.size()))
+                  << "\n";
+    }
+
+    // Register layout.  Baby registers store scalar traces V_j, or -V_j in the
+    // default v59 neg-baby/add mode.
     static constexpr size_t RSTATE    = 0;   // H loaded from stage-1 checkpoint, mostly for diagnostics
     static constexpr size_t RACC      = 1;   // accumulator Π(V_kD - V_j)
     static constexpr size_t RV1       = 2;   // V_1 = H + H^-1
@@ -2068,10 +2159,22 @@ int App::runPM1Stage2MarinVTrace() {
     static constexpr size_t baseRegsStage1 = 11;
 
     const size_t babyBase = baseRegsVTrace;
-    const size_t regCount = baseRegsVTrace + babyCount;
+    const size_t productTreeWidth = useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0;
+    const size_t productTreeScratchBase = babyBase + babyCount;
+    const size_t regCount = baseRegsVTrace + babyCount + productTreeWidth;
 
     std::cout << "[PM1-VTRACE] Baby residues stored: " << babyCount
               << " (odd j<=D/2, gcd(j,D)=1), GPU registers=" << regCount << "\n";
+    if (useNegBabyAdd) {
+        std::cout << "[PM1-VTRACE-NEGADD] negative baby traces enabled: term = V_kD + (-V_j). "
+                  << "Use -pm1-vtrace-negadd-off to benchmark the old copy+sub_reg path.\n";
+    } else {
+        std::cout << "[PM1-VTRACE-NEGADD] disabled: using old copy+sub_reg term builder.\n";
+    }
+    if (useProductTree) {
+        std::cout << "[PM1-VTRACE-PRODUCT-TREE] scratch width=" << productTreeWidth
+                  << " regs; accumulation is bucket-local tree chunks, then one ACC multiply per chunk.\n";
+    }
 
     engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
     if (!eng) {
@@ -2079,7 +2182,11 @@ int App::runPM1Stage2MarinVTrace() {
         return -2;
     }
 
-    std::ostringstream ck2; ck2 << "pm1_s2_vtrace_m_" << pexp << ".ckpt";
+    const int ckptVersionS2 = useProductTree ? 23 : 22;
+    std::ostringstream ck2;
+    if (useProductTree) ck2 << "pm1_s2_vtrace_producttree_m_" << pexp << ".ckpt";
+    else if (useNegBabyAdd) ck2 << "pm1_s2_vtrace_negadd_m_" << pexp << ".ckpt";
+    else ck2 << "pm1_s2_vtrace_m_" << pexp << ".ckpt";
     const std::string ckpt_file_s2 = ck2.str();
 
     auto read_ckpt_s2 = [&](engine* e, const std::string& file,
@@ -2088,7 +2195,7 @@ int App::runPM1Stage2MarinVTrace() {
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 21) return -2;
+        if (version != ckptVersionS2) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != pexp) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
@@ -2110,7 +2217,7 @@ int App::runPM1Stage2MarinVTrace() {
         const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
         {
             File f(newf, "wb");
-            int version = 21;
+            int version = ckptVersionS2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
             if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
@@ -2231,7 +2338,14 @@ int App::runPM1Stage2MarinVTrace() {
                 const int32_t bi = (n < j2i.size()) ? j2i[(size_t)n] : -1;
                 if (bi >= 0) {
                     const size_t slot = babyBase + (size_t)bi;
-                    eng->copy((engine::Reg)slot, (engine::Reg)RBCUR);
+                    if (useNegBabyAdd) {
+                        // Store -V_j once during precompute, so the hot loop can
+                        // form V_kD - V_j as an addition.
+                        eng->set((engine::Reg)slot, 0u);
+                        eng->sub_reg((engine::Reg)slot, (engine::Reg)RBCUR);
+                    } else {
+                        eng->copy((engine::Reg)slot, (engine::Reg)RBCUR);
+                    }
                     ++stored;
                     int newPct = int((stored * 100ull) / std::max<size_t>(1, babyCount));
                     if (newPct > pct) { pct = newPct; std::cout << "\rV-trace baby steps: " << pct << "%" << std::flush; }
@@ -2281,23 +2395,25 @@ int App::runPM1Stage2MarinVTrace() {
     uint64_t segLowRun = 0;
     uint64_t segHighRun = 0;
 
-    if (denseRun) {
-        auto it = std::lower_bound(denseStage2Primes.begin(), denseStage2Primes.end(), p_ui);
-        if (it == denseStage2Primes.end() || *it != p_ui) {
-            delete eng;
-            std::cerr << "[PM1-VTRACE] start prime not found in dense prime table.\n";
-            return -3;
-        }
-        densePosRun = (size_t)std::distance(denseStage2Primes.begin(), it);
-    } else {
-        segLowRun = p_ui;
-        segHighRun = std::min(B2u, segLowRun + SEG_SPAN - 1);
-        segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
-        while (posRun < primesRun.size() && primesRun[posRun] < p_ui) ++posRun;
-        if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
-            delete eng;
-            std::cerr << "[PM1-VTRACE] start prime not found in segmented sieve.\n";
-            return -3;
+    if (!useProductTree) {
+        if (denseRun) {
+            auto it = std::lower_bound(denseStage2Primes.begin(), denseStage2Primes.end(), p_ui);
+            if (it == denseStage2Primes.end() || *it != p_ui) {
+                delete eng;
+                std::cerr << "[PM1-VTRACE] start prime not found in dense prime table.\n";
+                return -3;
+            }
+            densePosRun = (size_t)std::distance(denseStage2Primes.begin(), it);
+        } else {
+            segLowRun = p_ui;
+            segHighRun = std::min(B2u, segLowRun + SEG_SPAN - 1);
+            segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
+            while (posRun < primesRun.size() && primesRun[posRun] < p_ui) ++posRun;
+            if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
+                delete eng;
+                std::cerr << "[PM1-VTRACE] start prime not found in segmented sieve.\n";
+                return -3;
+            }
         }
     }
 
@@ -2344,6 +2460,110 @@ int App::runPM1Stage2MarinVTrace() {
     auto lastBackup  = high_resolution_clock::now();
     auto lastDisplay = high_resolution_clock::now();
 
+    auto build_trace_term_into = [&](engine::Reg dst, int32_t bi){
+        eng->copy(dst, (engine::Reg)RGCUR);
+        if (bi < 0) {
+            eng->sub(dst, 2);
+        } else {
+            const size_t babyReg = babyBase + (size_t)bi;
+            if (useNegBabyAdd) eng->add(dst, (engine::Reg)babyReg);
+            else eng->sub_reg(dst, (engine::Reg)babyReg);
+        }
+    };
+
+    if (useProductTree) {
+        size_t bucketPos = resumed_s2 ? (size_t)resume_idx : 0;
+        if (bucketPos > productTreeBuckets.size()) {
+            delete eng;
+            std::cerr << "[PM1-VTRACE-PRODUCT-TREE] checkpoint bucket index is outside bucket table.\n";
+            return -3;
+        }
+        for (; bucketPos < productTreeBuckets.size(); ++bucketPos) {
+            if (interrupted) {
+                double et = duration<double>(high_resolution_clock::now() - t0).count();
+                save_ckpt_s2(eng, productTreeBuckets[bucketPos].k, (uint64_t)bucketPos, cur_k, et);
+                delete eng;
+                std::cout << "\nInterrupted by user, V-trace product-tree Stage 2 state saved at bucket "
+                          << bucketPos << " k=" << cur_k << "\n";
+                interrupted = false;
+                return 0;
+            }
+
+            const ProductTreeBucket& bucket = productTreeBuckets[bucketPos];
+            advance_giant_to(bucket.k);
+
+            size_t termPos = 0;
+            while (termPos < bucket.babyIndex.size()) {
+                const size_t chunk = std::min(productTreeWidth, bucket.babyIndex.size() - termPos);
+                for (size_t i = 0; i < chunk; ++i) {
+                    build_trace_term_into((engine::Reg)(productTreeScratchBase + i), bucket.babyIndex[termPos + i]);
+                }
+
+                size_t active = chunk;
+                while (active > 1) {
+                    size_t dst = 0;
+                    for (size_t i = 0; i < active; i += 2) {
+                        if (i + 1 < active) {
+                            eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)(productTreeScratchBase + i + 1));
+                            eng->mul((engine::Reg)(productTreeScratchBase + i), (engine::Reg)RMUL_TMP);
+                            if (dst != i) eng->copy((engine::Reg)(productTreeScratchBase + dst), (engine::Reg)(productTreeScratchBase + i));
+                        } else if (dst != i) {
+                            eng->copy((engine::Reg)(productTreeScratchBase + dst), (engine::Reg)(productTreeScratchBase + i));
+                        }
+                        ++dst;
+                    }
+                    active = dst;
+                }
+
+                eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)productTreeScratchBase);
+                eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
+                termsAccumulated += (uint64_t)chunk;
+                termPos += chunk;
+            }
+
+            primesSeen += bucket.primeCount;
+            skippedPairedUpper += bucket.skippedUpper;
+
+            auto now = high_resolution_clock::now();
+            if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                const double percent = productTreeBuckets.empty() ? 100.0 :
+                    100.0 * double(bucketPos + 1) / double(productTreeBuckets.size());
+                const double elapsedSec = duration<double>(now - start).count();
+                const double ipsPrime = (elapsedSec > 0.0) ? double(primesSeen) / elapsedSec : 0.0;
+                const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
+                const double etaSec = (percent > 0.0) ? elapsedSec * (100.0 - percent) / percent : 0.0;
+                int days = int(etaSec) / 86400;
+                int hours = (int(etaSec) % 86400) / 3600;
+                int minutes = (int(etaSec) % 3600) / 60;
+                int seconds = int(etaSec) % 60;
+                std::cout << "Progress V-trace product-tree: " << std::fixed << std::setprecision(2) << percent
+                          << "% | bucket=" << (bucketPos + 1) << "/" << productTreeBuckets.size()
+                          << " | k=" << bucket.k
+                          << " | primes=" << primesSeen
+                          << " | terms=" << termsAccumulated
+                          << " | paired-skip=" << skippedPairedUpper
+                          << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
+                          << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
+                          << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                          << std::flush;
+                lastDisplay = now;
+            }
+
+            auto now0 = high_resolution_clock::now();
+            if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+                double et = duration<double>(now0 - t0).count();
+                const uint64_t saveIdx = (uint64_t)(bucketPos + 1);
+                const uint64_t saveK = (bucketPos + 1 < productTreeBuckets.size()) ? productTreeBuckets[bucketPos + 1].k : bucket.k;
+                std::cout << "\nBackup V-trace product-tree Stage 2 at bucket " << saveIdx
+                          << " k=" << saveK << " start...\n";
+                save_ckpt_s2(eng, saveK, saveIdx, cur_k, et);
+                lastBackup = now0;
+                std::cout << "Backup V-trace product-tree Stage 2 done.\n";
+            }
+        }
+        std::cout << "\n[PM1-VTRACE-PRODUCT-TREE] processed " << productTreeBuckets.size()
+                  << " exact buckets with width=" << productTreeWidth << ".\n";
+    } else {
     for (;;) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
@@ -2385,7 +2605,11 @@ int App::runPM1Stage2MarinVTrace() {
                     return -4;
                 }
                 const size_t babyReg = babyBase + (size_t)j2i[(size_t)tp.j];
-                eng->sub_reg((engine::Reg)RTMP, (engine::Reg)babyReg); // V_kD - V_j
+                if (useNegBabyAdd) {
+                    eng->add((engine::Reg)RTMP, (engine::Reg)babyReg); // V_kD + (-V_j)
+                } else {
+                    eng->sub_reg((engine::Reg)RTMP, (engine::Reg)babyReg); // V_kD - V_j
+                }
             }
             eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)RTMP);
             eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
@@ -2430,6 +2654,8 @@ int App::runPM1Stage2MarinVTrace() {
             lastBackup = now0;
             std::cout << "Backup V-trace Stage 2 done.\n";
         }
+    }
+
     }
 
     std::cout << "\n";
@@ -3878,11 +4104,11 @@ int App::runPM1Marin() {
    // classic BSGS Stage 2 path.
    const bool pm1Stage2WillUseVTrace = (options.B2 > 0 && !options.pm1_vtrace_off && !options.pm1_lowmem);
    if (!options.pm1_vtrace_off && (pm1Stage2WillUseVTrace || (options.pm1_vtrace && options.B2 > 0))) {
-        uint64_t vd = options.pm1_vtrace_D ? options.pm1_vtrace_D : 630ULL;
+        uint64_t vd = options.pm1_vtrace_D ? options.pm1_vtrace_D : 30030ULL;
         if (!options.pm1_vtrace_auto_d && (vd < 4 || (vd & 1ULL))) {
             std::cerr << "[PM1-VTRACE] D must be even and >= 4. "
                       << "Odd D=" << vd << " is rejected before Stage 1. "
-                      << "Use e.g. -pm1-vtrace-d 4620, 13860, 30030 or -pm1-vtrace-auto-d, "
+                      << "Use e.g. -pm1-vtrace-d 4620, 30030 or -pm1-vtrace-deep-d auto, "
                       << "or -pm1-vtrace-off for classic Stage 2.\n";
             return -1;
         }

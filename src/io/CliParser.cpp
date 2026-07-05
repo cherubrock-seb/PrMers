@@ -85,12 +85,15 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-lowmem          : (Optional) P-1 stage 1 low-memory mode: 3 GPU registers, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-ultralowmem     : (Optional) P-1 stage 1 ultra-low-memory mode: 1 GPU register, fast3 only, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-s2-resume2reg   : (Optional) P-1 Stage 2 ultra-low-memory true resume mode: load resume_p...B1_<B1>.p95/.save and compute H^prod(primes) with 2 GPU registers" << std::endl;
-    std::cout << "  -pm1-vtrace          : P-1 Stage 2 scalar trace BSGS (default for normal-memory Stage 2, with conservative auto-D)" << std::endl;
+    std::cout << "  -pm1-vtrace          : P-1 Stage 2 scalar trace BSGS (default for normal-memory Stage 2, primorial-aware auto-D)" << std::endl;
     std::cout << "  -pm1-vtrace-off      : Disable default V-trace and use the previous classic Stage 2 BSGS path" << std::endl;
-    std::cout << "  -pm1-vtrace-d <D>    : (Optional) Force V-trace D. Use an even highly-composite D such as 630/2310/4620/13860/30030" << std::endl;
-    std::cout << "  -pm1-vtrace-auto-d   : (Optional) Explicitly auto-select D for V-trace under a conservative register cap" << std::endl;
-    std::cout << "  -pm1-vtrace-auto-d-aggressive : (Optional) auto-select D with a larger default cap (4096 regs) for normal-size Mersennes" << std::endl;
-    std::cout << "  -pm1-vtrace-max-regs <N> : (Optional) register cap for V-trace auto-D, default 1024 or 4096 with aggressive auto-D" << std::endl;
+    std::cout << "  -pm1-vtrace-d <D>    : (Optional) Force V-trace D. Use an even primorial/highly-composite D such as 4620/30030" << std::endl;
+    std::cout << "  -pm1-vtrace-auto-d   : (Optional) Explicitly auto-select D for V-trace under the default primorial-aware register cap" << std::endl;
+    std::cout << "  -pm1-vtrace-deep-d auto : (Optional) Explicit deep primorial-aware auto-D profile; current default is auto" << std::endl;
+    std::cout << "  -pm1-vtrace-auto-d-aggressive : (Optional) auto-select D with a larger default cap (8192 regs) for normal-size Mersennes" << std::endl;
+    std::cout << "  -pm1-vtrace-max-regs <N> : (Optional) register cap for V-trace auto-D, default 4096 or 8192 with aggressive/deep auto-D" << std::endl;
+    std::cout << "  -pm1-vtrace-product-tree : (Experimental) Use v62 bucket-local product-tree accumulation, opt-in" << std::endl;
+    std::cout << "  -pm1-vtrace-product-tree-width <N> : (Experimental) Product-tree scratch/chunk width, default 16" << std::endl;
     std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested" << std::endl;
     std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
@@ -543,6 +546,36 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.pm1_vtrace_auto_d = true;
             opts.pm1_vtrace_auto_d_aggressive = true;
         }
+        else if ((std::strcmp(argv[i], "-pm1-vtrace-deep-d") == 0 ||
+                  std::strcmp(argv[i], "--pm1-vtrace-deep-d") == 0 ||
+                  std::strcmp(argv[i], "-vtrace-deep-d") == 0) && i + 1 < argc) {
+            opts.pm1_vtrace = true;
+            const char* val = argv[i + 1];
+            if (std::strcmp(val, "auto") == 0 || std::strcmp(val, "AUTO") == 0) {
+                opts.pm1_vtrace_auto_d = true;
+                opts.pm1_vtrace_deep_d_auto = true;
+            } else {
+                opts.pm1_vtrace_D = std::strtoull(val, nullptr, 10);
+            }
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-product-tree") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-product-tree") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-product-tree") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_product_tree = true;
+        }
+        else if ((std::strcmp(argv[i], "-pm1-vtrace-product-tree-width") == 0 ||
+                  std::strcmp(argv[i], "--pm1-vtrace-product-tree-width") == 0 ||
+                  std::strcmp(argv[i], "-vtrace-product-tree-width") == 0) && i + 1 < argc) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_product_tree = true;
+            unsigned long long w = std::strtoull(argv[i + 1], nullptr, 10);
+            if (w < 2ULL) w = 2ULL;
+            if (w > 64ULL) w = 64ULL;
+            opts.pm1_vtrace_product_tree_width = static_cast<uint32_t>(w);
+            ++i;
+        }
         else if ((std::strcmp(argv[i], "-pm1-vtrace-max-regs") == 0 ||
                   std::strcmp(argv[i], "--pm1-vtrace-max-regs") == 0 ||
                   std::strcmp(argv[i], "-vtrace-max-regs") == 0) && i + 1 < argc) {
@@ -550,6 +583,12 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.pm1_vtrace_auto_d = true;
             opts.pm1_vtrace_max_regs = std::strtoull(argv[i + 1], nullptr, 10);
             ++i;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-negadd-off") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-negadd-off") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-negadd-off") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_negadd_off = true;
         }
         else if (std::strcmp(argv[i], "-nogcd-stage1") == 0 ||
                  std::strcmp(argv[i], "--nogcd-stage1") == 0 ||

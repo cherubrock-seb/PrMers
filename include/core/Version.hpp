@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.07-alpha-vtrace-v56";
+    const std::string PRMERS_VERSION = "4.20.13-alpha-vtrace-producttree-v62";
 } // namespace core
 
 #endif // VERSION_HPP

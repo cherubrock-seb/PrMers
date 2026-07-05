@@ -82,8 +82,12 @@ struct CliOptions {
     bool pm1_vtrace_off = false;      // Disable default V-trace Stage 2 and use the classic BSGS path
     uint64_t pm1_vtrace_D = 0;        // Optional giant-step D override; default is auto-D, fallback 630
     bool pm1_vtrace_auto_d = false;   // Explicit auto-select D for V-trace from a small candidate set
-    bool pm1_vtrace_auto_d_aggressive = false; // Aggressive auto-D profile; raises default register cap to 4096
-    uint64_t pm1_vtrace_max_regs = 0; // Optional auto-D register cap; default 1024, or 4096 with aggressive auto-D
+    bool pm1_vtrace_auto_d_aggressive = false; // Aggressive auto-D profile; raises default register cap to 8192
+    bool pm1_vtrace_deep_d_auto = false; // Primorial-aware deep auto-D profile, default normal-memory policy in v61
+    uint64_t pm1_vtrace_max_regs = 0; // Optional auto-D register cap; default 4096, or 8192 with aggressive/deep auto-D
+    bool pm1_vtrace_negadd_off = false; // Disable negative-baby/add term builder and use the older copy+sub_reg path
+    bool pm1_vtrace_product_tree = false; // Experimental v62 bucket-local product-tree Stage 2 accumulation (opt-in)
+    uint32_t pm1_vtrace_product_tree_width = 16; // Scratch fan-in/chunk width for product-tree experiment
     bool pm1_no_stage1_gcd = false;
     std::string p95path;
     int max_local_size1 = 0;
