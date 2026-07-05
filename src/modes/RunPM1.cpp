@@ -1897,7 +1897,7 @@ int App::runPM1Stage2MarinVTrace() {
         guiServer_->appendLog(oss.str());
     }
 
-    // v63 safety contract:
+    // v65 safety contract:
     //   - the default path stays the v61 stable path: primorial-aware D=30030
     //     selection plus negative-baby/add term construction.
     //   - product-tree accumulation remains opt-in only via
@@ -1975,8 +1975,13 @@ int App::runPM1Stage2MarinVTrace() {
         return {regBytes, totalBytes};
     };
     const bool allowTightVTraceMem = (std::getenv("PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM") != nullptr);
-    const long double maxAllocFrac = allowTightVTraceMem ? 0.985L : 0.900L;
-    const long double globalFrac   = allowTightVTraceMem ? 0.940L : 0.820L;
+    // v65: keep much more headroom below CL_DEVICE_MAX_MEM_ALLOC_SIZE.
+    // On NVIDIA OpenCL (e.g. RTX 3080/T4), allocating a register slab close to
+    // the reported max single allocation can fail later and leave the command
+    // queue invalid.  The V-trace slab is one large buffer, so use a conservative
+    // default cap and allow explicit opt-in via PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM.
+    const long double maxAllocFrac = allowTightVTraceMem ? 0.985L : 0.680L;
+    const long double globalFrac   = allowTightVTraceMem ? 0.940L : 0.700L;
     auto vtrace_mem_fits = [&](size_t regs)->bool {
         if (!vtraceMem.ok) return true;
         const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
@@ -2078,6 +2083,12 @@ int App::runPM1Stage2MarinVTrace() {
         static constexpr uint64_t BASE_REGS_VTRACE_AUTO = 14ULL;
         static constexpr uint64_t VTRACE_PRIMORIAL_DEFAULT_D = 30030ULL;
         const std::vector<uint64_t> candidates = {
+            // v64: ultra-small memory-safe fallbacks for 9-digit exponents on
+            // 10--16 GiB GPUs.  At p~205M, even D=90 can be too close to the OpenCL
+            // single-buffer allocation limit on NVIDIA OpenCL once driver
+            // overhead is accounted for, so auto-D must have candidates below
+            // 90 instead of crashing at D=30030.
+            30, 42, 60, 70, 84, 90, 110, 120, 126, 140, 150, 154, 168, 180,
             // conservative/highly-composite small-D fallback
             210, 420, 630, 840, 1050, 1260, 1470, 1680, 1890, 2100,
             2310, 2730, 3570, 3990, 4620, 5460, 6930, 8190, 9240,
@@ -2093,8 +2104,77 @@ int App::runPM1Stage2MarinVTrace() {
             return 4;
         };
         if (denseStage2Primes.empty()) {
-            std::cout << "[PM1-VTRACE] primorial auto-D requested but dense prime map is disabled for this B2; "
-                      << "keeping default D=" << D << ".\n";
+            // v64: B2 can be too large for the dense CPU prime map, but memory
+            // safety must still be enforced.  We cannot compute exact paired
+            // term counts cheaply here, so choose the largest fitting D from
+            // the candidate set under the register cap and OpenCL memory limits.
+            // This preserves correctness and avoids the previous D=30030 ->
+            // hundreds-of-GiB register slab failure at 9-digit exponents.
+            if (vtraceMem.ok) {
+                std::cout << "[PM1-VTRACE-MEM] auto-D memory guard: transform=" << vtraceTransformN
+                          << " | device='" << vtraceMem.name << "'"
+                          << " | global=" << std::fixed << std::setprecision(2) << gib_vtrace((long double)vtraceMem.global) << " GiB";
+                if (vtraceMem.maxAlloc != 0) std::cout << " | max-alloc=" << gib_vtrace((long double)vtraceMem.maxAlloc) << " GiB";
+                if (allowTightVTraceMem) std::cout << " | tight override enabled";
+                std::cout << "\n";
+            }
+
+            uint64_t bestD = 0;
+            size_t bestBabyCount = 0;
+            size_t bestRegs = 0;
+            uint64_t rejectedByMemory = 0;
+            uint64_t rejectedByRegs = 0;
+            for (uint64_t cand : candidates) {
+                if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
+                const size_t bc = baby_count_for_D(cand);
+                const size_t candRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc
+                                      + (useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0);
+                if (candRegs > maxRegs) { ++rejectedByRegs; continue; }
+                if (!vtrace_mem_fits(candRegs)) { ++rejectedByMemory; continue; }
+
+                // Without the dense prime map we do not have exact skip/term
+                // counts.  Prefer the largest fitting D: it lowers max-k and
+                // tends to improve pairing opportunity, while the memory guard
+                // already bounds baby table cost.
+                if (bestD == 0 || cand > bestD) {
+                    bestD = cand;
+                    bestBabyCount = bc;
+                    bestRegs = candRegs;
+                }
+            }
+
+            if (rejectedByMemory != 0) {
+                std::cout << "[PM1-VTRACE-MEM] rejected " << rejectedByMemory
+                          << " auto-D candidate(s) that were too tight for this transform/device. "
+                          << "Set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to benchmark them anyway.\n";
+            }
+            if (rejectedByRegs != 0) {
+                std::cout << "[PM1-VTRACE] rejected " << rejectedByRegs
+                          << " auto-D candidate(s) above max-regs=" << maxRegs << ".\n";
+            }
+
+            if (bestD == 0) {
+                std::cerr << "[PM1-VTRACE-MEM] no V-trace D candidate fits this transform/device "
+                          << "under max-regs=" << maxRegs << ". Falling back to classic Stage 2 is recommended: "
+                          << "rerun with -pm1-vtrace-off, or set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to force.\n";
+                return -2;
+            }
+
+            if (bestD != D) {
+                std::cout << "[PM1-VTRACE] dense prime map disabled for B2=" << B2u
+                          << "; memory-safe auto-D selected D=" << bestD
+                          << " under max-regs=" << maxRegs
+                          << " (baby=" << bestBabyCount
+                          << ", regs=" << bestRegs
+                          << ", approx max-k=" << (B2u / bestD) << ").\n";
+                D = bestD;
+            } else {
+                std::cout << "[PM1-VTRACE] dense prime map disabled for B2=" << B2u
+                          << "; memory-safe auto-D kept D=" << D
+                          << " under max-regs=" << maxRegs
+                          << " (baby=" << bestBabyCount
+                          << ", regs=" << bestRegs << ").\n";
+            }
         } else {
             if (vtraceMem.ok) {
                 std::cout << "[PM1-VTRACE-MEM] auto-D memory guard: transform=" << vtraceTransformN
@@ -2296,8 +2376,7 @@ int App::runPM1Stage2MarinVTrace() {
         std::cerr << "[PM1-VTRACE] GPU engine allocation failed for D=" << D
                   << ", regs=" << regCount << ": " << ex.what() << "\n";
         if (options.pm1_vtrace_D == 0) {
-            std::cerr << "[PM1-VTRACE] auto-D should have avoided this. Retry with -pm1-vtrace-max-regs 1024 "
-                      << "or -pm1-vtrace-d 4620; if intentional, set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1.\n";
+            std::cerr << "[PM1-VTRACE] auto-D should have avoided this. Retry with -pm1-vtrace-d 42 or -pm1-vtrace-d 30; if intentional, set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1.\n";
         }
         return -2;
     }
@@ -2896,7 +2975,152 @@ int App::runPM1Stage2Marin() {
     const bool verbose = true;
 
     // --------- BSGS parameters ----------
-    const uint64_t D = 630;
+    // v66: classic Stage-2 BSGS also needs a memory-aware D.
+    // The previous classic path always used D=630, which stores phi(630)=144
+    // baby steps plus base registers.  At p≈205M (FFT 10,485,760) this is
+    // about 12.3 GiB for the register slab alone, so it cannot fit on 10 GB
+    // GPUs and can throw CL_MEM_OBJECT_ALLOCATION_FAILURE.  Keep the old
+    // algorithm, but select a smaller D when the register slab would exceed
+    // conservative OpenCL allocation/global-memory limits.
+    auto gcd_u64_classic_autod = [](uint64_t a, uint64_t b)->uint64_t{
+        while (b) { uint64_t t = a % b; a = b; b = t; }
+        return a;
+    };
+    auto classic_baby_count_for_D = [&](uint64_t d)->size_t{
+        size_t c = 0;
+        for (uint64_t e = 1; e < d; e += 2) {
+            if (gcd_u64_classic_autod(e, d) == 1) ++c;
+        }
+        return c;
+    };
+
+    struct ClassicDeviceMemInfo {
+        cl_ulong global = 0;
+        cl_ulong maxAlloc = 0;
+        std::string name;
+        std::string vendor;
+        bool ok = false;
+    };
+    auto query_classic_device_mem = [](size_t wantedDevice)->ClassicDeviceMemInfo {
+        ClassicDeviceMemInfo out;
+        cl_uint numPlatforms = 0;
+        cl_platform_id platforms[64];
+        if (clGetPlatformIDs(64, platforms, &numPlatforms) != CL_SUCCESS) return out;
+
+        auto scan = [&](cl_device_type dtype, bool& anyFound)->bool {
+            size_t idx = 0;
+            for (cl_uint pi = 0; pi < numPlatforms; ++pi) {
+                cl_uint numDevices = 0;
+                cl_device_id devices[64];
+                cl_int r = clGetDeviceIDs(platforms[pi], dtype, 64, devices, &numDevices);
+                if (r != CL_SUCCESS) continue;
+                anyFound = true;
+                for (cl_uint di = 0; di < numDevices; ++di, ++idx) {
+                    if (idx != wantedDevice) continue;
+                    char dname[1024] = {0};
+                    char dvendor[1024] = {0};
+                    (void)clGetDeviceInfo(devices[di], CL_DEVICE_NAME, sizeof(dname), dname, nullptr);
+                    (void)clGetDeviceInfo(devices[di], CL_DEVICE_VENDOR, sizeof(dvendor), dvendor, nullptr);
+                    cl_ulong global = 0, maxAlloc = 0;
+                    if (clGetDeviceInfo(devices[di], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global), &global, nullptr) != CL_SUCCESS) return false;
+                    if (clGetDeviceInfo(devices[di], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(maxAlloc), &maxAlloc, nullptr) != CL_SUCCESS) maxAlloc = 0;
+                    out.global = global;
+                    out.maxAlloc = maxAlloc;
+                    out.name = dname;
+                    out.vendor = dvendor;
+                    out.ok = true;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        bool anyGpu = false;
+        if (scan(CL_DEVICE_TYPE_GPU, anyGpu)) return out;
+        if (!anyGpu) { bool anyAll = false; (void)scan(CL_DEVICE_TYPE_ALL, anyAll); }
+        return out;
+    };
+
+    static constexpr size_t baseRegsStage2 = 13;
+    static constexpr size_t baseRegsStage1 = 11;
+
+    const size_t classicTransformN = ibdwt::transform_size(pexp);
+    auto gib_classic = [](long double b)->long double { return b / 1073741824.0L; };
+    auto classic_memory_plan = [&](size_t regs)->std::pair<long double,long double> {
+        const long double n = (long double)classicTransformN;
+        const long double regBytes = (long double)regs * n * (long double)sizeof(uint64_t);
+        const long double totalBytes = regBytes
+                                   + (n / 4.0L) * (long double)sizeof(uint64_t)
+                                   + 3.0L * n * (long double)sizeof(uint64_t)
+                                   + 2.0L * n * (long double)sizeof(uint64_t)
+                                   + n * (long double)sizeof(uint8_t);
+        return {regBytes, totalBytes};
+    };
+
+    const ClassicDeviceMemInfo classicMem = query_classic_device_mem((size_t)options.device_id);
+    const bool allowTightClassicMem = (std::getenv("PRMERS_PM1_CLASSIC_ALLOW_TIGHT_MEM") != nullptr);
+    const long double classicMaxAllocFrac = allowTightClassicMem ? 0.985L : 0.680L;
+    const long double classicGlobalFrac   = allowTightClassicMem ? 0.940L : 0.700L;
+    auto classic_mem_fits = [&](size_t regs)->bool {
+        if (!classicMem.ok) return true;
+        const auto [regBytes, totalBytes] = classic_memory_plan(regs);
+        if (classicMem.maxAlloc != 0 && regBytes > (long double)classicMem.maxAlloc * classicMaxAllocFrac) return false;
+        if (classicMem.global != 0 && totalBytes > (long double)classicMem.global * classicGlobalFrac) return false;
+        return true;
+    };
+
+    uint64_t D = 630;
+    if (const char* envD = std::getenv("PRMERS_PM1_CLASSIC_D")) {
+        const uint64_t forced = std::strtoull(envD, nullptr, 10);
+        if (forced >= 4 && (forced % 2ULL) == 0) {
+            D = forced;
+            const size_t forcedRegs = baseRegsStage2 + classic_baby_count_for_D(D);
+            if (classicMem.ok && !classic_mem_fits(forcedRegs) && !allowTightClassicMem) {
+                const auto [regBytes, totalBytes] = classic_memory_plan(forcedRegs);
+                std::cerr << "[PM1-CLASSIC-MEM] WARNING: PRMERS_PM1_CLASSIC_D=" << D
+                          << " uses " << std::fixed << std::setprecision(2) << gib_classic(regBytes)
+                          << " GiB register slab and " << gib_classic(totalBytes)
+                          << " GiB total before driver overhead on device "
+                          << gib_classic((long double)classicMem.global) << " GiB";
+                if (classicMem.maxAlloc != 0) std::cerr << ", max single allocation=" << gib_classic((long double)classicMem.maxAlloc) << " GiB";
+                std::cerr << ". Set PRMERS_PM1_CLASSIC_ALLOW_TIGHT_MEM=1 only if intentional.\n";
+            }
+        } else {
+            std::cerr << "[PM1-CLASSIC-MEM] Ignoring invalid PRMERS_PM1_CLASSIC_D=" << envD << " (need even D>=4).\n";
+        }
+    } else if (classicMem.ok) {
+        std::cout << "[PM1-CLASSIC-MEM] auto-D memory guard: transform=" << classicTransformN
+                  << " | device='" << classicMem.name << "'"
+                  << " | global=" << std::fixed << std::setprecision(2) << gib_classic((long double)classicMem.global) << " GiB";
+        if (classicMem.maxAlloc != 0) std::cout << " | max-alloc=" << gib_classic((long double)classicMem.maxAlloc) << " GiB";
+        std::cout << "\n";
+
+        // Ordered from the old, faster/larger D down to conservative small-D fallbacks.
+        const uint64_t candidates[] = {630, 420, 330, 300, 210, 180, 150, 126, 120, 90, 84, 70, 60, 42, 30, 24, 18, 12, 10, 8, 6};
+        uint64_t bestD = 0;
+        size_t rejectedByMem = 0;
+        for (uint64_t cand : candidates) {
+            const size_t bc = classic_baby_count_for_D(cand);
+            const size_t regs = baseRegsStage2 + bc;
+            if (!classic_mem_fits(regs)) { ++rejectedByMem; continue; }
+            bestD = cand;
+            break;
+        }
+        if (bestD == 0) {
+            std::cerr << "[PM1-CLASSIC-MEM] No classic BSGS D candidate fits this transform/device. "
+                      << "Retry V-trace default, -pm1-lowmem, or set PRMERS_PM1_CLASSIC_D/PRMERS_PM1_CLASSIC_ALLOW_TIGHT_MEM if intentional.\n";
+            return -2;
+        }
+        if (bestD != 630 || rejectedByMem) {
+            const size_t bc = classic_baby_count_for_D(bestD);
+            const size_t regs = baseRegsStage2 + bc;
+            std::cout << "[PM1-CLASSIC-MEM] rejected " << rejectedByMem
+                      << " classic D candidate(s) that were too tight; selected D=" << bestD
+                      << " (baby=" << bc << ", regs=" << regs << ").\n";
+        }
+        D = bestD;
+    }
+
     const uint64_t SEG_SPAN = 100000000ULL;
 
     #ifndef PM1_BSGS_SELFTEST
@@ -2904,9 +3128,6 @@ int App::runPM1Stage2Marin() {
     #endif
 
     // ---- Registers ----
-    static constexpr size_t baseRegsStage2 = 13;
-    static constexpr size_t baseRegsStage1 = 11;
-
     static constexpr size_t RSTATE    = 0;   // H (digits)
     static constexpr size_t RACC_L    = 1;   // accumulator Π(H^r - 1) (digits)
     static constexpr size_t RGIANT    = 2;   // (H^D)^k (digits)
@@ -4927,8 +5148,8 @@ int App::runPM1Marin() {
                             for (size_t k = eb; k-- > 0;) {
                                 eng->square_mul(RPOW);
                                 if (mpz_tstbit(eacc.get_mpz_t(), k)) {
-                                    //eng->set_multiplicand(RTMP, RBASE);
-                                    eng->mul(RPOW, RBASE);
+                                    eng->set_multiplicand(RTMP, RBASE);
+                                    eng->mul(RPOW, RTMP);
                                 }
                             }
                             eng->set_multiplicand(RTMP, RPOW);
@@ -4992,8 +5213,8 @@ int App::runPM1Marin() {
                             for (size_t k = wb; k-- > 0;) {
                                 eng->square_mul(RPOW);
                                 if (mpz_tstbit(wbits.get_mpz_t(), k)) {
-                                    //eng->set_multiplicand(RTMP, RBASE);
-                                    eng->mul(RPOW, RBASE);
+                                    eng->set_multiplicand(RTMP, RBASE);
+                                    eng->mul(RPOW, RTMP);
                                 }
                             }
                             eng->set_multiplicand(RTMP, RPOW);
@@ -5076,8 +5297,8 @@ int App::runPM1Marin() {
                 for (size_t k = wbl; k-- > 0;) {
                     eng->square_mul(RPOW);
                     if (mpz_tstbit(wtail.get_mpz_t(), k)) {
-                        //eng->set_multiplicand(RTMP, RBASE);
-                        eng->mul(RPOW, RBASE);
+                        eng->set_multiplicand(RTMP, RBASE);
+                        eng->mul(RPOW, RTMP);
                     }
                 }
                 eng->set_multiplicand(RTMP, RPOW);
