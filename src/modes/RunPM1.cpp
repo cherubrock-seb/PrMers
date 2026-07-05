@@ -11,6 +11,7 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "marin/engine.h"
+#include "marin/ibdwt.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
@@ -26,6 +27,9 @@
 # include <OpenCL/opencl.h>
 #else
 # include <CL/cl.h>
+#endif
+#ifndef CL_DEVICE_MAX_MEM_ALLOC_SIZE
+#define CL_DEVICE_MAX_MEM_ALLOC_SIZE 0x1010
 #endif
 #ifdef _WIN32
 # include <windows.h>
@@ -1893,16 +1897,93 @@ int App::runPM1Stage2MarinVTrace() {
         guiServer_->appendLog(oss.str());
     }
 
-    // v62 safety contract:
+    // v63 safety contract:
     //   - the default path stays the v61 stable path: primorial-aware D=30030
     //     selection plus negative-baby/add term construction.
-    //   - product-tree accumulation is real but opt-in only via
-    //     -pm1-vtrace-product-tree, so the normal 42-43s regression level cannot
+    //   - product-tree accumulation remains opt-in only via
+    //     -pm1-vtrace-product-tree, so the normal stable regression level cannot
     //     be lost by default.  The product-tree path is also restricted to the
     //     dense-prime-map case for exact bucket construction.
+    //   - auto-D is now memory-aware.  For larger exponents D=30030 can require
+    //     a single register buffer above the OpenCL max-allocation limit even
+    //     though total VRAM looks almost sufficient.  The default auto-D filters
+    //     candidates using CL_DEVICE_GLOBAL_MEM_SIZE and CL_DEVICE_MAX_MEM_ALLOC_SIZE
+    //     before creating the engine; manual -pm1-vtrace-d still means force it.
     const bool useNegBabyAdd = !options.pm1_vtrace_negadd_off;
     const bool requestedProductTree = options.pm1_vtrace_product_tree;
     bool useProductTree = false;
+
+    struct VTraceDeviceMemInfo {
+        cl_ulong global = 0;
+        cl_ulong maxAlloc = 0;
+        std::string name;
+        std::string vendor;
+        bool ok = false;
+    };
+
+    auto query_vtrace_device_mem = [](size_t wantedDevice)->VTraceDeviceMemInfo {
+        VTraceDeviceMemInfo out;
+        cl_uint numPlatforms = 0;
+        cl_platform_id platforms[64];
+        if (clGetPlatformIDs(64, platforms, &numPlatforms) != CL_SUCCESS) return out;
+
+        auto scan = [&](cl_device_type dtype, bool& anyFound)->bool {
+            size_t idx = 0;
+            for (cl_uint pi = 0; pi < numPlatforms; ++pi) {
+                cl_uint numDevices = 0;
+                cl_device_id devices[64];
+                cl_int r = clGetDeviceIDs(platforms[pi], dtype, 64, devices, &numDevices);
+                if (r != CL_SUCCESS) continue;
+                anyFound = true;
+                for (cl_uint di = 0; di < numDevices; ++di, ++idx) {
+                    if (idx != wantedDevice) continue;
+                    char dname[1024] = {0};
+                    char dvendor[1024] = {0};
+                    (void)clGetDeviceInfo(devices[di], CL_DEVICE_NAME, sizeof(dname), dname, nullptr);
+                    (void)clGetDeviceInfo(devices[di], CL_DEVICE_VENDOR, sizeof(dvendor), dvendor, nullptr);
+                    cl_ulong global = 0, maxAlloc = 0;
+                    if (clGetDeviceInfo(devices[di], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global), &global, nullptr) != CL_SUCCESS) return false;
+                    if (clGetDeviceInfo(devices[di], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(maxAlloc), &maxAlloc, nullptr) != CL_SUCCESS) maxAlloc = 0;
+                    out.global = global;
+                    out.maxAlloc = maxAlloc;
+                    out.name = dname;
+                    out.vendor = dvendor;
+                    out.ok = true;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        bool anyGpu = false;
+        if (scan(CL_DEVICE_TYPE_GPU, anyGpu)) return out;
+        if (!anyGpu) { bool anyAll = false; (void)scan(CL_DEVICE_TYPE_ALL, anyAll); }
+        return out;
+    };
+
+    const VTraceDeviceMemInfo vtraceMem = query_vtrace_device_mem((size_t)options.device_id);
+    const size_t vtraceTransformN = ibdwt::transform_size(pexp);
+    auto gib_vtrace = [](long double b)->long double { return b / 1073741824.0L; };
+    auto vtrace_memory_plan = [&](size_t regs)->std::pair<long double,long double> {
+        const long double n = (long double)vtraceTransformN;
+        const long double regBytes = (long double)regs * n * (long double)sizeof(uint64_t);
+        const long double totalBytes = regBytes
+                                   + (n / 4.0L) * (long double)sizeof(uint64_t)
+                                   + 3.0L * n * (long double)sizeof(uint64_t)
+                                   + 2.0L * n * (long double)sizeof(uint64_t)
+                                   + n * (long double)sizeof(uint8_t);
+        return {regBytes, totalBytes};
+    };
+    const bool allowTightVTraceMem = (std::getenv("PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM") != nullptr);
+    const long double maxAllocFrac = allowTightVTraceMem ? 0.985L : 0.900L;
+    const long double globalFrac   = allowTightVTraceMem ? 0.940L : 0.820L;
+    auto vtrace_mem_fits = [&](size_t regs)->bool {
+        if (!vtraceMem.ok) return true;
+        const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
+        if (vtraceMem.maxAlloc != 0 && regBytes > (long double)vtraceMem.maxAlloc * maxAllocFrac) return false;
+        if (vtraceMem.global != 0 && totalBytes > (long double)vtraceMem.global * globalFrac) return false;
+        return true;
+    };
 
     auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
         while (b) { uint64_t t = a % b; a = b; b = t; }
@@ -1956,7 +2037,7 @@ int App::runPM1Stage2MarinVTrace() {
         uint32_t w = options.pm1_vtrace_product_tree_width;
         if (w < 2u) w = 2u;
         if (w > 64u) w = 64u;
-        std::cout << "[PM1-VTRACE-PRODUCT-TREE] v62 experimental bucket product-tree enabled "
+        std::cout << "[PM1-VTRACE-PRODUCT-TREE] v63 experimental bucket product-tree enabled "
                   << "(opt-in, width=" << w << "). Default runs remain on the stable v61 path.\n";
     }
 
@@ -2015,22 +2096,32 @@ int App::runPM1Stage2MarinVTrace() {
             std::cout << "[PM1-VTRACE] primorial auto-D requested but dense prime map is disabled for this B2; "
                       << "keeping default D=" << D << ".\n";
         } else {
+            if (vtraceMem.ok) {
+                std::cout << "[PM1-VTRACE-MEM] auto-D memory guard: transform=" << vtraceTransformN
+                          << " | device='" << vtraceMem.name << "'"
+                          << " | global=" << std::fixed << std::setprecision(2) << gib_vtrace((long double)vtraceMem.global) << " GiB";
+                if (vtraceMem.maxAlloc != 0) std::cout << " | max-alloc=" << gib_vtrace((long double)vtraceMem.maxAlloc) << " GiB";
+                if (allowTightVTraceMem) std::cout << " | tight override enabled";
+                std::cout << "\n";
+            }
+
             uint64_t bestD = D, bestTerms = 0, bestSkips = 0, bestMaxK = 0;
             size_t bestBabyCount = 0;
             double bestScore = std::numeric_limits<double>::infinity();
+            uint64_t rejectedByMemory = 0;
             for (uint64_t cand : candidates) {
                 if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
                 const size_t bc = baby_count_for_D(cand);
-                if (BASE_REGS_VTRACE_AUTO + bc > maxRegs) continue;
+                const size_t candRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc + (useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0);
+                if (candRegs > maxRegs) continue;
+                if (!vtrace_mem_fits(candRegs)) { ++rejectedByMemory; continue; }
                 uint64_t terms = 0, skips = 0, maxk = 0;
                 trace_stats_for_D(cand, terms, skips, maxk);
                 if (!terms) continue;
 
-                // v61 primorial-aware empirical model.  The regression sweep on
-                // M1362763 showed D=30030 is the useful plateau: 60060..240240
-                // consume 2.8..11.3 GiB but produce equal or more terms.  Score
-                // by exact term count first, then lightly penalize table size,
-                // giant span, and distance from the 30030 primorial anchor.
+                // v63 primorial-aware + memory-aware empirical model.  Exact term
+                // count dominates, but candidates must fit both total VRAM and the
+                // OpenCL single-buffer max allocation before engine creation.
                 const double babyPenalty = 0.08 * double(bc);
                 const double giantPenalty = 0.04 * double(maxk);
                 const double distancePenalty = 0.003 * double(cand > VTRACE_PRIMORIAL_DEFAULT_D
@@ -2041,6 +2132,11 @@ int App::runPM1Stage2MarinVTrace() {
                 if (score < bestScore) {
                     bestScore = score; bestD = cand; bestTerms = terms; bestSkips = skips; bestMaxK = maxk; bestBabyCount = bc;
                 }
+            }
+            if (rejectedByMemory != 0) {
+                std::cout << "[PM1-VTRACE-MEM] rejected " << rejectedByMemory
+                          << " auto-D candidate(s) that were too tight for this transform/device. "
+                          << "Set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to benchmark them anyway.\n";
             }
             if (bestD != D) {
                 std::cout << "[PM1-VTRACE] primorial-aware auto-D selected D=" << bestD
@@ -2175,8 +2271,36 @@ int App::runPM1Stage2MarinVTrace() {
         std::cout << "[PM1-VTRACE-PRODUCT-TREE] scratch width=" << productTreeWidth
                   << " regs; accumulation is bucket-local tree chunks, then one ACC multiply per chunk.\n";
     }
+    if (vtraceMem.ok) {
+        const auto [regBytes, totalBytes] = vtrace_memory_plan(regCount);
+        if (!vtrace_mem_fits(regCount)) {
+            std::cerr << "[PM1-VTRACE-MEM] selected/manual D=" << D << " uses "
+                      << std::fixed << std::setprecision(2) << gib_vtrace(regBytes)
+                      << " GiB for the register slab and " << gib_vtrace(totalBytes)
+                      << " GiB total before driver overhead on device "
+                      << gib_vtrace((long double)vtraceMem.global) << " GiB";
+            if (vtraceMem.maxAlloc != 0) std::cerr << ", max single allocation=" << gib_vtrace((long double)vtraceMem.maxAlloc) << " GiB";
+            std::cerr << ".\n";
+            if (options.pm1_vtrace_D != 0 && !allowTightVTraceMem) {
+                std::cerr << "[PM1-VTRACE-MEM] explicit -pm1-vtrace-d was requested, but this plan is likely to fail. "
+                          << "Use a smaller D or set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to force.\n";
+                return -2;
+            }
+        }
+    }
 
-    engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
+    engine* eng = nullptr;
+    try {
+        eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
+    } catch (const std::exception& ex) {
+        std::cerr << "[PM1-VTRACE] GPU engine allocation failed for D=" << D
+                  << ", regs=" << regCount << ": " << ex.what() << "\n";
+        if (options.pm1_vtrace_D == 0) {
+            std::cerr << "[PM1-VTRACE] auto-D should have avoided this. Retry with -pm1-vtrace-max-regs 1024 "
+                      << "or -pm1-vtrace-d 4620; if intentional, set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1.\n";
+        }
+        return -2;
+    }
     if (!eng) {
         std::cerr << "[PM1-VTRACE] cannot allocate GPU engine.\n";
         return -2;
