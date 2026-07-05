@@ -1857,7 +1857,667 @@ int App::runPM1Stage2MarinLowMem() {
     return found ? 0 : 1;
 }
 
+
+int App::runPM1Stage2MarinVTrace() {
+    using namespace std::chrono;
+
+    if (guiServer_) guiServer_->setStatus("P-1 factoring stage 2 (V-trace BSGS)");
+
+    const uint64_t B1u = options.B1, B2u = options.B2;
+    mpz_class B1 = mpz_from_u64(B1u);
+    mpz_class B2 = mpz_from_u64(B2u);
+
+    if (B2 <= B1) {
+        std::cerr << "Stage 2 V-trace error B2 < B1.\n";
+        if (guiServer_) guiServer_->appendLog("Stage 2 V-trace error B2 < B1.");
+        return -1;
+    }
+
+    uint64_t D = options.pm1_vtrace_D ? options.pm1_vtrace_D : 630ULL;
+    if (D < 4 || (D & 1ULL)) {
+        std::cerr << "[PM1-VTRACE] D must be even and >= 4. Use e.g. -pm1-vtrace-d 210, 630 or 2310.\n";
+        return -1;
+    }
+
+    const uint32_t pexp = static_cast<uint32_t>(options.exponent);
+    const bool verbose = true;
+    const uint64_t SEG_SPAN = 100000000ULL;
+
+    std::cout << "\nStart a P-1 factoring : Stage 2 V-trace Bounds: B1 = "
+              << B1 << ", B2 = " << B2 << "\n";
+    std::cout << "[PM1-VTRACE] Scalar trace path: V_n = H^n + H^(-n), D=" << D << "\n";
+    std::cout << "[PM1-VTRACE] This scalar trace path is the default normal-memory Stage 2; use -pm1-vtrace-off for the previous classic Stage 2.\n";
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "Start P-1 Stage 2 V-trace: B1=" << B1 << " B2=" << B2 << " D=" << D;
+        guiServer_->appendLog(oss.str());
+    }
+
+    auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
+        while (b) { uint64_t t = a % b; a = b; b = t; }
+        return a;
+    };
+
+    const uint64_t root = isqrt_u64(B2u);
+    const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
+
+    auto is_prime_trial = [&](uint64_t n)->bool{
+        if (n < 2) return false;
+        for (uint32_t p32 : basePrimes) {
+            const uint64_t p = (uint64_t)p32;
+            if (p * p > n) break;
+            if (n % p == 0) return n == p;
+        }
+        return true;
+    };
+
+    mpz_class p0;
+    mpz_nextprime(p0.get_mpz_t(), B1.get_mpz_t());
+    if (p0 > B2) {
+        std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << " (no primes in range)\n";
+        if (guiServer_) guiServer_->appendLog("No factor P-1 Stage 2 V-trace (no primes in range).");
+        return 1;
+    }
+    const uint64_t p0u = mpz_get_u64(p0.get_mpz_t());
+
+    // v53: for small/medium B2 ranges, build one dense CPU prime map once.
+    // This removes many trial divisions in the duplicate-pair test and also lets
+    // auto-D evaluate candidate D values cheaply.  It is CPU memory only and does
+    // not alter the classic Stage 2 path.
+    static constexpr uint64_t VTRACE_DENSE_PRIME_MAX = 100000000ULL;
+    std::vector<uint64_t> denseStage2Primes;
+    std::vector<uint8_t> densePrimeMark;
+    if (B2u <= VTRACE_DENSE_PRIME_MAX) {
+        denseStage2Primes.clear();
+        segmented_primes_odd(B1u + 1, B2u, basePrimes, denseStage2Primes);
+        densePrimeMark.assign((size_t)B2u + 1, uint8_t(0));
+        for (uint64_t q : denseStage2Primes) densePrimeMark[(size_t)q] = uint8_t(1);
+        std::cout << "[PM1-VTRACE] Dense CPU prime map enabled: "
+                  << denseStage2Primes.size() << " primes, "
+                  << (densePrimeMark.size() / (1024.0 * 1024.0)) << " MiB.\n";
+    }
+
+    auto is_prime_fast = [&](uint64_t n)->bool{
+        if (!densePrimeMark.empty() && n < densePrimeMark.size()) return densePrimeMark[(size_t)n] != 0;
+        return is_prime_trial(n);
+    };
+
+    auto baby_count_for_D = [&](uint64_t d)->size_t{
+        size_t c = 0;
+        for (uint64_t j = 1; j <= d / 2; j += 2) if (gcd_u64(j, d) == 1) ++c;
+        return c;
+    };
+
+    auto trace_stats_for_D = [&](uint64_t d, uint64_t& terms, uint64_t& skips, uint64_t& maxk)->void{
+        terms = 0; skips = 0; maxk = 0;
+        const std::vector<uint64_t>* plist = denseStage2Primes.empty() ? nullptr : &denseStage2Primes;
+        if (!plist) return;
+        for (uint64_t q : *plist) {
+            uint64_t k = q / d;
+            uint64_t rem = q - k * d;
+            uint64_t j = rem;
+            if (rem > d / 2) { ++k; j = d - rem; }
+            const uint64_t qminus = k * d - j;
+            const uint64_t qplus  = k * d + j;
+            bool process = true;
+            if (j != 0 && q == qplus && qminus > B1u && is_prime_fast(qminus)) process = false;
+            if (process) { ++terms; if (k > maxk) maxk = k; }
+            else ++skips;
+        }
+    };
+
+    const bool defaultAutoD = (options.pm1_vtrace_D == 0);
+    const bool autoDEnabled = options.pm1_vtrace_auto_d || defaultAutoD;
+    if (autoDEnabled) {
+        const uint64_t maxRegs = options.pm1_vtrace_max_regs ? options.pm1_vtrace_max_regs :
+                                 (options.pm1_vtrace_auto_d_aggressive ? 4096ULL : 1024ULL);
+        static constexpr uint64_t BASE_REGS_VTRACE_AUTO = 14ULL;
+        const std::vector<uint64_t> candidates = {
+            210, 420, 630, 840, 1050, 1260, 1470, 1680, 1890, 2100,
+            2310, 2730, 3570, 3990, 4620, 5460, 6930, 8190, 9240,
+            11550, 13860, 18480, 23100, 30030, 60060, 120120
+        };
+        if (denseStage2Primes.empty()) {
+            std::cout << "[PM1-VTRACE] auto-D requested but dense prime map is disabled for this B2; keeping D=" << D << ".\n";
+        } else {
+            uint64_t bestD = D, bestTerms = 0, bestSkips = 0, bestMaxK = 0;
+            double bestScore = std::numeric_limits<double>::infinity();
+            for (uint64_t cand : candidates) {
+                if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
+                const size_t bc = baby_count_for_D(cand);
+                if (BASE_REGS_VTRACE_AUTO + bc > maxRegs) continue;
+                uint64_t terms = 0, skips = 0, maxk = 0;
+                trace_stats_for_D(cand, terms, skips, maxk);
+                if (!terms) continue;
+                // v55 balanced empirical GPU model.  v54 minimized mostly the
+                // trace term count and often picked very large D (30030/60060).
+                // The M1362763 Radeon VII benchmark showed a plateau: larger
+                // baby tables consume much more VRAM/global-memory bandwidth but
+                // reduce very few additional terms.  Penalize baby residues so
+                // auto-D selects the smallest D near the measured throughput sweet
+                // spot instead of blindly filling VRAM.
+                const double babyPenalty = 5.0 * double(bc);
+                const double score = 2.0 * double(terms)
+                                   + double(maxk)
+                                   + 0.20 * double(cand)
+                                   + babyPenalty;
+                if (score < bestScore) {
+                    bestScore = score; bestD = cand; bestTerms = terms; bestSkips = skips; bestMaxK = maxk;
+                }
+            }
+            if (bestD != D) {
+                std::cout << "[PM1-VTRACE] auto-D selected D=" << bestD
+                          << (defaultAutoD ? " (default)" : (options.pm1_vtrace_auto_d_aggressive ? " (aggressive)" : ""))
+                          << " under max-regs=" << maxRegs
+                          << " (terms=" << bestTerms
+                          << ", paired-skip=" << bestSkips
+                          << ", max-k=" << bestMaxK
+                          << ", balanced-score=" << bestScore << ").\n";
+                D = bestD;
+            } else {
+                std::cout << "[PM1-VTRACE] auto-D kept D=" << D
+                          << (defaultAutoD ? " (default)" : "")
+                          << " under max-regs=" << maxRegs << ".\n";
+            }
+        }
+    }
+
+    struct TracePair { uint64_t k; uint64_t j; uint64_t qminus; uint64_t qplus; };
+    auto make_pair_for_prime = [&](uint64_t q)->TracePair{
+        uint64_t k = q / D;
+        uint64_t rem = q - k * D;
+        uint64_t j = rem;
+        if (rem > D / 2) {
+            ++k;
+            j = D - rem;
+        }
+        return TracePair{k, j, k * D - j, k * D + j};
+    };
+
+    // j in [1, D/2], odd, gcd(j,D)=1.  Prime q=kD±j with q not dividing D always lands here.
+    std::vector<int32_t> j2i((size_t)(D / 2 + 1), -1);
+    std::vector<uint32_t> babyJ;
+    for (uint64_t j = 1; j <= D / 2; j += 2) {
+        if (gcd_u64(j, D) == 1) {
+            j2i[(size_t)j] = (int32_t)babyJ.size();
+            babyJ.push_back((uint32_t)j);
+        }
+    }
+    const size_t babyCount = babyJ.size();
+    if (!babyCount) {
+        std::cerr << "[PM1-VTRACE] no usable baby residues for D=" << D << "\n";
+        return -2;
+    }
+
+    // Register layout.  Baby registers store scalar traces V_j in normal digit form.
+    static constexpr size_t RSTATE    = 0;   // H loaded from stage-1 checkpoint, mostly for diagnostics
+    static constexpr size_t RACC      = 1;   // accumulator Π(V_kD - V_j)
+    static constexpr size_t RV1       = 2;   // V_1 = H + H^-1
+    static constexpr size_t RMUL_V1   = 3;   // multiplicand(V_1)
+    static constexpr size_t RVD       = 4;   // V_D
+    static constexpr size_t RMUL_VD   = 5;   // multiplicand(V_D)
+    static constexpr size_t RGPREV    = 6;   // V_(cur_k-1)D ; at k=0 this is V_-D = V_D
+    static constexpr size_t RGCUR     = 7;   // V_cur_kD
+    static constexpr size_t RGNEXT    = 8;   // scratch for next giant
+    static constexpr size_t RBPREV    = 9;   // baby recurrence prev
+    static constexpr size_t RBCUR     = 10;  // baby recurrence cur
+    static constexpr size_t RBNEXT    = 11;  // baby recurrence next
+    static constexpr size_t RTMP      = 12;  // scratch term / multiplication input
+    static constexpr size_t RMUL_TMP  = 13;  // multiplicand(term)
+    static constexpr size_t baseRegsVTrace = 14;
+    static constexpr size_t baseRegsStage1 = 11;
+
+    const size_t babyBase = baseRegsVTrace;
+    const size_t regCount = baseRegsVTrace + babyCount;
+
+    std::cout << "[PM1-VTRACE] Baby residues stored: " << babyCount
+              << " (odd j<=D/2, gcd(j,D)=1), GPU registers=" << regCount << "\n";
+
+    engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, verbose);
+    if (!eng) {
+        std::cerr << "[PM1-VTRACE] cannot allocate GPU engine.\n";
+        return -2;
+    }
+
+    std::ostringstream ck2; ck2 << "pm1_s2_vtrace_m_" << pexp << ".ckpt";
+    const std::string ckpt_file_s2 = ck2.str();
+
+    auto read_ckpt_s2 = [&](engine* e, const std::string& file,
+                            uint64_t& saved_p, uint64_t& saved_idx, uint64_t& saved_k,
+                            double& et, uint64_t& sB1, uint64_t& sB2, uint64_t& sD)->int{
+        File f(file);
+        if (!f.exists()) return -1;
+        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+        if (version != 21) return -2;
+        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (rp != pexp) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
+        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        const size_t cksz = e->get_checkpoint_size();
+        std::vector<char> data(cksz);
+        if (!f.read(data.data(), cksz)) return -2;
+        if (!e->set_checkpoint(data)) return -2;
+        if (!f.check_crc32()) return -2;
+        return 0;
+    };
+
+    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, uint64_t cur_k, double et){
+        const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
+        {
+            File f(newf, "wb");
+            int version = 21;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
+            if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
+            if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
+            if (!f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u))) return;
+            if (!f.write(reinterpret_cast<const char*>(&D), sizeof(D))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
+            if (!f.write(reinterpret_cast<const char*>(&cur_k), sizeof(cur_k))) return;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!e->get_checkpoint(data)) return;
+            if (!f.write(data.data(), cksz)) return;
+            f.write_crc32();
+        }
+        std::remove(oldf.c_str());
+        struct stat st;
+        if ((stat(ckpt_file_s2.c_str(), &st) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
+        std::rename(newf.c_str(), ckpt_file_s2.c_str());
+    };
+
+    uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
+    double restored_time = 0.0;
+    uint64_t s2B1=0, s2B2=0, s2D=0;
+    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D);
+    bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
+
+    mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
+
+    if (!resumed_s2) {
+        // ---- load H from the Stage-1 checkpoint written by runPM1Marin() ----
+        engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, (size_t)options.device_id, verbose);
+        if (!eng_load) { delete eng; return -2; }
+
+        std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
+        const std::string ckpt_file = ck.str();
+
+        auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
+            File f(file);
+            if (!f.exists()) return -1;
+            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
+            if (version != 3) return -2;
+            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+            if (rp != pexp) return -2;
+            uint32_t ri = 0; double et = 0.0;
+            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            const size_t cksz = e->get_checkpoint_size();
+            std::vector<char> data(cksz);
+            if (!f.read(data.data(), cksz)) return -2;
+            if (!e->set_checkpoint(data)) return -2;
+            uint64_t tmp64;
+            for (int i = 0; i < 4; ++i) if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
+            uint8_t inlot=0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) return -2;
+            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) return -2;
+            if (eacc_len) { std::string skip(eacc_len, '\0'); if (!f.read(skip.data(), eacc_len)) return -2; }
+            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) return -2;
+            if (wbits_len) { std::string skip(wbits_len, '\0'); if (!f.read(skip.data(), wbits_len)) return -2; }
+            uint64_t chunkIdx=0, startP=0; uint8_t first=0; uint64_t processedBits=0, bitsInChunk=0;
+            if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
+            if (!f.check_crc32()) return -2;
+            return 0;
+        };
+
+        int rr = read_ckpt_stage1(eng_load, ckpt_file);
+        if (rr < 0) rr = read_ckpt_stage1(eng_load, ckpt_file + ".old");
+        if (rr != 0) {
+            delete eng_load; delete eng;
+            std::cerr << "[PM1-VTRACE] cannot load pm1 stage1 checkpoint " << ckpt_file << "\n";
+            if (guiServer_) guiServer_->appendLog("PM1-VTRACE: cannot load stage1 checkpoint.");
+            return -2;
+        }
+
+        mpz_t H; mpz_init(H);
+        eng_load->get_mpz(H, (engine::Reg)RSTATE);
+        delete eng_load;
+
+        eng->set_mpz((engine::Reg)RSTATE, H);
+
+        mpz_class Hc(H);
+        Hc %= Mp;
+        mpz_class Hinvc;
+        if (mpz_invert(Hinvc.get_mpz_t(), Hc.get_mpz_t(), Mp.get_mpz_t()) == 0) {
+            mpz_class g;
+            mpz_gcd(g.get_mpz_t(), Hc.get_mpz_t(), Mp.get_mpz_t());
+            mpz_clear(H);
+            delete eng;
+            if (g != 1 && g != Mp) {
+                std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
+                writeStageResult(filename, "inverse(H) failed because factor already divides H: factor=" + g.get_str());
+                std::cout << "\n>>> P-1 factor found while building V_1: " << g.get_str() << "\n";
+                return 0;
+            }
+            std::cerr << "[PM1-VTRACE] H is not invertible modulo M_p, but no proper factor was isolated.\n";
+            return -2;
+        }
+        mpz_clear(H);
+
+        mpz_class V1 = (Hc + Hinvc) % Mp;
+        mpz_t V1t; mpz_init_set(V1t, V1.get_mpz_t());
+        eng->set_mpz((engine::Reg)RV1, V1t);
+        mpz_clear(V1t);
+        eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+
+        std::cout << "[PM1-VTRACE] V1 = H + H^-1 built with one GMP inverse; precomputing V_j and V_D...\n";
+
+        eng->set((engine::Reg)RBPREV, 2);          // V_0
+        eng->copy((engine::Reg)RBCUR, (engine::Reg)RV1); // V_1
+
+        size_t stored = 0;
+        int pct = -1;
+        for (uint64_t n = 1; n <= D; ++n) {
+            if (n <= D / 2) {
+                const int32_t bi = (n < j2i.size()) ? j2i[(size_t)n] : -1;
+                if (bi >= 0) {
+                    const size_t slot = babyBase + (size_t)bi;
+                    eng->copy((engine::Reg)slot, (engine::Reg)RBCUR);
+                    ++stored;
+                    int newPct = int((stored * 100ull) / std::max<size_t>(1, babyCount));
+                    if (newPct > pct) { pct = newPct; std::cout << "\rV-trace baby steps: " << pct << "%" << std::flush; }
+                }
+            }
+            if (n == D) {
+                eng->copy((engine::Reg)RVD, (engine::Reg)RBCUR);
+                break;
+            }
+            // V_{n+1} = V_1 * V_n - V_{n-1}
+            eng->copy((engine::Reg)RBNEXT, (engine::Reg)RBCUR);
+            eng->mul((engine::Reg)RBNEXT, (engine::Reg)RMUL_V1);
+            eng->sub_reg((engine::Reg)RBNEXT, (engine::Reg)RBPREV);
+            eng->copy((engine::Reg)RBPREV, (engine::Reg)RBCUR);
+            eng->copy((engine::Reg)RBCUR, (engine::Reg)RBNEXT);
+        }
+        std::cout << "\rV-trace baby steps: 100%\n";
+
+        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+
+        // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
+        eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+        eng->set((engine::Reg)RGCUR, 2);
+        eng->set((engine::Reg)RACC, 1);
+        cur_k = 0;
+    } else {
+        cur_k = saved_k;
+        eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
+                  << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
+    }
+
+    uint64_t idx = 0;
+    uint64_t p_ui = p0u;
+    auto t0 = high_resolution_clock::now();
+    if (resumed_s2) {
+        idx = resume_idx;
+        p_ui = resume_p_u64;
+        t0 = high_resolution_clock::now() - duration_cast<high_resolution_clock::duration>(duration<double>(restored_time));
+    }
+
+    std::vector<uint64_t> primesRun;
+    bool denseRun = !denseStage2Primes.empty();
+    size_t densePosRun = 0;
+    size_t posRun = 0;
+    uint64_t segLowRun = 0;
+    uint64_t segHighRun = 0;
+
+    if (denseRun) {
+        auto it = std::lower_bound(denseStage2Primes.begin(), denseStage2Primes.end(), p_ui);
+        if (it == denseStage2Primes.end() || *it != p_ui) {
+            delete eng;
+            std::cerr << "[PM1-VTRACE] start prime not found in dense prime table.\n";
+            return -3;
+        }
+        densePosRun = (size_t)std::distance(denseStage2Primes.begin(), it);
+    } else {
+        segLowRun = p_ui;
+        segHighRun = std::min(B2u, segLowRun + SEG_SPAN - 1);
+        segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
+        while (posRun < primesRun.size() && primesRun[posRun] < p_ui) ++posRun;
+        if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
+            delete eng;
+            std::cerr << "[PM1-VTRACE] start prime not found in segmented sieve.\n";
+            return -3;
+        }
+    }
+
+    auto advancePrime = [&](uint64_t& out)->bool{
+        if (denseRun) {
+            if (densePosRun + 1 >= denseStage2Primes.size()) return false;
+            out = denseStage2Primes[++densePosRun];
+            return true;
+        }
+        for (;;) {
+            if (posRun + 1 < primesRun.size()) {
+                ++posRun;
+                out = primesRun[posRun];
+                return true;
+            }
+            if (segHighRun >= B2u) return false;
+            segLowRun = segHighRun + 1;
+            segHighRun = std::min(B2u, segLowRun + SEG_SPAN - 1);
+            segmented_primes_odd(segLowRun, segHighRun, basePrimes, primesRun);
+            posRun = 0;
+            if (primesRun.empty()) continue;
+            out = primesRun[0];
+            return true;
+        }
+    };
+
+    auto advance_giant_to = [&](uint64_t target_k){
+        while (cur_k < target_k) {
+            // next = V_D * cur - prev
+            eng->copy((engine::Reg)RGNEXT, (engine::Reg)RGCUR);
+            eng->mul((engine::Reg)RGNEXT, (engine::Reg)RMUL_VD);
+            eng->sub_reg((engine::Reg)RGNEXT, (engine::Reg)RGPREV);
+            eng->copy((engine::Reg)RGPREV, (engine::Reg)RGCUR);
+            eng->copy((engine::Reg)RGCUR, (engine::Reg)RGNEXT);
+            ++cur_k;
+        }
+    };
+
+    uint64_t primesSeen = 0;
+    uint64_t termsAccumulated = 0;
+    uint64_t skippedPairedUpper = 0;
+
+    auto start = t0;
+    auto lastBackup  = high_resolution_clock::now();
+    auto lastDisplay = high_resolution_clock::now();
+
+    for (;;) {
+        if (interrupted) {
+            double et = duration<double>(high_resolution_clock::now() - t0).count();
+            save_ckpt_s2(eng, p_ui, idx, cur_k, et);
+            delete eng;
+            std::cout << "\nInterrupted by user, V-trace Stage 2 state saved at prime " << p_ui
+                      << " idx=" << idx << " k=" << cur_k << "\n";
+            interrupted = false;
+            return 0;
+        }
+
+        const uint64_t q = p_ui;
+        ++primesSeen;
+        const TracePair tp = make_pair_for_prime(q);
+
+        bool processPair = true;
+        if (tp.j == 0) {
+            processPair = true;
+        } else if (q == tp.qplus) {
+            // q is the upper member kD+j.  If the lower member kD-j was also a Stage-2 prime,
+            // it was processed earlier, so skip this duplicate pair.
+            if (tp.qminus > B1u && is_prime_fast(tp.qminus)) {
+                processPair = false;
+                ++skippedPairedUpper;
+            }
+        }
+
+        if (processPair) {
+            advance_giant_to(tp.k);
+
+            eng->copy((engine::Reg)RTMP, (engine::Reg)RGCUR); // V_kD
+            if (tp.j == 0) {
+                eng->sub((engine::Reg)RTMP, 2);               // V_kD - V_0
+            } else {
+                if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
+                    delete eng;
+                    std::cerr << "\n[PM1-VTRACE] INTERNAL ERROR: no baby V_j for q=" << q
+                              << " j=" << tp.j << " D=" << D << "\n";
+                    return -4;
+                }
+                const size_t babyReg = babyBase + (size_t)j2i[(size_t)tp.j];
+                eng->sub_reg((engine::Reg)RTMP, (engine::Reg)babyReg); // V_kD - V_j
+            }
+            eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)RTMP);
+            eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
+            ++termsAccumulated;
+        }
+
+        uint64_t next_p = 0;
+        if (!advancePrime(next_p)) break;
+        p_ui = next_p;
+        ++idx;
+
+        auto now = high_resolution_clock::now();
+        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+            const double denom = double((B2u > p0u) ? (B2u - p0u) : 1ull);
+            const double numer = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
+            const double percent = 100.0 * (numer / denom);
+            const double elapsedSec = duration<double>(now - start).count();
+            const double ipsPrime = (elapsedSec > 0.0) ? double(primesSeen) / elapsedSec : 0.0;
+            const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
+            const double etaSec = (percent > 0.0) ? elapsedSec * (100.0 - percent) / percent : 0.0;
+            int days = int(etaSec) / 86400;
+            int hours = (int(etaSec) % 86400) / 3600;
+            int minutes = (int(etaSec) % 3600) / 60;
+            int seconds = int(etaSec) % 60;
+            std::cout << "Progress V-trace: " << std::fixed << std::setprecision(2) << percent
+                      << "% | prime=" << p_ui
+                      << " | primes=" << primesSeen
+                      << " | terms=" << termsAccumulated
+                      << " | paired-skip=" << skippedPairedUpper
+                      << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
+                      << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
+                      << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << std::flush;
+            lastDisplay = now;
+        }
+
+        auto now0 = high_resolution_clock::now();
+        if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+            double et = duration<double>(now0 - t0).count();
+            std::cout << "\nBackup V-trace Stage 2 at prime " << p_ui << " idx=" << idx << " k=" << cur_k << " start...\n";
+            save_ckpt_s2(eng, p_ui, idx, cur_k, et);
+            lastBackup = now0;
+            std::cout << "Backup V-trace Stage 2 done.\n";
+        }
+    }
+
+    std::cout << "\n";
+    auto t1 = high_resolution_clock::now();
+    double elapsed = duration<double>(t1 - t0).count();
+
+    std::cout << "[PM1-VTRACE] primes seen=" << primesSeen
+              << " | accumulated trace terms=" << termsAccumulated
+              << " | paired upper skips=" << skippedPairedUpper
+              << " | term reduction=";
+    if (primesSeen) {
+        double red = 100.0 * double(primesSeen - termsAccumulated) / double(primesSeen);
+        std::cout << std::fixed << std::setprecision(2) << red << "%\n";
+    } else {
+        std::cout << "0.00%\n";
+    }
+
+    mpz_class X  = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
+    mpz_class g  = gcd_with_dots(X, Mp);
+
+    auto gcd_mpz = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
+        mpz_class r;
+        mpz_gcd(r.get_mpz_t(), a.get_mpz_t(), b.get_mpz_t());
+        return r;
+    };
+
+    mpz_class gNew = g;
+    for (const std::string& fs : options.knownFactors) {
+        if (gNew == 1) break;
+        mpz_class f;
+        try { f = mpz_class(fs); } catch (...) { continue; }
+        if (f <= 1) continue;
+        mpz_class d = gcd_mpz(gNew, f);
+        while (d != 1) { gNew /= d; d = gcd_mpz(gNew, f); }
+    }
+
+    bool found = (gNew != 1 && gNew != Mp);
+    std::vector<std::string> newlyFound;
+    auto pushFactor = [&](const std::string& fs){
+        if (fs.empty() || fs == "1") return;
+        if (std::find(options.knownFactors.begin(), options.knownFactors.end(), fs) != options.knownFactors.end()) return;
+        options.knownFactors.push_back(fs);
+        newlyFound.push_back(fs);
+    };
+    if (found) pushFactor(gNew.get_str());
+
+    std::cout << "\nElapsed time (stage 2 V-trace) = " << std::fixed << std::setprecision(2) << elapsed << " s.\n";
+
+    std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (found) {
+        std::ostringstream fs;
+        for (size_t i = 0; i < newlyFound.size(); ++i) { if (i) fs << ","; fs << newlyFound[i]; }
+        writeStageResult(filename, "B2=" + B2.get_str() + " D=" + std::to_string(D) +
+                         " terms=" + std::to_string(termsAccumulated) +
+                         " primes=" + std::to_string(primesSeen) + " factor=" + fs.str());
+        std::cout << "\n>>>  Factor P-1 (stage 2 V-trace) found : " << fs.str() << "\n";
+    } else {
+        writeStageResult(filename, "No factor P-1 V-trace up to B2=" + B2.get_str() +
+                         " D=" + std::to_string(D) +
+                         " terms=" + std::to_string(termsAccumulated) +
+                         " primes=" + std::to_string(primesSeen));
+        std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << "\n";
+    }
+
+    std::remove(ckpt_file_s2.c_str());
+    std::remove((ckpt_file_s2 + ".old").c_str());
+    std::remove((ckpt_file_s2 + ".new").c_str());
+
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json);
+    wm.appendToResultsTxt(json);
+
+    delete eng;
+    return found ? 0 : 1;
+}
+
 int App::runPM1Stage2Marin() {
+    const bool useVTraceDefault = (!options.pm1_vtrace_off && !options.pm1_lowmem);
+    const bool useVTrace = (!options.pm1_vtrace_off && (options.pm1_vtrace || useVTraceDefault));
+    if (useVTrace) {
+        if (options.pm1_lowmem) {
+            std::cerr << "[PM1-VTRACE] V-trace is a normal-memory Stage 2 path; do not combine it with -pm1-lowmem/-pm1-ultralowmem.\n";
+            return -1;
+        }
+        return runPM1Stage2MarinVTrace();
+    }
     if (options.pm1_lowmem) {
         return runPM1Stage2MarinLowMem();
     }
@@ -3211,6 +3871,28 @@ static mpz_class buildE_incremental_fast(uint64_t B1_old, uint64_t B1_new)
 
 
 int App::runPM1Marin() {
+   // v56: fail fast on invalid default V-trace options before spending time in Stage 1.
+   // Normal-memory P-1 Stage 2 uses V-trace by default. Stage 2 V-trace
+   // requires even D so odd primes q can be represented as q = kD ± j with
+   // odd baby j and gcd(j,D)=1. Use -pm1-vtrace-off to force the previous
+   // classic BSGS Stage 2 path.
+   const bool pm1Stage2WillUseVTrace = (options.B2 > 0 && !options.pm1_vtrace_off && !options.pm1_lowmem);
+   if (!options.pm1_vtrace_off && (pm1Stage2WillUseVTrace || (options.pm1_vtrace && options.B2 > 0))) {
+        uint64_t vd = options.pm1_vtrace_D ? options.pm1_vtrace_D : 630ULL;
+        if (!options.pm1_vtrace_auto_d && (vd < 4 || (vd & 1ULL))) {
+            std::cerr << "[PM1-VTRACE] D must be even and >= 4. "
+                      << "Odd D=" << vd << " is rejected before Stage 1. "
+                      << "Use e.g. -pm1-vtrace-d 4620, 13860, 30030 or -pm1-vtrace-auto-d, "
+                      << "or -pm1-vtrace-off for classic Stage 2.\n";
+            return -1;
+        }
+        if (options.pm1_lowmem) {
+            std::cerr << "[PM1-VTRACE] V-trace is a normal-memory Stage 2 path; "
+                      << "do not combine it with -pm1-lowmem/-pm1-ultralowmem.\n";
+            return -1;
+        }
+   }
+
    if (guiServer_) {
         std::ostringstream oss;
         oss << "P-1 factoring stage 1";

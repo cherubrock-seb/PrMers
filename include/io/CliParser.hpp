@@ -78,6 +78,12 @@ struct CliOptions {
     // for split ranges such as B1=1500000, B2Start=2000000, B2=2500000.
     // This is intended for 10GB GPUs such as RTX 3080 and does not recompute from base 3.
     bool pm1_s2_resume2reg = false;
+    bool pm1_vtrace = false;          // Accepted legacy flag; normal-memory P-1 Stage 2 uses V-trace by default
+    bool pm1_vtrace_off = false;      // Disable default V-trace Stage 2 and use the classic BSGS path
+    uint64_t pm1_vtrace_D = 0;        // Optional giant-step D override; default is auto-D, fallback 630
+    bool pm1_vtrace_auto_d = false;   // Explicit auto-select D for V-trace from a small candidate set
+    bool pm1_vtrace_auto_d_aggressive = false; // Aggressive auto-D profile; raises default register cap to 4096
+    uint64_t pm1_vtrace_max_regs = 0; // Optional auto-D register cap; default 1024, or 4096 with aggressive auto-D
     bool pm1_no_stage1_gcd = false;
     std::string p95path;
     int max_local_size1 = 0;

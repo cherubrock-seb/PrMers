@@ -40,7 +40,7 @@ The default computation engine is the Marin backend by Yves Gallot. It uses an i
 |---|---|---|
 | Mersenne PRP | Supported | Default mode, GPU, Marin backend by default |
 | Mersenne Lucas-Lehmer | Supported | Safe GL mode, classic unsafe mode, doubling safe mode |
-| P-1 factoring | Supported | Stage 1, Stage 2, resume export, Prime95 handoff |
+| P-1 factoring | Supported | Stage 1, default V-trace Stage 2, classic Stage 2 fallback, resume export, Prime95 handoff |
 | P-1 ultra-low-memory mode | Supported | 1-register Stage 1 and 1-register Stage 2 product-exponent path |
 | ECM factoring | Supported | Edwards and Montgomery variants, optional Prime95 Stage 2 handoff |
 | Wagstaff PRP | Supported | `W = (2^p + 1) / 3` with `-wagstaff` |
@@ -63,10 +63,16 @@ Run a safe Lucas-Lehmer test:
 ./prmers 127 -ll
 ```
 
-Run P-1 factoring with Stage 1 and Stage 2:
+Run P-1 factoring with Stage 1 and Stage 2. Normal-memory Stage 2 uses the V-trace path by default, with conservative automatic `D` selection:
 
 ```bash
 ./prmers 367 -pm1 -b1 11981 -b2 38971
+```
+
+Force the previous classic Stage 2 path when comparing or debugging:
+
+```bash
+./prmers 367 -pm1 -b1 11981 -b2 38971 -pm1-vtrace-off
 ```
 
 Run the MM31 ultra-low-memory P-1 example that uses a 1-register GPU Stage 2:
@@ -255,6 +261,12 @@ Note: the option name `-marin` currently disables the Marin backend. The default
 | `-pm1` | Enable P-1 factoring |
 | `-b1 <B1>` | Stage 1 bound |
 | `-b2 <B2>` | Stage 2 bound |
+| `-pm1-vtrace` | Use scalar-trace P-1 Stage 2. This is the default for normal-memory Stage 2, with conservative auto-D |
+| `-pm1-vtrace-off` | Disable V-trace and use the previous classic Stage 2 BSGS path |
+| `-pm1-vtrace-d <D>` | Force the V-trace giant-step parameter `D`, for example `4620`, `13860`, or `30030` |
+| `-pm1-vtrace-auto-d` | Explicitly auto-select `D` for V-trace under a conservative register cap |
+| `-pm1-vtrace-auto-d-aggressive` | Auto-select `D` with a larger register cap for normal-size Mersennes |
+| `-pm1-vtrace-max-regs <N>` | Register cap used by V-trace auto-D |
 | `-b1old <B1old>` | Extend Stage 1 from an existing `.save` or `.p95` file |
 | `-resume` | Write GMP-ECM `.save` and Prime95 `.p95` resume files |
 | `-p95` | Write Prime95 `.p95` resume file |
@@ -380,6 +392,42 @@ Standard Stage 2 extends the search from `B1` to `B2`.
 
 ```bash
 ./prmers 367 -pm1 -b1 11981 -b2 38971
+```
+
+For normal-memory P-1, Stage 2 uses the V-trace path by default. Let `H` be the Stage 1 result. Instead of accumulating one term per prime with powers of `H`, V-trace works with the scalar trace:
+
+```text
+V_n = H^n + H^(-n) mod M_p
+```
+
+For a giant step `kD` and baby step `j`, the difference
+
+```text
+V_(kD) - V_j
+```
+
+covers both `kD - j` and `kD + j`, because it contains the factors `(H^(kD-j)-1)` and `(H^(kD+j)-1)` up to multiplication by an invertible term. This gives a compact baby/giant Stage 2 using one scalar residue per baby trace. By default PrMers uses conservative automatic `D` selection. `D` can also be forced explicitly with `-pm1-vtrace-d`.
+
+Examples:
+
+```bash
+./prmers 1362763 -pm1 -b1 29 -b2 6910159 -nogcd-stage1 \
+  -factors 46333943,282345414919
+
+./prmers 1362763 -pm1 -b1 29 -b2 6910159 -nogcd-stage1 \
+  -factors 46333943,282345414919 -pm1-vtrace-d 30030
+```
+
+Expected factor for this regression test:
+
+```text
+28401397572100073
+```
+
+To force the previous classic Stage 2 path, add:
+
+```bash
+-pm1-vtrace-off
 ```
 
 The classic Stage 2 path uses GPU precomputation and prime sweeps. The `n^K` variant can be enabled with:

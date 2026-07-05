@@ -85,6 +85,12 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-lowmem          : (Optional) P-1 stage 1 low-memory mode: 3 GPU registers, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-ultralowmem     : (Optional) P-1 stage 1 ultra-low-memory mode: 1 GPU register, fast3 only, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-s2-resume2reg   : (Optional) P-1 Stage 2 ultra-low-memory true resume mode: load resume_p...B1_<B1>.p95/.save and compute H^prod(primes) with 2 GPU registers" << std::endl;
+    std::cout << "  -pm1-vtrace          : P-1 Stage 2 scalar trace BSGS (default for normal-memory Stage 2, with conservative auto-D)" << std::endl;
+    std::cout << "  -pm1-vtrace-off      : Disable default V-trace and use the previous classic Stage 2 BSGS path" << std::endl;
+    std::cout << "  -pm1-vtrace-d <D>    : (Optional) Force V-trace D. Use an even highly-composite D such as 630/2310/4620/13860/30030" << std::endl;
+    std::cout << "  -pm1-vtrace-auto-d   : (Optional) Explicitly auto-select D for V-trace under a conservative register cap" << std::endl;
+    std::cout << "  -pm1-vtrace-auto-d-aggressive : (Optional) auto-select D with a larger default cap (4096 regs) for normal-size Mersennes" << std::endl;
+    std::cout << "  -pm1-vtrace-max-regs <N> : (Optional) register cap for V-trace auto-D, default 1024 or 4096 with aggressive auto-D" << std::endl;
     std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested" << std::endl;
     std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
@@ -502,6 +508,48 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.pm1_ultralowmem = true;
             opts.pm1_s2_resume2reg = true;
             opts.gerbiczli = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-off") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-off") == 0 ||
+                 std::strcmp(argv[i], "-pm1-stage2-classic") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-off") == 0) {
+            opts.pm1_vtrace_off = true;
+            opts.pm1_vtrace = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace") == 0 ||
+                 std::strcmp(argv[i], "-pm1-stage2-vtrace") == 0 ||
+                 std::strcmp(argv[i], "-vtrace") == 0) {
+            // Kept for compatibility: V-trace is now the default normal-memory Stage 2.
+            opts.pm1_vtrace = true;
+        }
+        else if ((std::strcmp(argv[i], "-pm1-vtrace-d") == 0 ||
+                  std::strcmp(argv[i], "--pm1-vtrace-d") == 0 ||
+                  std::strcmp(argv[i], "-vtrace-d") == 0) && i + 1 < argc) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_D = std::strtoull(argv[i + 1], nullptr, 10);
+            ++i;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-auto-d") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-auto-d") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-auto-d") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_auto_d = true;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-auto-d-aggressive") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-auto-d-aggressive") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-auto-d-aggressive") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_auto_d = true;
+            opts.pm1_vtrace_auto_d_aggressive = true;
+        }
+        else if ((std::strcmp(argv[i], "-pm1-vtrace-max-regs") == 0 ||
+                  std::strcmp(argv[i], "--pm1-vtrace-max-regs") == 0 ||
+                  std::strcmp(argv[i], "-vtrace-max-regs") == 0) && i + 1 < argc) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_auto_d = true;
+            opts.pm1_vtrace_max_regs = std::strtoull(argv[i + 1], nullptr, 10);
+            ++i;
         }
         else if (std::strcmp(argv[i], "-nogcd-stage1") == 0 ||
                  std::strcmp(argv[i], "--nogcd-stage1") == 0 ||
