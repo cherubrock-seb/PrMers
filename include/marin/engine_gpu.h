@@ -11,6 +11,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <cstring>
 #include <memory>
 #include <sstream>
+#include <limits>
+#include <set>
 
 #include "engine.h"
 #include "ibdwt.h"
@@ -43,6 +45,23 @@ private:
 
 	// reg is the weighted representation of registers R0, R1, ...
 	cl_mem _reg = nullptr, _carry = nullptr, _root = nullptr, _weight = nullptr, _digit_width = nullptr;
+
+	// v83: GPU-only segmented register slab.  When the logical register slab
+	// would exceed CL_DEVICE_MAX_MEM_ALLOC_SIZE, split it into several OpenCL
+	// buffers in the same context instead of using host-backed paging.  Kernels
+	// still operate on one segment at a time; cross-segment operands are copied
+	// device-to-device into reserved per-segment scratch registers.  This is
+	// activated only for reg slab > max single allocation, so the original flat
+	// path remains unchanged for normal cases.
+	bool _reg_segmented = false;
+	size_t _seg_usable_regs = 0;
+	size_t _seg_scratch_regs = 0;
+	size_t _seg_total_regs = 0;
+	size_t _seg_count = 0;
+	mutable std::vector<cl_mem> _reg_segments;
+	mutable std::vector<size_t> _seg_logical_regs;
+	mutable std::vector<size_t> _seg_alloc_regs;
+	mutable size_t _active_reg_segment = std::numeric_limits<size_t>::max();
 
 	// cl_kernel _forward4 = nullptr, _backward4 = nullptr, _forward16 = nullptr, _backward16 = nullptr;
 	cl_kernel _forward64 = nullptr, _backward64 = nullptr, _forward256 = nullptr, _backward256 = nullptr;
@@ -118,6 +137,99 @@ public:
 	size_t get_chunk256() const { return _chunk256; }
 	size_t get_chunk320() const { return _chunk320; }
 
+private:
+	struct segloc { size_t seg; size_t local; };
+
+	static size_t env_size_local(const char* name, const size_t def)
+	{
+		const char* v = std::getenv(name);
+		if (v == nullptr || *v == '\0') return def;
+		const unsigned long long x = std::strtoull(v, nullptr, 10);
+		return x == 0 ? def : size_t(x);
+	}
+
+	segloc seg_loc(const size_t logical) const
+	{
+		if (!_reg_segmented) return {0, logical};
+		return { logical / _seg_usable_regs, logical % _seg_usable_regs };
+	}
+
+	size_t seg_scratch_local(const size_t seg, const size_t scratch_index) const
+	{
+		// v84: the last segment may contain fewer logical registers than
+		// _seg_usable_regs.  Scratch space starts immediately after the
+		// logical registers actually allocated in that segment.  v83 used
+		// _seg_usable_regs + scratch_index for every segment, which made
+		// copies into the last segment address beyond the cl_mem allocation
+		// and produced CL_INVALID_VALUE during large baby-window precompute.
+		if (!_reg_segmented) return _seg_usable_regs + scratch_index;
+		return _seg_logical_regs.at(seg) + scratch_index;
+	}
+
+	bool same_segment(const size_t a, const size_t b) const
+	{
+		return (!_reg_segmented) || (seg_loc(a).seg == seg_loc(b).seg);
+	}
+
+	bool same_segment4(const size_t a, const size_t b, const size_t c, const size_t d) const
+	{
+		if (!_reg_segmented) return true;
+		const size_t s = seg_loc(a).seg;
+		return seg_loc(b).seg == s && seg_loc(c).seg == s && seg_loc(d).seg == s;
+	}
+
+	void check_segment_local_range(const size_t seg, const size_t local, const char* what) const
+	{
+		if (!_reg_segmented) return;
+		if (seg >= _seg_alloc_regs.size() || local >= _seg_alloc_regs.at(seg))
+		{
+			std::ostringstream ss;
+			ss << "segmented-regspace: " << what << " local=" << local
+			   << " outside segment " << seg << " alloc_regs="
+			   << (seg < _seg_alloc_regs.size() ? _seg_alloc_regs.at(seg) : 0);
+			throw std::runtime_error(ss.str());
+		}
+	}
+
+	void bind_reg_segment(cl_kernel kernel, const size_t seg) const
+	{
+		if (!_reg_segmented) return;
+		cl_mem mem = _reg_segments.at(seg);
+		_set_kernel_arg(kernel, 0, sizeof(cl_mem), &mem);
+	}
+
+	void bind_all_reg_kernels_to_segment(const size_t seg) const
+	{
+		if (!_reg_segmented) return;
+		cl_mem mem = _reg_segments.at(seg);
+		for (cl_kernel k : _kernels) _set_kernel_arg(k, 0, sizeof(cl_mem), &mem);
+		_active_reg_segment = seg;
+	}
+
+	void copy_reg_device_to_device(const size_t dst, const size_t src)
+	{
+		if (!_reg_segmented) { copy(dst, src); return; }
+		const segloc d = seg_loc(dst), s = seg_loc(src);
+		check_segment_local_range(d.seg, d.local, "copy dst");
+		check_segment_local_range(s.seg, s.local, "copy src");
+		_copy_buffer(_reg_segments[d.seg], _reg_segments[s.seg], _n * sizeof(uint64), d.local * _n * sizeof(uint64), s.local * _n * sizeof(uint64));
+	}
+
+	size_t materialize_src_in_segment(const size_t src, const size_t dstSeg, const size_t scratchIndex)
+	{
+		if (!_reg_segmented) return src;
+		const segloc s = seg_loc(src);
+		if (s.seg == dstSeg) return s.local;
+		if (scratchIndex >= _seg_scratch_regs) throw std::runtime_error("segmented-regspace: not enough segment scratch registers");
+		const size_t scratchLocal = seg_scratch_local(dstSeg, scratchIndex);
+		check_segment_local_range(dstSeg, scratchLocal, "scratch dst");
+		check_segment_local_range(s.seg, s.local, "scratch src");
+		_copy_buffer(_reg_segments[dstSeg], _reg_segments[s.seg], _n * sizeof(uint64), scratchLocal * _n * sizeof(uint64), s.local * _n * sizeof(uint64));
+		return scratchLocal;
+	}
+
+public:
+
 ///////////////////////////////
 
 	void alloc_memory()
@@ -136,6 +248,7 @@ public:
 			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
 			const bool lowmem_host_staging = (_reg_count <= 3);
 			const bool delta3reg_no_giant_clear = (_reg_count == 3);
+			const bool force_reg_no_clear = (std::getenv("PRMERS_MARIN_REG_NOCLEAR") != nullptr) || (std::getenv("PRMERS_GPU_ALLOC_DIAG") != nullptr);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
 			const cl_ulong device_mem_bytes = get_global_mem_size();
 			std::cout << "[GPU memory plan] regs=" << _reg_count
@@ -167,39 +280,81 @@ public:
 				}
 			}
 
-			if (lowmem_host_staging || delta3reg_no_giant_clear)
+			const cl_ulong max_alloc_bytes = get_max_mem_alloc_size();
+			const bool disableSegmented = (std::getenv("PRMERS_MARIN_SEGMENTED_DISABLE") != nullptr);
+			const bool needSegmented = (!disableSegmented && max_alloc_bytes != 0 &&
+				static_cast<long double>(reg_bytes) > static_cast<long double>(max_alloc_bytes) * 0.90L);
+
+			if (needSegmented)
+			{
+				long double frac = 0.94L;
+				if (const char* envFrac = std::getenv("PRMERS_MARIN_SEGMENTED_MAXALLOC_FRAC"))
+				{
+					const long double f = std::strtold(envFrac, nullptr);
+					if (f > 0.10L && f < 0.985L) frac = f;
+				}
+				_seg_scratch_regs = env_size_local("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS", 3);
+				const size_t per_reg_bytes = n * sizeof(uint64);
+				const size_t slots_under_limit = static_cast<size_t>((static_cast<long double>(max_alloc_bytes) * frac) / static_cast<long double>(per_reg_bytes));
+				if (slots_under_limit <= _seg_scratch_regs + 1)
+				{
+					std::ostringstream ss;
+					ss << "segmented-regspace: only " << slots_under_limit << " regs fit below max single allocation; scratch=" << _seg_scratch_regs;
+					throw std::runtime_error(ss.str());
+				}
+				_reg_segmented = true;
+				_seg_total_regs = slots_under_limit;
+				_seg_usable_regs = _seg_total_regs - _seg_scratch_regs;
+				_seg_count = (_reg_count + _seg_usable_regs - 1) / _seg_usable_regs;
+				std::cout << "[MARIN-SEGMENTED] logical regs=" << _reg_count
+				          << " reg slab=" << gib(reg_bytes) << " GiB exceeds OpenCL max single allocation="
+					          << gib(static_cast<size_t>(max_alloc_bytes)) << " GiB.\n"
+				          << "[MARIN-SEGMENTED] using " << _seg_count << " GPU-only cl_mem segment(s), "
+				          << "usable-regs/segment=" << _seg_usable_regs << ", scratch-regs/segment=" << _seg_scratch_regs
+					          << ", no host backing in hot loop. Disable with PRMERS_MARIN_SEGMENTED_DISABLE=1.\n";
+				_reg_segments.resize(_seg_count, nullptr);
+				_seg_logical_regs.assign(_seg_count, 0);
+				_seg_alloc_regs.assign(_seg_count, 0);
+				for (size_t seg = 0; seg < _seg_count; ++seg)
+				{
+					const size_t first = seg * _seg_usable_regs;
+					const size_t logical_here = std::min(_seg_usable_regs, _reg_count - first);
+					const size_t alloc_regs = logical_here + _seg_scratch_regs;
+					_seg_logical_regs[seg] = logical_here;
+					_seg_alloc_regs[seg] = alloc_regs;
+					const size_t bytes = alloc_regs * per_reg_bytes;
+					std::cout << "[MARIN-SEGMENTED] allocating segment " << (seg + 1) << "/" << _seg_count
+					          << ": logical=" << logical_here << " + scratch=" << _seg_scratch_regs
+					          << " reg=" << gib(bytes) << " GiB..." << std::endl;
+					_reg_segments[seg] = _create_buffer(CL_MEM_READ_WRITE, bytes, false);
+				}
+				_reg = _reg_segments[0];
+			}
+			else if (lowmem_host_staging || delta3reg_no_giant_clear || force_reg_no_clear)
 			{
 				// Low-memory PM1 paths explicitly initialize every register they use.
-				// V41 keeps the no-clear allocation for the canonical 3-register
-				// delta path.  On CUDA/OpenCL P100, clEnqueueFillBuffer on the
-				// 3.75 GiB MM31 register slab can fail as CL_INVALID_COMMAND_QUEUE
-				// even though allocation itself succeeds.  Avoid the giant clear;
-				// RSTATE/RBASE/RTMP are initialized explicitly before use.
 				std::cout << "[GPU memory alloc] allocating reg (no giant clear)..." << std::endl;
 				_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes, false);
 				std::cout << "[GPU memory alloc] reg OK" << std::endl;
-				std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
-				_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
-				std::cout << "[GPU memory alloc] carry OK" << std::endl;
-				std::cout << "[GPU memory alloc] allocating root..." << std::endl;
-				_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
-				std::cout << "[GPU memory alloc] root OK" << std::endl;
-				std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
-				_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
-				std::cout << "[GPU memory alloc] weight OK" << std::endl;
-				std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
-				_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
-				std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
 			}
 			else
 			{
 				// Original/default Marin behaviour for normal PRP/LL/PM1/ECM modes.
 				_reg = _create_buffer(CL_MEM_READ_WRITE, reg_bytes);
-				_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
-				_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
-				_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
-				_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
 			}
+
+			std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
+			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
+			std::cout << "[GPU memory alloc] carry OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating root..." << std::endl;
+			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+			std::cout << "[GPU memory alloc] root OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
+			_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+			std::cout << "[GPU memory alloc] weight OK" << std::endl;
+			std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
+			_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
+			std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
 		}
 	}
 
@@ -210,7 +365,18 @@ public:
 #endif
 		if (_n != 0)
 		{
-			_release_buffer(_reg); _release_buffer(_carry);
+			if (_reg_segmented)
+			{
+				for (cl_mem & mem : _reg_segments) _release_buffer(mem);
+				_reg_segments.clear();
+				_seg_logical_regs.clear();
+				_seg_alloc_regs.clear();
+				_reg = nullptr;
+				_reg_segmented = false;
+				_active_reg_segment = std::numeric_limits<size_t>::max();
+			}
+			else _release_buffer(_reg);
+			_release_buffer(_carry);
 			_release_buffer(_root); _release_buffer(_weight); _release_buffer(_digit_width);
 		}
 	}
@@ -440,13 +606,33 @@ public:
 
 ///////////////////////////////
 
-	void read_regs(uint64 * const ptr) { _read_buffer(_reg, ptr, _reg_count * _n * sizeof(uint64)); }
-	void write_regs(const uint64 * const ptr) { _write_buffer(_reg, ptr, _reg_count * _n * sizeof(uint64)); }
-	void read_reg(uint64 * const ptr, const size_t index) { _read_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
-	void write_reg(const uint64 * const ptr, const size_t index) { _write_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); }
+	void read_regs(uint64 * const ptr)
+	{
+		if (!_reg_segmented) { _read_buffer(_reg, ptr, _reg_count * _n * sizeof(uint64)); return; }
+		for (size_t r = 0; r < _reg_count; ++r) read_reg(ptr + r * _n, r);
+	}
+	void write_regs(const uint64 * const ptr)
+	{
+		if (!_reg_segmented) { _write_buffer(_reg, ptr, _reg_count * _n * sizeof(uint64)); return; }
+		for (size_t r = 0; r < _reg_count; ++r) write_reg(ptr + r * _n, r);
+	}
+	void read_reg(uint64 * const ptr, const size_t index)
+	{
+		if (!_reg_segmented) { _read_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); return; }
+		const segloc l = seg_loc(index);
+		_read_buffer(_reg_segments[l.seg], ptr, _n * sizeof(uint64), l.local * _n * sizeof(uint64));
+	}
+	void write_reg(const uint64 * const ptr, const size_t index)
+	{
+		if (!_reg_segmented) { _write_buffer(_reg, ptr, _n * sizeof(uint64), index * _n * sizeof(uint64)); return; }
+		const segloc l = seg_loc(index);
+		_write_buffer(_reg_segments[l.seg], ptr, _n * sizeof(uint64), l.local * _n * sizeof(uint64));
+	}
 	void write_reg_part(const uint64 * const ptr, const size_t elems, const size_t index, const size_t offset_elems)
 	{
-		_write_buffer(_reg, ptr, elems * sizeof(uint64), (index * _n + offset_elems) * sizeof(uint64));
+		if (!_reg_segmented) { _write_buffer(_reg, ptr, elems * sizeof(uint64), (index * _n + offset_elems) * sizeof(uint64)); return; }
+		const segloc l = seg_loc(index);
+		_write_buffer(_reg_segments[l.seg], ptr, elems * sizeof(uint64), (l.local * _n + offset_elems) * sizeof(uint64));
 	}
 	void fill_reg_zero(const size_t index)
 	{
@@ -469,7 +655,9 @@ public:
 
 	void ek_fb(cl_kernel & kernel, const size_t src, const uint32 s, const uint32 lm, const size_t local_size = 0)
 	{
-		const uint32 offset = uint32(src * _n);
+		const segloc l = seg_loc(src);
+		bind_reg_segment(kernel, l.seg);
+		const uint32 offset = uint32(l.local * _n);
 		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
 		_set_kernel_arg(kernel, 3, sizeof(uint32), &s);
 		_set_kernel_arg(kernel, 4, sizeof(uint32), &lm);
@@ -478,23 +666,32 @@ public:
 
 	void ek_fb_0(cl_kernel & kernel, const size_t step, const size_t src, const size_t local_size = 0)
 	{
-		const uint32 offset = uint32(src * _n);
+		const segloc l = seg_loc(src);
+		bind_reg_segment(kernel, l.seg);
+		const uint32 offset = uint32(l.local * _n);
 		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
 	void ek_fms(cl_kernel & kernel, const size_t step, const size_t src, const size_t local_size = 0)
 	{
-		const uint32 offset = uint32(src * _n);
+		const segloc l = seg_loc(src);
+		bind_reg_segment(kernel, l.seg);
+		const uint32 offset = uint32(l.local * _n);
 		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
 	void ek_mul(cl_kernel & kernel, const size_t step, const size_t dst, const size_t src, const size_t local_size = 0)
 	{
-		const uint32 offset_y = uint32(src * _n);
+		const segloc d = seg_loc(dst);
+		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
+		bind_reg_segment(kernel, d.seg);
+		const uint32 offset_y = uint32(srcLocal * _n);
 		_set_kernel_arg(kernel, 3, sizeof(uint32), &offset_y);
-		ek_fms(kernel, step, dst, local_size);
+		const uint32 offset = uint32(d.local * _n);
+		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
+		_execute_kernel(kernel, _n / step, local_size);
 	}
 
 	// DEFINE_FORWARD(4);
@@ -578,7 +775,10 @@ public:
 
 	void carry_weight_mul(const size_t src, const uint32 a)
 	{
-		const uint32 offset = uint32(src * _n);
+		const segloc l = seg_loc(src);
+		bind_reg_segment(_carry_weight_mul_p1, l.seg);
+		bind_reg_segment(_carry_weight_p2, l.seg);
+		const uint32 offset = uint32(l.local * _n);
 		_set_kernel_arg(_carry_weight_mul_p1, 4, sizeof(uint32), &a);
 		_set_kernel_arg(_carry_weight_mul_p1, 5, sizeof(uint32), &offset);
 		_execute_kernel(_carry_weight_mul_p1, _n / 4, 1u << _lcwm_wg_size);
@@ -588,8 +788,17 @@ public:
 
 	void carry_weight_mul_copy(const size_t src, const size_t dst, const uint32 a)
 	{
-		uint32 offS = (uint32)(src * _n);
-		uint32 offD = (uint32)(dst * _n);
+		if (_reg_segmented && !same_segment(src, dst))
+		{
+			carry_weight_mul(src, a);
+			copy_reg_device_to_device(dst, src);
+			return;
+		}
+		const segloc sl = seg_loc(src), dl = seg_loc(dst);
+		bind_reg_segment(_carry_weight_mul_p1_copy, sl.seg);
+		bind_reg_segment(_carry_weight_p2_copy, sl.seg);
+		uint32 offS = (uint32)(sl.local * _n);
+		uint32 offD = (uint32)(dl.local * _n);
 		_set_kernel_arg(_carry_weight_mul_p1_copy, 4, sizeof(uint32), &a);
 		_set_kernel_arg(_carry_weight_mul_p1_copy, 5, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_mul_p1_copy, 6, sizeof(uint32), &offD);
@@ -602,8 +811,12 @@ public:
 
 	void carry_weight_muladd(const size_t dst, const size_t add_src, const uint32 a)
 	{
-		const uint32 offY = uint32(dst * _n);
-		const uint32 offX = uint32(add_src * _n);
+		const segloc d = seg_loc(dst);
+		const size_t addLocal = materialize_src_in_segment(add_src, d.seg, 0);
+		bind_reg_segment(_carry_weight_muladd_p1, d.seg);
+		bind_reg_segment(_carry_weight_muladd_p2, d.seg);
+		const uint32 offY = uint32(d.local * _n);
+		const uint32 offX = uint32(addLocal * _n);
 
 		_set_kernel_arg(_carry_weight_muladd_p1, 4, sizeof(uint32), &a);
 		_set_kernel_arg(_carry_weight_muladd_p1, 5, sizeof(uint32), &offY);
@@ -614,9 +827,15 @@ public:
 		_execute_kernel(_carry_weight_muladd_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 	
+
+	
 	void carry_weight_add(const size_t dst, const size_t src)
 	{
-		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		const segloc d = seg_loc(dst);
+		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
+		bind_reg_segment(_carry_weight_add_p1, d.seg);
+		bind_reg_segment(_carry_weight_p2, d.seg);
+		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
 		_set_kernel_arg(_carry_weight_add_p1, 4, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_carry_weight_add_p1, 5, sizeof(uint32), &offset_x);
 		_execute_kernel(_carry_weight_add_p1, _n / 4, 1u << _lcwm_wg_size);
@@ -625,9 +844,15 @@ public:
 
 	}
 	
+
+	
 	void carry_weight_sub(const size_t dst, const size_t src)
 	{
-		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		const segloc d = seg_loc(dst);
+		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
+		bind_reg_segment(_carry_weight_add_neg_p1, d.seg);
+		bind_reg_segment(_carry_weight_p2, d.seg);
+		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
 		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
@@ -635,6 +860,8 @@ public:
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
+
+
 
 	void carry_weight_sub_safe(const size_t dst, const size_t src)
 	{
@@ -644,10 +871,21 @@ public:
 	
 	void carry_weight_addsub(const size_t sum, const size_t diff, const size_t a, const size_t b)
 	{
-		uint32 offS = (uint32)(sum * _n);
-		uint32 offD = (uint32)(diff * _n);
-		uint32 offA = (uint32)(a * _n);
-		uint32 offB = (uint32)(b * _n);
+		if (_reg_segmented && !same_segment4(sum, diff, a, b))
+		{
+			copy(sum, a);
+			carry_weight_add(sum, b);
+			copy(diff, a);
+			carry_weight_sub(diff, b);
+			return;
+		}
+		const segloc sl = seg_loc(sum), dl = seg_loc(diff), al = seg_loc(a), bl = seg_loc(b);
+		bind_reg_segment(_carry_weight_addsub_p1, sl.seg);
+		bind_reg_segment(_carry_weight_addsub_p2, sl.seg);
+		uint32 offS = (uint32)(sl.local * _n);
+		uint32 offD = (uint32)(dl.local * _n);
+		uint32 offA = (uint32)(al.local * _n);
+		uint32 offB = (uint32)(bl.local * _n);
 
 		_set_kernel_arg(_carry_weight_addsub_p1, 4, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_addsub_p1, 5, sizeof(uint32), &offD);
@@ -660,10 +898,20 @@ public:
 		_execute_kernel(_carry_weight_addsub_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
+
 	void carry_weight_mul2_unit(const size_t dst0, const size_t dst1)
 	{
-		uint32 off0 = (uint32)(dst0 * _n);
-		uint32 off1 = (uint32)(dst1 * _n);
+		if (_reg_segmented && !same_segment(dst0, dst1))
+		{
+			carry_weight_mul(dst0, 1);
+			carry_weight_mul(dst1, 1);
+			return;
+		}
+		const segloc d0 = seg_loc(dst0), d1 = seg_loc(dst1);
+		bind_reg_segment(_carry_weight_mul2_unit_p1, d0.seg);
+		bind_reg_segment(_carry_weight_p2x2, d0.seg);
+		uint32 off0 = (uint32)(d0.local * _n);
+		uint32 off1 = (uint32)(d1.local * _n);
 
 		_set_kernel_arg(_carry_weight_mul2_unit_p1, 4, sizeof(uint32), &off0);
 		_set_kernel_arg(_carry_weight_mul2_unit_p1, 5, sizeof(uint32), &off1);
@@ -674,15 +922,26 @@ public:
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
 	}
 
+
 	void addsub_copy(const size_t sum, const size_t diff, const size_t sum_copy, const size_t diff_copy,
 					const size_t a, const size_t b)
 	{
-		const uint32 offS = (uint32)(sum * _n);
-		const uint32 offD = (uint32)(diff * _n);
-		const uint32 offSc = (uint32)(sum_copy * _n);
-		const uint32 offDc = (uint32)(diff_copy * _n);
-		const uint32 offA = (uint32)(a * _n);
-		const uint32 offB = (uint32)(b * _n);
+		if (_reg_segmented && !(same_segment4(sum, diff, a, b) && same_segment(sum, sum_copy) && same_segment(diff, diff_copy)))
+		{
+			carry_weight_addsub(sum, diff, a, b);
+			copy(sum_copy, sum);
+			copy(diff_copy, diff);
+			return;
+		}
+		const segloc sl = seg_loc(sum), dl = seg_loc(diff), scl = seg_loc(sum_copy), dcl = seg_loc(diff_copy), al = seg_loc(a), bl = seg_loc(b);
+		bind_reg_segment(_carry_weight_addsub_p1_copy, sl.seg);
+		bind_reg_segment(_carry_weight_addsub_p2_copy, sl.seg);
+		const uint32 offS = (uint32)(sl.local * _n);
+		const uint32 offD = (uint32)(dl.local * _n);
+		const uint32 offSc = (uint32)(scl.local * _n);
+		const uint32 offDc = (uint32)(dcl.local * _n);
+		const uint32 offA = (uint32)(al.local * _n);
+		const uint32 offB = (uint32)(bl.local * _n);
 
 		_set_kernel_arg(_carry_weight_addsub_p1_copy, 4, sizeof(uint32), &offS);
 		_set_kernel_arg(_carry_weight_addsub_p1_copy, 5, sizeof(uint32), &offD);
@@ -699,9 +958,17 @@ public:
 		_execute_kernel(_carry_weight_addsub_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
+
 	void copy(const size_t dst, const size_t src)
 	{
-		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		if (_reg_segmented && !same_segment(dst, src))
+		{
+			copy_reg_device_to_device(dst, src);
+			return;
+		}
+		const segloc d = seg_loc(dst), s = seg_loc(src);
+		bind_reg_segment(_copy, d.seg);
+		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(s.local * _n);
 		_set_kernel_arg(_copy, 1, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_copy, 2, sizeof(uint32), &offset_x);
 		_execute_kernel(_copy, _n);
@@ -709,7 +976,9 @@ public:
 
 	void subtract(const size_t src, const uint32 a)
 	{
-		const uint32 offset = uint32(src * _n);
+		const segloc l = seg_loc(src);
+		bind_reg_segment(_subtract, l.seg);
+		const uint32 offset = uint32(l.local * _n);
 		_set_kernel_arg(_subtract, 3, sizeof(uint32), &offset);
 		_set_kernel_arg(_subtract, 4, sizeof(uint32), &a);
 		_execute_kernel(_subtract, 1);
@@ -717,19 +986,21 @@ public:
 
 	void subtract_reg_strong(const size_t dst, const size_t src)
 	{
-		if (_subtract_reg == nullptr)
+		if (_subtract_reg == nullptr || (_reg_segmented && !same_segment(dst, src)))
 		{
 			carry_weight_sub(dst, src);
 			return;
 		}
-		const uint32 offset_y = uint32(dst * _n), offset_x = uint32(src * _n);
+		const segloc d = seg_loc(dst), s = seg_loc(src);
+		bind_reg_segment(_subtract_reg, d.seg);
+		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(s.local * _n);
 		_set_kernel_arg(_subtract_reg, 3, sizeof(uint32), &offset_y);
 		_set_kernel_arg(_subtract_reg, 4, sizeof(uint32), &offset_x);
 		_execute_kernel(_subtract_reg, 1);
 	}
 };
 
-class engine_gpu : public engine
+class engine_gpu_flat : public engine
 {
 private:
 	const size_t _reg_count;
@@ -740,7 +1011,7 @@ private:
 
 
 public:
-	engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
+	engine_gpu_flat(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose) : engine(),
 		_reg_count(reg_count), _n(ibdwt::transform_size(q))
 	{
 		const size_t n = _n;
@@ -880,7 +1151,7 @@ public:
 		std::vector<uint8>().swap(_digit_width);
 	}
 
-	virtual ~engine_gpu()
+	virtual ~engine_gpu_flat()
 	{
 		release_gpu_resources_for_lowmem_handoff();
 	}
@@ -1594,7 +1865,7 @@ public:
 		add(u_work, v_reg);
 		mul_copy(u_work, tmp_e_mul, z_out);
 	}
-	size_t get_register_data_size() const override { return _reg_count * _n * sizeof(uint64); }
+	size_t get_register_data_size() const override { return _n * sizeof(uint64); }
 
 	bool get_data(std::vector<char> & data, const Reg src) const override
 	{
@@ -1625,4 +1896,483 @@ public:
 		_gpu->write_regs(reinterpret_cast<const uint64 *>(data.data()));
 		return true;
 	}
+};
+
+
+// v83: engine wrapper. Default path always constructs engine_gpu_flat; the gpu
+// layer itself now performs GPU-only segmented-regspace when the register slab
+// exceeds CL_DEVICE_MAX_MEM_ALLOC_SIZE.  The old host-backed paged wrapper is
+// kept only behind PRMERS_MARIN_HOST_PAGED_FORCE=1 for comparison/debug.
+class engine_gpu : public engine
+{
+private:
+    static constexpr size_t npos = std::numeric_limits<size_t>::max();
+
+    const size_t _logical_reg_count;
+    const size_t _n;
+    const size_t _reg_bytes;
+    bool _paged = false;
+    size_t _physical_reg_count = 0;
+    mutable std::unique_ptr<engine_gpu_flat> _flat;
+
+    mutable std::vector<std::vector<char>> _backing;      // raw weighted register images, one logical reg each
+    mutable std::vector<uint8_t> _valid;                  // backing contains a valid logical register
+    mutable std::vector<size_t> _logical_to_slot;
+    mutable std::vector<size_t> _slot_to_logical;
+    mutable std::vector<uint8_t> _slot_dirty;
+    mutable std::vector<uint64_t> _slot_clock;
+    mutable uint64_t _clock = 1;
+
+    static cl_ulong query_max_alloc(const ocl::platform& platform, const size_t device)
+    {
+        cl_ulong v = 0;
+        (void)clGetDeviceInfo(platform.get_device(device), CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(v), &v, nullptr);
+        return v;
+    }
+
+    static cl_ulong query_global_mem(const ocl::platform& platform, const size_t device)
+    {
+        cl_ulong v = 0;
+        (void)clGetDeviceInfo(platform.get_device(device), CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(v), &v, nullptr);
+        return v;
+    }
+
+    static bool env_enabled(const char* name)
+    {
+        const char* v = std::getenv(name);
+        return v != nullptr && std::string(v) != "0";
+    }
+
+    static size_t env_size(const char* name, const size_t def)
+    {
+        const char* v = std::getenv(name);
+        if (v == nullptr || *v == '\0') return def;
+        const unsigned long long x = std::strtoull(v, nullptr, 10);
+        return x == 0 ? def : size_t(x);
+    }
+
+    bool is_protected_slot(const size_t slot, const std::vector<size_t>& protect) const
+    {
+        for (size_t p : protect) if (p == slot) return true;
+        return false;
+    }
+
+    void ensure_backing(const size_t logical) const
+    {
+        if (_backing[logical].size() != _reg_bytes) _backing[logical].assign(_reg_bytes, 0);
+    }
+
+    void save_slot(const size_t slot) const
+    {
+        if (!_paged) return;
+        const size_t logical = _slot_to_logical[slot];
+        if (logical == npos || !_slot_dirty[slot]) return;
+        ensure_backing(logical);
+        if (!_flat->get_data(_backing[logical], (Reg)slot))
+            throw std::runtime_error("paged-regspace: cannot read physical register during eviction");
+        _valid[logical] = 1;
+        _slot_dirty[slot] = 0;
+    }
+
+    size_t choose_slot(const std::vector<size_t>& protect) const
+    {
+        for (size_t s = 0; s < _physical_reg_count; ++s)
+            if (_slot_to_logical[s] == npos && !is_protected_slot(s, protect)) return s;
+
+        size_t best = npos;
+        uint64_t best_clock = std::numeric_limits<uint64_t>::max();
+        for (size_t s = 0; s < _physical_reg_count; ++s)
+        {
+            if (is_protected_slot(s, protect)) continue;
+            if (_slot_clock[s] < best_clock) { best_clock = _slot_clock[s]; best = s; }
+        }
+        if (best == npos)
+            throw std::runtime_error("paged-regspace: not enough physical slots for this multi-register kernel");
+        return best;
+    }
+
+    size_t pin(const size_t logical, const bool load, const std::vector<size_t>& protect) const
+    {
+        if (!_paged) return logical;
+        if (logical >= _logical_reg_count) throw std::runtime_error("paged-regspace: logical register out of range");
+
+        size_t slot = _logical_to_slot[logical];
+        if (slot != npos)
+        {
+            _slot_clock[slot] = ++_clock;
+            return slot;
+        }
+
+        slot = choose_slot(protect);
+        save_slot(slot);
+
+        const size_t oldLogical = _slot_to_logical[slot];
+        if (oldLogical != npos) _logical_to_slot[oldLogical] = npos;
+
+        _slot_to_logical[slot] = logical;
+        _logical_to_slot[logical] = slot;
+        _slot_dirty[slot] = 0;
+        _slot_clock[slot] = ++_clock;
+
+        if (load)
+        {
+            if (_valid[logical])
+            {
+                ensure_backing(logical);
+                if (!_flat->set_data((Reg)slot, _backing[logical]))
+                    throw std::runtime_error("paged-regspace: cannot upload backing register");
+            }
+            else
+            {
+                _flat->set((Reg)slot, uint32(0));
+            }
+        }
+        return slot;
+    }
+
+    size_t pin_read(const Reg logical, std::vector<size_t>& protect) const
+    {
+        const size_t s = pin(size_t(logical), true, protect);
+        protect.push_back(s);
+        return s;
+    }
+
+    size_t pin_rw(const Reg logical, std::vector<size_t>& protect) const
+    {
+        const size_t s = pin(size_t(logical), true, protect);
+        protect.push_back(s);
+        return s;
+    }
+
+    size_t pin_overwrite(const Reg logical, std::vector<size_t>& protect) const
+    {
+        const size_t l = size_t(logical);
+        if (_paged && _logical_to_slot[l] != npos)
+        {
+            const size_t s = _logical_to_slot[l];
+            protect.push_back(s);
+            _slot_clock[s] = ++_clock;
+            return s;
+        }
+        const size_t s = pin(l, false, protect);
+        protect.push_back(s);
+        return s;
+    }
+
+    void mark_dirty(const Reg logical) const
+    {
+        if (!_paged) return;
+        const size_t l = size_t(logical);
+        const size_t s = _logical_to_slot[l];
+        if (s == npos) throw std::runtime_error("paged-regspace: dirty logical register is not resident");
+        _slot_dirty[s] = 1;
+        _valid[l] = 1;
+        _slot_clock[s] = ++_clock;
+    }
+
+    void flush_all() const
+    {
+        if (!_paged) return;
+        _flat->sync();
+        for (size_t s = 0; s < _physical_reg_count; ++s) save_slot(s);
+    }
+
+public:
+    engine_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose)
+        : engine(), _logical_reg_count(reg_count), _n(ibdwt::transform_size(q)), _reg_bytes(_n * sizeof(uint64))
+    {
+        const ocl::platform platform;
+        const cl_ulong maxAlloc = query_max_alloc(platform, device);
+        const cl_ulong globalMem = query_global_mem(platform, device);
+        const size_t logicalRegBytes = _logical_reg_count * _reg_bytes;
+        const bool disablePaged = env_enabled("PRMERS_MARIN_PAGED_DISABLE");
+        const long double triggerFrac = 0.90L;
+        const bool exceedsSingleAlloc = (maxAlloc != 0 && (long double)logicalRegBytes > (long double)maxAlloc * triggerFrac);
+
+        if (env_enabled("PRMERS_MARIN_HOST_PAGED_FORCE") && !disablePaged && exceedsSingleAlloc)
+        {
+            // Legacy v74-v82 host-backed paged regspace. Disabled by default in v83;
+            // use PRMERS_MARIN_HOST_PAGED_FORCE=1 only for comparison.
+            // v82: use a larger physical scratch by default.  v74-v81 used 0.70
+            // of CL_DEVICE_MAX_MEM_ALLOC_SIZE, which left only 21 slots on RTX 3080
+            // for a 10,485,760 transform.  That made batch+paged windows thrash.
+            // 0.94 stays below the single-allocation limit while giving ~29 slots.
+            size_t safeBytes = size_t((long double)maxAlloc * 0.94L);
+            if (const char* envFrac = std::getenv("PRMERS_MARIN_PAGED_MAXALLOC_FRAC"))
+            {
+                const long double f = std::strtold(envFrac, nullptr);
+                if (f > 0.10L && f < 0.985L) safeBytes = size_t((long double)maxAlloc * f);
+            }
+            size_t physical = safeBytes / std::max<size_t>(_reg_bytes, 1);
+            const size_t minSlots = env_size("PRMERS_MARIN_PAGED_MIN_SLOTS", 8);
+            const size_t maxSlots = env_size("PRMERS_MARIN_PAGED_MAX_SLOTS", 0);
+            if (maxSlots != 0 && physical > maxSlots) physical = maxSlots;
+            if (physical > _logical_reg_count) physical = _logical_reg_count;
+            if (physical < minSlots)
+            {
+                std::ostringstream ss;
+                ss << "paged-regspace requested but only " << physical
+                   << " physical register slots fit below max single allocation; need at least " << minSlots
+                   << ". Try smaller transform/exponent or set PRMERS_MARIN_PAGED_MIN_SLOTS.";
+                throw std::runtime_error(ss.str());
+            }
+
+            _paged = true;
+            _physical_reg_count = physical;
+            if (verbose || env_enabled("PRMERS_GPU_ALLOC_DIAG"))
+            {
+                auto gib = [](long double b){ return b / 1073741824.0L; };
+                std::cout << "[MARIN-PAGED] logical regs=" << _logical_reg_count
+                          << " would allocate reg slab=" << std::fixed << std::setprecision(2) << gib((long double)logicalRegBytes)
+                          << " GiB, above OpenCL max single allocation=" << gib((long double)maxAlloc) << " GiB.\n"
+                          << "[MARIN-PAGED] using physical scratch regs=" << _physical_reg_count
+                          << " (scratch slab=" << gib((long double)(_physical_reg_count * _reg_bytes))
+                          << " GiB), kernels unchanged, logical registers backed by host RAM"
+                          << " [scratch-frac default=0.94, override PRMERS_MARIN_PAGED_MAXALLOC_FRAC]";
+                if (globalMem != 0) std::cout << ", device=" << gib((long double)globalMem) << " GiB";
+                std::cout << ".\n";
+            }
+            _flat.reset(new engine_gpu_flat(q, _physical_reg_count, device, verbose));
+            _backing.resize(_logical_reg_count);
+            _valid.assign(_logical_reg_count, 0);
+            _logical_to_slot.assign(_logical_reg_count, npos);
+            _slot_to_logical.assign(_physical_reg_count, npos);
+            _slot_dirty.assign(_physical_reg_count, 0);
+            _slot_clock.assign(_physical_reg_count, 0);
+        }
+        else
+        {
+            _paged = false;
+            _physical_reg_count = _logical_reg_count;
+            _flat.reset(new engine_gpu_flat(q, _logical_reg_count, device, verbose));
+        }
+    }
+
+    virtual ~engine_gpu() { release_gpu_resources_for_lowmem_handoff(); }
+
+    void release_gpu_resources_for_lowmem_handoff() override
+    {
+        if (_flat) { flush_all(); _flat->release_gpu_resources_for_lowmem_handoff(); _flat.reset(); }
+        std::vector<std::vector<char>>().swap(_backing);
+        std::vector<uint8_t>().swap(_valid);
+        std::vector<size_t>().swap(_logical_to_slot);
+        std::vector<size_t>().swap(_slot_to_logical);
+        std::vector<uint8_t>().swap(_slot_dirty);
+        std::vector<uint64_t>().swap(_slot_clock);
+    }
+
+    size_t get_size() const override { return _n; }
+    void sync() const override { if (_flat) _flat->sync(); }
+
+    void set(const Reg dst, const uint32 a) const override
+    {
+        if (!_paged) { _flat->set(dst, a); return; }
+        std::vector<size_t> p; const size_t pd = pin_overwrite(dst, p);
+        _flat->set((Reg)pd, a); mark_dirty(dst);
+    }
+
+    void set(const Reg dst, uint64 * const d) const override
+    {
+        if (!_paged) { _flat->set(dst, d); return; }
+        std::vector<size_t> p; const size_t pd = pin_overwrite(dst, p);
+        _flat->set((Reg)pd, d); mark_dirty(dst);
+    }
+
+    void set_mpz(const Reg dst, const mpz_t & z) const override
+    {
+        if (!_paged) { _flat->set_mpz(dst, z); return; }
+        std::vector<size_t> p; const size_t pd = pin_overwrite(dst, p);
+        _flat->set_mpz((Reg)pd, z); mark_dirty(dst);
+    }
+
+    void get(uint64 * const d, const Reg src) const override
+    {
+        if (!_paged) { _flat->get(d, src); return; }
+        std::vector<size_t> p; const size_t ps = pin_read(src, p);
+        _flat->get(d, (Reg)ps);
+    }
+
+    void copy(const Reg dst, const Reg src) const override
+    {
+        if (!_paged) { _flat->copy(dst, src); return; }
+        if (dst == src) return;
+        std::vector<size_t> p; const size_t ps = pin_read(src, p); const size_t pd = pin_overwrite(dst, p);
+        _flat->copy((Reg)pd, (Reg)ps); mark_dirty(dst);
+    }
+
+    void square_mul(const Reg src, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->square_mul(src, a); return; }
+        std::vector<size_t> p; const size_t ps = pin_rw(src, p);
+        _flat->square_mul((Reg)ps, a); mark_dirty(src);
+    }
+
+    void set_multiplicand(const Reg dst, const Reg src) const override
+    {
+        if (!_paged) { _flat->set_multiplicand(dst, src); return; }
+        std::vector<size_t> p; const size_t ps = pin_read(src, p); const size_t pd = (dst == src) ? ps : pin_overwrite(dst, p);
+        _flat->set_multiplicand((Reg)pd, (Reg)ps); mark_dirty(dst);
+    }
+
+    void set_multiplicand2(const Reg dst, const Reg src) const override
+    {
+        set_multiplicand(dst, src);
+    }
+
+    void mul(const Reg dst, const Reg src, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->mul(dst, src, a); return; }
+        std::vector<size_t> p; const size_t pd = pin_rw(dst, p); const size_t ps = pin_read(src, p);
+        _flat->mul((Reg)pd, (Reg)ps, a); mark_dirty(dst);
+    }
+
+    void mul_new(const Reg dst, const Reg src, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->mul_new(dst, src, a); return; }
+        mul(dst, src, a);
+    }
+
+    void mul_add(const Reg dst, const Reg mul_src, const Reg add_src, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->mul_add(dst, mul_src, add_src, a); return; }
+        std::vector<size_t> p; const size_t pd = pin_rw(dst, p); const size_t pm = pin_read(mul_src, p); const size_t pa = pin_read(add_src, p);
+        _flat->mul_add((Reg)pd, (Reg)pm, (Reg)pa, a); mark_dirty(dst);
+    }
+
+    void square_mul_copy(const Reg src, const Reg dst_copy, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->square_mul_copy(src, dst_copy, a); return; }
+        std::vector<size_t> p; const size_t ps = pin_rw(src, p); const size_t pc = (dst_copy == src) ? ps : pin_overwrite(dst_copy, p);
+        _flat->square_mul_copy((Reg)ps, (Reg)pc, a); mark_dirty(src); mark_dirty(dst_copy);
+    }
+
+    void mul_copy(const Reg dst, const Reg src, const Reg dst_copy, const uint32 a = 1) const override
+    {
+        if (!_paged) { _flat->mul_copy(dst, src, dst_copy, a); return; }
+        std::vector<size_t> p; const size_t pd = pin_rw(dst, p); const size_t ps = pin_read(src, p); const size_t pc = (dst_copy == dst) ? pd : pin_overwrite(dst_copy, p);
+        _flat->mul_copy((Reg)pd, (Reg)ps, (Reg)pc, a); mark_dirty(dst); mark_dirty(dst_copy);
+    }
+
+    void sub(const Reg src, const uint32 a) const override
+    {
+        if (!_paged) { _flat->sub(src, a); return; }
+        std::vector<size_t> p; const size_t ps = pin_rw(src, p);
+        _flat->sub((Reg)ps, a); mark_dirty(src);
+    }
+
+    void add(const Reg dst, const Reg src) const override
+    {
+        if (!_paged) { _flat->add(dst, src); return; }
+        std::vector<size_t> p; const size_t pd = pin_rw(dst, p); const size_t ps = pin_read(src, p);
+        _flat->add((Reg)pd, (Reg)ps); mark_dirty(dst);
+    }
+
+    void sub_reg(const Reg dst, const Reg src) const override
+    {
+        if (!_paged) { _flat->sub_reg(dst, src); return; }
+        std::vector<size_t> p; const size_t pd = pin_rw(dst, p); const size_t ps = pin_read(src, p);
+        _flat->sub_reg((Reg)pd, (Reg)ps); mark_dirty(dst);
+    }
+
+    void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
+    {
+        if (!_paged) { _flat->addsub(sum_out, diff_out, a, b); return; }
+        // Generic alias-safe sequence through the public virtual operations.
+        engine::addsub(sum_out, diff_out, a, b);
+    }
+
+    void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy, const Reg a, const Reg b) const override
+    {
+        if (!_paged) { _flat->addsub_copy(sum, diff, sum_copy, diff_copy, a, b); return; }
+        engine::addsub_copy(sum, diff, sum_copy, diff_copy, a, b);
+    }
+
+    void mul_pair_unit(const Reg dst0, const Reg src0, const Reg dst1, const Reg src1) const override
+    {
+        if (!_paged) { _flat->mul_pair_unit(dst0, src0, dst1, src1); return; }
+        engine::mul_pair_unit(dst0, src0, dst1, src1);
+    }
+
+    void mul_pair_prepared(const Reg dst0, const Reg mul_src0, const Reg dst1, const Reg mul_src1, const uint32 a0 = 1, const uint32 a1 = 1) const override
+    {
+        if (!_paged) { _flat->mul_pair_prepared(dst0, mul_src0, dst1, mul_src1, a0, a1); return; }
+        if ((a0 != 1) || (a1 != 1)) { mul(dst0, mul_src0, a0); mul(dst1, mul_src1, a1); return; }
+        std::vector<size_t> p;
+        const size_t pd0 = pin_rw(dst0, p); const size_t ps0 = pin_read(mul_src0, p);
+        const size_t pd1 = pin_rw(dst1, p); const size_t ps1 = pin_read(mul_src1, p);
+        _flat->mul_pair_prepared((Reg)pd0, (Reg)ps0, (Reg)pd1, (Reg)ps1, a0, a1);
+        mark_dirty(dst0); mark_dirty(dst1);
+    }
+
+    void xdbl_tail_uv(const Reg x_out, const Reg z_out, const Reg u_work, const Reg v_reg,
+                      const Reg a24_mul, const Reg tmp_e_mul, const Reg tmp_v_mul) const override
+    {
+        if (!_paged) { _flat->xdbl_tail_uv(x_out, z_out, u_work, v_reg, a24_mul, tmp_e_mul, tmp_v_mul); return; }
+        engine::xdbl_tail_uv(x_out, z_out, u_work, v_reg, a24_mul, tmp_e_mul, tmp_v_mul);
+    }
+
+    size_t get_register_data_size() const override { return _reg_bytes; }
+
+    bool get_data(std::vector<char> & data, const Reg src) const override
+    {
+        if (data.size() != _reg_bytes) return false;
+        if (!_paged) return _flat->get_data(data, src);
+        const size_t l = size_t(src);
+        if (l >= _logical_reg_count) return false;
+        const size_t s = _logical_to_slot[l];
+        if (s != npos) return _flat->get_data(data, (Reg)s);
+        if (_valid[l]) { ensure_backing(l); std::memcpy(data.data(), _backing[l].data(), _reg_bytes); return true; }
+        std::fill(data.begin(), data.end(), 0); return true;
+    }
+
+    bool set_data(const Reg dst, const std::vector<char> & data) const override
+    {
+        if (data.size() != _reg_bytes) return false;
+        if (!_paged) return _flat->set_data(dst, data);
+        const size_t l = size_t(dst);
+        if (l >= _logical_reg_count) return false;
+        ensure_backing(l);
+        std::memcpy(_backing[l].data(), data.data(), _reg_bytes);
+        _valid[l] = 1;
+        const size_t s = _logical_to_slot[l];
+        if (s != npos)
+        {
+            if (!_flat->set_data((Reg)s, data)) return false;
+            _slot_dirty[s] = 0;
+        }
+        return true;
+    }
+
+    size_t get_checkpoint_size() const override { return _logical_reg_count * _reg_bytes; }
+
+    bool get_checkpoint(std::vector<char> & data) const override
+    {
+        if (data.size() != get_checkpoint_size()) return false;
+        if (!_paged) return _flat->get_checkpoint(data);
+        flush_all();
+        for (size_t l = 0; l < _logical_reg_count; ++l)
+        {
+            char* out = data.data() + l * _reg_bytes;
+            if (_valid[l]) { ensure_backing(l); std::memcpy(out, _backing[l].data(), _reg_bytes); }
+            else std::memset(out, 0, _reg_bytes);
+        }
+        return true;
+    }
+
+    bool set_checkpoint(const std::vector<char> & data) const override
+    {
+        if (data.size() != get_checkpoint_size()) return false;
+        if (!_paged) return _flat->set_checkpoint(data);
+        for (size_t l = 0; l < _logical_reg_count; ++l)
+        {
+            ensure_backing(l);
+            std::memcpy(_backing[l].data(), data.data() + l * _reg_bytes, _reg_bytes);
+            _valid[l] = 1;
+            _logical_to_slot[l] = npos;
+        }
+        std::fill(_slot_to_logical.begin(), _slot_to_logical.end(), npos);
+        std::fill(_slot_dirty.begin(), _slot_dirty.end(), 0);
+        std::fill(_slot_clock.begin(), _slot_clock.end(), 0);
+        return true;
+    }
 };

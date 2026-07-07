@@ -85,6 +85,9 @@ struct CliOptions {
     bool pm1_vtrace_auto_d_aggressive = false; // Aggressive auto-D profile; raises default register cap to 8192
     bool pm1_vtrace_deep_d_auto = false; // Primorial-aware deep auto-D profile, default normal-memory policy in v61
     uint64_t pm1_vtrace_max_regs = 0; // Optional auto-D register cap; default 4096, or 8192 with aggressive/deep auto-D
+    bool pm1_vtrace_auto_batch = true;  // v85: default; allow auto-D to consider baby batching, selected only when cost model wins
+    uint64_t pm1_vtrace_max_batches = 4; // v78: cap automatic baby-window passes while scoring D candidates when auto-batch is enabled
+    uint64_t pm1_vtrace_baby_batch = 0; // v72: optional active baby count override; env PRMERS_PM1_VTRACE_BABY_BATCH still supported
     bool pm1_vtrace_negadd_off = false; // Disable negative-baby/add term builder and use the older copy+sub_reg path
     bool pm1_vtrace_product_tree = false; // Experimental v62 bucket-local product-tree Stage 2 accumulation (opt-in)
     uint32_t pm1_vtrace_product_tree_width = 16; // Scratch fan-in/chunk width for product-tree experiment

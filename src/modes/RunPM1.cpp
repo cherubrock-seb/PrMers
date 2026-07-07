@@ -1974,6 +1974,40 @@ int App::runPM1Stage2MarinVTrace() {
                                    + n * (long double)sizeof(uint8_t);
         return {regBytes, totalBytes};
     };
+
+    auto vtrace_aux_bytes = [&]()->long double {
+        const long double n = (long double)vtraceTransformN;
+        return (n / 4.0L) * (long double)sizeof(uint64_t)
+             + 3.0L * n * (long double)sizeof(uint64_t)
+             + 2.0L * n * (long double)sizeof(uint64_t)
+             + n * (long double)sizeof(uint8_t);
+    };
+
+    auto vtrace_segmented_reg_bytes = [&](size_t regs)->long double {
+        if (!vtraceMem.ok || vtraceMem.maxAlloc == 0 || vtraceTransformN == 0) {
+            return vtrace_memory_plan(regs).first;
+        }
+        long double segFrac = 0.94L;
+        if (const char* envFrac = std::getenv("PRMERS_MARIN_SEGMENTED_MAXALLOC_FRAC")) {
+            const long double f = std::strtold(envFrac, nullptr);
+            if (f > 0.10L && f < 0.985L) segFrac = f;
+        }
+        size_t scratchRegs = 3;
+        if (const char* envScratch = std::getenv("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS")) {
+            const unsigned long long v = std::strtoull(envScratch, nullptr, 10);
+            if (v != 0) scratchRegs = (size_t)v;
+        }
+        const long double perReg = (long double)vtraceTransformN * (long double)sizeof(uint64_t);
+        const size_t slots = (size_t)((long double)vtraceMem.maxAlloc * segFrac / perReg);
+        if (slots <= scratchRegs + 1) return std::numeric_limits<long double>::infinity();
+        const size_t usable = slots - scratchRegs;
+        long double bytes = 0.0L;
+        for (size_t first = 0; first < regs; first += usable) {
+            const size_t logicalHere = std::min(usable, regs - first);
+            bytes += (long double)(logicalHere + scratchRegs) * perReg;
+        }
+        return bytes;
+    };
     const bool allowTightVTraceMem = (std::getenv("PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM") != nullptr);
     // v65: keep much more headroom below CL_DEVICE_MAX_MEM_ALLOC_SIZE.
     // On NVIDIA OpenCL (e.g. RTX 3080/T4), allocating a register slab close to
@@ -1985,9 +2019,58 @@ int App::runPM1Stage2MarinVTrace() {
     auto vtrace_mem_fits = [&](size_t regs)->bool {
         if (!vtraceMem.ok) return true;
         const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
+        const bool segmentedDisabled = (std::getenv("PRMERS_MARIN_SEGMENTED_DISABLE") != nullptr);
+
+        // v84: multi-cl_mem segmented regspace removes the max-single-allocation
+        // limit, but it does not create more VRAM.  Score/guards must therefore
+        // check the total bytes of all GPU segments plus auxiliary buffers and the
+        // small companion engine used by the V-trace setup.  v83 only checked that
+        // each segment was below maxAlloc, so auto-D could pick e.g. D=2310,
+        // active=120 on RTX 3080: each cl_mem was legal, but the total exceeded
+        // physical VRAM and later failed in OpenCL.
+        if (vtraceMem.maxAlloc != 0 && regBytes > (long double)vtraceMem.maxAlloc * maxAllocFrac) {
+            if (segmentedDisabled) return false;
+            long double segGlobalFrac = 0.98L;
+            if (const char* envFrac = std::getenv("PRMERS_MARIN_SEGMENTED_GLOBAL_FRAC")) {
+                const long double f = std::strtold(envFrac, nullptr);
+                if (f > 0.50L && f < 1.20L) segGlobalFrac = f;
+            }
+            const long double segmentedRegBytes = vtrace_segmented_reg_bytes(regs);
+            const long double auxBytes = vtrace_aux_bytes();
+            // V-trace constructs V1/VD using a temporary 11-register engine while
+            // the main stage-2 engine is still alive.  Account for that resident
+            // allocation too so the auto-plan does not overcommit RTX-class cards.
+            const long double companion11 = vtrace_memory_plan(11).second;
+            const long double segmentedTotal = segmentedRegBytes + auxBytes + companion11;
+            if (!std::isfinite((double)segmentedTotal)) return false;
+            if (vtraceMem.global != 0 && segmentedTotal > (long double)vtraceMem.global * segGlobalFrac) return false;
+            return true;
+        }
+
+        if (vtraceMem.global != 0 && totalBytes > (long double)vtraceMem.global * globalFrac) return false;
+        return true;
+    };
+
+    auto vtrace_flat_safe = [&](size_t regs)->bool {
+        if (!vtraceMem.ok) return true;
+        const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
         if (vtraceMem.maxAlloc != 0 && regBytes > (long double)vtraceMem.maxAlloc * maxAllocFrac) return false;
         if (vtraceMem.global != 0 && totalBytes > (long double)vtraceMem.global * globalFrac) return false;
         return true;
+    };
+
+    auto vtrace_paged_needed = [&](size_t regs)->bool {
+        if (!vtraceMem.ok || vtraceMem.maxAlloc == 0) return false;
+        const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
+        (void)totalBytes;
+        return regBytes > (long double)vtraceMem.maxAlloc * maxAllocFrac;
+    };
+
+    auto vtrace_tight_flat = [&](size_t regs)->bool {
+        if (!vtraceMem.ok || vtraceMem.maxAlloc == 0) return false;
+        const auto [regBytes, totalBytes] = vtrace_memory_plan(regs);
+        (void)totalBytes;
+        return regBytes > (long double)vtraceMem.maxAlloc * 0.62L;
     };
 
     auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
@@ -2077,6 +2160,13 @@ int App::runPM1Stage2MarinVTrace() {
 
     const bool defaultAutoD = (options.pm1_vtrace_D == 0);
     const bool autoDEnabled = options.pm1_vtrace_auto_d || defaultAutoD;
+    // v79: auto-D may select an execution plan, not only a D.  In particular,
+    // when auto-batch is allowed, a large D is only accepted with
+    // baby batching if the cost model predicts that it beats the full-slab or
+    // paged-regspace plan.  These are applied after baby residues are built.
+    bool autoDSelectedBabyBatching = false;
+    bool autoDSelectedFullPaged = false;
+    size_t autoDSelectedActiveBabyCount = 0;
     if (autoDEnabled) {
         const uint64_t maxRegs = options.pm1_vtrace_max_regs ? options.pm1_vtrace_max_regs :
                                  ((options.pm1_vtrace_auto_d_aggressive || options.pm1_vtrace_deep_d_auto) ? 8192ULL : 4096ULL);
@@ -2122,24 +2212,160 @@ int App::runPM1Stage2MarinVTrace() {
             uint64_t bestD = 0;
             size_t bestBabyCount = 0;
             size_t bestRegs = 0;
+            size_t bestActiveBabies = 0;
+            size_t bestBatches = 0;
+            double bestBatchScore = std::numeric_limits<double>::infinity();
             uint64_t rejectedByMemory = 0;
             uint64_t rejectedByRegs = 0;
+            uint64_t rejectedByBatches = 0;
+
+            // v81: dense-prime-map-disabled path must score the plan that will
+            // actually be executed.  v80 allowed vtrace_mem_fits(fullRegs) to mean
+            // "full paged is ok", selected batches=1, then the executor later applied
+            // an emergency flat-safe batch fallback (for example D=1260 -> active=6,
+            // 24 passes).  That makes the auto-D score meaningless.  Here we compare
+            // explicit plans: full-flat, full-paged, batch-flat, and batch+paged.
+            bool autoBatchAllowed = options.pm1_vtrace_auto_batch;
+            if (std::getenv("PRMERS_PM1_VTRACE_NO_AUTO_BATCH") != nullptr) autoBatchAllowed = false;
+            const bool allowPagedBatch = autoBatchAllowed &&
+                                         (std::getenv("PRMERS_PM1_VTRACE_NO_PAGED_BATCH") == nullptr);
+            size_t maxAutoBatches = (size_t)std::max<uint64_t>(1, options.pm1_vtrace_max_batches);
+            if (const char* envMaxB = std::getenv("PRMERS_PM1_VTRACE_MAX_BATCHES")) {
+                const unsigned long long v = std::strtoull(envMaxB, nullptr, 10);
+                if (v != 0) maxAutoBatches = (size_t)v;
+            }
+
+            auto max_active_babies_flat_safe = [&](size_t bc)->size_t{
+                size_t best = 0;
+                for (size_t active = 1; active <= bc; ++active) {
+                    const size_t regs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                    if (regs <= maxRegs && vtrace_flat_safe(regs)) best = active;
+                }
+                return best;
+            };
+            auto max_active_babies_paged_allowed = [&](size_t bc)->size_t{
+                size_t best = 0;
+                for (size_t active = 1; active <= bc; ++active) {
+                    const size_t regs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                    if (regs <= maxRegs && vtrace_mem_fits(regs)) best = active;
+                }
+                return best;
+            };
+
+            bool bestPlanUsesBatching = false;
+            bool bestPlanUsesFullPaged = false;
+            uint64_t consideredFullPaged = 0;
+            uint64_t consideredBatchPlans = 0;
+            uint64_t consideredBatchPaged = 0;
+
+            auto consider_coarse_plan = [&](uint64_t cand, size_t bc, size_t active,
+                                            size_t batches, size_t regs,
+                                            bool usesBatching, bool usesPaged)->void {
+                if (active == 0 || batches == 0 || regs > maxRegs) return;
+                const double approxK = double(B2u > B1u ? (B2u - B1u) : B2u) / double(cand);
+                const double passPenalty = 25000.0 * double(batches > 0 ? batches - 1 : 0);
+                const double babyPenalty = 1200.0 * double(bc);
+                const double tierPenalty = 50000.0 * double(primorial_tier(cand));
+                // Full paged slabs with many logical babies are a last resort; they
+                // can thrash the host-backed register layer.  Batch+paged is allowed
+                // but still penalized because each active window may fault/map pages.
+                const double fullPagedPenalty = (!usesBatching && usesPaged) ? (650000.0 + 2500.0 * double(bc)) : 0.0;
+                const double batchPagedPenalty = (usesBatching && usesPaged) ? (55000.0 * double(batches) + 350.0 * double(active)) : 0.0;
+                const double score = double(batches) * approxK + passPenalty + babyPenalty + tierPenalty
+                                   + fullPagedPenalty + batchPagedPenalty;
+                if (score < bestBatchScore) {
+                    bestBatchScore = score;
+                    bestD = cand;
+                    bestBabyCount = bc;
+                    bestRegs = regs;
+                    bestActiveBabies = active;
+                    bestBatches = batches;
+                    bestPlanUsesBatching = usesBatching;
+                    bestPlanUsesFullPaged = (!usesBatching && usesPaged);
+                }
+            };
+
             for (uint64_t cand : candidates) {
                 if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
                 const size_t bc = baby_count_for_D(cand);
-                const size_t candRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc
+                const size_t fullRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc
                                       + (useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0);
-                if (candRegs > maxRegs) { ++rejectedByRegs; continue; }
-                if (!vtrace_mem_fits(candRegs)) { ++rejectedByMemory; continue; }
+                if (fullRegs > maxRegs && !autoBatchAllowed) { ++rejectedByRegs; continue; }
 
-                // Without the dense prime map we do not have exact skip/term
-                // counts.  Prefer the largest fitting D: it lowers max-k and
-                // tends to improve pairing opportunity, while the memory guard
-                // already bounds baby table cost.
-                if (bestD == 0 || cand > bestD) {
-                    bestD = cand;
-                    bestBabyCount = bc;
-                    bestRegs = candRegs;
+                const bool fullFlat = (fullRegs <= maxRegs && vtrace_flat_safe(fullRegs));
+                const bool fullPaged = (fullRegs <= maxRegs && !fullFlat && vtrace_mem_fits(fullRegs));
+                if (fullFlat) {
+                    consider_coarse_plan(cand, bc, bc, 1, fullRegs, false, false);
+                } else if (fullPaged) {
+                    ++consideredFullPaged;
+                    consider_coarse_plan(cand, bc, bc, 1, fullRegs, false, true);
+                } else if (!autoBatchAllowed) {
+                    ++rejectedByMemory;
+                    continue;
+                }
+
+                if (autoBatchAllowed && bc > 1 && !useProductTree) {
+                    std::vector<size_t> activeCandidates;
+                    auto add_active_candidate = [&](size_t active) {
+                        if (active == 0 || active >= bc) return;
+                        if (std::find(activeCandidates.begin(), activeCandidates.end(), active) == activeCandidates.end())
+                            activeCandidates.push_back(active);
+                    };
+                    const size_t activeFlat = max_active_babies_flat_safe(bc);
+                    size_t activePagedMax = allowPagedBatch ? max_active_babies_paged_allowed(bc) : activeFlat;
+                    // v82: keep batch+paged hot windows small enough to stay mostly resident
+                    // in the physical scratch.  Paged regspace is a safety net, not a good
+                    // inner-loop cache replacement.  If active babies exceed physical slots
+                    // minus the V-trace base registers, the page layer evicts/reloads babies
+                    // on almost every term and becomes very slow.
+                    if (allowPagedBatch && vtraceMem.ok && vtraceMem.maxAlloc != 0) {
+                        long double scratchFrac = 0.94L;
+                        if (const char* envFrac = std::getenv("PRMERS_MARIN_PAGED_MAXALLOC_FRAC")) {
+                            const long double f = std::strtold(envFrac, nullptr);
+                            if (f > 0.10L && f < 0.985L) scratchFrac = f;
+                        }
+                        size_t hotMargin = 2;
+                        if (const char* envMargin = std::getenv("PRMERS_PM1_VTRACE_PAGED_HOT_MARGIN")) {
+                            const unsigned long long v = std::strtoull(envMargin, nullptr, 10);
+                            if (v != 0) hotMargin = (size_t)v;
+                        }
+                        const size_t regBytesOne = (size_t)vtraceTransformN * sizeof(uint64_t);
+                        const size_t physicalSlots = regBytesOne ? (size_t)((long double)vtraceMem.maxAlloc * scratchFrac / (long double)regBytesOne) : 0;
+                        if (physicalSlots > (size_t)BASE_REGS_VTRACE_AUTO + hotMargin) {
+                            const size_t hotActive = physicalSlots - (size_t)BASE_REGS_VTRACE_AUTO - hotMargin;
+                            if (hotActive != 0 && activePagedMax > hotActive) activePagedMax = std::max(activeFlat, hotActive);
+                        }
+                    }
+                    add_active_candidate(activeFlat);
+                    for (size_t targetBatches = 2; targetBatches <= maxAutoBatches; ++targetBatches) {
+                        add_active_candidate((bc + targetBatches - 1) / targetBatches);
+                    }
+                    if (activeFlat != 0) {
+                        add_active_candidate(activeFlat * 2);
+                        add_active_candidate(activeFlat * 3);
+                        add_active_candidate(activeFlat * 4);
+                        add_active_candidate(activeFlat * 6);
+                        add_active_candidate(activeFlat * 8);
+                    }
+                    if (activePagedMax != 0) {
+                        add_active_candidate(activePagedMax / 4);
+                        add_active_candidate(activePagedMax / 2);
+                        add_active_candidate(activePagedMax);
+                    }
+
+                    for (size_t active : activeCandidates) {
+                        if (active == 0 || active >= bc) continue;
+                        const size_t batches = (bc + active - 1) / active;
+                        if (batches > maxAutoBatches) { ++rejectedByBatches; continue; }
+                        const size_t regs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                        if (regs > maxRegs || !vtrace_mem_fits(regs)) continue;
+                        const bool batchFlat = vtrace_flat_safe(regs);
+                        const bool batchPaged = !batchFlat;
+                        if (batchPaged && !allowPagedBatch) continue;
+                        ++consideredBatchPlans;
+                        if (batchPaged) ++consideredBatchPaged;
+                        consider_coarse_plan(cand, bc, active, batches, regs, true, batchPaged);
+                    }
                 }
             }
 
@@ -2152,6 +2378,17 @@ int App::runPM1Stage2MarinVTrace() {
                 std::cout << "[PM1-VTRACE] rejected " << rejectedByRegs
                           << " auto-D candidate(s) above max-regs=" << maxRegs << ".\n";
             }
+            if (rejectedByBatches != 0) {
+                std::cout << "[PM1-VTRACE-BATCH] rejected " << rejectedByBatches
+                          << " auto-D candidate(s) requiring more than " << maxAutoBatches
+                          << " baby-window pass(es). Use -pm1-vtrace-max-batches <N> to allow more.\n";
+            }
+            if (consideredFullPaged != 0 || consideredBatchPlans != 0) {
+                std::cout << "[PM1-VTRACE-BATCH] dense-map coarse scorer considered " << consideredFullPaged
+                          << " full-paged plan(s), " << consideredBatchPlans
+                          << " baby-batch plan(s) including " << consideredBatchPaged
+                          << " batch+paged plan(s).\n";
+            }
 
             if (bestD == 0) {
                 std::cerr << "[PM1-VTRACE-MEM] no V-trace D candidate fits this transform/device "
@@ -2161,19 +2398,33 @@ int App::runPM1Stage2MarinVTrace() {
             }
 
             if (bestD != D) {
-                std::cout << "[PM1-VTRACE] dense prime map disabled for B2=" << B2u
-                          << "; memory-safe auto-D selected D=" << bestD
+                std::cout << "[PM1-VTRACE-BATCH] dense prime map disabled for B2=" << B2u
+                          << "; integrated D+batch auto selected D=" << bestD
                           << " under max-regs=" << maxRegs
                           << " (baby=" << bestBabyCount
+                          << ", active-baby=" << bestActiveBabies
+                          << ", batches=" << bestBatches
                           << ", regs=" << bestRegs
-                          << ", approx max-k=" << (B2u / bestD) << ").\n";
+                          << ", plan=" << (bestPlanUsesBatching ? (vtrace_flat_safe((size_t)BASE_REGS_VTRACE_AUTO + bestActiveBabies) ? "batch-flat" : "batch+paged") : (bestPlanUsesFullPaged ? "full-paged" : "full-flat"))
+                          << ", approx max-k=" << (B2u / bestD)
+                          << ", batch-score=" << bestBatchScore << ").\n";
                 D = bestD;
             } else {
-                std::cout << "[PM1-VTRACE] dense prime map disabled for B2=" << B2u
-                          << "; memory-safe auto-D kept D=" << D
+                std::cout << "[PM1-VTRACE-BATCH] dense prime map disabled for B2=" << B2u
+                          << "; integrated D+batch auto kept D=" << D
                           << " under max-regs=" << maxRegs
                           << " (baby=" << bestBabyCount
-                          << ", regs=" << bestRegs << ").\n";
+                          << ", active-baby=" << bestActiveBabies
+                          << ", batches=" << bestBatches
+                          << ", regs=" << bestRegs
+                          << ", plan=" << (bestPlanUsesBatching ? (vtrace_flat_safe((size_t)BASE_REGS_VTRACE_AUTO + bestActiveBabies) ? "batch-flat" : "batch+paged") : (bestPlanUsesFullPaged ? "full-paged" : "full-flat"))
+                          << ", batch-score=" << bestBatchScore << ").\n";
+            }
+            if (bestPlanUsesBatching && bestActiveBabies != 0 && bestActiveBabies < bestBabyCount) {
+                autoDSelectedBabyBatching = true;
+                autoDSelectedActiveBabyCount = bestActiveBabies;
+            } else if (bestPlanUsesFullPaged) {
+                autoDSelectedFullPaged = true;
             }
         } else {
             if (vtraceMem.ok) {
@@ -2186,37 +2437,220 @@ int App::runPM1Stage2MarinVTrace() {
             }
 
             uint64_t bestD = D, bestTerms = 0, bestSkips = 0, bestMaxK = 0;
-            size_t bestBabyCount = 0;
+            size_t bestBabyCount = 0, bestRegs = 0;
+            size_t bestActiveBabies = 0, bestBatches = 1;
+            bool bestUsesBatching = false;
             double bestScore = std::numeric_limits<double>::infinity();
-            uint64_t rejectedByMemory = 0;
+            uint64_t rejectedByMemory = 0, rejectedByBatches = 0;
+            uint64_t consideredPaged = 0, consideredTightFlat = 0, consideredBatch = 0;
+
+            const bool autoBatchAllowed = options.pm1_vtrace_auto_batch &&
+                                          (std::getenv("PRMERS_PM1_VTRACE_NO_AUTO_BATCH") == nullptr) &&
+                                          !useProductTree;
+            size_t maxAutoBatches = (size_t)std::max<uint64_t>(1, options.pm1_vtrace_max_batches);
+            if (const char* envMaxB = std::getenv("PRMERS_PM1_VTRACE_MAX_BATCHES")) {
+                const unsigned long long v = std::strtoull(envMaxB, nullptr, 10);
+                if (v != 0) maxAutoBatches = (size_t)v;
+            }
+            // v80: batching and paging are complementary, not mutually exclusive.
+            // A baby window is allowed to be either flat-safe or paged. The scorer
+            // penalizes paged windows, but it may still choose them when they reduce
+            // the number of rescans enough to beat a tiny flat window or a full-slab
+            // paged plan.
+            const bool allowPagedBatch = autoBatchAllowed &&
+                                         (std::getenv("PRMERS_PM1_VTRACE_NO_PAGED_BATCH") == nullptr);
+
+            long double pagedHostLimitMult = 2.0L;
+            if (const char* envMult = std::getenv("PRMERS_MARIN_PAGED_HOST_LIMIT_GLOBAL_MULT")) {
+                char* endp = nullptr;
+                const long double v = std::strtold(envMult, &endp);
+                if (endp != envMult && v > 0.0L) pagedHostLimitMult = v;
+            }
+
+            auto max_active_babies_flat_safe = [&](size_t bc)->size_t{
+                size_t best = 0;
+                for (size_t active = 1; active <= bc; ++active) {
+                    const size_t regs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                    if (regs <= maxRegs && vtrace_flat_safe(regs)) best = active;
+                }
+                return best;
+            };
+
+            auto max_active_babies_paged_allowed = [&](size_t bc)->size_t{
+                size_t best = 0;
+                for (size_t active = 1; active <= bc; ++active) {
+                    const size_t regs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                    if (regs <= maxRegs && vtrace_mem_fits(regs)) best = active;
+                }
+                return best;
+            };
+
+            auto consider_plan = [&](uint64_t cand, uint64_t terms, uint64_t skips, uint64_t maxk,
+                                     size_t bc, size_t regs, bool usesBatching, size_t activeBabies,
+                                     size_t batches, bool pagedNeeded, bool tightFlat) {
+                // Runtime is not purely proportional to terms.  Small-D runs pay more giant
+                // recurrence (large max-k); baby-batched runs rescan the prime table and
+                // restart giant recurrence once per baby window; paged full-slab runs can
+                // thrash the host-backed register cache.  This score is deliberately
+                // conservative: it allows paged/batched candidates, but only lets them win
+                // when they have a large theoretical advantage.
+                const double extraPasses = double(batches > 0 ? batches - 1 : 0);
+                const double primeScanPenalty = usesBatching ? 0.18 * double(denseStage2Primes.size()) * extraPasses : 0.0;
+                const double giantPenalty = 0.70 * double(maxk) * double(usesBatching ? batches : 1);
+                const double babyPenalty = (usesBatching ? 90.0 : 55.0) * double(bc);
+                const double regPenalty = 4.0 * double(regs);
+                const double passPenalty = usesBatching ? 22000.0 * extraPasses : 0.0;
+                const double distancePenalty = 0.0015 * double(cand > VTRACE_PRIMORIAL_DEFAULT_D
+                                                             ? cand - VTRACE_PRIMORIAL_DEFAULT_D
+                                                             : VTRACE_PRIMORIAL_DEFAULT_D - cand);
+                const double tierPenalty = 15.0 * double(primorial_tier(cand));
+                const double tightFlatPenalty = tightFlat ? 900.0 : 0.0;
+                // Full paged plans with hundreds of logical babies can thrash badly.
+                // Paged baby-window plans are still penalized, but much less: the
+                // active working set is bounded by activeBabies instead of the whole
+                // baby table, which is exactly the batch+pagination design.
+                const double pagedPenalty = pagedNeeded
+                    ? (usesBatching
+                        ? (0.28 * double(terms) * double(batches) + 1800.0 * double(batches) + 35.0 * double(activeBabies))
+                        : (double(terms) * 1.35 + 9000.0 + 260.0 * double(bc)))
+                    : 0.0;
+                const double score = double(terms) + primeScanPenalty + giantPenalty + babyPenalty
+                                   + regPenalty + passPenalty + distancePenalty + tierPenalty
+                                   + tightFlatPenalty + pagedPenalty;
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestD = cand;
+                    bestTerms = terms;
+                    bestSkips = skips;
+                    bestMaxK = maxk;
+                    bestBabyCount = bc;
+                    bestRegs = regs;
+                    bestActiveBabies = activeBabies;
+                    bestBatches = batches;
+                    bestUsesBatching = usesBatching;
+                }
+            };
+
+            // v80 paged-aware + smart-batch selection.
+            // Full paged plans are considered, but heavily penalized because accessing
+            // hundreds of logical baby registers through a small physical scratch can
+            // thrash.  When auto-batch is enabled, we consider both
+            // flat-safe baby windows and paged baby windows; batching is selected only
+            // if its score wins. A forced -pm1-vtrace-baby-batch still overrides this later.
             for (uint64_t cand : candidates) {
                 if (cand < 4 || (cand & 1ULL) || cand > B2u) continue;
                 const size_t bc = baby_count_for_D(cand);
-                const size_t candRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc + (useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0);
-                if (candRegs > maxRegs) continue;
-                if (!vtrace_mem_fits(candRegs)) { ++rejectedByMemory; continue; }
+                const size_t fullRegs = (size_t)BASE_REGS_VTRACE_AUTO + bc
+                                      + (useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0);
+                if (fullRegs > maxRegs) continue;
+
                 uint64_t terms = 0, skips = 0, maxk = 0;
                 trace_stats_for_D(cand, terms, skips, maxk);
                 if (!terms) continue;
 
-                // v63 primorial-aware + memory-aware empirical model.  Exact term
-                // count dominates, but candidates must fit both total VRAM and the
-                // OpenCL single-buffer max allocation before engine creation.
-                const double babyPenalty = 0.08 * double(bc);
-                const double giantPenalty = 0.04 * double(maxk);
-                const double distancePenalty = 0.003 * double(cand > VTRACE_PRIMORIAL_DEFAULT_D
-                                                            ? cand - VTRACE_PRIMORIAL_DEFAULT_D
-                                                            : VTRACE_PRIMORIAL_DEFAULT_D - cand);
-                const double tierPenalty = 25.0 * double(primorial_tier(cand));
-                const double score = double(terms) + babyPenalty + giantPenalty + distancePenalty + tierPenalty;
-                if (score < bestScore) {
-                    bestScore = score; bestD = cand; bestTerms = terms; bestSkips = skips; bestMaxK = maxk; bestBabyCount = bc;
+                const bool flatSafe = vtrace_flat_safe(fullRegs);
+                const bool pagedNeeded = (!flatSafe && vtrace_paged_needed(fullRegs));
+                const bool tightFlat = (flatSafe && vtrace_tight_flat(fullRegs));
+                if (pagedNeeded) ++consideredPaged;
+                if (tightFlat) ++consideredTightFlat;
+
+                bool fullAllowed = vtrace_mem_fits(fullRegs);
+                if (pagedNeeded && vtraceMem.ok && vtraceMem.global != 0) {
+                    const auto [regBytes, totalBytes] = vtrace_memory_plan(fullRegs);
+                    (void)totalBytes;
+                    if (!allowTightVTraceMem && regBytes > (long double)vtraceMem.global * pagedHostLimitMult) {
+                        fullAllowed = false;
+                    }
+                }
+                if (fullAllowed) {
+                    consider_plan(cand, terms, skips, maxk, bc, fullRegs, false, bc, 1, pagedNeeded, tightFlat);
+                } else {
+                    ++rejectedByMemory;
+                }
+
+                if (autoBatchAllowed && bc > 1) {
+                    std::vector<size_t> activeCandidates;
+                    auto add_active_candidate = [&](size_t active) {
+                        if (active == 0 || active >= bc) return;
+                        if (std::find(activeCandidates.begin(), activeCandidates.end(), active) == activeCandidates.end())
+                            activeCandidates.push_back(active);
+                    };
+
+                    const size_t activeFlat = max_active_babies_flat_safe(bc);
+                    add_active_candidate(activeFlat);
+
+                    if (allowPagedBatch) {
+                        size_t activePagedMax = max_active_babies_paged_allowed(bc);
+                        // v82: cap paged batch windows to the physical scratch hot set.
+                        // Otherwise the engine pages during the inner loop instead of
+                        // merely spilling cold logical registers between windows.
+                        if (vtraceMem.ok && vtraceMem.maxAlloc != 0) {
+                            long double scratchFrac = 0.94L;
+                            if (const char* envFrac = std::getenv("PRMERS_MARIN_PAGED_MAXALLOC_FRAC")) {
+                                const long double f = std::strtold(envFrac, nullptr);
+                                if (f > 0.10L && f < 0.985L) scratchFrac = f;
+                            }
+                            size_t hotMargin = 2;
+                            if (const char* envMargin = std::getenv("PRMERS_PM1_VTRACE_PAGED_HOT_MARGIN")) {
+                                const unsigned long long v = std::strtoull(envMargin, nullptr, 10);
+                                if (v != 0) hotMargin = (size_t)v;
+                            }
+                            const size_t regBytesOne = (size_t)vtraceTransformN * sizeof(uint64_t);
+                            const size_t physicalSlots = regBytesOne ? (size_t)((long double)vtraceMem.maxAlloc * scratchFrac / (long double)regBytesOne) : 0;
+                            if (physicalSlots > (size_t)BASE_REGS_VTRACE_AUTO + hotMargin) {
+                                const size_t hotActive = physicalSlots - (size_t)BASE_REGS_VTRACE_AUTO - hotMargin;
+                                if (hotActive != 0 && activePagedMax > hotActive) activePagedMax = std::max(activeFlat, hotActive);
+                            }
+                        }
+                        // Try the smallest windows that satisfy each pass-count budget,
+                        // and a few multiples of the flat-safe window. This lets the
+                        // model choose batch+pagination instead of being limited to
+                        // tiny flat-only batches.
+                        for (size_t targetBatches = 2; targetBatches <= maxAutoBatches; ++targetBatches) {
+                            add_active_candidate((bc + targetBatches - 1) / targetBatches);
+                        }
+                        if (activeFlat != 0) {
+                            add_active_candidate(activeFlat * 2);
+                            add_active_candidate(activeFlat * 3);
+                            add_active_candidate(activeFlat * 4);
+                            add_active_candidate(activeFlat * 6);
+                            add_active_candidate(activeFlat * 8);
+                        }
+                        add_active_candidate(activePagedMax / 4);
+                        add_active_candidate(activePagedMax / 2);
+                        add_active_candidate(activePagedMax);
+                    }
+
+                    for (size_t active : activeCandidates) {
+                        if (active == 0 || active >= bc) continue;
+                        const size_t batches = (bc + active - 1) / active;
+                        if (batches > maxAutoBatches) { ++rejectedByBatches; continue; }
+                        const size_t batchRegs = (size_t)BASE_REGS_VTRACE_AUTO + active;
+                        if (batchRegs > maxRegs || !vtrace_mem_fits(batchRegs)) continue;
+                        const bool batchFlatSafe = vtrace_flat_safe(batchRegs);
+                        const bool batchPagedNeeded = (!batchFlatSafe && vtrace_paged_needed(batchRegs));
+                        const bool batchTightFlat = (batchFlatSafe && vtrace_tight_flat(batchRegs));
+                        ++consideredBatch;
+                        consider_plan(cand, terms, skips, maxk, bc, batchRegs, true, active, batches, batchPagedNeeded, batchTightFlat);
+                    }
                 }
             }
             if (rejectedByMemory != 0) {
                 std::cout << "[PM1-VTRACE-MEM] rejected " << rejectedByMemory
-                          << " auto-D candidate(s) that were too tight for this transform/device. "
-                          << "Set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to benchmark them anyway.\n";
+                          << " full-slab auto-D candidate(s) too large for the paged policy; "
+                          << "set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 or increase "
+                          << "PRMERS_MARIN_PAGED_HOST_LIMIT_GLOBAL_MULT to benchmark them.\n";
+            }
+            if (rejectedByBatches != 0 && autoBatchAllowed) {
+                std::cout << "[PM1-VTRACE-BATCH] rejected " << rejectedByBatches
+                          << " batch candidate(s) requiring more than " << maxAutoBatches
+                          << " baby-window pass(es); use -pm1-vtrace-max-batches <N> to allow more.\n";
+            }
+            if (consideredPaged != 0 || consideredTightFlat != 0 || consideredBatch != 0) {
+                std::cout << "[PM1-VTRACE-MEM] paged-aware auto-D considered " << consideredPaged
+                          << " paged full-slab candidate(s), " << consideredTightFlat
+                          << " near-maxAlloc flat candidate(s), and " << consideredBatch
+                          << " baby-batch candidate(s); all are cost-penalized, not blindly selected.\n";
             }
             if (bestD != D) {
                 std::cout << "[PM1-VTRACE] primorial-aware auto-D selected D=" << bestD
@@ -2226,13 +2660,24 @@ int App::runPM1Stage2MarinVTrace() {
                           << ", paired-skip=" << bestSkips
                           << ", max-k=" << bestMaxK
                           << ", baby=" << bestBabyCount
-                          << ", primorial-score=" << bestScore << ").\n";
+                          << ", regs=" << bestRegs
+                          << ", plan=" << (bestUsesBatching ? "baby-batch" : "full-slab")
+                          << ", active-baby=" << (bestUsesBatching ? bestActiveBabies : bestBabyCount)
+                          << ", batches=" << (bestUsesBatching ? bestBatches : 1)
+                          << ", smart-score=" << bestScore << ").\n";
                 D = bestD;
             } else {
                 std::cout << "[PM1-VTRACE] primorial-aware auto-D kept D=" << D
                           << (defaultAutoD ? " (default)" : (options.pm1_vtrace_deep_d_auto ? " (deep-auto)" : ""))
                           << " under max-regs=" << maxRegs
-                          << ".\n";
+                          << " (plan=" << (bestUsesBatching ? "baby-batch" : "full-slab")
+                          << ", smart-score=" << bestScore << ").\n";
+            }
+            if (bestUsesBatching) {
+                autoDSelectedBabyBatching = true;
+                autoDSelectedActiveBabyCount = bestActiveBabies;
+            } else if (bestRegs != 0 && !vtrace_flat_safe(bestRegs) && vtrace_mem_fits(bestRegs)) {
+                autoDSelectedFullPaged = true;
             }
         }
     }
@@ -2248,6 +2693,8 @@ int App::runPM1Stage2MarinVTrace() {
         }
         return TracePair{k, j, k * D - j, k * D + j};
     };
+
+    std::cout << "[PM1-VTRACE] Effective execution D=" << D << " after auto-D/paged-aware cost filtering.\n";
 
     // j in [1, D/2], odd, gcd(j,D)=1.  Prime q=kD±j with q not dividing D always lands here.
     std::vector<int32_t> j2i((size_t)(D / 2 + 1), -1);
@@ -2335,9 +2782,79 @@ int App::runPM1Stage2MarinVTrace() {
     static constexpr size_t baseRegsStage1 = 11;
 
     const size_t babyBase = baseRegsVTrace;
-    const size_t productTreeWidth = useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0;
-    const size_t productTreeScratchBase = babyBase + babyCount;
-    const size_t regCount = baseRegsVTrace + babyCount + productTreeWidth;
+
+    // v71: V-trace baby batching.  Older builds placed all baby traces in one
+    // contiguous OpenCL register slab.  On NVIDIA OpenCL this is limited by
+    // CL_DEVICE_MAX_MEM_ALLOC_SIZE, not just total VRAM.  Instead of rejecting a
+    // useful D (for example D=90 on RTX 3080), keep D and store only a window of
+    // baby traces at once.  Stage 2 then scans the prime interval once per baby
+    // window while keeping the same global accumulator.  This is slower than a
+    // single slab when the slab fits, but it lets us benchmark/use larger D
+    // values without a giant single allocation.
+    const char* envBabyBatch = std::getenv("PRMERS_PM1_VTRACE_BABY_BATCH");
+    size_t requestedBabyBatch = (size_t)options.pm1_vtrace_baby_batch;
+    if (envBabyBatch && *envBabyBatch) {
+        const unsigned long long v = std::strtoull(envBabyBatch, nullptr, 10);
+        requestedBabyBatch = (size_t)v;
+    }
+
+    size_t productTreeWidth = useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0;
+    size_t activeBabyCount = babyCount;
+    bool useBabyBatching = false;
+
+    auto choose_max_baby_batch_that_fits = [&]()->size_t{
+        size_t best = 0;
+        for (size_t bc = 1; bc <= babyCount; ++bc) {
+            const size_t regs = baseRegsVTrace + bc; // product-tree disabled while batching
+            if (vtrace_flat_safe(regs)) best = bc;
+        }
+        return best;
+    };
+
+    if (requestedBabyBatch != 0 && requestedBabyBatch < babyCount) {
+        activeBabyCount = std::max<size_t>(1, requestedBabyBatch);
+        useBabyBatching = true;
+        std::cout << "[PM1-VTRACE-BATCH] forced baby batch size from CLI/env: " << activeBabyCount << "\n";
+    }
+
+    if (!useBabyBatching && autoDSelectedBabyBatching && autoDSelectedActiveBabyCount != 0 && autoDSelectedActiveBabyCount < babyCount) {
+        activeBabyCount = std::max<size_t>(1, autoDSelectedActiveBabyCount);
+        useBabyBatching = true;
+        std::cout << "[PM1-VTRACE-BATCH] auto-D selected baby batching: active-babies-per-pass="
+                  << activeBabyCount << "\n";
+    }
+
+    if (!useBabyBatching && !autoDSelectedFullPaged && !vtrace_flat_safe(baseRegsVTrace + babyCount + productTreeWidth)) {
+        // Emergency fallback only.  If the selected full plan is not flat-safe
+        // and auto-D did not explicitly select batching, prefer a flat-safe baby
+        // window instead of silently running a huge paged full-slab that may
+        // thrash host backing.
+        const size_t bestBatch = choose_max_baby_batch_that_fits();
+        if (bestBatch != 0 && bestBatch < babyCount) {
+            activeBabyCount = bestBatch;
+            useBabyBatching = true;
+            std::cout << "[PM1-VTRACE-BATCH] emergency flat-safe batch fallback: active-babies-per-pass="
+                      << activeBabyCount << "\n";
+        }
+    }
+
+    if (useBabyBatching) {
+        if (useProductTree) {
+            std::cout << "[PM1-VTRACE-BATCH] product-tree disabled because baby batching is active.\n";
+            useProductTree = false;
+        }
+        productTreeWidth = 0;
+        if (activeBabyCount > babyCount) activeBabyCount = babyCount;
+        if (activeBabyCount == 0) activeBabyCount = 1;
+        std::cout << "[PM1-VTRACE-BATCH] enabled: D=" << D
+                  << " total-babies=" << babyCount
+                  << " active-babies-per-pass=" << activeBabyCount
+                  << " passes=" << ((babyCount + activeBabyCount - 1) / activeBabyCount)
+                  << ". Set PRMERS_PM1_VTRACE_BABY_BATCH=<n> to override.\n";
+    }
+
+    const size_t productTreeScratchBase = babyBase + activeBabyCount;
+    const size_t regCount = baseRegsVTrace + activeBabyCount + productTreeWidth;
 
     std::cout << "[PM1-VTRACE] Baby residues stored: " << babyCount
               << " (odd j<=D/2, gcd(j,D)=1), GPU registers=" << regCount << "\n";
@@ -2362,9 +2879,9 @@ int App::runPM1Stage2MarinVTrace() {
             if (vtraceMem.maxAlloc != 0) std::cerr << ", max single allocation=" << gib_vtrace((long double)vtraceMem.maxAlloc) << " GiB";
             std::cerr << ".\n";
             if (options.pm1_vtrace_D != 0 && !allowTightVTraceMem) {
-                std::cerr << "[PM1-VTRACE-MEM] explicit -pm1-vtrace-d was requested, but this plan is likely to fail. "
-                          << "Use a smaller D or set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to force.\n";
-                return -2;
+                std::cerr << "[PM1-VTRACE-MEM] explicit -pm1-vtrace-d exceeds the old flat-buffer safety model; "
+                          << "v74 will let the Marin paged-regspace fallback decide instead of rejecting in the caller. "
+                          << "Set PRMERS_MARIN_PAGED_DISABLE=1 to restore strict flat-only behavior.\n";
             }
         }
     }
@@ -2450,6 +2967,58 @@ int App::runPM1Stage2MarinVTrace() {
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
 
+    if (useBabyBatching && resumed_s2) {
+        std::cout << "[PM1-VTRACE-BATCH] existing non-batched Stage 2 checkpoint ignored; "
+                  << "baby-batched checkpoints are not implemented in v71.\n";
+        resumed_s2 = false;
+    }
+
+    std::vector<int32_t> babyGlobalToLocal(babyCount, int32_t(-1));
+    auto precompute_baby_window = [&](size_t batchStart, size_t batchEnd,
+                                      std::vector<int32_t>& babyGlobalToLocal){
+        if (batchEnd > babyCount) batchEnd = babyCount;
+        std::fill(babyGlobalToLocal.begin(), babyGlobalToLocal.end(), int32_t(-1));
+        for (size_t gi = batchStart; gi < batchEnd; ++gi) {
+            babyGlobalToLocal[gi] = int32_t(gi - batchStart);
+        }
+
+        eng->set((engine::Reg)RBPREV, 2);          // V_0
+        eng->copy((engine::Reg)RBCUR, (engine::Reg)RV1); // V_1
+
+        size_t stored = 0;
+        const size_t want = batchEnd - batchStart;
+        int pct = -1;
+        for (uint64_t n = 1; n <= D; ++n) {
+            if (n <= D / 2) {
+                const int32_t gbi = (n < j2i.size()) ? j2i[(size_t)n] : -1;
+                if (gbi >= 0 && (size_t)gbi >= batchStart && (size_t)gbi < batchEnd) {
+                    const size_t local = (size_t)gbi - batchStart;
+                    const size_t slot = babyBase + local;
+                    if (useNegBabyAdd) {
+                        eng->set((engine::Reg)slot, 0u);
+                        eng->sub_reg((engine::Reg)slot, (engine::Reg)RBCUR);
+                    } else {
+                        eng->copy((engine::Reg)slot, (engine::Reg)RBCUR);
+                    }
+                    ++stored;
+                    int newPct = int((stored * 100ull) / std::max<size_t>(1, want));
+                    if (newPct > pct) { pct = newPct; std::cout << "\rV-trace baby window " << (batchStart + 1) << "-" << batchEnd << ": " << pct << "%" << std::flush; }
+                }
+            }
+            if (n == D) {
+                eng->copy((engine::Reg)RVD, (engine::Reg)RBCUR);
+                break;
+            }
+            // V_{n+1} = V_1 * V_n - V_{n-1}
+            eng->copy((engine::Reg)RBNEXT, (engine::Reg)RBCUR);
+            eng->mul((engine::Reg)RBNEXT, (engine::Reg)RMUL_V1);
+            eng->sub_reg((engine::Reg)RBNEXT, (engine::Reg)RBPREV);
+            eng->copy((engine::Reg)RBPREV, (engine::Reg)RBCUR);
+            eng->copy((engine::Reg)RBCUR, (engine::Reg)RBNEXT);
+        }
+        std::cout << "\rV-trace baby window " << (batchStart + 1) << "-" << batchEnd << ": 100%\n";
+    };
+
     if (!resumed_s2) {
         // ---- load H from the Stage-1 checkpoint written by runPM1Marin() ----
         engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, (size_t)options.device_id, verbose);
@@ -2531,41 +3100,11 @@ int App::runPM1Stage2MarinVTrace() {
 
         std::cout << "[PM1-VTRACE] V1 = H + H^-1 built with one GMP inverse; precomputing V_j and V_D...\n";
 
-        eng->set((engine::Reg)RBPREV, 2);          // V_0
-        eng->copy((engine::Reg)RBCUR, (engine::Reg)RV1); // V_1
-
-        size_t stored = 0;
-        int pct = -1;
-        for (uint64_t n = 1; n <= D; ++n) {
-            if (n <= D / 2) {
-                const int32_t bi = (n < j2i.size()) ? j2i[(size_t)n] : -1;
-                if (bi >= 0) {
-                    const size_t slot = babyBase + (size_t)bi;
-                    if (useNegBabyAdd) {
-                        // Store -V_j once during precompute, so the hot loop can
-                        // form V_kD - V_j as an addition.
-                        eng->set((engine::Reg)slot, 0u);
-                        eng->sub_reg((engine::Reg)slot, (engine::Reg)RBCUR);
-                    } else {
-                        eng->copy((engine::Reg)slot, (engine::Reg)RBCUR);
-                    }
-                    ++stored;
-                    int newPct = int((stored * 100ull) / std::max<size_t>(1, babyCount));
-                    if (newPct > pct) { pct = newPct; std::cout << "\rV-trace baby steps: " << pct << "%" << std::flush; }
-                }
-            }
-            if (n == D) {
-                eng->copy((engine::Reg)RVD, (engine::Reg)RBCUR);
-                break;
-            }
-            // V_{n+1} = V_1 * V_n - V_{n-1}
-            eng->copy((engine::Reg)RBNEXT, (engine::Reg)RBCUR);
-            eng->mul((engine::Reg)RBNEXT, (engine::Reg)RMUL_V1);
-            eng->sub_reg((engine::Reg)RBNEXT, (engine::Reg)RBPREV);
-            eng->copy((engine::Reg)RBPREV, (engine::Reg)RBCUR);
-            eng->copy((engine::Reg)RBCUR, (engine::Reg)RBNEXT);
+        if (!useBabyBatching) {
+            precompute_baby_window(0, babyCount, babyGlobalToLocal);
+        } else {
+            precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
         }
-        std::cout << "\rV-trace baby steps: 100%\n";
 
         eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
 
@@ -2578,6 +3117,9 @@ int App::runPM1Stage2MarinVTrace() {
         cur_k = saved_k;
         eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
         eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        if (!useBabyBatching) {
+            for (size_t gi = 0; gi < babyCount; ++gi) babyGlobalToLocal[gi] = int32_t(gi);
+        }
         std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
                   << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
     }
@@ -2674,7 +3216,164 @@ int App::runPM1Stage2MarinVTrace() {
         }
     };
 
-    if (useProductTree) {
+    if (useBabyBatching) {
+        std::cout << "[PM1-VTRACE-BATCH] scanning Stage 2 in "
+                  << ((babyCount + activeBabyCount - 1) / activeBabyCount)
+                  << " baby-window pass(es).  This avoids one huge OpenCL register slab.\n";
+
+        const size_t numPasses = (babyCount + activeBabyCount - 1) / activeBabyCount;
+        for (size_t batchStart = 0; batchStart < babyCount; batchStart += activeBabyCount) {
+            const size_t batchEnd = std::min(babyCount, batchStart + activeBabyCount);
+            if (interrupted) {
+                delete eng;
+                std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
+                          << "v71 does not checkpoint inside a baby-batched pass.\n";
+                interrupted = false;
+                return 0;
+            }
+
+            std::cout << "[PM1-VTRACE-BATCH] pass " << (batchStart / activeBabyCount + 1)
+                      << "/" << numPasses << " babies " << (batchStart + 1)
+                      << ".." << batchEnd << " of " << babyCount << "\n";
+
+            precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
+
+            // Restart giant recurrence for this baby window.  RACC is deliberately
+            // NOT reset: all pass products accumulate into the same final GCD value.
+            eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+            eng->set((engine::Reg)RGCUR, 2);
+            cur_k = 0;
+
+            std::vector<uint64_t> bPrimesRun;
+            size_t bDensePos = 0;
+            size_t bPos = 0;
+            uint64_t bSegLow = 0, bSegHigh = 0;
+            uint64_t bPrime = p0u;
+            if (denseRun) {
+                auto it = std::lower_bound(denseStage2Primes.begin(), denseStage2Primes.end(), bPrime);
+                if (it == denseStage2Primes.end() || *it != bPrime) {
+                    delete eng;
+                    std::cerr << "[PM1-VTRACE-BATCH] start prime not found in dense prime table.\n";
+                    return -3;
+                }
+                bDensePos = (size_t)std::distance(denseStage2Primes.begin(), it);
+            } else {
+                bSegLow = bPrime;
+                bSegHigh = std::min(B2u, bSegLow + SEG_SPAN - 1);
+                segmented_primes_odd(bSegLow, bSegHigh, basePrimes, bPrimesRun);
+                while (bPos < bPrimesRun.size() && bPrimesRun[bPos] < bPrime) ++bPos;
+                if (bPos >= bPrimesRun.size() || bPrimesRun[bPos] != bPrime) {
+                    delete eng;
+                    std::cerr << "[PM1-VTRACE-BATCH] start prime not found in segmented sieve.\n";
+                    return -3;
+                }
+            }
+            auto bAdvancePrime = [&](uint64_t& out)->bool{
+                if (denseRun) {
+                    if (bDensePos + 1 >= denseStage2Primes.size()) return false;
+                    out = denseStage2Primes[++bDensePos];
+                    return true;
+                }
+                for (;;) {
+                    if (bPos + 1 < bPrimesRun.size()) {
+                        ++bPos; out = bPrimesRun[bPos]; return true;
+                    }
+                    if (bSegHigh >= B2u) return false;
+                    bSegLow = bSegHigh + 1;
+                    bSegHigh = std::min(B2u, bSegLow + SEG_SPAN - 1);
+                    segmented_primes_odd(bSegLow, bSegHigh, basePrimes, bPrimesRun);
+                    bPos = 0;
+                    if (bPrimesRun.empty()) continue;
+                    out = bPrimesRun[0]; return true;
+                }
+            };
+
+            for (;;) {
+                if (interrupted) {
+                    delete eng;
+                    std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
+                              << "v71 does not checkpoint inside a baby-batched pass.\n";
+                    interrupted = false;
+                    return 0;
+                }
+
+                const uint64_t q = bPrime;
+                ++primesSeen;
+                const TracePair tp = make_pair_for_prime(q);
+
+                bool processPair = true;
+                if (tp.j == 0) {
+                    processPair = (batchStart == 0);
+                } else if (q == tp.qplus) {
+                    if (tp.qminus > B1u && is_prime_fast(tp.qminus)) {
+                        processPair = false;
+                        ++skippedPairedUpper;
+                    }
+                }
+
+                int32_t localBaby = -1;
+                if (processPair && tp.j != 0) {
+                    if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
+                        delete eng;
+                        std::cerr << "\n[PM1-VTRACE-BATCH] INTERNAL ERROR: no baby V_j for q=" << q
+                                  << " j=" << tp.j << " D=" << D << "\n";
+                        return -4;
+                    }
+                    const int32_t globalBaby = j2i[(size_t)tp.j];
+                    localBaby = (globalBaby >= 0 && (size_t)globalBaby < babyGlobalToLocal.size())
+                              ? babyGlobalToLocal[(size_t)globalBaby] : int32_t(-1);
+                    if (localBaby < 0) processPair = false;
+                }
+
+                if (processPair) {
+                    advance_giant_to(tp.k);
+                    eng->copy((engine::Reg)RTMP, (engine::Reg)RGCUR);
+                    if (tp.j == 0) {
+                        eng->sub((engine::Reg)RTMP, 2);
+                    } else {
+                        const size_t babyReg = babyBase + (size_t)localBaby;
+                        if (useNegBabyAdd) eng->add((engine::Reg)RTMP, (engine::Reg)babyReg);
+                        else eng->sub_reg((engine::Reg)RTMP, (engine::Reg)babyReg);
+                    }
+                    eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)RTMP);
+                    eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
+                    ++termsAccumulated;
+                }
+
+                uint64_t next_p = 0;
+                if (!bAdvancePrime(next_p)) break;
+                bPrime = next_p;
+
+                auto now = high_resolution_clock::now();
+                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                    const double rangeFrac = double((bPrime > p0u) ? (bPrime - p0u) : 0ull) /
+                                             double((B2u > p0u) ? (B2u - p0u) : 1ull);
+                    const double passFrac = (double(batchStart) + rangeFrac * double(batchEnd - batchStart)) / double(babyCount);
+                    const double percent = 100.0 * passFrac;
+                    const double elapsedSec = duration<double>(now - start).count();
+                    const double ipsPrime = (elapsedSec > 0.0) ? double(primesSeen) / elapsedSec : 0.0;
+                    const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
+                    const double etaSec = (percent > 0.0) ? elapsedSec * (100.0 - percent) / percent : 0.0;
+                    int days = int(etaSec) / 86400;
+                    int hours = (int(etaSec) % 86400) / 3600;
+                    int minutes = (int(etaSec) % 3600) / 60;
+                    int seconds = int(etaSec) % 60;
+                    std::cout << "Progress V-trace batch: " << std::fixed << std::setprecision(2) << percent
+                              << "% | pass=" << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                              << " | prime=" << bPrime
+                              << " | primes(scanned)=" << primesSeen
+                              << " | terms=" << termsAccumulated
+                              << " | paired-skip=" << skippedPairedUpper
+                              << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
+                              << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << std::flush;
+                    lastDisplay = now;
+                }
+            }
+        }
+        std::cout << "\n[PM1-VTRACE-BATCH] all baby-window passes completed.\n";
+    } else if (useProductTree) {
         size_t bucketPos = resumed_s2 ? (size_t)resume_idx : 0;
         if (bucketPos > productTreeBuckets.size()) {
             delete eng;
@@ -3064,8 +3763,9 @@ int App::runPM1Stage2Marin() {
     auto classic_mem_fits = [&](size_t regs)->bool {
         if (!classicMem.ok) return true;
         const auto [regBytes, totalBytes] = classic_memory_plan(regs);
-        if (classicMem.maxAlloc != 0 && regBytes > (long double)classicMem.maxAlloc * classicMaxAllocFrac) return false;
-        if (classicMem.global != 0 && totalBytes > (long double)classicMem.global * classicGlobalFrac) return false;
+        const bool pagedDisabled = (std::getenv("PRMERS_MARIN_PAGED_DISABLE") != nullptr);
+        if (pagedDisabled && classicMem.maxAlloc != 0 && regBytes > (long double)classicMem.maxAlloc * classicMaxAllocFrac) return false;
+        if (pagedDisabled && classicMem.global != 0 && totalBytes > (long double)classicMem.global * classicGlobalFrac) return false;
         return true;
     };
 

@@ -318,6 +318,7 @@ public:
 	}
 
 	cl_ulong get_global_mem_size() const { return _global_mem_size; }
+	cl_ulong get_max_mem_alloc_size() const { cl_ulong v = 0; (void)clGetDeviceInfo(_device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(v), &v, nullptr); return v; }
 
 	virtual ~device()
 	{
@@ -571,6 +572,13 @@ protected:
 	{
 		_sync();
 		fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset, size, ptr, 0, nullptr, nullptr));
+	}
+
+protected:
+	void _copy_buffer(cl_mem & dst, cl_mem & src, const size_t size, const size_t dst_offset = 0, const size_t src_offset = 0)
+	{
+		_sync();
+		fatal(clEnqueueCopyBuffer(_queue, src, dst, src_offset, dst_offset, size, 0, nullptr, nullptr));
 	}
 
 protected:
