@@ -293,7 +293,13 @@ public:
 					const long double f = std::strtold(envFrac, nullptr);
 					if (f > 0.10L && f < 0.985L) frac = f;
 				}
-				_seg_scratch_regs = env_size_local("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS", 3);
+				// v88: one scratch register per segment is enough for current segmented
+				// dispatch: cross-segment sources are materialized one at a time
+				// (materialize_src_in_segment(..., scratchIndex=0)).  v83-v87
+				// reserved 3 scratch regs per segment, which wasted ~0.625 GiB
+				// on RTX 3080 for 4 segments and could push D=630 full-72 over
+				// the real VRAM limit once the auxiliary engine was also allocated.
+				_seg_scratch_regs = env_size_local("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS", 1);
 				const size_t per_reg_bytes = n * sizeof(uint64);
 				const size_t slots_under_limit = static_cast<size_t>((static_cast<long double>(max_alloc_bytes) * frac) / static_cast<long double>(per_reg_bytes));
 				if (slots_under_limit <= _seg_scratch_regs + 1)

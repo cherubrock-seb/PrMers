@@ -2793,6 +2793,7 @@ int App::runPM1Stage2MarinVTrace() {
     // values without a giant single allocation.
     const char* envBabyBatch = std::getenv("PRMERS_PM1_VTRACE_BABY_BATCH");
     size_t requestedBabyBatch = (size_t)options.pm1_vtrace_baby_batch;
+    const bool cliOrEnvBabyBatchRequested = (requestedBabyBatch != 0) || (envBabyBatch && *envBabyBatch);
     if (envBabyBatch && *envBabyBatch) {
         const unsigned long long v = std::strtoull(envBabyBatch, nullptr, 10);
         requestedBabyBatch = (size_t)v;
@@ -2801,6 +2802,9 @@ int App::runPM1Stage2MarinVTrace() {
     size_t productTreeWidth = useProductTree ? std::min<size_t>(64, std::max<size_t>(2, options.pm1_vtrace_product_tree_width)) : 0;
     size_t activeBabyCount = babyCount;
     bool useBabyBatching = false;
+    bool explicitFullBabySlab = false; // v86: user asked for batch>=babyCount or no-auto full slab; do not flat-fallback.
+    const bool noAutoBatchRequested = (!options.pm1_vtrace_auto_batch) ||
+                                      (std::getenv("PRMERS_PM1_VTRACE_NO_AUTO_BATCH") != nullptr);
 
     auto choose_max_baby_batch_that_fits = [&]()->size_t{
         size_t best = 0;
@@ -2811,24 +2815,42 @@ int App::runPM1Stage2MarinVTrace() {
         return best;
     };
 
-    if (requestedBabyBatch != 0 && requestedBabyBatch < babyCount) {
-        activeBabyCount = std::max<size_t>(1, requestedBabyBatch);
-        useBabyBatching = true;
-        std::cout << "[PM1-VTRACE-BATCH] forced baby batch size from CLI/env: " << activeBabyCount << "\n";
+    if (requestedBabyBatch != 0) {
+        if (requestedBabyBatch < babyCount) {
+            activeBabyCount = std::max<size_t>(1, requestedBabyBatch);
+            useBabyBatching = true;
+            std::cout << "[PM1-VTRACE-BATCH] forced baby batch size from CLI/env: " << activeBabyCount << "\n";
+        } else {
+            // v86: -pm1-vtrace-baby-batch equal/larger than the baby table means
+            // "keep the whole baby table resident".  This is a valid benchmark for
+            // the segmented GPU-only regspace (for example D=630 has exactly 72
+            // babies).  Older builds fell through and the emergency flat-safe
+            // fallback silently changed it to a tiny batch=6, so the requested
+            // full-slab/segmented plan was never tested.
+            activeBabyCount = babyCount;
+            useBabyBatching = false;
+            explicitFullBabySlab = true;
+            std::cout << "[PM1-VTRACE-BATCH] CLI/env baby batch " << requestedBabyBatch
+                      << " covers all " << babyCount
+                      << " babies; using full baby slab (segmented if needed).\n";
+        }
     }
 
-    if (!useBabyBatching && autoDSelectedBabyBatching && autoDSelectedActiveBabyCount != 0 && autoDSelectedActiveBabyCount < babyCount) {
+    if (!useBabyBatching && !explicitFullBabySlab && autoDSelectedBabyBatching && autoDSelectedActiveBabyCount != 0 && autoDSelectedActiveBabyCount < babyCount) {
         activeBabyCount = std::max<size_t>(1, autoDSelectedActiveBabyCount);
         useBabyBatching = true;
         std::cout << "[PM1-VTRACE-BATCH] auto-D selected baby batching: active-babies-per-pass="
                   << activeBabyCount << "\n";
     }
 
-    if (!useBabyBatching && !autoDSelectedFullPaged && !vtrace_flat_safe(baseRegsVTrace + babyCount + productTreeWidth)) {
+    if (!useBabyBatching && !explicitFullBabySlab && !noAutoBatchRequested &&
+        !autoDSelectedFullPaged && !vtrace_flat_safe(baseRegsVTrace + babyCount + productTreeWidth)) {
         // Emergency fallback only.  If the selected full plan is not flat-safe
         // and auto-D did not explicitly select batching, prefer a flat-safe baby
-        // window instead of silently running a huge paged full-slab that may
-        // thrash host backing.
+        // window instead of silently running a huge paged full-slab.  v86: do not
+        // override explicit full-slab tests (-pm1-vtrace-no-auto-batch or
+        // -pm1-vtrace-baby-batch >= babyCount); those are exactly how we validate
+        // the segmented GPU-only regspace beyond CL_DEVICE_MAX_MEM_ALLOC_SIZE.
         const size_t bestBatch = choose_max_baby_batch_that_fits();
         if (bestBatch != 0 && bestBatch < babyCount) {
             activeBabyCount = bestBatch;
@@ -2902,16 +2924,37 @@ int App::runPM1Stage2MarinVTrace() {
         return -2;
     }
 
-    const int ckptVersionS2 = useProductTree ? 23 : 22;
+    // v87: normal V-trace Stage-2 checkpoints are compact by default.
+    // The old full-engine checkpoint copied every baby register to host RAM;
+    // with segmented full slabs (e.g. D=630, 72 babies on RTX 3080) this can
+    // mean a 6+ GiB host vector and may abort at the first periodic backup.
+    // We only need the accumulator and current giant recurrence state; baby
+    // traces are deterministic and are recomputed on resume.
+    const int ckptVersionS2 = useProductTree ? 23 : 24;
+    const bool compactVTraceCkpt = !useProductTree;
     std::ostringstream ck2;
     if (useProductTree) ck2 << "pm1_s2_vtrace_producttree_m_" << pexp << ".ckpt";
     else if (useNegBabyAdd) ck2 << "pm1_s2_vtrace_negadd_m_" << pexp << ".ckpt";
     else ck2 << "pm1_s2_vtrace_m_" << pexp << ".ckpt";
     const std::string ckpt_file_s2 = ck2.str();
 
+    auto compact_vtrace_regs = [&](){
+        std::vector<size_t> regs;
+        // Core state sufficient for deterministic resume.  Baby registers and
+        // multiplicand registers are recomputed on resume.
+        regs.push_back(RACC);
+        regs.push_back(RV1);
+        // RVD and baby traces are recomputed from RV1 on compact resume.
+        regs.push_back(RGPREV);
+        regs.push_back(RGCUR);
+        return regs;
+    };
+
     auto read_ckpt_s2 = [&](engine* e, const std::string& file,
                             uint64_t& saved_p, uint64_t& saved_idx, uint64_t& saved_k,
-                            double& et, uint64_t& sB1, uint64_t& sB2, uint64_t& sD)->int{
+                            double& et, uint64_t& sB1, uint64_t& sB2, uint64_t& sD,
+                            bool& compactLoaded)->int{
+        compactLoaded = false;
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
@@ -2925,6 +2968,23 @@ int App::runPM1Stage2MarinVTrace() {
         if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+
+        if (version == 24) {
+            uint32_t nregs = 0;
+            if (!f.read(reinterpret_cast<char*>(&nregs), sizeof(nregs))) return -2;
+            const size_t rsz = e->get_register_data_size();
+            std::vector<char> one(rsz);
+            for (uint32_t i = 0; i < nregs; ++i) {
+                uint32_t reg = 0;
+                if (!f.read(reinterpret_cast<char*>(&reg), sizeof(reg))) return -2;
+                if (!f.read(one.data(), rsz)) return -2;
+                if (!e->set_data((engine::Reg)reg, one)) return -2;
+            }
+            if (!f.check_crc32()) return -2;
+            compactLoaded = true;
+            return 0;
+        }
+
         const size_t cksz = e->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
@@ -2947,11 +3007,27 @@ int App::runPM1Stage2MarinVTrace() {
             if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
             if (!f.write(reinterpret_cast<const char*>(&cur_k), sizeof(cur_k))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
-            const size_t cksz = e->get_checkpoint_size();
-            std::vector<char> data(cksz);
-            if (!e->get_checkpoint(data)) return;
-            if (!f.write(data.data(), cksz)) return;
-            f.write_crc32();
+
+            if (compactVTraceCkpt) {
+                const std::vector<size_t> regs = compact_vtrace_regs();
+                const uint32_t nregs = (uint32_t)regs.size();
+                if (!f.write(reinterpret_cast<const char*>(&nregs), sizeof(nregs))) return;
+                const size_t rsz = e->get_register_data_size();
+                std::vector<char> one(rsz);
+                for (size_t r : regs) {
+                    const uint32_t reg = (uint32_t)r;
+                    if (!f.write(reinterpret_cast<const char*>(&reg), sizeof(reg))) return;
+                    if (!e->get_data(one, (engine::Reg)r)) return;
+                    if (!f.write(one.data(), rsz)) return;
+                }
+                f.write_crc32();
+            } else {
+                const size_t cksz = e->get_checkpoint_size();
+                std::vector<char> data(cksz);
+                if (!e->get_checkpoint(data)) return;
+                if (!f.write(data.data(), cksz)) return;
+                f.write_crc32();
+            }
         }
         std::remove(oldf.c_str());
         struct stat st;
@@ -2962,7 +3038,8 @@ int App::runPM1Stage2MarinVTrace() {
     uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
     double restored_time = 0.0;
     uint64_t s2B1=0, s2B2=0, s2D=0;
-    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D);
+    bool compactS2Loaded = false;
+    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
@@ -3116,10 +3193,15 @@ int App::runPM1Stage2MarinVTrace() {
     } else {
         cur_k = saved_k;
         eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
-        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
         if (!useBabyBatching) {
-            for (size_t gi = 0; gi < babyCount; ++gi) babyGlobalToLocal[gi] = int32_t(gi);
+            if (compactS2Loaded) {
+                std::cout << "[PM1-VTRACE-CKPT] compact checkpoint loaded; recomputing deterministic baby table before resume...\n";
+                precompute_baby_window(0, babyCount, babyGlobalToLocal);
+            } else {
+                for (size_t gi = 0; gi < babyCount; ++gi) babyGlobalToLocal[gi] = int32_t(gi);
+            }
         }
+        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
         std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
                   << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
     }
