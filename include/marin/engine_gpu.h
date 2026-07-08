@@ -259,6 +259,8 @@ public:
 			          << " width=" << gib(width_bytes) << " GiB"
 			          << " total=" << gib(total_bytes) << " GiB before driver overhead";
 			if (device_mem_bytes != 0) std::cout << " | device=" << gib(static_cast<size_t>(device_mem_bytes)) << " GiB";
+			const cl_ulong max_alloc_bytes = get_max_mem_alloc_size();
+			if (max_alloc_bytes != 0) std::cout << " | max-alloc=" << gib(static_cast<size_t>(max_alloc_bytes)) << " GiB";
 			std::cout << std::endl;
 
 			// V34 safety gate: on 10 GB RTX-class cards the 2-register MM31 plan can
@@ -280,10 +282,17 @@ public:
 				}
 			}
 
-			const cl_ulong max_alloc_bytes = get_max_mem_alloc_size();
 			const bool disableSegmented = (std::getenv("PRMERS_MARIN_SEGMENTED_DISABLE") != nullptr);
+			// v90: preserve the original flat Marin allocation path whenever the
+			// complete register slab fits under the hard OpenCL per-object limit.
+			// v83-v88 used a 0.90*maxAlloc trigger, which was good for large
+			// many-register RTX 3080 Stage-2 plans but regressed MM31 ultralowmem
+			// on P100: 3 regs = 3.75 GiB fits below the ~4 GiB hard maxAlloc,
+			// but segmentation with one scratch reg left only 2 usable regs.
+			// The safety fraction still applies below when segmenting is actually
+			// required; it must not forbid a flat slab that the driver allows.
 			const bool needSegmented = (!disableSegmented && max_alloc_bytes != 0 &&
-				static_cast<long double>(reg_bytes) > static_cast<long double>(max_alloc_bytes) * 0.90L);
+				static_cast<long double>(reg_bytes) > static_cast<long double>(max_alloc_bytes));
 
 			if (needSegmented)
 			{

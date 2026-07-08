@@ -267,6 +267,11 @@ Note: the option name `-marin` currently disables the Marin backend. The default
 | `-pm1-vtrace-auto-d` | Explicitly auto-select `D` for V-trace under a conservative register cap |
 | `-pm1-vtrace-auto-d-aggressive` | Auto-select `D` with a larger register cap for normal-size Mersennes |
 | `-pm1-vtrace-max-regs <N>` | Register cap used by V-trace auto-D |
+| `-pm1-vtrace-auto-batch` | Explicitly enable integrated V-trace `D` plus baby-batch selection. This is the default in current normal-memory V-trace builds |
+| `-pm1-vtrace-no-auto-batch` | Disable automatic V-trace baby batching and keep the full baby table for the selected `D`, using segmented GPU memory if needed |
+| `-pm1-vtrace-baby-batch <N>` | Force the number of active baby traces kept per Stage 2 pass. If `N` covers all baby residues, no batching is used |
+| `-pm1-vtrace-max-batches <N>` | Maximum number of baby-window passes considered by V-trace auto-batching |
+| `-pm1-vtrace-negadd-off` | Disable the negative-baby trace optimization and use the older copy/subtract path for comparison |
 | `-b1old <B1old>` | Extend Stage 1 from an existing `.save` or `.p95` file |
 | `-resume` | Write GMP-ECM `.save` and Prime95 `.p95` resume files |
 | `-p95` | Write Prime95 `.p95` resume file |
@@ -406,7 +411,7 @@ For a giant step `kD` and baby step `j`, the difference
 V_(kD) - V_j
 ```
 
-covers both `kD - j` and `kD + j`, because it contains the factors `(H^(kD-j)-1)` and `(H^(kD+j)-1)` up to multiplication by an invertible term. This gives a compact baby/giant Stage 2 using one scalar residue per baby trace. By default PrMers uses conservative automatic `D` selection. `D` can also be forced explicitly with `-pm1-vtrace-d`.
+covers both `kD - j` and `kD + j`, because it contains the factors `(H^(kD-j)-1)` and `(H^(kD+j)-1)` up to multiplication by an invertible term. This gives a compact baby/giant Stage 2 using one scalar residue per baby trace. By default PrMers uses automatic `D` selection and, when useful, automatic baby batching. `D` can also be forced explicitly with `-pm1-vtrace-d`.
 
 Examples:
 
@@ -423,6 +428,84 @@ Expected factor for this regression test:
 ```text
 28401397572100073
 ```
+
+#### V-trace `D`, baby residues and batching
+
+For a selected giant-step parameter `D`, the V-trace path stores one baby trace for each odd residue `j <= D/2` with `gcd(j,D)=1`. The number of baby traces is therefore:
+
+```text
+m(D) = phi(D) / 2
+```
+
+If all `m(D)` baby traces fit efficiently, Stage 2 can run in one pass. If only `b` active baby traces are kept in GPU memory, PrMers splits the baby table into:
+
+```text
+P = ceil(m(D) / b)
+```
+
+baby-window passes.
+
+A useful first-order cost model is:
+
+```text
+Cost(D,b) ~= A * (P * (B2-B1) / D)
+           + C * prime_terms
+           + E * baby_precompute
+           + batch_overhead
+```
+
+The important term for the giant recurrence is `P/D`, not just `D`. This is why two different settings can have similar runtime. For example, if `B = B2-B1`:
+
+```text
+D = 630:   phi(D)/2 = 72,  b = 72, P = 1  -> P/D = 1/630
+D = 1260:  phi(D)/2 = 144, b = 72, P = 2  -> P/D = 2/1260 = 1/630
+D = 2310:  phi(D)/2 = 240, b = 72, P = 4  -> P/D = 4/2310
+```
+
+`D=2310` may show a much higher `p/s` because each pass covers only a subset of residues and skips many primes quickly. The more useful comparison is usually `term/s` and the final ETA.
+
+Examples:
+
+```bash
+# Let PrMers choose D and the baby-window batch size.
+./prmers 205271257 -pm1 -b1 1301000 -b2 250000000
+
+# Force D and keep all 72 baby residues for D=630.
+./prmers 205271257 -pm1 -b1 1301000 -b2 250000000 \
+  -pm1-vtrace-d 630 -pm1-vtrace-baby-batch 72
+
+# Force D=2310 and keep 72 active baby traces per pass.
+./prmers 205271257 -pm1 -b1 1301000 -b2 250000000 \
+  -pm1-vtrace-d 2310 -pm1-vtrace-baby-batch 72
+```
+
+Use `-pm1-vtrace-no-auto-batch` when you want to force a full baby table for the selected `D` and compare it against the automatic batching choice.
+
+#### Segmented GPU register space
+
+On some OpenCL drivers, especially NVIDIA, a single `cl_mem` buffer can be limited by `CL_DEVICE_MAX_MEM_ALLOC_SIZE`, often much smaller than total VRAM. Recent PrMers builds can split the Marin register slab into several GPU-only OpenCL buffers when the logical register space is larger than one OpenCL allocation but still fits in total VRAM.
+
+This segmented register space is used automatically by normal-memory V-trace Stage 2 when needed. It is not host-backed swapping: the hot loop remains GPU-only. With `PRMERS_GPU_ALLOC_DIAG=1`, the log reports both the logical register slab and the segmented allocation plan, for example:
+
+```text
+[MARIN-SEGMENTED] logical regs=86 reg slab=6.72 GiB exceeds OpenCL max single allocation=2.41 GiB.
+[MARIN-SEGMENTED] using 4 GPU-only cl_mem segment(s), ... no host backing in hot loop.
+```
+
+Useful environment variables for debugging:
+
+| Variable | Meaning |
+|---|---|
+| `PRMERS_GPU_ALLOC_DIAG=1` | Print GPU memory planning and allocation diagnostics |
+| `PRMERS_PM1_VTRACE_BABY_BATCH=<N>` | Force V-trace active baby traces per pass, same purpose as `-pm1-vtrace-baby-batch <N>` |
+| `PRMERS_PM1_VTRACE_NO_AUTO_BATCH=1` | Disable V-trace auto-batching |
+| `PRMERS_MARIN_SEGMENTED_DISABLE=1` | Disable segmented register space and require a single flat register buffer |
+| `PRMERS_MARIN_SEGMENTED_MAXALLOC_FRAC=<f>` | Fraction of `CL_DEVICE_MAX_MEM_ALLOC_SIZE` used when sizing each segment |
+| `PRMERS_MARIN_SEGMENTED_SCRATCH_REGS=<N>` | Scratch registers reserved per segment for cross-segment operations |
+
+When benchmarking the internal V-trace path, do not set `-p95path`: that option delegates P-1 Stage 2 to Prime95 or mprime.
+
+V-trace Stage 2 checkpoints are compact: they save the accumulator and the current giant recurrence state, and rebuild deterministic baby tables on resume instead of writing the full baby table to disk.
 
 To force the previous classic Stage 2 path, add:
 
