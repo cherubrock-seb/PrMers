@@ -582,6 +582,29 @@ protected:
 	}
 
 protected:
+	void _fill_buffer(cl_mem & mem, const uint8_t pattern, const size_t size, const size_t offset = 0)
+	{
+		_sync();
+		cl_int err = clEnqueueFillBuffer(_queue, mem, &pattern, sizeof(pattern), offset, size, 0, nullptr, nullptr);
+		if (err != CL_SUCCESS)
+		{
+			// Fallback kept only for non-1.2/driver oddities.  The normal path is
+			// device-side fill, avoiding CUDA/OpenCL pinned host staging for MM31.
+			static constexpr size_t CHUNK = size_t(1) * 1024 * 1024;
+			std::vector<uint8_t> ptr(CHUNK, pattern);
+			for (size_t off = 0; off < size; off += CHUNK)
+			{
+				const size_t len = std::min(CHUNK, size - off);
+				fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset + off, len, ptr.data(), 0, nullptr, nullptr));
+			}
+		}
+		else
+		{
+			fatal(clFinish(_queue));
+		}
+	}
+
+protected:
 	cl_kernel _create_kernel(const char * const kernel_name)
 	{
 		cl_int err;

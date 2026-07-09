@@ -5265,29 +5265,33 @@ int App::runPM1Marin() {
     //   2) No automatic recompute fallback in this diagnostic path: P100 must run
     //      the true delta extension, otherwise -b1old has no value.
     bool ultralowmem_delta_extend = doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
+    bool ultralowmem_delta2_extend = ultralowmem_delta_extend && (std::getenv("PRMERS_PM1_MM31_DELTA2") != nullptr);
     bool ultralowmem_fast3_recompute_extend = false;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                   << B1_old << " -> B1=" << B1_new << "\n";
         std::cout << "[PM1] Ultra-low-memory extension will run the true "
-                  << "delta path H_old^Delta with 3 GPU registers; no automatic fast3 recompute fallback.\n";
+                  << "delta path H_old^Delta with " << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand, experimental)" : "3 GPU registers")
+                  << "; v93 uses compact GPU weights, no fast3 recompute fallback by default.\n";
         if (guiServer_) {
             std::ostringstream oss;
             oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
                 << B1_old << " -> B1=" << B1_new
-                << "\n[PM1] Trying true delta extension H_old^Delta with 3 GPU registers.\n";
+                << "\n[PM1] Running true delta extension H_old^Delta with "
+                << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand, experimental)." : "3 GPU registers.")
+                << " v93 compact GPU weights are enabled for MM31/RTX3080-class memory pressure.\n";
             guiServer_->appendLog(oss.str());
         }
     }
 
     std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-              << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 3-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
+              << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
         oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
-            << B1_new << (ultralowmem_delta_extend ? " (ULTRALOWMEM DELTA 3-REG)" : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
+            << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
         guiServer_->appendLog(oss.str());
     }
 
@@ -5489,8 +5493,8 @@ int App::runPM1Marin() {
     bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
-        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using 3 GPU registers; Gerbicz-Li disabled.\n";
-        if (guiServer_) guiServer_->appendLog("[PM1] Ultra-low-memory delta extension enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
+        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using " << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") << "; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog(std::string("[PM1] Ultra-low-memory delta extension enabled: using ") + (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") + "; Gerbicz-Li disabled.\n");
     } else if (pm1_ultralowmem_stage1) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n";
@@ -5501,33 +5505,44 @@ int App::runPM1Marin() {
         if (guiServer_) guiServer_->appendLog("[PM1] Low-memory Stage 1 enabled: using 3 GPU registers; Gerbicz-Li disabled.\n");
     }
 
-    size_t stage1RegCount = ultralowmem_delta_extend ? 3u : (pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u));
+    auto report_true_delta_compact_plan = [&]() {
+        if (!ultralowmem_delta_extend) return;
+        const size_t nPlan = ibdwt::transform_size(p);
+        const size_t regsPlan = ultralowmem_delta2_extend ? 2u : 3u;
+        const long double regBytes = static_cast<long double>(regsPlan) * static_cast<long double>(nPlan) * static_cast<long double>(sizeof(uint64_t));
+        const long double carryBytes = (static_cast<long double>(nPlan) / 4.0L) * static_cast<long double>(sizeof(uint64_t));
+        const long double rootBytes = 3.0L * static_cast<long double>(nPlan) * static_cast<long double>(sizeof(uint64_t));
+        const long double widthBytes = static_cast<long double>(nPlan) * static_cast<long double>(sizeof(uint8_t));
+        // Runtime CWM is usually 256 here, so one compact base pair per 1024 digits + 1024 relative pairs.
+        // The engine computes the exact allocation from CWM; this log is a conservative MM31 estimate.
+        const long double compactWeightBytes = (static_cast<long double>((nPlan + 1023) / 1024) + 1024.0L) * 2.0L * static_cast<long double>(sizeof(uint64_t));
+        const long double fullWeightBytes = 2.0L * static_cast<long double>(nPlan) * static_cast<long double>(sizeof(uint64_t));
+        const long double totalCompact = regBytes + carryBytes + rootBytes + widthBytes + compactWeightBytes;
+        auto gib = [](long double b)->long double { return b / 1073741824.0L; };
+        std::cout << "[PM1] v93 true-delta compact-weight estimate: regs=" << regsPlan
+                  << " compact-total≈" << std::fixed << std::setprecision(3) << gib(totalCompact)
+                  << " GiB before driver overhead; saved≈" << gib(fullWeightBytes - compactWeightBytes)
+                  << " GiB versus full GPU weight table.\n";
+        std::cout.unsetf(std::ios::floatfield);
+    };
+    report_true_delta_compact_plan();
+
+    size_t stage1RegCount = ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? 2u : 3u) : (pm1_ultralowmem_stage1 ? 1u : (pm1_lowmem_stage1 ? 3u : 11u));
     engine* eng = nullptr;
     try {
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     } catch (const std::exception& ex) {
-        if (!ultralowmem_delta_extend) throw;
-        std::cerr << "[PM1] Ultra-low-memory delta extension failed before start: "
-                  << ex.what() << "\n";
-        std::cerr << "[PM1] No automatic fast3 recompute fallback in this build. "
-                     "The goal is to diagnose/fix the true B1 extension path.\n";
-        std::cerr << "[PM1] If you explicitly want the old fallback behaviour, set "
-                     "PRMERS_PM1_FALLBACK_FAST3=1.\n";
-        if (std::getenv("PRMERS_PM1_FALLBACK_FAST3") == nullptr) {
-            throw;
-        }
-        std::cerr << "[PM1] PRMERS_PM1_FALLBACK_FAST3=1 set: falling back to 1-register fast3 recompute for B1="
-                  << B1_new << ".\n";
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss << "[PM1] 3-register delta extension failed; explicit fallback requested.\n";
-            guiServer_->appendLog(oss.str());
-        }
+        if (!ultralowmem_delta_extend || std::getenv("PRMERS_PM1_ENABLE_FAST3_FALLBACK") == nullptr) throw;
+        std::cerr << "[PM1] True-delta engine failed before start: " << ex.what() << "\n"
+                  << "[PM1] PRMERS_PM1_ENABLE_FAST3_FALLBACK=1 is set, so falling back to 1-reg fast3 recompute.\n";
         ultralowmem_delta_extend = false;
+        ultralowmem_delta2_extend = false;
         ultralowmem_fast3_recompute_extend = true;
         doExtend = false;
+        B1_old = 0;
         pm1_ultralowmem_stage1 = true;
         pm1_lowmem_stage1 = true;
+        options.gerbiczli = false;
         stage1RegCount = 1u;
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     }
@@ -5536,8 +5551,8 @@ int App::runPM1Marin() {
     const size_t RACC_L = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 1u;
     const size_t RACC_R = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 2u;
     const size_t RCHK   = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 3u;
-    const size_t RPOW   = ultralowmem_delta_extend ? 2u : (pm1_lowmem_stage1 ? 1u : 4u);
-    const size_t RTMP   = ultralowmem_delta_extend ? 2u : (pm1_lowmem_stage1 ? 1u : 5u);
+    const size_t RPOW   = ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? 1u : 2u) : (pm1_lowmem_stage1 ? 1u : 4u);
+    const size_t RTMP   = ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? 1u : 2u) : (pm1_lowmem_stage1 ? 1u : 5u);
     const size_t RSTART = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 6u;
     const size_t RSAVE_S= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 7u;
     const size_t RSAVE_L= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 8u;
@@ -5599,11 +5614,27 @@ int App::runPM1Marin() {
 
         eng->set_mpz(static_cast<engine::Reg>(RBASE), Xtmp);
 
-        mpz_clear(Xtmp);
-        if (ultralowmem_delta_extend) std::cout << "[PM1] H_old loaded; initializing RSTATE=1..." << std::endl;
+        if (ultralowmem_delta2_extend) {
+            // v91d: initialize the other live register while the queue only has
+            // host uploads behind it.  On RTX 3080/NVIDIA OpenCL, doing a
+            // blocking host write immediately after the huge RBASE forward
+            // transform can report a delayed CL_MEM_OBJECT_ALLOCATION_FAILURE.
+            std::cout << "[PM1] DELTA2: H_old loaded; pre-initializing RSTATE=1 before RBASE transform..." << std::endl;
+            eng->set(static_cast<engine::Reg>(RSTATE), 1);
+            std::cout << "[PM1] DELTA2: RSTATE initialized; transforming RBASE once as persistent multiplicand..." << std::endl;
+            eng->set_multiplicand(static_cast<engine::Reg>(RBASE), static_cast<engine::Reg>(RBASE));
+            std::cout << "[PM1] DELTA2: waiting for persistent multiplicand transform to complete..." << std::endl;
+            eng->sync();
+            std::cout << "[PM1] DELTA2: RBASE persistent multiplicand ready; building E_diff next." << std::endl;
+        }
 
-        eng->set(static_cast<engine::Reg>(RSTATE), 1);
-        if (ultralowmem_delta_extend) std::cout << "[PM1] RSTATE initialized; building E_diff next." << std::endl;
+        mpz_clear(Xtmp);
+        if (!ultralowmem_delta2_extend) {
+            if (ultralowmem_delta_extend) std::cout << "[PM1] H_old loaded; initializing RSTATE=1..." << std::endl;
+
+            eng->set(static_cast<engine::Reg>(RSTATE), 1);
+            if (ultralowmem_delta_extend) std::cout << "[PM1] RSTATE initialized; building E_diff next." << std::endl;
+        }
         if (options.gerbiczli) {
             eng->set(static_cast<engine::Reg>(RACC_L), 1);
             eng->set(static_cast<engine::Reg>(RACC_R), 1);
@@ -5876,8 +5907,12 @@ int App::runPM1Marin() {
                 eng->square_mul(RSTATE);
                 int b = mpz_tstbit(E_diff.get_mpz_t(), i - 1) ? 1 : 0;
                 if (b) {
-                    eng->set_multiplicand(RTMP, RBASE);
-                    eng->mul(RSTATE, RTMP);
+                    if (ultralowmem_delta2_extend) {
+                        eng->mul(RSTATE, RBASE);
+                    } else {
+                        eng->set_multiplicand(RTMP, RBASE);
+                        eng->mul(RSTATE, RTMP);
+                    }
                 }
 
                 // Injection d'erreur comme dans la branche normale

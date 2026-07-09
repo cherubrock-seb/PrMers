@@ -38,6 +38,7 @@ class gpu : public ocl::device
 private:
 	const size_t _n, _n5;
 	const size_t _reg_count;
+	uint32 _q = 0;
 	const int _lcwm_wg_size;
 	const size_t _blk16, _blk32, _blk64, _blk128, _blk256, _blk512;
 	const size_t _chunk16, _chunk20, _chunk64, _chunk80, _chunk256, _chunk320;
@@ -45,6 +46,19 @@ private:
 
 	// reg is the weighted representation of registers R0, R1, ...
 	cl_mem _reg = nullptr, _carry = nullptr, _root = nullptr, _weight = nullptr, _digit_width = nullptr;
+
+	// v91: optional split auxiliary buffers for very large low-register modes
+	// (MM31 on RTX 3080).  This is isolated: normal flat and v83-v90 segmented
+	// register modes keep the original single root/weight buffers.
+	bool _aux_split = false;
+	// v93: compact GPU weight table for MM31 low-register true-delta on 10 GB NVIDIA.
+	// Instead of keeping 2*n uint64 weights resident (~2.5 GiB at MM31), keep
+	// one base uint64_2 per carry workgroup plus a 4*CWM_WG_SZ relative table.
+	// This is isolated to low-register/split-aux programs unless explicitly forced.
+	bool _weight_compact = false;
+	cl_mem _root1 = nullptr, _root2 = nullptr;       // root[n..2n), root[2n..3n)
+	cl_mem _weight1 = nullptr;                      // split second half OR compact relative table
+	cl_kernel _mul512_xbuf = nullptr;               // dst/source in different cl_mem buffers
 
 	// v83: GPU-only segmented register slab.  When the logical register slab
 	// would exceed CL_DEVICE_MAX_MEM_ALLOC_SIZE, split it into several OpenCL
@@ -137,6 +151,22 @@ public:
 	size_t get_chunk256() const { return _chunk256; }
 	size_t get_chunk320() const { return _chunk320; }
 
+	bool should_split_aux() const
+	{
+		const cl_ulong max_alloc = get_max_mem_alloc_size();
+		if (max_alloc == 0) return false;
+		const size_t n = _n;
+		const size_t root_bytes = 3 * n * sizeof(uint64);
+		const size_t weight_bytes = 2 * n * sizeof(uint64);
+		return (static_cast<long double>(root_bytes) > static_cast<long double>(max_alloc)) ||
+		       (static_cast<long double>(weight_bytes) > static_cast<long double>(max_alloc));
+	}
+
+	void set_aux_split(const bool v) { _aux_split = v; }
+	void set_weight_compact(const bool v) { _weight_compact = v; }
+	void set_weight_exponent_q(const uint32 q) { _q = q; }
+	bool uses_compact_weight() const { return _weight_compact; }
+
 private:
 	struct segloc { size_t seg; size_t local; };
 
@@ -147,6 +177,10 @@ private:
 		const unsigned long long x = std::strtoull(v, nullptr, 10);
 		return x == 0 ? def : size_t(x);
 	}
+
+	uint32 xform_arg_base() const { return _aux_split ? 4u : 2u; }
+	uint32 carry_arg_base() const { return (_aux_split || _weight_compact) ? 5u : 4u; }
+	uint32 subtract_arg_base() const { return _aux_split ? 4u : 3u; }
 
 	segloc seg_loc(const size_t logical) const
 	{
@@ -243,46 +277,61 @@ public:
 			const size_t reg_bytes = _reg_count * n * sizeof(uint64);
 			const size_t carry_bytes = n / 4 * sizeof(uint64);
 			const size_t root_bytes = 3 * n * sizeof(uint64);
-			const size_t weight_bytes = 2 * n * sizeof(uint64);
+			const size_t full_weight_bytes = 2 * n * sizeof(uint64);
 			const size_t width_bytes = n * sizeof(uint8);
-			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
 			const bool lowmem_host_staging = (_reg_count <= 3);
 			const bool delta3reg_no_giant_clear = (_reg_count == 3);
 			const bool force_reg_no_clear = (std::getenv("PRMERS_MARIN_REG_NOCLEAR") != nullptr) || (std::getenv("PRMERS_GPU_ALLOC_DIAG") != nullptr);
 			auto gib = [](const size_t b) { return double(b) / 1073741824.0; };
 			const cl_ulong device_mem_bytes = get_global_mem_size();
+			const cl_ulong max_alloc_bytes = get_max_mem_alloc_size();
+
+			const bool disableSegmented = (std::getenv("PRMERS_MARIN_SEGMENTED_DISABLE") != nullptr);
+			const bool forceAuxSplit = (std::getenv("PRMERS_MARIN_SPLIT_AUX_FORCE") != nullptr);
+			const bool disableAuxSplit = (std::getenv("PRMERS_MARIN_SPLIT_AUX_DISABLE") != nullptr);
+			_aux_split = (!disableAuxSplit && max_alloc_bytes != 0 &&
+				(static_cast<long double>(root_bytes) > static_cast<long double>(max_alloc_bytes) ||
+				 static_cast<long double>(full_weight_bytes) > static_cast<long double>(max_alloc_bytes))) || forceAuxSplit;
+
+			const bool disableCompactWeight = (std::getenv("PRMERS_MARIN_COMPACT_WEIGHT_DISABLE") != nullptr);
+			const bool forceCompactWeight = (std::getenv("PRMERS_MARIN_COMPACT_WEIGHT_FORCE") != nullptr);
+			// v93: only low-register/split-aux programs need this by default.
+			// Normal PRP/LL/ECM and larger-register PM1 engines keep the old full GPU weight table.
+			_weight_compact = !disableCompactWeight && (forceCompactWeight || (lowmem_host_staging && _aux_split));
+
+			const size_t cwm = size_t(1) << _lcwm_wg_size;
+			const size_t compact_digits_per_group = 4 * cwm;
+			const size_t compact_base_pairs = (n + compact_digits_per_group - 1) / compact_digits_per_group;
+			const size_t compact_rel_pairs = compact_digits_per_group;
+			const size_t compact_exp_bytes = (compact_base_pairs + compact_rel_pairs) * sizeof(uint32);
+			const size_t compact_weight_bytes = (compact_base_pairs + compact_rel_pairs) * 2 * sizeof(uint64) + compact_exp_bytes;
+			const size_t weight_bytes = _weight_compact ? compact_weight_bytes : full_weight_bytes;
+			const size_t total_bytes = reg_bytes + carry_bytes + root_bytes + weight_bytes + width_bytes;
+
 			std::cout << "[GPU memory plan] regs=" << _reg_count
 			          << " reg=" << gib(reg_bytes) << " GiB"
 			          << " root=" << gib(root_bytes) << " GiB"
-			          << " weight=" << gib(weight_bytes) << " GiB"
+			          << " weight=" << gib(weight_bytes) << " GiB" << (_weight_compact ? " compact" : "")
 			          << " carry=" << gib(carry_bytes) << " GiB"
 			          << " width=" << gib(width_bytes) << " GiB"
 			          << " total=" << gib(total_bytes) << " GiB before driver overhead";
 			if (device_mem_bytes != 0) std::cout << " | device=" << gib(static_cast<size_t>(device_mem_bytes)) << " GiB";
-			const cl_ulong max_alloc_bytes = get_max_mem_alloc_size();
 			if (max_alloc_bytes != 0) std::cout << " | max-alloc=" << gib(static_cast<size_t>(max_alloc_bytes)) << " GiB";
 			std::cout << std::endl;
 
-			// V34 safety gate: on 10 GB RTX-class cards the 2-register MM31 plan can
-			// allocate the OpenCL buffers but still fail during the first streamed
-			// register upload because the CUDA/OpenCL driver needs extra pinned/mirror
-			// memory. Throw early so PM1 ultralowmem can fall back cleanly to the
-			// one-register fast3 recompute instead of aborting inside set_mpz().
-			if (_reg_count == 2 && device_mem_bytes != 0)
+			if (_aux_split)
 			{
-				const bool force_tight = (std::getenv("PRMERS_PM1_ALLOW_TIGHT_DELTA2REG") != nullptr);
-				const long double safe_limit = static_cast<long double>(device_mem_bytes) * 0.80L;
-				if (!force_tight && static_cast<long double>(total_bytes) > safe_limit)
-				{
-					std::ostringstream ss;
-					ss << "2-reg lowmem plan too tight for device memory: plan="
-					   << gib(total_bytes) << " GiB, device=" << gib(static_cast<size_t>(device_mem_bytes))
-					   << " GiB, safety_limit=80%. Set PRMERS_PM1_ALLOW_TIGHT_DELTA2REG=1 to force.";
-					throw std::runtime_error(ss.str());
-				}
+				std::cout << "[MARIN-SPLIT-AUX] root/weight exceed max single allocation or split forced; "
+				          << (_weight_compact ? "using split root[3] + compact weight-base/relative kernel ABI. " : "using split root[3] + split weight[2] kernel ABI. ")
+				          << "Disable with PRMERS_MARIN_SPLIT_AUX_DISABLE=1." << std::endl;
 			}
-
-			const bool disableSegmented = (std::getenv("PRMERS_MARIN_SEGMENTED_DISABLE") != nullptr);
+			if (_weight_compact)
+			{
+				std::cout << "[MARIN-COMPACT-WEIGHT] enabled: base-pairs=" << compact_base_pairs
+				          << ", relative-pairs=" << compact_rel_pairs
+				          << ", GPU weight table=" << gib(compact_weight_bytes) << " GiB (v94 carry-corrected compact weights). "
+				          << "Disable with PRMERS_MARIN_COMPACT_WEIGHT_DISABLE=1." << std::endl;
+			}
 			// v90: preserve the original flat Marin allocation path whenever the
 			// complete register slab fits under the hard OpenCL per-object limit.
 			// v83-v88 used a 0.90*maxAlloc trigger, which was good for large
@@ -303,23 +352,30 @@ public:
 					if (f > 0.10L && f < 0.985L) frac = f;
 				}
 				// v88: one scratch register per segment is enough for current segmented
-				// dispatch: cross-segment sources are materialized one at a time
-				// (materialize_src_in_segment(..., scratchIndex=0)).  v83-v87
-				// reserved 3 scratch regs per segment, which wasted ~0.625 GiB
-				// on RTX 3080 for 4 segments and could push D=630 full-72 over
-				// the real VRAM limit once the auxiliary engine was also allocated.
-				_seg_scratch_regs = env_size_local("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS", 1);
+				// dispatch. v91 adds a special no-scratch one-register-per-buffer mode
+				// for huge low-register MM31 where even one reg+scratch exceeds maxAlloc.
 				const size_t per_reg_bytes = n * sizeof(uint64);
 				const size_t slots_under_limit = static_cast<size_t>((static_cast<long double>(max_alloc_bytes) * frac) / static_cast<long double>(per_reg_bytes));
-				if (slots_under_limit <= _seg_scratch_regs + 1)
+				const bool one_reg_split_possible = (lowmem_host_staging && _aux_split && per_reg_bytes <= static_cast<size_t>(max_alloc_bytes));
+				if (one_reg_split_possible && slots_under_limit >= 1)
 				{
-					std::ostringstream ss;
-					ss << "segmented-regspace: only " << slots_under_limit << " regs fit below max single allocation; scratch=" << _seg_scratch_regs;
-					throw std::runtime_error(ss.str());
+					_seg_scratch_regs = 0;
+					_seg_total_regs = 1;
+					_seg_usable_regs = 1;
+				}
+				else
+				{
+					_seg_scratch_regs = env_size_local("PRMERS_MARIN_SEGMENTED_SCRATCH_REGS", 1);
+					if (slots_under_limit <= _seg_scratch_regs + 1)
+					{
+						std::ostringstream ss;
+						ss << "segmented-regspace: only " << slots_under_limit << " regs fit below max single allocation; scratch=" << _seg_scratch_regs;
+						throw std::runtime_error(ss.str());
+					}
+					_seg_total_regs = slots_under_limit;
+					_seg_usable_regs = _seg_total_regs - _seg_scratch_regs;
 				}
 				_reg_segmented = true;
-				_seg_total_regs = slots_under_limit;
-				_seg_usable_regs = _seg_total_regs - _seg_scratch_regs;
 				_seg_count = (_reg_count + _seg_usable_regs - 1) / _seg_usable_regs;
 				std::cout << "[MARIN-SEGMENTED] logical regs=" << _reg_count
 				          << " reg slab=" << gib(reg_bytes) << " GiB exceeds OpenCL max single allocation="
@@ -361,12 +417,53 @@ public:
 			std::cout << "[GPU memory alloc] allocating carry..." << std::endl;
 			_carry = _create_buffer(CL_MEM_READ_WRITE, carry_bytes);
 			std::cout << "[GPU memory alloc] carry OK" << std::endl;
-			std::cout << "[GPU memory alloc] allocating root..." << std::endl;
-			_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
-			std::cout << "[GPU memory alloc] root OK" << std::endl;
-			std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
-			_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
-			std::cout << "[GPU memory alloc] weight OK" << std::endl;
+			if (_aux_split)
+			{
+				std::cout << "[GPU memory alloc] allocating split root[0..2]..." << std::endl;
+				_root  = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint64), false);
+				_root1 = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint64), false);
+				_root2 = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint64), false);
+				std::cout << "[GPU memory alloc] split root OK" << std::endl;
+				if (_weight_compact)
+				{
+					const size_t cwm = size_t(1) << _lcwm_wg_size;
+					const size_t rel_pairs = 4 * cwm;
+					const size_t base_pairs = (n + rel_pairs - 1) / rel_pairs;
+					std::cout << "[GPU memory alloc] allocating compact weight base+relative..." << std::endl;
+					_weight  = _create_buffer(CL_MEM_READ_ONLY, base_pairs * 2 * sizeof(uint64) + base_pairs * sizeof(uint32), false);
+					_weight1 = _create_buffer(CL_MEM_READ_ONLY, rel_pairs  * 2 * sizeof(uint64) + rel_pairs  * sizeof(uint32), false);
+					std::cout << "[GPU memory alloc] compact weight OK" << std::endl;
+				}
+				else
+				{
+					std::cout << "[GPU memory alloc] allocating split weight[0..1]..." << std::endl;
+					_weight  = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint64), false);
+					_weight1 = _create_buffer(CL_MEM_READ_ONLY, n * sizeof(uint64), false);
+					std::cout << "[GPU memory alloc] split weight OK" << std::endl;
+				}
+			}
+			else
+			{
+				std::cout << "[GPU memory alloc] allocating root..." << std::endl;
+				_root = _create_buffer(CL_MEM_READ_ONLY, root_bytes, false);
+				std::cout << "[GPU memory alloc] root OK" << std::endl;
+				if (_weight_compact)
+				{
+					const size_t cwm = size_t(1) << _lcwm_wg_size;
+					const size_t rel_pairs = 4 * cwm;
+					const size_t base_pairs = (n + rel_pairs - 1) / rel_pairs;
+					std::cout << "[GPU memory alloc] allocating compact weight base+relative..." << std::endl;
+					_weight  = _create_buffer(CL_MEM_READ_ONLY, base_pairs * 2 * sizeof(uint64) + base_pairs * sizeof(uint32), false);
+					_weight1 = _create_buffer(CL_MEM_READ_ONLY, rel_pairs  * 2 * sizeof(uint64) + rel_pairs  * sizeof(uint32), false);
+					std::cout << "[GPU memory alloc] compact weight OK" << std::endl;
+				}
+				else
+				{
+					std::cout << "[GPU memory alloc] allocating weight..." << std::endl;
+					_weight = _create_buffer(CL_MEM_READ_ONLY, weight_bytes, false);
+					std::cout << "[GPU memory alloc] weight OK" << std::endl;
+				}
+			}
 			std::cout << "[GPU memory alloc] allocating digit_width..." << std::endl;
 			_digit_width = _create_buffer(CL_MEM_READ_ONLY, width_bytes, false);
 			std::cout << "[GPU memory alloc] digit_width OK" << std::endl;
@@ -392,7 +489,7 @@ public:
 			}
 			else _release_buffer(_reg);
 			_release_buffer(_carry);
-			_release_buffer(_root); _release_buffer(_weight); _release_buffer(_digit_width);
+			_release_buffer(_root); _release_buffer(_root1); _release_buffer(_root2); _release_buffer(_weight); _release_buffer(_weight1); _release_buffer(_digit_width);
 		}
 	}
 
@@ -403,6 +500,22 @@ public:
 		cl_kernel kernel = _create_kernel(kernel_name);
 		_set_kernel_arg(kernel, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(kernel, 1, sizeof(cl_mem), &_root);
+		if (_aux_split)
+		{
+			_set_kernel_arg(kernel, 2, sizeof(cl_mem), &_root1);
+			_set_kernel_arg(kernel, 3, sizeof(cl_mem), &_root2);
+		}
+		_kernels.push_back(kernel);
+		return kernel;
+	}
+
+	cl_kernel create_kernel_transform_xbuf(const char * const kernel_name)
+	{
+		cl_kernel kernel = _create_kernel(kernel_name);
+		_set_kernel_arg(kernel, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(kernel, 1, sizeof(cl_mem), &_root);
+		_set_kernel_arg(kernel, 2, sizeof(cl_mem), &_root1);
+		_set_kernel_arg(kernel, 3, sizeof(cl_mem), &_root2);
 		_kernels.push_back(kernel);
 		return kernel;
 	}
@@ -413,7 +526,15 @@ public:
 		_set_kernel_arg(kernel, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(kernel, 1, sizeof(cl_mem), &_carry);
 		_set_kernel_arg(kernel, 2, sizeof(cl_mem), &_weight);
-		_set_kernel_arg(kernel, 3, sizeof(cl_mem), &_digit_width);
+		if (_aux_split || _weight_compact)
+		{
+			_set_kernel_arg(kernel, 3, sizeof(cl_mem), &_weight1);
+			_set_kernel_arg(kernel, 4, sizeof(cl_mem), &_digit_width);
+		}
+		else
+		{
+			_set_kernel_arg(kernel, 3, sizeof(cl_mem), &_digit_width);
+		}
 		_kernels.push_back(kernel);
 		return kernel;
 	}
@@ -592,19 +713,31 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_mul2_unit_p1);
 
+		if (_aux_split) _mul512_xbuf = create_kernel_transform_xbuf("mul512_xbuf");
+
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
 		_kernels.push_back(_copy);
 		_subtract = _create_kernel("subtract");
 		_set_kernel_arg(_subtract, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(_subtract, 1, sizeof(cl_mem), &_weight);
-		_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_digit_width);
+		if (_aux_split)
+		{
+			_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_weight1);
+			_set_kernel_arg(_subtract, 3, sizeof(cl_mem), &_digit_width);
+		}
+		else _set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract);
 
 		_subtract_reg = _create_kernel("subtract_reg");
 		_set_kernel_arg(_subtract_reg, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
-		_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
+		if (_aux_split)
+		{
+			_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_weight1);
+			_set_kernel_arg(_subtract_reg, 3, sizeof(cl_mem), &_digit_width);
+		}
+		else _set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract_reg);
 
 
@@ -651,19 +784,101 @@ public:
 	}
 	void fill_reg_zero(const size_t index)
 	{
-		const uint64 zero = 0;
-		static constexpr size_t CHUNK = size_t(1) << 20;
-		std::vector<uint64> z(CHUNK, zero);
-		for (size_t off = 0; off < _n; off += CHUNK)
+		const uint8_t zero = 0;
+		if (!_reg_segmented)
 		{
-			const size_t len = std::min(CHUNK, _n - off);
-			write_reg_part(z.data(), len, index, off);
+			_fill_buffer(_reg, zero, _n * sizeof(uint64), index * _n * sizeof(uint64));
+			return;
+		}
+
+		// v91c: NVIDIA may accept clEnqueueFillBuffer for a ~1.25 GiB
+		// segmented MM31 register and only report CL_MEM_OBJECT_ALLOCATION_FAILURE
+		// at the next blocking command/finish.  Avoid that hidden temporary path
+		// completely for segmented registers and clear by small host chunks, the
+		// same safe upload mechanism already used by lowmem set_mpz().  This is
+		// cold-path initialization only; normal kernels/hot loop are unchanged.
+		const segloc l = seg_loc(index);
+		check_segment_local_range(l.seg, l.local, "fill zero");
+		static constexpr size_t CHUNK_ELEMS = size_t(1) << 20;
+		std::vector<uint64> zeros(CHUNK_ELEMS, 0);
+		for (size_t off = 0; off < _n; off += CHUNK_ELEMS)
+		{
+			const size_t len = std::min(CHUNK_ELEMS, _n - off);
+			_write_buffer(_reg_segments[l.seg], zeros.data(), len * sizeof(uint64), (l.local * _n + off) * sizeof(uint64));
 		}
 	}
 
-	void write_root(const uint64 * const ptr) { _write_buffer(_root, ptr, 3 * _n * sizeof(uint64)); }
-	void write_root_part(const uint64 * const ptr, const size_t elems, const size_t offset_elems) { _write_buffer(_root, ptr, elems * sizeof(uint64), offset_elems * sizeof(uint64)); }
-	void write_weight(const uint64 * const ptr) { _write_buffer(_weight, ptr, 2 * _n * sizeof(uint64)); }
+	void write_root(const uint64 * const ptr)
+	{
+		if (!_aux_split) { _write_buffer(_root, ptr, 3 * _n * sizeof(uint64)); return; }
+		_write_buffer(_root,  ptr,           _n * sizeof(uint64));
+		_write_buffer(_root1, ptr + _n,      _n * sizeof(uint64));
+		_write_buffer(_root2, ptr + 2 * _n,  _n * sizeof(uint64));
+	}
+	void write_root_part(const uint64 * const ptr, const size_t elems, const size_t offset_elems)
+	{
+		if (!_aux_split) { _write_buffer(_root, ptr, elems * sizeof(uint64), offset_elems * sizeof(uint64)); return; }
+		size_t done = 0;
+		while (done < elems)
+		{
+			const size_t global = offset_elems + done;
+			const size_t part = global / _n;
+			const size_t local = global % _n;
+			const size_t len = std::min(elems - done, _n - local);
+			cl_mem dst = (part == 0) ? _root : ((part == 1) ? _root1 : _root2);
+			_write_buffer(dst, ptr + done, len * sizeof(uint64), local * sizeof(uint64));
+			done += len;
+		}
+	}
+	void write_weight(const uint64 * const ptr)
+	{
+		if (_weight_compact)
+		{
+			const size_t cwm = size_t(1) << _lcwm_wg_size;
+			const size_t rel_pairs = 4 * cwm;
+			const size_t base_pairs = (_n + rel_pairs - 1) / rel_pairs;
+			if (_q == 0) throw std::runtime_error("compact weight: missing exponent q");
+			auto storage_pair_index = [this](const size_t digit) -> size_t {
+				return digit / 4 + (digit % 4) * (_n / 4);
+			};
+			auto weight_exp_for_digit = [this](const size_t digit) -> uint32 {
+				if (digit == 0) return 0u;
+				const uint64 qj = uint64(_q) * uint64(digit);
+				const uint32 r = uint32(qj % uint64(_n));
+				return (r == 0u) ? 0u : uint32(_n) - r;
+			};
+
+			std::vector<uint64> base(2 * base_pairs);
+			std::vector<uint64> rel(2 * rel_pairs);
+			std::vector<uint32> base_exp(base_pairs);
+			std::vector<uint32> rel_exp(rel_pairs);
+			for (size_t g = 0; g < base_pairs; ++g)
+			{
+				const size_t digit = std::min(g * rel_pairs, _n - 1);
+				const size_t i = storage_pair_index(digit);
+				base[2 * g + 0] = ptr[2 * i + 0];
+				base[2 * g + 1] = ptr[2 * i + 1];
+				base_exp[g] = weight_exp_for_digit(digit);
+			}
+			for (size_t d = 0; d < rel_pairs; ++d)
+			{
+				const size_t digit = std::min(d, _n - 1);
+				const size_t i = storage_pair_index(digit);
+				rel[2 * d + 0] = ptr[2 * i + 0];
+				rel[2 * d + 1] = ptr[2 * i + 1];
+				rel_exp[d] = weight_exp_for_digit(digit);
+			}
+			_write_buffer(_weight,  base.data(), base.size() * sizeof(uint64));
+			_write_buffer(_weight,  base_exp.data(), base_exp.size() * sizeof(uint32), base.size() * sizeof(uint64));
+			_write_buffer(_weight1, rel.data(),  rel.size()  * sizeof(uint64));
+			_write_buffer(_weight1, rel_exp.data(), rel_exp.size() * sizeof(uint32), rel.size() * sizeof(uint64));
+			return;
+		}
+		if (!_aux_split) { _write_buffer(_weight, ptr, 2 * _n * sizeof(uint64)); return; }
+		// Split by uint64_2 pair index: first n/2 pairs then second n/2 pairs.
+		_write_buffer(_weight,  ptr,      _n * sizeof(uint64));
+		_write_buffer(_weight1, ptr + _n, _n * sizeof(uint64));
+	}
 	void write_width(const uint8 * const ptr) { _write_buffer(_digit_width, ptr, _n * sizeof(uint8)); }
 
 ///////////////////////////////
@@ -673,9 +888,9 @@ public:
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
 		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
-		_set_kernel_arg(kernel, 3, sizeof(uint32), &s);
-		_set_kernel_arg(kernel, 4, sizeof(uint32), &lm);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
+		_set_kernel_arg(kernel, xform_arg_base() + 1, sizeof(uint32), &s);
+		_set_kernel_arg(kernel, xform_arg_base() + 2, sizeof(uint32), &lm);
 		_execute_kernel(kernel, _n / 8, local_size);
 	}
 
@@ -684,7 +899,7 @@ public:
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
 		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
@@ -693,7 +908,7 @@ public:
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
 		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
@@ -703,10 +918,24 @@ public:
 		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
 		bind_reg_segment(kernel, d.seg);
 		const uint32 offset_y = uint32(srcLocal * _n);
-		_set_kernel_arg(kernel, 3, sizeof(uint32), &offset_y);
+		_set_kernel_arg(kernel, xform_arg_base() + 1, sizeof(uint32), &offset_y);
 		const uint32 offset = uint32(d.local * _n);
-		_set_kernel_arg(kernel, 2, sizeof(uint32), &offset);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
+	}
+
+	void ek_mul_xbuf512(const size_t dst, const size_t src, const size_t local_size = 0)
+	{
+		if (_mul512_xbuf == nullptr) throw std::runtime_error("split-reg cross-buffer mul512 kernel not available");
+		const segloc d = seg_loc(dst), s = seg_loc(src);
+		bind_reg_segment(_mul512_xbuf, d.seg);
+		cl_mem src_mem = _reg_segmented ? _reg_segments[s.seg] : _reg;
+		_set_kernel_arg(_mul512_xbuf, 4, sizeof(cl_mem), &src_mem);
+		const uint32 offset = uint32(d.local * _n);
+		const uint32 offset_y = uint32(s.local * _n);
+		_set_kernel_arg(_mul512_xbuf, 5, sizeof(uint32), &offset);
+		_set_kernel_arg(_mul512_xbuf, 6, sizeof(uint32), &offset_y);
+		_execute_kernel(_mul512_xbuf, _n / 8, local_size);
 	}
 
 	// DEFINE_FORWARD(4);
@@ -778,7 +1007,11 @@ public:
 
 	DEFINE_FORWARD_MUL(512);
 	DEFINE_SQR(512);
-	DEFINE_MUL(512);
+	void mul512(const size_t dst, const size_t src)
+	{
+		if (_reg_segmented && !same_segment(dst, src) && _seg_scratch_regs == 0) { ek_mul_xbuf512(dst, src, (512 / 4) * _blk512); return; }
+		ek_mul(_mul512, 8, dst, src, (512 / 4) * _blk512);
+	}
 
 	DEFINE_FORWARD_MUL(1024);
 	DEFINE_SQR(1024);
@@ -794,10 +1027,10 @@ public:
 		bind_reg_segment(_carry_weight_mul_p1, l.seg);
 		bind_reg_segment(_carry_weight_p2, l.seg);
 		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(_carry_weight_mul_p1, 4, sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_mul_p1, 5, sizeof(uint32), &offset);
+		_set_kernel_arg(_carry_weight_mul_p1, carry_arg_base(), sizeof(uint32), &a);
+		_set_kernel_arg(_carry_weight_mul_p1, carry_arg_base() + 1, sizeof(uint32), &offset);
 		_execute_kernel(_carry_weight_mul_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -814,13 +1047,13 @@ public:
 		bind_reg_segment(_carry_weight_p2_copy, sl.seg);
 		uint32 offS = (uint32)(sl.local * _n);
 		uint32 offD = (uint32)(dl.local * _n);
-		_set_kernel_arg(_carry_weight_mul_p1_copy, 4, sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_mul_p1_copy, 5, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_mul_p1_copy, 6, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base(), sizeof(uint32), &a);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 1, sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 2, sizeof(uint32), &offD);
 		_execute_kernel(_carry_weight_mul_p1_copy, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_p2_copy, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_p2_copy, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base(), sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
 		_execute_kernel(_carry_weight_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -833,12 +1066,12 @@ public:
 		const uint32 offY = uint32(d.local * _n);
 		const uint32 offX = uint32(addLocal * _n);
 
-		_set_kernel_arg(_carry_weight_muladd_p1, 4, sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_muladd_p1, 5, sizeof(uint32), &offY);
-		_set_kernel_arg(_carry_weight_muladd_p1, 6, sizeof(uint32), &offX);
+		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base(), sizeof(uint32), &a);
+		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 1, sizeof(uint32), &offY);
+		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 2, sizeof(uint32), &offX);
 		_execute_kernel(_carry_weight_muladd_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_muladd_p2, 4, sizeof(uint32), &offY);
+		_set_kernel_arg(_carry_weight_muladd_p2, carry_arg_base(), sizeof(uint32), &offY);
 		_execute_kernel(_carry_weight_muladd_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 	
@@ -851,10 +1084,10 @@ public:
 		bind_reg_segment(_carry_weight_add_p1, d.seg);
 		bind_reg_segment(_carry_weight_p2, d.seg);
 		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
-		_set_kernel_arg(_carry_weight_add_p1, 4, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_add_p1, 5, sizeof(uint32), &offset_x);
+		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base(), sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base() + 1, sizeof(uint32), &offset_x);
 		_execute_kernel(_carry_weight_add_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset_y);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
@@ -868,10 +1101,10 @@ public:
 		bind_reg_segment(_carry_weight_add_neg_p1, d.seg);
 		bind_reg_segment(_carry_weight_p2, d.seg);
 		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
-		_set_kernel_arg(_carry_weight_add_neg_p1, 4, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_add_neg_p1, 5, sizeof(uint32), &offset_x);
+		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base(), sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base() + 1, sizeof(uint32), &offset_x);
 		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, 4, sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset_y);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
@@ -902,14 +1135,14 @@ public:
 		uint32 offA = (uint32)(al.local * _n);
 		uint32 offB = (uint32)(bl.local * _n);
 
-		_set_kernel_arg(_carry_weight_addsub_p1, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1, 5, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1, 6, sizeof(uint32), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1, 7, sizeof(uint32), &offB);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base(), sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 1, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 2, sizeof(uint32), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 3, sizeof(uint32), &offB);
 		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_addsub_p2, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2, 5, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base(), sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base() + 1, sizeof(uint32), &offD);
 		_execute_kernel(_carry_weight_addsub_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -928,12 +1161,12 @@ public:
 		uint32 off0 = (uint32)(d0.local * _n);
 		uint32 off1 = (uint32)(d1.local * _n);
 
-		_set_kernel_arg(_carry_weight_mul2_unit_p1, 4, sizeof(uint32), &off0);
-		_set_kernel_arg(_carry_weight_mul2_unit_p1, 5, sizeof(uint32), &off1);
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base(), sizeof(uint32), &off0);
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base() + 1, sizeof(uint32), &off1);
 		_execute_kernel(_carry_weight_mul2_unit_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_p2x2, 4, sizeof(uint32), &off0);
-		_set_kernel_arg(_carry_weight_p2x2, 5, sizeof(uint32), &off1);
+		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base(), sizeof(uint32), &off0);
+		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base() + 1, sizeof(uint32), &off1);
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -958,18 +1191,18 @@ public:
 		const uint32 offA = (uint32)(al.local * _n);
 		const uint32 offB = (uint32)(bl.local * _n);
 
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 5, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 6, sizeof(uint32), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 7, sizeof(uint32), &offDc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 8, sizeof(uint32), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, 9, sizeof(uint32), &offB);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base(), sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 2, sizeof(uint32), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 3, sizeof(uint32), &offDc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 4, sizeof(uint32), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 5, sizeof(uint32), &offB);
 		_execute_kernel(_carry_weight_addsub_p1_copy, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, 4, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, 5, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, 6, sizeof(uint32), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, 7, sizeof(uint32), &offDc);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base(), sizeof(uint32), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 2, sizeof(uint32), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 3, sizeof(uint32), &offDc);
 		_execute_kernel(_carry_weight_addsub_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -994,8 +1227,8 @@ public:
 		const segloc l = seg_loc(src);
 		bind_reg_segment(_subtract, l.seg);
 		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(_subtract, 3, sizeof(uint32), &offset);
-		_set_kernel_arg(_subtract, 4, sizeof(uint32), &a);
+		_set_kernel_arg(_subtract, subtract_arg_base(), sizeof(uint32), &offset);
+		_set_kernel_arg(_subtract, subtract_arg_base() + 1, sizeof(uint32), &a);
 		_execute_kernel(_subtract, 1);
 	}
 
@@ -1009,8 +1242,8 @@ public:
 		const segloc d = seg_loc(dst), s = seg_loc(src);
 		bind_reg_segment(_subtract_reg, d.seg);
 		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(s.local * _n);
-		_set_kernel_arg(_subtract_reg, 3, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_subtract_reg, 4, sizeof(uint32), &offset_x);
+		_set_kernel_arg(_subtract_reg, subtract_arg_base(), sizeof(uint32), &offset_y);
+		_set_kernel_arg(_subtract_reg, subtract_arg_base() + 1, sizeof(uint32), &offset_x);
 		_execute_kernel(_subtract_reg, 1);
 	}
 };
@@ -1068,7 +1301,25 @@ public:
 
 		src << "#define CWM_WG_SZ\t" << (1u << _gpu->get_lcwm_wg_size()) << "u" << std::endl;
 
-		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << "u" << std::endl << std::endl;
+		src << "#define MAX_WG_SZ\t" << _gpu->get_max_workgroup_size() << "u" << std::endl;
+
+		const bool auxSplitProgram = ((std::getenv("PRMERS_MARIN_SPLIT_AUX_DISABLE") == nullptr) && _gpu->should_split_aux()) || (std::getenv("PRMERS_MARIN_SPLIT_AUX_FORCE") != nullptr);
+		const bool compactWeightProgram = (std::getenv("PRMERS_MARIN_COMPACT_WEIGHT_DISABLE") == nullptr) &&
+			((std::getenv("PRMERS_MARIN_COMPACT_WEIGHT_FORCE") != nullptr) || (_reg_count <= 3 && auxSplitProgram));
+		_gpu->set_aux_split(auxSplitProgram);
+		_gpu->set_weight_compact(compactWeightProgram);
+		_gpu->set_weight_exponent_q(q);
+		if (auxSplitProgram)
+		{
+			src << "#define MARIN_SPLIT_AUX 1" << std::endl;
+			std::cout << "[MARIN-SPLIT-AUX] compiling split root kernel ABI" << std::endl;
+		}
+		if (compactWeightProgram)
+		{
+			src << "#define MARIN_COMPACT_WEIGHT 1" << std::endl;
+			std::cout << "[MARIN-COMPACT-WEIGHT] compiling compact weight kernel ABI" << std::endl;
+		}
+		src << std::endl;
 
 		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
