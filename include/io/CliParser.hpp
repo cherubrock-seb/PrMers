@@ -89,6 +89,9 @@ struct CliOptions {
     uint64_t pm1_vtrace_max_batches = 4; // v78: cap automatic baby-window passes while scoring D candidates when auto-batch is enabled
     uint64_t pm1_vtrace_baby_batch = 0; // v72: optional active baby count override; env PRMERS_PM1_VTRACE_BABY_BATCH still supported
     bool pm1_vtrace_negadd_off = false; // Disable negative-baby/add term builder and use the older copy+sub_reg path
+    bool pm1_vtrace_pair95 = false;     // v97: explicitly enable Pair95 irregular prime pairing (default when dense map is available)
+    bool pm1_vtrace_pair95_off = false; // v97: disable default Pair95 and use classic V-trace pairing
+    uint64_t pm1_vtrace_pair95_L = 0;   // v97: optional Pair95 level count override; 0 = auto
     bool pm1_vtrace_product_tree = false; // Experimental v62 bucket-local product-tree Stage 2 accumulation (opt-in)
     uint32_t pm1_vtrace_product_tree_width = 16; // Scratch fan-in/chunk width for product-tree experiment
     bool pm1_no_stage1_gcd = false;

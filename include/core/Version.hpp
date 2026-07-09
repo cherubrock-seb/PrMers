@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.44-alpha-mm31-compact-weight-v94-carryfix";
+    const std::string PRMERS_VERSION = "4.20.47-alpha-v97-pair95-auto";
 } // namespace core
 
 #endif // VERSION_HPP

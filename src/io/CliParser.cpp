@@ -96,6 +96,9 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-vtrace-baby-batch <N> : (Optional) force V-trace active baby traces per pass. Keeps D large but scans several baby windows" << std::endl;
     std::cout << "  -pm1-vtrace-max-batches <N> : (Optional) cap auto-D baby-window passes, default 4" << std::endl;
     std::cout << "  -pm1-vtrace-no-auto-batch : Disable default integrated D+batch scoring; useful for flat/full-slab regression tests" << std::endl;
+    std::cout << "  -pm1-vtrace-pair95 : Enable Pair95 irregular prime pairing explicitly (v97: default when dense map is available)" << std::endl;
+    std::cout << "  -pm1-vtrace-pair95-off : Disable default Pair95 and use classic V-trace pairing" << std::endl;
+    std::cout << "  -pm1-vtrace-pair95-l <N> : Force Pair95 irregular level count; 0/omitted = auto, common values 2 or 3" << std::endl;
     std::cout << "  -pm1-vtrace-product-tree : (Experimental) Use v62 bucket-local product-tree accumulation, opt-in" << std::endl;
     std::cout << "  -pm1-vtrace-product-tree-width <N> : (Experimental) Product-tree scratch/chunk width, default 16" << std::endl;
     std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested" << std::endl;
@@ -620,6 +623,28 @@ CliOptions CliParser::parse(int argc, char** argv ) {
                  std::strcmp(argv[i], "-vtrace-negadd-off") == 0) {
             opts.pm1_vtrace = true;
             opts.pm1_vtrace_negadd_off = true;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-pair95") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-pair95") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-pair95") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_pair95 = true;
+            opts.pm1_vtrace_pair95_off = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-vtrace-pair95-off") == 0 ||
+                 std::strcmp(argv[i], "--pm1-vtrace-pair95-off") == 0 ||
+                 std::strcmp(argv[i], "-vtrace-pair95-off") == 0) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_pair95_off = true;
+            opts.pm1_vtrace_pair95 = false;
+        }
+        else if ((std::strcmp(argv[i], "-pm1-vtrace-pair95-l") == 0 ||
+                  std::strcmp(argv[i], "--pm1-vtrace-pair95-l") == 0 ||
+                  std::strcmp(argv[i], "-vtrace-pair95-l") == 0) && i + 1 < argc) {
+            opts.pm1_vtrace = true;
+            opts.pm1_vtrace_pair95 = true;
+            opts.pm1_vtrace_pair95_L = std::strtoull(argv[i + 1], nullptr, 10);
+            ++i;
         }
         else if (std::strcmp(argv[i], "-nogcd-stage1") == 0 ||
                  std::strcmp(argv[i], "--nogcd-stage1") == 0 ||

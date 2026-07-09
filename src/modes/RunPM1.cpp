@@ -58,6 +58,7 @@
 #include <filesystem>
 #include <set>
 #include <unordered_set>
+#include <unordered_map>
 #include <limits>
 #include <cmath>
 #include <vector>
@@ -2694,21 +2695,380 @@ int App::runPM1Stage2MarinVTrace() {
         return TracePair{k, j, k * D - j, k * D + j};
     };
 
+    // v97: Pair95 is now the default Stage-2 V-trace planner when the dense
+    // prime map is available.  The default can be disabled with
+    // -pm1-vtrace-pair95-off or PRMERS_PM1_VTRACE_PAIRING95_DISABLE=1.  If the
+    // user does not force D, run a Pair95-aware selector that scores D, L and
+    // the baby-window size together.  This avoids the v95/v96 failure mode where
+    // the old classic auto-D picked D=42 and the Pair95 planner was bolted on
+    // afterwards.
+    auto env_truthy = [](const char* name)->bool{
+        const char* v = std::getenv(name);
+        if (!v || !*v) return false;
+        if (std::strcmp(v, "0") == 0 || std::strcmp(v, "false") == 0 ||
+            std::strcmp(v, "FALSE") == 0 || std::strcmp(v, "off") == 0 ||
+            std::strcmp(v, "OFF") == 0) return false;
+        return true;
+    };
+    const bool pair95EnvOn  = env_truthy("PRMERS_PM1_VTRACE_PAIRING95") ||
+                              env_truthy("PRMERS_PM1_VTRACE_PAIR95");
+    const bool pair95EnvOff = env_truthy("PRMERS_PM1_VTRACE_PAIRING95_DISABLE") ||
+                              env_truthy("PRMERS_PM1_VTRACE_PAIR95_DISABLE") ||
+                              env_truthy("PRMERS_PM1_VTRACE_PAIRING95_OFF") ||
+                              env_truthy("PRMERS_PM1_VTRACE_PAIR95_OFF");
+    bool usePair95 = !denseStage2Primes.empty() && !pair95EnvOff && !options.pm1_vtrace_pair95_off;
+    if (options.pm1_vtrace_pair95 || pair95EnvOn) usePair95 = !denseStage2Primes.empty();
+    if ((options.pm1_vtrace_pair95 || pair95EnvOn) && denseStage2Primes.empty()) {
+        std::cout << "[PM1-VTRACE-PAIR95] requested but disabled: dense prime map is required "
+                  << "for the safe/default implementation.\n";
+    }
+    if (!usePair95 && !denseStage2Primes.empty()) {
+        std::cout << "[PM1-VTRACE-PAIR95] disabled; using classic V-trace pairing.\n";
+    }
+
+    size_t pair95L = (size_t)options.pm1_vtrace_pair95_L;
+    if (const char* envL = std::getenv("PRMERS_PM1_VTRACE_PAIRING95_L")) {
+        const unsigned long long v = std::strtoull(envL, nullptr, 10);
+        if (v != 0) pair95L = (size_t)v;
+    }
+    if (const char* envL = std::getenv("PRMERS_PM1_VTRACE_PAIR95_L")) {
+        const unsigned long long v = std::strtoull(envL, nullptr, 10);
+        if (v != 0) pair95L = (size_t)v;
+    }
+    const bool pair95LForced = (pair95L != 0);
+
+    std::unordered_map<uint64_t,size_t> pair95PrimeIndex;
+    if (usePair95) {
+        pair95PrimeIndex.reserve(denseStage2Primes.size() * 2 + 16);
+        for (size_t i = 0; i < denseStage2Primes.size(); ++i) pair95PrimeIndex[denseStage2Primes[i]] = i;
+    }
+
+    auto pair95_make_offsets = [&](uint64_t d, size_t L)->std::vector<uint64_t>{
+        std::vector<uint64_t> unit;
+        unit.reserve((size_t)std::max<uint64_t>(1, d / 4));
+        for (uint64_t j = 1; j <= d / 2; j += 2) {
+            if (gcd_u64(j, d) == 1) unit.push_back(j);
+        }
+        std::vector<uint64_t> out;
+        out.reserve(unit.size() * std::max<size_t>(1, L));
+        for (size_t level = 0; level < std::max<size_t>(1, L); ++level) {
+            const uint64_t distMul = (level >= 63) ? std::numeric_limits<uint64_t>::max()
+                                                   : ((uint64_t(1) << level) - 1u);
+            if (distMul > 0 && d > std::numeric_limits<uint64_t>::max() / distMul) break;
+            const uint64_t baseAdd = distMul * d;
+            for (uint64_t u : unit) {
+                if (u <= std::numeric_limits<uint64_t>::max() - baseAdd) out.push_back(u + baseAdd);
+            }
+        }
+        std::sort(out.begin(), out.end());
+        out.erase(std::unique(out.begin(), out.end()), out.end());
+        return out;
+    };
+
+    struct Pair95AutoPlan {
+        uint64_t D = 0;
+        size_t L = 0;
+        size_t babyCount = 0;
+        size_t activeBaby = 0;
+        size_t passes = 0;
+        uint64_t terms = 0;
+        uint64_t pairs = 0;
+        uint64_t singles = 0;
+        uint64_t maxK = 0;
+        double score = std::numeric_limits<double>::infinity();
+        bool ok = false;
+    };
+
+    auto pair95_estimate_plan = [&](uint64_t candD, size_t candL, size_t activeBaby,
+                                    size_t maxPasses, bool enforceMaxPasses)->Pair95AutoPlan{
+        Pair95AutoPlan plan;
+        plan.D = candD;
+        plan.L = candL;
+        const std::vector<uint64_t> offsets = pair95_make_offsets(candD, candL);
+        plan.babyCount = offsets.size();
+        if (plan.babyCount == 0 || activeBaby == 0) return plan;
+        if (activeBaby > plan.babyCount) activeBaby = plan.babyCount;
+        plan.activeBaby = activeBaby;
+        plan.passes = (plan.babyCount + activeBaby - 1) / activeBaby;
+        if (plan.passes == 0) plan.passes = 1;
+        if (enforceMaxPasses && maxPasses != 0 && plan.passes > maxPasses) return plan;
+
+        std::vector<std::vector<uint64_t>> residueToOffset((size_t)candD);
+        for (uint64_t r : offsets) {
+            const uint64_t rr = r % candD;
+            const uint64_t residueLower = (rr == 0) ? 0 : (candD - rr);
+            if (residueLower < candD) residueToOffset[(size_t)residueLower].push_back(r);
+        }
+        for (auto& v : residueToOffset) std::sort(v.begin(), v.end());
+
+        std::vector<uint8_t> covered(denseStage2Primes.size(), uint8_t(0));
+        for (size_t pi = 0; pi < denseStage2Primes.size(); ++pi) {
+            if (covered[pi]) continue;
+            const uint64_t q = denseStage2Primes[pi];
+            bool paired = false;
+            const auto& candidates = residueToOffset[(size_t)(q % candD)];
+            for (uint64_t r : candidates) {
+                if (r > (std::numeric_limits<uint64_t>::max() - q) / 2u) continue;
+                const uint64_t mate = q + 2u * r;
+                if (mate > B2u) continue;
+                auto itMate = pair95PrimeIndex.find(mate);
+                if (itMate == pair95PrimeIndex.end()) continue;
+                if (covered[itMate->second]) continue;
+                const uint64_t base = q + r;
+                if ((base % candD) != 0) continue;
+                const uint64_t k = base / candD;
+                if (k > plan.maxK) plan.maxK = k;
+                covered[itMate->second] = uint8_t(1);
+                covered[pi] = uint8_t(1);
+                ++plan.pairs;
+                ++plan.terms;
+                paired = true;
+                break;
+            }
+            if (!paired) {
+                uint64_t k = q / candD;
+                uint64_t rem = q - k * candD;
+                if (rem > candD / 2) ++k;
+                if (k > plan.maxK) plan.maxK = k;
+                covered[pi] = uint8_t(1);
+                ++plan.singles;
+                ++plan.terms;
+            }
+        }
+
+        // Cost model: terms dominate, but repeated baby windows also replay giant
+        // recurrences and reduce locality.  Penalize many passes strongly enough
+        // that L=3/D=1260/batch=72 does not beat a 3--4 pass plan by term count
+        // alone on RTX3080-class GPUs.
+        const double passPenalty = 0.20 * double(plan.passes > 0 ? plan.passes - 1 : 0);
+        const double giantPenalty = 2.0 * double(plan.maxK) * double(plan.passes);
+        const double segmentedPenalty = vtrace_paged_needed(14 + activeBaby) ? 0.06 * double(plan.terms) : 0.0;
+        const double babyPenalty = 250.0 * double(plan.babyCount);
+        plan.score = double(plan.terms) * (1.0 + passPenalty) + giantPenalty + segmentedPenalty + babyPenalty;
+        plan.ok = true;
+        return plan;
+    };
+
+    if (usePair95 && defaultAutoD && !denseStage2Primes.empty()) {
+        const uint64_t maxRegs = options.pm1_vtrace_max_regs ? options.pm1_vtrace_max_regs :
+                                 ((options.pm1_vtrace_auto_d_aggressive || options.pm1_vtrace_deep_d_auto) ? 8192ULL : 4096ULL);
+        size_t maxAutoBatches = (size_t)std::max<uint64_t>(1, options.pm1_vtrace_max_batches);
+        if (const char* envMaxB = std::getenv("PRMERS_PM1_VTRACE_MAX_BATCHES")) {
+            const unsigned long long v = std::strtoull(envMaxB, nullptr, 10);
+            if (v != 0) maxAutoBatches = (size_t)v;
+        }
+        const bool allowMorePasses = env_truthy("PRMERS_PM1_VTRACE_PAIR95_ALLOW_MORE_PASSES");
+        const std::vector<uint64_t> candidates = {
+            210, 420, 630, 840, 1050, 1260, 1470, 1680, 1890, 2100,
+            2310, 2520, 2730, 3150, 3570, 3990, 4200, 4620, 5040, 5460,
+            6300, 6930, 7560, 8190, 9240, 10080, 11550, 12600, 13860,
+            18480, 23100, 30030, 60060
+        };
+        std::vector<size_t> lCandidates;
+        if (pair95LForced) lCandidates.push_back(std::max<size_t>(1, pair95L));
+        else { lCandidates.push_back(2); lCandidates.push_back(3); }
+
+        Pair95AutoPlan best;
+        Pair95AutoPlan bestRelaxed;
+        for (uint64_t candD : candidates) {
+            if (candD < 4 || (candD & 1ULL)) continue;
+            if (B2u / candD == 0) continue;
+            for (size_t candL : lCandidates) {
+                if (candL < 1) candL = 1;
+                if (candL > 8) candL = 8;
+                const std::vector<uint64_t> offsets = pair95_make_offsets(candD, candL);
+                if (offsets.empty()) continue;
+                size_t maxActive = 0;
+                for (size_t active = 1; active <= offsets.size(); ++active) {
+                    const size_t regs = 14 + active;
+                    if (regs <= maxRegs && vtrace_mem_fits(regs)) maxActive = active;
+                }
+                if (maxActive == 0) continue;
+                Pair95AutoPlan cur = pair95_estimate_plan(candD, candL, maxActive, maxAutoBatches, true);
+                if (cur.ok && cur.score < best.score) best = cur;
+                Pair95AutoPlan relaxed = pair95_estimate_plan(candD, candL, maxActive, maxAutoBatches, false);
+                if (relaxed.ok && relaxed.score < bestRelaxed.score) bestRelaxed = relaxed;
+            }
+        }
+        if (!best.ok && allowMorePasses && bestRelaxed.ok) best = bestRelaxed;
+        if (best.ok) {
+            D = best.D;
+            pair95L = best.L;
+            autoDSelectedBabyBatching = best.activeBaby < best.babyCount;
+            autoDSelectedActiveBabyCount = best.activeBaby;
+            autoDSelectedFullPaged = !autoDSelectedBabyBatching;
+            std::cout << "[PM1-VTRACE-PAIR95] v97 auto selected D=" << best.D
+                      << ", L=" << best.L
+                      << ", babies=" << best.babyCount
+                      << ", active-babies=" << best.activeBaby
+                      << ", passes=" << best.passes
+                      << ", terms=" << best.terms
+                      << ", greedy-pairs=" << best.pairs
+                      << ", singletons=" << best.singles
+                      << ", score=" << std::fixed << std::setprecision(2) << best.score
+                      << ". Disable with -pm1-vtrace-pair95-off or PRMERS_PM1_VTRACE_PAIRING95_DISABLE=1.\n";
+        } else {
+            if (pair95L == 0) pair95L = 2;
+            std::cout << "[PM1-VTRACE-PAIR95] v97 auto selector found no memory-safe Pair95 plan under max-batches="
+                      << maxAutoBatches << "; keeping D=" << D << ", L=" << pair95L
+                      << ". Set PRMERS_PM1_VTRACE_PAIR95_ALLOW_MORE_PASSES=1 to relax.\n";
+        }
+    }
+    if (usePair95 && pair95L == 0) pair95L = 3;
+
     std::cout << "[PM1-VTRACE] Effective execution D=" << D << " after auto-D/paged-aware cost filtering.\n";
 
     // j in [1, D/2], odd, gcd(j,D)=1.  Prime q=kD±j with q not dividing D always lands here.
+    // v97: default AtNashev/Woltman-inspired irregular prime pairing.  The classic
+    // half-residue set is extended with baby offsets u + (2^i-1)D when Pair95 is
+    // enabled.  A CPU greedy planner then covers the prime interval with fewer
+    // trace terms.  Use -pm1-vtrace-pair95-off to get the old classic planner.
     std::vector<int32_t> j2i((size_t)(D / 2 + 1), -1);
-    std::vector<uint32_t> babyJ;
+    std::vector<uint64_t> babyOffset;
+    babyOffset.reserve((size_t)std::max<uint64_t>(1, D / 4));
     for (uint64_t j = 1; j <= D / 2; j += 2) {
         if (gcd_u64(j, D) == 1) {
-            j2i[(size_t)j] = (int32_t)babyJ.size();
-            babyJ.push_back((uint32_t)j);
+            j2i[(size_t)j] = (int32_t)babyOffset.size();
+            babyOffset.push_back(j);
         }
     }
-    const size_t babyCount = babyJ.size();
+
+    if (pair95L < 1) pair95L = 1;
+    if (pair95L > 8) {
+        std::cout << "[PM1-VTRACE-PAIR95] L=" << pair95L
+                  << " capped to 8 to avoid an excessive baby precompute window.\n";
+        pair95L = 8;
+    }
+
+    if (usePair95 && pair95L > 1) {
+        const size_t classicUnit = babyOffset.size();
+        std::vector<uint64_t> extended;
+        extended.reserve(classicUnit * pair95L);
+        for (size_t level = 0; level < pair95L; ++level) {
+            const uint64_t distMul = (level >= 63) ? std::numeric_limits<uint64_t>::max()
+                                                   : ((uint64_t(1) << level) - 1u);
+            if (distMul > 0 && D > std::numeric_limits<uint64_t>::max() / distMul) break;
+            const uint64_t baseAdd = distMul * D;
+            for (uint64_t u : babyOffset) {
+                if (u <= std::numeric_limits<uint64_t>::max() - baseAdd) extended.push_back(u + baseAdd);
+            }
+        }
+        std::sort(extended.begin(), extended.end());
+        extended.erase(std::unique(extended.begin(), extended.end()), extended.end());
+        babyOffset.swap(extended);
+    }
+
+    std::unordered_map<uint64_t,int32_t> babyOffsetToGlobal;
+    babyOffsetToGlobal.reserve(babyOffset.size() * 2 + 16);
+    uint64_t maxBabyN = 0;
+    for (size_t i = 0; i < babyOffset.size(); ++i) {
+        babyOffsetToGlobal[babyOffset[i]] = (int32_t)i;
+        if (babyOffset[i] > maxBabyN) maxBabyN = babyOffset[i];
+    }
+
+    const size_t babyCount = babyOffset.size();
     if (!babyCount) {
         std::cerr << "[PM1-VTRACE] no usable baby residues for D=" << D << "\n";
         return -2;
+    }
+
+    struct Pair95Task {
+        uint64_t k = 0;
+        int32_t babyIndex = -1;
+        uint64_t qlo = 0;
+        uint64_t qhi = 0;
+        bool paired = false;
+    };
+    std::vector<Pair95Task> pair95Tasks;
+    uint64_t pair95Paired = 0;
+    uint64_t pair95Singleton = 0;
+
+    if (usePair95) {
+        if (useProductTree) {
+            std::cout << "[PM1-VTRACE-PAIR95] disabling product-tree for v97 irregular planner; "
+                      << "pair95 already reduces term count and keeps execution linear/safe.\n";
+            useProductTree = false;
+        }
+
+        std::vector<std::vector<int32_t>> residueToBaby((size_t)D);
+        for (size_t bi = 0; bi < babyOffset.size(); ++bi) {
+            const uint64_t r = babyOffset[bi];
+            const uint64_t rr = r % D;
+            const uint64_t residueLower = (rr == 0) ? 0 : (D - rr);
+            if (residueLower < D) residueToBaby[(size_t)residueLower].push_back((int32_t)bi);
+        }
+        for (auto& v : residueToBaby) {
+            std::sort(v.begin(), v.end(), [&](int32_t a, int32_t b){
+                return babyOffset[(size_t)a] < babyOffset[(size_t)b];
+            });
+        }
+
+        if (pair95PrimeIndex.empty()) {
+            pair95PrimeIndex.reserve(denseStage2Primes.size() * 2 + 16);
+            for (size_t i = 0; i < denseStage2Primes.size(); ++i) pair95PrimeIndex[denseStage2Primes[i]] = i;
+        }
+        const auto& primeIndex = pair95PrimeIndex;
+        std::vector<uint8_t> covered(denseStage2Primes.size(), uint8_t(0));
+        pair95Tasks.reserve(denseStage2Primes.size());
+
+        for (size_t pi = 0; pi < denseStage2Primes.size(); ++pi) {
+            if (covered[pi]) continue;
+            const uint64_t q = denseStage2Primes[pi];
+            int32_t chosenBi = -1;
+            uint64_t chosenMate = 0;
+            const auto& candidates = residueToBaby[(size_t)(q % D)];
+            for (int32_t bi : candidates) {
+                const uint64_t r = babyOffset[(size_t)bi];
+                if (r > (std::numeric_limits<uint64_t>::max() - q) / 2u) continue;
+                const uint64_t mate = q + 2u * r;
+                if (mate > B2u) continue;
+                auto itMate = primeIndex.find(mate);
+                if (itMate == primeIndex.end()) continue;
+                if (covered[itMate->second]) continue;
+                chosenBi = bi;
+                chosenMate = mate;
+                covered[itMate->second] = uint8_t(1);
+                break;
+            }
+
+            if (chosenBi >= 0) {
+                const uint64_t r = babyOffset[(size_t)chosenBi];
+                const uint64_t base = q + r;
+                if ((base % D) != 0) {
+                    std::cerr << "[PM1-VTRACE-PAIR95] internal residue error for q=" << q
+                              << " r=" << r << " D=" << D << "\n";
+                    return -4;
+                }
+                pair95Tasks.push_back(Pair95Task{base / D, chosenBi, q, chosenMate, true});
+                covered[pi] = uint8_t(1);
+                ++pair95Paired;
+            } else {
+                const TracePair tp = make_pair_for_prime(q);
+                if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
+                    std::cerr << "[PM1-VTRACE-PAIR95] internal fallback error: no classic baby for q="
+                              << q << " j=" << tp.j << " D=" << D << "\n";
+                    return -4;
+                }
+                pair95Tasks.push_back(Pair95Task{tp.k, j2i[(size_t)tp.j], q, q, false});
+                covered[pi] = uint8_t(1);
+                ++pair95Singleton;
+            }
+        }
+
+        std::stable_sort(pair95Tasks.begin(), pair95Tasks.end(), [](const Pair95Task& a, const Pair95Task& b){
+            if (a.k != b.k) return a.k < b.k;
+            return a.babyIndex < b.babyIndex;
+        });
+        std::cout << "[PM1-VTRACE-PAIR95] enabled: irregular units L=" << pair95L
+                  << " | baby-offsets=" << babyCount
+                  << " | max-offset=" << maxBabyN
+                  << " | primes=" << denseStage2Primes.size()
+                  << " | terms=" << pair95Tasks.size()
+                  << " | greedy-pairs=" << pair95Paired
+                  << " | singletons=" << pair95Singleton
+                  << " | term reduction=" << std::fixed << std::setprecision(2)
+                  << (denseStage2Primes.empty() ? 0.0 : 100.0 * double(pair95Paired) / double(denseStage2Primes.size()))
+                  << "%\n";
     }
 
     struct ProductTreeBucket {
@@ -2815,6 +3175,21 @@ int App::runPM1Stage2MarinVTrace() {
         return best;
     };
 
+    // v96: pair95 creates virtual baby offsets (u, u+D, u+3D, ...).  On RTX-class
+    // GPUs a flat single cl_mem slab is often much smaller than the segmented
+    // regspace that can actually run.  The old emergency path therefore picked
+    // active-babies=6 for p~205M even though 72 active babies fit with segmented
+    // GPU-only storage.  For opt-in pair95, prefer the largest memory-safe
+    // segmented window, not the tiny flat-safe window.
+    auto choose_max_baby_batch_that_fits_segmented = [&]()->size_t{
+        size_t best = 0;
+        for (size_t bc = 1; bc <= babyCount; ++bc) {
+            const size_t regs = baseRegsVTrace + bc; // product-tree disabled while batching
+            if (vtrace_mem_fits(regs)) best = bc;
+        }
+        return best;
+    };
+
     if (requestedBabyBatch != 0) {
         if (requestedBabyBatch < babyCount) {
             activeBabyCount = std::max<size_t>(1, requestedBabyBatch);
@@ -2833,6 +3208,18 @@ int App::runPM1Stage2MarinVTrace() {
             std::cout << "[PM1-VTRACE-BATCH] CLI/env baby batch " << requestedBabyBatch
                       << " covers all " << babyCount
                       << " babies; using full baby slab (segmented if needed).\n";
+        }
+    }
+
+    if (usePair95 && !useBabyBatching && !explicitFullBabySlab && !cliOrEnvBabyBatchRequested &&
+        !noAutoBatchRequested && !vtrace_mem_fits(baseRegsVTrace + babyCount + productTreeWidth)) {
+        const size_t bestSegmentedBatch = choose_max_baby_batch_that_fits_segmented();
+        if (bestSegmentedBatch != 0 && bestSegmentedBatch < babyCount) {
+            activeBabyCount = bestSegmentedBatch;
+            useBabyBatching = true;
+            std::cout << "[PM1-VTRACE-PAIR95] v96 memory-aware baby batching: "
+                      << "active-babies-per-pass=" << activeBabyCount
+                      << " using segmented/paged regspace instead of the tiny flat-safe fallback.\n";
         }
     }
 
@@ -2873,6 +3260,29 @@ int App::runPM1Stage2MarinVTrace() {
                   << " active-babies-per-pass=" << activeBabyCount
                   << " passes=" << ((babyCount + activeBabyCount - 1) / activeBabyCount)
                   << ". Set PRMERS_PM1_VTRACE_BABY_BATCH=<n> to override.\n";
+    }
+
+    // v96: buckets built after activeBabyCount is final.  Each bucket contains only
+    // the pair95 tasks whose baby trace is resident in that window.  This avoids
+    // scanning the full task list once per baby window and gives a truthful ETA.
+    std::vector<std::vector<size_t>> pair95TaskBuckets;
+    if (usePair95) {
+        const size_t pairPasses = useBabyBatching ? ((babyCount + activeBabyCount - 1) / activeBabyCount) : 1;
+        pair95TaskBuckets.assign(std::max<size_t>(1, pairPasses), {});
+        for (size_t ti = 0; ti < pair95Tasks.size(); ++ti) {
+            const int32_t bi = pair95Tasks[ti].babyIndex;
+            size_t bucket = 0;
+            if (useBabyBatching && bi >= 0) bucket = std::min(pair95TaskBuckets.size() - 1, (size_t)bi / activeBabyCount);
+            pair95TaskBuckets[bucket].push_back(ti);
+        }
+        if (useBabyBatching) {
+            size_t nonEmpty = 0, maxBucket = 0;
+            for (const auto& b : pair95TaskBuckets) { if (!b.empty()) ++nonEmpty; maxBucket = std::max(maxBucket, b.size()); }
+            std::cout << "[PM1-VTRACE-PAIR95] v97 task buckets: passes=" << pair95TaskBuckets.size()
+                      << ", non-empty=" << nonEmpty
+                      << ", max-tasks/pass=" << maxBucket
+                      << "; execution no longer scans all pair95 tasks in every baby pass.\n";
+        }
     }
 
     const size_t productTreeScratchBase = babyBase + activeBabyCount;
@@ -3041,6 +3451,11 @@ int App::runPM1Stage2MarinVTrace() {
     bool compactS2Loaded = false;
     int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
+    if (usePair95 && resumed_s2) {
+        std::cout << "[PM1-VTRACE-PAIR95] existing Stage 2 checkpoint ignored; "
+                  << "v95 irregular-pair checkpoints are not implemented yet.\n";
+        resumed_s2 = false;
+    }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
 
@@ -3065,9 +3480,11 @@ int App::runPM1Stage2MarinVTrace() {
         size_t stored = 0;
         const size_t want = batchEnd - batchStart;
         int pct = -1;
-        for (uint64_t n = 1; n <= D; ++n) {
-            if (n <= D / 2) {
-                const int32_t gbi = (n < j2i.size()) ? j2i[(size_t)n] : -1;
+        const uint64_t loopEnd = std::max<uint64_t>(D, maxBabyN);
+        for (uint64_t n = 1; n <= loopEnd; ++n) {
+            auto itBaby = babyOffsetToGlobal.find(n);
+            if (itBaby != babyOffsetToGlobal.end()) {
+                const int32_t gbi = itBaby->second;
                 if (gbi >= 0 && (size_t)gbi >= batchStart && (size_t)gbi < batchEnd) {
                     const size_t local = (size_t)gbi - batchStart;
                     const size_t slot = babyBase + local;
@@ -3084,8 +3501,9 @@ int App::runPM1Stage2MarinVTrace() {
             }
             if (n == D) {
                 eng->copy((engine::Reg)RVD, (engine::Reg)RBCUR);
-                break;
+                if (n == loopEnd) break;
             }
+            if (n == loopEnd) break;
             // V_{n+1} = V_1 * V_n - V_{n-1}
             eng->copy((engine::Reg)RBNEXT, (engine::Reg)RBCUR);
             eng->mul((engine::Reg)RBNEXT, (engine::Reg)RMUL_V1);
@@ -3298,7 +3716,103 @@ int App::runPM1Stage2MarinVTrace() {
         }
     };
 
-    if (useBabyBatching) {
+    if (usePair95) {
+        std::cout << "[PM1-VTRACE-PAIR95] executing greedy irregular pair plan"
+                  << (useBabyBatching ? " with baby-window batching" : " with resident baby table")
+                  << ".\n";
+        const size_t numPasses = useBabyBatching ? ((babyCount + activeBabyCount - 1) / activeBabyCount) : 1;
+        const size_t passStep = useBabyBatching ? activeBabyCount : babyCount;
+        for (size_t batchStart = 0; batchStart < babyCount; batchStart += passStep) {
+            const size_t passNo = batchStart / passStep;
+            const size_t batchEnd = std::min(babyCount, batchStart + passStep);
+            if (useBabyBatching || batchStart == 0) {
+                if (numPasses > 1) {
+                    const size_t bucketTerms = (passNo < pair95TaskBuckets.size()) ? pair95TaskBuckets[passNo].size() : 0;
+                    std::cout << "[PM1-VTRACE-PAIR95] pass " << (passNo + 1)
+                              << "/" << numPasses << " babies " << (batchStart + 1)
+                              << ".." << batchEnd << " of " << babyCount
+                              << " | queued-tasks=" << bucketTerms << "\n";
+                }
+                precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
+                eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+                eng->set((engine::Reg)RGCUR, 2);
+                cur_k = 0;
+            }
+
+            uint64_t passTerms = 0;
+            const std::vector<size_t>* bucketPtr = nullptr;
+            if (!pair95TaskBuckets.empty()) bucketPtr = &pair95TaskBuckets[std::min(passNo, pair95TaskBuckets.size() - 1)];
+            std::vector<size_t> fallbackAll;
+            if (!bucketPtr) {
+                fallbackAll.reserve(pair95Tasks.size());
+                for (size_t ti = 0; ti < pair95Tasks.size(); ++ti) fallbackAll.push_back(ti);
+                bucketPtr = &fallbackAll;
+            }
+            const auto& bucket = *bucketPtr;
+            for (size_t bucketPos = 0; bucketPos < bucket.size(); ++bucketPos) {
+                const size_t ti = bucket[bucketPos];
+                const Pair95Task& task = pair95Tasks[ti];
+                if (task.babyIndex < 0) continue;
+                int32_t localBaby = -1;
+                if ((size_t)task.babyIndex < babyGlobalToLocal.size()) {
+                    localBaby = babyGlobalToLocal[(size_t)task.babyIndex];
+                }
+                if (localBaby < 0) {
+                    std::cerr << "\n[PM1-VTRACE-PAIR95] INTERNAL ERROR: bucketed task has non-resident baby index "
+                              << task.babyIndex << " in pass " << (passNo + 1) << ".\n";
+                    delete eng;
+                    return -4;
+                }
+
+                if (interrupted) {
+                    delete eng;
+                    std::cout << "\nInterrupted by user during V-trace pair95 Stage 2. "
+                              << "v97 does not checkpoint inside the irregular pair planner yet.\n";
+                    interrupted = false;
+                    return 0;
+                }
+
+                advance_giant_to(task.k);
+                build_trace_term_into((engine::Reg)RTMP, localBaby);
+                eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)RTMP);
+                eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
+                ++termsAccumulated;
+                ++passTerms;
+                primesSeen += task.paired ? 2u : 1u;
+
+                auto now = high_resolution_clock::now();
+                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                    const double percent = pair95Tasks.empty() ? 100.0 : 100.0 * double(termsAccumulated) / double(pair95Tasks.size());
+                    const double elapsedSec = duration<double>(now - start).count();
+                    const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
+                    const double etaSec = (percent > 0.0) ? elapsedSec * (100.0 - percent) / percent : 0.0;
+                    int days = int(etaSec) / 86400;
+                    int hours = (int(etaSec) % 86400) / 3600;
+                    int minutes = (int(etaSec) % 3600) / 60;
+                    int seconds = int(etaSec) % 60;
+                    std::cout << "Progress V-trace pair95: " << std::fixed << std::setprecision(2) << percent
+                              << "% | pass=" << (passNo + 1) << "/" << numPasses
+                              << " | bucket-task=" << (bucketPos + 1) << "/" << bucket.size()
+                              << " | k=" << task.k
+                              << " | terms=" << termsAccumulated << "/" << pair95Tasks.size()
+                              << " | pair-skips=" << pair95Paired
+                              << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << std::flush;
+                    lastDisplay = now;
+                }
+            }
+            if (numPasses > 1) {
+                std::cout << "\n[PM1-VTRACE-PAIR95] pass " << (passNo + 1)
+                          << " accumulated " << passTerms << " term(s).\n";
+            }
+        }
+        skippedPairedUpper = pair95Paired;
+        std::cout << "\n[PM1-VTRACE-PAIR95] processed " << pair95Tasks.size()
+                  << " terms covering " << denseStage2Primes.size()
+                  << " primes; greedy-pairs=" << pair95Paired
+                  << ", singletons=" << pair95Singleton << ".\n";
+    } else if (useBabyBatching) {
         std::cout << "[PM1-VTRACE-BATCH] scanning Stage 2 in "
                   << ((babyCount + activeBabyCount - 1) / activeBabyCount)
                   << " baby-window pass(es).  This avoids one huge OpenCL register slab.\n";
