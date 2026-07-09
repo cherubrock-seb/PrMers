@@ -263,6 +263,9 @@ Note: the option name `-marin` currently disables the Marin backend. The default
 | `-b2 <B2>` | Stage 2 bound |
 | `-pm1-vtrace` | Use scalar-trace P-1 Stage 2. This is the default for normal-memory Stage 2, with conservative auto-D |
 | `-pm1-vtrace-off` | Disable V-trace and use the previous classic Stage 2 BSGS path |
+| `-pm1-vtrace-pair95` | Enable the Pair95 prime-pairing planner for V-trace Stage 2 when supported by the build |
+| `-pm1-vtrace-pair95-off` | Disable Pair95 and use the ordinary V-trace prime-pairing planner |
+| `-pm1-vtrace-pair95-l <L>` | Set the Pair95 irregular-unit count, for example `2` or `3` |
 | `-pm1-vtrace-d <D>` | Force the V-trace giant-step parameter `D`, for example `4620`, `13860`, or `30030` |
 | `-pm1-vtrace-auto-d` | Explicitly auto-select `D` for V-trace under a conservative register cap |
 | `-pm1-vtrace-auto-d-aggressive` | Auto-select `D` with a larger register cap for normal-size Mersennes |
@@ -429,6 +432,12 @@ Expected factor for this regression test:
 28401397572100073
 ```
 
+#### Pair95 prime pairing
+
+Some builds include a Pair95 planner for V-trace Stage 2, inspired by the prime-pairing method described by Atnashev and Woltman. It extends the ordinary `kD ± j` pairing by allowing irregular precomputed units such as `unit`, `unit + D`, `unit + 3D`, `unit + 7D`, and so on. This is a Stage 2 planning and coverage option; it does not change the underlying Marin modular arithmetic.
+
+Pair95 can be selected explicitly with `-pm1-vtrace-pair95`, disabled with `-pm1-vtrace-pair95-off`, and tuned with `-pm1-vtrace-pair95-l <L>`. When Pair95 is enabled, `D` and the baby-window size can still be forced with `-pm1-vtrace-d <D>` and `-pm1-vtrace-baby-batch <N>`.
+
 #### V-trace `D`, baby residues and batching
 
 For a selected giant-step parameter `D`, the V-trace path stores one baby trace for each odd residue `j <= D/2` with `gcd(j,D)=1`. The number of baby traces is therefore:
@@ -498,6 +507,9 @@ Useful environment variables for debugging:
 |---|---|
 | `PRMERS_GPU_ALLOC_DIAG=1` | Print GPU memory planning and allocation diagnostics |
 | `PRMERS_PM1_VTRACE_BABY_BATCH=<N>` | Force V-trace active baby traces per pass, same purpose as `-pm1-vtrace-baby-batch <N>` |
+| `PRMERS_PM1_VTRACE_PAIRING95=1` | Enable Pair95 prime-pairing in builds where it is available |
+| `PRMERS_PM1_VTRACE_PAIRING95_DISABLE=1` | Disable Pair95 and use the ordinary V-trace planner |
+| `PRMERS_PM1_VTRACE_PAIRING95_L=<L>` | Set the Pair95 irregular-unit count |
 | `PRMERS_PM1_VTRACE_NO_AUTO_BATCH=1` | Disable V-trace auto-batching |
 | `PRMERS_MARIN_SEGMENTED_DISABLE=1` | Disable segmented register space and require a single flat register buffer |
 | `PRMERS_MARIN_SEGMENTED_MAXALLOC_FRAC=<f>` | Fraction of `CL_DEVICE_MAX_MEM_ALLOC_SIZE` used when sizing each segment |
@@ -875,6 +887,10 @@ https://www.ams.org/journals/mcom/1990-54-190/S0025-5718-1990-1011444-3/S0025-57
 Improved Stage 2 to P+/-1 Factoring Algorithms  
 Peter L. Montgomery and Alexander Kruppa, 2008  
 https://inria.hal.science/inria-00188192v3/document
+
+Prime pairing in algorithms searching for smooth group order  
+Pavel Atnashev and George Woltman, 2021  
+https://eprint.iacr.org/2021/1462.pdf
 
 ### Proof schemes
 
