@@ -25,6 +25,10 @@ struct CliOptions {
     uint64_t llsafe_block = 0;
     uint64_t B3 = 0;
     bool marin = true;
+    bool aevum = false;
+    bool aevum_auto = true;
+    bool force_engine_marin = false;
+    std::string aevum_fft_spec = "";
     bool bench = false;
     bool profiling = false;
     bool debug = false;

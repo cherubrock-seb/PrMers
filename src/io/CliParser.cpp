@@ -124,7 +124,13 @@ void printUsage(const char* progName) {
     std::cout << "  -nop95stage2         : (Optional) Disable Prime95 Stage2 handoff even if -p95path is set" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
-    std::cout << "  -marin               : (Optional) deactivate use of marin backend" << std::endl;
+    std::cout << "  Backend selection (default: automatic Marin/Aevum):" << std::endl;
+    std::cout << "  -aevum               : Force the integrated Aevum engine::Reg backend" << std::endl;
+    std::cout << "  -engine-marin        : Force the Marin engine::Reg backend" << std::endl;
+    std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode" << std::endl;
+    std::cout << "  -marin               : Legacy option: use the internal PrMers NTT path instead of engine::Reg" << std::endl;
+    std::cout << "  -aevum-fft <spec>    : Force an Aevum FFT3161 shape, for example 1:1024:8:512" << std::endl;
+    std::cout << "  Auto policy env      : AEVUM_AUTO_MAX_RATIO or workload-specific AEVUM_AUTO_PM1_STAGE1_MAX_RATIO, AEVUM_AUTO_PM1_STAGE2_MAX_RATIO, AEVUM_AUTO_ECM_MAX_RATIO" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
     //std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
     std::cout << "  -res64_display_interval <N> : (Optional) (only in -marin mode) Display Res64 every N iterations (0 = disabled or > 0, default = 100000)" << std::endl;
@@ -231,6 +237,34 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-marin") == 0) {
             opts.marin = false;
+            opts.aevum = false;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+        }
+        else if (std::strcmp(argv[i], "-engine-marin") == 0 || std::strcmp(argv[i], "-backend-marin") == 0) {
+            opts.marin = true;
+            opts.aevum = false;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = true;
+        }
+        else if (std::strcmp(argv[i], "-aevum") == 0) {
+            opts.aevum = true;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+        }
+        else if (std::strcmp(argv[i], "-aevum-auto") == 0 || std::strcmp(argv[i], "-backend-auto") == 0) {
+            opts.aevum = false;
+            opts.aevum_auto = true;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+        }
+        else if (std::strcmp(argv[i], "-aevum-fft") == 0 && i + 1 < argc) {
+            opts.aevum = true;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+            opts.aevum_fft_spec = argv[++i];
         }
         else if (std::strcmp(argv[i], "-s3") == 0) {
             opts.s3only = true;

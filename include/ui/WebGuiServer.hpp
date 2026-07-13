@@ -33,13 +33,28 @@ public:
     static void setInstance(std::shared_ptr<WebGuiServer> s);
     void setStatus(const std::string& s);
     void setProgress(uint64_t current, uint64_t total, const std::string& res64);
+    void setBackendInfo(const std::string& mode,
+                        const std::string& active,
+                        const std::string& workload,
+                        const std::string& detail,
+                        uint64_t aevum_transform = 0,
+                        uint64_t marin_transform = 0,
+                        const std::string& fft_spec = {});
     void appendLog(const std::string& line);
+    std::string stateJson();
 private:
     struct State {
         std::string status;
         uint64_t cur = 0;
         uint64_t tot = 0;
         std::string res64;
+        std::string backend_mode;
+        std::string backend_active;
+        std::string backend_workload;
+        std::string backend_detail;
+        std::string backend_fft;
+        uint64_t backend_aevum_transform = 0;
+        uint64_t backend_marin_transform = 0;
         std::deque<std::string> logs;
     };
     WebGuiConfig cfg_;

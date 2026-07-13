@@ -544,7 +544,20 @@ int App::runPrpOrLlMarin()
     }		
     logger.logEnd(elapsed_time);
 
-    if (options.mode == "prp" && options.proof) {
+    if (options.mode == "prp" && options.proof && (options.aevum || options.aevum_auto)) {
+        try {
+            std::cout << "\nGenerating PRP proof file..." << std::endl;
+            if (guiServer_) guiServer_->appendLog("\nGenerating PRP proof file...");
+            const auto proofFilePath = proofManagerMarin.proof();
+            options.proofFile = proofFilePath.string();
+            std::cout << "Proof file saved: " << proofFilePath << std::endl;
+            if (guiServer_) guiServer_->appendLog("Proof file saved: " + proofFilePath.string());
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
+            if (guiServer_) guiServer_->appendLog(std::string("Warning: Proof generation failed: ") + e.what());
+        }
+    }
+    else if (options.mode == "prp" && options.proof) {
         cl_command_queue queue = context.getQueue();
         math::Carry carry(
             context,

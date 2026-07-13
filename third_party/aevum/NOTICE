@@ -1,0 +1,19 @@
+Aevum is a modified GPLv3 derivative of GPUOwl/PRPLL.
+
+GPUOwl was originally authored by Mihai Preda:
+https://github.com/preda/gpuowl
+
+The imported base is George Woltman's GPUOwl/PRPLL fork:
+https://github.com/gwoltman/gpuowl
+commit 294cc485ac8cf53c8b69144a3039832eda573849
+
+George Woltman's upstream README credits NTT and other optimizations to George Woltman and the CUDA backend to Sherpa.
+
+The register-engine design is inspired by Marin by Yves Gallot:
+https://github.com/galloty/marin
+
+Aevum shared-library API, register adaptation, tests and PrMers integration:
+Copyright (C) 2026 cherubrock-seb
+https://github.com/cherubrock-seb
+
+Aevum is not an official GPUOwl, PRPLL or Marin release.

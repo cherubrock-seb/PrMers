@@ -1753,6 +1753,11 @@ int App::runECMMarin()
                         << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                         << " | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
+                    if (guiServer_) {
+                        guiServer_->setStatus("ECM Stage 1");
+                        guiServer_->setProgress(static_cast<uint64_t>(done_u), static_cast<uint64_t>(total_bits), "");
+                        guiServer_->appendLog(line.str());
+                    }
                     last_ui_done = done_u;
                     last_ui = now;
                 }
@@ -1973,6 +1978,11 @@ int App::runECMMarin()
                                      << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                                      << " | ETA " << fmt_hms(eta);
                                 std::cout << line.str() << std::flush;
+                                if (guiServer_) {
+                                    guiServer_->setStatus("ECM Stage 2");
+                                    guiServer_->setProgress(inside_done, total_s2_iters, "");
+                                    guiServer_->appendLog(line.str());
+                                }
                                 last2_ui_done = inside_done;
                                 last2_ui = now2;
                             }
@@ -2099,6 +2109,11 @@ int App::runECMMarin()
                          << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                          << " | ETA " << fmt_hms(eta);
                     std::cout << line.str() << std::flush;
+                    if (guiServer_) {
+                        guiServer_->setStatus("ECM Stage 2");
+                        guiServer_->setProgress(done_bits_base, total_s2_iters, "");
+                        guiServer_->appendLog(line.str());
+                    }
                     last2_ui_done = done_bits_base;
                     last2_ui = now2;
 
@@ -2299,6 +2314,11 @@ auto setup_stage2_base = [&]() -> int {
                              << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                              << " | ETA " << fmt_hms(eta);
                         std::cout << line.str() << std::flush;
+                        if (guiServer_) {
+                            guiServer_->setStatus("ECM Stage 2");
+                            guiServer_->setProgress(done_u, total_s2_iters, "");
+                            guiServer_->appendLog(line.str());
+                        }
                         last2_ui_done = done_u;
                         last2_ui = now2;
                     }
@@ -2350,6 +2370,11 @@ auto setup_stage2_base = [&]() -> int {
                      << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                      << " | ETA " << fmt_hms(eta);
                 std::cout << line.str() << std::flush;
+                if (guiServer_) {
+                    guiServer_->setStatus("ECM Stage 2");
+                    guiServer_->setProgress(done_bits_base, total_s2_iters, "");
+                    guiServer_->appendLog(line.str());
+                }
                 last2_ui_done = done_bits_base;
                 last2_ui = now2;
 

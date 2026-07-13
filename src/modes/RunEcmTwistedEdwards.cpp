@@ -3153,6 +3153,11 @@ int App::runECMMarinTwistedEdwards()
                          << " | bits/s " << std::fixed << std::setprecision(1) << ema_naf_bits_per_s
                          << " | ETA " << fmt_hms(eta);
                     ecm_print_progress_line(line.str());
+                    if (guiServer_) {
+                        guiServer_->setStatus("ECM Stage 1 initialization");
+                        guiServer_->setProgress(static_cast<uint64_t>(naf_done), static_cast<uint64_t>(Kbits), "");
+                        guiServer_->appendLog(line.str());
+                    }
                     naf_last = now;
                     naf_last_done = naf_done;
                 }
@@ -3321,6 +3326,11 @@ int App::runECMMarinTwistedEdwards()
                      << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                      << " | ETA " << fmt_hms(eta);
                 ecm_print_progress_line(line.str());
+                if (guiServer_) {
+                    guiServer_->setStatus("ECM Stage 1");
+                    guiServer_->setProgress(static_cast<uint64_t>(done_u), static_cast<uint64_t>(total_steps), "");
+                    guiServer_->appendLog(line.str());
+                }
                 last_ui_done = done_u;
                 last_ui = now;
             }
@@ -3605,6 +3615,11 @@ int App::runECMMarinTwistedEdwards()
                                  << " | it/s " << std::fixed << std::setprecision(1) << eta_ips
                                  << " | ETA " << fmt_hms(eta);
                             ecm_print_progress_line(line.str());
+                            if (guiServer_) {
+                                guiServer_->setStatus("ECM Stage 2");
+                                guiServer_->setProgress(inside_done, total_s2_iters, "");
+                                guiServer_->appendLog(line.str());
+                            }
                             last2_done_bits = inside_done;
                             last2_ui = now2;
                         }

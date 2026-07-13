@@ -151,6 +151,59 @@ static inline mpz_class mpz_from_u64(uint64_t x) {
 
 namespace fs = std::filesystem;
 
+static std::string pm1_checkpoint_backend_sidecar(const std::string& checkpoint_file) {
+    std::string base = checkpoint_file;
+    if (base.size() > 4 && base.compare(base.size() - 4, 4, ".old") == 0) {
+        base.resize(base.size() - 4);
+    }
+    return base + ".backend";
+}
+
+static const char* pm1_checkpoint_backend_name(const engine* eng) {
+    return eng && eng->is_aevum_backend() ? "aevum" : "marin";
+}
+
+static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng) {
+    const std::string path = pm1_checkpoint_backend_sidecar(checkpoint_file);
+    const std::string temp = path + ".new";
+    {
+        std::ofstream out(temp, std::ios::trunc);
+        if (!out) return;
+        out << pm1_checkpoint_backend_name(eng) << '\n';
+    }
+    std::error_code ec;
+    fs::rename(temp, path, ec);
+    if (ec) {
+        fs::remove(path, ec);
+        ec.clear();
+        fs::rename(temp, path, ec);
+    }
+}
+
+static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
+                                           const engine* eng,
+                                           std::string* reason = nullptr) {
+    const std::string sidecar = pm1_checkpoint_backend_sidecar(checkpoint_file);
+    std::ifstream in(sidecar);
+    if (!in) {
+        // Checkpoints written before v99.5 did not carry a backend marker.
+        // They used the Marin register layout by default and must never be
+        // injected into Aevum buffers.
+        if (eng && eng->is_aevum_backend()) {
+            if (reason) *reason = "legacy checkpoint has no backend marker and is assumed to use Marin registers";
+            return false;
+        }
+        return true;
+    }
+
+    std::string stored;
+    in >> stored;
+    const std::string expected = pm1_checkpoint_backend_name(eng);
+    if (stored == expected) return true;
+    if (reason) *reason = "checkpoint backend is " + stored + ", current backend is " + expected;
+    return false;
+}
+
 struct PM1Prime95Stage2Result {
     bool success = false;
     bool factor_found = false;
@@ -3525,6 +3578,11 @@ int App::runPM1Stage2MarinVTrace() {
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
             if (!f.exists()) return -1;
+            std::string backend_reason;
+            if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+                std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+                return -3;
+            }
             int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
             if (version != 3) return -2;
             uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -4551,6 +4609,11 @@ int App::runPM1Stage2Marin() {
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
             if (!f.exists()) return -1;
+            std::string backend_reason;
+            if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+                std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+                return -3;
+            }
             int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
             if (version != 3) return -2;
             uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -5799,12 +5862,13 @@ int App::runPM1Marin() {
         }
     }
 
-    std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
+    const char* const arithmetic_backend = engine::configured_gpu_backend_name();
+    std::cout << "[Backend " << arithmetic_backend << "] Start a P-1 factoring stage 1 up to B1="
               << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
-        oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1="
+        oss << "[Backend " << arithmetic_backend << "] Start a P-1 factoring stage 1 up to B1="
             << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
         guiServer_->appendLog(oss.str());
     }
@@ -5995,8 +6059,6 @@ int App::runPM1Marin() {
     }
     //bool debug = false;
     uint64_t B1 = options.B1;
-    std::cout << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl;
-    if (guiServer_) { std::ostringstream oss; oss << "[Backend Marin] Start a P-1 factoring stage 1 up to B1=" << B1 << std::endl; guiServer_->appendLog(oss.str()); }
     const double L_est_bits = 1.4426950408889634 * static_cast<double>(B1);
     const uint64_t MAX_E_BITS = options.max_e_bits;
     std::cout << "MAX_E_BITS = " << MAX_E_BITS << " bits (~ " << (MAX_E_BITS >> 23) << " MiB)" << std::endl;
@@ -6061,6 +6123,16 @@ int App::runPM1Marin() {
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     }
 
+    const bool aevum_backend = eng->is_aevum_backend();
+    if (aevum_backend && !pm1_ultralowmem_stage1) {
+        std::cout << "[PM1] Aevum uses the generic square plus base-3 multiply path; fast3 is disabled.\n";
+        if (guiServer_) guiServer_->appendLog("[PM1] Aevum uses the generic square plus base-3 multiply path; fast3 is disabled.\n");
+    }
+    if (aevum_backend && pm1_ultralowmem_stage1) {
+        delete eng;
+        throw std::runtime_error("-pm1-ultralowmem requires Marin because the one-register path depends on fast3; use -engine-marin or omit -aevum");
+    }
+
     const size_t RSTATE=0;
     const size_t RACC_L = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 1u;
     const size_t RACC_R = (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 2u;
@@ -6078,10 +6150,16 @@ int App::runPM1Marin() {
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
+        write_pm1_checkpoint_backend(ckpt_file, eng);
     };
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
         if (!f.exists()) return -1;
+        std::string backend_reason;
+        if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
+            std::cerr << "[PM1] Ignoring incompatible checkpoint " << file << ": " << backend_reason << "\n";
+            return -3;
+        }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != 3) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -6214,11 +6292,17 @@ int App::runPM1Marin() {
                 const std::string oldf = ckpt_file_ext + ".old", newf = ckpt_file_ext + ".new";
                 { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
                 std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file_ext, oldf, ec); fs::rename(ckpt_file_ext + ".new", ckpt_file_ext, ec); fs::remove(oldf, ec);
+                write_pm1_checkpoint_backend(ckpt_file_ext, eng);
             };
 
             auto read_ckpt_ext = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
                 File f(file);
                 if (!f.exists()) return -1;
+                std::string backend_reason;
+                if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
+                    std::cerr << "[PM1] Ignoring incompatible extension checkpoint " << file << ": " << backend_reason << "\n";
+                    return -3;
+                }
                 int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
                 if (version != 3) return -2;
                 uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -6486,12 +6570,7 @@ int App::runPM1Marin() {
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
 
-                            mpz_t z0, z1;
-                            mpz_inits(z0, z1, nullptr);
-                            eng->get_mpz(z0, RCHK);
-                            eng->get_mpz(z1, RACC_R);
-                            bool ok = (mpz_cmp(z0, z1) == 0);
-                            mpz_clears(z0, z1, nullptr);
+                            const bool ok = eng->is_equal(RCHK, RACC_R);
 
                             if (!ok) {
                                 std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
@@ -6551,12 +6630,7 @@ int App::runPM1Marin() {
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
 
-                            mpz_t z0, z1;
-                            mpz_inits(z0, z1, nullptr);
-                            eng->get_mpz(z0, RCHK);
-                            eng->get_mpz(z1, RSTATE);
-                            bool ok0 = (mpz_cmp(z0, z1) == 0);
-                            mpz_clears(z0, z1, nullptr);
+                            const bool ok0 = eng->is_equal(RCHK, RSTATE);
 
                             if (!ok0) {
                                 std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n";
@@ -6635,12 +6709,7 @@ int App::runPM1Marin() {
                 eng->set_multiplicand(RTMP, RPOW);
                 eng->mul(RCHK, RTMP);
 
-                mpz_t z0, z1;
-                mpz_inits(z0, z1, nullptr);
-                eng->get_mpz(z0, RCHK);
-                eng->get_mpz(z1, RSTATE);
-                bool ok_tail = (mpz_cmp(z0, z1) == 0);
-                mpz_clears(z0, z1, nullptr);
+                const bool ok_tail = eng->is_equal(RCHK, RSTATE);
 
                 if (!ok_tail) {
                     eng->copy(RSTATE, RSTART);
@@ -6838,6 +6907,7 @@ int App::runPM1Marin() {
         }
 
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
+        { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
         delete eng;
         if (hasWorktodoEntry_) {
                 if (worktodoParser_->removeFirstProcessed()) {
@@ -6870,7 +6940,7 @@ int App::runPM1Marin() {
                 Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
             }
             if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
-            bool useFast3 = useFast3Candidate && (nextStart == 0);
+            bool useFast3 = useFast3Candidate && (nextStart == 0) && !aevum_backend;
             if (pm1_ultralowmem_stage1 && !useFast3) {
                 throw std::runtime_error("-pm1-ultralowmem requires the fast3 single-chunk path; use a smaller B1 or a larger -maxebits value, or use -pm1-lowmem");
             }
@@ -7014,15 +7084,7 @@ int App::runPM1Marin() {
                             }
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
-                            mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
-                            eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RACC_R);
-                            //if (mpz_cmp(z0, z1) != 0) throw std::runtime_error("Gerbicz-Li error checking failed!");
-                            bool ok = (mpz_cmp(z0, z1) == 0);
-                            //mpz_class Mp = (mpz_class)(((mpz_class)1 << options.exponent) - 1);
-                            //bool ok = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
-
-                            mpz_clears(z0, z1, nullptr);
-                            //bool ok = eng->is_equal(RCHK, RACC_R);
+                            const bool ok = eng->is_equal(RCHK, RACC_R);
                             if (!ok) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSAVE_S); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eng->copy(RSTART, RSTATE); i = (mp_bitcnt_t)(i + blocks_since_check * B); eacc = 0; blocks_since_check = 0; wbits = 0; gl_checkpass = 0; bits_in_block = 0; continue; }
                             else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                         }
@@ -7038,14 +7100,7 @@ int App::runPM1Marin() {
                             }
                             eng->set_multiplicand(RTMP, RPOW);
                             eng->mul(RCHK, RTMP);
-                            //bool ok0 = eng->is_equal(RCHK, RSTATE);
-                            mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
-                            eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RSTATE);
-                            //if (mpz_cmp(z0, z1) != 0) throw std::runtime_error("Gerbicz-Li error checking failed!");
-                            bool ok0 = (mpz_cmp(z0, z1) == 0);
-                            //mpz_class Mp = (mpz_class) (((mpz_class)1 << options.exponent) - 1);
-                            //bool ok0 = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
-                            mpz_clears(z0, z1, nullptr);
+                            const bool ok0 = eng->is_equal(RCHK, RSTATE);
                             if (!ok0) { std::cout << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Mismatch : Last correct state will be restored\n"; guiServer_->appendLog(oss.str()); } options.gerbicz_error_count += 1; eng->copy(RSTATE, RSTART); i = (mp_bitcnt_t)(i + current_block_len); wbits = 0; bits_in_block = 0; continue; }
                             else { std::cout << "[Gerbicz Li] Check passed\n"; if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz Li] Check passed\n"; guiServer_->appendLog(oss.str()); } eng->copy(RSAVE_S, RSTATE); eng->set(RACC_L, 1); eng->set(RACC_R, 1); eacc = 0; blocks_since_check = 0; gl_checkpass = 0; }
                         }
@@ -7089,13 +7144,7 @@ int App::runPM1Marin() {
                 }
                 eng->set_multiplicand(RTMP, RPOW);
                 eng->mul(RCHK, RTMP);
-                //bool ok_tail = eng->is_equal(RCHK, RSTATE);
-                mpz_t z0, z1; mpz_inits(z0, z1, nullptr);
-                eng->get_mpz(z0, RCHK); eng->get_mpz(z1, RSTATE);
-                bool ok_tail = (mpz_cmp(z0, z1) == 0);
-                //mpz_class Mp = (mpz_class)(((mpz_class)1 << options.exponent) - 1);
-                //bool ok_tail = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
-                mpz_clears(z0, z1, nullptr);
+                const bool ok_tail = eng->is_equal(RCHK, RSTATE);
                 if (!ok_tail) { eng->copy(RSTATE, RSTART); eng->copy(RCHK, RSTART); for (uint64_t k = 0; k < bt; ++k) eng->square_mul(RCHK); eng->set(RPOW, 1); size_t wbl2 = mpz_sizeinbase(wtail.get_mpz_t(), 2); for (size_t k = wbl2; k-- > 0;) { if (useFast3) { if (mpz_tstbit(wtail.get_mpz_t(), k)) eng->square_mul(RPOW, 3); else eng->square_mul(RPOW); } else { eng->square_mul(RPOW); if (mpz_tstbit(wtail.get_mpz_t(), k)) { eng->set_multiplicand(RTMP, RBASE); eng->mul(RPOW, RTMP); } } } eng->set_multiplicand(RTMP, RPOW); eng->mul(RSTATE, RTMP); }
                 bits_in_block = 0;
                 wbits = 0;
@@ -7283,6 +7332,7 @@ int App::runPM1Marin() {
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_) {
         if (worktodoParser_->removeFirstProcessed()) {

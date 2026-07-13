@@ -333,6 +333,15 @@ App::App(int argc, char** argv)
     o.mode = "prp";
     //std::exit(-1);
     }
+    engine::gpu_workload workload = engine::gpu_workload::generic;
+    if (o.mode == "prp") workload = engine::gpu_workload::prp;
+    else if (o.mode == "ll" || o.mode == "llsafe" || o.mode == "llsafe2") workload = engine::gpu_workload::ll;
+    else if (o.mode == "pm1") workload = engine::gpu_workload::pm1;
+    else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
+    const engine::gpu_backend selected_backend = (!o.marin || o.force_engine_marin)
+        ? engine::gpu_backend::marin
+        : (o.aevum ? engine::gpu_backend::aevum : engine::gpu_backend::auto_select);
+    engine::configure_gpu_backend(selected_backend, o.aevum_fft_spec, workload);
     return o;
   }())
   , context(options.device_id,
@@ -393,12 +402,10 @@ App::App(int argc, char** argv)
         options.max_local_size1,
         options.max_local_size5
     );
-    //if(!options.marin){
+    if ((!options.aevum && !options.aevum_auto) || options.force_engine_marin) {
         buffers.emplace(context, precompute);
         program.emplace(context, context.getDevice(), options.kernel_path, precompute,options.build_options, options.debug);
         kernels.emplace(program->getProgram(), context.getQueue());
-        
-
 
         std::vector<std::string> kernelNames = {
             "kernel_sub2",
@@ -437,7 +444,7 @@ App::App(int argc, char** argv)
             kernels->createKernel(name);
         }
         nttEngine.emplace(context, *kernels, *buffers, precompute, /*options.mode == "pm1",*/ options.debug);
-    //}
+    }
 
     std::signal(SIGINT, handle_sigint);
 }
@@ -797,8 +804,8 @@ int App::run() {
        // std::cout << "host : " << cfg.bind_host << "\n";
         cfg.lanipv4 = options.ipv4;
         cfg.worktodo_path = options.worktodo_path;
-        cfg.config_path = "./settings.cfg";
-        cfg.results_path = "./results.txt";
+        cfg.config_path = options.config_path.empty() ? "./settings.cfg" : options.config_path;
+        cfg.results_path = (std::filesystem::path(options.save_path.empty() ? "." : options.save_path) / "results.txt").string();
         static std::atomic<bool> gui_alive{true};
         auto submitFn = [this](const std::string& line){
             std::ofstream out(this->options.worktodo_path, std::ios::app);
@@ -814,6 +821,24 @@ int App::run() {
         };
         guiServer_ = std::make_shared<ui::WebGuiServer>(cfg, submitFn, stopFn);
         ui::WebGuiServer::setInstance(guiServer_);
+        const std::string gui_workload = options.mode == "pm1" ? "P-1"
+                                       : options.mode == "ecm" ? "ECM"
+                                       : (options.mode == "ll" || options.mode == "llsafe" || options.mode == "llsafe2") ? "LL"
+                                       : "PRP";
+        if (!options.marin) {
+            guiServer_->setBackendInfo("Internal PrMers NTT", "Internal NTT", gui_workload,
+                                       "selected by the legacy -marin option");
+        } else if (options.force_engine_marin) {
+            guiServer_->setBackendInfo("Forced Marin", "Pending", gui_workload,
+                                       "Marin engine will be created on first arithmetic operation");
+        } else if (options.aevum) {
+            guiServer_->setBackendInfo("Forced Aevum", "Pending", gui_workload,
+                                       "Aevum engine will be created on first arithmetic operation", 0, 0,
+                                       options.aevum_fft_spec);
+        } else {
+            guiServer_->setBackendInfo("Auto", "Pending", gui_workload,
+                                       "backend will be selected from workload and transform sizes");
+        }
         guiServer_->start();
         std::cout << "GUI " << guiServer_->url() << std::endl;
         if (!file_non_empty(cfg.worktodo_path)) {
@@ -919,10 +944,10 @@ int App::run() {
                     oss << "Detected P-1 checkpoint(s): "
                         << (haveS2 ? "[Stage 2] " : "")
                         << (haveS1 ? "[Stage 1] " : "")
-                        << "-> running Stage 1 (runPM1Marin)";
+                        << "-> running Stage 1 with " << engine::configured_gpu_backend_name();
                     msg = oss.str();
                 } else {
-                    msg = "No P-1 checkpoints found -> running Stage 1 (runPM1Marin)";
+                    msg = std::string("No P-1 checkpoints found -> running Stage 1 with ") + engine::configured_gpu_backend_name();
                 }
                 std::cout << msg << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg); guiServer_->setStatus("Running P-1 Stage 1"); }

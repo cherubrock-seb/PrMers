@@ -132,6 +132,36 @@ void WebGuiServer::setProgress(uint64_t current, uint64_t total, const std::stri
     st_.res64 = res64;
 }
 
+void WebGuiServer::setBackendInfo(const std::string& mode,
+                                  const std::string& active,
+                                  const std::string& workload,
+                                  const std::string& detail,
+                                  uint64_t aevum_transform,
+                                  uint64_t marin_transform,
+                                  const std::string& fft_spec) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const bool changed = st_.backend_mode != mode || st_.backend_active != active ||
+                         st_.backend_workload != workload || st_.backend_detail != detail ||
+                         st_.backend_fft != fft_spec ||
+                         st_.backend_aevum_transform != aevum_transform ||
+                         st_.backend_marin_transform != marin_transform;
+    st_.backend_mode = mode;
+    st_.backend_active = active;
+    st_.backend_workload = workload;
+    st_.backend_detail = detail;
+    st_.backend_fft = fft_spec;
+    st_.backend_aevum_transform = aevum_transform;
+    st_.backend_marin_transform = marin_transform;
+    if (changed) {
+        if (st_.logs.size() > 2000) st_.logs.pop_front();
+        std::ostringstream line;
+        line << "[Backend UI] " << mode << " -> " << active;
+        if (!workload.empty()) line << " | " << workload;
+        if (!detail.empty()) line << " | " << detail;
+        st_.logs.push_back(line.str());
+    }
+}
+
 void WebGuiServer::appendLog(const std::string& line) {
     std::lock_guard<std::mutex> lk(mtx_);
     if (st_.logs.size() > 2000) st_.logs.pop_front();
@@ -374,6 +404,10 @@ void WebGuiServer::serveOne(int fd) {
     sendAll(fd, resp.data(), resp.size());
 }
 
+std::string WebGuiServer::stateJson() {
+    return handleStateJson();
+}
+
 std::string WebGuiServer::handleStateJson() {
     State s;
     {
@@ -389,6 +423,13 @@ std::string WebGuiServer::handleStateJson() {
     oss << "\"total\":" << s.tot << ",";
     oss << "\"percent\":" << (int)(pct+0.5) << ",";
     oss << "\"res64\":\"" << jsonEscape(s.res64) << "\",";
+    oss << "\"backend_mode\":\"" << jsonEscape(s.backend_mode) << "\",";
+    oss << "\"backend_active\":\"" << jsonEscape(s.backend_active) << "\",";
+    oss << "\"backend_workload\":\"" << jsonEscape(s.backend_workload) << "\",";
+    oss << "\"backend_detail\":\"" << jsonEscape(s.backend_detail) << "\",";
+    oss << "\"backend_fft\":\"" << jsonEscape(s.backend_fft) << "\",";
+    oss << "\"backend_aevum_transform\":" << s.backend_aevum_transform << ",";
+    oss << "\"backend_marin_transform\":" << s.backend_marin_transform << ",";
     oss << "\"logs\":[";
     bool first = true;
     {
@@ -496,9 +537,23 @@ std::string WebGuiServer::htmlPage() {
 "#logs{max-height:160px;overflow:auto}"
 ".right{margin-left:auto;display:flex;gap:8px;align-items:center}"
 ".btn-red{background:#e53935}"
+".pill{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;background:#202033;border:1px solid #343451;font-size:12px;font-weight:600}"
+".backend-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}"
+".kv{min-width:0}.kv .k{font-size:11px;opacity:.65;text-transform:uppercase;letter-spacing:.05em}.kv .v{margin-top:2px;overflow-wrap:anywhere}"
+"@media(max-width:600px){.backend-grid{grid-template-columns:1fr}.bar{gap:8px;flex-wrap:wrap}.stat{margin-left:0}}"
 "</style></head><body>"
-"<div class=bar><div><a href='https://github.com/cherubrock-seb/PrMers' target=_blank rel=noopener noreferrer style='display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:inherit'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' aria-hidden='true'><circle cx='12' cy='12' r='9' stroke='#3d5afe' stroke-width='2'/><path d='M7 15V9l5 6 5-6v6' stroke='#00e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg><b>PrMers</b></a></div><div class=url id=url></div><div class=stat id=stat></div></div>"
+"<div class=bar><div><a href='https://github.com/cherubrock-seb/PrMers' target=_blank rel=noopener noreferrer style='display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:inherit'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' aria-hidden='true'><circle cx='12' cy='12' r='9' stroke='#3d5afe' stroke-width='2'/><path d='M7 15V9l5 6 5-6v6' stroke='#00e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg><b>PrMers</b></a></div><div class=url id=url></div><div class=pill id=backendBadge>Backend pending</div><div class=stat id=stat></div></div>"
 "<div class=wrap>"
+"<div class='card' id=backendCard>"
+"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'><div style='font-weight:600'>Computation engine</div><div class=pill id=backendActive>Pending</div></div>"
+"<div class=backend-grid>"
+"<div class=kv><div class=k>Selection mode</div><div class=v id=backendMode>—</div></div>"
+"<div class=kv><div class=k>Workload</div><div class=v id=backendWorkload>—</div></div>"
+"<div class=kv><div class=k>Aevum transform</div><div class=v id=backendAevum>—</div></div>"
+"<div class=kv><div class=k>Marin transform</div><div class=v id=backendMarin>—</div></div>"
+"<div class=kv><div class=k>FFT3161 plan</div><div class=v id=backendFft>—</div></div>"
+"<div class=kv><div class=k>Decision</div><div class=v id=backendDetail>Waiting for engine creation</div></div>"
+"</div></div>"
 "<div class='card'>"
 "<div style='font-weight:600;margin-bottom:8px'>Logs</div>"
 "<div id=logs class='mono'></div>"
@@ -511,10 +566,11 @@ std::string WebGuiServer::htmlPage() {
 "<div class=card>"
 "<div style='font-weight:600;margin-bottom:8px'>Worktodo</div>"
 "<div class='grid-2'>"
-"<div><label>Mode</label><select id=mode><option value=prp>PRP</option><option value=ll>LL</option><option value=llsafe>LL-SAFE</option><option value=pm1>P-1</option></select></div>"
+"<div><label>Mode</label><select id=mode><option value=prp>PRP</option><option value=ll>LL</option><option value=llsafe2>LL-SAFE2</option><option value=pm1>P-1</option><option value=ecm>ECM</option></select></div>"
 "<div><label>Exponent</label><div style='display:flex;gap:8px;align-items:center'><input id=exp type=number min=2 placeholder='139700819'><a id=expopen target=_blank class=muted>Open on mersenne.ca</a></div></div>"
-"<div><label>B1 (P-1)</label><input id=b1 type=number min=0 placeholder='500000'></div>"
-"<div><label>B2 (P-1)</label><input id=b2 type=text placeholder='0 or 1.3'></div>"
+"<div><label>B1 (P-1 / ECM)</label><input id=b1 type=number min=0 placeholder='500000'></div>"
+"<div><label>B2 (P-1 / ECM)</label><input id=b2 type=text placeholder='0 or 1000000'></div>"
+"<div><label>Curves / K (ECM)</label><input id=curves type=number min=1 value=1></div>"
 "<div><label>Known factors (comma)</label><input id=factors type=text placeholder='36357263,145429049'></div>"
 "<div><label>Base,residue_type (PRP)</label><input id=basert type=text placeholder='3,1'></div>"
 "</div>"
@@ -536,6 +592,8 @@ std::string WebGuiServer::htmlPage() {
 "<div style='font-weight:600;margin-bottom:8px'>Settings</div>"
 "<div class='grid-2'>"
 "<div><label>OpenCL device id</label><input id=opt_d type=number value=0></div>"
+"<div><label>Computation backend</label><select id=opt_backend><option value=auto>Auto (recommended)</option><option value=aevum>Force Aevum</option><option value=marin>Force Marin engine::Reg</option><option value=internal>Internal PrMers NTT</option></select></div>"
+"<div><label>Forced Aevum FFT3161 plan</label><input id=opt_afft type=text placeholder='auto or 1:1K:8:256'></div>"
 "<div><label>Backup interval (s)</label><input id=opt_t type=number value=120></div>"
 "<div><label>Save path</label><input id=opt_f type=text value='.'></div>"
 "<div><label>Enqueue max</label><input id=opt_eq type=number value=0></div>"
@@ -570,7 +628,7 @@ std::string WebGuiServer::htmlPage() {
 "<script>"
 "const $=q=>document.querySelector(q);"
 "$('#url').textContent=window.location.href;"
-"const statEl=$('#stat');const resEl=$('#res64');const progEl=$('#prog');const fill=$('#fill');const logs=$('#logs');"
+"const statEl=$('#stat');const resEl=$('#res64');const progEl=$('#prog');const fill=$('#fill');const logs=$('#logs');const backendBadge=$('#backendBadge');"
 "let disconnected=false, tries=0;"
 "function setDisconnected(on){"
 "  disconnected=on;"
@@ -585,6 +643,9 @@ std::string WebGuiServer::htmlPage() {
 "    fill.style.width=(j.percent||0)+'%';"
 "    progEl.textContent=(j.current||0)+' / '+(j.total||0)+'  ('+(j.percent||0)+'%)';"
 "    statEl.textContent=j.status||'';"
+"    const active=j.backend_active||'Pending';const mode=j.backend_mode||'—';const wl=j.backend_workload||'—';"
+"    backendBadge.textContent=(mode==='Auto'?('Auto → '+active):active);const bc=(active||'').toLowerCase().includes('aevum')?'aevum':((active||'').toLowerCase().includes('marin')?'marin':((active||'').toLowerCase().includes('internal')?'internal':''));backendBadge.className='pill '+bc;$('#backendActive').textContent=active;$('#backendActive').className='pill '+bc;$('#backendMode').textContent=mode;$('#backendWorkload').textContent=wl;"
+"    $('#backendAevum').textContent=j.backend_aevum_transform?Number(j.backend_aevum_transform).toLocaleString()+' words':'—';$('#backendMarin').textContent=j.backend_marin_transform?Number(j.backend_marin_transform).toLocaleString()+' words':'—';$('#backendFft').textContent=j.backend_fft||'—';$('#backendDetail').textContent=j.backend_detail||'—';"
 "    logs.innerHTML=(j.logs||[]).slice(-1000).map(x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('\\n');"
 "    logs.scrollTop=logs.scrollHeight;"
 "    if(disconnected){ setDisconnected(false); tries=0; }"
@@ -595,10 +656,10 @@ std::string WebGuiServer::htmlPage() {
 "}"
 "setInterval(pull,1000); pull();"
 "$('#stop').onclick=async()=>{try{await fetch('/api/stop',{method:'POST'});}catch(e){}};"
-"function buildWorktodo(){const m=$('#mode').value;const p=parseInt($('#exp').value||'0');const b1=$('#b1').value.trim();const b2=$('#b2').value.trim();const factors=($('#factors').value||'').split(',').map(s=>s.trim()).filter(Boolean);const basert=($('#basert').value||'').split(',').map(s=>s.trim()).filter(Boolean);let line='';if(m==='prp'){line=`PRP=1,2,${p},-1`;if(basert.length===2)line+=`,`+basert[0]+`,`+basert[1];if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}else if(m==='ll'){line=`Test=1,2,${p},-1`;}else if(m==='llsafe'){line=`DoubleCheck=1,2,${p},-1`;}else if(m==='pm1'){let B1=(b1||'0');let B2=(b2||'0');line=`Pminus1=1,2,${p},-1,${B1},${B2}`;if(factors.length)line+=`,`+factors.map(s=>`\"${s}\"`).join(',');}return line;}"
+"function buildWorktodo(){const m=$('#mode').value;const p=parseInt($('#exp').value||'0');const b1=$('#b1').value.trim();const b2=$('#b2').value.trim();const curves=Math.max(1,parseInt($('#curves').value||'1'));const factors=($('#factors').value||'').split(',').map(s=>s.trim()).filter(Boolean);const basert=($('#basert').value||'').split(',').map(s=>s.trim()).filter(Boolean);let line='';if(m==='prp'){line=`PRP=1,2,${p},-1`;if(basert.length===2)line+=`,`+basert[0]+`,`+basert[1];if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}else if(m==='ll'){line=`Test=1,2,${p},-1`;}else if(m==='llsafe2'){line=`DoubleCheck=1,2,${p},-1`;}else if(m==='pm1'){let B1=(b1||'0');let B2=(b2||'0');line=`Pminus1=1,2,${p},-1,${B1},${B2}`;if(factors.length)line+=`,`+factors.map(s=>`\"${s}\"`).join(',');}else if(m==='ecm'){let B1=(b1||'0');let B2=(b2||'0');line=`ECM2=1,2,${p},-1,${B1},${B2},${curves}`;if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}return line;}"
 "$('#buildwt').onclick=()=>{$('#wt').value=buildWorktodo();};"
 "$('#appendrun').onclick=async()=>{const t=$('#wt').value;try{await fetch('/api/append-worktodo',{method:'POST',headers:{'Content-Type':'text/plain'},body:t});}catch(e){}};"
-"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe'?'-llsafe':'-pm1');const t=$('#opt_t').value;if(t)parts.push('-t',t);const f=$('#opt_f').value;if(f)parts.push('-f',f);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const kp=$('#opt_kpath').value;if(kp)parts.push('-kernel_path',kp);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wt=$('#opt_wt').value;if(wt)parts.push('-worktodo',wt);const out=$('#opt_out').value;if(out)parts.push('-output',out);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const pass=$('#opt_pass').value;if(pass)parts.push('-password',pass);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
+"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe2'?'-llsafe2':m==='ecm'?'-ecm':'-pm1');const be=$('#opt_backend').value;const afft=($('#opt_afft').value||'').trim();if(be==='aevum'){parts.push('-aevum');if(afft)parts.push('-aevum-fft',afft);}else if(be==='marin')parts.push('-engine-marin');else if(be==='internal')parts.push('-marin');else parts.push('-aevum-auto');if(m==='pm1'||m==='ecm'){const b1=($('#b1').value||'').trim();const b2=($('#b2').value||'').trim();if(b1)parts.push('-b1',b1);if(b2)parts.push('-b2',b2);}if(m==='ecm'){const cv=Math.max(1,parseInt($('#curves').value||'1'));parts.push('-K',String(cv));}const t=$('#opt_t').value;if(t)parts.push('-t',t);const f=$('#opt_f').value;if(f)parts.push('-f',f);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const kp=$('#opt_kpath').value;if(kp)parts.push('-kernel_path',kp);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wt=$('#opt_wt').value;if(wt)parts.push('-worktodo',wt);const out=$('#opt_out').value;if(out)parts.push('-output',out);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const pass=$('#opt_pass').value;if(pass)parts.push('-password',pass);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
 "$('#gensettings').onclick=()=>{$('#settingstxt').value=genSettings();};"
 "$('#savesettings').onclick=async()=>{const txt=$('#settingstxt').value;await fetch('/api/save-settings',{method:'POST',headers:{'Content-Type':'text/plain'},body:txt});};"
 "$('#loadsettings').onclick=async()=>{const r=await fetch('/api/load-settings');const t=await r.text();$('#settingstxt').value=t;};"

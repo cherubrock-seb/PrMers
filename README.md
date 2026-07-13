@@ -12,8 +12,9 @@ Releases for Linux, macOS and Windows are available here:
 
 PrMers is an OpenCL GPU program focused on long modular arithmetic runs for numbers of the form `2^p - 1`. It supports PRP, Lucas-Lehmer, P-1 and ECM workflows, with checkpointing, result JSON output, Prime95 compatible handoff files, worktodo parsing, and an optional web GUI.
 
-The default computation engine is the Marin backend by Yves Gallot. It uses an integer IBDWT style transform modulo `2^64 - 2^32 + 1`, avoiding floating point roundoff in the core modular arithmetic.
+The default backend policy is automatic. PrMers selects between the Marin backend by Yves Gallot and the optional Aevum backend from the workload, register count and transform sizes. Marin uses an integer IBDWT-style transform modulo `2^64 - 2^32 + 1`. Aevum exposes GPUOwl/PRPLL paired integer NTT arithmetic over `GF(M31^2)` and `GF(M61^2)` through a PrMers `engine::Reg` adapter. The v99.7 policy uses measured transform-size thresholds per workload. The adapter retains GPU-side register equality for Gerbicz checks and bounded Mersenne carry canonicalization for residue export.
 
+Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to request the default policy explicitly. The historical `-marin` option keeps its previous meaning and selects the internal PrMers NTT path. The standalone engine is intended for publication at https://github.com/cherubrock-seb/aevum-engine.
 ## Contents
 
 - [What PrMers can do](#what-prmers-can-do)
@@ -33,12 +34,13 @@ The default computation engine is the Marin backend by Yves Gallot. It uses an i
 - [Backend and code](#backend-and-code)
 - [Related inspiration](#related-inspiration)
 - [Must read papers](#must-read-papers)
+- [License and upstream attribution](#license-and-upstream-attribution)
 
 ## What PrMers can do
 
 | Area | Status | Notes |
 |---|---|---|
-| Mersenne PRP | Supported | Default mode, GPU, Marin backend by default |
+| Mersenne PRP | Supported | Default mode, automatic Marin/Aevum backend selection |
 | Mersenne Lucas-Lehmer | Supported | Safe GL mode, classic unsafe mode, doubling safe mode |
 | P-1 factoring | Supported | Stage 1, default V-trace Stage 2, classic Stage 2 fallback, resume export, Prime95 handoff |
 | P-1 ultra-low-memory mode | Supported | 1-register Stage 1 and 1-register Stage 2 product-exponent path |
@@ -55,6 +57,13 @@ Run a PRP test on a Mersenne number:
 
 ```bash
 ./prmers 136279841
+```
+
+The command above uses automatic backend selection. Force a backend only for testing or benchmarking:
+
+```bash
+./prmers 136279841 -engine-marin
+./prmers 136279841 -aevum
 ```
 
 Run a safe Lucas-Lehmer test:
@@ -129,6 +138,20 @@ sudo apt-get install -y g++ make ocl-icd-opencl-dev opencl-headers libgmp-dev
 git clone https://github.com/cherubrock-seb/PrMers.git
 cd PrMers
 make -j"$(nproc)"
+```
+
+Build with the optional Aevum shared engine when its source is present under `third_party/aevum`:
+
+```bash
+./build_with_aevum_engine.sh
+```
+
+For the public repositories, the recommended layout is to keep Aevum in its own GPLv3 repository and attach it to PrMers as a Git submodule or external shared-library dependency:
+
+```bash
+git submodule add https://github.com/cherubrock-seb/aevum-engine third_party/aevum
+git submodule update --init --recursive
+./build_with_aevum_engine.sh
 ```
 
 Install system-wide:
@@ -230,9 +253,15 @@ Run the built-in help for the exact option list supported by your binary:
 | `-wagstaff` | Test `W = (2^p + 1) / 3` |
 | `-pm1` | P-1 factoring mode |
 | `-ecm` | ECM factoring mode |
-| `-marin` | Disable Marin and use the internal NTT backend |
+| `-aevum` | Force the Aevum `engine::Reg` backend |
+| `-engine-marin` | Force the Marin `engine::Reg` backend |
+| `-aevum-auto` | Explicitly request automatic Marin/Aevum selection |
+| `-marin` | Legacy option: use the internal PrMers NTT path |
 
-Note: the option name `-marin` currently disables the Marin backend. The default is Marin enabled.
+Automatic Marin/Aevum selection is the default when no backend option is supplied.
+
+
+Automatic selection compares the native transform sizes for every engine creation. PRP/LL and multi-register P-1 accept Aevum when its transform is no larger than Marin. P-1 Stage 1 and ECM require a clearer advantage (`Aevum / Marin <= 0.75` by default). Thus `M136279841` P-1 Stage 1 selects Aevum automatically: its FFT3161 transform is 4M words versus 8M for Marin, matching the measured Radeon VII advantage. A forced Aevum Stage 1 uses the generic `square` plus prepared base-3 multiplication path instead of the Marin-specific `fast3` shortcut. `-pm1-ultralowmem` remains Marin-only because its one-register algorithm depends on `fast3`. Stage 1 checkpoints are tagged with their arithmetic backend; incompatible checkpoints are ignored safely.
 
 ### PRP and proof options
 
@@ -726,7 +755,15 @@ Common options:
 ./prmers -gui -host 0.0.0.0 -http 3131
 ```
 
-The GUI can monitor progress, show logs, inspect results and help edit `worktodo.txt`.
+The GUI can monitor progress, show logs, inspect results and help edit `worktodo.txt`. It now also displays the configured backend mode, the active backend, workload, Marin/Aevum transform sizes, the FFT3161 plan and the reason for the automatic decision. ECM initialization, Stage 1 and Stage 2 update the main progress bar. The settings editor can select Auto, forced Aevum, forced Marin or the internal PrMers NTT path, and can generate ECM work entries.
+
+Example with backend telemetry:
+
+```bash
+./prmers 136279841 -pm1 -b1 1000000 -gui -http 3131 -d 0 --noask
+```
+
+Open the printed URL and look at the **Computation engine** card. For this case the expected decision is `Auto -> Aevum`, with Aevum 4M words versus Marin 8M words.
 
 ## GPU memory test
 
@@ -836,18 +873,30 @@ PRP throughput for `p` near `136279841`.
 
 ## Backend and code
 
-- Marin backend by Yves Gallot
+- PrMers and its integrated algorithms
+  - https://github.com/cherubrock-seb/PrMers
+  - developed by cherubrock-seb
+- Marin register engine and integer IBDWT backend
   - https://github.com/galloty/marin
-- Integer NTT and IBDWT techniques
-  - PrMers uses integer modular arithmetic modulo `2^64 - 2^32 + 1`.
-  - The transform and weighting ideas are inspired by DWT and IBDWT work for Mersenne arithmetic.
+  - written by Yves Gallot
+  - MIT licensed
+- Aevum register engine
+  - intended repository: https://github.com/cherubrock-seb/aevum-engine
+  - modified derivative of GPUOwl/PRPLL
+  - exposes `GF(M31^2) x GF(M61^2)` arithmetic through a shared C API and a PrMers `engine::Reg` adapter
+- GPUOwl/PRPLL lineage
+  - original GPUOwl: https://github.com/preda/gpuowl by Mihai Preda
+  - imported fork: https://github.com/gwoltman/gpuowl by George Woltman
+  - imported commit: `294cc485ac8cf53c8b69144a3039832eda573849`
 - Gerbicz-Li proof scheme
-  - Used for PRP error checking and safe long exponentiation workflows.
+  - used for PRP error checking and safe long exponentiation workflows
 
 ## Related inspiration
 
-- GPUOwl by Preda
+- GPUOwl by Mihai Preda
   - https://github.com/preda/gpuowl
+- GPUOwl/PRPLL fork and NTT work by George Woltman
+  - https://github.com/gwoltman/gpuowl
 - Genefer22 by Yves Gallot
   - https://github.com/galloty/genefer22
 - Marin by Yves Gallot
@@ -899,6 +948,67 @@ Darren Li and Yves Gallot, 2022-2023
 https://arxiv.org/abs/2209.15623
 
 The paper describes a proof scheme for left-to-right modular exponentiation, generalizing the Gerbicz-Pietrzak approach to arbitrary exponents. It is relevant to long PRP runs and validation of large modular exponentiations.
+
+## Aevum arithmetic backend
+
+PrMers can load Aevum as an in-process arithmetic plugin for PRP, LL, P-1 and ECM:
+
+```bash
+./build_with_aevum_engine.sh
+./prmers 136279841 -prp -proof 0 -d 0 --noask
+```
+
+The command above uses automatic backend selection. Explicit choices are available with `-aevum`, `-engine-marin` and `-aevum-auto`.
+
+Default workload thresholds:
+
+| Workload | Default maximum `Aevum / Marin` transform ratio |
+|---|---:|
+| PRP / LL | `1.00` |
+| P-1 Stage 1 (up to 16 registers) | `0.75` |
+| P-1 Stage 2 / multi-register | `1.00` |
+| ECM (51 registers) | `0.75` |
+
+The global threshold can be changed with `AEVUM_AUTO_MAX_RATIO`. Workload-specific variables are `AEVUM_AUTO_PRP_MAX_RATIO`, `AEVUM_AUTO_LL_MAX_RATIO`, `AEVUM_AUTO_PM1_STAGE1_MAX_RATIO`, `AEVUM_AUTO_PM1_STAGE2_MAX_RATIO`, `AEVUM_AUTO_ECM_MAX_RATIO` and `AEVUM_AUTO_GENERIC_MAX_RATIO`.
+
+Run the host and routing checks with:
+
+```bash
+make test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source
+```
+
+Run the GPU backend matrix with:
+
+```bash
+AEVUM_TEST_DEVICE=0 make test-aevum-auto-gpu
+```
+
+Aevum is a customized GPLv3 derivative of GPUOwl/PRPLL, adapted by cherubrock-seb into a reusable register engine. Its external interface is modeled after the kind of opaque register operations used by Marin, while the Aevum arithmetic implementation remains derived from GPUOwl/PRPLL. Aevum is not an official upstream release.
+
+The standalone source includes:
+
+- a main Aevum README
+- the original upstream README renamed to `README_GPUOWL.md`
+- `UPSTREAM.md` with the exact imported commit
+- `MODIFICATIONS.md`
+- GPU register examples and CPU-verified arithmetic chains
+
+See `third_party/aevum/README.md`, `README_AEVUM_REG.md`, `README_V99_7_AEVUM_AUTO_GUI.md` and `NOTICE.md`.
+
+## License and upstream attribution
+
+The root `LICENSE` is the MIT License and applies to PrMers-authored files unless a file or subdirectory states another license.
+
+The optional engine in `third_party/aevum/` is licensed under GNU GPL version 3 because it is a modified derivative of GPUOwl/PRPLL. Its own `LICENSE`, copyright headers, upstream README and attribution files are preserved in that directory.
+
+Recommended public distribution:
+
+1. publish `cherubrock-seb/aevum-engine` as a fork of `gwoltman/gpuowl`, preserving history and GPLv3
+2. keep the main PrMers repository under MIT for PrMers-authored files
+3. reference Aevum as an optional submodule or external plugin
+4. when distributing a bundle or binary containing Aevum, provide the corresponding Aevum source and satisfy GPLv3 requirements
+
+Whether a particular binary/plugin arrangement is treated as one combined work can depend on facts and jurisdiction. The conservative release approach is to publish complete source for both projects and avoid imposing terms incompatible with GPLv3. This is not legal advice.
 
 ## Cleaning and uninstall
 

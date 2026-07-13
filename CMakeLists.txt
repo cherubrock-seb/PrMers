@@ -26,6 +26,8 @@ target_compile_options(prmers PRIVATE
 
 target_compile_definitions(prmers PRIVATE
   GPU
+  AEVUM_ENGINE_DEFAULT_LIB=\"/usr/local/lib/prmers/libaevum_engine.so\"
+  AEVUM_ENGINE_DEFAULT_TUNE_DIR=\"/usr/local/share/prmers/aevum\"
   $<$<PLATFORM_ID:Windows>:KERNEL_PATH=\"./kernels/\">
   $<$<NOT:$<PLATFORM_ID:Windows>>:KERNEL_PATH=\"/usr/local/share/prmers/\">
 )
@@ -34,6 +36,7 @@ target_link_libraries(prmers PRIVATE
   OpenCL::OpenCL
   PkgConfig::GMP
   PkgConfig::GMPXX
+  ${CMAKE_DL_LIBS}
 )
 
 if (WIN32)

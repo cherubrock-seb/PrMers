@@ -8,12 +8,17 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #pragma once
 
 #include <vector>
+#include <string>
 #include <gmp.h>
 
 #include "arith.h"
 
 class engine
 {
+public:
+	enum class gpu_backend { marin, aevum, auto_select };
+	enum class gpu_workload { generic, prp, ll, pm1, ecm };
+
 protected:
 	// d is encoded: low 32-bit word is the value and high 32-bit word is the width of the base
 	virtual void get(uint64 * const d, const size_t src) const = 0;
@@ -22,6 +27,7 @@ protected:
 public:
 	engine() {}
 	virtual ~engine() {}
+	virtual bool is_aevum_backend() const { return false; }
 
 	// Explicit resource release hook used by ultra/low-memory stage handoff.
 	// Default is a no-op for non-GPU engines.
@@ -139,6 +145,17 @@ public:
 	// copy data to all registers. The size of data must be equal to get_checkpoint_size().
 	virtual bool set_checkpoint(const std::vector<char> & data) const = 0;
 
+	virtual bool is_equal(const Reg lhs, const Reg rhs) const
+	{
+		mpz_t a, b;
+		mpz_inits(a, b, nullptr);
+		get_mpz(a, lhs);
+		get_mpz(b, rhs);
+		const bool equal = mpz_cmp(a, b) == 0;
+		mpz_clears(a, b, nullptr);
+		return equal;
+	}
+
 	// dst = src^e, src is erased
 	void pow(const Reg dst, const Reg src, const uint64 e) const
 	{
@@ -153,7 +170,7 @@ public:
 	}
 
 	// copy the content of src to a GMP integer. z must be initialized
-	void get_mpz(mpz_t & z, const Reg src) const
+	virtual void get_mpz(mpz_t & z, const Reg src) const
 	{
 		std::vector<uint64> data(get_size());
 		get(data.data(), src);
@@ -277,6 +294,10 @@ public:
 			return true;
 		}
 	};
+	static void configure_gpu_backend(const gpu_backend backend, const std::string & aevum_fft_spec = "", const gpu_workload workload = gpu_workload::generic);
+	static gpu_backend configured_gpu_backend();
+	static const char * configured_gpu_backend_name();
+	static std::string configured_aevum_fft_spec();
 	static engine * create_gpu(const uint32_t q, const size_t reg_count, const size_t device, const bool verbose);
 	static engine * create_cpu(const uint32_t q, const size_t reg_count);
 };
