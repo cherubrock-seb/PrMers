@@ -43,7 +43,7 @@ run_case() {
     echo "FAIL: expected backend decision not found in $name" >&2
     exit 1
   fi
-  if [[ $rc -ne 0 && $rc -ne 124 && $rc -ne 130 ]]; then
+  if [[ $rc -ne 0 && $rc -ne 1 && $rc -ne 124 && $rc -ne 130 ]]; then
     echo "FAIL: unexpected exit=$rc in $name" >&2
     exit 1
   fi

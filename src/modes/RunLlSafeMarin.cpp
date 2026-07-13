@@ -112,22 +112,33 @@ int App::runLlSafeMarinDoubling()
         guiServer_->setStatus(oss.str());
     }
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose);
-    if (verbose) std::cout << "Testing 2^" << p << " - 1 (LL-safe, GPU), " << eng->get_size() << " 64-bit words..." << std::endl;
+    const char* ll_backend_name = eng->is_aevum_backend() ? "Aevum" : "Marin";
+    if (verbose) std::cout << "LL-SAFE2 on 2^" << p << " - 1 using " << ll_backend_name
+                           << " engine with " << eng->get_size() << " words" << std::endl;
     if (guiServer_) {
-                    std::ostringstream oss;
-                    oss  << "Testing 2^" << p << " - 1 (LL-safe, GPU), " << eng->get_size() << " 64-bit words..." << std::endl;
-                    guiServer_->appendLog(oss.str());
+        std::ostringstream oss;
+        oss << "LL-SAFE2 arithmetic backend: " << ll_backend_name
+            << " | transform=" << eng->get_size();
+        guiServer_->appendLog(oss.str());
     }
-    std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
+    std::ostringstream ck; ck << "llsafe2_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
+    const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 1) return -2;
-        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
+        if (version != 2) return -2;
+        uint32_t rp = 0, saved_backend = 0;
+        if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
+        if (!f.read(reinterpret_cast<char*>(&saved_backend), sizeof(saved_backend))) return -2;
+        if (saved_backend != checkpoint_backend) {
+            std::cout << "[LL-SAFE2] Ignoring incompatible checkpoint " << file
+                      << " (backend mismatch)." << std::endl;
+            return -3;
+        }
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
         const size_t cksz = eng->get_checkpoint_size();
@@ -142,9 +153,10 @@ int App::runLlSafeMarinDoubling()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 1;
+            int version = 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
             if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
             const size_t cksz = eng->get_checkpoint_size();
@@ -338,7 +350,7 @@ int App::runLlSafeMarinDoubling()
     
                     guiServer_->appendLog(oss.str());
     }
-    std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), is_prime, res64_hex, res2048_hex);
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), is_prime, res64_hex, res2048_hex);
     Printer::finalReport(options, elapsed_time, json, is_prime);
 
     /*if (options.submit && !options.gui) {
@@ -388,11 +400,20 @@ int App::runLlSafeMarin()
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
     engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
-    if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using Marin engine with " << eng->get_size() << " words" << std::endl;
+    const char* ll_backend_name = eng->is_aevum_backend() ? "Aevum" : "Marin";
+    if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using " << ll_backend_name
+                           << " engine with " << eng->get_size() << " words" << std::endl;
+    if (guiServer_) {
+        std::ostringstream oss;
+        oss << "LL-SAFE arithmetic backend: " << ll_backend_name
+            << " | transform=" << eng->get_size();
+        guiServer_->appendLog(oss.str());
+    }
     if (guiServer_) { std::ostringstream oss; oss << "LL-SAFE on 2^" << p << " - 1"; guiServer_->setStatus(oss.str()); }
 
     std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
+    const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
     auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, uint64_t& itersave, uint64_t& jsave, double& et)->int{
         File f(file);
@@ -400,6 +421,19 @@ int App::runLlSafeMarin()
         int version = 1; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
+        if (version >= 3) {
+            uint32_t saved_backend = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_backend), sizeof(saved_backend))) return -2;
+            if (saved_backend != checkpoint_backend) {
+                std::cout << "[LL-SAFE] Ignoring incompatible checkpoint " << file
+                          << " (backend mismatch)." << std::endl;
+                return -3;
+            }
+        } else if (checkpoint_backend != 1u) {
+            std::cout << "[LL-SAFE] Ignoring legacy untagged checkpoint " << file
+                      << " for Aevum." << std::endl;
+            return -3;
+        }
         if (!f.read(reinterpret_cast<char*>(&iter_done), sizeof(iter_done))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
         if (version >= 2) {
@@ -422,9 +456,10 @@ int App::runLlSafeMarin()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 2;
+            int version = 3;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
             if (!f.write(reinterpret_cast<const char*>(&iter_done), sizeof(iter_done))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
             if (!f.write(reinterpret_cast<const char*>(&itersave), sizeof(itersave))) return;
@@ -676,7 +711,7 @@ int App::runLlSafeMarin()
 
     std::string json = io::JsonBuilder::generate(
         options,
-        static_cast<int>(context.getTransformSize()),
+        static_cast<int>(eng->get_size()),
         is_prime,
         ll_res64,
         ll_res2048

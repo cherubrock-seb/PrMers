@@ -139,3 +139,8 @@ Aevum is a customized GNU GPLv3 derivative of PRPLL/GPUOwl. It is not an officia
 ## Standalone repository
 
 The reusable engine is intended for publication at https://github.com/cherubrock-seb/aevum-engine as a GPLv3 fork-derived project with GPUOwl history preserved.
+
+
+## v99.8 compatibility routing
+
+LL-safe, LL-unsafe, LL-safe2, normal P-1, three-register P-1 low-memory, and ECM all retain automatic/forced Aevum support. The one-register P-1 ultra-low-memory fast3 algorithm remains Marin-only by design. Use `tests/run_backend_validation_matrix.sh` to validate every routing combination and produce a shareable report archive. The `full` profile uses deterministic ECM seeds and complete medium-size Aevum/Marin pairs; `PRMERS_MATRIX_CASE_FILTER` can restrict a rerun to one family of failures.

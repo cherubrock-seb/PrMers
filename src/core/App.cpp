@@ -336,7 +336,11 @@ App::App(int argc, char** argv)
     engine::gpu_workload workload = engine::gpu_workload::generic;
     if (o.mode == "prp") workload = engine::gpu_workload::prp;
     else if (o.mode == "ll" || o.mode == "llsafe" || o.mode == "llsafe2") workload = engine::gpu_workload::ll;
-    else if (o.mode == "pm1") workload = engine::gpu_workload::pm1;
+    else if (o.mode == "pm1") {
+        if (o.pm1_ultralowmem) workload = engine::gpu_workload::pm1_ultralowmem;
+        else if (o.pm1_lowmem) workload = engine::gpu_workload::pm1_lowmem;
+        else workload = engine::gpu_workload::pm1;
+    }
     else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
     const engine::gpu_backend selected_backend = (!o.marin || o.force_engine_marin)
         ? engine::gpu_backend::marin
@@ -847,6 +851,23 @@ int App::run() {
             if (guiServer_) guiServer_->stop();
             return 0;
         }
+    }
+
+    // The historical one-register ultra-low-memory P-1 path is intentionally
+    // Marin-only: it relies on Marin's fast3 operation and cannot be represented
+    // by the generic engine::Reg API without adding a second register. Reject an
+    // explicit Aevum request cleanly before allocating the Aevum plugin. Auto
+    // mode is handled by the compatibility-aware policy and selects Marin.
+    if (options.mode == "pm1" && options.pm1_ultralowmem && options.aevum) {
+        std::cerr << "[Backend Compatibility] -pm1-ultralowmem is a Marin fast3-only "
+                     "algorithm and cannot be forced to Aevum. Use automatic mode or "
+                     "-engine-marin.\n";
+        if (guiServer_) {
+            guiServer_->setBackendInfo("Forced Aevum rejected", "Marin required", "P-1 ultra-low-memory",
+                                       "one-register fast3-only algorithm");
+            guiServer_->appendLog("[Backend Compatibility] Forced Aevum rejected for P-1 ultra-low-memory.");
+        }
+        return 2;
     }
 
     int rc = 1;

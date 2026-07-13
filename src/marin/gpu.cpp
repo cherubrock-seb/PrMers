@@ -85,6 +85,14 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
     }
 
     if (selected == gpu_backend::aevum) {
+        if (configured != gpu_backend::auto_select) {
+            std::cout << "[Backend Aevum] " << aevum_workload_name(selected_workload)
+                      << ": forced by -aevum" << std::endl;
+        }
+        if (selected_workload == gpu_workload::pm1_ultralowmem) {
+            throw std::runtime_error(
+                "Aevum is incompatible with the one-register P-1 ultra-low-memory fast3 algorithm");
+        }
         std::string resolved_fft = fft_spec;
         std::size_t resolved_transform = decision.aevum_transform;
         if (fft_spec.empty()) {
@@ -108,6 +116,8 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
     }
 
     if (configured != gpu_backend::auto_select) {
+        std::cout << "[Backend Marin] " << aevum_workload_name(selected_workload)
+                  << ": forced by -engine-marin or compatibility route" << std::endl;
         publish("Forced Marin", "Marin", "selected by -engine-marin", 0, "");
     }
     return new engine_gpu(p, reg_count, device, verbose);

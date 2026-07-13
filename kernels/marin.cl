@@ -597,7 +597,7 @@ void forward_mul4(__global uint64 * restrict const reg, __global const uint64 * 
 	const sz_t id = (sz_t)get_global_id(0), j = id, k = 4 * id;
 
 	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);
-	const uint64_2 r = r2[N_SZ / 8 + j];
+	const uint64_2 r = r2_2[N_SZ / 8 + j];
 	fwd22(&xl[0], r.s0); fwd22(&xl[2], r.s1);
 	storeg2(4, &x[k], 1, xl);
 }
@@ -613,7 +613,7 @@ void sqr4(__global uint64 * restrict const reg, __global const uint64 * restrict
 	const sz_t id = (sz_t)get_global_id(0), j = id, k = 4 * id;
 
 	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);
-	sqr_4(xl, r2[N_SZ / 8 + j], r2i[N_SZ / 8 + j]);
+	sqr_4(xl, r2_2[N_SZ / 8 + j], r2i_2[N_SZ / 8 + j]);
 	storeg2(4, &x[k], 1, xl);
 }
 
@@ -630,7 +630,7 @@ void mul4(__global uint64 * restrict const reg, __global const uint64 * restrict
 
 	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);
 	uint64_2 yl[4]; loadg2(4, yl, &y[k], 1);
-	mul_4(xl, yl, r2[N_SZ / 8 + j], r2i[N_SZ / 8 + j]);
+	mul_4(xl, yl, r2_2[N_SZ / 8 + j], r2i_2[N_SZ / 8 + j]);
 	storeg2(4, &x[k], 1, xl);
 }
 

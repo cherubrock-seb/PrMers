@@ -17,7 +17,7 @@ class engine
 {
 public:
 	enum class gpu_backend { marin, aevum, auto_select };
-	enum class gpu_workload { generic, prp, ll, pm1, ecm };
+	enum class gpu_workload { generic, prp, ll, pm1, pm1_lowmem, pm1_ultralowmem, ecm };
 
 protected:
 	// d is encoded: low 32-bit word is the value and high 32-bit word is the width of the base

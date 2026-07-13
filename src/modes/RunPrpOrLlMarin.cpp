@@ -109,10 +109,19 @@ int App::runPrpOrLlMarin()
     const bool verbose = true;//options.debug;
 
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
+    const char* active_backend_name = eng->is_aevum_backend() ? "Aevum" : "Marin";
 
     //auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
-    if (verbose) std::cout << "Testing 2^" << p << " - 1, " << eng->get_size() << " 64-bit words..." << std::endl;
+    if (verbose) {
+        if (options.mode == "ll") {
+            std::cout << "LL-UNSAFE on 2^" << p << " - 1 using " << active_backend_name
+                      << " engine with " << eng->get_size() << " words" << std::endl;
+        } else {
+            std::cout << "PRP on 2^" << p << " - 1 using " << active_backend_name
+                      << " engine with " << eng->get_size() << " words" << std::endl;
+        }
+    }
     if (guiServer_) {
         std::ostringstream oss;
         oss << "Testing 2^" << p << " - 1";
@@ -138,16 +147,36 @@ int App::runPrpOrLlMarin()
     }
     std::ostringstream ck;
     if (options.wagstaff) ck << "wagstaff_";
+    if (options.mode == "ll") ck << "llunsafe_";
     ck << "m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
+    const uint32_t checkpoint_mode = options.mode == "prp" ? 1u : 2u;
+    const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 1) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
+        if (version >= 2) {
+            uint32_t saved_mode = 0, saved_backend = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_mode), sizeof(saved_mode))) return -2;
+            if (!f.read(reinterpret_cast<char*>(&saved_backend), sizeof(saved_backend))) return -2;
+            if (saved_mode != checkpoint_mode || saved_backend != checkpoint_backend) {
+                std::cout << "[Checkpoint] Ignoring incompatible " << file
+                          << " (mode/backend mismatch)." << std::endl;
+                return -3;
+            }
+        } else if (version == 1) {
+            // Legacy checkpoints have no backend tag.  They are safe to keep only
+            // for the original Marin PRP path.  LL-unsafe now has its own filename.
+            if (checkpoint_mode != 1u || checkpoint_backend != 1u) {
+                std::cout << "[Checkpoint] Ignoring legacy untagged " << file
+                          << " for this mode/backend." << std::endl;
+                return -3;
+            }
+        } else return -2;
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
         const size_t cksz = eng->get_checkpoint_size();
@@ -162,9 +191,11 @@ int App::runPrpOrLlMarin()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 1;
+            int version = 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
             if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
             const size_t cksz = eng->get_checkpoint_size();
@@ -614,7 +645,7 @@ int App::runPrpOrLlMarin()
         is_prp_prime = isPrime;
         json = io::JsonBuilder::generate(
             options,
-            static_cast<int>(context.getTransformSize()),
+            static_cast<int>(eng->get_size()),
             isPrime,
             res64,
             res2048
@@ -630,7 +661,7 @@ int App::runPrpOrLlMarin()
     else{
         json = io::JsonBuilder::generate(
             options,
-            static_cast<int>(context.getTransformSize()),
+            static_cast<int>(eng->get_size()),
             is_prp_prime,
             res64_hex,
             res2048_hex

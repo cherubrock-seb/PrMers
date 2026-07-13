@@ -22,16 +22,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ocl-icd-opencl-dev opencl-headers libcurl4-openssl-dev libgmp-dev
 
-      - name: Build with Makefile
+      - name: Build PrMers and Aevum engine
         run: |
-          export CXXFLAGS="-I/usr/include"
-          export LDFLAGS="-L/usr/lib -lgmpxx -lgmp"
-          make KERNEL_PATH=./kernels/
+          make clean-all || true
+          make -j"$(nproc)" KERNEL_PATH=./kernels/
+
+      - name: Run host and routing tests
+        run: |
+          make test-aevum-host
+          make test-aevum-auto
+          make test-aevum-default
+          make test-gui-state
+          make test-aevum-source
+          make -C third_party/aevum test-engine-api
+
       - name: Package for release
         run: |
           mkdir -p prmers_package/kernels
+          mkdir -p prmers_package/third_party/aevum/build-engine
           cp prmers prmers_package/
           cp kernels/prmers.cl prmers_package/kernels/
+          cp third_party/aevum/build-engine/libaevum_engine.so prmers_package/third_party/aevum/build-engine/
+          cp third_party/aevum/tune.txt prmers_package/third_party/aevum/
           tar -czvf prmers-linux.tar.gz -C prmers_package .
 
       - name: Upload release to GitHub

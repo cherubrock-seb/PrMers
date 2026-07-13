@@ -206,6 +206,35 @@ pacman -S --noconfirm make \
 make -j"$(nproc)"
 ```
 
+
+### Backend validation matrix (v99.8)
+
+The automatic policy remains active for PRP, all Lucas-Lehmer engine paths, normal P-1, 3-register P-1 low-memory, and ECM. Aevum is selected when its FFT3161 transform meets the workload ratio threshold. The historical one-register `-pm1-ultralowmem` algorithm is the only explicit Marin-only compatibility case because it encodes multiply-by-3 through Marin `fast3`; forced `-aevum` is rejected cleanly before plugin allocation.
+
+The tiny Marin radix-4 kernel used by transforms of 16 to 80 words is fixed in v99.8. This repairs small P-1 low-memory and ECM examples such as `M367` and `M701`.
+
+Run the exhaustive cross-backend validation and create a single report archive:
+
+```bash
+PRMERS_TEST_DEVICE=0 PRMERS_MATRIX_PROFILE=standard make test-backend-matrix
+```
+
+Profiles are `quick`, `standard`, and `full`. The script covers Auto, forced Aevum, forced Marin, and the internal NTT path across PRP, LL-safe, LL-unsafe, LL-safe2, normal/low/ultra-low-memory P-1, and Edwards/Montgomery ECM. ECM uses a fixed seed so Aevum and Marin execute the same curve. The `full` profile adds complete medium-size Aevum/Marin pairs and compares their final JSON status, residues or factors as well as measured throughput.
+
+```bash
+PRMERS_TEST_DEVICE=0 PRMERS_MATRIX_PROFILE=full \
+PRMERS_MATRIX_COMPLETE_SECONDS=1200 make test-backend-matrix
+```
+
+To rerun only selected cases, use a regular-expression filter:
+
+```bash
+PRMERS_MATRIX_CASE_FILTER='ll-safe|pm1-lowmem|ecm-medium' \
+PRMERS_MATRIX_PROFILE=full ./tests/run_backend_validation_matrix.sh 0 full
+```
+
+The script writes `tests/backend-validation-<timestamp>.tar.gz` and a matching SHA-256 file. The archive contains every command and log plus `summary.tsv`, `comparisons.tsv`, `errors.tsv`, `system.txt`, `combined.log`, and `report-manifest.txt`.
+
 ## Command line options
 
 Run the built-in help for the exact option list supported by your binary:
@@ -1034,3 +1063,11 @@ When reporting a problem, include:
 ## Author
 
 PrMers is developed by cherubrock-seb, with feedback and contributions from users on GitHub and mersenneforum.org.
+
+
+### Backend compatibility details
+
+- PRP, LL-safe, LL-unsafe, LL-safe2, normal P-1, three-register P-1 low-memory and ECM all use the same Auto/Aevum/Marin selection policy.
+- A forced Aevum request falls back to Marin only when no admissible FFT3161 plan exists, and the log states the reason explicitly.
+- The one-register P-1 ultra-low-memory algorithm is the sole Marin-only path because it depends on Marin `fast3`; Auto selects Marin and forced Aevum exits cleanly before GPU allocation.
+- PRP/LL checkpoints now include backend and mode metadata. Legacy untagged checkpoints are not loaded into Aevum, and LL-safe, LL-safe2 and LL-unsafe use distinct filenames.

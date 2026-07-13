@@ -11,6 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
+AEVUM_VERSION ?= v0.3.4
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
 # AppleClang and is fully supported by the engine build.
@@ -137,12 +138,14 @@ $(DEPDIR)/%.d: ;
 src/version.cpp : src/version.inc
 
 src/version.inc: FORCE
-	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-	  desc=$$(git describe --tags --long --dirty --always --match 'v/aevum/*' 2>/dev/null || git rev-parse --short HEAD); \
-	  echo "\"$$(basename $$desc)\"" > $(BIN)/version.new; \
+	@repo_root=$$(git rev-parse --show-toplevel 2>/dev/null || true); \
+	here=$$(pwd -P); \
+	if [ -n "$$repo_root" ] && [ "$$(cd "$$repo_root" && pwd -P)" = "$$here" ]; then \
+	  desc=$$(git describe --tags --dirty --always --match 'v/aevum/*' --match 'v0.*' 2>/dev/null || echo "$(AEVUM_VERSION)"); \
 	else \
-	  echo '"v/aevum/0.3.3"' > $(BIN)/version.new; \
-	fi
+	  desc="$(AEVUM_VERSION)"; \
+	fi; \
+	echo "\"$$desc\"" > $(BIN)/version.new
 	@diff -q -N $(BIN)/version.new $@ >/dev/null || mv $(BIN)/version.new $@
 	@echo Version: `cat $@`
 

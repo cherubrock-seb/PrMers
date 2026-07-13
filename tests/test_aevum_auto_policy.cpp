@@ -29,6 +29,23 @@ int main() {
     auto stage2 = aevum_auto_decide(136279841u, 158, engine::gpu_workload::pm1);
     expect(stage2.use_aevum, true, "P-1 Stage 2");
 
+
+    auto small_ll = aevum_auto_decide(1362763u, 18, engine::gpu_workload::ll);
+    expect(small_ll.use_aevum, false, "small LL");
+
+    auto large_ll = aevum_auto_decide(136279841u, 18, engine::gpu_workload::ll);
+    expect(large_ll.use_aevum, true, "large LL");
+
+    auto lowmem_small = aevum_auto_decide(1362763u, 3, engine::gpu_workload::pm1_lowmem);
+    expect(lowmem_small.use_aevum, false, "small P-1 low-memory");
+
+    auto lowmem_large = aevum_auto_decide(136279841u, 3, engine::gpu_workload::pm1_lowmem);
+    expect(lowmem_large.use_aevum, true, "large P-1 low-memory");
+
+    auto ultralow = aevum_auto_decide(2147483647u, 1, engine::gpu_workload::pm1_ultralowmem);
+    expect(ultralow.use_aevum, false, "P-1 ultra-low-memory compatibility");
+    if (ultralow.detail.find("Marin-only") == std::string::npos) return 8;
+
     auto small_ecm = aevum_auto_decide(1362763u, 51, engine::gpu_workload::ecm);
     expect(small_ecm.use_aevum, false, "small ECM");
 

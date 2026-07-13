@@ -22,6 +22,8 @@ struct PolicyProfile {
     double limit = 1.0;
     const char* name = "generic";
     const char* env_name = nullptr;
+    bool aevum_compatible = true;
+    const char* compatibility_reason = nullptr;
 };
 
 PolicyProfile profile_for(const engine::gpu_workload workload, const std::size_t register_count) {
@@ -32,14 +34,22 @@ PolicyProfile profile_for(const engine::gpu_workload workload, const std::size_t
             return {1.00, "PRP/LL throughput", "AEVUM_AUTO_LL_MAX_RATIO"};
         case engine::gpu_workload::pm1:
             if (register_count <= 16) {
-                // Stage 1 uses few registers. Aevum is worthwhile only with a clear
-                // transform-size advantage. On the measured Radeon VII case,
-                // M136279841 is 4M words in Aevum versus 8M in Marin and Aevum wins.
+                // Normal Stage 1 uses the generic engine API. Aevum is worthwhile
+                // only with a clear transform-size advantage.
                 return {0.75, "P-1 Stage 1", "AEVUM_AUTO_PM1_STAGE1_MAX_RATIO"};
             }
-            // Stage 2 uses many resident registers, so equal transform sizes are
-            // acceptable and the smaller Aevum representation can reduce memory.
             return {1.00, "P-1 multi-register/Stage 2", "AEVUM_AUTO_PM1_STAGE2_MAX_RATIO"};
+        case engine::gpu_workload::pm1_lowmem:
+            // The 3-register low-memory implementation uses generic set/pow/mul
+            // operations and is valid on both engines. Keep the same conservative
+            // transform advantage as normal Stage 1.
+            return {0.75, "P-1 low-memory (3-register)", "AEVUM_AUTO_PM1_LOWMEM_MAX_RATIO"};
+        case engine::gpu_workload::pm1_ultralowmem:
+            // The one-register implementation encodes multiply-by-3 in Marin's
+            // fast3 square operation. It is an algorithmic incompatibility, not a
+            // performance preference.
+            return {0.0, "P-1 ultra-low-memory (1-register)", nullptr, false,
+                    "Marin fast3-only one-register algorithm"};
         case engine::gpu_workload::ecm:
             // ECM has 51 long-lived registers and many mixed operations. Stay
             // conservative unless Aevum saves at least 25% of transform length.
@@ -56,6 +66,8 @@ const char* aevum_workload_name(const engine::gpu_workload value) {
         case engine::gpu_workload::prp: return "PRP";
         case engine::gpu_workload::ll: return "LL";
         case engine::gpu_workload::pm1: return "P-1";
+        case engine::gpu_workload::pm1_lowmem: return "P-1 low-memory";
+        case engine::gpu_workload::pm1_ultralowmem: return "P-1 ultra-low-memory";
         case engine::gpu_workload::ecm: return "ECM";
         default: return "generic";
     }
@@ -65,18 +77,31 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
                                     const std::size_t register_count,
                                     const engine::gpu_workload workload) {
     AevumAutoDecision result;
+    result.marin_transform = ibdwt::transform_size(exponent);
+
+    const PolicyProfile profile = profile_for(workload, register_count);
+    if (!profile.aevum_compatible) {
+        std::ostringstream out;
+        out << "profile=" << profile.name
+            << ", regs=" << register_count
+            << ", Marin=" << result.marin_transform
+            << ", compatibility=Marin-only";
+        if (profile.compatibility_reason) out << " (" << profile.compatibility_reason << ")";
+        result.detail = out.str();
+        result.use_aevum = false;
+        return result;
+    }
+
     std::string reason;
     if (!aevum_engine_resolve_auto_fft(exponent, &result.aevum_transform, &result.fft_spec, &reason)) {
         result.detail = reason;
         return result;
     }
 
-    result.marin_transform = ibdwt::transform_size(exponent);
     const double ratio = result.marin_transform == 0
         ? 1000.0
         : static_cast<double>(result.aevum_transform) / static_cast<double>(result.marin_transform);
 
-    const PolicyProfile profile = profile_for(workload, register_count);
     double limit = profile.limit;
     // Global override first, then the workload-specific override.
     limit = parse_env_ratio("AEVUM_AUTO_MAX_RATIO", limit);

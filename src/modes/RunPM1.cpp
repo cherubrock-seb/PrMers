@@ -6130,7 +6130,9 @@ int App::runPM1Marin() {
     }
     if (aevum_backend && pm1_ultralowmem_stage1) {
         delete eng;
-        throw std::runtime_error("-pm1-ultralowmem requires Marin because the one-register path depends on fast3; use -engine-marin or omit -aevum");
+        std::cerr << "[PM1] Internal compatibility error: ultra-low-memory selected Aevum "
+                     "although the one-register path requires Marin fast3.\n";
+        return -2;
     }
 
     const size_t RSTATE=0;

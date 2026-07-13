@@ -23,19 +23,29 @@ jobs:
       - name: Install GMP via Homebrew
         run: brew install gmp
 
-      - name: Build with Makefile
+      - name: Build PrMers and Aevum engine
         run: |
           GMP_PREFIX=$(brew --prefix gmp)
-          make \
+          make clean-all || true
+          make -j"$(sysctl -n hw.logicalcpu)" \
+            CXX=c++ \
             CXXFLAGS="-I${GMP_PREFIX}/include -Iinclude -I/System/Library/Frameworks/OpenCL.framework/Headers -std=c++20 -O3 -Wall -DHAS_CURL=1 -DKERNEL_PATH=\"./kernels/\"" \
             LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp -lcurl -framework OpenCL" \
             KERNEL_PATH=./kernels/
 
+      - name: Run portable source and host tests
+        run: |
+          make test-aevum-host
+          make test-aevum-source
+
       - name: Package for release
         run: |
           mkdir -p prmers_package/kernels
+          mkdir -p prmers_package/third_party/aevum/build-engine
           cp prmers prmers_package/
           cp kernels/prmers.cl prmers_package/kernels/
+          cp third_party/aevum/build-engine/libaevum_engine.so prmers_package/third_party/aevum/build-engine/
+          cp third_party/aevum/tune.txt prmers_package/third_party/aevum/
           tar -czvf prmers-macos.tar.gz -C prmers_package .
 
       - name: Calculate SHA256 checksum

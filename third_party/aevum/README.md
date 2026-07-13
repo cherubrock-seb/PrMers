@@ -177,3 +177,7 @@ This README is a technical packaging recommendation, not legal advice.
 ## Status
 
 Aevum is experimental. It has produced matching PRP residues and correct P-1 results in PrMers testing, but performance depends strongly on exponent size, transform choice, GPU architecture and workload. Automatic Marin/Aevum selection is therefore recommended in PrMers.
+
+## 0.3.4 build identity and portability update
+
+When Aevum is embedded as `third_party/aevum` inside another Git repository, the build reports `v0.3.4` instead of accidentally using the parent repository commit hash. A standalone Aevum checkout still reports its own matching tag or commit identity. The portable macOS shared-library changes are retained; no arithmetic API or GPU kernel semantics changed in 0.3.4.

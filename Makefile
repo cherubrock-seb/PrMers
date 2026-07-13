@@ -39,7 +39,7 @@ LDFLAGS += -lgmpxx -lgmp
 CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source test-aevum-auto-gpu clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -106,6 +106,9 @@ test-aevum-source:
 
 test-aevum-auto-gpu: all
 	bash tests/run_aevum_auto_gpu_matrix.sh $${AEVUM_TEST_DEVICE:-0}
+
+test-backend-matrix: all
+	bash tests/run_backend_validation_matrix.sh $${PRMERS_TEST_DEVICE:-0} $${PRMERS_MATRIX_PROFILE:-standard}
 
 install-aevum-engine: aevum-engine
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers

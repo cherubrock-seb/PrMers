@@ -602,7 +602,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t id = (sz_t)get_global_id(0), j = id, k = 4 * id;\n" \
 "\n" \
 "	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);\n" \
-"	const uint64_2 r = r2[N_SZ / 8 + j];\n" \
+"	const uint64_2 r = r2_2[N_SZ / 8 + j];\n" \
 "	fwd22(&xl[0], r.s0); fwd22(&xl[2], r.s1);\n" \
 "	storeg2(4, &x[k], 1, xl);\n" \
 "}\n" \
@@ -618,7 +618,7 @@ static const char * const src_ocl_kernel = \
 "	const sz_t id = (sz_t)get_global_id(0), j = id, k = 4 * id;\n" \
 "\n" \
 "	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);\n" \
-"	sqr_4(xl, r2[N_SZ / 8 + j], r2i[N_SZ / 8 + j]);\n" \
+"	sqr_4(xl, r2_2[N_SZ / 8 + j], r2i_2[N_SZ / 8 + j]);\n" \
 "	storeg2(4, &x[k], 1, xl);\n" \
 "}\n" \
 "\n" \
@@ -635,7 +635,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "	uint64_2 xl[4]; loadg2(4, xl, &x[k], 1);\n" \
 "	uint64_2 yl[4]; loadg2(4, yl, &y[k], 1);\n" \
-"	mul_4(xl, yl, r2[N_SZ / 8 + j], r2i[N_SZ / 8 + j]);\n" \
+"	mul_4(xl, yl, r2_2[N_SZ / 8 + j], r2i_2[N_SZ / 8 + j]);\n" \
 "	storeg2(4, &x[k], 1, xl);\n" \
 "}\n" \
 "\n" \
