@@ -12,11 +12,17 @@
 
 HOST_OS = $(shell uname -s)
 
+# Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
+# AppleClang and is fully supported by the engine build.
+CXX ?= c++
+
+DL_LIBS = -ldl
+ENGINE_LINK_FLAGS = -shared -Wl,-Bsymbolic
+EXAMPLE_RPATH = -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)'
 ifeq ($(HOST_OS), Darwin)
-# Real GCC (not clang), needed for 128-bit floats and std::filesystem::path
-CXX ?= g++-15
-else
-CXX ?= g++
+DL_LIBS =
+ENGINE_LINK_FLAGS = -dynamiclib
+EXAMPLE_RPATH = -Wl,-rpath,@loader_path/../$(ENGINE_BIN)
 endif
 
 ifeq ($(CUDA), 1)
@@ -84,7 +90,7 @@ ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
 engine-lib: $(ENGINE_LIB)
 
 $(ENGINE_LIB): $(ENGINE_OBJS)
-	$(CXX) -shared -Wl,-Bsymbolic -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) -ldl
+	$(CXX) $(ENGINE_LINK_FLAGS) -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) $(DL_LIBS)
 
 $(ENGINE_BIN)/%.o: src/%.cpp
 	@mkdir -p $(dir $@) $(ENGINE_DEPDIR)
@@ -106,7 +112,7 @@ $(BIN)/aevum-amd: ${OBJS}
 
 .PHONY: test-small-factor-gpu
 test-small-factor-gpu: engine-lib
-	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp -ldl -o build-tests/aevum-engine-small-factor-gpu-test
+	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
 	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
 
 clean:
@@ -155,7 +161,7 @@ test-engine-api: engine-lib $(ENGINE_API_TEST)
 
 $(ENGINE_API_TEST): tests/engine_api_load_test.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -O2 -std=c++20 $< -ldl -o $@
+	$(CXX) -O2 -std=c++20 $< $(DL_LIBS) -o $@
 
 HOST_TEST := build-tests/aevum-host-gf-test
 STATE_TEST := build-tests/aevum-state-compact-test
@@ -191,7 +197,7 @@ examples: $(EXAMPLE_TARGETS)
 
 $(EXAMPLE_BIN)/%: examples/%.cpp examples/example_common.h src/EngineApi.h $(ENGINE_LIB)
 	@mkdir -p $(EXAMPLE_BIN)
-	$(CXX) -O2 -std=c++20 -Isrc $< -L$(ENGINE_BIN) -laevum_engine -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)' -o $@
+	$(CXX) -O2 -std=c++20 -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
 
 test-examples-gpu: examples
 	$(EXAMPLE_BIN)/fft_plans

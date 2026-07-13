@@ -5,8 +5,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD="$ROOT/tests/build-aevum-reg"
 mkdir -p "$BUILD"
 
-CXX="${CXX:-g++}"
-"$CXX" -std=c++20 -O2 -fPIC -shared \
+CXX="${CXX:-c++}"
+SHARED_FLAGS=(-shared)
+DL_LIBS=(-ldl)
+OPENCL_LIBS=(-lOpenCL)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    SHARED_FLAGS=(-dynamiclib)
+    DL_LIBS=()
+    OPENCL_LIBS=(-framework OpenCL)
+fi
+"$CXX" -std=c++20 -O2 -fPIC "${SHARED_FLAGS[@]}" \
     "$ROOT/tests/aevum_fake_engine.cpp" \
     -o "$BUILD/libaevum_engine_fake.so"
 
@@ -18,7 +26,7 @@ CXX="${CXX:-g++}"
     "$ROOT/src/marin/gpu.cpp" \
     "$ROOT/src/ui/WebGuiServer.cpp" \
     -DAEVUM_ENGINE_DEFAULT_LIB=\"/nonexistent/libaevum_engine.so\" \
-    -pthread -ldl -lOpenCL -lgmpxx -lgmp \
+    -pthread "${DL_LIBS[@]}" "${OPENCL_LIBS[@]}" -lgmpxx -lgmp \
     -o "$BUILD/test_aevum_reg_adapter"
 
 AEVUM_ENGINE_LIB="$BUILD/libaevum_engine_fake.so" "$BUILD/test_aevum_reg_adapter"

@@ -5,16 +5,27 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
 #include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#else
+#include <dlfcn.h>
 #include <unistd.h>
+#endif
 
 #ifndef AEVUM_ENGINE_DEFAULT_LIB
 #define AEVUM_ENGINE_DEFAULT_LIB "/usr/local/lib/prmers/libaevum_engine.so"
@@ -26,6 +37,54 @@
 namespace {
 
 using Handle = void*;
+
+#if defined(_WIN32)
+using NativeLibrary = HMODULE;
+
+std::string library_error_text() {
+    const DWORD code = GetLastError();
+    if (code == 0) return "unknown Windows loader error";
+    char* buffer = nullptr;
+    const DWORD size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                                      FORMAT_MESSAGE_FROM_SYSTEM |
+                                      FORMAT_MESSAGE_IGNORE_INSERTS,
+                                      nullptr, code, 0,
+                                      reinterpret_cast<char*>(&buffer), 0, nullptr);
+    std::string message = size && buffer ? std::string(buffer, size) : "Windows loader error " + std::to_string(code);
+    if (buffer) LocalFree(buffer);
+    while (!message.empty() && (message.back() == '\r' || message.back() == '\n')) message.pop_back();
+    return message;
+}
+
+NativeLibrary open_library(const std::filesystem::path& path) {
+    SetLastError(0);
+    return LoadLibraryW(path.wstring().c_str());
+}
+
+void close_library(NativeLibrary library) {
+    if (library) FreeLibrary(library);
+}
+#else
+using NativeLibrary = void*;
+
+std::string library_error_text() {
+    const char* error = dlerror();
+    return error ? error : "unknown dynamic loader error";
+}
+
+NativeLibrary open_library(const std::filesystem::path& path) {
+    int flags = RTLD_NOW | RTLD_LOCAL;
+#ifdef RTLD_DEEPBIND
+    flags |= RTLD_DEEPBIND;
+#endif
+    dlerror();
+    return dlopen(path.c_str(), flags);
+}
+
+void close_library(NativeLibrary library) {
+    if (library) dlclose(library);
+}
+#endif
 
 struct Api {
     using version_fn = const char* (*)();
@@ -46,7 +105,7 @@ struct Api {
     using sub_u32_fn = int (*)(Handle, std::size_t, uint32_t);
     using equal_fn = int (*)(Handle, std::size_t, std::size_t, int*);
 
-    void* library = nullptr;
+    NativeLibrary library = nullptr;
     std::string path;
     version_fn version = nullptr;
     error_fn last_error = nullptr;
@@ -69,30 +128,63 @@ struct Api {
     equal_fn equal = nullptr;
 
     ~Api() {
-        if (library) dlclose(library);
+        close_library(library);
     }
 
     template <class T>
     T load_symbol(const char* name) {
+#if defined(_WIN32)
+        SetLastError(0);
+        FARPROC symbol = GetProcAddress(library, name);
+        if (!symbol) {
+            throw std::runtime_error(std::string("Aevum plugin missing symbol ") + name + ": " + library_error_text());
+        }
+        return reinterpret_cast<T>(symbol);
+#else
         dlerror();
         void* symbol = dlsym(library, name);
         const char* error = dlerror();
-        if (error || !symbol) throw std::runtime_error(std::string("Aevum plugin missing symbol ") + name);
+        if (error || !symbol) {
+            throw std::runtime_error(std::string("Aevum plugin missing symbol ") + name +
+                                     (error ? std::string(": ") + error : std::string()));
+        }
         return reinterpret_cast<T>(symbol);
+#endif
     }
 
     static std::filesystem::path executable_dir() {
-        std::array<char, 4096> buf{};
-        const ssize_t n = readlink("/proc/self/exe", buf.data(), buf.size() - 1);
-        if (n <= 0) return std::filesystem::current_path();
-        buf[static_cast<std::size_t>(n)] = '\0';
-        return std::filesystem::path(buf.data()).parent_path();
+#if defined(_WIN32)
+        std::vector<wchar_t> buffer(32768);
+        const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0 || static_cast<std::size_t>(length) >= buffer.size()) {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path(std::wstring(buffer.data(), length)).parent_path();
+#elif defined(__APPLE__)
+        uint32_t size = 0;
+        _NSGetExecutablePath(nullptr, &size);
+        if (size == 0) return std::filesystem::current_path();
+        std::vector<char> buffer(static_cast<std::size_t>(size) + 1, '\0');
+        if (_NSGetExecutablePath(buffer.data(), &size) != 0) return std::filesystem::current_path();
+        std::error_code ec;
+        const auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buffer.data()), ec);
+        return (ec ? std::filesystem::path(buffer.data()) : resolved).parent_path();
+#else
+        std::array<char, 4096> buffer{};
+        const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+        if (length <= 0) return std::filesystem::current_path();
+        buffer[static_cast<std::size_t>(length)] = '\0';
+        return std::filesystem::path(buffer.data()).parent_path();
+#endif
     }
 
     std::filesystem::path tune_dir() const {
         if (const char* env = std::getenv("AEVUM_TUNE_DIR")) return std::filesystem::absolute(env);
-        const auto exe_tune = executable_dir() / "third_party/aevum/tune.txt";
+        const auto exe = executable_dir();
+        const auto exe_tune = exe / "third_party/aevum/tune.txt";
         if (std::filesystem::exists(exe_tune)) return exe_tune.parent_path();
+        const auto adjacent_tune = exe / "tune.txt";
+        if (std::filesystem::exists(adjacent_tune)) return adjacent_tune.parent_path();
         const auto source_tune = std::filesystem::path(path).parent_path().parent_path() / "tune.txt";
         if (std::filesystem::exists(source_tune)) return source_tune.parent_path();
         return AEVUM_ENGINE_DEFAULT_TUNE_DIR;
@@ -101,29 +193,33 @@ struct Api {
     Api() {
         std::vector<std::filesystem::path> candidates;
         if (const char* env = std::getenv("AEVUM_ENGINE_LIB")) candidates.emplace_back(env);
-        const auto exe = executable_dir();
-        candidates.emplace_back(exe / "third_party/aevum/build-engine/libaevum_engine.so");
-        candidates.emplace_back(exe / "libaevum_engine.so");
-        candidates.emplace_back(std::filesystem::current_path() / "third_party/aevum/build-engine/libaevum_engine.so");
+        const auto add_candidates = [&](const std::filesystem::path& root) {
+            candidates.emplace_back(root / "third_party/aevum/build-engine/libaevum_engine.so");
+            candidates.emplace_back(root / "third_party/aevum/build-engine/libaevum_engine.dylib");
+            candidates.emplace_back(root / "third_party/aevum/build-engine/aevum_engine.dll");
+            candidates.emplace_back(root / "third_party/aevum/build-engine/libaevum_engine.dll");
+            candidates.emplace_back(root / "libaevum_engine.so");
+            candidates.emplace_back(root / "libaevum_engine.dylib");
+            candidates.emplace_back(root / "aevum_engine.dll");
+            candidates.emplace_back(root / "libaevum_engine.dll");
+        };
+        add_candidates(executable_dir());
+        add_candidates(std::filesystem::current_path());
         candidates.emplace_back(AEVUM_ENGINE_DEFAULT_LIB);
 
-        int flags = RTLD_NOW | RTLD_LOCAL;
-#ifdef RTLD_DEEPBIND
-        flags |= RTLD_DEEPBIND;
-#endif
         std::string errors;
         for (const auto& candidate : candidates) {
             if (candidate.empty()) continue;
-            library = dlopen(candidate.c_str(), flags);
+            library = open_library(candidate);
             if (library) {
                 path = candidate.string();
                 break;
             }
-            const char* e = dlerror();
-            if (e) errors += candidate.string() + ": " + e + "\n";
+            errors += candidate.string() + ": " + library_error_text() + "\n";
         }
         if (!library) {
-            throw std::runtime_error("Cannot load libaevum_engine.so. Build it with ./build_with_aevum_engine.sh or set AEVUM_ENGINE_LIB.\n" + errors);
+            throw std::runtime_error("Cannot load the Aevum engine plugin. Build it with "
+                                     "./build_with_aevum_engine.sh or set AEVUM_ENGINE_LIB.\n" + errors);
         }
 
         version = load_symbol<version_fn>("aevum_engine_version");
@@ -368,7 +464,7 @@ private:
     uint32_t digit_width(std::size_t k) const {
         const uint64_t n = transform_size_;
         const uint64_t step = n - (uint64_t(exponent_) % n);
-        const uint64_t extra = (static_cast<unsigned __int128>(step) * k) % n;
+        const uint64_t extra = (step * static_cast<uint64_t>(k)) % n;
         return static_cast<uint32_t>(uint64_t(exponent_) / n + (extra + step < n ? 1 : 0));
     }
 
@@ -439,23 +535,23 @@ bool aevum_engine_resolve_auto_fft(uint32_t exponent,
                                     std::size_t* transform_size,
                                     std::string* resolved_spec,
                                     std::string* reason) {
-    auto& loaded = api();
-    std::array<char, 96> resolved{};
-    if (!loaded.resolve_fft(exponent, nullptr, resolved.data(), resolved.size())) {
-        if (reason) {
-            const char* detail = loaded.last_error ? loaded.last_error() : nullptr;
-            *reason = detail && *detail ? detail : "no admissible FFT3161 plan";
-        }
-        return false;
-    }
     try {
+        auto& loaded = api();
+        std::array<char, 96> resolved{};
+        if (!loaded.resolve_fft(exponent, nullptr, resolved.data(), resolved.size())) {
+            if (reason) {
+                const char* detail = loaded.last_error ? loaded.last_error() : nullptr;
+                *reason = detail && *detail ? detail : "no admissible FFT3161 plan";
+            }
+            return false;
+        }
         const std::string spec(resolved.data());
         const std::size_t size = transform_size_from_spec(spec);
         if (transform_size) *transform_size = size;
         if (resolved_spec) *resolved_spec = spec;
         return true;
-    } catch (const std::exception& e) {
-        if (reason) *reason = e.what();
+    } catch (const std::exception&) {
+        if (reason) *reason = "Aevum engine plugin unavailable";
         return false;
     }
 }
