@@ -1,4 +1,4 @@
-# PrMers v99.8 — Aevum LL, P-1 low-memory, ECM and validation matrix
+# PrMers v99.8 - Aevum LL, P-1 low-memory, ECM and validation matrix
 
 ## Purpose
 
