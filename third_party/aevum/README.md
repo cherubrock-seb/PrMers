@@ -166,36 +166,6 @@ PrMers/
   third_party/aevum/        optional source checkout or submodule
 ```
 
-The long-term clean layout for public repositories is:
-
-1. publish this project as `cherubrock-seb/aevum-engine`, preferably as a fork of `gwoltman/gpuowl` so GitHub preserves the fork relationship and commit history
-2. keep Aevum under GPLv3
-3. keep PrMers under its existing MIT license for PrMers-authored files
-4. include only the MIT adapter and ABI declarations in PrMers, then fetch Aevum as an optional submodule or external build dependency
-5. when distributing a bundle or binary that includes Aevum, provide the complete corresponding Aevum source and comply with GPLv3
-
-## Publishing the GitHub repository
-
-The cleanest publication method is:
-
-```bash
-git clone https://github.com/gwoltman/gpuowl.git aevum-engine
-cd aevum-engine
-git remote rename origin upstream
-# create your GitHub fork first, then:
-git remote add origin https://github.com/cherubrock-seb/aevum-engine.git
-git checkout -b aevum-engine
-```
-
-Apply the Aevum changes as normal commits, preserve the upstream history, and tag releases using names such as:
-
-```bash
-git tag -a v/aevum/0.3.3 -m "Aevum register engine 0.3.3"
-git push origin aevum-engine --tags
-```
-
-Do not remove existing copyright headers. Keep `LICENSE`, `NOTICE`, `UPSTREAM.md`, `MODIFICATIONS.md`, and `README_GPUOWL.md` in the repository.
-
 ## License
 
 Aevum is licensed under GNU GPL version 3 because it is a modified derivative of GPUOwl/PRPLL. See `LICENSE`.
