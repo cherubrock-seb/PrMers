@@ -144,3 +144,12 @@ The reusable engine is intended for publication at https://github.com/cherubrock
 ## v99.8 compatibility routing
 
 LL-safe, LL-unsafe, LL-safe2, normal P-1, three-register P-1 low-memory, and ECM all retain automatic/forced Aevum support. The one-register P-1 ultra-low-memory fast3 algorithm remains Marin-only by design. Use `tests/run_backend_validation_matrix.sh` to validate every routing combination and produce a shareable report archive. The `full` profile uses deterministic ECM seeds and complete medium-size Aevum/Marin pairs; `PRMERS_MATRIX_CASE_FILTER` can restrict a rerun to one family of failures.
+
+
+## v99.9 strict request semantics
+
+- Automatic selection still falls back to Marin when no admissible FFT3161 plan exists.
+- `-aevum` is strict and exits with code 2 instead of silently using Marin.
+- `M216091` is below the native FFT3161 range; use `M1362763` or larger test cases to exercise Aevum LL.
+- `-llunsafe -marin` is rejected because the legacy internal NTT LL path is not validated.
+- `-pm1-ultralowmem -aevum` is rejected before `App`, OpenCL, and transform allocation.

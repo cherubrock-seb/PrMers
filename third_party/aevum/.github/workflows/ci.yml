@@ -33,7 +33,7 @@ jobs:
         make -O -j "$(nproc)"
         cd build-release
         rm -f -- *.o
-        ./prpll -h
+        ./aevum -h
     - uses: actions/upload-artifact@v7
       if: always()
       with:
@@ -83,7 +83,7 @@ jobs:
         make -O -j $env:NUMBER_OF_PROCESSORS
         cd build-release
         rm *.o
-        .\prpll.exe -h
+        .\aevum.exe -h
     - uses: actions/upload-artifact@v7
       if: always()
       with:
@@ -99,7 +99,7 @@ jobs:
         os: [macos-15-intel, macos-latest]
       fail-fast: false
     env:
-      CXX: g++-15
+      CXX: c++
     steps:
     - uses: actions/checkout@v6
     - name: Install
@@ -107,10 +107,13 @@ jobs:
         $CXX --version
     - name: Script
       run: |
+        make test-host
+        make -j "$(sysctl -n hw.ncpu)" engine-lib
+        make test-engine-api
         make -j "$(sysctl -n hw.ncpu)"
         cd build-release
         rm -f -- *.o
-        ./prpll -h
+        ./aevum -h
     - uses: actions/upload-artifact@v7
       if: always()
       with:

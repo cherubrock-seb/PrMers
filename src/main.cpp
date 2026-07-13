@@ -20,10 +20,16 @@
  * This code is released as free software. 
  */
 #include "core/App.hpp"
+#include "io/CliParser.hpp"
+#include "aevum/EngineAevum.hpp"
 #include <fstream>
 #include <streambuf>
 #include <iostream>
 #include <string>
+#include <vector>
+#include <sstream>
+#include <cstring>
+#include <exception>
 
 class TeeBuf : public std::streambuf {
     std::streambuf* a_;
@@ -79,7 +85,81 @@ struct LogTee {
     }
 };
 
+namespace {
+
+std::vector<std::string> effectiveArguments(int argc, char** argv) {
+    std::vector<std::string> out;
+    out.emplace_back(argc > 0 && argv[0] ? argv[0] : "prmers");
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "-config" && i + 1 < argc) {
+            std::ifstream cfg(argv[++i]);
+            std::string line;
+            while (std::getline(cfg, line)) {
+                std::istringstream iss(line);
+                std::string token;
+                while (iss >> token) out.push_back(token);
+            }
+        } else {
+            out.push_back(arg);
+        }
+    }
+    return out;
+}
+
+int validateCompatibilityBeforeApp(int argc, char** argv) {
+    auto args = effectiveArguments(argc, argv);
+    std::vector<char*> parsed_argv;
+    parsed_argv.reserve(args.size() + 1);
+    for (auto& arg : args) parsed_argv.push_back(arg.data());
+    parsed_argv.push_back(nullptr);
+
+    const auto options = io::CliParser::parse(
+        static_cast<int>(args.size()), parsed_argv.data());
+
+    if (options.pm1_ultralowmem && options.aevum) {
+        std::cerr << "[Backend Compatibility] -pm1-ultralowmem is a Marin fast3-only "
+                     "one-register algorithm and cannot be forced to Aevum. "
+                     "Use automatic mode or -engine-marin.\n";
+        return 2;
+    }
+
+    if (options.mode == "ll" && !options.marin) {
+        std::cerr << "[Backend Compatibility] -llunsafe cannot use the legacy internal "
+                     "PrMers NTT backend selected by -marin because that path is not "
+                     "validated for Lucas-Lehmer. Use automatic mode, -engine-marin, "
+                     "or -aevum.\n";
+        return 2;
+    }
+
+    // A forced backend must be honest.  Resolve the native plan before App
+    // constructs OpenCL contexts and large transform tables whenever the
+    // exponent is available directly from the command line/config file.
+    if (options.aevum && options.aevum_fft_spec.empty() && options.exponent != 0) {
+        std::size_t transform = 0;
+        std::string spec;
+        std::string reason;
+        if (!aevum_engine_resolve_auto_fft(
+                static_cast<std::uint32_t>(options.exponent),
+                &transform, &spec, &reason)) {
+            std::cerr << "[Backend Aevum] Forced Aevum request cannot be satisfied for exponent "
+                      << options.exponent << ": " << reason << ".\n";
+            return 2;
+        }
+    }
+
+    return 0;
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
     LogTee _tee("prmers.log");
-    return core::App(argc, argv).run();
+    if (const int rc = validateCompatibilityBeforeApp(argc, argv); rc != 0) return rc;
+    try {
+        return core::App(argc, argv).run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 2;
+    }
 }

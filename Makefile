@@ -104,6 +104,9 @@ test-gui-state:
 test-aevum-source:
 	bash tests/source_aevum_engine_audit.sh
 
+test-backend-compat: all
+	bash tests/test_backend_compatibility_cli.sh
+
 test-aevum-auto-gpu: all
 	bash tests/run_aevum_auto_gpu_matrix.sh $${AEVUM_TEST_DEVICE:-0}
 

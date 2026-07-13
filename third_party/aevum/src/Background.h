@@ -19,7 +19,7 @@ class Background {
   std::mutex mut;
   std::condition_variable cond;
   bool stopRequested;
-  std::jthread thread;
+  std::thread thread;
 
   void run() {
     std::function<void()> task;
@@ -64,9 +64,12 @@ public:
   }
 
   ~Background() {
-    std::lock_guard lock(mut);
-    stopRequested = true;
+    {
+      std::lock_guard lock(mut);
+      stopRequested = true;
+    }
     cond.notify_all();
+    if (thread.joinable()) { thread.join(); }
   }
 
   void waitEmpty() {

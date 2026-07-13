@@ -100,7 +100,7 @@ extract_actual_backend() {
   if grep -q 'using Aevum engine' "$log"; then echo Aevum; return; fi
   if grep -q 'using Marin engine' "$log"; then echo Marin; return; fi
   if grep -q 'Sampling 100 iterations for IPS estimation' "$log"; then echo Internal-NTT; return; fi
-  if grep -Eq 'Forced Aevum rejected|cannot be forced to Aevum' "$log"; then echo Rejected; return; fi
+  if grep -Eq 'Forced Aevum rejected|cannot be forced to Aevum|Forced Aevum request cannot be satisfied|not validated for Lucas-Lehmer' "$log"; then echo Rejected; return; fi
   echo Unknown
 }
 
@@ -158,7 +158,7 @@ case_group() {
 quick_case() {
   case "$1" in
     prp-small-auto|prp-small-marin|prp-small-internal|prp-medium-aevum|\
-    ll-safe-small-auto|ll-safe-small-marin|ll-safe-small-aevum-fallback|\
+    ll-safe-small-auto|ll-safe-small-marin|ll-safe-small-aevum-reject|\
     ll-safe-medium-aevum|ll-safe-large-auto|\
     pm1-small-vtrace-auto|pm1-lowmem-tiny-auto|pm1-lowmem-medium-aevum|\
     pm1-ultralow-auto|pm1-ultralow-aevum-reject|\
@@ -228,6 +228,12 @@ run_case() {
     status=FAIL; note=required-result-pattern-missing
   elif [[ ",${allowed}," != *",${rc},"* ]]; then
     status=FAIL; note=unexpected-exit
+  elif [[ "$rc" == 137 ]]; then
+    if grep -Eq 'Progress:|Check passed|Check OK|invariant OK|check_on_curve=OK|Stage1|Chunk 1/1' "$log"; then
+      note=timeout-kill-after-useful-progress
+    else
+      status=FAIL; note=timeout-kill-before-useful-progress
+    fi
   fi
 
   if [[ "$status" == PASS ]]; then
@@ -244,15 +250,15 @@ run_case() {
 
 # Exit 1 means a valid completed no-factor/composite result for several modes.
 COMPLETE_RC="0,1"
-SMOKE_RC="0,1,124,130"
+SMOKE_RC="0,1,124,130,137"
 REJECT_RC="2"
 
 # -------------------- PRP --------------------
-run_case prp-small-auto PRP 216091 auto '\[Backend Auto\] PRP: Marin selected' "$MEDIUM" "$COMPLETE_RC" 'probable prime|composite' -- \
+run_case prp-small-auto PRP 216091 auto '\[Backend Auto\] PRP: Marin selected' "$MEDIUM" "$COMPLETE_RC" '"status":"P"|probably prime|probable prime' -- \
   216091 -prp -proof 0
-run_case prp-small-marin PRP 216091 forced-marin '\[Backend Marin\] PRP:' "$MEDIUM" "$COMPLETE_RC" 'probable prime|composite' -- \
+run_case prp-small-marin PRP 216091 forced-marin '\[Backend Marin\] PRP:' "$MEDIUM" "$COMPLETE_RC" '"status":"P"|probably prime|probable prime' -- \
   216091 -prp -proof 0 -engine-marin
-run_case prp-small-internal PRP 216091 internal-ntt 'Sampling 100 iterations for IPS estimation' "$MEDIUM" "$COMPLETE_RC" 'probable prime|composite' -- \
+run_case prp-small-internal PRP 216091 internal-ntt 'Sampling 100 iterations for IPS estimation' "$MEDIUM" "$COMPLETE_RC" '"status":"P"|probably prime|probable prime' -- \
   216091 -prp -proof 0 -marin
 run_case prp-medium-auto PRP 1362763 auto '\[Backend Auto\] PRP: Marin selected' "$SHORT" "$SMOKE_RC" 'Progress:' -- \
   1362763 -prp -proof 0
@@ -268,7 +274,7 @@ run_case ll-safe-small-auto LL-safe 216091 auto '\[Backend Auto\] LL: Marin sele
   216091 -ll
 run_case ll-safe-small-marin LL-safe 216091 forced-marin '\[Backend Marin\] LL:' "$MEDIUM" "$COMPLETE_RC" 'is prime|is composite' -- \
   216091 -ll -engine-marin
-run_case ll-safe-small-aevum-fallback LL-safe 216091 forced-aevum 'using Marin fallback' "$MEDIUM" "$COMPLETE_RC" 'LL-SAFE on .* using Marin engine' -- \
+run_case ll-safe-small-aevum-reject LL-safe 216091 forced-aevum 'Forced Aevum request cannot be satisfied' "$SHORT" "$REJECT_RC" 'No admissible FFT3161 plan|cannot be satisfied' -- \
   216091 -ll -aevum
 run_case ll-safe-medium-aevum LL-safe 1362763 forced-aevum '\[Backend Aevum\] engine::Reg adapter active' "$SHORT" "$SMOKE_RC" 'LL-SAFE on .* using Aevum engine' -- \
   1362763 -ll -aevum
@@ -280,7 +286,7 @@ run_case ll-unsafe-medium-aevum LL-unsafe 1362763 forced-aevum '\[Backend Aevum\
   1362763 -llunsafe -aevum
 run_case ll-unsafe-medium-marin LL-unsafe 1362763 forced-marin '\[Backend Marin\] LL:' "$SHORT" "$SMOKE_RC" 'LL-UNSAFE on .* using Marin engine' -- \
   1362763 -llunsafe -engine-marin
-run_case ll-unsafe-small-internal LL-unsafe 216091 internal-ntt 'Sampling 100 iterations for IPS estimation' "$MEDIUM" "$COMPLETE_RC" 'is prime|is composite' -- \
+run_case ll-unsafe-small-internal-reject LL-unsafe 216091 internal-ntt-rejected 'legacy internal PrMers NTT backend' "$SHORT" "$REJECT_RC" 'not validated for Lucas-Lehmer' -- \
   216091 -llunsafe -marin
 run_case ll-safe2-medium-aevum LL-safe2 1362763 forced-aevum '\[Backend Aevum\] engine::Reg adapter active' "$SHORT" "$SMOKE_RC" 'LL-SAFE2 on .* using Aevum engine' -- \
   1362763 -llsafe2 -aevum
@@ -337,9 +343,9 @@ if [[ "$PROFILE" == full ]]; then
   # Complete medium-size pairs.  These are intentionally duplicated from the
   # smoke cases with a longer timeout so the report can compare final residues,
   # factors and result JSON across real Aevum and Marin executions.
-  run_case prp-medium-aevum-complete PRP 1362763 forced-aevum '\[Backend Aevum\] engine::Reg adapter active' "$COMPLETE" "$COMPLETE_RC" 'probable prime|composite' -- \
+  run_case prp-medium-aevum-complete PRP 1362763 forced-aevum '\[Backend Aevum\] engine::Reg adapter active' "$COMPLETE" "$COMPLETE_RC" '"status":"P"|probably prime|probable prime|composite' -- \
     1362763 -prp -proof 0 -aevum
-  run_case prp-medium-marin-complete PRP 1362763 forced-marin '\[Backend Marin\] PRP:' "$COMPLETE" "$COMPLETE_RC" 'probable prime|composite' -- \
+  run_case prp-medium-marin-complete PRP 1362763 forced-marin '\[Backend Marin\] PRP:' "$COMPLETE" "$COMPLETE_RC" '"status":"P"|probably prime|probable prime|composite' -- \
     1362763 -prp -proof 0 -engine-marin
 
   run_case ll-safe-medium-aevum-complete LL-safe 1362763 forced-aevum '\[Backend Aevum\] engine::Reg adapter active' "$COMPLETE" "$COMPLETE_RC" 'is prime|is composite' -- \
@@ -381,7 +387,7 @@ with open(summary, newline='', encoding='utf-8') as f:
 by_name = {r['name']: r for r in rows if r.get('status') != 'SKIP'}
 groups = {
     'prp-small-result': (['prp-small-auto', 'prp-small-marin', 'prp-small-internal'], ['result_status', 'res64']),
-    'll-safe-small-result': (['ll-safe-small-auto', 'll-safe-small-marin', 'll-safe-small-aevum-fallback'], ['result_status', 'res64']),
+    'll-safe-small-result': (['ll-safe-small-auto', 'll-safe-small-marin'], ['result_status', 'res64']),
     'pm1-small-result': (['pm1-small-vtrace-auto', 'pm1-small-classic-auto'], ['result_status', 'factor']),
     'ecm-tiny-completion': (['ecm-tiny-edwards-auto', 'ecm-tiny-montgomery-auto'], ['result_status']),
     'prp-medium-aevum-vs-marin': (['prp-medium-marin-complete', 'prp-medium-aevum-complete'], ['result_status', 'res64']),

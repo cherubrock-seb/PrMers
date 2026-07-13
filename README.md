@@ -207,7 +207,22 @@ make -j"$(nproc)"
 ```
 
 
-### Backend validation matrix (v99.8)
+
+### Strict backend requests in v99.9
+
+`-aevum` is now strict: when the requested exponent has no admissible FFT3161
+plan, PrMers exits with code 2 instead of silently running Marin. Automatic mode
+continues to choose Marin normally in that situation. For example, `M216091` is
+below the native FFT3161 range, while `M1362763` can be used to exercise the
+forced Aevum LL paths.
+
+The legacy internal NTT option `-marin` is rejected with `-llunsafe`, because
+that historical Lucas-Lehmer path is not validated. Use automatic mode,
+`-engine-marin`, or `-aevum`. The one-register `-pm1-ultralowmem` path remains
+Marin-only and an explicit `-aevum` request is rejected before OpenCL and
+transform allocation.
+
+### Backend validation matrix (v99.9)
 
 The automatic policy remains active for PRP, all Lucas-Lehmer engine paths, normal P-1, 3-register P-1 low-memory, and ECM. Aevum is selected when its FFT3161 transform meets the workload ratio threshold. The historical one-register `-pm1-ultralowmem` algorithm is the only explicit Marin-only compatibility case because it encodes multiply-by-3 through Marin `fast3`; forced `-aevum` is rejected cleanly before plugin allocation.
 

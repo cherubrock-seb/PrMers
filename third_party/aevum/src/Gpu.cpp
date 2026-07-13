@@ -21,6 +21,8 @@
 #include <bitset>
 #include <limits>
 #include <iomanip>
+#include <sstream>
+#include <type_traits>
 #include <array>
 #include <cinttypes>
 #include <cstring>
@@ -174,19 +176,28 @@ string toLiteral(u32 value) { return to_string(value) + 'u'; }
 [[maybe_unused]] string toLiteral(unsigned long long value) { return to_string(value) + "ull"; }
 
 template<typename F>
-string toLiteral(F value) {
+string floatingLiteral(F value) {
+  static_assert(std::is_same_v<F, float> || std::is_same_v<F, double>);
   std::ostringstream ss;
   ss << std::setprecision(numeric_limits<F>::max_digits10) << value;
-  if (sizeof(F) == 4) ss << "f";
+  if constexpr (std::is_same_v<F, float>) ss << "f";
   string s = std::move(ss).str();
 
-  // verify exact roundtrip
+  // Verify an exact round-trip without relying on overload resolution between
+  // integer and floating-point toLiteral() overloads.
   [[maybe_unused]] F back = 0;
-  sscanf(s.c_str(), (sizeof(F) == 4) ? "%f" : "%lf", &back);
+  if constexpr (std::is_same_v<F, float>) {
+    sscanf(s.c_str(), "%f", &back);
+  } else {
+    sscanf(s.c_str(), "%lf", &back);
+  }
   assert(back == value);
-  
+
   return s;
 }
+
+string toLiteral(float value) { return floatingLiteral(value); }
+string toLiteral(double value) { return floatingLiteral(value); }
 
 template<typename T>
 string toLiteral(const vector<T>& v) {

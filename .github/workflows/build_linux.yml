@@ -34,6 +34,7 @@ jobs:
           make test-aevum-default
           make test-gui-state
           make test-aevum-source
+          make test-backend-compat
           make -C third_party/aevum test-engine-api
 
       - name: Package for release

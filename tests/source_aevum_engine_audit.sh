@@ -68,3 +68,8 @@ grep -q 'Aevum engine plugin unavailable' "$ROOT/src/aevum/EngineAevum.cpp"
 grep -q 'third_party/aevum/build-engine/libaevum_engine.so' "$ROOT/.github/workflows/build_mac_os.yml"
 grep -q 'third_party/aevum/build-engine/libaevum_engine.so' "$ROOT/.github/workflows/build_linux.yml"
 echo 'Aevum engine routing, auto policy, GUI and safe factor audit passed'
+
+grep -q 'Forced Aevum request cannot be satisfied' "$ROOT/src/marin/gpu.cpp"
+grep -q 'validateCompatibilityBeforeApp' "$ROOT/src/main.cpp"
+grep -q -- '-llunsafe cannot use the legacy internal' "$ROOT/src/main.cpp"
+grep -q -- '-pm1-ultralowmem is a Marin fast3-only' "$ROOT/src/main.cpp"

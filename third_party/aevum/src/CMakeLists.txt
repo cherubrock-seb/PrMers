@@ -23,11 +23,6 @@ add_executable(prpll
   version.inc
   )
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-  # Real GCC (not clang), needed for 128-bit floats and std::filesystem::path
-  set(CMAKE_CXX_COMPILER g++-14)
-endif()
-
 find_package(OpenCL)
 
 if (${OpenCL_FOUND})

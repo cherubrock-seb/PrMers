@@ -39,6 +39,25 @@ void gpuWorker(GpuCommon shared, i32 instance) {
   }
 }
 
+namespace {
+
+class ThreadJoiner {
+  vector<thread>& threads_;
+
+public:
+  explicit ThreadJoiner(vector<thread>& threads) : threads_(threads) {}
+  ThreadJoiner(const ThreadJoiner&) = delete;
+  ThreadJoiner& operator=(const ThreadJoiner&) = delete;
+
+  ~ThreadJoiner() {
+    for (auto& worker : threads_) {
+      if (worker.joinable()) worker.join();
+    }
+  }
+};
+
+} // namespace
+
 
 #if defined(__MINGW32__) || defined(__MINGW64__) || defined(__MSYS__) // for Windows
 extern int putenv(char *);
@@ -117,7 +136,8 @@ int main(int argc, char **argv) {
       }
     } else {
       {
-        vector<jthread> threads;
+        vector<thread> threads;
+        ThreadJoiner joiner{threads};
         for (int i = 1; i < int(args.workers); ++i) {
           threads.emplace_back(gpuWorker, shared, i);
         }

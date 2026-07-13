@@ -99,12 +99,18 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
             std::string reason;
             if (resolved_transform == 0 &&
                 !aevum_engine_resolve_auto_fft(p, &resolved_transform, &resolved_fft, &reason)) {
-                std::cout << "[Backend Aevum] exponent " << p
-                          << " is below the native FFT3161 range; using Marin fallback ("
-                          << reason << ")." << std::endl;
-                publish(configured == gpu_backend::auto_select ? "Auto" : "Forced Aevum (fallback)",
-                        "Marin", reason, 0, "");
-                return new engine_gpu(p, reg_count, device, verbose);
+                if (configured == gpu_backend::auto_select) {
+                    // Defensive only: the automatic policy normally rejects Aevum
+                    // before reaching this branch when no FFT3161 plan exists.
+                    std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
+                              << ": Marin selected (" << reason << ")." << std::endl;
+                    publish("Auto", "Marin", reason, 0, "");
+                    return new engine_gpu(p, reg_count, device, verbose);
+                }
+                publish("Forced Aevum rejected", "Unavailable", reason, 0, "");
+                throw std::runtime_error(
+                    std::string("Forced Aevum request cannot be satisfied for exponent ") +
+                    std::to_string(p) + ": " + reason);
             }
         }
         engine* created = create_aevum_engine(p, reg_count, device, verbose, fft_spec);

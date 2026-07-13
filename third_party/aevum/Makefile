@@ -43,11 +43,12 @@ else
  endif
 endif
 
-ifneq ($(findstring MINGW, $(HOST_OS)), MINGW)
- COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 -static-libstdc++ -static-libgcc
-else
-# For mingw-64 use this:
- COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 -static-libstdc++ -static-libgcc -static
+COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20
+ifneq ($(HOST_OS),Darwin)
+ COMMON_FLAGS += -static-libstdc++ -static-libgcc
+ ifeq ($(findstring MINGW,$(HOST_OS)),MINGW)
+  COMMON_FLAGS += -static
+ endif
 endif
 # -fext-numeric-literals
 

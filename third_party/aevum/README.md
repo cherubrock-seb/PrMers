@@ -158,14 +158,6 @@ The sample executes repeated `square_mul` operations on the GPU and compares the
 
 PrMers loads Aevum as an optional in-process shared library through a small adapter derived from its existing `engine` interface.
 
-Recommended layout:
-
-```text
-PrMers/
-  src/aevum/EngineAevum.cpp
-  third_party/aevum/        optional source checkout or submodule
-```
-
 ## License
 
 Aevum is licensed under GNU GPL version 3 because it is a modified derivative of GPUOwl/PRPLL. See `LICENSE`.
@@ -180,4 +172,6 @@ Aevum is experimental. It has produced matching PRP residues and correct P-1 res
 
 ## 0.3.4 build identity and portability update
 
-When Aevum is embedded as `third_party/aevum` inside another Git repository, the build reports `v0.3.4` instead of accidentally using the parent repository commit hash. A standalone Aevum checkout still reports its own matching tag or commit identity. The portable macOS shared-library changes are retained; no arithmetic API or GPU kernel semantics changed in 0.3.4.
+When Aevum is embedded as `third_party/aevum` inside another Git repository, the build now reports `v0.3.4` instead of accidentally using the parent repository commit hash. When built from the standalone Aevum repository, a matching tag or the Aevum repository commit identity is used.
+
+The same update keeps the portable macOS shared-library path: AppleClang/libc++ uses the real `std::filesystem` declaration, the linker uses `-dynamiclib`, and the API loader tests do not require `libdl` on macOS. No arithmetic API or GPU kernel semantics changed in 0.3.4.
