@@ -567,6 +567,15 @@ cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
           k->reqWorkGroupSize = val;
         }
       }
+    } else {
+      // CUBIN (binary) module: no PTX text to parse. __launch_bounds__(N) is preserved
+      // as the function's MAX_THREADS_PER_BLOCK attribute; use it when it is a real
+      // bound (unbounded kernels report the device max, e.g. 1024).
+      int maxThreads = 0;
+      if (cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func) == CUDA_SUCCESS
+          && maxThreads > 0 && maxThreads < 1024) {
+        k->reqWorkGroupSize = maxThreads;
+      }
     }
   }
 
@@ -675,7 +684,10 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   ensureContextCurrent();
 
   size_t gs = globalSize[0];
-  size_t ls = localSize ? localSize[0] : 256;
+  // NULL localSize: OpenCL lets the runtime choose, and with reqd_work_group_size the
+  // chosen size must match it. Use the kernel's parsed/queried workgroup size instead of
+  // a blind 256, which breaks kernels compiled with __launch_bounds__ < 256.
+  size_t ls = localSize ? localSize[0] : (k->reqWorkGroupSize > 0 ? (size_t)k->reqWorkGroupSize : 256);
   size_t numBlocks = (gs + ls - 1) / ls;
 
   // Build args array
@@ -744,7 +756,12 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   if (r != CUDA_SUCCESS) {
     const char* errName = nullptr;
     cuGetErrorName(r, &errName);
-    fprintf(stderr, "cuLaunchKernel FAILED for '%s': %s (%d)\n", k->name.c_str(), errName ? errName : "?", (int)r);
+    int maxThreads = -1, regs = -1, shmem = -1;
+    cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func);
+    cuFuncGetAttribute(&regs, CU_FUNC_ATTRIBUTE_NUM_REGS, k->func);
+    cuFuncGetAttribute(&shmem, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, k->func);
+    fprintf(stderr, "cuLaunchKernel FAILED for '%s': %s (%d) | blocks=%zu threads/block=%zu | kernel maxThreads=%d regs=%d shmem=%d\n",
+            k->name.c_str(), errName ? errName : "?", (int)r, numBlocks, ls, maxThreads, regs, shmem);
   }
 
   if (event) *event = nullptr;

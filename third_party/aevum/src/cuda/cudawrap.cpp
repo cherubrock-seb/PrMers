@@ -482,7 +482,18 @@ std::string NvrtcProgram::compile(const std::string& source, const std::string& 
     throw std::runtime_error("NVRTC compilation failed for " + name);
   }
 
-  // Get PTX
+  // Prefer CUBIN (native SASS for the exact sm_ arch): loads via cuModuleLoadData without
+  // driver PTX JIT, so an NVRTC newer than the driver (e.g. 13.3 vs 13.1) still works.
+  // PTX from a newer NVRTC fails with CUDA_ERROR_UNSUPPORTED_PTX_VERSION on older drivers.
+  size_t cubinSize = 0;
+  if (nvrtcGetCUBINSize(prog, &cubinSize) == NVRTC_SUCCESS && cubinSize > 0) {
+    std::string cubin(cubinSize, '\0');
+    NVRTC_CHECK(nvrtcGetCUBIN(prog, cubin.data()));
+    nvrtcDestroyProgram(&prog);
+    return cubin;
+  }
+
+  // Fallback: PTX (e.g. when compiled for a virtual compute_ arch)
   size_t ptxSize;
   NVRTC_CHECK(nvrtcGetPTXSize(prog, &ptxSize));
   std::string ptx(ptxSize, '\0');
