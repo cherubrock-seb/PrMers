@@ -61,9 +61,8 @@ grep -q 'transposeInAppleGlobal' "$ROOT/src/cl/transpose.cl"
 grep -Fq 'K(transpOut, "transpose.cl", "transposeOutAppleGlobal", hN)' "$ROOT/src/Gpu.cpp"
 python3 "$ROOT/tests/apple_global_transpose_test.py"
 
-echo "Aevum source audit passed"
 
-grep -q 'AEVUM_VERSION ?= v0.3.53' "$ROOT/Makefile"
+grep -q 'AEVUM_VERSION ?= v0.3.54' "$ROOT/Makefile"
 grep -q 'OpenCLSourceBuilder.cpp' "$ROOT/Makefile"
 grep -q 'buildMonolithicOpenCLSource' "$ROOT/src/KernelCompiler.cpp"
 grep -q 'clBuildProgram' "$ROOT/src/KernelCompiler.cpp"
@@ -125,3 +124,5 @@ python3 "$ROOT/tests/apple_gf61_maintail_staging_test.py"
 
 grep -Fq 'writeIn(dst, makeWords(E, value));' "$ROOT/src/Gpu.cpp"
 grep -q 'set_u32 uses canonical compact-word upload' "$ROOT/src/EngineApi.cpp"
+
+echo "Aevum source audit passed"
