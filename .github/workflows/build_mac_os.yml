@@ -23,23 +23,69 @@ jobs:
             arch: x86_64
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
+      GMP_VERSION: "6.3.0"
+      GMP_SHA256: "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build GMP for the portable deployment target
         shell: bash
         run: |
           set -euo pipefail
-          export HOMEBREW_NO_AUTO_UPDATE=1
-          if brew list --versions gmp >/dev/null 2>&1; then
-            brew reinstall --build-from-source gmp
-          else
-            brew install --build-from-source gmp
-          fi
-          GMP_PREFIX="$(brew --prefix gmp)"
-          bash scripts/check_macos_minos.sh "$MACOSX_DEPLOYMENT_TARGET" \
+
+          ARCH="${{ matrix.arch }}"
+          JOBS="$(sysctl -n hw.logicalcpu)"
+          ARCHIVE="$RUNNER_TEMP/gmp-${GMP_VERSION}.tar.xz"
+          SOURCE_DIR="$RUNNER_TEMP/gmp-${GMP_VERSION}-source"
+          GMP_PREFIX="$RUNNER_TEMP/gmp-${GMP_VERSION}-${ARCH}"
+
+          case "$ARCH" in
+            arm64)  BUILD_TRIPLE="aarch64-apple-darwin" ;;
+            x86_64) BUILD_TRIPLE="x86_64-apple-darwin" ;;
+            *) echo "Unsupported architecture: $ARCH" >&2; exit 2 ;;
+          esac
+
+          rm -rf "$SOURCE_DIR" "$GMP_PREFIX" "$ARCHIVE"
+
+          # gmplib.org blocks some GitHub runner addresses. Use GNU's mirror,
+          # then verify the official GMP 6.3.0 archive checksum.
+          curl --fail --location --silent --show-error \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            "https://ftpmirror.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" \
+            --output "$ARCHIVE"
+
+          printf '%s  %s\n' "$GMP_SHA256" "$ARCHIVE" | shasum -a 256 --check
+
+          mkdir -p "$SOURCE_DIR"
+          tar -xJf "$ARCHIVE" -C "$SOURCE_DIR" --strip-components=1
+
+          cd "$SOURCE_DIR"
+          export CC=clang
+          export CXX=clang++
+          export CFLAGS="-O3 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          export CXXFLAGS="-O3 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          export LDFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+
+          ./configure \
+            --prefix="$GMP_PREFIX" \
+            --build="$BUILD_TRIPLE" \
+            --enable-cxx \
+            --enable-shared \
+            --disable-static \
+            --with-pic
+
+          make -j"$JOBS"
+          make check
+          make install
+
+          test -f "$GMP_PREFIX/lib/libgmp.10.dylib"
+          test -f "$GMP_PREFIX/lib/libgmpxx.4.dylib"
+          printf 'GMP_PREFIX=%s\n' "$GMP_PREFIX" >> "$GITHUB_ENV"
+
+          bash "$GITHUB_WORKSPACE/scripts/check_macos_minos.sh" \
+            "$MACOSX_DEPLOYMENT_TARGET" \
             "$GMP_PREFIX/lib/libgmp.10.dylib" \
             "$GMP_PREFIX/lib/libgmpxx.4.dylib"
 
@@ -48,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = "${{ matrix.arch }}"
-          GMP_PREFIX="$(brew --prefix gmp)"
+          test -d "${GMP_PREFIX:?GMP_PREFIX was not exported}"
           JOBS="$(sysctl -n hw.logicalcpu)"
           make clean-all || true
           make -j"$JOBS" \
@@ -77,7 +123,7 @@ jobs:
           set -euo pipefail
           ARCH="${{ matrix.arch }}"
           STAGE="$RUNNER_TEMP/prmers-macos-$ARCH"
-          GMP_PREFIX="$(brew --prefix gmp)"
+          test -d "${GMP_PREFIX:?GMP_PREFIX was not exported}"
           rm -rf "$STAGE"
           mkdir -p "$STAGE/kernels" "$STAGE/lib" "$STAGE/scripts" \
                    "$STAGE/third_party/aevum/build-engine"
