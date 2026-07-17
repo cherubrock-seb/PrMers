@@ -1416,6 +1416,133 @@ KERNEL(G_H) tailSquareGF61PairApple(P(T2) data, Trig smallTrig) {
   data61[bIndex] = b;
 }
 
+
+// Fused Apple main-tail stage.  This is the exact composition of the legacy
+// radix, scalar twiddle and global shufl kernels, but each source lane scatters
+// its NH radix outputs directly to their unique shuffled destinations.  No
+// LDS or cross-work-item barrier is used, so the kernel remains compatible
+// with Apple's OpenCL 1.2 to Metal compiler while eliminating two full GF61
+// global-memory round trips per height stage.
+inline GF61 appleTailGF61TwiddleFused(GF61 value, TrigGF61 smallTrig61,
+                                      u32 i, u32 me, u32 f) {
+  if (i == 0) return value;
+  const u32 p = me & ~(f - 1);
+#if TABMUL_CHAIN61
+  GF61 w = TFLOAD(&smallTrig61[p]);
+  GF61 multiplier = w;
+  for (u32 j = 1; j < i; ++j) multiplier = cmul(multiplier, w);
+  return cmul(value, multiplier);
+#else
+  return cmul(value, TFLOAD(&smallTrig61[(i - 1) * G_H + p]));
+#endif
+}
+
+inline void appleTailGF61ScatterFused(P(GF61) dst61, u32 line,
+                                      GF61 value, u32 i, u32 me, u32 f) {
+  const u32 remainder = me & (f - 1);
+  const u32 logical = ((me / f) * RADIX + i) * f + remainder;
+  const u32 outI = logical / G_H;
+  const u32 outMe = logical - outI * G_H;
+  dst61[appleTailGF61LineIndex(line, outI, outMe)] = value;
+}
+
+// First normal-line height stage: scalar transpose load + radix + twiddle +
+// exact shufl permutation.  Apple forces INPLACE=0 and PAD=0 for FFT3161, so
+// source and destination are distinct and every scatter destination is unique.
+KERNEL(G_H) tailSquareGF61LoadStageFusedApple(P(T2) dst, CP(T2) in,
+                                              Trig smallTrig, u32 f) {
+#if PAD_SIZE != 0
+#error Apple fused GF61 main-tail load requires PAD_SIZE=0
+#endif
+  P(GF61) dst61 = (P(GF61)) (dst + DISTGF61);
+  CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 line = appleTailGF61NormalLine(get_group_id(0));
+  const u32 me = get_local_id(0);
+  const u32 sizeY = IN_WG / IN_SIZEX;
+  const u32 x = line % WIDTH;
+  const u32 chunkX = x / IN_SIZEX;
+  const u32 xWithin = x % IN_SIZEX;
+  const u32 middleI = line / WIDTH;
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) {
+    const u32 y = i * G_H + me;
+    const u32 chunkY = y / sizeY;
+    const u32 srcIndex = chunkX * (SMALL_HEIGHT * MIDDLE * IN_SIZEX) +
+                         xWithin * sizeY + middleI * IN_WG + (me % sizeY) +
+                         chunkY * (MIDDLE * IN_WG);
+    u[i] = in61[srcIndex];
+  }
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) {
+    GF61 value = appleTailGF61TwiddleFused(u[i], smallTrig61, i, me, f);
+    appleTailGF61ScatterFused(dst61, line, value, i, me, f);
+  }
+}
+
+// Subsequent normal-line height stage.  It is algebraically identical to
+// tailSquareGF61FftRadixApple + tailSquareGF61FftTwiddleApple +
+// tailSquareGF61FftShuffleApple, with distinct source/destination planes.
+KERNEL(G_H) tailSquareGF61StageFusedApple(CP(T2) src, P(T2) dst,
+                                          Trig smallTrig, u32 f) {
+  CP(GF61) src61 = (CP(GF61)) (src + DISTGF61);
+  P(GF61) dst61 = (P(GF61)) (dst + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 line = appleTailGF61NormalLine(get_group_id(0));
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) u[i] = src61[appleTailGF61LineIndex(line, i, me)];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) {
+    GF61 value = appleTailGF61TwiddleFused(u[i], smallTrig61, i, me, f);
+    appleTailGF61ScatterFused(dst61, line, value, i, me, f);
+  }
+}
+
+// Exact R * pairSq * R composition for the normal lines.  The first element
+// remains in (line,aSlot,me); the reversed second element lives directly at
+// (H-line,NH-1-aSlot,G_H-1-me).  Reading one plane and writing the other makes
+// this race-free and replaces two global permutations plus the in-place pair
+// kernel with a single pass.
+KERNEL(G_H) tailSquareGF61PairCrossFusedApple(CP(T2) src, P(T2) dst,
+                                              Trig smallTrig) {
+  CP(GF61) src61 = (CP(GF61)) (src + DISTGF61);
+  P(GF61) dst61 = (P(GF61)) (dst + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 pairSlots = NH / 2;
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / pairSlots;
+  const u32 pairSlot = group - ordinal * pairSlots;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 side = line > H / 2 ? 1u : 0u;
+  const u32 lineU = side ? H - line : line;
+  const u32 quarter = NH / 4;
+  const u32 i = pairSlot % quarter;
+  const u32 type = pairSlot / quarter;
+  const u32 aSlot = i + type * quarter;
+  const u32 crossLine = H - line;
+  const u32 crossSlot = NH - 1 - aSlot;
+  const u32 me = get_local_id(0);
+  const u32 crossMe = G_H - 1 - me;
+  const u32 heightTrigs = SMALL_HEIGHT;
+#if TAIL_TRIGS61 >= 1
+  GF61 trig = TFLOAD(&smallTrig61[heightTrigs + me]);
+  GF61 mult = TSLOAD(&smallTrig61[heightTrigs + G_H + lineU * 2 + side]);
+  trig = cmul(trig, mult);
+#else
+  GF61 trig = TOLOAD(&smallTrig61[heightTrigs + lineU * G_H * 2 + side * G_H + me]);
+#endif
+  for (u32 j = 0; j < i; ++j) trig = mul_t8(trig);
+  const u32 aIndex = appleTailGF61LineIndex(line, aSlot, me);
+  const u32 bIndex = appleTailGF61LineIndex(crossLine, crossSlot, crossMe);
+  GF61 a = src61[aIndex];
+  GF61 b = src61[bIndex];
+  onePairSq(&a, &b, trig, type);
+  dst61[aIndex] = a;
+  dst61[bIndex] = b;
+}
+
 // The stock member is still present in the C++ object for non-Apple builds.
 // On Apple it is initialized with this signature-compatible no-op so Metal is
 // never asked to create the rejected monolithic tailSquareGF61 pipeline.

@@ -210,6 +210,9 @@ private:
   Kernel ktailSquareGF61FftFinalApple;
   Kernel ktailSquareGF61ReverseCrossApple;
   Kernel ktailSquareGF61PairApple;
+  Kernel ktailSquareGF61LoadStageFusedApple;
+  Kernel ktailSquareGF61StageFusedApple;
+  Kernel ktailSquareGF61PairCrossFusedApple;
   Kernel kfftP31Apple;  // retained as an unused diagnostic fallback
   Kernel kfftP31WeightScalarApple;
   Kernel kfftP31WidthRadixApple;
@@ -453,6 +456,7 @@ public:
 private:
 #if defined(__APPLE__)
   bool apple_stage_finish = false;
+  bool apple_fused_tailsquare_gf61 = true;
   void appleStageFinish();
 #else
   void appleStageFinish() {}

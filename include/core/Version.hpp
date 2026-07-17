@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.54-alpha-v99.60-macos-marin-default-aevum-apple-queue-flush";
+    const std::string PRMERS_VERSION = "4.20.55-alpha-v99.61-aevum-apple-fused-tailsquare-gf61";
 } // namespace core
 
 #endif // VERSION_HPP

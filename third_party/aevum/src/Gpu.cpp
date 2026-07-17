@@ -935,6 +935,12 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
       (hN / nH - SMALL_H / nH * 2) * nH, kernelDefines(K61).c_str()),
   K(ktailSquareGF61PairApple, "tailsquare.cl", "tailSquareGF61PairApple",
       (hN / nH - SMALL_H / nH * 2) * nH / 2, kernelDefines(K61).c_str()),
+  K(ktailSquareGF61LoadStageFusedApple, "tailsquare.cl", "tailSquareGF61LoadStageFusedApple",
+      hN / nH - SMALL_H / nH * 2, kernelDefines(K61).c_str()),
+  K(ktailSquareGF61StageFusedApple, "tailsquare.cl", "tailSquareGF61StageFusedApple",
+      hN / nH - SMALL_H / nH * 2, kernelDefines(K61).c_str()),
+  K(ktailSquareGF61PairCrossFusedApple, "tailsquare.cl", "tailSquareGF61PairCrossFusedApple",
+      (hN / nH - SMALL_H / nH * 2) * nH / 2, kernelDefines(K61).c_str()),
   K(kfftP31Apple,          "fftp.cl", "fftP31Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31WeightScalarApple, "fftp.cl", "fftP31WeightScalarApple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31WidthRadixApple,   "fftp.cl", "fftP31WidthRadixApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
@@ -1043,9 +1049,43 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 {    
 
 #if defined(__APPLE__)
+  apple_fused_tailsquare_gf61 = fft.shape.fft_type == FFT3161 && fft.NTT_GF61 && nH > 1;
   if (const char* value = std::getenv("AEVUM_APPLE_STAGE_FINISH")) {
     apple_stage_finish = *value != '\0' && std::strcmp(value, "0") != 0;
     if (apple_stage_finish) log("Apple Aevum diagnostic: strict staged clFinish serialization enabled.\n");
+  }
+  if (const char* value = std::getenv("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
+    apple_fused_tailsquare_gf61 = !(*value != '\0' && std::strcmp(value, "0") != 0);
+  }
+  if (apple_fused_tailsquare_gf61) {
+    // Apple compiles OpenCL kernels to Metal when clCreateKernel is reached.
+    // Preload all fused kernels before any arithmetic is modified; if the
+    // driver rejects one of them, automatically retain the validated v0.3.53
+    // staged path for this device.
+    try {
+      ktailSquareGF61LoadStageFusedApple.startLoad(&compiler);
+      ktailSquareGF61LoadStageFusedApple.finishLoad();
+      ktailSquareGF61StageFusedApple.startLoad(&compiler);
+      ktailSquareGF61StageFusedApple.finishLoad();
+      ktailSquareGF61PairCrossFusedApple.startLoad(&compiler);
+      ktailSquareGF61PairCrossFusedApple.finishLoad();
+    } catch (const std::exception& e) {
+      apple_fused_tailsquare_gf61 = false;
+      log("Apple Aevum performance: fused GF61 tailSquare unavailable (%s); using validated legacy staging.\n", e.what());
+    } catch (...) {
+      apple_fused_tailsquare_gf61 = false;
+      log("Apple Aevum performance: fused GF61 tailSquare unavailable; using validated legacy staging.\n");
+    }
+  }
+  if (apple_fused_tailsquare_gf61) {
+    u32 stage_count = 0;
+    for (u32 stage = 1; stage < SMALL_H / nH; stage *= nH) ++stage_count;
+    const u32 legacy_dispatches = 6 * stage_count + 6;
+    const u32 fused_dispatches = 2 * stage_count + 3;
+    log("Apple Aevum performance: fused GF61 tailSquare stages enabled (radix+twiddle+shuffle and R-pair-R); normal-tail dispatches %u -> %u.\n",
+        legacy_dispatches, fused_dispatches);
+  } else if (std::getenv("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
+    log("Apple Aevum diagnostic: legacy staged GF61 tailSquare selected by AEVUM_APPLE_TAILSQUARE_LEGACY.\n");
   }
 #endif
 
@@ -1225,6 +1265,9 @@ void Gpu::splitQueue(void) {
       ktailSquareZeroGF61ReverseGlobalApple.setQueue(&auxQueues[which_queue]);
       ktailSquareZeroGF61PairApple.setQueue(&auxQueues[which_queue]);
       ktailSquareZeroGF61WriteDirectApple.setQueue(&auxQueues[which_queue]);
+      ktailSquareGF61LoadStageFusedApple.setQueue(&auxQueues[which_queue]);
+      ktailSquareGF61StageFusedApple.setQueue(&auxQueues[which_queue]);
+      ktailSquareGF61PairCrossFusedApple.setQueue(&auxQueues[which_queue]);
 #endif
       kfftHinGF61.setQueue(&auxQueues[which_queue]);
 #if defined(__APPLE__)
@@ -1334,6 +1377,9 @@ void Gpu::mergeQueue(void) {
     ktailSquareZeroGF61ReverseGlobalApple.setQueue(&queue);
     ktailSquareZeroGF61PairApple.setQueue(&queue);
     ktailSquareZeroGF61WriteDirectApple.setQueue(&queue);
+    ktailSquareGF61LoadStageFusedApple.setQueue(&queue);
+    ktailSquareGF61StageFusedApple.setQueue(&queue);
+    ktailSquareGF61PairCrossFusedApple.setQueue(&queue);
 #endif
     kfftHinGF61.setQueue(&queue);
 #if defined(__APPLE__)
@@ -1536,32 +1582,65 @@ void Gpu::replay(void) {
         if (cache_group == 3) {
 #if defined(__APPLE__)
           if (fft.shape.fft_type == FFT3161) {
-            ktailSquareGF61LoadScalarApple(*out, *in);
-            appleStageFinish();
-            auto runAppleTailGF61Fft = [&]() {
+            const u32 groupSize = SMALL_H / nH;
+            if (apple_fused_tailsquare_gf61 && groupSize > 1) {
+              // First height FFT: fuse transpose load with the first
+              // radix/twiddle/shuffle stage, then use one fused global
+              // scatter kernel per remaining stage.
+              ktailSquareGF61LoadStageFusedApple(*out, *in, bufTrigH, 1u);
+              appleStageFinish();
               Buffer<double> *current = out;
-              const u32 groupSize = SMALL_H / nH;
-              for (u32 stage = 1; stage < groupSize; stage *= nH) {
-                ktailSquareGF61FftRadixApple(*current);
-                appleStageFinish();
-                ktailSquareGF61FftTwiddleApple(*current, bufTrigH, stage);
-                appleStageFinish();
+              for (u32 stage = nH; stage < groupSize; stage *= nH) {
                 Buffer<double> *next = current == out ? in : out;
-                ktailSquareGF61FftShuffleApple(*current, *next, stage);
+                ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);
                 appleStageFinish();
                 current = next;
               }
               ktailSquareGF61FftFinalApple(*current, *out);
               appleStageFinish();
-            };
-            runAppleTailGF61Fft();
-            ktailSquareGF61ReverseCrossApple(*out, *in);
-            appleStageFinish();
-            ktailSquareGF61PairApple(*in, bufTrigH);
-            appleStageFinish();
-            ktailSquareGF61ReverseCrossApple(*in, *out);
-            appleStageFinish();
-            runAppleTailGF61Fft();
+
+              // Exact reverse-pair-reverse composition into the free input
+              // plane.  The second height FFT starts directly from that bank.
+              ktailSquareGF61PairCrossFusedApple(*out, *in, bufTrigH);
+              appleStageFinish();
+              current = in;
+              for (u32 stage = 1; stage < groupSize; stage *= nH) {
+                Buffer<double> *next = current == out ? in : out;
+                ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);
+                appleStageFinish();
+                current = next;
+              }
+              ktailSquareGF61FftFinalApple(*current, *out);
+              appleStageFinish();
+            } else {
+              // Conservative v0.3.53 path.  It remains available for
+              // differential validation with AEVUM_APPLE_TAILSQUARE_LEGACY=1.
+              ktailSquareGF61LoadScalarApple(*out, *in);
+              appleStageFinish();
+              auto runAppleTailGF61FftLegacy = [&]() {
+                Buffer<double> *current = out;
+                for (u32 stage = 1; stage < groupSize; stage *= nH) {
+                  ktailSquareGF61FftRadixApple(*current);
+                  appleStageFinish();
+                  ktailSquareGF61FftTwiddleApple(*current, bufTrigH, stage);
+                  appleStageFinish();
+                  Buffer<double> *next = current == out ? in : out;
+                  ktailSquareGF61FftShuffleApple(*current, *next, stage);
+                  appleStageFinish();
+                  current = next;
+                }
+                ktailSquareGF61FftFinalApple(*current, *out);
+                appleStageFinish();
+              };
+              runAppleTailGF61FftLegacy();
+              ktailSquareGF61ReverseCrossApple(*out, *in);
+              appleStageFinish();
+              ktailSquareGF61PairApple(*in, bufTrigH);
+              appleStageFinish();
+              ktailSquareGF61ReverseCrossApple(*in, *out);
+              appleStageFinish();
+              runAppleTailGF61FftLegacy();
+            }
           } else {
             ktailSquareGF61(*out, *in);
           }

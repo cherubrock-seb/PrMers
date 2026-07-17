@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+python3 "$ROOT/tests/aevum_apple_fused_tailsquare_test.py"
 
 grep -q 'gpu_backend::aevum' "$ROOT/src/marin/gpu.cpp"
 grep -q 'gpu_backend::auto_select' "$ROOT/src/marin/gpu.cpp"
@@ -58,7 +59,7 @@ grep -q 'r2i_2\[N_SZ / 8 + j\]' "$ROOT/include/marin/ocl/kernel.h"
 grep -q 'run_backend_validation_matrix.sh' "$ROOT/Makefile"
 grep -q 'PRMERS_MATRIX_CASE_FILTER' "$ROOT/tests/run_backend_validation_matrix.sh"
 grep -q 'pm1-ultralow-aevum-reject' "$ROOT/tests/run_backend_validation_matrix.sh"
-grep -q 'AEVUM_VERSION ?= v0.3.53' "$ROOT/third_party/aevum/Makefile"
+grep -q 'AEVUM_VERSION ?= v0.3.54' "$ROOT/third_party/aevum/Makefile"
 grep -q -- "--match 'v0.*'" "$ROOT/third_party/aevum/Makefile"
 grep -q '294cc485ac8cf53c8b69144a3039832eda573849' "$ROOT/third_party/aevum/UPSTREAM.md"
 grep -q '#include <filesystem>' "$ROOT/third_party/aevum/src/common.h"

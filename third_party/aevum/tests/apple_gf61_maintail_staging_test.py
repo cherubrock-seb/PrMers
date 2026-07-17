@@ -15,6 +15,9 @@ kernels = [
     "tailSquareGF61FftFinalApple",
     "tailSquareGF61ReverseCrossApple",
     "tailSquareGF61PairApple",
+    "tailSquareGF61LoadStageFusedApple",
+    "tailSquareGF61StageFusedApple",
+    "tailSquareGF61PairCrossFusedApple",
     "tailSquareGF61ApplePlaceholder",
 ]
 for name in kernels:
@@ -31,6 +34,9 @@ required_gpu = [
     "ktailSquareGF61ReverseCrossApple(*out, *in);",
     "ktailSquareGF61PairApple(*in, bufTrigH);",
     "ktailSquareGF61ReverseCrossApple(*in, *out);",
+    "ktailSquareGF61LoadStageFusedApple(*out, *in, bufTrigH, 1u);",
+    "ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);",
+    "ktailSquareGF61PairCrossFusedApple(*out, *in, bufTrigH);",
 ]
 for token in required_gpu:
     assert token in gpu, token
@@ -38,11 +44,16 @@ for token in required_gpu:
 # Apple reuses the existing input/output transform buffers as ping-pong banks.
 assert "Buffer<double> *current = out;" in gpu
 assert "Buffer<double> *next = current == out ? in : out;" in gpu
-assert "runAppleTailGF61Fft();" in gpu
-block_start = gpu.index("ktailSquareGF61LoadScalarApple(*out, *in);")
+assert "runAppleTailGF61FftLegacy" in gpu
+block_start = gpu.index("const u32 groupSize = SMALL_H / nH;")
 block_end = gpu.index("} else {\n            ktailSquareGF61(*out, *in);", block_start)
 block = gpu[block_start:block_end]
-assert block.count("runAppleTailGF61Fft();") == 2
+assert block.count("runAppleTailGF61FftLegacy();") == 2
+assert "apple_fused_tailsquare_gf61 && groupSize > 1" in block
+assert "ktailSquareGF61LoadStageFusedApple" in block
+assert "ktailSquareGF61PairCrossFusedApple" in block
+assert "AEVUM_APPLE_TAILSQUARE_LEGACY" in gpu
+assert "using validated legacy staging" in gpu
 assert "bufAppleTailGF61" not in gpu
 
 # The stock double-wide kernel remains in source and remains selected outside
