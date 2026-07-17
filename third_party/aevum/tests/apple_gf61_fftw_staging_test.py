@@ -19,6 +19,14 @@ kernels = [
     "fftWGF61TwiddleShuffle256Apple",
     "fftWGF61TwiddleShuffle512Apple",
     "fftWGF61WidthFinalApple",
+    "fftWGF61LoadStage1FusedApple",
+    "fftWGF61WidthStageFused1Apple",
+    "fftWGF61WidthStageFused4Apple",
+    "fftWGF61WidthStageFused8Apple",
+    "fftWGF61WidthStageFused16Apple",
+    "fftWGF61WidthStageFused64Apple",
+    "fftWGF61WidthStageFused256Apple",
+    "fftWGF61WidthStageFused512Apple",
 ]
 for name in kernels:
     assert name in fftw, name
@@ -37,6 +45,9 @@ required_gpu = [
     "kfftWGF61TwiddleShuffle16Apple(*alternate, *current);",
     "kfftWGF61WidthFinalApple(*out, *current);",
     "Apple staged GF61 fftW requires distinct input/output buffers",
+    "kfftWGF61LoadStage1FusedApple(*out, *in);",
+    "AEVUM_APPLE_FFTW_V55",
+    "AEVUM_APPLE_FFTW_STAGE_ONLY",
 ]
 for token in required_gpu:
     assert token in gpu, token

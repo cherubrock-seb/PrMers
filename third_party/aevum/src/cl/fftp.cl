@@ -528,6 +528,78 @@ DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle512Apple, 512)
 
 #undef DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE
 
+// Apple v0.3.56: exact composition of WidthRadix + TwiddleShuffle.  Each
+// work-item owns NW values, performs the private radix, applies the stage
+// twiddles, then scatters to unique destinations in the alternate transform
+// buffer.  No LDS or cross-work-item barrier is used.
+#define DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(NAME, STAGE)                       \
+KERNEL(G_W) NAME(P(ulong2) outRaw, CP(ulong2) inRaw,                           \
+                 global const ulong2 *trigRaw) {                               \
+  const u32 line = get_group_id(0);                                             \
+  const u32 me = get_local_id(0);                                                \
+  CP(GF31) in31 = (CP(GF31)) (inRaw + DISTGF31) + line * WIDTH;                 \
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31) + line * WIDTH;                 \
+  TrigGF31 trig31 = (TrigGF31) (trigRaw + DISTWTRIGGF31);                      \
+  GF31 u[NW];                                                                   \
+  for (u32 i = 0; i < NW; ++i) u[i] = in31[i * G_W + me];                      \
+  fft_RADIX(u);                                                                 \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  for (u32 i = 0; i < NW; ++i) {                                                \
+    GF31 v = u[i];                                                              \
+    if (i != 0) v = cmul(v, TFLOAD(&trig31[(i - 1) * G_W + trigBase]));        \
+    const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);             \
+    out31[dst] = v;                                                             \
+  }                                                                             \
+}
+
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused1Apple,   1)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused4Apple,   4)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused8Apple,   8)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused16Apple, 16)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused64Apple, 64)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused256Apple, 256)
+DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED(fftP31WidthStageFused512Apple, 512)
+
+#undef DEFINE_APPLE_GF31_WIDTH_STAGE_FUSED
+
+// More aggressive first stage: exact WeightScalar + fused stage-1 composition.
+// It is preloaded separately; Apple can fall back to the stage-only path if its
+// Metal pipeline compiler rejects the combined weighting arithmetic.
+KERNEL(G_W) fftP31WeightStage1FusedApple(P(ulong2) outRaw, CP(Word2) in,
+                                         global const ulong2 *trigRaw) {
+  const u32 line = get_group_id(0);
+  const u32 me = get_local_id(0);
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31) + line * WIDTH;
+  TrigGF31 trig31 = (TrigGF31) (trigRaw + DISTWTRIGGF31);
+  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * log2_root_two % 31;
+  const u32 step = (bigword_weight_shift + 30) % 31;
+  GF31 u[NW];
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 x = i * G_W + me;
+    const u32 p = line * WIDTH + x;
+    const u32 word_index = (line + BIG_HEIGHT * x) * 2;
+    union { uint2 a; u64 b; } combo;
+    combo.b = comboFracBits(word_index) +
+              make_u64(word_index * step, 0xFFFFFFFF);
+    combo.a[1] %= 31;
+    const u32 shift0 = combo.a[1];
+    combo.b += make_u64(step, FRAC_BPW_HI);
+    combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+    const u32 shift1 = combo.a[1];
+    u[i] = U2(shl(make_Z31(in[p].x), shift0),
+              shl(make_Z31(in[p].y), shift1));
+  }
+  fft_RADIX(u);
+  for (u32 i = 0; i < NW; ++i) {
+    GF31 v = u[i];
+    if (i != 0) v = cmul(v, TFLOAD(&trig31[(i - 1) * G_W + me]));
+    out31[i + me * NW] = v;
+  }
+}
+
 KERNEL(G_W) fftP31WidthFinalApple(P(ulong2) outRaw, CP(ulong2) inRaw) {
   GF31 u31[NW];
   const u32 g = get_group_id(0);
@@ -625,6 +697,71 @@ DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle256Apple, 256)
 DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle512Apple, 512)
 
 #undef DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE
+
+#define DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(NAME, STAGE)                       \
+KERNEL(G_W) NAME(P(ulong2) outRaw, CP(ulong2) inRaw,                           \
+                 global const ulong2 *trigRaw) {                               \
+  const u32 line = get_group_id(0);                                             \
+  const u32 me = get_local_id(0);                                                \
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61) + line * WIDTH;                 \
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + line * WIDTH;                 \
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);                      \
+  GF61 u[NW];                                                                   \
+  for (u32 i = 0; i < NW; ++i) u[i] = in61[i * G_W + me];                      \
+  fft_RADIX(u);                                                                 \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  for (u32 i = 0; i < NW; ++i) {                                                \
+    GF61 v = u[i];                                                              \
+    if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + trigBase]));        \
+    const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);             \
+    out61[dst] = v;                                                             \
+  }                                                                             \
+}
+
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused1Apple,   1)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused4Apple,   4)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused8Apple,   8)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused16Apple, 16)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused64Apple, 64)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused256Apple, 256)
+DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED(fftP61WidthStageFused512Apple, 512)
+
+#undef DEFINE_APPLE_GF61_WIDTH_STAGE_FUSED
+
+KERNEL(G_W) fftP61WeightStage1FusedApple(P(ulong2) outRaw, CP(Word2) in,
+                                         global const ulong2 *trigRaw) {
+  const u32 line = get_group_id(0);
+  const u32 me = get_local_id(0);
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + line * WIDTH;
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);
+  const u32 log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * log2_root_two % 61;
+  const u32 step = (bigword_weight_shift + 60) % 61;
+  GF61 u[NW];
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 x = i * G_W + me;
+    const u32 p = line * WIDTH + x;
+    const u32 word_index = (line + BIG_HEIGHT * x) * 2;
+    union { uint2 a; u64 b; } combo;
+    combo.b = comboFracBits(word_index) +
+              make_u64(word_index * step, 0xFFFFFFFF);
+    combo.a[1] %= 61;
+    const u32 shift0 = combo.a[1];
+    combo.b += make_u64(step, FRAC_BPW_HI);
+    combo.a[1] = adjust_m61_weight_shift(combo.a[1]);
+    const u32 shift1 = combo.a[1];
+    u[i] = U2(shl(make_Z61(in[p].x), shift0),
+              shl(make_Z61(in[p].y), shift1));
+  }
+  fft_RADIX(u);
+  for (u32 i = 0; i < NW; ++i) {
+    GF61 v = u[i];
+    if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + me]));
+    out61[i + me * NW] = v;
+  }
+}
 
 // Final radix can write to a different big buffer.  This avoids an extra copy
 // when the odd number of width stages leaves the current GF61 state in the

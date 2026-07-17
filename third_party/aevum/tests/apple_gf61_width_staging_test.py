@@ -16,7 +16,10 @@ assert "fftP61WidthFinalApple" in cl
 assert "kfftP61WidthRadixApple(*current);" in gpu
 assert "std::swap(current, alternate);" in gpu
 assert "kfftP61WidthFinalApple(*out, *current);" in gpu
-assert "for (u32 stage = 1; stage < width_workgroup; stage *= nW)" in gpu
+assert "for (u32 stage = firstStage; stage < width_workgroup; stage *= nW)" in gpu
+assert "fftP61WidthStageFused1Apple" in cl
+assert "fftP61WeightStage1FusedApple" in cl
+assert "AEVUM_APPLE_FFTP_V55" in gpu
 
 # The new radix and scalar twiddle+shuffle entries must not use LDS/barriers.
 radix_body = cl.split("KERNEL(G_W) fftP61WidthRadixApple", 1)[1].split("#define DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE", 1)[0]

@@ -55,6 +55,7 @@ grep -q 'runGF31();' "$ROOT/src/Gpu.cpp"
 grep -q 'runGF61();' "$ROOT/src/Gpu.cpp"
 ! grep -q 'kfftP31Apple(\*out, in);' "$ROOT/src/Gpu.cpp"
 python3 "$ROOT/tests/apple_gf31_width_staging_test.py"
+python3 "$ROOT/tests/apple_fused_fftp_test.py"
 python3 "$ROOT/tests/apple_plane_isolation_gate_test.py"
 grep -q 'transposeOutAppleGlobal' "$ROOT/src/cl/transpose.cl"
 grep -q 'transposeInAppleGlobal' "$ROOT/src/cl/transpose.cl"
@@ -62,7 +63,7 @@ grep -Fq 'K(transpOut, "transpose.cl", "transposeOutAppleGlobal", hN)' "$ROOT/sr
 python3 "$ROOT/tests/apple_global_transpose_test.py"
 
 
-grep -q 'AEVUM_VERSION ?= v0.3.54' "$ROOT/Makefile"
+grep -q 'AEVUM_VERSION ?= v0.3.56' "$ROOT/Makefile"
 grep -q 'OpenCLSourceBuilder.cpp' "$ROOT/Makefile"
 grep -q 'buildMonolithicOpenCLSource' "$ROOT/src/KernelCompiler.cpp"
 grep -q 'clBuildProgram' "$ROOT/src/KernelCompiler.cpp"
@@ -124,5 +125,10 @@ python3 "$ROOT/tests/apple_gf61_maintail_staging_test.py"
 
 grep -Fq 'writeIn(dst, makeWords(E, value));' "$ROOT/src/Gpu.cpp"
 grep -q 'set_u32 uses canonical compact-word upload' "$ROOT/src/EngineApi.cpp"
+
+grep -q 'tailSquareGF61FinalPairFirstFusedApple' "$ROOT/src/cl/tailsquare.cl"
+grep -q 'ktailSquareGF61FinalPairFirstFusedApple' "$ROOT/src/Gpu.cpp"
+grep -q 'AEVUM_APPLE_TAILSQUARE_V54' "$ROOT/src/Gpu.cpp"
+grep -q 'apple_bridge_fused_tailsquare_gf61' "$ROOT/src/Gpu.h"
 
 echo "Aevum source audit passed"

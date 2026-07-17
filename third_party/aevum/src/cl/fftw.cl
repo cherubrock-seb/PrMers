@@ -184,6 +184,71 @@ DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle512Apple, 512)
 
 #undef DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE
 
+// v0.3.56: exact radix + twiddle + shuffle composition for the Apple GF61
+// inverse width transform.  This removes one full GF61 write/read round trip
+// per width stage without LDS or a cross-work-item barrier.
+#define DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(NAME, STAGE)                        \
+KERNEL(G_W) NAME(P(T2) outRaw, CP(T2) inRaw, global const T2 *trigRaw) {        \
+  const u32 line = get_group_id(0);                                             \
+  const u32 me = get_local_id(0);                                                \
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61) + line * WIDTH;                 \
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + line * WIDTH;                 \
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);                      \
+  GF61 u[NW];                                                                   \
+  for (u32 i = 0; i < NW; ++i) u[i] = in61[i * G_W + me];                      \
+  fft_RADIX(u);                                                                 \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  for (u32 i = 0; i < NW; ++i) {                                                \
+    GF61 v = u[i];                                                              \
+    if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + trigBase]));        \
+    const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);             \
+    out61[dst] = v;                                                             \
+  }                                                                             \
+}
+
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused1Apple,   1)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused4Apple,   4)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused8Apple,   8)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused16Apple, 16)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused64Apple, 64)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused256Apple, 256)
+DEFINE_APPLE_FFTW_GF61_STAGE_FUSED(fftWGF61WidthStageFused512Apple, 512)
+
+#undef DEFINE_APPLE_FFTW_GF61_STAGE_FUSED
+
+// Exact LoadScalar + stage-1 composition.  The host keeps source and
+// destination distinct so the global transpose load remains race-free.
+KERNEL(G_W) fftWGF61LoadStage1FusedApple(P(T2) outRaw, CP(T2) inRaw,
+                                         global const T2 *trigRaw) {
+  const u32 line = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 sizeY = OUT_WG / OUT_SIZEX;
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61);
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + line * WIDTH;
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);
+  GF61 u[NW];
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 middleOutX = line % SMALL_HEIGHT;
+    const u32 chunkX = middleOutX / OUT_SIZEX;
+    const u32 xWithinOutWg = middleOutX % OUT_SIZEX;
+    const u32 middleOutI = line / SMALL_HEIGHT;
+    const u32 chunkY = me / sizeY + i * (G_W / sizeY);
+    const u32 src = chunkX * MIDDLE * WIDTH * OUT_SIZEX
+                  + xWithinOutWg * sizeY
+                  + middleOutI * OUT_WG
+                  + (me % sizeY)
+                  + chunkY * MIDDLE * OUT_WG;
+    u[i] = in61[src];
+  }
+  fft_RADIX(u);
+  for (u32 i = 0; i < NW; ++i) {
+    GF61 v = u[i];
+    if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + me]));
+    out61[i + me * NW] = v;
+  }
+}
+
 KERNEL(G_W) fftWGF61WidthFinalApple(P(T2) outRaw, CP(T2) inRaw) {
   GF61 u[NW];
   const u32 g = get_group_id(0);

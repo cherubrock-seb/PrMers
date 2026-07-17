@@ -184,6 +184,14 @@ private:
   Kernel kfftWGF61TwiddleShuffle256Apple;
   Kernel kfftWGF61TwiddleShuffle512Apple;
   Kernel kfftWGF61WidthFinalApple;
+  Kernel kfftWGF61LoadStage1FusedApple;
+  Kernel kfftWGF61WidthStageFused1Apple;
+  Kernel kfftWGF61WidthStageFused4Apple;
+  Kernel kfftWGF61WidthStageFused8Apple;
+  Kernel kfftWGF61WidthStageFused16Apple;
+  Kernel kfftWGF61WidthStageFused64Apple;
+  Kernel kfftWGF61WidthStageFused256Apple;
+  Kernel kfftWGF61WidthStageFused512Apple;
 #endif
 
   /* Kernels dealing with the FP data and product of NTT primes */
@@ -213,6 +221,7 @@ private:
   Kernel ktailSquareGF61LoadStageFusedApple;
   Kernel ktailSquareGF61StageFusedApple;
   Kernel ktailSquareGF61PairCrossFusedApple;
+  Kernel ktailSquareGF61FinalPairFirstFusedApple;
   Kernel kfftP31Apple;  // retained as an unused diagnostic fallback
   Kernel kfftP31WeightScalarApple;
   Kernel kfftP31WidthRadixApple;
@@ -224,6 +233,14 @@ private:
   Kernel kfftP31TwiddleShuffle256Apple;
   Kernel kfftP31TwiddleShuffle512Apple;
   Kernel kfftP31WidthFinalApple;
+  Kernel kfftP31WeightStage1FusedApple;
+  Kernel kfftP31WidthStageFused1Apple;
+  Kernel kfftP31WidthStageFused4Apple;
+  Kernel kfftP31WidthStageFused8Apple;
+  Kernel kfftP31WidthStageFused16Apple;
+  Kernel kfftP31WidthStageFused64Apple;
+  Kernel kfftP31WidthStageFused256Apple;
+  Kernel kfftP31WidthStageFused512Apple;
   Kernel kfftP61WeightScalarApple;
   Kernel kfftP61WidthRadixApple;
   Kernel kfftP61TwiddleShuffle1Apple;
@@ -234,6 +251,14 @@ private:
   Kernel kfftP61TwiddleShuffle256Apple;
   Kernel kfftP61TwiddleShuffle512Apple;
   Kernel kfftP61WidthFinalApple;
+  Kernel kfftP61WeightStage1FusedApple;
+  Kernel kfftP61WidthStageFused1Apple;
+  Kernel kfftP61WidthStageFused4Apple;
+  Kernel kfftP61WidthStageFused8Apple;
+  Kernel kfftP61WidthStageFused16Apple;
+  Kernel kfftP61WidthStageFused64Apple;
+  Kernel kfftP61WidthStageFused256Apple;
+  Kernel kfftP61WidthStageFused512Apple;
 #endif
   Kernel kCarryA;
   Kernel kCarryAROE;
@@ -457,6 +482,11 @@ private:
 #if defined(__APPLE__)
   bool apple_stage_finish = false;
   bool apple_fused_tailsquare_gf61 = true;
+  bool apple_bridge_fused_tailsquare_gf61 = true;
+  bool apple_fused_fftp_width = true;
+  bool apple_fused_fftp_weight_first = true;
+  bool apple_fused_fftw_width = true;
+  bool apple_fused_fftw_load_first = true;
   void appleStageFinish();
 #else
   void appleStageFinish() {}

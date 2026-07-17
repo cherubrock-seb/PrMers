@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.54
+AEVUM_VERSION ?= v0.3.56
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -189,6 +189,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
 	python3 tests/apple_gf31_width_staging_test.py
+	python3 tests/apple_fused_fftp_test.py
 	python3 tests/apple_gf61_scalar_mapping_test.py
 	python3 tests/apple_gf61_width_staging_test.py
 	python3 tests/apple_gf61_middlein_staging_test.py

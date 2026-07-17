@@ -898,6 +898,14 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftWGF61TwiddleShuffle256Apple, "fftw.cl", "fftWGF61TwiddleShuffle256Apple", hN, kernelDefines(K61).c_str()),
   K(kfftWGF61TwiddleShuffle512Apple, "fftw.cl", "fftWGF61TwiddleShuffle512Apple", hN, kernelDefines(K61).c_str()),
   K(kfftWGF61WidthFinalApple, "fftw.cl", "fftWGF61WidthFinalApple", hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61LoadStage1FusedApple, "fftw.cl", "fftWGF61LoadStage1FusedApple", hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused1Apple,   "fftw.cl", "fftWGF61WidthStageFused1Apple",   hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused4Apple,   "fftw.cl", "fftWGF61WidthStageFused4Apple",   hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused8Apple,   "fftw.cl", "fftWGF61WidthStageFused8Apple",   hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused16Apple,  "fftw.cl", "fftWGF61WidthStageFused16Apple",  hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused64Apple,  "fftw.cl", "fftWGF61WidthStageFused64Apple",  hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused256Apple, "fftw.cl", "fftWGF61WidthStageFused256Apple", hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61WidthStageFused512Apple, "fftw.cl", "fftWGF61WidthStageFused512Apple", hN / nW, kernelDefines(K61).c_str()),
 #else
   K(kfftWGF61,             "fftw.cl", "fftWGF61", hN / nW, kernelDefines(K61).c_str()),
 #endif
@@ -941,6 +949,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
       hN / nH - SMALL_H / nH * 2, kernelDefines(K61).c_str()),
   K(ktailSquareGF61PairCrossFusedApple, "tailsquare.cl", "tailSquareGF61PairCrossFusedApple",
       (hN / nH - SMALL_H / nH * 2) * nH / 2, kernelDefines(K61).c_str()),
+  K(ktailSquareGF61FinalPairFirstFusedApple, "tailsquare.cl", "tailSquareGF61FinalPairFirstFusedApple",
+      (hN / nH - SMALL_H / nH * 2) / 2, kernelDefines(K61).c_str()),
   K(kfftP31Apple,          "fftp.cl", "fftP31Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31WeightScalarApple, "fftp.cl", "fftP31WeightScalarApple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31WidthRadixApple,   "fftp.cl", "fftP31WidthRadixApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
@@ -952,6 +962,14 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftP31TwiddleShuffle256Apple, "fftp.cl", "fftP31TwiddleShuffle256Apple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31TwiddleShuffle512Apple, "fftp.cl", "fftP31TwiddleShuffle512Apple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP31WidthFinalApple,        "fftp.cl", "fftP31WidthFinalApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WeightStage1FusedApple, "fftp.cl", "fftP31WeightStage1FusedApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused1Apple,   "fftp.cl", "fftP31WidthStageFused1Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused4Apple,   "fftp.cl", "fftP31WidthStageFused4Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused8Apple,   "fftp.cl", "fftP31WidthStageFused8Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused16Apple,  "fftp.cl", "fftP31WidthStageFused16Apple",  hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused64Apple,  "fftp.cl", "fftP31WidthStageFused64Apple",  hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused256Apple, "fftp.cl", "fftP31WidthStageFused256Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP31WidthStageFused512Apple, "fftp.cl", "fftP31WidthStageFused512Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61WeightScalarApple, "fftp.cl", "fftP61WeightScalarApple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61WidthRadixApple,   "fftp.cl", "fftP61WidthRadixApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61TwiddleShuffle1Apple,   "fftp.cl", "fftP61TwiddleShuffle1Apple",   hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
@@ -962,6 +980,14 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftP61TwiddleShuffle256Apple, "fftp.cl", "fftP61TwiddleShuffle256Apple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61TwiddleShuffle512Apple, "fftp.cl", "fftP61TwiddleShuffle512Apple", hN, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61WidthFinalApple,    "fftp.cl", "fftP61WidthFinalApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WeightStage1FusedApple, "fftp.cl", "fftP61WeightStage1FusedApple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused1Apple,   "fftp.cl", "fftP61WidthStageFused1Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused4Apple,   "fftp.cl", "fftP61WidthStageFused4Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused8Apple,   "fftp.cl", "fftP61WidthStageFused8Apple",   hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused16Apple,  "fftp.cl", "fftP61WidthStageFused16Apple",  hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused64Apple,  "fftp.cl", "fftP61WidthStageFused64Apple",  hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused256Apple, "fftp.cl", "fftP61WidthStageFused256Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
+  K(kfftP61WidthStageFused512Apple, "fftp.cl", "fftP61WidthStageFused512Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
 #endif
   K(kCarryA,               "carry.cl", "carry", hN / CARRY_LEN, kernelDefines(KALL).c_str()),
   K(kCarryAROE,            "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DROE=1").c_str()),
@@ -1050,18 +1076,165 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
 #if defined(__APPLE__)
   apple_fused_tailsquare_gf61 = fft.shape.fft_type == FFT3161 && fft.NTT_GF61 && nH > 1;
-  if (const char* value = std::getenv("AEVUM_APPLE_STAGE_FINISH")) {
-    apple_stage_finish = *value != '\0' && std::strcmp(value, "0") != 0;
-    if (apple_stage_finish) log("Apple Aevum diagnostic: strict staged clFinish serialization enabled.\n");
+  apple_bridge_fused_tailsquare_gf61 = apple_fused_tailsquare_gf61;
+  auto envEnabled = [](const char* name) {
+    if (const char* value = std::getenv(name)) return *value != '\0' && std::strcmp(value, "0") != 0;
+    return false;
+  };
+  if (envEnabled("AEVUM_APPLE_STAGE_FINISH")) {
+    apple_stage_finish = true;
+    log("Apple Aevum diagnostic: strict staged clFinish serialization enabled.\n");
   }
-  if (const char* value = std::getenv("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
-    apple_fused_tailsquare_gf61 = !(*value != '\0' && std::strcmp(value, "0") != 0);
+  apple_fused_fftp_width = fft.shape.fft_type == FFT3161 && fft.NTT_GF31 && fft.NTT_GF61 && nW > 1;
+  apple_fused_fftp_weight_first = apple_fused_fftp_width;
+  if (envEnabled("AEVUM_APPLE_FFTP_V55")) {
+    apple_fused_fftp_width = false;
+    apple_fused_fftp_weight_first = false;
+  }
+  if (envEnabled("AEVUM_APPLE_FFTP_STAGE_ONLY")) {
+    apple_fused_fftp_weight_first = false;
+  }
+  auto preloadFftpStage = [&](u32 stage, bool gf61) {
+    Kernel* k = nullptr;
+    if (!gf61) {
+      switch (stage) {
+        case 1: k=&kfftP31WidthStageFused1Apple; break;
+        case 4: k=&kfftP31WidthStageFused4Apple; break;
+        case 8: k=&kfftP31WidthStageFused8Apple; break;
+        case 16: k=&kfftP31WidthStageFused16Apple; break;
+        case 64: k=&kfftP31WidthStageFused64Apple; break;
+        case 256: k=&kfftP31WidthStageFused256Apple; break;
+        case 512: k=&kfftP31WidthStageFused512Apple; break;
+      }
+    } else {
+      switch (stage) {
+        case 1: k=&kfftP61WidthStageFused1Apple; break;
+        case 4: k=&kfftP61WidthStageFused4Apple; break;
+        case 8: k=&kfftP61WidthStageFused8Apple; break;
+        case 16: k=&kfftP61WidthStageFused16Apple; break;
+        case 64: k=&kfftP61WidthStageFused64Apple; break;
+        case 256: k=&kfftP61WidthStageFused256Apple; break;
+        case 512: k=&kfftP61WidthStageFused512Apple; break;
+      }
+    }
+    if (!k) throw std::runtime_error("Unsupported Apple fused fftP stage " + std::to_string(stage));
+    k->startLoad(&compiler);
+    k->finishLoad();
+  };
+  const u32 apple_width_workgroup = WIDTH / nW;
+  if (apple_fused_fftp_width) {
+    try {
+      for (u32 stage=1; stage<apple_width_workgroup; stage*=nW) {
+        preloadFftpStage(stage, false);
+        preloadFftpStage(stage, true);
+      }
+    } catch (const std::exception& e) {
+      apple_fused_fftp_width = false;
+      apple_fused_fftp_weight_first = false;
+      log("Apple Aevum performance: fused fftP width stages unavailable (%s); using v0.3.55 split fftP.\n", e.what());
+    } catch (...) {
+      apple_fused_fftp_width = false;
+      apple_fused_fftp_weight_first = false;
+      log("Apple Aevum performance: fused fftP width stages unavailable; using v0.3.55 split fftP.\n");
+    }
+  }
+  if (apple_fused_fftp_weight_first) {
+    try {
+      kfftP31WeightStage1FusedApple.startLoad(&compiler);
+      kfftP31WeightStage1FusedApple.finishLoad();
+      kfftP61WeightStage1FusedApple.startLoad(&compiler);
+      kfftP61WeightStage1FusedApple.finishLoad();
+    } catch (const std::exception& e) {
+      apple_fused_fftp_weight_first = false;
+      log("Apple Aevum performance: fused fftP weight+stage1 unavailable (%s); using stage-only fusion.\n", e.what());
+    } catch (...) {
+      apple_fused_fftp_weight_first = false;
+      log("Apple Aevum performance: fused fftP weight+stage1 unavailable; using stage-only fusion.\n");
+    }
+  }
+  u32 apple_fftp_stages = 0;
+  for (u32 stage=1; stage<apple_width_workgroup; stage*=nW) ++apple_fftp_stages;
+  const u32 apple_fftp_v55_dispatches = 2 * (2 * apple_fftp_stages + 2);
+  const u32 apple_fftp_stage_dispatches = 2 * (apple_fftp_stages + 2);
+  const u32 apple_fftp_turbo_dispatches = 2 * (apple_fftp_stages + 1);
+  if (apple_fused_fftp_weight_first) {
+    log("Apple Aevum performance: fused CRT fftP enabled (weight+stage1 and radix+twiddle+shuffle); dispatches %u -> %u -> %u.\n",
+        apple_fftp_v55_dispatches, apple_fftp_stage_dispatches, apple_fftp_turbo_dispatches);
+  } else if (apple_fused_fftp_width) {
+    log("Apple Aevum performance: fused CRT fftP width stages enabled; dispatches %u -> %u.\n",
+        apple_fftp_v55_dispatches, apple_fftp_stage_dispatches);
+  } else if (envEnabled("AEVUM_APPLE_FFTP_V55")) {
+    log("Apple Aevum diagnostic: v0.3.55 split fftP selected by AEVUM_APPLE_FFTP_V55.\n");
+  }
+  apple_fused_fftw_width = fft.shape.fft_type == FFT3161 && fft.NTT_GF61 && nW > 1;
+  apple_fused_fftw_load_first = apple_fused_fftw_width;
+  if (envEnabled("AEVUM_APPLE_FFTW_V55")) {
+    apple_fused_fftw_width = false;
+    apple_fused_fftw_load_first = false;
+  }
+  if (envEnabled("AEVUM_APPLE_FFTW_STAGE_ONLY")) {
+    apple_fused_fftw_load_first = false;
+  }
+  auto preloadFftwStage = [&](u32 stage) {
+    Kernel* k = nullptr;
+    switch (stage) {
+      case 1: k=&kfftWGF61WidthStageFused1Apple; break;
+      case 4: k=&kfftWGF61WidthStageFused4Apple; break;
+      case 8: k=&kfftWGF61WidthStageFused8Apple; break;
+      case 16: k=&kfftWGF61WidthStageFused16Apple; break;
+      case 64: k=&kfftWGF61WidthStageFused64Apple; break;
+      case 256: k=&kfftWGF61WidthStageFused256Apple; break;
+      case 512: k=&kfftWGF61WidthStageFused512Apple; break;
+    }
+    if (!k) throw std::runtime_error("Unsupported Apple fused fftW stage " + std::to_string(stage));
+    k->startLoad(&compiler);
+    k->finishLoad();
+  };
+  if (apple_fused_fftw_width) {
+    try {
+      for (u32 stage=1; stage<apple_width_workgroup; stage*=nW) preloadFftwStage(stage);
+    } catch (const std::exception& e) {
+      apple_fused_fftw_width = false;
+      apple_fused_fftw_load_first = false;
+      log("Apple Aevum performance: fused GF61 fftW width stages unavailable (%s); using v0.3.55 split fftW.\n", e.what());
+    } catch (...) {
+      apple_fused_fftw_width = false;
+      apple_fused_fftw_load_first = false;
+      log("Apple Aevum performance: fused GF61 fftW width stages unavailable; using v0.3.55 split fftW.\n");
+    }
+  }
+  if (apple_fused_fftw_load_first) {
+    try {
+      kfftWGF61LoadStage1FusedApple.startLoad(&compiler);
+      kfftWGF61LoadStage1FusedApple.finishLoad();
+    } catch (const std::exception& e) {
+      apple_fused_fftw_load_first = false;
+      log("Apple Aevum performance: fused GF61 fftW load+stage1 unavailable (%s); using stage-only fusion.\n", e.what());
+    } catch (...) {
+      apple_fused_fftw_load_first = false;
+      log("Apple Aevum performance: fused GF61 fftW load+stage1 unavailable; using stage-only fusion.\n");
+    }
+  }
+  const u32 apple_fftw_v55_dispatches = 2 * apple_fftp_stages + 2;
+  const u32 apple_fftw_stage_dispatches = apple_fftp_stages + 2;
+  const u32 apple_fftw_turbo_dispatches = apple_fftp_stages + 1;
+  if (apple_fused_fftw_load_first) {
+    log("Apple Aevum performance: fused GF61 fftW enabled (load+stage1 and radix+twiddle+shuffle); dispatches %u -> %u -> %u.\n",
+        apple_fftw_v55_dispatches, apple_fftw_stage_dispatches, apple_fftw_turbo_dispatches);
+  } else if (apple_fused_fftw_width) {
+    log("Apple Aevum performance: fused GF61 fftW width stages enabled; dispatches %u -> %u.\n",
+        apple_fftw_v55_dispatches, apple_fftw_stage_dispatches);
+  } else if (envEnabled("AEVUM_APPLE_FFTW_V55")) {
+    log("Apple Aevum diagnostic: v0.3.55 split GF61 fftW selected by AEVUM_APPLE_FFTW_V55.\n");
+  }
+  if (envEnabled("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
+    apple_fused_tailsquare_gf61 = false;
+    apple_bridge_fused_tailsquare_gf61 = false;
   }
   if (apple_fused_tailsquare_gf61) {
     // Apple compiles OpenCL kernels to Metal when clCreateKernel is reached.
-    // Preload all fused kernels before any arithmetic is modified; if the
-    // driver rejects one of them, automatically retain the validated v0.3.53
-    // staged path for this device.
+    // Preload the v0.3.54 kernels before any arithmetic is modified; if the
+    // driver rejects one of them, retain the validated v0.3.53 staged path.
     try {
       ktailSquareGF61LoadStageFusedApple.startLoad(&compiler);
       ktailSquareGF61LoadStageFusedApple.finishLoad();
@@ -1071,20 +1244,47 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
       ktailSquareGF61PairCrossFusedApple.finishLoad();
     } catch (const std::exception& e) {
       apple_fused_tailsquare_gf61 = false;
+      apple_bridge_fused_tailsquare_gf61 = false;
       log("Apple Aevum performance: fused GF61 tailSquare unavailable (%s); using validated legacy staging.\n", e.what());
     } catch (...) {
       apple_fused_tailsquare_gf61 = false;
+      apple_bridge_fused_tailsquare_gf61 = false;
       log("Apple Aevum performance: fused GF61 tailSquare unavailable; using validated legacy staging.\n");
     }
   }
-  if (apple_fused_tailsquare_gf61) {
-    u32 stage_count = 0;
-    for (u32 stage = 1; stage < SMALL_H / nH; stage *= nH) ++stage_count;
-    const u32 legacy_dispatches = 6 * stage_count + 6;
-    const u32 fused_dispatches = 2 * stage_count + 3;
-    log("Apple Aevum performance: fused GF61 tailSquare stages enabled (radix+twiddle+shuffle and R-pair-R); normal-tail dispatches %u -> %u.\n",
+  if (envEnabled("AEVUM_APPLE_TAILSQUARE_V54")) {
+    apple_bridge_fused_tailsquare_gf61 = false;
+  }
+  if (apple_bridge_fused_tailsquare_gf61) {
+    // v0.3.55 additionally composes final-forward radix, both directional
+    // pairings and the first inverse stage.  Preload it separately so a Metal
+    // compiler rejection falls back to the already validated v0.3.54 path.
+    try {
+      ktailSquareGF61FinalPairFirstFusedApple.startLoad(&compiler);
+      ktailSquareGF61FinalPairFirstFusedApple.finishLoad();
+    } catch (const std::exception& e) {
+      apple_bridge_fused_tailsquare_gf61 = false;
+      log("Apple Aevum performance: bridge-fused GF61 tailSquare unavailable (%s); using v0.3.54 fused staging.\n", e.what());
+    } catch (...) {
+      apple_bridge_fused_tailsquare_gf61 = false;
+      log("Apple Aevum performance: bridge-fused GF61 tailSquare unavailable; using v0.3.54 fused staging.\n");
+    }
+  }
+  u32 stage_count = 0;
+  for (u32 stage = 1; stage < SMALL_H / nH; stage *= nH) ++stage_count;
+  const u32 legacy_dispatches = 6 * stage_count + 6;
+  const u32 fused_dispatches = 2 * stage_count + 3;
+  const u32 bridge_dispatches = 2 * stage_count + 1;
+  if (apple_bridge_fused_tailsquare_gf61) {
+    log("Apple Aevum performance: bridge-fused GF61 tailSquare enabled (final-forward radix + R-pair-R + first inverse stage); normal-tail dispatches %u -> %u -> %u.\n",
+        legacy_dispatches, fused_dispatches, bridge_dispatches);
+  } else if (apple_fused_tailsquare_gf61) {
+    log("Apple Aevum performance: v0.3.54 fused GF61 tailSquare stages enabled; normal-tail dispatches %u -> %u.\n",
         legacy_dispatches, fused_dispatches);
-  } else if (std::getenv("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
+    if (envEnabled("AEVUM_APPLE_TAILSQUARE_V54")) {
+      log("Apple Aevum diagnostic: v0.3.54 fused tailSquare selected by AEVUM_APPLE_TAILSQUARE_V54.\n");
+    }
+  } else if (envEnabled("AEVUM_APPLE_TAILSQUARE_LEGACY")) {
     log("Apple Aevum diagnostic: legacy staged GF61 tailSquare selected by AEVUM_APPLE_TAILSQUARE_LEGACY.\n");
   }
 #endif
@@ -1156,7 +1356,12 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     for (Kernel* k : {&kfftWGF61TwiddleShuffle1Apple, &kfftWGF61TwiddleShuffle4Apple,
                       &kfftWGF61TwiddleShuffle8Apple, &kfftWGF61TwiddleShuffle16Apple,
                       &kfftWGF61TwiddleShuffle64Apple, &kfftWGF61TwiddleShuffle256Apple,
-                      &kfftWGF61TwiddleShuffle512Apple}) {
+                      &kfftWGF61TwiddleShuffle512Apple,
+                      &kfftWGF61LoadStage1FusedApple,
+                      &kfftWGF61WidthStageFused1Apple, &kfftWGF61WidthStageFused4Apple,
+                      &kfftWGF61WidthStageFused8Apple, &kfftWGF61WidthStageFused16Apple,
+                      &kfftWGF61WidthStageFused64Apple, &kfftWGF61WidthStageFused256Apple,
+                      &kfftWGF61WidthStageFused512Apple}) {
       k->setFixedArgs(2, bufTrigW);
     }
 #endif
@@ -1183,7 +1388,17 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
                       &kfftP61TwiddleShuffle1Apple, &kfftP61TwiddleShuffle4Apple,
                       &kfftP61TwiddleShuffle8Apple, &kfftP61TwiddleShuffle16Apple,
                       &kfftP61TwiddleShuffle64Apple, &kfftP61TwiddleShuffle256Apple,
-                      &kfftP61TwiddleShuffle512Apple}) {
+                      &kfftP61TwiddleShuffle512Apple,
+                      &kfftP31WeightStage1FusedApple,
+                      &kfftP31WidthStageFused1Apple, &kfftP31WidthStageFused4Apple,
+                      &kfftP31WidthStageFused8Apple, &kfftP31WidthStageFused16Apple,
+                      &kfftP31WidthStageFused64Apple, &kfftP31WidthStageFused256Apple,
+                      &kfftP31WidthStageFused512Apple,
+                      &kfftP61WeightStage1FusedApple,
+                      &kfftP61WidthStageFused1Apple, &kfftP61WidthStageFused4Apple,
+                      &kfftP61WidthStageFused8Apple, &kfftP61WidthStageFused16Apple,
+                      &kfftP61WidthStageFused64Apple, &kfftP61WidthStageFused256Apple,
+                      &kfftP61WidthStageFused512Apple}) {
       k->setFixedArgs(2, bufTrigW);
     }
 #endif
@@ -1268,6 +1483,7 @@ void Gpu::splitQueue(void) {
       ktailSquareGF61LoadStageFusedApple.setQueue(&auxQueues[which_queue]);
       ktailSquareGF61StageFusedApple.setQueue(&auxQueues[which_queue]);
       ktailSquareGF61PairCrossFusedApple.setQueue(&auxQueues[which_queue]);
+      ktailSquareGF61FinalPairFirstFusedApple.setQueue(&auxQueues[which_queue]);
 #endif
       kfftHinGF61.setQueue(&auxQueues[which_queue]);
 #if defined(__APPLE__)
@@ -1310,6 +1526,14 @@ void Gpu::splitQueue(void) {
       kfftWGF61TwiddleShuffle256Apple.setQueue(&auxQueues[which_queue]);
       kfftWGF61TwiddleShuffle512Apple.setQueue(&auxQueues[which_queue]);
       kfftWGF61WidthFinalApple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61LoadStage1FusedApple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused1Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused4Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused8Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused16Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused64Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused256Apple.setQueue(&auxQueues[which_queue]);
+      kfftWGF61WidthStageFused512Apple.setQueue(&auxQueues[which_queue]);
 #endif
     }
     which_queue++;
@@ -1380,6 +1604,7 @@ void Gpu::mergeQueue(void) {
     ktailSquareGF61LoadStageFusedApple.setQueue(&queue);
     ktailSquareGF61StageFusedApple.setQueue(&queue);
     ktailSquareGF61PairCrossFusedApple.setQueue(&queue);
+    ktailSquareGF61FinalPairFirstFusedApple.setQueue(&queue);
 #endif
     kfftHinGF61.setQueue(&queue);
 #if defined(__APPLE__)
@@ -1422,6 +1647,14 @@ void Gpu::mergeQueue(void) {
     kfftWGF61TwiddleShuffle256Apple.setQueue(&queue);
     kfftWGF61TwiddleShuffle512Apple.setQueue(&queue);
     kfftWGF61WidthFinalApple.setQueue(&queue);
+    kfftWGF61LoadStage1FusedApple.setQueue(&queue);
+    kfftWGF61WidthStageFused1Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused4Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused8Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused16Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused64Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused256Apple.setQueue(&queue);
+    kfftWGF61WidthStageFused512Apple.setQueue(&queue);
 #endif
   }
   if (fft.FFT_FP64 || fft.FFT_FP32) {
@@ -1596,19 +1829,33 @@ void Gpu::replay(void) {
                 appleStageFinish();
                 current = next;
               }
-              ktailSquareGF61FftFinalApple(*current, *out);
-              appleStageFinish();
-
-              // Exact reverse-pair-reverse composition into the free input
-              // plane.  The second height FFT starts directly from that bank.
-              ktailSquareGF61PairCrossFusedApple(*out, *in, bufTrigH);
-              appleStageFinish();
-              current = in;
-              for (u32 stage = 1; stage < groupSize; stage *= nH) {
+              if (apple_bridge_fused_tailsquare_gf61) {
+                // Compose the forward final radix, exact R-pair-R operation
+                // and inverse f=1 stage into one private-register bridge.
                 Buffer<double> *next = current == out ? in : out;
-                ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);
+                ktailSquareGF61FinalPairFirstFusedApple(*current, *next, bufTrigH);
                 appleStageFinish();
                 current = next;
+                for (u32 stage = nH; stage < groupSize; stage *= nH) {
+                  next = current == out ? in : out;
+                  ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);
+                  appleStageFinish();
+                  current = next;
+                }
+              } else {
+                // Validated v0.3.54 path retained for differential testing and
+                // automatic fallback when the bridge kernel is unavailable.
+                ktailSquareGF61FftFinalApple(*current, *out);
+                appleStageFinish();
+                ktailSquareGF61PairCrossFusedApple(*out, *in, bufTrigH);
+                appleStageFinish();
+                current = in;
+                for (u32 stage = 1; stage < groupSize; stage *= nH) {
+                  Buffer<double> *next = current == out ? in : out;
+                  ktailSquareGF61StageFusedApple(*current, *next, bufTrigH, stage);
+                  appleStageFinish();
+                  current = next;
+                }
               }
               ktailSquareGF61FftFinalApple(*current, *out);
               appleStageFinish();
@@ -1807,26 +2054,48 @@ void Gpu::replay(void) {
 #if defined(__APPLE__)
           if (fft.shape.fft_type == FFT3161) {
             if (out == in) throw std::runtime_error("Apple staged GF61 fftW requires distinct input/output buffers");
-            kfftWGF61LoadScalarApple(*out, *in);
-            appleStageFinish();
             Buffer<double>* current = out;
             Buffer<double>* alternate = in;
             const u32 width_workgroup = WIDTH / nW;
-            for (u32 stage = 1; stage < width_workgroup; stage *= nW) {
-              kfftWGF61WidthRadixApple(*current);
+            u32 firstStage = 1;
+            if (apple_fused_fftw_load_first) {
+              kfftWGF61LoadStage1FusedApple(*out, *in);
               appleStageFinish();
-              switch (stage) {
-                case 1:   kfftWGF61TwiddleShuffle1Apple(*alternate, *current); break;
-                case 4:   kfftWGF61TwiddleShuffle4Apple(*alternate, *current); break;
-                case 8:   kfftWGF61TwiddleShuffle8Apple(*alternate, *current); break;
-                case 16:  kfftWGF61TwiddleShuffle16Apple(*alternate, *current); break;
-                case 64:  kfftWGF61TwiddleShuffle64Apple(*alternate, *current); break;
-                case 256: kfftWGF61TwiddleShuffle256Apple(*alternate, *current); break;
-                case 512: kfftWGF61TwiddleShuffle512Apple(*alternate, *current); break;
-                default:
-                  throw std::runtime_error("Unsupported Apple GF61 fftW width stage " + std::to_string(stage));
+              current = out;
+              alternate = in;
+              firstStage = nW;
+            } else {
+              kfftWGF61LoadScalarApple(*out, *in);
+              appleStageFinish();
+            }
+            for (u32 stage = firstStage; stage < width_workgroup; stage *= nW) {
+              if (apple_fused_fftw_width) {
+                switch (stage) {
+                  case 1:   kfftWGF61WidthStageFused1Apple(*alternate, *current); break;
+                  case 4:   kfftWGF61WidthStageFused4Apple(*alternate, *current); break;
+                  case 8:   kfftWGF61WidthStageFused8Apple(*alternate, *current); break;
+                  case 16:  kfftWGF61WidthStageFused16Apple(*alternate, *current); break;
+                  case 64:  kfftWGF61WidthStageFused64Apple(*alternate, *current); break;
+                  case 256: kfftWGF61WidthStageFused256Apple(*alternate, *current); break;
+                  case 512: kfftWGF61WidthStageFused512Apple(*alternate, *current); break;
+                  default: throw std::runtime_error("Unsupported Apple fused GF61 fftW width stage " + std::to_string(stage));
+                }
+                appleStageFinish();
+              } else {
+                kfftWGF61WidthRadixApple(*current);
+                appleStageFinish();
+                switch (stage) {
+                  case 1:   kfftWGF61TwiddleShuffle1Apple(*alternate, *current); break;
+                  case 4:   kfftWGF61TwiddleShuffle4Apple(*alternate, *current); break;
+                  case 8:   kfftWGF61TwiddleShuffle8Apple(*alternate, *current); break;
+                  case 16:  kfftWGF61TwiddleShuffle16Apple(*alternate, *current); break;
+                  case 64:  kfftWGF61TwiddleShuffle64Apple(*alternate, *current); break;
+                  case 256: kfftWGF61TwiddleShuffle256Apple(*alternate, *current); break;
+                  case 512: kfftWGF61TwiddleShuffle512Apple(*alternate, *current); break;
+                  default: throw std::runtime_error("Unsupported Apple GF61 fftW width stage " + std::to_string(stage));
+                }
+                appleStageFinish();
               }
-              appleStageFinish();
               std::swap(current, alternate);
             }
             if (current == out) {
@@ -1871,24 +2140,47 @@ void Gpu::fftP(Buffer<double>& buf, Buffer<Word>& in) {
     const u32 width_workgroup = WIDTH / nW;
 
     auto runGF31 = [&]() {
-      kfftP31WeightScalarApple(*out, in);
-      appleStageFinish();
       Buffer<double>* current = out;
       Buffer<double>* next = alternate;
-      for (u32 stage = 1; stage < width_workgroup; stage *= nW) {
-        kfftP31WidthRadixApple(*current);
+      u32 firstStage = 1;
+      if (apple_fused_fftp_weight_first) {
+        kfftP31WeightStage1FusedApple(*alternate, in);
         appleStageFinish();
-        switch (stage) {
-          case 1:   kfftP31TwiddleShuffle1Apple(*next, *current); break;
-          case 4:   kfftP31TwiddleShuffle4Apple(*next, *current); break;
-          case 8:   kfftP31TwiddleShuffle8Apple(*next, *current); break;
-          case 16:  kfftP31TwiddleShuffle16Apple(*next, *current); break;
-          case 64:  kfftP31TwiddleShuffle64Apple(*next, *current); break;
-          case 256: kfftP31TwiddleShuffle256Apple(*next, *current); break;
-          case 512: kfftP31TwiddleShuffle512Apple(*next, *current); break;
-          default: throw std::runtime_error("Unsupported Apple GF31 width stage " + std::to_string(stage));
+        current = alternate;
+        next = out;
+        firstStage = nW;
+      } else {
+        kfftP31WeightScalarApple(*out, in);
+        appleStageFinish();
+      }
+      for (u32 stage = firstStage; stage < width_workgroup; stage *= nW) {
+        if (apple_fused_fftp_width) {
+          switch (stage) {
+            case 1:   kfftP31WidthStageFused1Apple(*next, *current); break;
+            case 4:   kfftP31WidthStageFused4Apple(*next, *current); break;
+            case 8:   kfftP31WidthStageFused8Apple(*next, *current); break;
+            case 16:  kfftP31WidthStageFused16Apple(*next, *current); break;
+            case 64:  kfftP31WidthStageFused64Apple(*next, *current); break;
+            case 256: kfftP31WidthStageFused256Apple(*next, *current); break;
+            case 512: kfftP31WidthStageFused512Apple(*next, *current); break;
+            default: throw std::runtime_error("Unsupported Apple fused GF31 width stage " + std::to_string(stage));
+          }
+          appleStageFinish();
+        } else {
+          kfftP31WidthRadixApple(*current);
+          appleStageFinish();
+          switch (stage) {
+            case 1:   kfftP31TwiddleShuffle1Apple(*next, *current); break;
+            case 4:   kfftP31TwiddleShuffle4Apple(*next, *current); break;
+            case 8:   kfftP31TwiddleShuffle8Apple(*next, *current); break;
+            case 16:  kfftP31TwiddleShuffle16Apple(*next, *current); break;
+            case 64:  kfftP31TwiddleShuffle64Apple(*next, *current); break;
+            case 256: kfftP31TwiddleShuffle256Apple(*next, *current); break;
+            case 512: kfftP31TwiddleShuffle512Apple(*next, *current); break;
+            default: throw std::runtime_error("Unsupported Apple GF31 width stage " + std::to_string(stage));
+          }
+          appleStageFinish();
         }
-        appleStageFinish();
         std::swap(current, next);
       }
       if (current == out) kfftP31WidthRadixApple(*out);
@@ -1897,24 +2189,47 @@ void Gpu::fftP(Buffer<double>& buf, Buffer<Word>& in) {
     };
 
     auto runGF61 = [&]() {
-      kfftP61WeightScalarApple(*out, in);
-      appleStageFinish();
       Buffer<double>* current = out;
       Buffer<double>* next = alternate;
-      for (u32 stage = 1; stage < width_workgroup; stage *= nW) {
-        kfftP61WidthRadixApple(*current);
+      u32 firstStage = 1;
+      if (apple_fused_fftp_weight_first) {
+        kfftP61WeightStage1FusedApple(*alternate, in);
         appleStageFinish();
-        switch (stage) {
-          case 1:   kfftP61TwiddleShuffle1Apple(*next, *current); break;
-          case 4:   kfftP61TwiddleShuffle4Apple(*next, *current); break;
-          case 8:   kfftP61TwiddleShuffle8Apple(*next, *current); break;
-          case 16:  kfftP61TwiddleShuffle16Apple(*next, *current); break;
-          case 64:  kfftP61TwiddleShuffle64Apple(*next, *current); break;
-          case 256: kfftP61TwiddleShuffle256Apple(*next, *current); break;
-          case 512: kfftP61TwiddleShuffle512Apple(*next, *current); break;
-          default: throw std::runtime_error("Unsupported Apple GF61 width stage " + std::to_string(stage));
+        current = alternate;
+        next = out;
+        firstStage = nW;
+      } else {
+        kfftP61WeightScalarApple(*out, in);
+        appleStageFinish();
+      }
+      for (u32 stage = firstStage; stage < width_workgroup; stage *= nW) {
+        if (apple_fused_fftp_width) {
+          switch (stage) {
+            case 1:   kfftP61WidthStageFused1Apple(*next, *current); break;
+            case 4:   kfftP61WidthStageFused4Apple(*next, *current); break;
+            case 8:   kfftP61WidthStageFused8Apple(*next, *current); break;
+            case 16:  kfftP61WidthStageFused16Apple(*next, *current); break;
+            case 64:  kfftP61WidthStageFused64Apple(*next, *current); break;
+            case 256: kfftP61WidthStageFused256Apple(*next, *current); break;
+            case 512: kfftP61WidthStageFused512Apple(*next, *current); break;
+            default: throw std::runtime_error("Unsupported Apple fused GF61 width stage " + std::to_string(stage));
+          }
+          appleStageFinish();
+        } else {
+          kfftP61WidthRadixApple(*current);
+          appleStageFinish();
+          switch (stage) {
+            case 1:   kfftP61TwiddleShuffle1Apple(*next, *current); break;
+            case 4:   kfftP61TwiddleShuffle4Apple(*next, *current); break;
+            case 8:   kfftP61TwiddleShuffle8Apple(*next, *current); break;
+            case 16:  kfftP61TwiddleShuffle16Apple(*next, *current); break;
+            case 64:  kfftP61TwiddleShuffle64Apple(*next, *current); break;
+            case 256: kfftP61TwiddleShuffle256Apple(*next, *current); break;
+            case 512: kfftP61TwiddleShuffle512Apple(*next, *current); break;
+            default: throw std::runtime_error("Unsupported Apple GF61 width stage " + std::to_string(stage));
+          }
+          appleStageFinish();
         }
-        appleStageFinish();
         std::swap(current, next);
       }
       if (current == out) kfftP61WidthRadixApple(*out);
