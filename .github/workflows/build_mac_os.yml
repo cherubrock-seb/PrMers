@@ -134,9 +134,21 @@ jobs:
              "$STAGE/third_party/aevum/build-engine/"
           cp third_party/aevum/tune.txt "$STAGE/third_party/aevum/"
           cp third_party/aevum/build-tests/aevum-engine-api-load-test "$STAGE/scripts/"
-          cp scripts/diagnose_aevum_macos.sh scripts/fix_macos_download.sh \
-             scripts/check_macos_minos.sh "$STAGE/scripts/"
-          cp README_V99.11_MACOS_PORTABLE_AEVUM.md "$STAGE/"
+          cp scripts/check_macos_minos.sh "$STAGE/scripts/"
+
+          # Optional support files must not block package creation.
+          for optional_file in \
+            scripts/diagnose_aevum_macos.sh \
+            scripts/fix_macos_download.sh \
+            README_V99.11_MACOS_PORTABLE_AEVUM.md; do
+            if [[ -f "$optional_file" ]]; then
+              if [[ "$optional_file" == scripts/* ]]; then
+                cp "$optional_file" "$STAGE/scripts/"
+              else
+                cp "$optional_file" "$STAGE/"
+              fi
+            fi
+          done
 
           cp -L "$GMP_PREFIX/lib/libgmp.10.dylib" "$STAGE/lib/"
           cp -L "$GMP_PREFIX/lib/libgmpxx.4.dylib" "$STAGE/lib/"
