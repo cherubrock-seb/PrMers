@@ -13,6 +13,7 @@ jobs:
   build-macos:
     name: macOS ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -64,8 +65,10 @@ jobs:
           cd "$SOURCE_DIR"
           export CC=clang
           export CXX=clang++
-          export CFLAGS="-O3 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
-          export CXXFLAGS="-O3 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          # GMP's arithmetic tests expose an AppleClang x86_64 failure at -O3.
+          # Use the conservative optimization level normally expected by GMP.
+          export CFLAGS="-O2 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
+          export CXXFLAGS="-O2 -mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
           export LDFLAGS="-mmacosx-version-min=${MACOSX_DEPLOYMENT_TARGET}"
 
           ./configure \
@@ -77,7 +80,17 @@ jobs:
             --with-pic
 
           make -j"$JOBS"
-          make check
+
+          # Run the GMP suite in parallel. Print useful logs immediately
+          # instead of leaving an apparently stalled multi-hour job.
+          if ! make -j"$JOBS" check; then
+            echo "::error::GMP self-tests failed on ${ARCH}"
+            find "$SOURCE_DIR" -type f \
+              \( -name 'test-suite.log' -o -name 't-toom32.log' \) \
+              -print -exec tail -n 200 {} \;
+            exit 1
+          fi
+
           make install
 
           test -f "$GMP_PREFIX/lib/libgmp.10.dylib"
