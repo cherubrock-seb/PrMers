@@ -406,6 +406,243 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
 
 #elif FFT_TYPE == FFT3161
 
+
+#if defined(AEVUM_APPLE_SPLIT_FFTP)
+
+// Apple OpenCL lowers every kernel entry point separately to a Metal compute
+// pipeline. The combined FFT3161 fftP entry is too large for the legacy Apple
+// translator even though clBuildProgram accepts the source. Keep the exact
+// same data layout but expose one compact entry point per CRT modulus.
+KERNEL(G_W) fftP31Apple(P(ulong2) outRaw, CP(Word2) in, global const ulong2 *trigRaw) {
+  local GF31 lds31[LDS_BYTES / sizeof(GF31)];
+  GF31 u31[NW];
+
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31);
+  TrigGF31 smallTrig31 = (TrigGF31) (trigRaw + DISTWTRIGGF31);
+  in += g * WIDTH;
+
+  const u32 word_index = (me * BIG_HEIGHT + g) * 2;
+  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 31;
+  const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 30) % 31;
+
+  union { uint2 a; u64 b; } combo;
+  const u64 combo_step = make_u64(bigword_weight_shift_minus1, FRAC_BPW_HI);
+  const u64 combo_bigstep =
+      (comboFracBits(G_W * BIG_HEIGHT * 2 - 1) +
+       make_u64((G_W * BIG_HEIGHT * 2 - 1) * bigword_weight_shift_minus1, 0)) %
+      (31ULL << 32);
+  combo.b = comboFracBits(word_index) +
+            make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
+  combo.a[1] %= 31;
+
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 p = G_W * i + me;
+    const u32 shift0 = combo.a[1];
+    combo.b += combo_step;
+    combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+    const u32 shift1 = combo.a[1];
+    u31[i] = U2(shl(make_Z31(in[p].x), shift0),
+                shl(make_Z31(in[p].y), shift1));
+    combo.b += combo_bigstep;
+    combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+  }
+
+  fft_WIDTH(lds31, u31, smallTrig31, 1, me);
+  writeCarryFusedLine(u31, out31, g, me);
+}
+
+
+// The grouped GF31 fftP entry still uses LDS and is the only Apple fftP
+// component whose result remained unstable in the M2 stage trace.  Use the
+// same exact scalar weighting plus global radix/twiddle/shuffle decomposition
+// as GF61.  Every destination is written exactly once, no local memory is used,
+// and the final GF31 plane is returned to the original output buffer.
+KERNEL(256) fftP31WeightScalarApple(P(ulong2) outRaw, CP(Word2) in) {
+  const u32 p = get_global_id(0);
+  const u32 line = p / WIDTH;
+  const u32 x = p - line * WIDTH;
+  const u32 word_index = (line + BIG_HEIGHT * x) * 2;
+
+  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * log2_root_two % 31;
+  const u32 bigword_weight_shift_minus1 =
+      (bigword_weight_shift + 30) % 31;
+
+  union { uint2 a; u64 b; } combo;
+  combo.b = comboFracBits(word_index) +
+            make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
+  combo.a[1] %= 31;
+  const u32 shift0 = combo.a[1];
+
+  combo.b += make_u64(bigword_weight_shift_minus1, FRAC_BPW_HI);
+  combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+  const u32 shift1 = combo.a[1];
+
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31);
+  out31[p] = U2(shl(make_Z31(in[p].x), shift0),
+                 shl(make_Z31(in[p].y), shift1));
+}
+
+KERNEL(G_W) fftP31WidthRadixApple(P(ulong2) ioRaw) {
+  GF31 u31[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  P(GF31) io31 = (P(GF31)) (ioRaw + DISTGF31) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u31[i] = io31[i * G_W];
+  fft_RADIX(u31);
+  for (u32 i = 0; i < NW; ++i) io31[i * G_W] = u31[i];
+}
+
+#define DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(NAME, STAGE)                         \
+KERNEL(G_W) NAME(P(ulong2) outRaw, CP(ulong2) inRaw,                           \
+                 global const ulong2 *trigRaw) {                               \
+  const u32 p = get_global_id(0);                                               \
+  const u32 line = p / WIDTH;                                                   \
+  const u32 x = p - line * WIDTH;                                               \
+  const u32 i = x / G_W;                                                        \
+  const u32 me = x - i * G_W;                                                   \
+  CP(GF31) in31 = (CP(GF31)) (inRaw + DISTGF31);                               \
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31);                               \
+  TrigGF31 trig31 = (TrigGF31) (trigRaw + DISTWTRIGGF31);                      \
+  GF31 v = in31[p];                                                             \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  if (i != 0) v = cmul(v, TFLOAD(&trig31[(i - 1) * G_W + trigBase]));          \
+  const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);               \
+  out31[line * WIDTH + dst] = v;                                                \
+}
+
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle1Apple,   1)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle4Apple,   4)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle8Apple,   8)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle16Apple, 16)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle64Apple, 64)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle256Apple, 256)
+DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE(fftP31TwiddleShuffle512Apple, 512)
+
+#undef DEFINE_APPLE_GF31_TWIDDLE_SHUFFLE
+
+KERNEL(G_W) fftP31WidthFinalApple(P(ulong2) outRaw, CP(ulong2) inRaw) {
+  GF31 u31[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  CP(GF31) in31 = (CP(GF31)) (inRaw + DISTGF31) + g * WIDTH + me;
+  P(GF31) out31 = (P(GF31)) (outRaw + DISTGF31) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u31[i] = in31[i * G_W];
+  fft_RADIX(u31);
+  for (u32 i = 0; i < NW; ++i) out31[i * G_W] = u31[i];
+}
+
+// Apple's Metal pipeline compiler also rejects the grouped GF61 weighting
+// kernel.  Use one work-item per Word2.  With PAD=0 (the Apple default), the
+// carry-fused line index is exactly the flat input index.  The logical FFT word
+// order is the transpose q = line + BIG_HEIGHT * x, where line=p/WIDTH and
+// x=p%WIDTH.  This is algebraically identical to the grouped NW loop above but
+// removes the private GF61[NW] array, the loop, and writeCarryFusedLine.
+KERNEL(256) fftP61WeightScalarApple(P(ulong2) outRaw, CP(Word2) in) {
+  const u32 p = get_global_id(0);          // Flat Word2 / carry-fused index.
+  const u32 line = p / WIDTH;
+  const u32 x = p - line * WIDTH;
+  const u32 word_index = (line + BIG_HEIGHT * x) * 2;
+
+  const u32 log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * log2_root_two % 61;
+  const u32 bigword_weight_shift_minus1 =
+      (bigword_weight_shift + 60) % 61;
+
+  union { uint2 a; u64 b; } combo;
+  combo.b = comboFracBits(word_index) +
+            make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
+  combo.a[1] %= 61;
+  const u32 shift0 = combo.a[1];
+
+  combo.b += make_u64(bigword_weight_shift_minus1, FRAC_BPW_HI);
+  combo.a[1] = adjust_m61_weight_shift(combo.a[1]);
+  const u32 shift1 = combo.a[1];
+
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61);
+  out61[p] = U2(shl(make_Z61(in[p].x), shift0),
+                 shl(make_Z61(in[p].y), shift1));
+}
+
+// On the tested Apple OpenCL-to-Metal stack, this particular fftP width stage
+// exceeded the pipeline compiler when GF61 arithmetic, twiddles and LDS shuffle
+// were all in one entry point. This is not a general prohibition on LDS: the
+// middle/tail kernels keep their original LDS paths. Reproduce fft_common here
+// with compact stages:
+//
+//   1. one in-place radix kernel operates on the NW values owned by a lane;
+//   2. one scalar kernel applies the twiddle and writes the exact shufl
+//      permutation into the alternate big buffer.
+//
+// The scalar destination below is the flat LDS index used by shufl's generic
+// implementation.  Interpreting that flat index as [register][lane] gives
+// exactly the u[] state consumed by the following radix stage.
+KERNEL(G_W) fftP61WidthRadixApple(P(ulong2) ioRaw) {
+  GF61 u61[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  P(GF61) io61 = (P(GF61)) (ioRaw + DISTGF61) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u61[i] = io61[i * G_W];
+  fft_RADIX(u61);
+  for (u32 i = 0; i < NW; ++i) io61[i * G_W] = u61[i];
+}
+
+#define DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(NAME, STAGE)                         \
+KERNEL(G_W) NAME(P(ulong2) outRaw, CP(ulong2) inRaw,                           \
+                 global const ulong2 *trigRaw) {                               \
+  const u32 p = get_global_id(0);                                               \
+  const u32 line = p / WIDTH;                                                   \
+  const u32 x = p - line * WIDTH;                                               \
+  const u32 i = x / G_W;                                                        \
+  const u32 me = x - i * G_W;                                                   \
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61);                               \
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61);                               \
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);                      \
+  GF61 v = in61[p];                                                             \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + trigBase]));          \
+  const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);               \
+  out61[line * WIDTH + dst] = v;                                                \
+}
+
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle1Apple,   1)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle4Apple,   4)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle8Apple,   8)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle16Apple, 16)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle64Apple, 64)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle256Apple, 256)
+DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE(fftP61TwiddleShuffle512Apple, 512)
+
+#undef DEFINE_APPLE_GF61_TWIDDLE_SHUFFLE
+
+// Final radix can write to a different big buffer.  This avoids an extra copy
+// when the odd number of width stages leaves the current GF61 state in the
+// alternate buffer (WIDTH=256, NW=4 on the M2 smoke plan).
+KERNEL(G_W) fftP61WidthFinalApple(P(ulong2) outRaw, CP(ulong2) inRaw) {
+  GF61 u61[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61) + g * WIDTH + me;
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u61[i] = in61[i * G_W];
+  fft_RADIX(u61);
+  for (u32 i = 0; i < NW; ++i) out61[i * G_W] = u61[i];
+}
+
+#else
+
 // fftPremul: weight words with IBDWT weights followed by FFT-width.
 KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   local GF61 lds61[LDS_BYTES / sizeof(GF61)];
@@ -483,9 +720,12 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
 }
 
 
+#endif  // AEVUM_APPLE_SPLIT_FFTP
+
 /******************************************************************************/
 /*  Similar to above, but for a hybrid FFT based on FP32*GF(M31^2)*GF(M61^2)  */
-/******************************************************************************/
+/*******************************************************************************/
+
 
 #elif FFT_TYPE == FFT323161
 

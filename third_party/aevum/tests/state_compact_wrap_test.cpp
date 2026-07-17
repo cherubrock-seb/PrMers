@@ -40,6 +40,17 @@ int main() {
   minusTwo.back() -= 2 * topBase;
   expect_word(compactBits(minusTwo, E), {0xfffffffdu, 0xffffffffu, 0xffffffffu, 0x7fffffffu}, "negative carry two");
 
-  std::cout << "Aevum compact Mersenne carry tests passed\n";
+  // The engine set_u32 API must enter through the same compact-word import as
+  // set_words.  Check the exact small constants used by the Apple arithmetic
+  // and plane-isolation probes with their real transform geometry.
+  constexpr u64 SMALL_E = 859553;
+  constexpr u32 SMALL_N = 262144;
+  for (u32 value : {0u, 1u, 2u, 3u, 5u}) {
+    const auto compact = makeWords(SMALL_E, value);
+    expect_word(compactBits(expandBits(compact, SMALL_N, SMALL_E), SMALL_E), compact,
+                "small canonical import roundtrip");
+  }
+
+  std::cout << "Aevum compact Mersenne carry and canonical import tests passed\n";
   return 0;
 }

@@ -9,7 +9,7 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo v99.7-aevum-auto-ui)
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo v99.21-aevum-apple-opencl12-conservative-lds)
 PACKAGE := prmers-$(VERSION)
 
 WARN        := -Wall -Wextra -Wsign-conversion
@@ -20,10 +20,15 @@ OPT         := -O3 -ffinite-math-only -march=$(MARCH)
 CXX         := g++
 CXXFLAGS    := -std=c++20 $(WARN) $(OPT) -flto=auto
 LDFLAGS     := -flto=auto
+PLATFORM_CXXFLAGS :=
+PLATFORM_LDFLAGS  :=
 
 ifeq ($(UNAME_S),Darwin)
+  MACOSX_DEPLOYMENT_TARGET ?= 12.0
+  export MACOSX_DEPLOYMENT_TARGET
   CPPFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
-  LDFLAGS  += -framework OpenCL
+  PLATFORM_CXXFLAGS += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
+  PLATFORM_LDFLAGS  += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET) -framework OpenCL
 else
   LDFLAGS  += -lOpenCL -ldl
 endif
@@ -39,16 +44,16 @@ LDFLAGS += -lgmpxx -lgmp
 CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source clean-all
 
 all: aevum-engine $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $^ -o $@ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(PLATFORM_CXXFLAGS) $(CPPFLAGS) $^ -o $@ $(LDFLAGS) $(PLATFORM_LDFLAGS)
 
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(PLATFORM_CXXFLAGS) $(CPPFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
 -include $(DEPS)
 
@@ -78,13 +83,13 @@ package: all
 	bsdtar -czvf $(PACKAGE).zip -C package $(PACKAGE)
 
 aevum:
-	$(MAKE) -C third_party/aevum -j$${JOBS:-$$(nproc)}
+	$(MAKE) -C third_party/aevum
 
 aevum-cuda:
-	$(MAKE) -C third_party/aevum CUDA=1 -j$${JOBS:-$$(nproc)}
+	$(MAKE) -C third_party/aevum CUDA=1
 
 aevum-engine:
-	$(MAKE) -C third_party/aevum engine-lib -j$${JOBS:-$$(nproc)}
+	$(MAKE) -C third_party/aevum engine-lib
 
 test-aevum-host:
 	$(MAKE) -C third_party/aevum test-host
@@ -112,6 +117,9 @@ test-aevum-auto-gpu: all
 
 test-backend-matrix: all
 	bash tests/run_backend_validation_matrix.sh $${PRMERS_TEST_DEVICE:-0} $${PRMERS_MATRIX_PROFILE:-standard}
+
+test-aevum-apple-port-source:
+	bash tests/source_v9942_apple_port_audit.sh
 
 install-aevum-engine: aevum-engine
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers

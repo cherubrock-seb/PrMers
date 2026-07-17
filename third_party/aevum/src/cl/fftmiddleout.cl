@@ -256,6 +256,157 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
   writeMiddleOutLine(out61, u, gy, gx);
 }
 
+#if defined(AEVUM_APPLE_OPENCL12)
+
+// The stock GF61 middle-out kernel is too large for cl2Metal when MIDDLE=8.
+// Four stages are fully scalar and flatten MIDDLE into the group id.  Only the
+// isolated fft_MIDDLE stage retains GF61 u[MIDDLE], a pipeline shape already
+// accepted by Apple for fftMiddleInGF61FftApple.  The existing raw GF61 scratch
+// plane holds exactly one transform and no additional allocation is required.
+inline u32 appleMiddleOutGF61TmpIndex(u32 g, u32 k, u32 me) {
+  return g * MIDDLE * OUT_WG + k * OUT_WG + me;
+}
+
+KERNEL(OUT_WG) fftMiddleOutGF61LoadScalarApple(P(GF61) tmp,
+                                               CP(T2) in) {
+#if PAD_SIZE != 0
+#error Apple scalar GF61 middle-out requires PAD_SIZE=0
+#endif
+  CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
+  const u32 flatGroup = get_group_id(0);
+  const u32 k = flatGroup % MIDDLE;
+  const u32 g = flatGroup / MIDDLE;
+  const u32 sizeY = OUT_WG / OUT_SIZEX;
+  const u32 groupsX = SMALL_HEIGHT / OUT_SIZEX;
+  const u32 gx = g % groupsX;
+  const u32 gy = g / groupsX;
+  const u32 me = get_local_id(0);
+  const u32 mx = me % OUT_SIZEX;
+  const u32 my = me / OUT_SIZEX;
+  const u32 x = gx * OUT_SIZEX + mx;
+  const u32 y = gy * sizeY + my;
+
+  dependentLaunchWait();
+  tmp[appleMiddleOutGF61TmpIndex(g, k, me)] =
+      in61[(u64) y * MIDDLE * SMALL_HEIGHT + x + (u64) k * SMALL_HEIGHT];
+}
+
+KERNEL(OUT_WG) fftMiddleOutGF61MulScalarApple(P(GF61) tmp,
+                                              Trig trig) {
+  TrigGF61 trig61 = (TrigGF61) (trig + DISTMTRIGGF61);
+  const u32 flatGroup = get_group_id(0);
+  const u32 k = flatGroup % MIDDLE;
+  if (k == 0) return;
+  const u32 g = flatGroup / MIDDLE;
+  const u32 groupsX = SMALL_HEIGHT / OUT_SIZEX;
+  const u32 gx = g % groupsX;
+  const u32 me = get_local_id(0);
+  const u32 mx = me % OUT_SIZEX;
+  const u32 x = gx * OUT_SIZEX + mx;
+  GF61 value = tmp[appleMiddleOutGF61TmpIndex(g, k, me)];
+
+#if !MIDDLE_CHAIN
+  value = cmul(value, TFLOAD(&trig61[x + (k - 1) * SMALL_HEIGHT]));
+#else
+  GF61 w = TFLOAD(&trig61[x]);
+  GF61 factor = U2((u64) 1, (u64) 0);
+  GF61 power = w;
+  if (k & 1u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 2u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 4u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 8u) factor = cmul(factor, power);
+  value = cmul(value, factor);
+#endif
+  tmp[appleMiddleOutGF61TmpIndex(g, k, me)] = value;
+}
+
+KERNEL(OUT_WG) fftMiddleOutGF61FftApple(P(GF61) tmp) {
+  GF61 u[MIDDLE];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  for (u32 k = 0; k < MIDDLE; ++k)
+    u[k] = tmp[appleMiddleOutGF61TmpIndex(g, k, me)];
+  fft_MIDDLE(u);
+  for (u32 k = 0; k < MIDDLE; ++k)
+    tmp[appleMiddleOutGF61TmpIndex(g, k, me)] = u[k];
+}
+
+KERNEL(OUT_WG) fftMiddleOutGF61Mul2ScalarApple(P(GF61) tmp,
+                                               Trig trig) {
+  TrigGF61 trig61 = (TrigGF61) (trig + DISTMTRIGGF61);
+  const u32 flatGroup = get_group_id(0);
+  const u32 k = flatGroup % MIDDLE;
+  const u32 g = flatGroup / MIDDLE;
+  const u32 sizeY = OUT_WG / OUT_SIZEX;
+  const u32 groupsX = SMALL_HEIGHT / OUT_SIZEX;
+  const u32 gx = g % groupsX;
+  const u32 gy = g / groupsX;
+  const u32 me = get_local_id(0);
+  const u32 mx = me % OUT_SIZEX;
+  const u32 my = me / OUT_SIZEX;
+  const u32 x = gx * OUT_SIZEX + mx;
+  const u32 y = gy * sizeY + my;
+
+  TrigGF61 trig1 = trig61 + SMALL_HEIGHT * (MIDDLE - 1);
+  TrigGF61 trig2 = trig1 + WIDTH;
+  if (WIDTH == SMALL_HEIGHT) trig1 = trig61;
+  GF61 w = TFLOAD(&trig1[x]);
+  const u32 desiredRoot = x * y;
+  GF61 factor = cmul(TFLOAD(&trig2[desiredRoot % SMALL_HEIGHT]),
+                     TFLOAD(&trig1[desiredRoot / SMALL_HEIGHT]));
+
+  GF61 power = w;
+  if (k & 1u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 2u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 4u) factor = cmul(factor, power);
+  power = cmul(power, power);
+  if (k & 8u) factor = cmul(factor, power);
+
+  const u32 index = appleMiddleOutGF61TmpIndex(g, k, me);
+  tmp[index] = cmul(tmp[index], factor);
+}
+
+KERNEL(OUT_WG) fftMiddleOutGF61WriteScalarApple(P(T2) out,
+                                                CP(GF61) tmp) {
+#if PAD_SIZE != 0
+#error Apple scalar GF61 middle-out requires PAD_SIZE=0
+#endif
+  P(GF61) out61 = (P(GF61)) (out + DISTGF61);
+  const u32 flatGroup = get_group_id(0);
+  const u32 k = flatGroup % MIDDLE;
+  const u32 g = flatGroup / MIDDLE;
+  const u32 sizeY = OUT_WG / OUT_SIZEX;
+  const u32 groupsX = SMALL_HEIGHT / OUT_SIZEX;
+  const u32 gx = g % groupsX;
+  const u32 gy = g / groupsX;
+  const u32 me = get_local_id(0);
+  const u32 transposedMe =
+      (me % OUT_SIZEX) * sizeY + me / OUT_SIZEX;
+  const u64 outputIndex =
+      (u64) gy * MIDDLE * OUT_WG +
+      (u64) gx * MIDDLE * WIDTH * OUT_SIZEX +
+      (u64) k * OUT_WG + transposedMe;
+
+  dependentLaunch();
+  out61[outputIndex] = tmp[appleMiddleOutGF61TmpIndex(g, k, me)];
+}
+
+// Signature-compatible placeholder used instead of the rejected monolithic
+// kernel on Apple large plans.
+KERNEL(OUT_WG) fftMiddleOutGF61ApplePlaceholder(P(T2) out,
+                                                 CP(T2) in, Trig trig) {
+  (void) out;
+  (void) in;
+  (void) trig;
+}
+
+#endif  // AEVUM_APPLE_OPENCL12
+
 #endif
 
 

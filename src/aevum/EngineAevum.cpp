@@ -550,8 +550,8 @@ bool aevum_engine_resolve_auto_fft(uint32_t exponent,
         if (transform_size) *transform_size = size;
         if (resolved_spec) *resolved_spec = spec;
         return true;
-    } catch (const std::exception&) {
-        if (reason) *reason = "Aevum engine plugin unavailable";
+    } catch (const std::exception& e) {
+        if (reason) *reason = std::string("Aevum engine plugin unavailable: ") + e.what();
         return false;
     }
 }

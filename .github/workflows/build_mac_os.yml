@@ -1,4 +1,4 @@
-name: Build macOS with OpenCL
+name: Build portable macOS packages
 
 on:
   workflow_dispatch:
@@ -11,54 +11,207 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up OpenCL
-        run: echo "OpenCL is preinstalled on macOS. No action needed."
-
-      - name: Install GMP via Homebrew
-        run: brew install gmp
+      - name: Build GMP for the portable deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          if brew list --versions gmp >/dev/null 2>&1; then
+            brew reinstall --build-from-source gmp
+          else
+            brew install --build-from-source gmp
+          fi
+          GMP_PREFIX="$(brew --prefix gmp)"
+          bash scripts/check_macos_minos.sh "$MACOSX_DEPLOYMENT_TARGET" \
+            "$GMP_PREFIX/lib/libgmp.10.dylib" \
+            "$GMP_PREFIX/lib/libgmpxx.4.dylib"
 
       - name: Build PrMers and Aevum engine
+        shell: bash
         run: |
-          GMP_PREFIX=$(brew --prefix gmp)
+          set -euo pipefail
+          test "$(uname -m)" = "${{ matrix.arch }}"
+          GMP_PREFIX="$(brew --prefix gmp)"
+          JOBS="$(sysctl -n hw.logicalcpu)"
           make clean-all || true
-          make -j"$(sysctl -n hw.logicalcpu)" \
+          make -j"$JOBS" \
             CXX=c++ \
-            CXXFLAGS="-I${GMP_PREFIX}/include -Iinclude -I/System/Library/Frameworks/OpenCL.framework/Headers -std=c++20 -O3 -Wall -DHAS_CURL=1 -DKERNEL_PATH=\"./kernels/\"" \
-            LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp -lcurl -framework OpenCL" \
-            KERNEL_PATH=./kernels/
+            CXXFLAGS="-I${GMP_PREFIX}/include -std=c++20 -O3 -Wall -DHAS_CURL=1" \
+            LDFLAGS="-L${GMP_PREFIX}/lib -lgmpxx -lgmp -lcurl" \
+            KERNEL_PATH=./kernels/ \
+            MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
 
-      - name: Run portable source and host tests
+      - name: Run source, host and loader tests
+        shell: bash
         run: |
-          make test-aevum-host
+          set -euo pipefail
+          make test-aevum-host MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
           make test-aevum-source
           make test-backend-compat
-          make -C third_party/aevum test-engine-api
+          make -C third_party/aevum test-engine-api MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          bash scripts/check_macos_minos.sh "$MACOSX_DEPLOYMENT_TARGET" \
+            prmers \
+            third_party/aevum/build-engine/libaevum_engine.so \
+            third_party/aevum/build-tests/aevum-engine-api-load-test
 
-      - name: Package for release
+      - name: Build self-contained package stage
+        shell: bash
         run: |
-          mkdir -p prmers_package/kernels
-          mkdir -p prmers_package/third_party/aevum/build-engine
-          cp prmers prmers_package/
-          cp kernels/prmers.cl prmers_package/kernels/
-          cp third_party/aevum/build-engine/libaevum_engine.so prmers_package/third_party/aevum/build-engine/
-          cp third_party/aevum/tune.txt prmers_package/third_party/aevum/
-          tar -czvf prmers-macos.tar.gz -C prmers_package .
+          set -euo pipefail
+          ARCH="${{ matrix.arch }}"
+          STAGE="$RUNNER_TEMP/prmers-macos-$ARCH"
+          GMP_PREFIX="$(brew --prefix gmp)"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/kernels" "$STAGE/lib" "$STAGE/scripts" \
+                   "$STAGE/third_party/aevum/build-engine"
 
-      - name: Calculate SHA256 checksum
-        run: shasum -a 256 prmers-macos.tar.gz > prmers-macos.tar.gz.sha256
+          cp prmers "$STAGE/"
+          cp kernels/prmers.cl "$STAGE/kernels/"
+          cp third_party/aevum/build-engine/libaevum_engine.so \
+             "$STAGE/third_party/aevum/build-engine/"
+          cp third_party/aevum/tune.txt "$STAGE/third_party/aevum/"
+          cp third_party/aevum/build-tests/aevum-engine-api-load-test "$STAGE/scripts/"
+          cp scripts/diagnose_aevum_macos.sh scripts/fix_macos_download.sh \
+             scripts/check_macos_minos.sh "$STAGE/scripts/"
+          cp README_V99.11_MACOS_PORTABLE_AEVUM.md "$STAGE/"
 
-      - name: Upload release to GitHub
+          cp -L "$GMP_PREFIX/lib/libgmp.10.dylib" "$STAGE/lib/"
+          cp -L "$GMP_PREFIX/lib/libgmpxx.4.dylib" "$STAGE/lib/"
+
+          OLD_GMP="$(otool -L "$STAGE/prmers" | awk '/libgmp\.10\.dylib/{print $1; exit}')"
+          OLD_GMPXX="$(otool -L "$STAGE/prmers" | awk '/libgmpxx\.4\.dylib/{print $1; exit}')"
+          OLD_GMP_FROM_GMPXX="$(otool -L "$STAGE/lib/libgmpxx.4.dylib" | awk '/libgmp\.10\.dylib/{print $1; exit}')"
+          test -n "$OLD_GMP" && test -n "$OLD_GMPXX" && test -n "$OLD_GMP_FROM_GMPXX"
+
+          install_name_tool -change "$OLD_GMP" '@loader_path/lib/libgmp.10.dylib' "$STAGE/prmers"
+          install_name_tool -change "$OLD_GMPXX" '@loader_path/lib/libgmpxx.4.dylib' "$STAGE/prmers"
+          install_name_tool -id '@loader_path/libgmp.10.dylib' "$STAGE/lib/libgmp.10.dylib"
+          install_name_tool -id '@loader_path/libgmpxx.4.dylib' "$STAGE/lib/libgmpxx.4.dylib"
+          install_name_tool -change "$OLD_GMP_FROM_GMPXX" '@loader_path/libgmp.10.dylib' \
+            "$STAGE/lib/libgmpxx.4.dylib"
+
+          chmod +x "$STAGE/prmers" "$STAGE/scripts/"*
+          codesign --force --sign - "$STAGE/lib/libgmp.10.dylib"
+          codesign --force --sign - "$STAGE/lib/libgmpxx.4.dylib"
+          codesign --force --sign - "$STAGE/third_party/aevum/build-engine/libaevum_engine.so"
+          codesign --force --sign - "$STAGE/scripts/aevum-engine-api-load-test"
+          codesign --force --sign - "$STAGE/prmers"
+
+          ! otool -L "$STAGE/prmers" | grep -E '/opt/homebrew|/usr/local/opt'
+          "$STAGE/scripts/aevum-engine-api-load-test" \
+            "$STAGE/third_party/aevum/build-engine/libaevum_engine.so"
+          set +e
+          LOADER_OUTPUT="$(AEVUM_ENGINE_LIB="$STAGE/third_party/aevum/build-engine/libaevum_engine.so" \
+            "$STAGE/prmers" 216091 -llunsafe -aevum 2>&1)"
+          LOADER_RC=$?
+          set -e
+          printf '%s\n' "$LOADER_OUTPUT"
+          test "$LOADER_RC" -eq 2
+          grep -q 'No admissible FFT3161 plan' <<<"$LOADER_OUTPUT"
+          ! grep -q 'plugin unavailable' <<<"$LOADER_OUTPUT"
+          "$STAGE/prmers" -v
+          bash "$STAGE/scripts/check_macos_minos.sh" "$MACOSX_DEPLOYMENT_TARGET" \
+            "$STAGE/prmers" \
+            "$STAGE/third_party/aevum/build-engine/libaevum_engine.so" \
+            "$STAGE/lib/libgmp.10.dylib" \
+            "$STAGE/lib/libgmpxx.4.dylib" \
+            "$STAGE/scripts/aevum-engine-api-load-test"
+
+      - name: Upload package stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: prmers-macos-${{ matrix.arch }}-stage
+          path: ${{ runner.temp }}/prmers-macos-${{ matrix.arch }}
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS releases
+    needs: build-macos
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - name: Download architecture stages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prmers-macos-*-stage
+          path: stages
+
+      - name: Create arm64, Intel and universal packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARM="$PWD/stages/prmers-macos-arm64-stage"
+          X64="$PWD/stages/prmers-macos-x86_64-stage"
+          test -f "$ARM/prmers" && test -f "$X64/prmers"
+          chmod +x "$ARM/prmers" "$X64/prmers" \
+            "$ARM/scripts/"* "$X64/scripts/"*
+          mkdir -p dist
+
+          cp -a "$ARM" universal
+          for rel in \
+            prmers \
+            third_party/aevum/build-engine/libaevum_engine.so \
+            lib/libgmp.10.dylib \
+            lib/libgmpxx.4.dylib \
+            scripts/aevum-engine-api-load-test; do
+            lipo -create "$ARM/$rel" "$X64/$rel" -output "universal/$rel"
+          done
+
+          codesign --force --sign - universal/lib/libgmp.10.dylib
+          codesign --force --sign - universal/lib/libgmpxx.4.dylib
+          codesign --force --sign - universal/third_party/aevum/build-engine/libaevum_engine.so
+          codesign --force --sign - universal/scripts/aevum-engine-api-load-test
+          codesign --force --sign - universal/prmers
+
+          universal/scripts/aevum-engine-api-load-test \
+            universal/third_party/aevum/build-engine/libaevum_engine.so
+          set +e
+          LOADER_OUTPUT="$(AEVUM_ENGINE_LIB="$PWD/universal/third_party/aevum/build-engine/libaevum_engine.so" \
+            universal/prmers 216091 -llunsafe -aevum 2>&1)"
+          LOADER_RC=$?
+          set -e
+          printf '%s\n' "$LOADER_OUTPUT"
+          test "$LOADER_RC" -eq 2
+          grep -q 'No admissible FFT3161 plan' <<<"$LOADER_OUTPUT"
+          ! grep -q 'plugin unavailable' <<<"$LOADER_OUTPUT"
+          universal/prmers -v
+          file universal/prmers universal/third_party/aevum/build-engine/libaevum_engine.so
+
+          tar -czf dist/prmers-macos-arm64.tar.gz -C "$ARM" .
+          tar -czf dist/prmers-macos-x86_64.tar.gz -C "$X64" .
+          tar -czf dist/prmers-macos-universal2.tar.gz -C universal .
+          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS.txt)
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prmers-macos-release-packages
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Upload GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
-          files: |
-            prmers-macos.tar.gz
-            prmers-macos.tar.gz.sha256
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -8,6 +8,8 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <thread>
 
 void Events::clearCompleted() { while (!empty() && front().isComplete()) { pop_front(); } }
@@ -28,7 +30,22 @@ Queue::Queue(const Context& context, bool profile, bool auxQueue) :
   squareTime(50),
   squareKernels(4),
   firstSetTime(true)
+#if defined(__APPLE__)
+  , appleMarkerWait([]() {
+      const char* value = std::getenv("AEVUM_APPLE_QUEUE_MARKER_WAIT");
+      return value && *value && std::strcmp(value, "0") != 0;
+    }())
+#endif
 {
+#if defined(__APPLE__)
+  if (!isAuxQueue) {
+    if (appleMarkerWait) {
+      log("Apple Aevum queue diagnostic: legacy marker polling enabled by AEVUM_APPLE_QUEUE_MARKER_WAIT.\n");
+    } else {
+      log("Apple Aevum queue: nonblocking clFlush pacing enabled; marker polling disabled.\n");
+    }
+  }
+#endif
   // Formerly a constant (thus the CAPS).  nVidia is 3% CPU load at 400 or 500, and 35% load at 800 on my Linux machine.
   // AMD is just over 2% load at 1600 and 3200 on the same Linux machine.  Marginally better timings(?) at 3200.
   MAX_QUEUE_COUNT = isAmdGpu(context.deviceId()) ? 3200 : 500;          // Queue size for 800 or 125 squarings (if squareKernels = 4)
@@ -88,15 +105,34 @@ void Queue::finish() {
 
 void Queue::queueMarkerEvent() {
   assert (!isAuxQueue);
+#if defined(__APPLE__)
+  // Apple's in-order OpenCL 1.2 queue does not need NVIDIA's marker-polling
+  // workaround.  Polling a marker every few hundred staged kernels serializes
+  // the host against cl2Metal and severely hurts split-kernel FFT throughput.
+  // clFlush submits the queued work without waiting; blocking reads and finish()
+  // remain the only completion barriers.  The old policy is available only as
+  // a diagnostic through AEVUM_APPLE_QUEUE_MARKER_WAIT=1.
+  if (!appleMarkerWait) {
+    if (queueCount) {
+      ::flush(get());
+      queueCount = 0;
+    }
+    return;
+  }
+#endif
   waitForMarkerEvent();
   if (queueCount) {
     // AMD GPUs have no trouble waiting for a finish without a CPU busy wait.  So, instead of markers and events, simply run finish every now and then.
     if (isAmdGpu(context->deviceId())) {
       finish();
     }
-    // Enqueue a marker for nVidia GPUs
+    // Enqueue a marker for nVidia GPUs (and the Apple legacy diagnostic mode).
     else {
       markerEvent = enqueueMarker(get());
+#if defined(__APPLE__)
+      // Legacy diagnostic mode still needs an explicit submit before polling.
+      ::flush(get());
+#endif
       markerQueued = true;
       queueCount = 0;
     }

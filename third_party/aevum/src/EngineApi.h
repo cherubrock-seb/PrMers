@@ -58,6 +58,12 @@ AEVUM_ENGINE_API int aevum_engine_sub_reg(aevum_engine_handle handle, size_t dst
 AEVUM_ENGINE_API int aevum_engine_sub_u32(aevum_engine_handle handle, size_t dst, uint32_t value);
 AEVUM_ENGINE_API int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, size_t rhs, int* equal_out);
 
+// Diagnostic only: hashes GF31/GF61 after fftP, middle-in, tail-square,
+// middle-out and fftW, followed by the final word-buffer hash and low word.
+// trace_count must be at least 12. The source register is preserved.
+AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
+    aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count);
+
 #ifdef __cplusplus
 }
 #endif

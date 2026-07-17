@@ -11,6 +11,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include "marin/ibdwt.h"
 #include "ui/WebGuiServer.hpp"
 
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -123,8 +124,8 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
 
     if (configured != gpu_backend::auto_select) {
         std::cout << "[Backend Marin] " << aevum_workload_name(selected_workload)
-                  << ": forced by -engine-marin or compatibility route" << std::endl;
-        publish("Forced Marin", "Marin", "selected by -engine-marin", 0, "");
+                  << ": selected by -engine-marin, compatibility route, or platform policy" << std::endl;
+        publish("Marin", "Marin", "selected by -engine-marin, compatibility route, or platform policy", 0, "");
     }
     return new engine_gpu(p, reg_count, device, verbose);
 }

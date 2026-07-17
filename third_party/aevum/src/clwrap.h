@@ -8,6 +8,10 @@
 #include "tinycl.h"
 #endif
 
+#ifndef CL_DEVICE_OPENCL_C_VERSION
+#define CL_DEVICE_OPENCL_C_VERSION 0x103D
+#endif
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -69,6 +73,8 @@ bool isAmdGpu(cl_device_id id);
 bool isNvidiaGpu(cl_device_id id);
 u32 getNvidiaComputeCapability(cl_device_id id);
 string getDriverVersion(cl_device_id id);
+string getOpenCLDeviceVersion(cl_device_id id);
+string getOpenCLCVersion(cl_device_id id);
 string getDriverVersionByPos(int pos);
 
 string getBdfFromDevice(cl_device_id id);

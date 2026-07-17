@@ -1025,6 +1025,406 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   fft_HEIGHT2(lds, u, smallTrig61, 1, me);
   writeTailFusedLine(u, out61, transPos(line, MIDDLE, WIDTH), me);
 }
+
+
+#if defined(AEVUM_APPLE_OPENCL12)
+// Apple OpenCL translates kernels to Metal at clCreateKernel time.  The stock
+// tailSquareZeroGF61 combines load, two height FFTs, reversals, pair squaring
+// and the final write in one pipeline.  Keep the exact arithmetic, but stage
+// the two exceptional lines (0 and H/2) through a tiny ping-pong scratch.
+//
+// Apple Metal also rejects a single GF61 radix/twiddle/LDS-shuffle stage.  The
+// special-line height FFT therefore uses three deliberately small pipelines:
+//   1. one private radix per lane,
+//   2. one scalar twiddle multiply per value,
+//   3. the exact logical shufl permutation through the second global bank.
+// This global permutation is limited to the two exceptional lines.  The main
+// double-wide tail kernel, reverse kernels, middle transforms and carry path
+// retain their original LDS algorithms.
+//
+// Scratch layout: two banks, each holding two complete special lines.  A GF61
+// value owned by line `which`, private slot `i` and lane `me` is stored at
+//   bank * (2 * SMALL_HEIGHT) + which * SMALL_HEIGHT + i * G_H + me.
+// The complete allocation is 4 * SMALL_HEIGHT GF61 values.
+inline u32 appleTailZeroGF61BankIndex(u32 bank, u32 which, u32 i, u32 me) {
+  return bank * (2 * SMALL_HEIGHT) + which * SMALL_HEIGHT + i * G_H + me;
+}
+
+inline u32 appleTailZeroGF61Index(u32 which, u32 i, u32 me) {
+  return appleTailZeroGF61BankIndex(0, which, i, me);
+}
+
+void appleTailZeroGF61ScratchLoadBank(CP(GF61) scratch, GF61 *u,
+                                      u32 bank, u32 which, u32 me) {
+  for (u32 i = 0; i < NH; ++i) {
+    u[i] = scratch[appleTailZeroGF61BankIndex(bank, which, i, me)];
+  }
+}
+
+void appleTailZeroGF61ScratchStoreBank(P(GF61) scratch, GF61 *u,
+                                       u32 bank, u32 which, u32 me) {
+  for (u32 i = 0; i < NH; ++i) {
+    scratch[appleTailZeroGF61BankIndex(bank, which, i, me)] = u[i];
+  }
+}
+
+void appleTailZeroGF61ScratchLoad(CP(GF61) scratch, GF61 *u, u32 which, u32 me) {
+  appleTailZeroGF61ScratchLoadBank(scratch, u, 0, which, me);
+}
+
+void appleTailZeroGF61ScratchStore(P(GF61) scratch, GF61 *u, u32 which, u32 me) {
+  appleTailZeroGF61ScratchStoreBank(scratch, u, 0, which, me);
+}
+
+KERNEL(G_H) tailSquareZeroGF61LoadApple(P(GF61) scratch, CP(T2) in) {
+  CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
+  const u32 which = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 line = which ? H / 2 : 0;
+  GF61 u[NH];
+  readTailFusedLine(in61, u, line, me);
+  appleTailZeroGF61ScratchStoreBank(scratch, u, 0, which, me);
+}
+
+// One radix per lane, entirely in private registers.  No LDS and no twiddle
+// lookup are present in this pipeline.
+KERNEL(G_H) tailSquareZeroGF61FftRadixApple(P(GF61) scratch, u32 bank) {
+  const u32 which = get_group_id(0);
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  appleTailZeroGF61ScratchLoadBank(scratch, u, bank, which, me);
+  fft_RADIX(u);
+  appleTailZeroGF61ScratchStoreBank(scratch, u, bank, which, me);
+}
+
+// Scalarized equivalent of tabMul().  Workgroup `group` selects one private
+// vector slot, so every work-item performs at most one GF61 multiply.
+KERNEL(G_H) tailSquareZeroGF61FftTwiddleApple(P(GF61) scratch, Trig smallTrig,
+                                              u32 bank, u32 f) {
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 group = get_group_id(0);
+  const u32 which = group / NH;
+  const u32 i = group - which * NH;
+  const u32 me = get_local_id(0);
+  if (i == 0) return;
+
+  const u32 p = me & ~(f - 1);
+  const u32 index = appleTailZeroGF61BankIndex(bank, which, i, me);
+  GF61 value = scratch[index];
+#if TABMUL_CHAIN61
+  GF61 w = TFLOAD(&smallTrig61[p]);
+  GF61 multiplier = w;
+  for (u32 j = 1; j < i; ++j) multiplier = cmul(multiplier, w);
+  value = cmul(value, multiplier);
+#else
+  value = cmul(value, TFLOAD(&smallTrig61[(i - 1) * G_H + p]));
+#endif
+  scratch[index] = value;
+}
+
+// Global-memory form of the logical shufl permutation.  The source mapping is
+// the inverse of the stock LDS write/read pair:
+//   L = out_i * G_H + out_me
+//   src_i  = (L / f) % RADIX
+//   src_me = (L / (f * RADIX)) * f + (L % f)
+// A distinct destination bank makes the permutation race-free.
+KERNEL(G_H) tailSquareZeroGF61FftShuffleApple(P(GF61) scratch,
+                                              u32 srcBank, u32 dstBank, u32 f) {
+  const u32 group = get_group_id(0);
+  const u32 which = group / NH;
+  const u32 outI = group - which * NH;
+  const u32 outMe = get_local_id(0);
+  const u32 logical = outI * G_H + outMe;
+  const u32 remainder = logical & (f - 1);
+  const u32 srcI = (logical / f) % RADIX;
+  const u32 srcMe = (logical / (f * RADIX)) * f + remainder;
+
+  scratch[appleTailZeroGF61BankIndex(dstBank, which, outI, outMe)] =
+      scratch[appleTailZeroGF61BankIndex(srcBank, which, srcI, srcMe)];
+}
+
+// Apply the final radix and normalize the result back into bank zero.  Reading
+// and writing bank zero is safe because each lane owns a disjoint private
+// vector; when srcBank is one this also performs the final bank copy.
+KERNEL(G_H) tailSquareZeroGF61FftFinalApple(P(GF61) scratch, u32 srcBank) {
+  const u32 which = get_group_id(0);
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  appleTailZeroGF61ScratchLoadBank(scratch, u, srcBank, which, me);
+  fft_RADIX(u);
+  appleTailZeroGF61ScratchStoreBank(scratch, u, 0, which, me);
+}
+
+// Global-memory equivalent of reverse(lds, u + NH/2, !which).  A distinct
+// destination bank makes the permutation race-free and keeps the stock
+// bump semantics for line zero.  One workgroup handles one vector slot.
+KERNEL(G_H) tailSquareZeroGF61ReverseGlobalApple(P(GF61) scratch,
+                                                 u32 srcBank, u32 dstBank) {
+  const u32 group = get_group_id(0);
+  const u32 which = group / NH;
+  const u32 slot = group - which * NH;
+  const u32 me = get_local_id(0);
+  const u32 halfN = NH / 2;
+
+  u32 dstSlot = slot;
+  u32 dstMe = me;
+  if (slot >= halfN) {
+    const u32 j = slot - halfN;
+    const u32 bump = which == 0 ? 1u : 0u;
+    const u32 revMe = G_H - 1 - me + bump;
+    const u32 logical = (revMe + (halfN - 1 - j) * G_H) % (halfN * G_H);
+    dstSlot = halfN + logical / G_H;
+    dstMe = logical % G_H;
+  }
+
+  scratch[appleTailZeroGF61BankIndex(dstBank, which, dstSlot, dstMe)] =
+      scratch[appleTailZeroGF61BankIndex(srcBank, which, slot, me)];
+}
+
+// One workgroup per (special line, pair slot).  This scalarizes pairSq: each
+// lane owns only the two GF61 values consumed by one onePairSq invocation.
+KERNEL(G_H) tailSquareZeroGF61PairApple(P(GF61) scratch, Trig smallTrig, u32 bank) {
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 pairSlots = NH / 2;
+  const u32 group = get_group_id(0);
+  const u32 which = group / pairSlots;
+  const u32 slot = group - which * pairSlots;
+  const u32 quarter = NH / 4;
+  const u32 i = slot % quarter;
+  const u32 type = slot / quarter; // 0 or 1, matching pairSq's t_squared_type
+  const u32 me = get_local_id(0);
+  const u32 aIndex = i + type * quarter;
+  const u32 bIndex = aIndex + NH / 2;
+
+  u32 height_trigs = SMALL_HEIGHT;
+#if TAIL_TRIGS61 >= 1
+  GF61 trig = TFLOAD(&smallTrig61[height_trigs + me]);
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + which]);
+  trig = cmul(trig, mult);
+#else
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + which * G_H + me]);
+#endif
+  for (u32 j = 0; j < i; ++j) trig = mul_t8(trig);
+
+  GF61 a = scratch[appleTailZeroGF61BankIndex(bank, which, aIndex, me)];
+  GF61 b = scratch[appleTailZeroGF61BankIndex(bank, which, bIndex, me)];
+  if (which == 0 && type == 0 && i == 0 && me == 0) {
+    a = SWAP_XY(mul2(foo(a)));
+    b = SWAP_XY(shl(csq(b), 2));
+  } else {
+    onePairSq(&a, &b, trig, type);
+  }
+  scratch[appleTailZeroGF61BankIndex(bank, which, aIndex, me)] = a;
+  scratch[appleTailZeroGF61BankIndex(bank, which, bIndex, me)] = b;
+}
+
+
+// Direct final write for one exceptional GF61 line.  The host launches this
+// kernel twice and supplies already-resolved scratch/output bases.  Keeping
+// the pipeline to one GF61 load and one GF61 store avoids transPos, pointer
+// casts, helper overloads, branches and private arrays in Apple Metal.
+KERNEL(G_H) tailSquareZeroGF61WriteDirectApple(P(GF61) out61, CP(GF61) scratch,
+                                                u32 scratchBase, u32 outBase) {
+  const u32 i = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 offset = i * G_H + me;
+  out61[DISTGF61 + outBase + offset] = scratch[scratchBase + offset];
+}
+
+
+// Apple-only staged path for the normal GF61 tail-square line pairs.  The
+// stock double-wide kernel combines two private vectors, two height FFTs,
+// cross-line LDS reversals, pair squaring and the final write.  Apple Metal
+// rejects that pipeline at clCreateKernel.  The staged path keeps identical
+// arithmetic and line pairing while reusing the already allocated output and
+// input GF61 planes as ping-pong banks.  Apple forces INPLACE=0 and PAD=0, so
+// the old input plane is free after this first scalar load completes.
+//
+// Normal-line ordinal mapping excludes the two exceptional lines 0 and H/2:
+//   ordinal 0..H/2-2   -> line 1..H/2-1
+//   ordinal H/2-1..H-3 -> line H/2+1..H-1
+inline u32 appleTailGF61NormalLine(u32 ordinal) {
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 halfH = H / 2;
+  return ordinal < halfH - 1 ? ordinal + 1 : ordinal + 2;
+}
+
+inline u32 appleTailGF61LineBase(u32 line) {
+  return transPos(line, MIDDLE, WIDTH) * SMALL_HEIGHT;
+}
+
+inline u32 appleTailGF61LineIndex(u32 line, u32 slot, u32 me) {
+  return appleTailGF61LineBase(line) + slot * G_H + me;
+}
+
+// Scalar equivalent of one readTailFusedLine iteration for PAD=0.  One
+// workgroup handles one private-vector slot of one normal line and writes it
+// directly into bank zero (the output GF61 plane) in final tail layout.
+KERNEL(G_H) tailSquareGF61LoadScalarApple(P(T2) out, CP(T2) in) {
+#if PAD_SIZE != 0
+#error Apple staged GF61 main-tail load requires PAD_SIZE=0
+#endif
+  P(GF61) out61 = (P(GF61)) (out + DISTGF61);
+  CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / NH;
+  const u32 slot = group - ordinal * NH;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 me = get_local_id(0);
+  const u32 sizeY = IN_WG / IN_SIZEX;
+
+  const u32 x = line % WIDTH;
+  const u32 chunkX = x / IN_SIZEX;
+  const u32 xWithin = x % IN_SIZEX;
+  const u32 middleI = line / WIDTH;
+  const u32 y = slot * G_H + me;
+  const u32 chunkY = y / sizeY;
+  const u32 src = chunkX * (SMALL_HEIGHT * MIDDLE * IN_SIZEX) +
+                  xWithin * sizeY + middleI * IN_WG + (me % sizeY) +
+                  chunkY * (MIDDLE * IN_WG);
+  out61[appleTailGF61LineIndex(line, slot, me)] = in61[src];
+}
+
+// One private radix per normal line.  The host passes whichever existing GF61
+// plane is the current ping-pong bank.
+KERNEL(G_H) tailSquareGF61FftRadixApple(P(T2) data) {
+  P(GF61) data61 = (P(GF61)) (data + DISTGF61);
+  const u32 line = appleTailGF61NormalLine(get_group_id(0));
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) u[i] = data61[appleTailGF61LineIndex(line, i, me)];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) data61[appleTailGF61LineIndex(line, i, me)] = u[i];
+}
+
+// Scalar tabMul equivalent for one slot of one normal line.
+KERNEL(G_H) tailSquareGF61FftTwiddleApple(P(T2) data, Trig smallTrig, u32 f) {
+  P(GF61) data61 = (P(GF61)) (data + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / NH;
+  const u32 i = group - ordinal * NH;
+  if (i == 0) return;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 me = get_local_id(0);
+  const u32 p = me & ~(f - 1);
+  const u32 index = appleTailGF61LineIndex(line, i, me);
+  GF61 value = data61[index];
+#if TABMUL_CHAIN61
+  GF61 w = TFLOAD(&smallTrig61[p]);
+  GF61 multiplier = w;
+  for (u32 j = 1; j < i; ++j) multiplier = cmul(multiplier, w);
+  value = cmul(value, multiplier);
+#else
+  value = cmul(value, TFLOAD(&smallTrig61[(i - 1) * G_H + p]));
+#endif
+  data61[index] = value;
+}
+
+// Race-free global form of shufl.  The host passes the current and next
+// existing transform buffers, so no transform-sized allocation is added.
+KERNEL(G_H) tailSquareGF61FftShuffleApple(CP(T2) src, P(T2) dst, u32 f) {
+  CP(GF61) src61 = (CP(GF61)) (src + DISTGF61);
+  P(GF61) dst61 = (P(GF61)) (dst + DISTGF61);
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / NH;
+  const u32 outI = group - ordinal * NH;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 outMe = get_local_id(0);
+  const u32 logical = outI * G_H + outMe;
+  const u32 remainder = logical & (f - 1);
+  const u32 srcI = (logical / f) % RADIX;
+  const u32 srcMe = (logical / (f * RADIX)) * f + remainder;
+  dst61[appleTailGF61LineIndex(line, outI, outMe)] =
+      src61[appleTailGF61LineIndex(line, srcI, srcMe)];
+}
+
+// Final radix.  It always normalizes the result into the output plane, which
+// is also the exact final fftMiddleOut input layout.
+KERNEL(G_H) tailSquareGF61FftFinalApple(CP(T2) src, P(T2) out) {
+  CP(GF61) src61 = (CP(GF61)) (src + DISTGF61);
+  P(GF61) out61 = (P(GF61)) (out + DISTGF61);
+  const u32 line = appleTailGF61NormalLine(get_group_id(0));
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) u[i] = src61[appleTailGF61LineIndex(line, i, me)];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) out61[appleTailGF61LineIndex(line, i, me)] = u[i];
+}
+
+// Global equivalent of revCrossLine.  The first half of each line is copied
+// unchanged; the second half is reversed in both slot and lane and crossed to
+// its paired line H-line.  Distinct source/destination planes make it race-free.
+KERNEL(G_H) tailSquareGF61ReverseCrossApple(CP(T2) src, P(T2) dst) {
+  CP(GF61) src61 = (CP(GF61)) (src + DISTGF61);
+  P(GF61) dst61 = (P(GF61)) (dst + DISTGF61);
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / NH;
+  const u32 slot = group - ordinal * NH;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 me = get_local_id(0);
+  u32 dstLine = line;
+  u32 dstSlot = slot;
+  u32 dstMe = me;
+  if (slot >= NH / 2) {
+    const u32 H = ND / SMALL_HEIGHT;
+    const u32 j = slot - NH / 2;
+    dstLine = H - line;
+    dstSlot = NH / 2 + (NH / 2 - 1 - j);
+    dstMe = G_H - 1 - me;
+  }
+  dst61[appleTailGF61LineIndex(dstLine, dstSlot, dstMe)] =
+      src61[appleTailGF61LineIndex(line, slot, me)];
+}
+
+// Scalar pairSq coverage for all normal lines.  Each workgroup owns exactly
+// one onePairSq pair in one line; trig indexing is identical to the two halves
+// of the stock double-wide kernel.
+KERNEL(G_H) tailSquareGF61PairApple(P(T2) data, Trig smallTrig) {
+  P(GF61) data61 = (P(GF61)) (data + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 pairSlots = NH / 2;
+  const u32 group = get_group_id(0);
+  const u32 ordinal = group / pairSlots;
+  const u32 pairSlot = group - ordinal * pairSlots;
+  const u32 line = appleTailGF61NormalLine(ordinal);
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 side = line > H / 2 ? 1u : 0u;
+  const u32 lineU = side ? H - line : line;
+  const u32 quarter = NH / 4;
+  const u32 i = pairSlot % quarter;
+  const u32 type = pairSlot / quarter;
+  const u32 aSlot = i + type * quarter;
+  const u32 bSlot = aSlot + NH / 2;
+  const u32 me = get_local_id(0);
+  const u32 heightTrigs = SMALL_HEIGHT;
+#if TAIL_TRIGS61 >= 1
+  GF61 trig = TFLOAD(&smallTrig61[heightTrigs + me]);
+  GF61 mult = TSLOAD(&smallTrig61[heightTrigs + G_H + lineU * 2 + side]);
+  trig = cmul(trig, mult);
+#else
+  GF61 trig = TOLOAD(&smallTrig61[heightTrigs + lineU * G_H * 2 + side * G_H + me]);
+#endif
+  for (u32 j = 0; j < i; ++j) trig = mul_t8(trig);
+  const u32 aIndex = appleTailGF61LineIndex(line, aSlot, me);
+  const u32 bIndex = appleTailGF61LineIndex(line, bSlot, me);
+  GF61 a = data61[aIndex];
+  GF61 b = data61[bIndex];
+  onePairSq(&a, &b, trig, type);
+  data61[aIndex] = a;
+  data61[bIndex] = b;
+}
+
+// The stock member is still present in the C++ object for non-Apple builds.
+// On Apple it is initialized with this signature-compatible no-op so Metal is
+// never asked to create the rejected monolithic tailSquareGF61 pipeline.
+KERNEL(G_H) tailSquareGF61ApplePlaceholder(P(T2) out, CP(T2) in, Trig smallTrig) {
+  (void) out;
+  (void) in;
+  (void) smallTrig;
+}
+#endif
 #endif
 
 #if SINGLE_WIDE

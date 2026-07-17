@@ -127,7 +127,7 @@ void printUsage(const char* progName) {
     std::cout << "  Backend selection (default: automatic Marin/Aevum):" << std::endl;
     std::cout << "  -aevum               : Strictly force Aevum; exit with an error when no FFT3161 plan is available" << std::endl;
     std::cout << "  -engine-marin        : Force the Marin engine::Reg backend" << std::endl;
-    std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode" << std::endl;
+    std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode (macOS still defaults to Marin unless -aevum is used)" << std::endl;
     std::cout << "  -marin               : Legacy internal PrMers NTT path (not supported with -llunsafe)" << std::endl;
     std::cout << "  -aevum-fft <spec>    : Force an Aevum FFT3161 shape, for example 1:1024:8:512" << std::endl;
     std::cout << "  Auto policy env      : AEVUM_AUTO_MAX_RATIO or workload-specific AEVUM_AUTO_PM1_STAGE1_MAX_RATIO, AEVUM_AUTO_PM1_STAGE2_MAX_RATIO, AEVUM_AUTO_ECM_MAX_RATIO" << std::endl;

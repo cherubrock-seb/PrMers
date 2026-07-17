@@ -487,4 +487,251 @@ KERNEL(G_H) tailMulGF61(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
   writeTailFusedLine(u, out61, memline1, me);
 }
 
+
+#if defined(AEVUM_APPLE_OPENCL12)
+
+// Apple Metal rejects the stock monolithic tailMulGF61 pipeline.  The staged
+// replacement keeps the exact height-FFT/pairing arithmetic while using the
+// two existing transform buffers plus one GF61-only scratch plane.  Pointer
+// bases are expressed in GF61 elements, allowing the same kernels to operate
+// on a combined GF31/GF61 transform buffer (base DISTGF61) or the raw scratch
+// plane (base zero).
+inline u32 appleTailMulGF61LineIndex(u32 base, u32 line, u32 slot, u32 me) {
+  return base + transPos(line, MIDDLE, WIDTH) * SMALL_HEIGHT + slot * G_H + me;
+}
+
+// Scalar equivalent of readTailFusedLine for every line, PAD=0.  One
+// workgroup owns one private-vector slot of one line.
+KERNEL(G_H) tailMulGF61LoadScalarApple(P(GF61) dst, u32 dstBase,
+                                       CP(GF61) src, u32 srcBase) {
+#if PAD_SIZE != 0
+#error Apple staged GF61 tailMul load requires PAD_SIZE=0
+#endif
+  const u32 group = get_group_id(0);
+  const u32 line = group / NH;
+  const u32 slot = group - line * NH;
+  const u32 me = get_local_id(0);
+  const u32 sizeY = IN_WG / IN_SIZEX;
+  const u32 x = line % WIDTH;
+  const u32 chunkX = x / IN_SIZEX;
+  const u32 xWithin = x % IN_SIZEX;
+  const u32 middleI = line / WIDTH;
+  const u32 y = slot * G_H + me;
+  const u32 chunkY = y / sizeY;
+  const u32 srcIndex = srcBase +
+      chunkX * (SMALL_HEIGHT * MIDDLE * IN_SIZEX) +
+      xWithin * sizeY + middleI * IN_WG + (me % sizeY) +
+      chunkY * (MIDDLE * IN_WG);
+  dst[appleTailMulGF61LineIndex(dstBase, line, slot, me)] = src[srcIndex];
+}
+
+KERNEL(G_H) tailMulGF61FftRadixApple(P(GF61) data, u32 base) {
+  const u32 line = get_group_id(0);
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) u[i] = data[appleTailMulGF61LineIndex(base, line, i, me)];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) data[appleTailMulGF61LineIndex(base, line, i, me)] = u[i];
+}
+
+KERNEL(G_H) tailMulGF61FftTwiddleApple(P(GF61) data, u32 base,
+                                        Trig smallTrig, u32 f) {
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 group = get_group_id(0);
+  const u32 line = group / NH;
+  const u32 i = group - line * NH;
+  if (i == 0) return;
+  const u32 me = get_local_id(0);
+  const u32 p = me & ~(f - 1);
+  const u32 index = appleTailMulGF61LineIndex(base, line, i, me);
+  GF61 value = data[index];
+#if TABMUL_CHAIN61
+  GF61 w = TFLOAD(&smallTrig61[p]);
+  GF61 multiplier = w;
+  for (u32 j = 1; j < i; ++j) multiplier = cmul(multiplier, w);
+  value = cmul(value, multiplier);
+#else
+  value = cmul(value, TFLOAD(&smallTrig61[(i - 1) * G_H + p]));
+#endif
+  data[index] = value;
+}
+
+KERNEL(G_H) tailMulGF61FftShuffleApple(CP(GF61) src, u32 srcBase,
+                                        P(GF61) dst, u32 dstBase, u32 f) {
+  const u32 group = get_group_id(0);
+  const u32 line = group / NH;
+  const u32 outI = group - line * NH;
+  const u32 outMe = get_local_id(0);
+  const u32 logical = outI * G_H + outMe;
+  const u32 remainder = logical & (f - 1);
+  const u32 srcI = (logical / f) % RADIX;
+  const u32 srcMe = (logical / (f * RADIX)) * f + remainder;
+  dst[appleTailMulGF61LineIndex(dstBase, line, outI, outMe)] =
+      src[appleTailMulGF61LineIndex(srcBase, line, srcI, srcMe)];
+}
+
+KERNEL(G_H) tailMulGF61FftFinalApple(CP(GF61) src, u32 srcBase,
+                                      P(GF61) dst, u32 dstBase) {
+  const u32 line = get_group_id(0);
+  const u32 me = get_local_id(0);
+  GF61 u[NH];
+  for (u32 i = 0; i < NH; ++i) u[i] = src[appleTailMulGF61LineIndex(srcBase, line, i, me)];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NH; ++i) dst[appleTailMulGF61LineIndex(dstBase, line, i, me)] = u[i];
+}
+
+// Apple scalar central multiply.  The stock kernel reverses partner vectors
+// in LDS before pairMul and reverses the result afterwards.  These two kernels
+// compose those permutations directly into the global source/destination
+// coordinates.  Each work-item owns one onePairMul operation and keeps only
+// four GF61 values, avoiding the local arrays rejected by cl2Metal.
+
+// Lines 0 and H/2 pair with themselves.  `pairSlot` indexes the first half;
+// the second-half coordinate below is exactly the source selected by stock
+// reverse(..., bump=true/false).  Writing back to that same coordinate is the
+// stock post-pair reverse.
+KERNEL(G_H) tailMulGF61PairSpecialScalarApple(P(GF61) dst, u32 dstBase,
+                                              CP(GF61) lhs, u32 lhsBase,
+                                              CP(GF61) rhs, u32 rhsBase,
+                                              Trig smallTrig) {
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 halfN = NH / 2;
+  const u32 quarter = NH / 4;
+  const u32 group = get_group_id(0);
+  const u32 which = group / halfN;
+  const u32 pairSlot = group - which * halfN;
+  const u32 i = pairSlot % quarter;
+  const u32 type = pairSlot / quarter;
+  const u32 me = get_local_id(0);
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 line = which ? H / 2 : 0;
+  const u32 heightTrigs = SMALL_HEIGHT;
+
+  // The stock tailMulGF61 computes the base trig once with line1 == 0 for
+  // both special self-paired lines.  The H/2 line is derived only by one
+  // multiplication by TAILTGF61; it must not select a second line/side trig.
+#if TAIL_TRIGS61 >= 1
+  GF61 trig = TFLOAD(&smallTrig61[heightTrigs + me]);
+  GF61 mult = TSLOAD(&smallTrig61[heightTrigs + G_H]);
+  trig = cmul(trig, mult);
+#else
+  GF61 trig = TOLOAD(&smallTrig61[heightTrigs + me]);
+#endif
+
+  if (which) trig = cmul(trig, TAILTGF61);
+  for (u32 j = 0; j < i; ++j) trig = mul_t8(trig);
+  if (type) trig = mul_t4(trig);
+
+  const u32 n = halfN * G_H;
+  const u32 outputLinear = pairSlot * G_H + me;
+  const u32 sourceLinear = which
+      ? (n - 1 - outputLinear)
+      : ((n - outputLinear) % n);
+  const u32 partnerSlot = halfN + sourceLinear / G_H;
+  const u32 partnerMe = sourceLinear % G_H;
+
+  const u32 aIndex = appleTailMulGF61LineIndex(lhsBase, line, pairSlot, me);
+  const u32 bIndex = appleTailMulGF61LineIndex(lhsBase, line, partnerSlot, partnerMe);
+  const u32 pIndex = appleTailMulGF61LineIndex(rhsBase, line, pairSlot, me);
+  const u32 qIndex = appleTailMulGF61LineIndex(rhsBase, line, partnerSlot, partnerMe);
+
+  GF61 a = lhs[aIndex];
+  GF61 b = lhs[bIndex];
+  GF61 p = rhs[pIndex];
+  GF61 q = rhs[qIndex];
+
+  if (which == 0 && pairSlot == 0 && me == 0) {
+    a = SWAP_XY(mul2(foo2(a, p)));
+    b = SWAP_XY(shl(cmul(b, q), 2));
+  } else {
+    onePairMul(&a, &b, &p, &q, trig);
+  }
+
+  dst[appleTailMulGF61LineIndex(dstBase, line, pairSlot, me)] = a;
+  dst[appleTailMulGF61LineIndex(dstBase, line, partnerSlot, partnerMe)] = b;
+}
+
+// Normal line pair line1/H-line1.  Stock reverseLine makes slot `slot` of the
+// partner read original slot NH-1-slot at lane G_H-1-me.  The result is stored
+// directly back at that original coordinate, composing the final reverseLine.
+KERNEL(G_H) tailMulGF61PairNormalScalarApple(P(GF61) dst, u32 dstBase,
+                                             CP(GF61) lhs, u32 lhsBase,
+                                             CP(GF61) rhs, u32 rhsBase,
+                                             Trig smallTrig) {
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTHTRIGGF61);
+  const u32 group = get_group_id(0);
+  const u32 pairOrdinal = group / NH;
+  const u32 slot = group - pairOrdinal * NH;
+  const u32 line1 = pairOrdinal + 1;
+  const u32 H = ND / SMALL_HEIGHT;
+  const u32 line2 = H - line1;
+  const u32 me = get_local_id(0);
+  const u32 partnerSlot = NH - 1 - slot;
+  const u32 partnerMe = G_H - 1 - me;
+  const u32 quarter = NH / 4;
+  const u32 heightTrigs = SMALL_HEIGHT;
+
+  u32 i;
+  u32 type;
+  if (slot < quarter) {
+    i = slot;
+    type = 0;
+  } else if (slot < NH / 2) {
+    i = slot - quarter;
+    type = 1;
+  } else if (slot < 3 * quarter) {
+    i = slot - NH / 2;
+    type = 2;
+  } else {
+    i = slot - 3 * quarter;
+    type = 3;
+  }
+
+#if TAIL_TRIGS61 >= 1
+  GF61 trig = TFLOAD(&smallTrig61[heightTrigs + me]);
+#if SINGLE_WIDE
+  GF61 mult = TSLOAD(&smallTrig61[heightTrigs + G_H + line1]);
+#else
+  GF61 mult = TSLOAD(&smallTrig61[heightTrigs + G_H + line1 * 2]);
+#endif
+  trig = cmul(trig, mult);
+#else
+#if SINGLE_WIDE
+  GF61 trig = TOLOAD(&smallTrig61[heightTrigs + line1 * G_H + me]);
+#else
+  GF61 trig = TOLOAD(&smallTrig61[heightTrigs + line1 * 2 * G_H + me]);
+#endif
+#endif
+
+  for (u32 j = 0; j < i; ++j) trig = mul_t8(trig);
+  if (type == 1) trig = mul_t4(trig);
+  if (type == 2) trig = neg(trig);
+  if (type == 3) trig = neg(mul_t4(trig));
+
+  const u32 aIndex = appleTailMulGF61LineIndex(lhsBase, line1, slot, me);
+  const u32 bIndex = appleTailMulGF61LineIndex(lhsBase, line2, partnerSlot, partnerMe);
+  const u32 pIndex = appleTailMulGF61LineIndex(rhsBase, line1, slot, me);
+  const u32 qIndex = appleTailMulGF61LineIndex(rhsBase, line2, partnerSlot, partnerMe);
+
+  GF61 a = lhs[aIndex];
+  GF61 b = lhs[bIndex];
+  GF61 p = rhs[pIndex];
+  GF61 q = rhs[qIndex];
+  onePairMul(&a, &b, &p, &q, trig);
+
+  dst[appleTailMulGF61LineIndex(dstBase, line1, slot, me)] = a;
+  dst[appleTailMulGF61LineIndex(dstBase, line2, partnerSlot, partnerMe)] = b;
+}
+
+// Signature-compatible no-op used only for the legacy member on Apple.
+KERNEL(G_H) tailMulGF61ApplePlaceholder(P(T2) out, CP(T2) in,
+                                        CP(T2) a, Trig smallTrig) {
+  (void) out;
+  (void) in;
+  (void) a;
+  (void) smallTrig;
+}
+
+#endif  // AEVUM_APPLE_OPENCL12
+
 #endif

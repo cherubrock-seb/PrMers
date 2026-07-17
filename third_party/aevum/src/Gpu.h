@@ -106,6 +106,17 @@ private:
 
   Profile profile{};
 
+  // These values are populated by clDefines while KernelCompiler is built.
+  // They must be declared before compiler: C++ initializes members in declaration
+  // order, not initializer-list order.  The old order passed references to members
+  // whose lifetime had not started yet, which is undefined behaviour and triggered
+  // SIGABRT in the first Aevum arithmetic operation on Apple OpenCL.
+  bool tail_single_wide{false};          // TailSquare processes one line at a time
+  bool tail_single_kernel{true};         // TailSquare uses one kernel by default
+  u32 in_place{0};                       // 0 = out-of-place
+  u32 wmul{2};                           // Carry-fused width multiplier
+  u32 pad_size{0};                       // Padding in bytes
+
   Queue queue;
   vector<Queue> auxQueues;
   KernelCompiler compiler;
@@ -133,15 +144,94 @@ private:
   /* Kernels for NTT_GF61 */
   Kernel kfftMidInGF61;
   Kernel kfftHinGF61;
+#if defined(__APPLE__)
+  Kernel kfftHinGF61LoadScalarApple;
+  Kernel kfftHinGF61FftRadixApple;
+  Kernel kfftHinGF61FftTwiddleApple;
+  Kernel kfftHinGF61FftShuffleApple;
+  Kernel kfftHinGF61FftFinalApple;
+#endif
   Kernel ktailSquareZeroGF61;
   Kernel ktailSquareGF61;
   Kernel ktailMulGF61;
+#if defined(__APPLE__)
+  Kernel ktailMulGF61LoadScalarApple;
+  Kernel ktailMulGF61FftRadixApple;
+  Kernel ktailMulGF61FftTwiddleApple;
+  Kernel ktailMulGF61FftShuffleApple;
+  Kernel ktailMulGF61FftFinalApple;
+  Kernel ktailMulGF61PairSpecialScalarApple;
+  Kernel ktailMulGF61PairNormalScalarApple;
+#endif
   Kernel ktailMulLowGF61;
   Kernel kfftMidOutGF61;
+#if defined(__APPLE__)
+  Kernel kfftMidOutGF61LoadScalarApple;
+  Kernel kfftMidOutGF61MulScalarApple;
+  Kernel kfftMidOutGF61FftApple;
+  Kernel kfftMidOutGF61Mul2ScalarApple;
+  Kernel kfftMidOutGF61WriteScalarApple;
+#endif
   Kernel kfftWGF61;
+#if defined(__APPLE__)
+  Kernel kfftWGF61LoadScalarApple;
+  Kernel kfftWGF61WidthRadixApple;
+  Kernel kfftWGF61TwiddleShuffle1Apple;
+  Kernel kfftWGF61TwiddleShuffle4Apple;
+  Kernel kfftWGF61TwiddleShuffle8Apple;
+  Kernel kfftWGF61TwiddleShuffle16Apple;
+  Kernel kfftWGF61TwiddleShuffle64Apple;
+  Kernel kfftWGF61TwiddleShuffle256Apple;
+  Kernel kfftWGF61TwiddleShuffle512Apple;
+  Kernel kfftWGF61WidthFinalApple;
+#endif
 
   /* Kernels dealing with the FP data and product of NTT primes */
   Kernel kfftP;
+#if defined(__APPLE__)
+  Kernel kfftMidInGF61LoadScalarApple;
+  Kernel kfftMidInGF61Mul2FactorScalarApple;
+  Kernel kfftMidInGF61ApplyScalarApple;
+  Kernel kfftMidInGF61FftApple;
+  Kernel kfftMidInGF61MulApple;
+  Kernel kfftMidInGF61TransposeApple;
+  Kernel ktailSquareZeroGF61LoadApple;
+  Kernel ktailSquareZeroGF61FftRadixApple;
+  Kernel ktailSquareZeroGF61FftTwiddleApple;
+  Kernel ktailSquareZeroGF61FftShuffleApple;
+  Kernel ktailSquareZeroGF61FftFinalApple;
+  Kernel ktailSquareZeroGF61ReverseGlobalApple;
+  Kernel ktailSquareZeroGF61PairApple;
+  Kernel ktailSquareZeroGF61WriteDirectApple;
+  Kernel ktailSquareGF61LoadScalarApple;
+  Kernel ktailSquareGF61FftRadixApple;
+  Kernel ktailSquareGF61FftTwiddleApple;
+  Kernel ktailSquareGF61FftShuffleApple;
+  Kernel ktailSquareGF61FftFinalApple;
+  Kernel ktailSquareGF61ReverseCrossApple;
+  Kernel ktailSquareGF61PairApple;
+  Kernel kfftP31Apple;  // retained as an unused diagnostic fallback
+  Kernel kfftP31WeightScalarApple;
+  Kernel kfftP31WidthRadixApple;
+  Kernel kfftP31TwiddleShuffle1Apple;
+  Kernel kfftP31TwiddleShuffle4Apple;
+  Kernel kfftP31TwiddleShuffle8Apple;
+  Kernel kfftP31TwiddleShuffle16Apple;
+  Kernel kfftP31TwiddleShuffle64Apple;
+  Kernel kfftP31TwiddleShuffle256Apple;
+  Kernel kfftP31TwiddleShuffle512Apple;
+  Kernel kfftP31WidthFinalApple;
+  Kernel kfftP61WeightScalarApple;
+  Kernel kfftP61WidthRadixApple;
+  Kernel kfftP61TwiddleShuffle1Apple;
+  Kernel kfftP61TwiddleShuffle4Apple;
+  Kernel kfftP61TwiddleShuffle8Apple;
+  Kernel kfftP61TwiddleShuffle16Apple;
+  Kernel kfftP61TwiddleShuffle64Apple;
+  Kernel kfftP61TwiddleShuffle256Apple;
+  Kernel kfftP61TwiddleShuffle512Apple;
+  Kernel kfftP61WidthFinalApple;
+#endif
   Kernel kCarryA;
   Kernel kCarryAROE;
   Kernel kCarryM;
@@ -171,13 +261,6 @@ private:
   Kernel testTime;
 
   // Kernel testKernel;
-
-  // Copy of some -use options needed for Kernel, Trig, and Weights initialization
-  bool tail_single_wide;                // TailSquare processes one line at a time
-  bool tail_single_kernel;              // TailSquare does not use a separate kernel for line zero
-  u32 in_place;                         // Should GPU perform transform in-place. 1 = nVidia friendly memory layout, 2 = AMD friendly.
-  u32 wmul;                             // Number of workgroups carryFused kernel should process ("width multiplier").
-  u32 pad_size;                         // Pad size in bytes as specified on the command line or config.txt.  Maximum value is 512.
 
   // Twiddles: trigonometry constant buffers, used in FFTs.
   // The twiddles depend only on FFT config and do not depend on the exponent.
@@ -217,6 +300,11 @@ private:
   Buffer<double> buf1;
   Buffer<double> buf2;
   Buffer<double> buf3;
+#if defined(__APPLE__)
+  // Two exceptional tail lines, each SMALL_HEIGHT GF61 values (GF61 = 2 doubles).
+  Buffer<double> bufAppleTailZeroGF61;
+  Buffer<double> bufAppleTailMulGF61;
+#endif
 
   unsigned statsBits;
   TimeInfo* timeBufVect;
@@ -358,10 +446,17 @@ public:
   void regSetU32(Buffer<Word>& dst, u32 value);
   void regSubU32(Buffer<Word>& dst, u32 value);
   bool regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs);
+  void regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count);
 
   void clear(bool isPRP);
 
 private:
+#if defined(__APPLE__)
+  bool apple_stage_finish = false;
+  void appleStageFinish();
+#else
+  void appleStageFinish() {}
+#endif
   u32 getProofPower(u64 k);
   void doBigLog(u64 k, u64 res, bool checkOK, float secsPerIt, u64 nIters, u32 nErrors);
   enum WHICH_KERNEL {CARRYFUSED=0, MIDIN=1, MIDIN31=2, MIDIN61=3, TAIL=4, TAIL31=5, TAIL61=6, MIDOUT=7, MIDOUT31=8, MIDOUT61=9};

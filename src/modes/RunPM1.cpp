@@ -3386,6 +3386,7 @@ int App::runPM1Stage2MarinVTrace() {
         std::cerr << "[PM1-VTRACE] cannot allocate GPU engine.\n";
         return -2;
     }
+    const bool aevum_vtrace_backend = eng->is_aevum_backend();
 
     // v87: normal V-trace Stage-2 checkpoints are compact by default.
     // The old full-engine checkpoint copied every baby register to host RAM;
@@ -3521,6 +3522,14 @@ int App::runPM1Stage2MarinVTrace() {
     std::vector<int32_t> babyGlobalToLocal(babyCount, int32_t(-1));
     auto precompute_baby_window = [&](size_t batchStart, size_t batchEnd,
                                       std::vector<int32_t>& babyGlobalToLocal){
+        // Aevum keeps only a small LRU cache of prepared multiplicands.  A
+        // previous Stage-2 pass may have evicted V1 in favour of VD and the
+        // current trace term, so make the recurrence source live explicitly
+        // before rebuilding a baby window.
+        if (aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        }
+
         if (batchEnd > babyCount) batchEnd = babyCount;
         std::fill(babyGlobalToLocal.begin(), babyGlobalToLocal.end(), int32_t(-1));
         for (size_t gi = batchStart; gi < batchEnd; ++gi) {
@@ -3564,6 +3573,15 @@ int App::runPM1Stage2MarinVTrace() {
             eng->copy((engine::Reg)RBPREV, (engine::Reg)RBCUR);
             eng->copy((engine::Reg)RBCUR, (engine::Reg)RBNEXT);
         }
+        // The baby recurrence touches RMUL_V1 on every step, making an older
+        // prepared VD slot the LRU victim when the first term is prepared.
+        // Refresh VD now so the two hot Stage-2 multiplicands are VD and the
+        // current term.  This is required by Aevum's prepared-multiply contract.
+        // Marin keeps its original preparation schedule outside this helper.
+        if (aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        }
+
         std::cout << "\rV-trace baby window " << (batchStart + 1) << "-" << batchEnd << ": 100%\n";
     };
 
@@ -3649,17 +3667,19 @@ int App::runPM1Stage2MarinVTrace() {
         mpz_t V1t; mpz_init_set(V1t, V1.get_mpz_t());
         eng->set_mpz((engine::Reg)RV1, V1t);
         mpz_clear(V1t);
-        eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
-
         std::cout << "[PM1-VTRACE] V1 = H + H^-1 built with one GMP inverse; precomputing V_j and V_D...\n";
 
+        if (!aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        }
         if (!useBabyBatching) {
             precompute_baby_window(0, babyCount, babyGlobalToLocal);
         } else {
             precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
         }
-
-        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        if (!aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        }
 
         // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
         eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
@@ -3668,16 +3688,25 @@ int App::runPM1Stage2MarinVTrace() {
         cur_k = 0;
     } else {
         cur_k = saved_k;
-        eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        bool rebuiltBabyWindow = false;
+        if (!aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        }
         if (!useBabyBatching) {
             if (compactS2Loaded) {
                 std::cout << "[PM1-VTRACE-CKPT] compact checkpoint loaded; recomputing deterministic baby table before resume...\n";
                 precompute_baby_window(0, babyCount, babyGlobalToLocal);
+                rebuiltBabyWindow = true;
             } else {
                 for (size_t gi = 0; gi < babyCount; ++gi) babyGlobalToLocal[gi] = int32_t(gi);
             }
         }
-        eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        if (aevum_vtrace_backend && !rebuiltBabyWindow) {
+            eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        } else if (!aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+        }
         std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
                   << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
     }

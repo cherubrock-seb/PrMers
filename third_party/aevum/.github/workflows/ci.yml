@@ -96,10 +96,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-15-intel, macos-latest]
+        os: [macos-15-intel, macos-15]
       fail-fast: false
     env:
       CXX: c++
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
     - uses: actions/checkout@v6
     - name: Install
@@ -110,6 +111,7 @@ jobs:
         make test-host
         make -j "$(sysctl -n hw.ncpu)" engine-lib
         make test-engine-api
+        bash tests/check_macos_minos.sh "$MACOSX_DEPLOYMENT_TARGET" build-engine/libaevum_engine.so build-tests/aevum-engine-api-load-test
         make -j "$(sysctl -n hw.ncpu)"
         cd build-release
         rm -f -- *.o

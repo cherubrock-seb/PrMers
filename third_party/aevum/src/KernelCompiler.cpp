@@ -4,6 +4,8 @@
 #include "log.h"
 #include "timeutil.h"
 #include "Args.h"
+#include "OpenCLStandard.h"
+#include "OpenCLSourceBuilder.h"
 
 #include <cassert>
 #include <cinttypes>
@@ -17,6 +19,19 @@ const std::vector<const char*>& getClFiles();
 
 static_assert(sizeof(Program) == sizeof(cl_program));
 
+static string openclStandardArg(cl_device_id deviceId) {
+#if defined(__APPLE__)
+  return aevum_opencl_standard_arg(getOpenCLCVersion(deviceId),
+                                   getOpenCLDeviceVersion(deviceId),
+                                   true) + "-DAEVUM_APPLE_OPENCL12=1 ";
+#else
+  (void) deviceId;
+  // Preserve the upstream PRPLL/Aevum build contract exactly on Linux,
+  // Windows, OpenCL and CUDA backends.
+  return "-cl-std=CL2.0 ";
+#endif
+}
+
 // -cl-fast-relaxed-math  -cl-unsafe-math-optimizations -cl-denorms-are-zero -cl-mad-enable
 // Other options:
 // * -cl-uniform-work-group-size
@@ -27,7 +42,7 @@ KernelCompiler::KernelCompiler(const Args& args, const Context* context, const s
   cacheDir{args.cacheDir.string()},
   context{context->get()},
   linkArgs{"-cl-finite-math-only " },
-  baseArgs{linkArgs + "-cl-std=CL2.0 " + clArgs},
+  baseArgs{linkArgs + openclStandardArg(context->deviceId()) + clArgs},
   dump{args.dump},
   useCache{args.useCache},
   verbose{args.verbose},
@@ -35,6 +50,12 @@ KernelCompiler::KernelCompiler(const Args& args, const Context* context, const s
 {
 
   string hw = getDriverVersion(deviceId) + ':' + getDeviceName(deviceId);
+#if defined(__APPLE__) && !defined(CUDA_BACKEND)
+  // Include the effective language/device versions in Apple cache keys because
+  // the same hardware can receive a different legacy OpenCL frontend after a
+  // macOS update. Keep the upstream cache key untouched everywhere else.
+  hw += ':' + getOpenCLDeviceVersion(deviceId) + ':' + getOpenCLCVersion(deviceId);
+#endif
   if (args.verbose) { log("OpenCL: %s, args %s\n", hw.c_str(), baseArgs.c_str()); }
 
   SHA3 hasher;
@@ -58,13 +79,30 @@ KernelCompiler::KernelCompiler(const Args& args, const Context* context, const s
 }
 
 Program KernelCompiler::compile(const string& fileName, const string& extraArgs) const {
-  Program p1 = loadSource(context, "#include \""s + fileName + "\"\n");
-  assert(p1);
-  
   string args = baseArgs + ' ' + extraArgs;
   if (!dump.empty()) {
     args += " -save-temps="s + dump + "/" + fileName;
   }
+
+#if defined(__APPLE__) && !defined(CUDA_BACKEND)
+  // Apple's legacy OpenCL 1.2 stack can abort inside the separate
+  // clCompileProgram + clLinkProgram route when bundled sources are supplied
+  // as compile headers. Build one expanded source program instead.
+  const string source = buildMonolithicOpenCLSource(fileName, files);
+  Program program = loadSource(context, source);
+  if (!program) throw runtime_error("Can't create Apple OpenCL source program for " + fileName);
+  if (verbose) log("Apple OpenCL monolithic build begin: %s\n", fileName.c_str());
+  const int err = clBuildProgram(program.get(), 1, &deviceId, args.c_str(), nullptr, nullptr);
+  if (string mes = getBuildLog(program.get(), deviceId); !mes.empty()) { log("%s\n", mes.c_str()); }
+  if (err != CL_SUCCESS) {
+    log("Building '%s' error %s (args %s)\n", fileName.c_str(), errMes(err).c_str(), args.c_str());
+    return {};
+  }
+  if (verbose) log("Apple OpenCL monolithic build end: %s\n", fileName.c_str());
+  return program;
+#else
+  Program p1 = loadSource(context, "#include \""s + fileName + "\"\n");
+  assert(p1);
 #ifdef CUDA_BACKEND
   int err = clCompileProgram(p1.get(), 1, &deviceId, args.c_str(),
                              clSources.size(), (const cl_program*) (clSources.data()), getClFileNames().data(),
@@ -80,7 +118,7 @@ Program KernelCompiler::compile(const string& fileName, const string& extraArgs)
     log("Compiling '%s' error %s (args %s)\n", fileName.c_str(), errMes(err).c_str(), args.c_str());
     return {};
   }
-  
+
   Program p2{clLinkProgram(context, 1, &deviceId, linkArgs.c_str(),
                            1, (cl_program *) &p1, nullptr, nullptr, &err)};
   if (string mes = getBuildLog(p1.get(), deviceId); !mes.empty()) { log("%s\n", mes.c_str()); }
@@ -88,6 +126,7 @@ Program KernelCompiler::compile(const string& fileName, const string& extraArgs)
     log("Linking '%s' error %s (args %s)\n", fileName.c_str(), errMes(err).c_str(), linkArgs.c_str());
   }
   return p2;
+#endif
 }
 
 static string to_hex(u64 d) {
@@ -119,7 +158,57 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
     throw "Can't compile " + fileName;
   }
 
-  KernelHolder ret{loadKernel(program.get(), kernelName.c_str())};
+  KernelHolder ret;
+#if defined(__APPLE__) && !defined(CUDA_BACKEND)
+  string createError;
+  auto tryCreate = [&](Program& candidate) -> KernelHolder {
+    if (!candidate) return {};
+    try {
+      return KernelHolder{loadKernel(candidate.get(), kernelName.c_str())};
+    } catch (const std::runtime_error& e) {
+      createError = e.what();
+      return {};
+    }
+  };
+
+  ret = tryCreate(program);
+
+  // A stale binary produced by a previous macOS/OpenCL configuration can build
+  // successfully yet fail during Metal pipeline creation. Rebuild it once from
+  // the current monolithic source before trying a lower-optimization fallback.
+  if (!ret && fromCache) {
+    if (verbose) {
+      log("Apple OpenCL cached pipeline rejected for %s (%s); rebuilding source.\n",
+          kernelName.c_str(), createError.c_str());
+    }
+    program = compile(fileName, args);
+    fromCache = false;
+    ret = tryCreate(program);
+  }
+
+  // Some Apple OpenCL-to-Metal revisions fail only in the optimized pipeline
+  // compiler for large integer kernels. Retry the exact same source and work-
+  // group contract with standard OpenCL optimization disabled. Linux, Windows,
+  // CUDA, AMD and NVIDIA paths never enter this branch.
+  if (!ret) {
+    if (verbose) {
+      log("Apple OpenCL pipeline retry for %s with -cl-opt-disable (%s).\n",
+          kernelName.c_str(), createError.c_str());
+    }
+    Program conservative = compile(fileName, args + " -cl-opt-disable");
+    KernelHolder retry = tryCreate(conservative);
+    if (retry) {
+      program = std::move(conservative);
+      ret = std::move(retry);
+      fromCache = false;
+      if (verbose) log("Apple OpenCL conservative pipeline accepted: %s\n", kernelName.c_str());
+    }
+  }
+
+  if (!ret && !createError.empty()) throw std::runtime_error(createError);
+#else
+  ret = KernelHolder{loadKernel(program.get(), kernelName.c_str())};
+#endif
   if (!ret) {
     log("Can't find %s in %s\n", kernelName.c_str(), fileName.c_str());
     throw "Can't find "s + kernelName + " in " + fileName;

@@ -85,3 +85,29 @@ KERNEL(64) transposeIn(P(Word2) out, CP(Word2) in) {
 }
 
 #endif
+
+
+// Apple OpenCL-to-Metal compatibility path.
+//
+// The stock transpose uses a full 64x64 local-memory tile (32 KiB) plus
+// three barriers.  On Apple OpenCL 1.2 that kernel can compile and execute
+// without reporting an error yet return corrupted data, including for an
+// all-zero register.  Use a direct global transpose instead.  Each work-item
+// copies one Word2 and there is no cross-work-item dependency.
+#if defined(AEVUM_APPLE_OPENCL12)
+
+KERNEL(64) transposeOutAppleGlobal(P(Word2) out, CP(Word2) in) {
+  const u32 gid = get_global_id(0);
+  const u32 row = gid / WIDTH;
+  const u32 col = gid - row * WIDTH;
+  out[col * BIG_HEIGHT + row] = in[gid];
+}
+
+KERNEL(64) transposeInAppleGlobal(P(Word2) out, CP(Word2) in) {
+  const u32 gid = get_global_id(0);
+  const u32 row = gid / BIG_HEIGHT;
+  const u32 col = gid - row * BIG_HEIGHT;
+  out[col * WIDTH + row] = in[gid];
+}
+
+#endif

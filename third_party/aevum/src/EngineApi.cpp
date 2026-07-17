@@ -72,7 +72,21 @@ public:
 
     const std::string spec = fft_spec ? fft_spec : "";
     FFTConfig fft = FFTConfig::bestFit(args_, exponent_, spec);
-    if (fft.shape.fft_type != FFT3161) throw std::runtime_error("Aevum engine requires FFT3161");
+    bool apple_diagnostic_plane = false;
+#if defined(__APPLE__)
+    if (const char* diagnostic = std::getenv("AEVUM_APPLE_DIAGNOSTIC_PLANES")) {
+      apple_diagnostic_plane = diagnostic[0] == '1' && diagnostic[1] == '\0' &&
+                               (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
+    }
+#endif
+    if (fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane)
+      throw std::runtime_error("Aevum engine requires FFT3161");
+#if defined(__APPLE__)
+    if (verbose && apple_diagnostic_plane) {
+      log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",
+          static_cast<int>(fft.shape.fft_type), fft.shape.fft_type == FFT31 ? "GF31 only" : "GF61 only");
+    }
+#endif
 
     gpu_ = Gpu::make(exponent_, shared_, fft, {}, verbose);
     transform_size_ = gpu_->getFFTSize();
@@ -86,7 +100,27 @@ public:
     }
     prepared_buffers_ = gpu_->makeTransformBufVector(static_cast<u32>(prepared_count));
     prepared_slots_.resize(prepared_count);
+#if defined(__APPLE__)
+    // Apple cl2Metal may honor the restrict contract of regAdd and miscompile
+    // an in-place dst==src doubling.  A second tiny register buffer lets the
+    // exact same add-and-double algorithm ping-pong without aliasing.
+    small_factor_scratch_ = gpu_->makeBufVector(2);
+#else
     small_factor_scratch_ = gpu_->makeBufVector(1);
+#endif
+#if defined(__APPLE__)
+    if (verbose && fft.shape.fft_type == FFT3161) {
+      log("Apple Aevum compatibility: register upload/readback uses direct global transpose kernels without LDS.\n");
+      log("Apple Aevum compatibility: set_u32 uses canonical compact-word upload; raw register fill is disabled.\n");
+      log("Apple Aevum compatibility: FFT3161 remains GF31+GF61; fftP uses fully global scalar/radix/twiddle staging for both CRT planes.\n");
+      log("Apple Aevum compatibility: GF61 middle-in in-place stages use single-pointer no-alias dispatch.\n");
+      log("Apple Aevum compatibility: fftHinGF61 uses exact global staging; non-Apple keeps the upstream monolithic kernel.\n");
+      log("Apple Aevum compatibility: prepared tailMulLowGF61 uses exact staged height FFT/pairing; prepared operand remains read-only.\n");
+      log("Apple Aevum performance: queue pacing uses nonblocking clFlush; marker polling is disabled by default.\n");
+      log("Apple Aevum diagnostic: set AEVUM_APPLE_QUEUE_MARKER_WAIT=1 to restore legacy marker polling.\n");
+      log("Apple Aevum diagnostic: set AEVUM_APPLE_STAGE_FINISH=1 to serialize every staged GF61 kernel.\n");
+    }
+#endif
     gpu_->regSync();
   }
 
@@ -153,8 +187,15 @@ public:
     check_reg(src);
     if (factor == 0) throw std::runtime_error("Aevum multiplication factor must be positive");
     const size_t slot = find_prepared(src, true);
+#if defined(__APPLE__)
+    if (slot == no_prepared) {
+      throw std::runtime_error("Apple Aevum multiplication requires set_multiplicand/prepare; unprepared generic tailMul is not used");
+    }
+    gpu_->regMulPrepared(reg(dst), prepared_buffers_[slot], 1);
+#else
     if (slot != no_prepared) gpu_->regMulPrepared(reg(dst), prepared_buffers_[slot], 1);
     else gpu_->regMul(reg(dst), reg(src), 1);
+#endif
     invalidate_if(dst);
     multiply_small(dst, factor);
   }
@@ -183,6 +224,14 @@ public:
     check_reg(lhs);
     check_reg(rhs);
     return gpu_->regEqual(reg(lhs), reg(rhs));
+  }
+
+  void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
+    check_reg(src);
+    if (!trace || trace_count < 12) throw std::runtime_error("Aevum square trace buffer must contain at least 12 uint64 values");
+    if (small_factor_scratch_.empty()) throw std::runtime_error("Aevum square trace scratch is unavailable");
+    gpu_->regCopy(small_factor_scratch_[0], reg(src));
+    gpu_->regDebugSquareTrace(small_factor_scratch_[0], trace, trace_count);
   }
 
 private:
@@ -230,11 +279,25 @@ private:
     gpu_->regSetU32(reg(index), 0);
 
     uint32_t bits = factor;
+#if defined(__APPLE__)
+    size_t current = 0;
+    size_t next = 1;
+    while (bits != 0) {
+      if (bits & 1u) gpu_->regAddWords(reg(index), small_factor_scratch_[current]);
+      bits >>= 1;
+      if (bits != 0) {
+        gpu_->regCopy(small_factor_scratch_[next], small_factor_scratch_[current]);
+        gpu_->regAddWords(small_factor_scratch_[next], small_factor_scratch_[current]);
+        std::swap(current, next);
+      }
+    }
+#else
     while (bits != 0) {
       if (bits & 1u) gpu_->regAddWords(reg(index), small_factor_scratch_[0]);
       bits >>= 1;
       if (bits != 0) gpu_->regAddWords(small_factor_scratch_[0], small_factor_scratch_[0]);
     }
+#endif
   }
 
   void check_reg(size_t index) const {
@@ -356,6 +419,10 @@ int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, size_t rhs, int* 
     if (!equal_out) throw std::runtime_error("null Aevum equality output");
     *equal_out = runtime(handle).equal(lhs, rhs) ? 1 : 0;
   });
+}
+
+int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count) {
+  return invoke([&] { runtime(handle).debug_square_trace(src, trace, trace_count); });
 }
 
 } // extern "C"

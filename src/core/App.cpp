@@ -342,9 +342,20 @@ App::App(int argc, char** argv)
         else workload = engine::gpu_workload::pm1;
     }
     else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
+#if defined(__APPLE__)
+    // Apple ships the legacy OpenCL 1.2 stack. Keep Marin as the safe default
+    // on macOS and make Aevum an explicit opt-in only.
+    const engine::gpu_backend selected_backend = (!o.marin || o.force_engine_marin)
+        ? engine::gpu_backend::marin
+        : (o.aevum ? engine::gpu_backend::aevum : engine::gpu_backend::marin);
+    if (o.marin && !o.aevum && !o.force_engine_marin) {
+        std::cout << "[Backend macOS] Marin selected by platform default; use -aevum to opt in.\n";
+    }
+#else
     const engine::gpu_backend selected_backend = (!o.marin || o.force_engine_marin)
         ? engine::gpu_backend::marin
         : (o.aevum ? engine::gpu_backend::aevum : engine::gpu_backend::auto_select);
+#endif
     engine::configure_gpu_backend(selected_backend, o.aevum_fft_spec, workload);
     return o;
   }())
@@ -840,8 +851,13 @@ int App::run() {
                                        "Aevum engine will be created on first arithmetic operation", 0, 0,
                                        options.aevum_fft_spec);
         } else {
+#if defined(__APPLE__)
+            guiServer_->setBackendInfo("macOS default", "Marin", gui_workload,
+                                       "Marin is the macOS default; use -aevum to opt in explicitly");
+#else
             guiServer_->setBackendInfo("Auto", "Pending", gui_workload,
                                        "backend will be selected from workload and transform sizes");
+#endif
         }
         guiServer_->start();
         std::cout << "GUI " << guiServer_->url() << std::endl;

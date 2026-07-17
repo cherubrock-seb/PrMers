@@ -65,6 +65,9 @@ private:                            // This replaces the "call queue->finish eve
   int squareTime;                   // Time to do one squaring (in microseconds)
   int squareKernels;                // Number of kernels in one squaring
   bool firstSetTime;                // Flag so we can ignore first setSquareTime call (which is inaccurate because of all the initial openCL compiles)
+#if defined(__APPLE__)
+  bool appleMarkerWait;             // Diagnostic opt-in for the old marker polling policy.
+#endif
   void queueMarkerEvent();          // Queue the marker event
   void waitForMarkerEvent();        // Wait for marker event to complete
 };

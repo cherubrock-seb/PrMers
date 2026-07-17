@@ -15,6 +15,7 @@
 #include <array>
 #include <map>
 #include <cinttypes>
+#include <cstdlib>
 
 using namespace std;
 
@@ -301,10 +302,23 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // A FFT-spec was given, simply take the first FFT from the spec that can handle E
   if (!spec.empty()) {
     FFTConfig fft{spec};
-    if (fft.shape.fft_type != FFT3161) {
+    bool apple_diagnostic_plane = false;
+#if defined(__APPLE__)
+    if (const char* diagnostic = std::getenv("AEVUM_APPLE_DIAGNOSTIC_PLANES")) {
+      apple_diagnostic_plane = diagnostic[0] == '1' && diagnostic[1] == '\0' &&
+                               (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
+    }
+#endif
+    if (fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane) {
       log("Aevum accepts only FFT type 1, GF(M31^2) x GF(M61^2).\n");
       throw "Aevum FFT type";
     }
+#if defined(__APPLE__)
+    if (apple_diagnostic_plane) {
+      log("Apple Aevum diagnostic: explicit single-plane FFT type %d enabled.\n",
+          static_cast<int>(fft.shape.fft_type));
+    }
+#endif
     if (fft.maxExp() * args.fftOverdrive < E) {
       log("Warning: %s (max %" PRIu64 ") may be too small for %" PRIu64 "\n", fft.spec().c_str(), fft.maxExp(), E);
     }

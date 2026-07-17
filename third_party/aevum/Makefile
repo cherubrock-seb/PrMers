@@ -11,7 +11,8 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.4
+AEVUM_VERSION ?= v0.3.53
+MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
 # AppleClang and is fully supported by the engine build.
@@ -21,8 +22,10 @@ DL_LIBS = -ldl
 ENGINE_LINK_FLAGS = -shared -Wl,-Bsymbolic
 EXAMPLE_RPATH = -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)'
 ifeq ($(HOST_OS), Darwin)
+export MACOSX_DEPLOYMENT_TARGET
+DARWIN_MIN_FLAGS = -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
 DL_LIBS =
-ENGINE_LINK_FLAGS = -dynamiclib
+ENGINE_LINK_FLAGS = -dynamiclib -Wl,-install_name,@rpath/libaevum_engine.so $(DARWIN_MIN_FLAGS)
 EXAMPLE_RPATH = -Wl,-rpath,@loader_path/../$(ENGINE_BIN)
 endif
 
@@ -43,7 +46,7 @@ else
  endif
 endif
 
-COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20
+COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 $(DARWIN_MIN_FLAGS)
 ifneq ($(HOST_OS),Darwin)
  COMMON_FLAGS += -static-libstdc++ -static-libgcc
  ifeq ($(findstring MINGW,$(HOST_OS)),MINGW)
@@ -65,7 +68,7 @@ STRIP=-s
 
 endif
 
-SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp EngineApi.cpp
+SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp OpenCLSourceBuilder.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp EngineApi.cpp
 
 SRCS2 = test.cpp
 
@@ -85,7 +88,7 @@ ENGINE_BIN = build-engine
 ENGINE_SRCS = $(filter-out main.cpp,$(SRCS1))
 ENGINE_OBJS = $(ENGINE_SRCS:%.cpp=$(ENGINE_BIN)/%.o)
 ENGINE_DEPDIR := $(ENGINE_BIN)/.d
-ENGINE_FLAGS = -O3 -DNDEBUG -Wall -std=c++20 -fPIC -fvisibility=hidden -DAEVUM_ENGINE_LIBRARY
+ENGINE_FLAGS = -O3 -DNDEBUG -Wall -std=c++20 $(DARWIN_MIN_FLAGS) -fPIC -fvisibility=hidden -DAEVUM_ENGINE_LIBRARY
 ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
 
 .PHONY: engine-lib
@@ -114,7 +117,7 @@ $(BIN)/aevum-amd: ${OBJS}
 
 .PHONY: test-small-factor-gpu
 test-small-factor-gpu: engine-lib
-	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
 	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
 
 clean:
@@ -165,30 +168,64 @@ test-engine-api: engine-lib $(ENGINE_API_TEST)
 
 $(ENGINE_API_TEST): tests/engine_api_load_test.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -O2 -std=c++20 $< $(DL_LIBS) -o $@
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) $< $(DL_LIBS) -o $@
 
 HOST_TEST := build-tests/aevum-host-gf-test
 STATE_TEST := build-tests/aevum-state-compact-test
+OPENCL_STANDARD_TEST := build-tests/aevum-opencl-standard-test
+MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 
 .PHONY: test test-host test-gpu
 
 test: test-host
 
-test-host: $(HOST_TEST) $(STATE_TEST)
+$(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp src/OpenCLSourceBuilder.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
+
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST)
+	$(MONOLITHIC_SOURCE_TEST)
+	bash tests/opencl12_syntax_test.sh
+	bash tests/apple_opencl12_kernel_matrix_syntax.sh
+	python3 tests/apple_gf61_ffthin_staging_test.py
+	python3 tests/apple_gf31_width_staging_test.py
+	python3 tests/apple_gf61_scalar_mapping_test.py
+	python3 tests/apple_gf61_width_staging_test.py
+	python3 tests/apple_gf61_middlein_staging_test.py
+	python3 tests/apple_gf61_middlein_restrict_alias_test.py
+	python3 tests/apple_gf61_tail_two_kernel_policy_test.py
+	python3 tests/apple_gf61_tailzero_staging_test.py
+	python3 tests/apple_gf61_maintail_staging_test.py
+	python3 tests/apple_gf61_fftw_staging_test.py
+	python3 tests/apple_gf61_tailmul_staging_test.py
+	python3 tests/apple_prepared_tailmullow_staging_test.py
+	python3 tests/apple_gf61_middleout_staging_test.py
+	python3 tests/apple_readchecked_double_sync_test.py
+	python3 tests/apple_queue_marker_flush_test.py
+	python3 tests/apple_generic_mul_safety_test.py
+	python3 tests/apple_global_transpose_test.py
+	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
+	python3 tests/gpu_init_order_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
+	$(OPENCL_STANDARD_TEST)
 
 $(HOST_TEST): tests/host_gf_test.cpp
 	@mkdir -p build-tests
-	$(CXX) -O3 -std=c++20 -Wall -Wextra $< -o $@
+	$(CXX) -O3 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $< -o $@
 
 $(STATE_TEST): tests/state_compact_wrap_test.cpp src/state.cpp
 	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 -Wall -Wextra -Isrc $^ -o $@
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $^ -o $@
+
+$(OPENCL_STANDARD_TEST): tests/opencl_standard_test.cpp src/OpenCLStandard.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
 
 test-gpu: $(BIN)/aevum
 	bash tests/gpu_prp_smoke.sh $(BIN)/aevum
+
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
 
@@ -201,7 +238,7 @@ examples: $(EXAMPLE_TARGETS)
 
 $(EXAMPLE_BIN)/%: examples/%.cpp examples/example_common.h src/EngineApi.h $(ENGINE_LIB)
 	@mkdir -p $(EXAMPLE_BIN)
-	$(CXX) -O2 -std=c++20 -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
 
 test-examples-gpu: examples
 	$(EXAMPLE_BIN)/fft_plans

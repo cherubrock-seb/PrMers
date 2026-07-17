@@ -116,6 +116,26 @@ string getDriverVersion(cl_device_id id) {
   }
 }
 
+string getOpenCLDeviceVersion(cl_device_id id) {
+  try {
+    char buf[256] = {0};
+    GET_INFO(id, CL_DEVICE_VERSION, buf);
+    return buf;
+  } catch (const gpu_error&) {
+    return "";
+  }
+}
+
+string getOpenCLCVersion(cl_device_id id) {
+  try {
+    char buf[256] = {0};
+    GET_INFO(id, CL_DEVICE_OPENCL_C_VERSION, buf);
+    return buf;
+  } catch (const gpu_error&) {
+    return "";
+  }
+}
+
 string getDriverVersionByPos(int pos) {
   assert(pos >= 0);
   return getDriverVersion(getAllDeviceIDs().at(pos));

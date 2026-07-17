@@ -215,6 +215,21 @@ void OVERLOAD writeTailFusedLine(T2 *u, P(T2) out, u32 line, u32 me) {
 #endif
 }
 
+// Scalar equivalent of one iteration of writeTailFusedLine.
+void OVERLOAD writeTailFusedValue(T2 value, P(T2) out, u32 line, u32 i, u32 me) {
+#if PAD_SIZE > 0
+#if MIDDLE == 4 || MIDDLE == 8 || MIDDLE == 16
+  u32 BIG_PAD_SIZE = (PAD_SIZE/2+1)*PAD_SIZE;
+  out += line * (SMALL_HEIGHT + PAD_SIZE) + line / MIDDLE * BIG_PAD_SIZE + me;
+#else
+  out += line * (SMALL_HEIGHT + PAD_SIZE) + me;
+#endif
+#else
+  out += line * SMALL_HEIGHT + me;
+#endif
+  FFTSTORE(&out[i * G_H], value);
+}
+
 void OVERLOAD readMiddleOutLine(T2 *u, CP(T2) in, u32 y, u32 x) {
 #if PAD_SIZE > 0
 #if MIDDLE == 4 || MIDDLE == 8 || MIDDLE == 16
@@ -656,6 +671,11 @@ void OVERLOAD writeTailFusedLine(GF61 *u, P(GF61) out, u32 line, u32 me) {
   writeTailFusedLine((T2 *) u, (P(T2)) out, line, me);
 }
 
+void OVERLOAD writeTailFusedValue(GF61 value, P(GF61) out,
+                                  u32 line, u32 i, u32 me) {
+  writeTailFusedValue(as_double2(value), (P(T2)) out, line, i, me);
+}
+
 void OVERLOAD readMiddleOutLine(GF61 *u, CP(GF61) in, u32 y, u32 x) {
   readMiddleOutLine((T2 *) u, (CP(T2)) in, y, x);
 }
@@ -832,6 +852,18 @@ void OVERLOAD writeTailFusedLine(T2 *u, P(T2) out, u32 line, u32 me) {
   u32 middle = line / WIDTH;           // Multiples of SMALL_HEIGHT
   out += (width / 16 * SIZEW) + (middle * SIZEM) + (width % 16 * SIZEBLK) + (me % 16);
   for (i32 i = 0; i < NH; ++i) { FFTSTORE(&out[SWIZ(width % 16, (i * SMALL_HEIGHT / NH + me) / 16) * 16], u[i]); }
+}
+
+// Scalar equivalent of one iteration of writeTailFusedLine.  This helper is
+// used by the Apple GF61 special-tail writer so the Metal pipeline carries
+// one value instead of a private vector and loop.
+void OVERLOAD writeTailFusedValue(T2 value, P(T2) out, u32 line, u32 i, u32 me) {
+  u32 width = line % WIDTH;
+  u32 middle = line / WIDTH;
+  out += (width / 16 * SIZEW) + (middle * SIZEM) +
+         (width % 16 * SIZEBLK) + (me % 16);
+  FFTSTORE(&out[SWIZ(width % 16,
+                     (i * SMALL_HEIGHT / NH + me) / 16) * 16], value);
 }
 
 //****************************************************************************************
@@ -1049,6 +1081,11 @@ void OVERLOAD readTailFusedLine(CP(GF61) in, GF61 *u, u32 line, u32 me) {
 
 void OVERLOAD writeTailFusedLine(GF61 *u, P(GF61) out, u32 line, u32 me) {
   writeTailFusedLine((T2 *) u, (P(T2)) out, line, me);
+}
+
+void OVERLOAD writeTailFusedValue(GF61 value, P(GF61) out,
+                                  u32 line, u32 i, u32 me) {
+  writeTailFusedValue(as_double2(value), (P(T2)) out, line, i, me);
 }
 
 void OVERLOAD readMiddleOutLine(GF61 *u, CP(GF61) in, u32 y, u32 x) {

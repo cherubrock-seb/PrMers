@@ -766,7 +766,15 @@ void OVERLOAD bar(const u32 WG) {
 
 // A half-barrier is only needed when half-a-workgroup needs a barrier.
 // This is used e.g. by the double-wide tailSquare, where LDS is split between the halves.
-void halfBar() { if (get_enqueued_local_size(0) / 2 > WAVEFRONT) { bar(); } }
+void halfBar() {
+#if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ < 200
+  // OpenCL C 1.2 has no get_enqueued_local_size().  PrMers/Aevum always
+  // supplies an explicit local size, so get_local_size() is equivalent here.
+  if (get_local_size(0) / 2 > WAVEFRONT) { bar(); }
+#else
+  if (get_enqueued_local_size(0) / 2 > WAVEFRONT) { bar(); }
+#endif
+}
 
 
 // nVidia GPUs (Hopper architecture sm 9.0 and later) support Programatic Dependent Launch where the tail end execution of one kernel can overlap

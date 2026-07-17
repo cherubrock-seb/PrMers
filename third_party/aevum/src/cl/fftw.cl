@@ -107,4 +107,95 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   write(G_W, NW, u, out61, 0);
 }
 
+#if defined(AEVUM_APPLE_OPENCL12)
+
+// Apple accepts the full fftMiddleOutGF61 pipeline but rejects the following
+// monolithic fftWGF61 pipeline at clCreateKernel.  Stage only this GF61 width
+// transform.  No extra transform-sized allocation is needed: the caller's
+// output and consumed middle-out input buffers are the two ping-pong banks.
+KERNEL(G_W) fftWGF61ApplePlaceholder(P(T2) out, CP(T2) in, Trig smallTrig) {
+  if (get_global_id(0) == 0) out[0] = in[0];
+}
+
+// Scalar form of readCarryFusedLine for the Apple-forced INPLACE=0, PAD=0
+// layout.  Each work-item loads exactly one GF61 value and writes the normal
+// contiguous width-line layout consumed by the staged radix kernels.
+KERNEL(G_W) fftWGF61LoadScalarApple(P(T2) outRaw, CP(T2) inRaw) {
+  const u32 p = get_global_id(0);
+  const u32 line = p / WIDTH;
+  const u32 x = p - line * WIDTH;
+  const u32 i = x / G_W;
+  const u32 me = x - i * G_W;
+  const u32 sizeY = OUT_WG / OUT_SIZEX;
+
+  const u32 middleOutX = line % SMALL_HEIGHT;
+  const u32 chunkX = middleOutX / OUT_SIZEX;
+  const u32 xWithinOutWg = middleOutX % OUT_SIZEX;
+  const u32 middleOutI = line / SMALL_HEIGHT;
+  const u32 chunkY = me / sizeY + i * (G_W / sizeY);
+
+  const u32 src = chunkX * MIDDLE * WIDTH * OUT_SIZEX
+                + xWithinOutWg * sizeY
+                + middleOutI * OUT_WG
+                + (me % sizeY)
+                + chunkY * MIDDLE * OUT_WG;
+
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61);
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61);
+  out61[p] = in61[src];
+}
+
+KERNEL(G_W) fftWGF61WidthRadixApple(P(T2) ioRaw) {
+  GF61 u[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  P(GF61) io61 = (P(GF61)) (ioRaw + DISTGF61) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u[i] = io61[i * G_W];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NW; ++i) io61[i * G_W] = u[i];
+}
+
+#define DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(NAME, STAGE)                    \
+KERNEL(G_W) NAME(P(T2) outRaw, CP(T2) inRaw, global const T2 *trigRaw) {        \
+  const u32 p = get_global_id(0);                                               \
+  const u32 line = p / WIDTH;                                                   \
+  const u32 x = p - line * WIDTH;                                               \
+  const u32 i = x / G_W;                                                        \
+  const u32 me = x - i * G_W;                                                   \
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61);                               \
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61);                               \
+  TrigGF61 trig61 = (TrigGF61) (trigRaw + DISTWTRIGGF61);                      \
+  GF61 v = in61[p];                                                             \
+  const u32 mask = (STAGE) - 1;                                                 \
+  const u32 trigBase = me & ~mask;                                              \
+  if (i != 0) v = cmul(v, TFLOAD(&trig61[(i - 1) * G_W + trigBase]));          \
+  const u32 dst = i * (STAGE) + (me & ~mask) * NW + (me & mask);               \
+  out61[line * WIDTH + dst] = v;                                                \
+}
+
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle1Apple,   1)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle4Apple,   4)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle8Apple,   8)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle16Apple, 16)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle64Apple, 64)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle256Apple, 256)
+DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE(fftWGF61TwiddleShuffle512Apple, 512)
+
+#undef DEFINE_APPLE_FFTW_GF61_TWIDDLE_SHUFFLE
+
+KERNEL(G_W) fftWGF61WidthFinalApple(P(T2) outRaw, CP(T2) inRaw) {
+  GF61 u[NW];
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  CP(GF61) in61 = (CP(GF61)) (inRaw + DISTGF61) + g * WIDTH + me;
+  P(GF61) out61 = (P(GF61)) (outRaw + DISTGF61) + g * WIDTH + me;
+
+  for (u32 i = 0; i < NW; ++i) u[i] = in61[i * G_W];
+  fft_RADIX(u);
+  for (u32 i = 0; i < NW; ++i) out61[i * G_W] = u[i];
+}
+
+#endif  // AEVUM_APPLE_OPENCL12
+
 #endif
