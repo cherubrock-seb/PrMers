@@ -36,6 +36,7 @@ jobs:
           update: true
           install: >-
             make
+            diffutils
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
@@ -199,8 +200,16 @@ jobs:
           ./aevum-dll-smoke.exe "$DLL"
 
           file "$DLL"
-          objdump -p "$DLL" | sed -n '/Export Table/,$p' | \
-            grep -q 'aevum_engine_version'
+
+          objdump -p "$DLL" > aevum-dll-objdump.txt
+
+          if ! grep -q 'aevum_engine_version' aevum-dll-objdump.txt; then
+            echo "::error::aevum_engine_version is absent from the DLL export table"
+            sed -n '/Export Table/,$p' aevum-dll-objdump.txt
+            exit 1
+          fi
+
+          echo "Aevum DLL export table validation passed."
 
       - name: Generate code signing certificate
         shell: powershell
