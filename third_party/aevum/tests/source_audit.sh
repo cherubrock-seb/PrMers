@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::${BASH_COMMAND}" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 grep -q 'for (enum FFT_TYPES type : {FFT3161})' "$ROOT/src/FFTConfig.cpp"
 grep -q 'json("name", "aevum")' "$ROOT/src/Task.cpp"
@@ -126,8 +127,11 @@ python3 "$ROOT/tests/apple_gf61_maintail_staging_test.py"
 grep -Fq 'writeIn(dst, makeWords(E, value));' "$ROOT/src/Gpu.cpp"
 grep -q 'set_u32 uses canonical compact-word upload' "$ROOT/src/EngineApi.cpp"
 
-grep -q 'tailSquareGF61FinalPairFirstFusedApple' "$ROOT/src/cl/tailsquare.cl"
-grep -q 'ktailSquareGF61FinalPairFirstFusedApple' "$ROOT/src/Gpu.cpp"
+# The v0.3.56 release keeps the validated v0.3.54 tailSquare pipeline.
+# The bridge kernel was referenced by C++ but its OpenCL implementation was
+# not shipped, so it must remain disabled.
+! grep -q 'tailSquareGF61FinalPairFirstFusedApple' "$ROOT/src/cl/tailsquare.cl"
+grep -Fq 'apple_bridge_fused_tailsquare_gf61 = false;' "$ROOT/src/Gpu.cpp"
 grep -q 'AEVUM_APPLE_TAILSQUARE_V54' "$ROOT/src/Gpu.cpp"
 grep -q 'apple_bridge_fused_tailsquare_gf61' "$ROOT/src/Gpu.h"
 

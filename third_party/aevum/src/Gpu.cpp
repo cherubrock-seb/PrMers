@@ -1076,7 +1076,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
 #if defined(__APPLE__)
   apple_fused_tailsquare_gf61 = fft.shape.fft_type == FFT3161 && fft.NTT_GF61 && nH > 1;
-  apple_bridge_fused_tailsquare_gf61 = apple_fused_tailsquare_gf61;
+  // v0.3.56 does not ship the matching OpenCL bridge kernel.
+  // Keep the validated v0.3.54 tailSquare path; width fusions remain enabled.
+  apple_bridge_fused_tailsquare_gf61 = false;
   auto envEnabled = [](const char* name) {
     if (const char* value = std::getenv(name)) return *value != '\0' && std::strcmp(value, "0") != 0;
     return false;

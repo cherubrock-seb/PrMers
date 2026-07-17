@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::${BASH_COMMAND}" >&2' ERR
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 python3 "$ROOT/tests/aevum_apple_fused_tailsquare_test.py"
 python3 "$ROOT/tests/aevum_apple_fused_fftp_test.py"
@@ -61,7 +62,8 @@ grep -q 'run_backend_validation_matrix.sh' "$ROOT/Makefile"
 grep -q 'PRMERS_MATRIX_CASE_FILTER' "$ROOT/tests/run_backend_validation_matrix.sh"
 grep -q 'pm1-ultralow-aevum-reject' "$ROOT/tests/run_backend_validation_matrix.sh"
 grep -q 'AEVUM_VERSION ?= v0.3.56' "$ROOT/third_party/aevum/Makefile"
-grep -q 'tailSquareGF61FinalPairFirstFusedApple' "$ROOT/third_party/aevum/src/cl/tailsquare.cl"
+! grep -q 'tailSquareGF61FinalPairFirstFusedApple' "$ROOT/third_party/aevum/src/cl/tailsquare.cl"
+grep -Fq 'apple_bridge_fused_tailsquare_gf61 = false;' "$ROOT/third_party/aevum/src/Gpu.cpp"
 grep -q 'AEVUM_APPLE_TAILSQUARE_V54' "$ROOT/third_party/aevum/src/Gpu.cpp"
 grep -q -- "--match 'v0.*'" "$ROOT/third_party/aevum/Makefile"
 grep -q '294cc485ac8cf53c8b69144a3039832eda573849' "$ROOT/third_party/aevum/UPSTREAM.md"
