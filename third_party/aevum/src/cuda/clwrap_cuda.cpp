@@ -548,32 +548,72 @@ cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
     }
   }
 
-  // Parse .maxntid from PTX to get __launch_bounds__ value.
-  // PTX pattern: .visible .entry <name>(...)\n.maxntid N, 1, 1
+  // Determine the kernel's required workgroup size, module-format independent.
+  // 1) Exact source of truth: the __launch_bounds__(N) emitted for this kernel by the
+  //    KERNEL(N) macro translation — parsed from preprocessedSource, which is carried
+  //    into the linked program for exactly this purpose.
+  // 2) Fallback: .maxntid from PTX text (PTX modules only).
+  // 3) CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK is used only to VALIDATE the result:
+  //    it is the max launchable size for the compiled function, not necessarily the
+  //    original reqd_work_group_size.
   k->reqWorkGroupSize = 256; // fallback
+  bool haveExact = false;
   {
+    const string& src = prog->preprocessedSource;
+    if (!src.empty()) {
+      const string lb = "__launch_bounds__(";
+      const string nm = name;
+      size_t pos = 0;
+      while ((pos = src.find(nm, pos)) != string::npos) {
+        char before = pos ? src[pos - 1] : ' ';
+        size_t after = pos + nm.size();
+        size_t q = after;
+        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) q++;
+        bool isDefUse = !(isalnum((unsigned char)before) || before == '_') && q < src.size() && src[q] == '(';
+        if (isDefUse) {
+          size_t wstart = pos > 200 ? pos - 200 : 0;
+          size_t lbp = src.rfind(lb, pos);
+          if (lbp != string::npos && lbp >= wstart) {
+            int val = atoi(src.c_str() + lbp + lb.size());
+            if (val > 0) {
+              k->reqWorkGroupSize = val;
+              haveExact = true;
+              break;
+            }
+          }
+        }
+        pos += nm.size();
+      }
+    }
+  }
+  if (!haveExact) {
+    // PTX pattern: .visible .entry <name>(...)\n.maxntid N, 1, 1
     const string& ptx = prog->ptx;
     string entryPattern = ".entry " + string(name) + "(";
     size_t pos = ptx.find(entryPattern);
     if (pos != string::npos) {
-      // Found the kernel entry. Now find .maxntid before the next .entry or opening brace
       size_t searchEnd = ptx.find(".entry ", pos + 1);
       if (searchEnd == string::npos) searchEnd = ptx.size();
       string maxntidPattern = ".maxntid ";
       size_t mpos = ptx.find(maxntidPattern, pos);
       if (mpos != string::npos && mpos < searchEnd) {
         int val = atoi(ptx.c_str() + mpos + maxntidPattern.size());
-        if (val > 0) {
-          k->reqWorkGroupSize = val;
-        }
+        if (val > 0) { k->reqWorkGroupSize = val; haveExact = true; }
       }
-    } else {
-      // CUBIN (binary) module: no PTX text to parse. __launch_bounds__(N) is preserved
-      // as the function's MAX_THREADS_PER_BLOCK attribute; use it when it is a real
-      // bound (unbounded kernels report the device max, e.g. 1024).
-      int maxThreads = 0;
-      if (cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func) == CUDA_SUCCESS
-          && maxThreads > 0 && maxThreads < 1024) {
+    }
+  }
+  {
+    int maxThreads = 0;
+    if (cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func) == CUDA_SUCCESS
+        && maxThreads > 0) {
+      if (!haveExact && maxThreads < 1024) {
+        // Source-less program (e.g. aux kernels loaded from the binary cache, or CUBIN
+        // modules without carried source): fall back to the compiled bound, which for
+        // KERNEL(N)-originated kernels equals N.
+        k->reqWorkGroupSize = maxThreads;
+      } else if (k->reqWorkGroupSize > maxThreads) {
+        fprintf(stderr, "WARNING: kernel '%s': required workgroup %d exceeds compiled max %d; clamping\n",
+                name, k->reqWorkGroupSize, maxThreads);
         k->reqWorkGroupSize = maxThreads;
       }
     }
