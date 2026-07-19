@@ -52,6 +52,14 @@
 
 namespace {
 
+u32 inverseModSmall(u32 value, u32 modulus) {
+  value %= modulus;
+  for (u32 candidate = 1; candidate < modulus; ++candidate) {
+    if ((value * candidate) % modulus == 1) return candidate;
+  }
+  throw std::runtime_error("transform length is not invertible modulo field shift period");
+}
+
 u32 kAt(u32 H, u32 line, u32 col) { return (line + col * H) * 2; }
 
 double weight(u32 N, u64 E, u32 H, u32 line, u32 col, u32 rep) {
@@ -273,6 +281,16 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   config.try_emplace("PAD", "0");
 #endif
 
+  // Correctness-first PFA defaults.  Explicit engine configuration (for
+  // example AEVUM_PFA_USE after exact validation) has higher priority and
+  // can benchmark the existing upstream tail variants without rebuilding.
+  if (fft.isPfa()) {
+    config.try_emplace("TAIL_KERNELS", "1");
+    config.try_emplace("INPLACE", "0");
+    config.try_emplace("TAIL_TRIGS31", "0");
+    config.try_emplace("TAIL_TRIGS61", "0");
+  }
+
   // Default value for -use options that must also be parsed in C++ code
   tail_single_wide = 0, tail_single_kernel = 1;         // Default tailSquare is double-wide in one kernel
   in_place = 0;                                         // Default is not in-place
@@ -331,6 +349,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (k == "PAD") pad_size = atoi(v.c_str());
   }
 
+  if (fft.isPfa() && in_place != 0) {
+    log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
+    in_place = 0;
+    config["INPLACE"] = "0";
+  }
+
 #if defined(__APPLE__)
   // Apple's OpenCL-to-Metal compiler rejects the combined double-wide
   // tailSquareGF61 pipeline (TAIL_KERNELS=2) after successfully creating the
@@ -385,8 +409,39 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
                     {"MIDDLE", fft.shape.middle},
                     {"CARRY_LEN", CARRY_LEN},
                     {"NW", fft.shape.nW()},
-                    {"NH", fft.shape.nH()}
+                    {"NH", fft.shape.nH()},
+                    {"PFA_RADIX", fft.pfa_radix}
                   });
+
+  if (fft.isPfa()) {
+    const u32 binary_length = 2u * fft.shape.width * fft.shape.height;
+    const u32 lmod = binary_length % fft.pfa_radix;
+    u32 linv = 0;
+    for (u32 x = 1; x < fft.pfa_radix; ++x) if ((lmod * x) % fft.pfa_radix == 1) { linv = x; break; }
+    if (!linv) throw std::runtime_error("PFA binary length is not coprime to odd radix");
+    defines += toDefine("PFA_BINARY_LENGTH", binary_length);
+    defines += toDefine("PFA_L_INV", linv);
+
+    // Consecutive width-register values advance by a fixed CRT step while
+    // staying in the same odd row.  Export it so fftP/fftW can replace the
+    // per-register modulo/multiply Good-Thomas map with one add and wrap.
+    const u32 binary_step = binary_length / fft.shape.nW();
+    u32 logical_step = 0;
+    for (u32 k = 0; k < fft.pfa_radix; ++k) {
+      const u32 candidate = binary_step + binary_length * k;
+      if (candidate % fft.pfa_radix == 0) { logical_step = candidate; break; }
+    }
+    if (!logical_step || logical_step >= fft.shape.size())
+      throw std::runtime_error("invalid PFA logical register step");
+    defines += toDefine("PFA_LOGICAL_STEP", logical_step);
+
+    // GPUOwl's stock formula uses division by NWORDS and is exact only when
+    // NWORDS is a power of two. Mixed 3*2^m and 9*2^m transforms require
+    // the modular inverse of NWORDS in the M31/M61 cyclic shift periods.
+    const u32 nwords = fft.shape.size();
+    defines += toDefine("PFA_LOG2_ROOT_TWO31", inverseModSmall(nwords % 31u, 31u));
+    defines += toDefine("PFA_LOG2_ROOT_TWO61", inverseModSmall(nwords % 61u, 61u));
+  }
 
   if (isAmdGpu(id)) { defines += toDefine("AMDGPU", 1); }
   if (isNvidiaGpu(id)) { defines += toDefine("NVIDIAGPU", 1); }
@@ -824,11 +879,11 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
   K(kfftMidInGF31,         "fftmiddlein.cl",  "fftMiddleInGF31",  hN / (BIG_H / SMALL_H), (kernelDefines(K31) + numCudaRegisters(MIDIN31)).c_str()),
   K(kfftHinGF31,           "ffthin.cl",  "fftHinGF31",  hN / nH, kernelDefines(K31).c_str()),
-  K(ktailSquareZeroGF31,   "tailsquare.cl", "tailSquareZeroGF31", SMALL_H / nH * 2, kernelDefines(K31).c_str()),
+  K(ktailSquareZeroGF31,   "tailsquare.cl", "tailSquareZeroGF31", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(K31).c_str()),
   K(ktailSquareGF31,       "tailsquare.cl", "tailSquareGF31",
                                                !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
-                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH :                      // Single-wide tailSquare with two kernels
+                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide, two kernels
                                                hN / nH / 2, (kernelDefines(K31) + numCudaRegisters(TAIL31)).c_str()),  // Single-wide tailSquare with one kernel
   K(ktailMulGF31,          "tailmul.cl", "tailMulGF31", hN / nH / 2, kernelDefines(K31).c_str()),
   K(ktailMulLowGF31,       "tailmul.cl", "tailMulGF31", hN / nH / 2, (kernelDefines(K31) + "-DMUL_LOW=1").c_str()),
@@ -846,14 +901,14 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #else
   K(kfftHinGF61,           "ffthin.cl",  "fftHinGF61",  hN / nH, kernelDefines(K61).c_str()),
 #endif
-  K(ktailSquareZeroGF61,   "tailsquare.cl", "tailSquareZeroGF61", SMALL_H / nH * 2, kernelDefines(K61).c_str()),
+  K(ktailSquareZeroGF61,   "tailsquare.cl", "tailSquareZeroGF61", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(K61).c_str()),
 #if defined(__APPLE__)
   K(ktailSquareGF61,       "tailsquare.cl", "tailSquareGF61ApplePlaceholder", SMALL_H / nH, kernelDefines(K61).c_str()),
 #else
   K(ktailSquareGF61,       "tailsquare.cl", "tailSquareGF61",
                                                !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
-                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH :                      // Single-wide tailSquare with two kernels
+                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide, two kernels
                                                hN / nH / 2, (kernelDefines(K61) + numCudaRegisters(TAIL61)).c_str()),  // Single-wide tailSquare with one kernel
 #endif
 #if defined(__APPLE__)
@@ -1294,6 +1349,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   float bitsPerWord = E / float(N);
   if (logFftSize) {
     log("FFT: %s %s (%.2f bpw)\n", numberK(N).c_str(), fft.spec().c_str(), bitsPerWord);
+    if (fft.isPfa()) log("Aevum native PFA active: radix-%u Good-Thomas digit map, binary half-real rows, native GF31/GF61 carry.\n", fft.pfa_radix);
 
     // Sometimes we do want to run a FFT beyond a reasonable BPW (e.g. during -ztune), and these situations
     // coincide with logFftSize == false
@@ -2293,6 +2349,8 @@ void Gpu::fftW(Buffer<double>& out, Buffer<double>& in) {
   recorded_kernel_args.push_back(&in);
   // This kernel always ends the "bottom half".  Replay the recorded kernel calls.
   replay();
+  // PFA fftW now scatters directly into canonical carry order.  The former
+  // pfaUnpack full-memory pass is intentionally eliminated.
 }
 
 void Gpu::carryA(Buffer<Word>& out, Buffer<double>& in) {
@@ -2664,7 +2722,8 @@ void Gpu::mul(Buffer<Word>& ioA, Buffer<double>& inB, Buffer<double>& tmp1, bool
   // Register the current ROE pos as multiplication (vs. a squaring)
   if (mulRoePos.empty() || mulRoePos.back() < roePos) { mulRoePos.push_back(roePos); }
 
-  if (mul3) { carryM(ioA, buf3); } else { carryA(ioA, buf3); }
+  Buffer<double>& carryInput = buf3;
+  if (mul3) { carryM(ioA, carryInput); } else { carryA(ioA, carryInput); }
   carryB(ioA);
 }
 
@@ -2862,9 +2921,11 @@ void Gpu::exponentiate(Buffer<Word>& bufInOut, u64 exp) {
   }
 }
 
-// does either carryFused() or the expanded version depending on useLongCarry
+// PFA still uses the canonical carry sequence, but fftW performs its
+// Good-Thomas scatter directly and no longer needs a separate unpack kernel.
+// The stock fused carry remains byte-for-byte selected when PFA is disabled.
 void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
-  if (useLongCarry) {
+  if (useLongCarry || fft.isPfa()) {
     fftW(buf3, in);
     carryA(wordBuf, buf3);
     carryB(wordBuf);
@@ -2876,6 +2937,9 @@ void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
 
 // Use buf1 (and buf23 if not in place) to do a single squaring.
 void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL) {
+  if (fft.isPfa() && (leadIn != LEAD_NONE || leadOut != LEAD_NONE)) {
+    throw std::runtime_error("Aevum native PFA requires canonical register boundaries between iterations");
+  }
   // leadOut = LEAD_MIDDLE is not supported (slower than LEAD_WIDTH)
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
@@ -2894,12 +2958,13 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   // If leadOut is not allowed then we cannot use the faster carryFused kernel
   if (leadOut == LEAD_NONE) {
     fftW(buf3, buf1);
+    Buffer<double>& carryInput = buf3;
     if (!doLL && !doMul3) {
-      carryA(out, buf3);
+      carryA(out, carryInput);
     } else if (doLL) {
-      carryLL(out, buf3);
+      carryLL(out, carryInput);
     } else {
-      carryM(out, buf3);
+      carryM(out, carryInput);
     }
     carryB(out);
   }
@@ -2920,7 +2985,7 @@ u32 Gpu::squareLoop(Buffer<Word>& out, Buffer<Word>& in, u64 from, u64 to, bool 
   assert(from < to);
   enum LEAD_TYPE leadIn = LEAD_NONE;
   for (u64 k = from; k < to; ++k) {
-    enum LEAD_TYPE leadOut = useLongCarry || (k == to - 1) ? LEAD_NONE : LEAD_WIDTH;
+    enum LEAD_TYPE leadOut = fft.isPfa() || useLongCarry || (k == to - 1) ? LEAD_NONE : LEAD_WIDTH;
     square(out, (k==from) ? in : out, leadIn, leadOut, doTailMul3 && (k == to - 1));
     leadIn = leadOut;
   }

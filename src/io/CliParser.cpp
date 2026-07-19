@@ -27,6 +27,7 @@
 #include <cstring>
 #include "util/PathUtils.hpp"
 #include <filesystem>
+#include <stdexcept>
 #include "opencl/Context.hpp"
 #include "core/Version.hpp"
 
@@ -130,6 +131,9 @@ void printUsage(const char* progName) {
     std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode (macOS still defaults to Marin unless -aevum is used)" << std::endl;
     std::cout << "  -marin               : Legacy internal PrMers NTT path (not supported with -llunsafe)" << std::endl;
     std::cout << "  -aevum-fft <spec>    : Force an Aevum FFT3161 shape, for example 1:1024:8:512" << std::endl;
+    std::cout << "  -pfa [3|9]           : Enable/force native Aevum Good-Thomas PFA (auto when omitted)" << std::endl;
+    std::cout << "  -pfa3 / -pfa9        : Force native Aevum PFA radix 3 or radix 9" << std::endl;
+    std::cout << "  -pfa-off             : Keep the stock power-of-two Aevum plan" << std::endl;
     std::cout << "  Auto policy env      : AEVUM_AUTO_MAX_RATIO or workload-specific AEVUM_AUTO_PM1_STAGE1_MAX_RATIO, AEVUM_AUTO_PM1_STAGE2_MAX_RATIO, AEVUM_AUTO_ECM_MAX_RATIO" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
     //std::cout << "  -p95                 : (Optional) write Prime 95 resume file after P-1 stage 1" << std::endl;
@@ -265,6 +269,39 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.force_engine_marin = false;
             opts.marin = true;
             opts.aevum_fft_spec = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-pfa-off") == 0 ||
+                 std::strcmp(argv[i], "-no-pfa") == 0) {
+            opts.aevum_pfa_radix = 0;
+            opts.aevum_pfa_off = true;
+            opts.aevum_fft_spec.clear();
+        }
+        else if (std::strcmp(argv[i], "-pfa") == 0 ||
+                 std::strcmp(argv[i], "-pfa-auto") == 0 ||
+                 std::strncmp(argv[i], "-pfa=", 5) == 0 ||
+                 std::strcmp(argv[i], "-pfa3") == 0 ||
+                 std::strcmp(argv[i], "-pfa9") == 0) {
+            int radix = -1;
+            if (std::strcmp(argv[i], "-pfa3") == 0) radix = 3;
+            else if (std::strcmp(argv[i], "-pfa9") == 0) radix = 9;
+            else if (std::strncmp(argv[i], "-pfa=", 5) == 0) {
+                const char* value = argv[i] + 5;
+                if (std::strcmp(value, "3") == 0) radix = 3;
+                else if (std::strcmp(value, "9") == 0) radix = 9;
+                else if (std::strcmp(value, "auto") != 0) {
+                    throw std::runtime_error("-pfa accepts only auto, 3, or 9");
+                }
+            } else if (i + 1 < argc &&
+                       (std::strcmp(argv[i + 1], "3") == 0 || std::strcmp(argv[i + 1], "9") == 0)) {
+                radix = std::atoi(argv[++i]);
+            }
+            opts.aevum = true;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+            opts.aevum_pfa_radix = radix;
+            opts.aevum_pfa_off = false;
+            opts.aevum_fft_spec = radix == 3 ? "pfa:3" : radix == 9 ? "pfa:9" : "pfa:auto";
         }
         else if (std::strcmp(argv[i], "-s3") == 0) {
             opts.s3only = true;

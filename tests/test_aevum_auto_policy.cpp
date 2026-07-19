@@ -17,6 +17,15 @@ int main() {
     expect(large.use_aevum, true, "large PRP");
     if (large.aevum_transform != 4194304 || large.marin_transform != 8388608) return 3;
 
+    auto pfa3 = aevum_auto_decide(100000019u, 8, engine::gpu_workload::prp, "pfa:auto");
+    expect(pfa3.use_aevum, true, "PFA-3 PRP");
+    if (pfa3.aevum_transform != 3145728 || pfa3.fft_spec.rfind("pfa3:", 0) != 0) return 4;
+
+    auto pfa9 = aevum_auto_decide(175000001u, 8, engine::gpu_workload::prp, "pfa:auto");
+    expect(pfa9.use_aevum, true, "PFA-9 PRP");
+    if (pfa9.aevum_transform != 4718592 || pfa9.marin_transform != 10485760 ||
+        pfa9.fft_spec.rfind("pfa9:", 0) != 0) return 5;
+
     auto small_stage1 = aevum_auto_decide(1362763u, 11, engine::gpu_workload::pm1);
     expect(small_stage1.use_aevum, false, "small P-1 Stage 1");
 

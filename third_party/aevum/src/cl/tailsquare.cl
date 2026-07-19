@@ -637,11 +637,21 @@ KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
   GF31 u[NH];
   u32 H = ND / SMALL_HEIGHT;
 
-  // This kernel in executed in two workgroups.
-  u32 which = get_group_id(0);
+#if PFA_RADIX
+  const u32 which = get_group_id(0);
+  const u32 row = which >> 1;
+  const bool upper = (which & 1u) != 0;
+  assert(row < PFA_RADIX);
+  const u32 binary_line = upper ? (WIDTH / 2u) : 0u;
+  const u32 line = row * WIDTH + binary_line;
+  const bool bump = !upper;
+#else
+  const u32 which = get_group_id(0);
   assert(which < 2);
-
-  u32 line = which ? (H/2) : 0;
+  const u32 line = which ? (H/2) : 0;
+  const u32 binary_line = line;
+  const bool bump = !which;
+#endif
   u32 me = get_local_id(0);
 
   dependentLaunch();       // Next kernel will be tailSquareGF31 which must dependentLaunchWait before reading data from fftMiddleInGF31
@@ -655,23 +665,23 @@ KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 #if TAIL_TRIGS31 >= 1
   GF31 trig = TFLOAD(&smallTrig31[height_trigs + me]);
 #if SINGLE_WIDE
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + line]);
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line]);
 #else
   GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + which]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + line*G_H + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*G_H + me]);
 #else
   GF31 trig = TOLOAD(&smallTrig31[height_trigs + which*G_H + me]);
 #endif
 #endif
 
   fft_HEIGHT1(lds, u, smallTrig31, 1, me);
-  reverse(lds, u + NH/2, !which);
-  pairSq(NH/2, u,   u + NH/2, trig, !which);
-  reverse(lds, u + NH/2, !which);
+  reverse(lds, u + NH/2, bump);
+  pairSq(NH/2, u,   u + NH/2, trig, bump);
+  reverse(lds, u + NH/2, bump);
 
   fft_HEIGHT2(lds, u, smallTrig31, 1, me);
   writeTailFusedLine(u, out31, transPos(line, MIDDLE, WIDTH), me);
@@ -691,12 +701,21 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if SINGLE_KERNEL
+#if PFA_RADIX
+  const u32 per_row = WIDTH / 2u - 1u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row + 1u;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (WIDTH - binary_line);
+#elif SINGLE_KERNEL
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
+  const u32 binary_line = line1;
 #else
   u32 line1 = get_group_id(0) + 1;
   u32 line2 = H - line1;
+  const u32 binary_line = line1;
 #endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
   u32 memline2 = transPos(line2, MIDDLE, WIDTH);
@@ -719,7 +738,7 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read a hopefully cached line of data and one non-cached GF31 per line
   GF31 trig = TFLOAD(&smallTrig31[height_trigs + me]);                    // Trig values for line zero, should be cached
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + line1]);           // Line multiplier
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line]);           // Line multiplier
   trig = cmul(trig, mult);
 
   // On consumer-grade GPUs, it is likely beneficial to read all trig values.
@@ -728,7 +747,7 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
   // The trig values used here are pre-computed and stored after the fft_HEIGHT trig values.
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read pre-computed trig values
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + line1*G_H + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*G_H + me]);
 #endif
 
 #if SINGLE_KERNEL
@@ -986,11 +1005,21 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   GF61 u[NH];
   u32 H = ND / SMALL_HEIGHT;
 
-  // This kernel in executed in two workgroups.
-  u32 which = get_group_id(0);
+#if PFA_RADIX
+  const u32 which = get_group_id(0);
+  const u32 row = which >> 1;
+  const bool upper = (which & 1u) != 0;
+  assert(row < PFA_RADIX);
+  const u32 binary_line = upper ? (WIDTH / 2u) : 0u;
+  const u32 line = row * WIDTH + binary_line;
+  const bool bump = !upper;
+#else
+  const u32 which = get_group_id(0);
   assert(which < 2);
-
-  u32 line = which ? (H/2) : 0;
+  const u32 line = which ? (H/2) : 0;
+  const u32 binary_line = line;
+  const bool bump = !which;
+#endif
   u32 me = get_local_id(0);
 
   dependentLaunch();       // Next kernel will be tailSquareGF61 which must dependentLaunchWait before reading data from fftMiddleInGF61
@@ -1004,23 +1033,23 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 #if TAIL_TRIGS61 >= 1
   GF61 trig = TFLOAD(&smallTrig61[height_trigs + me]);
 #if SINGLE_WIDE
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + line]);
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line]);
 #else
   GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + which]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + line*G_H + me]);
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + binary_line*G_H + me]);
 #else
   GF61 trig = TOLOAD(&smallTrig61[height_trigs + which*G_H + me]);
 #endif
 #endif
 
   fft_HEIGHT1(lds, u, smallTrig61, 1, me);
-  reverse(lds, u + NH/2, !which);
-  pairSq(NH/2, u,   u + NH/2, trig, !which);
-  reverse(lds, u + NH/2, !which);
+  reverse(lds, u + NH/2, bump);
+  pairSq(NH/2, u,   u + NH/2, trig, bump);
+  reverse(lds, u + NH/2, bump);
 
   fft_HEIGHT2(lds, u, smallTrig61, 1, me);
   writeTailFusedLine(u, out61, transPos(line, MIDDLE, WIDTH), me);
@@ -1567,12 +1596,21 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if SINGLE_KERNEL
+#if PFA_RADIX
+  const u32 per_row = WIDTH / 2u - 1u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row + 1u;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (WIDTH - binary_line);
+#elif SINGLE_KERNEL
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
+  const u32 binary_line = line1;
 #else
   u32 line1 = get_group_id(0) + 1;
   u32 line2 = H - line1;
+  const u32 binary_line = line1;
 #endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
   u32 memline2 = transPos(line2, MIDDLE, WIDTH);
@@ -1595,7 +1633,7 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read a hopefully cached line of data and one non-cached GF61 per line
   GF61 trig = TFLOAD(&smallTrig61[height_trigs + me]);                    // Trig values for line zero, should be cached
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + line1]);           // Line multiplier
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line]);           // Line multiplier
   trig = cmul(trig, mult);
 
   // On consumer-grade GPUs, it is likely beneficial to read all trig values.
@@ -1604,7 +1642,7 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   // The trig values used here are pre-computed and stored after the fft_HEIGHT trig values.
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read pre-computed trig values
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + line1*G_H + me]);
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + binary_line*G_H + me]);
 #endif
 
 #if SINGLE_KERNEL

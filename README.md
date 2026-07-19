@@ -30,6 +30,7 @@ Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to
 - [Web GUI](#web-gui)
 - [GPU memory test](#gpu-memory-test)
 - [NTT and IBDWT transform sizes](#ntt-and-ibdwt-transform-sizes)
+- [Native PFA radix-3 and radix-9](#native-pfa-radix-3-and-radix-9)
 - [Benchmarks](#benchmarks)
 - [Backend and code](#backend-and-code)
 - [Related inspiration](#related-inspiration)
@@ -297,7 +298,7 @@ Run the built-in help for the exact option list supported by your binary:
 | `-wagstaff` | Test `W = (2^p + 1) / 3` |
 | `-pm1` | P-1 factoring mode |
 | `-ecm` | ECM factoring mode |
-| `-aevum` | Force the Aevum `engine::Reg` backend |
+| `-aevum` | Force the Aevum `engine::Reg` backend; PRP/LL use automatic PFA selection |
 | `-engine-marin` | Force the Marin `engine::Reg` backend |
 | `-aevum-auto` | Explicitly request the normal auto policy; macOS still keeps Marin unless `-aevum` is used |
 | `-marin` | Legacy option: use the internal PrMers NTT path |
@@ -875,6 +876,61 @@ For a given exponent p, PrMers chooses an NTT/IBDWT size N:
 
 
 Note: for MM31 (`p = 2147483647`), the valid Marin transform size is `167772160 = 5*2^25`. Pure `2^27` is not valid for the Goldilocks root layout used here.
+
+## Native PFA radix-3 and radix-9
+
+Aevum can use a Good-Thomas prime-factor layout with a transform length
+`N = r * 2^m`, where `r` is 3 or 9. The power-of-two rows keep the existing
+half-real `GF(M31^2) x GF(M61^2)` path, while a small odd-axis transform is
+applied before and after the row transforms. The inverse stage writes directly
+to the canonical Aevum carry layout, so there is no separate unpack pass.
+
+For PRP and Lucas-Lehmer work, Aevum now evaluates this path automatically.
+Radix 3 or radix 9 is selected when the actual Aevum stock/PFA size ratio
+reaches its validated threshold; otherwise the normal power-of-two plan is retained.
+On macOS, Marin remains the platform default, but an explicit `-aevum` request
+uses the same PFA selector.
+
+```bash
+./prmers 175000001 -aevum          # automatic PFA/stock choice
+./prmers 175000001 -aevum -pfa 9   # force radix 9
+./prmers 175000001 -aevum -pfa-off # force the stock Aevum plan
+```
+
+<a id="native-pfa-automatic-selection-ranges"></a>
+### Native PFA automatic selection ranges
+
+The table below is the current default `pfa:auto` policy with the normal
+`fftOverdrive = 1.0`. The limits are exponent values `p` for `M_p = 2^p - 1`.
+They are checked by the plan-policy test at the exact boundaries.
+
+| Automatic plan | Exponent range `p` | Selected Aevum plan | Transform words | Stock/PFA ratio |
+|---|---:|---|---:|---:|
+| Radix 3 | 10,627,319–15,724,707 | `pfa3:1:256:3:256:101` | 393,216 | 1.333x |
+| Radix 3 | 21,071,135–31,284,264 | `pfa3:1:256:3:512:101` | 786,432 | 1.333x |
+| Radix 9 | 41,922,069–46,560,704 | `pfa9:1:256:9:256:101` | 1,179,648 | 1.778x |
+| Radix 3 | 46,560,705–62,080,936 | `pfa3:1:512:3:512:101` | 1,572,864 | 1.333x |
+| Radix 9 | 83,194,017–92,625,960 | `pfa9:1:256:9:512:101` | 2,359,296 | 1.778x |
+| Radix 3 | 92,625,961–123,343,992 | `pfa3:1:512:3:1K:101` | 3,145,728 | 1.333x |
+| Radix 9 | 165,507,233–183,789,168 | `pfa9:1:512:9:512:101` | 4,718,592 | 1.778x |
+| Radix 3 | 183,789,169–244,737,648 | `pfa3:1:1K:3:1K:101` | 6,291,456 | 1.333x |
+| Radix 9 | 328,414,017–365,879,616 | `pfa9:1:512:9:1K:101` | 9,437,184 | 1.778x |
+| Radix 3 | 365,879,617–487,210,368 | `pfa3:1:4K:3:512:101` | 12,582,912 | 1.333x |
+| Radix 9 | 653,808,129–725,153,152 | `pfa9:1:1K:9:1K:101` | 18,874,368 | 1.778x |
+| Radix 3 | 725,153,153–965,612,672 | `pfa3:1:4K:3:1K:101` | 25,165,824 | 1.333x |
+| Radix 9 | 1,295,872,129–1,440,869,120 | `pfa9:1:4K:9:512:101` | 37,748,736 | 1.778x |
+| Radix 9 | 2,574,967,041–2,862,863,872 | `pfa9:1:4K:9:1K:101` | 75,497,472 | 1.778x |
+
+All other admissible exponent ranges use the normal power-of-two Aevum plan.
+The automatic gates are `1.30x` for radix 3 and `1.60x` for radix 9.
+The explicit radix options remain available for validation and benchmarking.
+
+Gerbicz-Li checking remains active with the mixed-radix path. The initial idea
+and implementation notes are documented here:
+
+- https://www.mersenneforum.org/node/1110517/page4
+- https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
+- https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split
 
 ## Benchmarks
 

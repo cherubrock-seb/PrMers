@@ -124,13 +124,13 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             (parts.size() >= 4 && parts[0] == "1" && parts[1] == "2" && parts[3] == "-1");
         if (isLL && !looksLikeKbncMersenne && !parts.empty() && isIntegerToken(parts[0])) {
             try {
-                uint64_t exp64 = std::stoull(parts[0]);
-                if (exp64 == 0 || exp64 > std::numeric_limits<uint32_t>::max()) continue;
+                uint64_t exp74 = std::stoull(parts[0]);
+                if (exp74 == 0 || exp74 > std::numeric_limits<uint32_t>::max()) continue;
 
                 WorktodoEntry entry;
                 entry.llTest      = true;
                 entry.doubleCheck = isDoubleCheck;
-                entry.exponent    = static_cast<uint32_t>(exp64);
+                entry.exponent    = static_cast<uint32_t>(exp74);
                 entry.rawLine     = line;
                 entry.aid         = aid;
 

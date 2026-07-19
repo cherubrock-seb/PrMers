@@ -76,7 +76,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
 
     AevumAutoDecision decision;
     if (selected == gpu_backend::auto_select) {
-        decision = aevum_auto_decide(p, reg_count, selected_workload);
+        decision = aevum_auto_decide(p, reg_count, selected_workload, fft_spec);
         std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload) << ": "
                   << (decision.use_aevum ? "Aevum" : "Marin")
                   << " selected (" << decision.detail << ")." << std::endl;

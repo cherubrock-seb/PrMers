@@ -16,6 +16,7 @@
 #include <map>
 #include <cinttypes>
 #include <cstdlib>
+#include <stdexcept>
 
 using namespace std;
 
@@ -29,6 +30,16 @@ map<string, array<float, NUM_BPW_ENTRIES>> BPW {
 };
 
 namespace {
+
+bool startsWith(const string& s, const string& prefix) { return s.rfind(prefix, 0) == 0; }
+
+u64 mersenne2ReferencePowerOfTwo(u64 exponent) {
+  for (u64 n = 256; n <= (u64(1) << 34); n <<= 1) {
+    const double safe = std::log2(double(n)) + 2.0 * (double(exponent) / double(n) + 1.0);
+    if (safe < 92.0) return n;
+  }
+  return 0;
+}
 
 u32 parseInt(const string& s) {
   // if (s.empty()) { return 1; }
@@ -134,6 +145,16 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
 
+  // PFA keeps the exact GF31/GF61 arithmetic but replaces the power-of-two
+  // middle axis by a 3/9 Good-Thomas axis.  Until tune data is collected, use
+  // the next stock power-of-two plan as a conservative capacity estimate.
+  if (t == FFT3161 && (m == 3 || m == 9)) {
+    const u32 reference_middle = m == 3 ? 4 : 16;
+    bpw = FFTShape{t, w, reference_middle, h}.bpw;
+    for (float& value : bpw) value -= 0.20f;
+    return;
+  }
+
   string s = spec();
   if (auto it = BPW.find(s); it != BPW.end()) {
     bpw = it->second;
@@ -206,7 +227,11 @@ bool FFTShape::isFavoredShape() const {
          (width == 256 && middle >= 1));
 }
 
-FFTConfig::FFTConfig(const string& spec) {
+FFTConfig::FFTConfig(const string& input_spec) {
+  string spec = input_spec;
+  u32 requested_pfa = 0;
+  if (startsWith(spec, "pfa3:")) { requested_pfa = 3; spec = spec.substr(5); }
+  else if (startsWith(spec, "pfa9:")) { requested_pfa = 9; spec = spec.substr(5); }
   auto v = split(spec, ':');
 
   enum FFT_TYPES fft_type = FFT3161;
@@ -233,8 +258,9 @@ FFTConfig::FFTConfig(const string& spec) {
       log("Height must be 256, 512, 1024.\n");
       throw "Invalid FFT spec";
     }
-    if (fft_type != FFT64 && fft_type != FFT32 && (m & (m - 1))) {
-      log("NTT middle must be a power of two.\n");
+    if (fft_type != FFT64 && fft_type != FFT32 && (m & (m - 1)) &&
+        !(requested_pfa && m == requested_pfa)) {
+      log("NTT middle must be a power of two unless an explicit pfa3:/pfa9: plan is used.\n");
       throw "Invalid FFT spec";
     }
   }
@@ -251,6 +277,11 @@ FFTConfig::FFTConfig(const string& spec) {
     *this = {FFTShape{fft_type, v[0], v[1], v[2]}, parseInt(v[3]), c == 0 ? CARRY_32 : CARRY_64};
   } else {
     throw "FFT spec";
+  }
+  if (requested_pfa) {
+    if (shape.fft_type != FFT3161 || shape.middle != requested_pfa)
+      throw std::runtime_error("PFA plans require FFT3161 and middle 3 or 9");
+    pfa_radix = requested_pfa;
   }
 }
 
@@ -277,6 +308,7 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
 
 string FFTConfig::spec() const {
   string s = shape.spec() + ":" + to_string(variant_W(variant)) + to_string(variant_M(variant)) + to_string(variant_H(variant));
+  if (isPfa()) s = string("pfa") + to_string(pfa_radix) + ":" + s;
   return carry == CARRY_AUTO ? s : (s + (carry == CARRY_32 ? ":0" : ":1"));
 }
 
@@ -299,6 +331,69 @@ float FFTConfig::maxBpw() const {
 }
 
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
+  // Native Good-Thomas PFA selector. pfa:auto chooses an odd-radix plan only
+  // when the actual Aevum transform-size reduction is large enough to cover
+  // the odd-axis work. Forced pfa:3 and pfa:9 remain available for diagnostics.
+  if (spec == "pfa:auto" || spec == "pfa:3" || spec == "pfa:9") {
+    const u32 forced = spec == "pfa:3" ? 3u : spec == "pfa:9" ? 9u : 0u;
+    FFTConfig stock = bestFit(args, E, "");
+    // The optimized radix-9 path is selected directly from the real Aevum
+    // stock/PFA size ratio. Device tuning can still override tail variants,
+    // but is no longer required to enable pfa:auto.
+    vector<FFTConfig> candidates;
+    for (u32 radix : {9u, 3u}) {
+      if (forced && radix != forced) continue;
+      for (u32 width : {256u, 512u, 1024u, 4096u}) {
+        for (u32 height : {256u, 512u, 1024u}) {
+          if (width == 256 && height == 1024) continue;
+          FFTConfig c{FFTShape{FFT3161, width, radix, height}, 101, CARRY_AUTO};
+          c.pfa_radix = radix;
+          const double bpw = E / double(c.size());
+          if (bpw < c.minBpw()) continue;
+          if (c.maxExp() * args.fftOverdrive >= E) candidates.push_back(c);
+        }
+      }
+    }
+    if (candidates.empty()) {
+      if (forced) throw std::runtime_error("No admissible native PFA radix-3/9 plan");
+      log("Aevum PFA auto: no admissible odd-radix plan; stock %s retained.\n",
+          stock.spec().c_str());
+      return stock;
+    }
+    sort(candidates.begin(), candidates.end(), [](const FFTConfig& a, const FFTConfig& b) {
+      if (a.size() != b.size()) return a.size() < b.size();
+      return a.pfa_radix > b.pfa_radix;
+    });
+    FFTConfig selected = candidates.front();
+    const double ratio = double(stock.size()) / double(selected.size());
+
+    // PFA-9 is enabled automatically for the 1.778x reduction windows that
+    // have enough headroom to absorb the odd-axis work. PFA-3 is enabled for the 1.333x reduction windows after
+    // the RTX 3080 measurements confirmed a speed win.
+    const double minimum = selected.pfa_radix == 9 ? 1.60 : 1.30;
+    if (!forced && ratio < minimum) {
+      const u64 reference = mersenne2ReferencePowerOfTwo(E);
+      if (ratio < 1.0) {
+        log("Aevum PFA auto: stock %s (%" PRIu64 " words) retained; candidate %s (%" PRIu64
+            " words) is %.3fx larger than the actual Aevum stock plan.\n",
+            stock.spec().c_str(), stock.size(), selected.spec().c_str(), selected.size(), 1.0 / ratio);
+      } else {
+        log("Aevum PFA auto: stock %s (%" PRIu64 " words) retained; candidate %s (%" PRIu64
+            " words) reduces size by only %.3fx, below the current %.2fx overhead gate.\n",
+            stock.spec().c_str(), stock.size(), selected.spec().c_str(), selected.size(), ratio, minimum);
+      }
+      if (reference && reference != stock.size()) {
+        log("Aevum PFA note: the mersenne2 reference table compares against conservative power-of-two n=%" PRIu64
+            "; Aevum's tuned stock selector uses n=%" PRIu64 ".\n", reference, stock.size());
+      }
+      return stock;
+    }
+    log("Aevum native PFA: %s selected for exponent %" PRIu64
+        " (stock %s, actual Aevum transform reduction %.3fx; auto gate %.2fx).\n",
+        selected.spec().c_str(), E, stock.spec().c_str(), ratio, minimum);
+    return selected;
+  }
+
   // A FFT-spec was given, simply take the first FFT from the spec that can handle E
   if (!spec.empty()) {
     FFTConfig fft{spec};

@@ -593,7 +593,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Weights can be applied with shifts because 2 is the 60th root GF31.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 31.
-  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 log2_root_two = M31_LOG2_ROOT_TWO;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 31;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 30) % 31;
 
@@ -612,7 +612,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   weight_shift = weight_shift + log2_NWORDS + 1;
   if (weight_shift > 31) weight_shift -= 31;
@@ -815,7 +815,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Weights can be applied with shifts because 2 is the 60th root GF61.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 61.
-  const u32 log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 log2_root_two = M61_LOG2_ROOT_TWO;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 61;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 60) % 61;
 
@@ -834,7 +834,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   weight_shift = weight_shift + log2_NWORDS + 1;
   if (weight_shift > 61) weight_shift -= 61;
@@ -1050,7 +1050,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 31.
-  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 log2_root_two = M31_LOG2_ROOT_TWO;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 31;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 30) % 31;
 
@@ -1069,7 +1069,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   weight_shift = weight_shift + log2_NWORDS + 1;
   if (weight_shift > 31) weight_shift -= 31;
@@ -1314,7 +1314,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 31.
-  const u32 log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 log2_root_two = M31_LOG2_ROOT_TWO;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 31;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 30) % 31;
 
@@ -1333,7 +1333,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   weight_shift = weight_shift + log2_NWORDS + 1;
   if (weight_shift > 31) weight_shift -= 31;
@@ -1573,7 +1573,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 61.
-  const u32 log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 log2_root_two = M61_LOG2_ROOT_TWO;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 61;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 60) % 61;
 
@@ -1592,7 +1592,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   weight_shift = weight_shift + log2_NWORDS + 1;
   if (weight_shift > 61) weight_shift -= 61;
@@ -1814,10 +1814,10 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 31.
-  const u32 m31_log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 m31_log2_root_two = M31_LOG2_ROOT_TWO;
   const u32 m31_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m31_log2_root_two % 31;
   const u32 m31_bigword_weight_shift_minus1 = (m31_bigword_weight_shift + 30) % 31;
-  const u32 m61_log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 m61_log2_root_two = M61_LOG2_ROOT_TWO;
   const u32 m61_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m61_log2_root_two % 61;
   const u32 m61_bigword_weight_shift_minus1 = (m61_bigword_weight_shift + 60) % 61;
 
@@ -1843,7 +1843,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   m31_weight_shift = adjust_m31_weight_shift(m31_weight_shift + log2_NWORDS + 1);
   m61_weight_shift = adjust_m61_weight_shift(m61_weight_shift + log2_NWORDS + 1);
@@ -2099,10 +2099,10 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   // Let s be the shift amount for word 1.  The shift amount for word x is ceil(x * (s - 1) + num_big_words_less_than_x) % 31.
-  const u32 m31_log2_root_two = (u32) (((1ULL << 30) / NWORDS) % 31);
+  const u32 m31_log2_root_two = M31_LOG2_ROOT_TWO;
   const u32 m31_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m31_log2_root_two % 31;
   const u32 m31_bigword_weight_shift_minus1 = (m31_bigword_weight_shift + 30) % 31;
-  const u32 m61_log2_root_two = (u32) (((1ULL << 60) / NWORDS) % 61);
+  const u32 m61_log2_root_two = M61_LOG2_ROOT_TWO;
   const u32 m61_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m61_log2_root_two % 61;
   const u32 m61_bigword_weight_shift_minus1 = (m61_bigword_weight_shift + 60) % 61;
 
@@ -2128,7 +2128,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
-                          (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
                           (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   m31_weight_shift = adjust_m31_weight_shift(m31_weight_shift + log2_NWORDS + 1);
   m61_weight_shift = adjust_m61_weight_shift(m61_weight_shift + log2_NWORDS + 1);

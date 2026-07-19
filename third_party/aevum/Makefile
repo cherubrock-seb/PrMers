@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.56
+AEVUM_VERSION ?= v0.3.63-native-pfa-radix39-exp8
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -245,3 +245,17 @@ test-examples-gpu: examples
 	$(EXAMPLE_BIN)/fft_plans
 	$(EXAMPLE_BIN)/register_ops $${AEVUM_TEST_DEVICE:-0} .
 	$(EXAMPLE_BIN)/power_chain $${AEVUM_TEST_DEVICE:-0} .
+
+.PHONY: native-pfa-host-test native-pfa-build native-pfa-gpu-test
+native-pfa-host-test:
+	python3 tools/native_pfa_reference_test.py
+	python3 tools/native_pfa_source_audit.py
+	bash tests/native_pfa_opencl_syntax.sh
+
+native-pfa-build: engine-lib
+	python3 tools/native_pfa_plan_test.py build-engine/libaevum_engine.so
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 -Wall -Wextra tests/native_pfa_engine_compare.cpp $(DL_LIBS) -o build-tests/native-pfa-engine-compare
+
+native-pfa-gpu-test: native-pfa-build native-pfa-host-test
+	bash scripts/test_native_pfa_gpu.sh $${AEVUM_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}

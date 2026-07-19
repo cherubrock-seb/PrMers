@@ -157,11 +157,13 @@ KERNEL(IN_WG) fftMiddleInGF31(P(T2) out, CP(T2) in, Trig trig) {
 
   readMiddleInLine(u, in31, y, x);
 
-  middleMul2(u, x, y, trig31);
-
+#if PFA_RADIX
   fft_MIDDLE(u);
-
+#else
+  middleMul2(u, x, y, trig31);
+  fft_MIDDLE(u);
   middleMul(u, y, trig31);
+#endif
 
   dependentLaunch();       // Next kernel will be tailSquareGF31 which must dependentLaunchWait before reading data
 
@@ -218,11 +220,13 @@ KERNEL(IN_WG) fftMiddleInGF61(P(T2) out, CP(T2) in, Trig trig) {
 
   readMiddleInLine(u, in61, y, x);
 
-  middleMul2(u, x, y, trig61);
-
+#if PFA_RADIX
   fft_MIDDLE(u);
-
+#else
+  middleMul2(u, x, y, trig61);
+  fft_MIDDLE(u);
   middleMul(u, y, trig61);
+#endif
 
   dependentLaunch();       // Next kernel will be tailSquareGF61 which must dependentLaunchWait before reading data
 
@@ -589,11 +593,13 @@ KERNEL(256) fftMiddleInGF31(P(T2) out, P(T2) in, Trig trig) {
 
   readMiddleInLine(u, in31, y, x);
 
-  middleMul2(u, x, y, trig31);
-
+#if PFA_RADIX
   fft_MIDDLE(u);
-
+#else
+  middleMul2(u, x, y, trig31);
+  fft_MIDDLE(u);
   middleMul(u, y, trig31);
+#endif
 
   dependentLaunch();       // Next kernel will be tailSquareGF31 which must dependentLaunchWait before reading data
 
@@ -644,11 +650,13 @@ KERNEL(256) fftMiddleInGF61(P(T2) out, P(T2) in, Trig trig) {
 
   readMiddleInLine(u, in61, y, x);
 
-  middleMul2(u, x, y, trig61);
-
+#if PFA_RADIX
   fft_MIDDLE(u);
-
+#else
+  middleMul2(u, x, y, trig61);
+  fft_MIDDLE(u);
   middleMul(u, y, trig61);
+#endif
 
   dependentLaunch();       // Next kernel will be tailSquareGF61 which must dependentLaunchWait before reading data
 

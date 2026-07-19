@@ -342,6 +342,14 @@ App::App(int argc, char** argv)
         else workload = engine::gpu_workload::pm1;
     }
     else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
+
+    // Aevum PRP and Lucas-Lehmer use the native PFA selector by default.
+    // pfa:auto falls back to the stock binary plan when the odd-radix size
+    // reduction is below the conservative gate. -pfa-off disables it.
+    if (!o.aevum_pfa_off && o.aevum_fft_spec.empty() &&
+        (workload == engine::gpu_workload::prp || workload == engine::gpu_workload::ll)) {
+        o.aevum_fft_spec = "pfa:auto";
+    }
 #if defined(__APPLE__)
     // Apple ships the legacy OpenCL 1.2 stack. Keep Marin as the safe default
     // on macOS and make Aevum an explicit opt-in only.
@@ -848,7 +856,7 @@ int App::run() {
                                        "Marin engine will be created on first arithmetic operation");
         } else if (options.aevum) {
             guiServer_->setBackendInfo("Forced Aevum", "Pending", gui_workload,
-                                       "Aevum engine will be created on first arithmetic operation", 0, 0,
+                                       "Aevum engine will be created on first arithmetic operation; native PFA is automatic for PRP/LL", 0, 0,
                                        options.aevum_fft_spec);
         } else {
 #if defined(__APPLE__)

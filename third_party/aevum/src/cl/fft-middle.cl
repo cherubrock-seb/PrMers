@@ -646,6 +646,80 @@ void OVERLOAD middleShuffle(local F2 *lds, F2 *u) {
 
 #if NTT_GF31
 
+#if PFA_RADIX
+GF31 OVERLOAD pfaMulScalar(GF31 a, Z31 s) { return U2(mul(a.x, s), mul(a.y, s)); }
+
+// Three-point DFT using w^2 + w + 1 = 0.  The direct expression used
+// four GF scalar multiplies.  This form needs only one:
+//   y1 = a0 - a2 + w*(a1-a2), y2 = a0 - a1 - w*(a1-a2).
+void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31 *o2) {
+  const GF31 wd = pfaMulScalar(sub(a1, a2), w);
+  *o0 = add(add(a0, a1), a2);
+  *o1 = add(sub(a0, a2), wd);
+  *o2 = sub(sub(a0, a1), wd);
+}
+
+void OVERLOAD pfaForwardMiddle(GF31 *u) {
+#if PFA_RADIX == 3
+  GF31 o0, o1, o2;
+  pfaDft3(u[0], u[1], u[2], (Z31)1513477735U, &o0, &o1, &o2);
+  u[0] = o0; u[1] = o1; u[2] = o2;
+#elif PFA_RADIX == 9
+  const Z31 w9  = (Z31)765383222U;
+  const Z31 w92 = (Z31)864490562U;
+  const Z31 w94 = (Z31)1072993205U;
+  GF31 t[9], o[9];
+#pragma unroll
+  for (u32 n1 = 0; n1 < 3; ++n1)
+    pfaDft3(u[n1], u[n1+3], u[n1+6], (Z31)1513477735U,
+            &t[n1*3], &t[n1*3+1], &t[n1*3+2]);
+  t[4] = pfaMulScalar(t[4], w9);
+  t[5] = pfaMulScalar(t[5], w92);
+  t[7] = pfaMulScalar(t[7], w92);
+  t[8] = pfaMulScalar(t[8], w94);
+#pragma unroll
+  for (u32 k2 = 0; k2 < 3; ++k2) {
+    GF31 a, b, c;
+    pfaDft3(t[k2], t[3+k2], t[6+k2], (Z31)1513477735U, &a, &b, &c);
+    o[k2] = a; o[k2+3] = b; o[k2+6] = c;
+  }
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = o[i];
+#endif
+}
+
+void OVERLOAD pfaInverseMiddle(GF31 *u) {
+#if PFA_RADIX == 3
+  GF31 o0, o1, o2;
+  pfaDft3(u[0], u[1], u[2], (Z31)634005911U, &o0, &o1, &o2);
+  const Z31 inv = (Z31)1431655765U;
+  u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
+#elif PFA_RADIX == 9
+  const Z31 w9  = (Z31)473297587U;
+  const Z31 w92 = (Z31)309107220U;
+  const Z31 w94 = (Z31)809695498U;
+  const Z31 inv9 = (Z31)1908874353U;
+  GF31 t[9], o[9];
+#pragma unroll
+  for (u32 n1 = 0; n1 < 3; ++n1)
+    pfaDft3(u[n1], u[n1+3], u[n1+6], (Z31)634005911U,
+            &t[n1*3], &t[n1*3+1], &t[n1*3+2]);
+  t[4] = pfaMulScalar(t[4], w9);
+  t[5] = pfaMulScalar(t[5], w92);
+  t[7] = pfaMulScalar(t[7], w92);
+  t[8] = pfaMulScalar(t[8], w94);
+#pragma unroll
+  for (u32 k2 = 0; k2 < 3; ++k2) {
+    GF31 a, b, c;
+    pfaDft3(t[k2], t[3+k2], t[6+k2], (Z31)634005911U, &a, &b, &c);
+    o[k2] = a; o[k2+3] = b; o[k2+6] = c;
+  }
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
+#endif
+}
+#endif
+
 void OVERLOAD fft2(GF31* u) { X2(u[0], u[1]); }
 
 void OVERLOAD fft_MIDDLE(GF31 *u) {
@@ -659,8 +733,20 @@ void OVERLOAD fft_MIDDLE(GF31 *u) {
   fft8(u);
 #elif MIDDLE == 16
   fft16(u);
+#elif PFA_RADIX == 3 && MIDDLE == 3
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 9 && MIDDLE == 9
+  pfaForwardMiddle(u);
 #else
 #error UNRECOGNIZED MIDDLE
+#endif
+}
+
+void OVERLOAD ifft_MIDDLE(GF31 *u) {
+#if PFA_RADIX
+  pfaInverseMiddle(u);
+#else
+  fft_MIDDLE(u);
 #endif
 }
 
@@ -767,6 +853,78 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 
 #if NTT_GF61
 
+#if PFA_RADIX
+GF61 OVERLOAD pfaMulScalar(GF61 a, Z61 s) { return U2(mul(a.x, s), mul(a.y, s)); }
+
+// Same one-multiply radix-3 identity as the GF31 path above.
+void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61 *o2) {
+  const GF61 wd = pfaMulScalar(sub(a1, a2), w);
+  *o0 = add(add(a0, a1), a2);
+  *o1 = add(sub(a0, a2), wd);
+  *o2 = sub(sub(a0, a1), wd);
+}
+
+void OVERLOAD pfaForwardMiddle(GF61 *u) {
+#if PFA_RADIX == 3
+  GF61 o0, o1, o2;
+  pfaDft3(u[0], u[1], u[2], (Z61)1669582390241348315UL, &o0, &o1, &o2);
+  u[0] = o0; u[1] = o1; u[2] = o2;
+#elif PFA_RADIX == 9
+  const Z61 w9  = (Z61)1102844585000305877UL;
+  const Z61 w92 = (Z61)594418010121383343UL;
+  const Z61 w94 = (Z61)569931187132395942UL;
+  GF61 t[9], o[9];
+#pragma unroll
+  for (u32 n1 = 0; n1 < 3; ++n1)
+    pfaDft3(u[n1], u[n1+3], u[n1+6], (Z61)1669582390241348315UL,
+            &t[n1*3], &t[n1*3+1], &t[n1*3+2]);
+  t[4] = pfaMulScalar(t[4], w9);
+  t[5] = pfaMulScalar(t[5], w92);
+  t[7] = pfaMulScalar(t[7], w92);
+  t[8] = pfaMulScalar(t[8], w94);
+#pragma unroll
+  for (u32 k2 = 0; k2 < 3; ++k2) {
+    GF61 a, b, c;
+    pfaDft3(t[k2], t[3+k2], t[6+k2], (Z61)1669582390241348315UL, &a, &b, &c);
+    o[k2] = a; o[k2+3] = b; o[k2+6] = c;
+  }
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = o[i];
+#endif
+}
+
+void OVERLOAD pfaInverseMiddle(GF61 *u) {
+#if PFA_RADIX == 3
+  GF61 o0, o1, o2;
+  pfaDft3(u[0], u[1], u[2], (Z61)636260618972345635UL, &o0, &o1, &o2);
+  const Z61 inv = (Z61)1537228672809129301UL;
+  u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
+#elif PFA_RADIX == 9
+  const Z61 w9  = (Z61)2252987116782656529UL;
+  const Z61 w92 = (Z61)633067237080992132UL;
+  const Z61 w94 = (Z61)1764280891523348030UL;
+  const Z61 inv9 = (Z61)2049638230412172401UL;
+  GF61 t[9], o[9];
+#pragma unroll
+  for (u32 n1 = 0; n1 < 3; ++n1)
+    pfaDft3(u[n1], u[n1+3], u[n1+6], (Z61)636260618972345635UL,
+            &t[n1*3], &t[n1*3+1], &t[n1*3+2]);
+  t[4] = pfaMulScalar(t[4], w9);
+  t[5] = pfaMulScalar(t[5], w92);
+  t[7] = pfaMulScalar(t[7], w92);
+  t[8] = pfaMulScalar(t[8], w94);
+#pragma unroll
+  for (u32 k2 = 0; k2 < 3; ++k2) {
+    GF61 a, b, c;
+    pfaDft3(t[k2], t[3+k2], t[6+k2], (Z61)636260618972345635UL, &a, &b, &c);
+    o[k2] = a; o[k2+3] = b; o[k2+6] = c;
+  }
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
+#endif
+}
+#endif
+
 void OVERLOAD fft2(GF61* u) { X2(u[0], u[1]); }
 
 void OVERLOAD fft_MIDDLE(GF61 *u) {
@@ -780,8 +938,20 @@ void OVERLOAD fft_MIDDLE(GF61 *u) {
   fft8(u);
 #elif MIDDLE == 16
   fft16(u);
+#elif PFA_RADIX == 3 && MIDDLE == 3
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 9 && MIDDLE == 9
+  pfaForwardMiddle(u);
 #else
 #error UNRECOGNIZED MIDDLE
+#endif
+}
+
+void OVERLOAD ifft_MIDDLE(GF61 *u) {
+#if PFA_RADIX
+  pfaInverseMiddle(u);
+#else
+  fft_MIDDLE(u);
 #endif
 }
 

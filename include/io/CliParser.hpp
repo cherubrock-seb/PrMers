@@ -29,6 +29,8 @@ struct CliOptions {
     bool aevum_auto = true;
     bool force_engine_marin = false;
     std::string aevum_fft_spec = "";
+    int aevum_pfa_radix = -1;             // -1=auto, 0=disabled, 3 or 9
+    bool aevum_pfa_off = false;            // keep the stock power-of-two Aevum plan
     bool bench = false;
     bool profiling = false;
     bool debug = false;

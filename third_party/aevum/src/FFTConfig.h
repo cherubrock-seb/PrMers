@@ -86,6 +86,10 @@ public:
   u32 variant;
   enum CARRY_KIND carry;
 
+  // Opt-in Good-Thomas/PFA odd axis. Zero keeps the stock GPUOwl/Aevum path.
+  u32 pfa_radix = 0;
+  bool isPfa() const { return pfa_radix == 3 || pfa_radix == 9; }
+
   explicit FFTConfig(const string& spec);
   FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry);
 

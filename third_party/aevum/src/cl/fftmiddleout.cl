@@ -172,11 +172,13 @@ KERNEL(OUT_WG) fftMiddleOutGF31(P(T2) out, CP(T2) in, Trig trig) {
 
   readMiddleOutLine(u, in31, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+#else
   middleMul(u, x, trig31);
-
   fft_MIDDLE(u);
-
   middleMul2(u, y, x, trig31);
+#endif
 
   dependentLaunch();       // Next kernel will be carryFused which must dependentLaunchWait before reading data
 
@@ -235,11 +237,13 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
 
   readMiddleOutLine(u, in61, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+#else
   middleMul(u, x, trig61);
-
   fft_MIDDLE(u);
-
   middleMul2(u, y, x, trig61);
+#endif
 
   dependentLaunch();       // Next kernel will be carryfused which must dependentLaunchWait before reading data
 
@@ -549,11 +553,13 @@ KERNEL(256) fftMiddleOutGF31(P(T2) out, P(T2) in, Trig trig) {
 
   readMiddleOutLine(u, in31, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+#else
   middleMul(u, x, trig31);
-
   fft_MIDDLE(u);
-
   middleMul2(u, y, x, trig31);
+#endif
 
   dependentLaunch();       // Next kernel will be carryFused which must dependentLaunchWait before reading data
 
@@ -600,11 +606,13 @@ KERNEL(256) fftMiddleOutGF61(P(T2) out, P(T2) in, Trig trig) {
 
   readMiddleOutLine(u, in61, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+#else
   middleMul(u, x, trig61);
-
   fft_MIDDLE(u);
-
   middleMul2(u, y, x, trig61);
+#endif
 
   dependentLaunch();       // Next kernel will be carryfused which must dependentLaunchWait before reading data
 

@@ -75,7 +75,8 @@ const char* aevum_workload_name(const engine::gpu_workload value) {
 
 AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
                                     const std::size_t register_count,
-                                    const engine::gpu_workload workload) {
+                                    const engine::gpu_workload workload,
+                                    const std::string& fft_spec) {
     AevumAutoDecision result;
     result.marin_transform = ibdwt::transform_size(exponent);
 
@@ -93,7 +94,10 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
     }
 
     std::string reason;
-    if (!aevum_engine_resolve_auto_fft(exponent, &result.aevum_transform, &result.fft_spec, &reason)) {
+    const bool resolved = fft_spec.empty()
+        ? aevum_engine_resolve_auto_fft(exponent, &result.aevum_transform, &result.fft_spec, &reason)
+        : aevum_engine_resolve_fft(exponent, fft_spec, &result.aevum_transform, &result.fft_spec, &reason);
+    if (!resolved) {
         result.detail = reason;
         return result;
     }

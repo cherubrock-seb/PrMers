@@ -519,10 +519,13 @@ std::size_t transform_size_from_spec(const std::string& spec) {
         if (pos == std::string::npos) break;
         start = pos + 1;
     }
-    if (fields.size() < 4 || fields[0] != "1") throw std::runtime_error("invalid Aevum FFT3161 spec");
-    const std::size_t width = parse_fft_dimension(fields[1]);
-    const std::size_t middle = parse_fft_dimension(fields[2]);
-    const std::size_t height = parse_fft_dimension(fields[3]);
+    std::size_t offset = 0;
+    if (!fields.empty() && (fields[0] == "pfa3" || fields[0] == "pfa9")) offset = 1;
+    if (fields.size() < offset + 4 || fields[offset] != "1")
+        throw std::runtime_error("invalid Aevum FFT3161 spec");
+    const std::size_t width = parse_fft_dimension(fields[offset + 1]);
+    const std::size_t middle = parse_fft_dimension(fields[offset + 2]);
+    const std::size_t height = parse_fft_dimension(fields[offset + 3]);
     if (width > std::numeric_limits<std::size_t>::max() / middle) throw std::runtime_error("Aevum FFT size overflow");
     const std::size_t half = width * middle;
     if (half > std::numeric_limits<std::size_t>::max() / height / 2) throw std::runtime_error("Aevum FFT size overflow");
@@ -539,6 +542,33 @@ bool aevum_engine_resolve_auto_fft(uint32_t exponent,
         auto& loaded = api();
         std::array<char, 96> resolved{};
         if (!loaded.resolve_fft(exponent, nullptr, resolved.data(), resolved.size())) {
+            if (reason) {
+                const char* detail = loaded.last_error ? loaded.last_error() : nullptr;
+                *reason = detail && *detail ? detail : "no admissible FFT3161 plan";
+            }
+            return false;
+        }
+        const std::string spec(resolved.data());
+        const std::size_t size = transform_size_from_spec(spec);
+        if (transform_size) *transform_size = size;
+        if (resolved_spec) *resolved_spec = spec;
+        return true;
+    } catch (const std::exception& e) {
+        if (reason) *reason = std::string("Aevum engine plugin unavailable: ") + e.what();
+        return false;
+    }
+}
+
+bool aevum_engine_resolve_fft(uint32_t exponent,
+                               const std::string& requested_spec,
+                               std::size_t* transform_size,
+                               std::string* resolved_spec,
+                               std::string* reason) {
+    try {
+        auto& loaded = api();
+        std::array<char, 96> resolved{};
+        const char* request = requested_spec.empty() ? nullptr : requested_spec.c_str();
+        if (!loaded.resolve_fft(exponent, request, resolved.data(), resolved.size())) {
             if (reason) {
                 const char* detail = loaded.last_error ? loaded.last_error() : nullptr;
                 *reason = detail && *detail ? detail : "no admissible FFT3161 plan";

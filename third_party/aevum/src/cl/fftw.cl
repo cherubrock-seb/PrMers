@@ -4,6 +4,24 @@
 #include "fftwidth.cl"
 #include "middle.cl"
 
+#if FFT_TYPE == FFT3161 && PFA_RADIX
+// Map one scalar produced by an inverse PFA width row directly to the
+// canonical transposed pair layout consumed by carry.cl.  This fuses the
+// former transform-sized pfaUnpack pass into fftW.
+inline u32 pfaWLogicalIndex(u32 row, u32 binary_index) {
+  const u32 delta = (row + PFA_RADIX - binary_index % PFA_RADIX) % PFA_RADIX;
+  const u32 t = (delta * PFA_L_INV) % PFA_RADIX;
+  return binary_index + PFA_BINARY_LENGTH * t;
+}
+
+inline u32 pfaWCanonicalPairIndex(u32 logical) {
+  const u32 pair = logical >> 1;
+  const u32 x = pair / BIG_HEIGHT;
+  const u32 line = pair - x * BIG_HEIGHT;
+  return line * WIDTH + x;
+}
+#endif
+
 #if FFT_FP64
 
 // Do the ending fft_WIDTH after an fftMiddleOut.  This is the same as the first half of carryFused.
@@ -75,8 +93,27 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   readCarryFusedLine(in31, u, g, me);
   fft_WIDTH(lds, u, smallTrig31, 1, me);
+#if FFT_TYPE == FFT3161 && PFA_RADIX
+  // The inverse tail leaves components swapped: y is the even binary digit,
+  // x is the odd binary digit.  Scatter scalar stores so adjacent canonical
+  // digits may safely originate in different Good-Thomas rows.
+  P(Z31) outScalar31 = (P(Z31)) out31;
+  const u32 row = g / SMALL_HEIGHT;
+  const u32 y = g - row * SMALL_HEIGHT;
+  const u32 firstBinaryPair = me * SMALL_HEIGHT + y;
+  u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
+  u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    outScalar31[pfaWCanonicalPairIndex(nEven) * 2u + 1u] = u[i].y;
+    outScalar31[pfaWCanonicalPairIndex(nOdd)  * 2u]      = u[i].x;
+    nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
+    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
+  }
+#else
   out31 += WIDTH * g;
   write(G_W, NW, u, out31, 0);
+#endif
 }
 
 #endif
@@ -103,8 +140,24 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   readCarryFusedLine(in61, u, g, me);
   fft_WIDTH(lds, u, smallTrig61, 1, me);
+#if FFT_TYPE == FFT3161 && PFA_RADIX
+  P(Z61) outScalar61 = (P(Z61)) out61;
+  const u32 row = g / SMALL_HEIGHT;
+  const u32 y = g - row * SMALL_HEIGHT;
+  const u32 firstBinaryPair = me * SMALL_HEIGHT + y;
+  u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
+  u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    outScalar61[pfaWCanonicalPairIndex(nEven) * 2u + 1u] = u[i].y;
+    outScalar61[pfaWCanonicalPairIndex(nOdd)  * 2u]      = u[i].x;
+    nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
+    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
+  }
+#else
   out61 += WIDTH * g;
   write(G_W, NW, u, out61, 0);
+#endif
 }
 
 #if defined(AEVUM_APPLE_OPENCL12)

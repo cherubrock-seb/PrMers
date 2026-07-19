@@ -88,7 +88,25 @@ public:
     }
 #endif
 
-    gpu_ = Gpu::make(exponent_, shared_, fft, {}, verbose);
+    std::vector<KeyVal> pfa_use;
+    if (fft.isPfa()) {
+      if (const char* text = std::getenv("AEVUM_PFA_USE")) {
+        std::string uses(text);
+        size_t pos = 0;
+        while (pos < uses.size()) {
+          const size_t comma = uses.find(',', pos);
+          const std::string item = uses.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+          const size_t equal = item.find('=');
+          if (equal == std::string::npos || equal == 0 || equal + 1 == item.size())
+            throw std::runtime_error("AEVUM_PFA_USE expects KEY=VALUE comma-separated entries");
+          pfa_use.emplace_back(item.substr(0, equal), item.substr(equal + 1));
+          if (comma == std::string::npos) break;
+          pos = comma + 1;
+        }
+        if (verbose && !pfa_use.empty()) log("Aevum PFA validated tune override: %s\n", text);
+      }
+    }
+    gpu_ = Gpu::make(exponent_, shared_, fft, pfa_use, verbose);
     transform_size_ = gpu_->getFFTSize();
 
     buffers_ = gpu_->makeBufVector(static_cast<u32>(register_count_));

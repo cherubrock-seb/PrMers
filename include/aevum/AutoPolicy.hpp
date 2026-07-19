@@ -16,6 +16,7 @@ struct AevumAutoDecision {
 
 AevumAutoDecision aevum_auto_decide(std::uint32_t exponent,
                                     std::size_t register_count,
-                                    engine::gpu_workload workload);
+                                    engine::gpu_workload workload,
+                                    const std::string& fft_spec = "");
 
 const char* aevum_workload_name(engine::gpu_workload workload);

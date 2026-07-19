@@ -287,8 +287,20 @@ KERNEL(G_H) tailMulGF31(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 
   u32 H = ND / SMALL_HEIGHT;
 
+#if PFA_RADIX
+  const u32 group = get_group_id(0);
+  const u32 per_row = WIDTH / 2u;
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (binary_line ? WIDTH - binary_line : WIDTH / 2u);
+  const bool special_line = binary_line == 0;
+#else
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
+  const u32 binary_line = line1;
+  const bool special_line = line1 == 0;
+#endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
   u32 memline2 = transPos(line2, MIDDLE, WIDTH);
 
@@ -318,20 +330,20 @@ KERNEL(G_H) tailMulGF31(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 #if TAIL_TRIGS31 >= 1
   GF31 trig = TFLOAD(&smallTrig31[height_trigs + me]);                    // Trig values for line zero, should be cached
 #if SINGLE_WIDE
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + line1]);
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line]);
 #else
-  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + line1 * 2]);
+  GF31 mult = TSLOAD(&smallTrig31[height_trigs + G_H + binary_line * 2]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + line1*G_H + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*G_H + me]);
 #else
-  GF31 trig = TOLOAD(&smallTrig31[height_trigs + line1*2*G_H + me]);
+  GF31 trig = TOLOAD(&smallTrig31[height_trigs + binary_line*2*G_H + me]);
 #endif
 #endif
 
-  if (line1 == 0) {
+  if (special_line) {
     reverse(lds, u + NH/2, true);
     reverse(lds, p + NH/2, true);
     pairMul(NH/2, u,  u + NH/2, p, p + NH/2, trig, true);
@@ -417,8 +429,20 @@ KERNEL(G_H) tailMulGF61(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 
   u32 H = ND / SMALL_HEIGHT;
 
+#if PFA_RADIX
+  const u32 group = get_group_id(0);
+  const u32 per_row = WIDTH / 2u;
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (binary_line ? WIDTH - binary_line : WIDTH / 2u);
+  const bool special_line = binary_line == 0;
+#else
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
+  const u32 binary_line = line1;
+  const bool special_line = line1 == 0;
+#endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
   u32 memline2 = transPos(line2, MIDDLE, WIDTH);
 
@@ -448,20 +472,20 @@ KERNEL(G_H) tailMulGF61(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 #if TAIL_TRIGS61 >= 1
   GF61 trig = TFLOAD(&smallTrig61[height_trigs + me]);                    // Trig values for line zero, should be cached
 #if SINGLE_WIDE
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + line1]);
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line]);
 #else
-  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + line1 * 2]);
+  GF61 mult = TSLOAD(&smallTrig61[height_trigs + G_H + binary_line * 2]);
 #endif
   trig = cmul(trig, mult);
 #else
 #if SINGLE_WIDE
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + line1*G_H + me]);
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + binary_line*G_H + me]);
 #else
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + line1*2*G_H + me]);
+  GF61 trig = TOLOAD(&smallTrig61[height_trigs + binary_line*2*G_H + me]);
 #endif
 #endif
 
-  if (line1 == 0) {
+  if (special_line) {
     reverse(lds, u + NH/2, true);
     reverse(lds, p + NH/2, true);
     pairMul(NH/2, u,  u + NH/2, p, p + NH/2, trig, true);

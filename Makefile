@@ -15,18 +15,29 @@ PACKAGE := prmers-$(VERSION)
 WARN        := -Wall -Wextra -Wsign-conversion
 CPPFLAGS    := -I$(INC_DIR) -I$(INC_DIR)/marin -DGPU -DAEVUM_ENGINE_DEFAULT_LIB=\"$(PREFIX)/lib/prmers/libaevum_engine.so\" -DAEVUM_ENGINE_DEFAULT_TUNE_DIR=\"$(PREFIX)/share/prmers/aevum\"
 MARCH       := native
-OPT         := -O3 -ffinite-math-only -march=$(MARCH)
-
-CXX         := g++
+ifeq ($(UNAME_S),Darwin)
+  OPT := -O3 -ffinite-math-only -mcpu=native
+  CXX := c++
+else
+  OPT := -O3 -ffinite-math-only -march=$(MARCH)
+  CXX ?= g++
+endif
 CXXFLAGS    := -std=c++20 $(WARN) $(OPT) -flto=auto
 LDFLAGS     := -flto=auto
 PLATFORM_CXXFLAGS :=
 PLATFORM_LDFLAGS  :=
 
 ifeq ($(UNAME_S),Darwin)
+  CXXFLAGS := -std=c++20 $(WARN) $(OPT) -flto
+  LDFLAGS := -flto
   MACOSX_DEPLOYMENT_TARGET ?= 12.0
   export MACOSX_DEPLOYMENT_TARGET
   CPPFLAGS += -I/System/Library/Frameworks/OpenCL.framework/Headers
+  GMP_PREFIX := $(shell brew --prefix gmp 2>/dev/null)
+  ifneq ($(GMP_PREFIX),)
+    CPPFLAGS += -I$(GMP_PREFIX)/include
+    PLATFORM_LDFLAGS += -L$(GMP_PREFIX)/lib
+  endif
   PLATFORM_CXXFLAGS += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
   PLATFORM_LDFLAGS  += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET) -framework OpenCL
 else
@@ -139,3 +150,14 @@ clean:
 clean-all: clean
 	$(MAKE) -C third_party/aevum clean
 	rm -rf third_party/aevum/build-tests tests/build-aevum-reg package
+
+.PHONY: native-pfa-build native-pfa-host-test native-pfa-gpu-test
+native-pfa-build: all
+	python3 tests/native_pfa_cli_source_test.py
+
+native-pfa-host-test:
+	python3 tests/native_pfa_cli_source_test.py
+	$(MAKE) -C third_party/aevum native-pfa-host-test
+
+native-pfa-gpu-test: native-pfa-build
+	bash scripts/test_native_pfa_gpu.sh $${PRMERS_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}
