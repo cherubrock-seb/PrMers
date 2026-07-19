@@ -208,6 +208,10 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define NWORDS (ND * 2u)
 #define NWORDS_IS_POWER_OF_TWO  !(NWORDS & (NWORDS - 1))
 
+#ifndef PFA_RADIX
+#define PFA_RADIX 0u
+#endif
+
 #if PFA_RADIX
 #ifndef PFA_LOG2_ROOT_TWO31
 #error PFA_LOG2_ROOT_TWO31 must be supplied for mixed-radix transforms
