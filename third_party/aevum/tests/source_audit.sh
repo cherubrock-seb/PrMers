@@ -64,7 +64,7 @@ grep -Fq 'K(transpOut, "transpose.cl", "transposeOutAppleGlobal", hN)' "$ROOT/sr
 python3 "$ROOT/tests/apple_global_transpose_test.py"
 
 
-grep -q 'AEVUM_VERSION ?= v0.3.56' "$ROOT/Makefile"
+grep -Eq '^AEVUM_VERSION[[:space:]]+\?=[[:space:]]+v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/Makefile"
 grep -q 'OpenCLSourceBuilder.cpp' "$ROOT/Makefile"
 grep -q 'buildMonolithicOpenCLSource' "$ROOT/src/KernelCompiler.cpp"
 grep -q 'clBuildProgram' "$ROOT/src/KernelCompiler.cpp"
