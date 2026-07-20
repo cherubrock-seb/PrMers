@@ -253,3 +253,9 @@ This README is a technical packaging recommendation, not legal advice.
 ## Status
 
 Aevum is experimental. It has produced matching PRP residues and correct P-1 results in PrMers testing, but performance depends strongly on exponent size, transform choice, GPU architecture and workload. Automatic Marin/Aevum selection is therefore recommended in PrMers.
+
+## v0.3.67 power-of-two FFT323161
+
+The engine accepts `4:512:8:512:202` and restores PRPLL-style `LEAD_WIDTH`
+caching across consecutive register squarings.  See
+`README_POW2_TYPE4_LEAD_CACHE.md`.

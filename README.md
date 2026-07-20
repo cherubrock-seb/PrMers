@@ -1175,3 +1175,11 @@ PrMers is developed by cherubrock-seb, with feedback and contributions from user
 - A forced Aevum request falls back to Marin only when no admissible FFT3161 plan exists, and the log states the reason explicitly.
 - The one-register P-1 ultra-low-memory algorithm is the sole Marin-only path because it depends on Marin `fast3`; Auto selects Marin and forced Aevum exits cleanly before GPU allocation.
 - PRP/LL checkpoints now include backend and mode metadata. Legacy untagged checkpoints are not loaded into Aevum, and LL-safe, LL-safe2 and LL-unsafe use distinct filenames.
+
+### Power-of-two FFT323161 lead cache in v99.74
+
+The exact plan `4:512:8:512:202` is now accepted by Aevum.  Consecutive
+`engine::square_mul(reg, 1)` calls use a one-square pending scheduler so the
+GPU retains `LEAD_WIDTH` and upstream `carryFused` between iterations.  See
+`README_POW2_TYPE4_LEAD_CACHE.md` for validation and A/B commands.
+

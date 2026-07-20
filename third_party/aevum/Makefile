@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.66-pfa9-force-adaptive-exp11
+AEVUM_VERSION ?= v0.3.67-pow2-type4-lead-cache-exp12
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -190,6 +190,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
+	bash tests/pow2_type4_opencl_syntax.sh
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
 	python3 tests/apple_gf31_width_staging_test.py
@@ -212,6 +213,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
+	python3 tests/engine_lead_cache_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)

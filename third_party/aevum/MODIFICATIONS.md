@@ -1,3 +1,12 @@
+## v0.3.67 power-of-two FFT323161 + register lead cache
+
+- enables explicit power-of-two FFT323161 plans such as `4:512:8:512:202`;
+- restores the upstream PRPLL `LEAD_WIDTH`/`carryFused` chain across register API squarings;
+- uses a one-pending-square scheduler so all observable register operations remain canonical;
+- enables type-4 multi-queue overlap for both power-of-two and PFA9 plans;
+- keeps PFA and Apple on their validated canonical paths;
+- adds host source/model coverage and a cached-versus-canonical GPU differential test.
+
 ## v0.3.66 force-adaptive FFT323161 PFA9
 
 - Ordinary `pfa9:4:...` requests are now capacity-adaptive.  When the exact

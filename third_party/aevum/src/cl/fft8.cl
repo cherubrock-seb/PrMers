@@ -61,7 +61,12 @@ void OVERLOAD fft8Core(F2 *u) {
   X2(u[1], u[5]);   u[5] = mul_t8_delayed(u[5]);
   X2_mul_t4(u[2], u[6]);                                        // X2(u[2], u[6]);   u[6] = mul_t4(u[6]);
   X2(u[3], u[7]);   u[7] = mul_3t8_delayed(u[7]);
-  fft4Core(u);
+  // Keep the radix-8 type-4 plan self-contained.  Some OpenCL front-ends
+  // lose the overload imported from fft4.cl specifically with variant 202.
+  X2(u[0], u[2]);
+  X2(u[1], u[3]); u[3] = mul_t4(u[3]);
+  X2(u[0], u[1]);
+  X2(u[2], u[3]);
   fft4CoreSpecial(u + 4);
 }
 
@@ -87,10 +92,9 @@ void OVERLOAD fft8Core(GF31 *u) {
   X2_mul_t8(u[1], u[5]);
   X2_mul_t4(u[2], u[6]);
   X2_mul_3t8(u[3], u[7]);
-#if defined(AEVUM_APPLE_OPENCL12)
-  // Apple cl2Metal can lose the overload imported from fft4.cl when MIDDLE=8.
-  // Inline the exact GF31 fft4Core body twice; all non-Apple builds retain
-  // the upstream calls and generated code.
+  // Inline the exact GF31 fft4Core body twice.  This is algebraically
+  // identical and avoids an OpenCL overload-visibility failure in the
+  // power-of-two type-4 variant-202 compilation unit.
   X2(u[0], u[2]);
   X2_mul_t4(u[1], u[3]);
   X2(u[0], u[1]);
@@ -99,10 +103,6 @@ void OVERLOAD fft8Core(GF31 *u) {
   X2_mul_t4(u[5], u[7]);
   X2(u[4], u[5]);
   X2(u[6], u[7]);
-#else
-  fft4Core(u);
-  fft4Core(u + 4);
-#endif
 }
 
 // 4 MUL + 52 ADD

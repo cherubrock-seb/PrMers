@@ -75,8 +75,9 @@ public:
 
     // Full FFT323161 has three independent residue planes.  Overlap the
     // GF61 queue with the FP32+GF31 queue by default; the planes touch
-    // disjoint transform ranges and are synchronized before carry.
-    if (fft.shape.fft_type == FFT323161 && fft.isPfa()) {
+    // disjoint transform ranges and are synchronized before carry.  This is
+    // useful for both the stock power-of-two plan and the PFA9 diagnostic.
+    if (fft.shape.fft_type == FFT323161) {
       int multi_q = 1;
       if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q"))
         multi_q = std::atoi(value) != 0;
@@ -84,7 +85,7 @@ public:
         args_.flags["MULTI_Q"] = "1";
         if (verbose) log("Aevum optimized full type-4 PFA9: concurrent GF61 and FP32+GF31 queues enabled.\n");
       } else if (verbose) {
-        log("Aevum full type-4 PFA9: multi-queue overlap disabled by AEVUM_TYPE4_MULTI_Q=0.\n");
+        log("Aevum full type-4: multi-queue overlap disabled by AEVUM_TYPE4_MULTI_Q=0.\n");
       }
     }
 
@@ -96,9 +97,9 @@ public:
     }
 #endif
     const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
-                                      (fft.shape.fft_type == FFT323161 && fft.isPfa() && fft.pfa_radix == 9);
+                                      fft.shape.fft_type == FFT323161;
     if (!supported_aevum_type && !apple_diagnostic_plane)
-      throw std::runtime_error("Aevum engine requires FFT3161 or experimental FFT323161 PFA9");
+      throw std::runtime_error("Aevum engine requires FFT3161 or FFT323161");
 #if defined(__APPLE__)
     if (verbose && apple_diagnostic_plane) {
       log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",
@@ -126,6 +127,17 @@ public:
     }
     gpu_ = Gpu::make(exponent_, shared_, fft, pfa_use, verbose);
     transform_size_ = gpu_->getFFTSize();
+
+    lead_cache_enabled_ = gpu_->regSupportsLeadCache();
+    if (const char* value = std::getenv("AEVUM_REG_LEAD_CACHE"))
+      lead_cache_enabled_ = lead_cache_enabled_ && std::atoi(value) != 0;
+    if (verbose) {
+      if (lead_cache_enabled_) {
+        log("Aevum register lead cache enabled: consecutive square_mul(reg,1) calls retain the width transform and use carryFused.\n");
+      } else if (!fft.isPfa()) {
+        log("Aevum register lead cache disabled; set AEVUM_REG_LEAD_CACHE=1 only on a supported non-Apple, short-carry plan.\n");
+      }
+    }
 
     buffers_ = gpu_->makeBufVector(static_cast<u32>(register_count_));
     size_t prepared_count = std::min<size_t>(register_count_, 2);
@@ -160,19 +172,33 @@ public:
     gpu_->regSync();
   }
 
+  ~Runtime() noexcept {
+    try {
+      flush_pending_square();
+      if (gpu_) gpu_->regSync();
+    } catch (...) {
+      // Destruction is best-effort; all explicit API calls report failures.
+    }
+  }
+
   size_t transform_size() const { return transform_size_; }
   size_t word_count() const { return word_count_; }
 
-  void sync() { gpu_->regSync(); }
+  void sync() {
+    flush_pending_square();
+    gpu_->regSync();
+  }
 
   void set_u32(size_t dst, uint32_t value) {
     check_reg(dst);
+    flush_pending_square();
     invalidate_if(dst);
     gpu_->regSetU32(reg(dst), value);
   }
 
   void set_words(size_t dst, const uint32_t* words, size_t count) {
     check_reg(dst);
+    flush_pending_square();
     invalidate_if(dst);
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum word buffer");
     Words v(words, words + count);
@@ -182,6 +208,7 @@ public:
 
   void get_words(size_t src, uint32_t* words, size_t count) {
     check_reg(src);
+    flush_pending_square();
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum output word buffer");
     Words v = gpu_->regRead(reg(src));
     if (v.empty()) v.assign(word_count_, 0);
@@ -192,6 +219,7 @@ public:
   void copy(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+    flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
       gpu_->regCopy(reg(dst), reg(src));
@@ -201,6 +229,7 @@ public:
   void prepare(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+    flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
       gpu_->regCopy(reg(dst), reg(src));
@@ -214,6 +243,26 @@ public:
     check_reg(index);
     if (factor == 0) throw std::runtime_error("Aevum square factor must be positive");
     invalidate_if(index);
+
+    // The register API exposes one square at a time, while upstream PRPLL
+    // keeps a LEAD_WIDTH transform between consecutive squarings.  Keep one
+    // logical square pending: the next call executes the previous square with
+    // leadOut=WIDTH, and a read/copy/checkpoint executes the final square with
+    // leadOut=NONE.  Thus every externally visible value is canonical while
+    // the hot PRP loop uses the same carryFused chain as PRPLL.
+    if (lead_cache_enabled_ && factor == 1) {
+      if (pending_reg_ != no_prepared && pending_reg_ != index) flush_pending_square();
+      if (pending_reg_ == no_prepared) {
+        pending_reg_ = index;
+        pending_lead_width_ = false;
+        return;
+      }
+      gpu_->regSquareStep(reg(index), pending_lead_width_, true);
+      pending_lead_width_ = true;
+      return;
+    }
+
+    flush_pending_square();
     gpu_->regSquare(reg(index), 1);
     multiply_small(index, factor);
   }
@@ -221,6 +270,7 @@ public:
   void mul(size_t dst, size_t src, uint32_t factor) {
     check_reg(dst);
     check_reg(src);
+    flush_pending_square();
     if (factor == 0) throw std::runtime_error("Aevum multiplication factor must be positive");
     const size_t slot = find_prepared(src, true);
 #if defined(__APPLE__)
@@ -239,6 +289,7 @@ public:
   void add(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+    flush_pending_square();
     invalidate_if(dst);
     gpu_->regAddWords(reg(dst), reg(src));
   }
@@ -246,12 +297,14 @@ public:
   void sub_reg(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+    flush_pending_square();
     invalidate_if(dst);
     gpu_->regSubWords(reg(dst), reg(src));
   }
 
   void sub_u32(size_t dst, uint32_t value) {
     check_reg(dst);
+    flush_pending_square();
     invalidate_if(dst);
     gpu_->regSubU32(reg(dst), value);
   }
@@ -259,11 +312,13 @@ public:
   bool equal(size_t lhs, size_t rhs) {
     check_reg(lhs);
     check_reg(rhs);
+    flush_pending_square();
     return gpu_->regEqual(reg(lhs), reg(rhs));
   }
 
   void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
     check_reg(src);
+    flush_pending_square();
     if (!trace || trace_count < 12) throw std::runtime_error("Aevum square trace buffer must contain at least 12 uint64 values");
     if (small_factor_scratch_.empty()) throw std::runtime_error("Aevum square trace scratch is unavailable");
     gpu_->regCopy(small_factor_scratch_[0], reg(src));
@@ -277,6 +332,16 @@ private:
     size_t reg = no_prepared;
     uint64_t stamp = 0;
   };
+
+  void flush_pending_square() {
+    if (pending_reg_ == no_prepared) return;
+    const size_t index = pending_reg_;
+    const bool lead_in = pending_lead_width_;
+    // Clear first so an exception cannot leave a stale transformed-state tag.
+    pending_reg_ = no_prepared;
+    pending_lead_width_ = false;
+    gpu_->regSquareStep(reg(index), lead_in, false);
+  }
 
   size_t find_prepared(size_t index, bool touch) {
     for (size_t i = 0; i < prepared_slots_.size(); ++i) {
@@ -357,6 +422,9 @@ private:
   std::vector<PreparedSlot> prepared_slots_;
   std::vector<Buffer<Word>> small_factor_scratch_;
   uint64_t prepared_clock_ = 0;
+  bool lead_cache_enabled_ = false;
+  size_t pending_reg_ = no_prepared;
+  bool pending_lead_width_ = false;
 };
 
 template <class F>

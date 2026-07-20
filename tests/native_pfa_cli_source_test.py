@@ -12,7 +12,8 @@ assert '"-pfa9-type4-full"' in cpp
 assert '"pfa9:4:512:9:512:202"' in cpp
 adapter=(root/'src/aevum/EngineAevum.cpp').read_text()
 assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
-assert 'Aevum FFT323161 requires explicit pfa9, pfa9fast, or pfa9full plan' in adapter
+assert 'Aevum FFT323161 requires explicit pfa9' not in adapter
+assert '4:512:8:512:202' in (root/'README_POW2_TYPE4_LEAD_CACHE.md').read_text()
 for p in root.rglob('*'):
     if p.is_file() and p.name != 'MANIFEST_NATIVE_PFA.json' and 'third_party' not in p.parts and 'docs' not in p.parts and '__pycache__' not in p.parts and p.stat().st_size<8_000_000:
         forbidden='prmers_'+'opencl_'+'prp'

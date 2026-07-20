@@ -25,6 +25,14 @@ int main() {
       plan.size() != 4718592 || plan.spec() != "pfa9:4:512:9:512:202") {
     throw std::runtime_error("FFT323161 PFA9 plan resolution mismatch");
   }
+  FFTConfig pow2 = FFTConfig::bestFit(args, 175000039, "4:512:8:512:202");
+  if (pow2.shape.fft_type != FFT323161 || pow2.isPfa() ||
+      pow2.shape.width != 512 || pow2.shape.middle != 8 ||
+      pow2.shape.height != 512 || pow2.variant != 202 ||
+      pow2.size() != 4194304 || pow2.spec() != "4:512:8:512:202") {
+    throw std::runtime_error("power-of-two FFT323161 plan resolution mismatch");
+  }
+
   bool rejected = false;
   try { FFTConfig invalid("pfa3:4:512:3:512:202"); (void) invalid; }
   catch (...) { rejected = true; }
@@ -42,6 +50,6 @@ int main() {
   if (auto9.pfa_radix != 9 || auto9.variant != 202)
     throw std::runtime_error("forced radix-9 did not select optimized variant 202");
 
-  std::cout << "Aevum force-adaptive/full FFT323161 PFA9 plan test passed" << std::endl;
+  std::cout << "Aevum power-of-two and force-adaptive/full FFT323161 plan test passed" << std::endl;
   return 0;
 }

@@ -118,6 +118,7 @@ test-gui-state:
 	bash tests/test_web_gui_backend_state.sh
 
 test-aevum-source:
+	python3 tests/aevum_pow2_type4_source_test.py
 	bash tests/source_aevum_engine_audit.sh
 
 test-backend-compat: all

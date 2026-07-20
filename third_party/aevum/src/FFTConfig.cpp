@@ -451,9 +451,9 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     }
 #endif
     const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
-                                      (fft.shape.fft_type == FFT323161 && fft.isPfa() && fft.pfa_radix == 9);
+                                      fft.shape.fft_type == FFT323161;
     if (!supported_aevum_type && !apple_diagnostic_plane) {
-      log("Aevum accepts FFT type 1, or experimental FFT type 4 with explicit PFA9.\n");
+      log("Aevum accepts FFT type 1 or FFT type 4 (power-of-two or explicit PFA9).\n");
       throw "Aevum FFT type";
     }
 #if defined(__APPLE__)

@@ -264,7 +264,7 @@ public:
             handle_ = nullptr;
             throw std::runtime_error("Aevum plugin returned an invalid transform");
         }
-        std::cout << "[Backend Aevum] engine::Reg adapter active, GF(M31^2) x GF(M61^2)"
+        std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT323161"
                   << " | transform=" << transform_size_
                   << " | regs=" << register_count_
                   << " | plugin=" << api_.path
@@ -525,9 +525,6 @@ std::size_t transform_size_from_spec(const std::string& spec) {
                                 (fields[offset] == "1" || fields[offset] == "4");
     if (!supported_type)
         throw std::runtime_error("invalid Aevum FFT3161/FFT323161 spec");
-    const bool explicit_pfa9 = spec.rfind("pfa9:", 0) == 0 || spec.rfind("pfa9fast:", 0) == 0 || spec.rfind("pfa9full:", 0) == 0;
-    if (fields[offset] == "4" && !explicit_pfa9)
-        throw std::runtime_error("Aevum FFT323161 requires explicit pfa9, pfa9fast, or pfa9full plan");
     const std::size_t width = parse_fft_dimension(fields[offset + 1]);
     const std::size_t middle = parse_fft_dimension(fields[offset + 2]);
     const std::size_t height = parse_fft_dimension(fields[offset + 3]);

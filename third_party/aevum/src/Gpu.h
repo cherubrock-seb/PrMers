@@ -460,6 +460,8 @@ public:
   vector<Buffer<double>> makeTransformBufVector(u32 size);
 
   void regSync();
+  bool regSupportsLeadCache() const;
+  void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out);
   void regCopy(Buffer<Word>& dst, const Buffer<Word>& src);
   void regWrite(Buffer<Word>& dst, const Words& words);
   Words regRead(Buffer<Word>& src);

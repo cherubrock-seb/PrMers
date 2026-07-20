@@ -73,6 +73,13 @@ int main(int argc, char** argv) {
     std::cout << "Aevum FFT " << exponent << " -> " << spec << std::endl;
   }
 
+  char type4[64]{};
+  if (!resolve(175000039u, "4:512:8:512:202", type4, sizeof(type4)) ||
+      std::string(type4) != "4:512:8:512:202") {
+    throw std::runtime_error(std::string("power-of-two FFT323161 resolution failed: ") + error());
+  }
+  std::cout << "Aevum power-of-two type4 -> " << type4 << std::endl;
+
   char invalid[64]{};
   if (resolve(216091u, "1:1024:13:256", invalid, sizeof(invalid))) {
     throw std::runtime_error("invalid NTT middle was accepted");

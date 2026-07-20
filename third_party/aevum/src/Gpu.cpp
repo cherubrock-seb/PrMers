@@ -2517,6 +2517,24 @@ void Gpu::regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count) 
 
 void Gpu::regSync() { queue.finish(); }
 
+bool Gpu::regSupportsLeadCache() const {
+#if defined(__APPLE__)
+  // Keep the already validated Apple canonical-boundary path unchanged.
+  return false;
+#else
+  return !fft.isPfa() && !useLongCarry;
+#endif
+}
+
+void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out) {
+  if ((lead_in || lead_out) && !regSupportsLeadCache())
+    throw std::runtime_error("Aevum register lead cache requires a non-PFA short-carry plan");
+  square(io, io,
+         lead_in ? LEAD_WIDTH : LEAD_NONE,
+         lead_out ? LEAD_WIDTH : LEAD_NONE,
+         false, false);
+}
+
 void Gpu::regCopy(Buffer<Word>& dst, const Buffer<Word>& src) { dst << src; }
 
 void Gpu::regWrite(Buffer<Word>& dst, const Words& words) { writeIn(dst, words); }
