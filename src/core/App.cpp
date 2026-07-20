@@ -343,12 +343,13 @@ App::App(int argc, char** argv)
     }
     else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
 
-    // Aevum PRP and Lucas-Lehmer use the native PFA selector by default.
-    // pfa:auto falls back to the stock binary plan when the odd-radix size
-    // reduction is below the conservative gate. -pfa-off disables it.
-    if (!o.aevum_pfa_off && o.aevum_fft_spec.empty() &&
+    // PRP/LL select by predicted iteration cost, not transform length alone.
+    // The power-of-two FFT323161 lead-cache path can beat a smaller PFA plan
+    // because it retains LEAD_WIDTH and uses carryFused.  -pfa-off keeps the
+    // same throughput selector but restricts it to power-of-two candidates.
+    if (o.aevum_fft_spec.empty() &&
         (workload == engine::gpu_workload::prp || workload == engine::gpu_workload::ll)) {
-        o.aevum_fft_spec = "pfa:auto";
+        o.aevum_fft_spec = o.aevum_pfa_off ? "pow2:auto" : "throughput:auto";
     }
 #if defined(__APPLE__)
     // Apple ships the legacy OpenCL 1.2 stack. Keep Marin as the safe default

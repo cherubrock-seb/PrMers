@@ -50,6 +50,15 @@ int main() {
   if (auto9.pfa_radix != 9 || auto9.variant != 202)
     throw std::runtime_error("forced radix-9 did not select optimized variant 202");
 
-  std::cout << "Aevum power-of-two and force-adaptive/full FFT323161 plan test passed" << std::endl;
+  FFTConfig throughput = FFTConfig::bestFit(args, 175000039, "throughput:auto");
+  if (throughput.spec() != "4:512:8:512:202" || throughput.size() != 4194304) {
+    std::cerr << "throughput selected " << throughput.spec() << " size=" << throughput.size() << std::endl;
+    throw std::runtime_error("throughput selector did not choose the measured 4M FFT323161 lead-cache plan");
+  }
+  FFTConfig pow2auto = FFTConfig::bestFit(args, 175000039, "pow2:auto");
+  if (pow2auto.spec() != "4:512:8:512:202")
+    throw std::runtime_error("power-of-two selector did not choose the measured FFT323161 plan");
+
+  std::cout << "Aevum throughput-auto, power-of-two and PFA9 plan test passed" << std::endl;
   return 0;
 }

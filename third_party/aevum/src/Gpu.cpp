@@ -976,6 +976,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #endif
 
   K(kfftP,                 "fftp.cl", "fftP", hN / nW, kernelDefines(KALL).c_str()),
+  K(kfftPCarryB,           "fftp.cl", "fftPCarryB", hN / nW, kernelDefines(KALL).c_str()),
 #if defined(__APPLE__)
   K(kfftMidInGF61LoadScalarApple, "fftmiddlein.cl", "fftMiddleInGF61LoadScalarApple",
       hN / (BIG_H / SMALL_H) * fft.shape.middle, kernelDefines(K61).c_str()),
@@ -1452,6 +1453,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     for (Kernel* k : {&kCarryFused, &kCarryFusedMul, &kCarryFusedLL}) { k->setFixedArgs(8, bufStatsCarry); }
   } else {
     kfftP.setFixedArgs(2, bufTrigW);
+    kfftPCarryB.setFixedArgs(2, bufCarry, bufTrigW);
 #if defined(__APPLE__)
     kfftP31Apple.setFixedArgs(2, bufTrigW);
     for (Kernel* k : {&kfftP31TwiddleShuffle1Apple, &kfftP31TwiddleShuffle4Apple,
@@ -2318,6 +2320,18 @@ void Gpu::fftP(Buffer<double>& buf, Buffer<Word>& in) {
   kfftP(*out, in);
 }
 
+void Gpu::fftPCarryB(Buffer<double>& buf, Buffer<Word>& in) {
+#if defined(__APPLE__)
+  (void) buf; (void) in;
+  throw std::runtime_error("PFA carry bridge is disabled on Apple");
+#else
+  if (!fft.isPfa() || fft.shape.fft_type != FFT3161 || useLongCarry)
+    throw std::runtime_error("PFA carry bridge requires a short-carry FFT3161 PFA plan");
+  Buffer<double>* out = in_place ? &buf : &buf3;
+  kfftPCarryB(*out, in);
+#endif
+}
+
 void Gpu::fftMidIn(Buffer<double>& buf) {
   // Record this call for later playback
   recorded_kernels.push_back(KMIDIN);
@@ -2522,13 +2536,14 @@ bool Gpu::regSupportsLeadCache() const {
   // Keep the already validated Apple canonical-boundary path unchanged.
   return false;
 #else
-  return !fft.isPfa() && !useLongCarry;
+  return !useLongCarry && (!fft.isPfa() ||
+         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9));
 #endif
 }
 
 void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out) {
   if ((lead_in || lead_out) && !regSupportsLeadCache())
-    throw std::runtime_error("Aevum register lead cache requires a non-PFA short-carry plan");
+    throw std::runtime_error("Aevum register lead cache requires a supported short-carry plan");
   square(io, io,
          lead_in ? LEAD_WIDTH : LEAD_NONE,
          lead_out ? LEAD_WIDTH : LEAD_NONE,
@@ -2970,9 +2985,6 @@ void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
 
 // Use buf1 (and buf23 if not in place) to do a single squaring.
 void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL) {
-  if (fft.isPfa() && (leadIn != LEAD_NONE || leadOut != LEAD_NONE)) {
-    throw std::runtime_error("Aevum native PFA requires canonical register boundaries between iterations");
-  }
   // leadOut = LEAD_MIDDLE is not supported (slower than LEAD_WIDTH)
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
@@ -3002,11 +3014,19 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
     carryB(out);
   }
 
-  // Use CarryFused
+  // Retain LEAD_WIDTH.  Power-of-two plans use the stock carryFused kernel.
+  // Native PFA cannot use that canonical-order stairway directly; instead,
+  // fftW+carryA produces provisional canonical words and fftPCarryB applies
+  // carryB while gathering those words into the next PFA width transform.
   else {
     assert(!useLongCarry);
     assert(!doMul3);
-    if (doLL) {
+    if (fft.isPfa()) {
+      assert(!doLL);
+      fftW(buf3, buf1);
+      carryA(out, buf3);
+      fftPCarryB(buf1, out);
+    } else if (doLL) {
       carryFusedLL(buf1);
     } else {
       carryFused(buf1);

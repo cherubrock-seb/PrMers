@@ -55,7 +55,7 @@ LDFLAGS += -lgmpxx -lgmp
 CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -107,6 +107,9 @@ test-aevum-host:
 
 test-aevum-reg:
 	bash tests/test_aevum_reg_adapter.sh
+
+test-aevum-pfa9-bridge: aevum-engine
+	bash third_party/aevum/scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}
 
 test-aevum-auto: aevum-engine
 	bash tests/test_aevum_auto_policy.sh

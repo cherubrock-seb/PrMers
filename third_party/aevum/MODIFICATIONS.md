@@ -1,3 +1,10 @@
+## v0.3.68 throughput-cost auto selection + experimental PFA9 lead bridge
+
+- adds `throughput:auto` and `pow2:auto` candidate scoring;
+- calibrates M175 RTX 3080 default selection to `4:512:8:512:202`;
+- adds the opt-in `AEVUM_PFA_LEAD_BRIDGE=1` path;
+- adds exact bridge/canonical GPU comparison and OpenCL/source audits.
+
 ## v0.3.67 power-of-two FFT323161 + register lead cache
 
 - enables explicit power-of-two FFT323161 plans such as `4:512:8:512:202`;

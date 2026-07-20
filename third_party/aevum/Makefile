@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.67-pow2-type4-lead-cache-exp12
+AEVUM_VERSION ?= v0.3.68-throughput-auto-pfa-bridge-exp13
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -179,7 +179,7 @@ OPENCL_STANDARD_TEST := build-tests/aevum-opencl-standard-test
 MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
 
-.PHONY: test test-host test-gpu
+.PHONY: test test-host test-gpu test-pfa9-lead-bridge-gpu
 
 test: test-host
 
@@ -191,6 +191,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
+	python3 tests/pfa9_lead_bridge_source_test.py
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
 	python3 tests/apple_gf31_width_staging_test.py
@@ -273,3 +274,7 @@ native-pfa-build: engine-lib
 
 native-pfa-gpu-test: native-pfa-build native-pfa-host-test
 	bash scripts/test_native_pfa_gpu.sh $${AEVUM_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}
+
+
+test-pfa9-lead-bridge-gpu: engine-lib
+	bash scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}

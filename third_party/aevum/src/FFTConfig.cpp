@@ -33,6 +33,14 @@ namespace {
 
 bool startsWith(const string& s, const string& prefix) { return s.rfind(prefix, 0) == 0; }
 
+double positiveEnv(const char* name, double fallback) {
+  const char* text = std::getenv(name);
+  if (!text || !*text) return fallback;
+  char* end = nullptr;
+  const double value = std::strtod(text, &end);
+  return end != text && *end == '\0' && value > 0.0 ? value : fallback;
+}
+
 u64 mersenne2ReferencePowerOfTwo(u64 exponent) {
   for (u64 n = 256; n <= (u64(1) << 34); n <<= 1) {
     const double safe = std::log2(double(n)) + 2.0 * (double(exponent) / double(n) + 1.0);
@@ -349,6 +357,67 @@ float FFTConfig::maxBpw() const {
 }
 
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
+  // Throughput selector for long PRP/LL square chains.  Transform length is
+  // not a sufficient proxy: a non-PFA FFT323161 plan can retain LEAD_WIDTH
+  // and replace fftW+carryA+carryB+fftP with carryFused.  The default cost
+  // multipliers are calibrated from the RTX 3080 M175000039 measurements and
+  // remain environment-overridable for other devices.
+  if (spec == "throughput:auto" || spec == "pow2:auto") {
+    struct Candidate { FFTConfig fft; double score; const char* family; };
+    vector<Candidate> candidates;
+
+    FFTConfig stock = bestFit(args, E, "");
+    candidates.push_back({stock, double(stock.size()) * positiveEnv("AEVUM_AUTO_STOCK_COST", 1.00), "stock FFT3161"});
+
+#if !defined(__APPLE__)
+    // Enumerate the same tuned power-of-two geometry with the hybrid type-4
+    // capacity model.  Variant 202 is the validated fast path on NVIDIA.
+    for (u32 width : {256u, 512u, 1024u, 4096u}) {
+      for (u32 height : {256u, 512u, 1024u}) {
+        if (width == 256u && height == 1024u) continue;
+        for (u32 middle : {2u, 4u, 8u, 16u}) {
+          FFTConfig hybrid{FFTShape{FFT323161, width, middle, height}, 202u, CARRY_AUTO};
+          const double bpw = E / double(hybrid.size());
+          if (bpw < hybrid.minBpw()) continue;
+          if (hybrid.maxExp() * args.fftOverdrive < E) continue;
+          const double aspect_penalty = 0.010 * std::abs(std::log2(double(width) / double(height)));
+          const double middle_penalty = 0.002 * std::abs(std::log2(double(middle)) - 3.0);
+          const double geometry = 1.0 + aspect_penalty + middle_penalty;
+          candidates.push_back({hybrid, double(hybrid.size()) *
+                                positiveEnv("AEVUM_AUTO_POW2_TYPE4_COST", 1.00) * geometry,
+                                "power-of-two FFT323161 lead-cache"});
+        }
+      }
+    }
+#endif
+
+    if (spec == "throughput:auto") {
+      FFTConfig pfa = bestFit(args, E, "pfa:auto");
+      if (pfa.isPfa()) {
+        const double factor = pfa.pfa_radix == 9
+            ? positiveEnv("AEVUM_AUTO_PFA9_COST", 1.20)
+            : positiveEnv("AEVUM_AUTO_PFA3_COST", 1.10);
+        candidates.push_back({pfa, double(pfa.size()) * factor,
+                              pfa.pfa_radix == 9 ? "PFA9 FFT3161" : "PFA3 FFT3161"});
+      }
+    }
+
+    sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+      if (a.score != b.score) return a.score < b.score;
+      return a.fft.size() < b.fft.size();
+    });
+    const Candidate& selected = candidates.front();
+    log("Aevum throughput auto: %s selected for exponent %" PRIu64
+        " (family %s, score %.3fM, words %.3fM).\n",
+        selected.fft.spec().c_str(), E, selected.family,
+        selected.score / 1048576.0, double(selected.fft.size()) / 1048576.0);
+    for (size_t i = 1; i < candidates.size() && i < 4; ++i) {
+      log("Aevum throughput candidate: %s, family %s, score %.3fM, words %.3fM.\n",
+          candidates[i].fft.spec().c_str(), candidates[i].family,
+          candidates[i].score / 1048576.0, double(candidates[i].fft.size()) / 1048576.0);
+    }
+    return selected.fft;
+  }
   // Native Good-Thomas PFA selector. pfa:auto chooses an odd-radix plan only
   // when the actual Aevum transform-size reduction is large enough to cover
   // the odd-axis work. Forced pfa:3 and pfa:9 remain available for diagnostics.

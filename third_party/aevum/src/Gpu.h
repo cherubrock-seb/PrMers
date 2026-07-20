@@ -196,6 +196,7 @@ private:
 
   /* Kernels dealing with the FP data and product of NTT primes */
   Kernel kfftP;
+  Kernel kfftPCarryB;  // PFA9 carryB + fftP bridge for retained LEAD_WIDTH
 #if defined(__APPLE__)
   Kernel kfftMidInGF61LoadScalarApple;
   Kernel kfftMidInGF61Mul2FactorScalarApple;
@@ -349,6 +350,7 @@ private:
 
   void fftP(Buffer<double>& out, Buffer<double>& in) { fftP(out, reinterpret_cast<Buffer<Word>&>(in)); }
   void fftP(Buffer<double>& out, Buffer<Word>& in);
+  void fftPCarryB(Buffer<double>& out, Buffer<Word>& in);
   void fftMidIn(Buffer<double>& buf);
   void fftMidOut(Buffer<double>& buf);
   void fftHin(Buffer<double>& out, Buffer<double>& in);

@@ -3,6 +3,7 @@
 #include "base.cl"
 #include "fftwidth.cl"
 #include "weight.cl"
+#include "carryutil.cl"
 #include "middle.cl"
 
 #if FFT_TYPE == FFT64
@@ -876,6 +877,41 @@ inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
   return (logical & 1u) ? value.y : value.x;
 }
 
+// Apply the carryB correction lazily while gathering one canonical pair.
+// This lets a retained PFA square skip the separate transform-sized carryB
+// write before the next fftP.
+inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
+  const u32 x = pair / BIG_HEIGHT;
+  const u32 line = pair - x * BIG_HEIGHT;
+  const u32 gx = x / G_W;
+  const u32 me = x - gx * G_W;
+  const u32 gy = line / CARRY_LEN;
+  const u32 within = line - gy * CARRY_LEN;
+  const u32 HB = BIG_HEIGHT / CARRY_LEN;
+  const u32 prev = (gy + HB * G_W * gx + HB * me + (HB * WIDTH - 1u)) % (HB * WIDTH);
+  CarryABM carry = carryIn[WIDTH * (prev % HB) + prev / HB];
+  const u32 baseLine = gy * CARRY_LEN;
+  const u32 firstWord = (x * BIG_HEIGHT + baseLine) * 2u;
+  const u32 baseFrac = fracBits(firstWord) + FRAC_BPW_HI;
+  Word2 value = U2((Word)0, (Word)0);
+#pragma unroll
+  for (u32 i = 0; i < CARRY_LEN; ++i) {
+    const bool biglit0 = baseFrac + (2u * i) * FRAC_BPW_HI <= FRAC_BPW_HI;
+    const bool biglit1 = baseFrac + (2u * i) * FRAC_BPW_HI >= -FRAC_BPW_HI;
+    value = carryWord(in[(baseLine + i) * WIDTH + x], &carry, biglit0, biglit1);
+    if (i == within) break;
+    // carryB stops as soon as the incoming carry becomes zero; all remaining
+    // canonical pairs are already final and can be loaded directly.
+    if (!carry) return in[(baseLine + within) * WIDTH + x];
+  }
+  return value;
+}
+
+inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 logical) {
+  const Word2 value = pfaLoadCanonicalPairCarried(in, carryIn, logical >> 1);
+  return (logical & 1u) ? value.y : value.x;
+}
+
 // Compute both CRT-plane shifts from one shared fixed-point fracBits product.
 // Reduce logical before multiplying: (logical*step) mod p equals
 // ((logical mod p)*step) mod p and avoids expensive 64-bit division.
@@ -917,6 +953,51 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   for (u32 i = 0; i < NW; ++i) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
+    const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
+    const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+    u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
+    u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
+    n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
+    n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
+  }
+
+  fft_WIDTH(lds31, u31, smallTrig31, 1, me);
+  writeCarryFusedLine(u31, out31, g, me);
+  fft_WIDTH(lds61, u61, smallTrig61, 1, me);
+  writeCarryFusedLine(u61, out61, g, me);
+}
+
+// Same PFA pack as fftP, but consume carryA's provisional words and apply
+// carryB lazily during the gather.  Used only for an internal LEAD_WIDTH
+// boundary; externally visible registers are still materialized canonically.
+KERNEL(G_W) fftPCarryB(P(T2) out, CP(Word2) in, CP(CarryABM) carryIn, Trig smallTrig) {
+  local GF61 lds61[LDS_BYTES / sizeof(GF61)];
+  local GF31 *lds31 = (local GF31 *) lds61;
+  GF31 u31[NW];
+  GF61 u61[NW];
+
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 row = g / SMALL_HEIGHT;
+  const u32 y = g - row * SMALL_HEIGHT;
+
+  P(GF31) out31 = (P(GF31)) (out + DISTGF31);
+  TrigGF31 smallTrig31 = (TrigGF31) (smallTrig + DISTWTRIGGF31);
+  P(GF61) out61 = (P(GF61)) (out + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTWTRIGGF61);
+
+  const u32 m31_bigword_weight_shift = (NWORDS - EXP % NWORDS) * M31_LOG2_ROOT_TWO % 31u;
+  const u32 m31_step = (m31_bigword_weight_shift + 30u) % 31u;
+  const u32 m61_bigword_weight_shift = (NWORDS - EXP % NWORDS) * M61_LOG2_ROOT_TWO % 61u;
+  const u32 m61_step = (m61_bigword_weight_shift + 60u) % 61u;
+
+  const u32 first_binary_pair = me * SMALL_HEIGHT + y;
+  u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
+  u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const Word word0 = pfaLoadCanonicalWordCarried(in, carryIn, n0);
+    const Word word1 = pfaLoadCanonicalWordCarried(in, carryIn, n1);
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));

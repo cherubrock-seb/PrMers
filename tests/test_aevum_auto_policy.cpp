@@ -26,6 +26,11 @@ int main() {
     if (pfa9.aevum_transform != 4718592 || pfa9.marin_transform != 10485760 ||
         pfa9.fft_spec.rfind("pfa9:", 0) != 0) return 5;
 
+    auto throughput175 = aevum_auto_decide(175000039u, 8, engine::gpu_workload::prp, "throughput:auto");
+    expect(throughput175.use_aevum, true, "M175 throughput auto");
+    if (throughput175.aevum_transform != 4194304 ||
+        throughput175.fft_spec != "4:512:8:512:202") return 6;
+
     auto small_stage1 = aevum_auto_decide(1362763u, 11, engine::gpu_workload::pm1);
     expect(small_stage1.use_aevum, false, "small P-1 Stage 1");
 

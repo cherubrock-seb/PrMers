@@ -19,11 +19,11 @@ for text in required:
         raise SystemExit(f"missing lead-cache engine transition: {text}")
 if "bool regSupportsLeadCache() const;" not in gpu_h:
     raise SystemExit("Gpu lead-cache capability API missing")
-for text in ["!fft.isPfa() && !useLongCarry", "lead_in ? LEAD_WIDTH : LEAD_NONE", "lead_out ? LEAD_WIDTH : LEAD_NONE"]:
+for text in ["return !useLongCarry", "fft.pfa_radix == 9", "lead_in ? LEAD_WIDTH : LEAD_NONE", "lead_out ? LEAD_WIDTH : LEAD_NONE"]:
     if text not in gpu:
         raise SystemExit(f"Gpu lead-cache routing missing: {text}")
-if "fft.shape.fft_type == FFT323161;" not in fft:
-    raise SystemExit("power-of-two FFT323161 gate is not enabled")
+if "FFT323161" not in fft or "throughput:auto" not in fft:
+    raise SystemExit("throughput auto FFT323161 selector is not enabled")
 
 # Pure state-machine check: one logical square is always held pending, all
 # earlier squares are emitted as WIDTH->WIDTH, and flush emits exactly one

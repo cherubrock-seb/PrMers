@@ -13,7 +13,12 @@ assert 'pending_reg_ = index;' in engine
 assert 'AEVUM_REG_LEAD_CACHE' in engine
 assert 'gpu_->regSquareStep(reg(index), pending_lead_width_, true);' in engine
 assert 'gpu_->regSquareStep(reg(index), lead_in, false);' in engine
-assert '!fft.isPfa() && !useLongCarry' in gpu
-assert 'fft.shape.fft_type == FFT323161;' in fft
-assert '4.20.68-alpha-v99.74-aevum-pow2-type4-lead-cache-exp12' in version
-print('PrMers Aevum power-of-two type-4 lead-cache source test passed')
+assert 'return !useLongCarry' in gpu
+assert 'fft.pfa_radix == 9' in gpu
+assert 'throughput:auto' in fft
+assert 'AEVUM_AUTO_POW2_TYPE4_COST' in fft
+assert 'AEVUM_AUTO_PFA9_COST' in fft
+assert '4.20.69-alpha-v99.75-aevum-throughput-auto-pfa-bridge-exp13' in version
+assert 'AEVUM_PFA_LEAD_BRIDGE' in engine
+assert 'fftPCarryB' in gpu
+print('PrMers Aevum throughput-auto and PFA9 bridge source test passed')
