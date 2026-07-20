@@ -548,24 +548,100 @@ cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
     }
   }
 
-  // Parse .maxntid from PTX to get __launch_bounds__ value.
-  // PTX pattern: .visible .entry <name>(...)\n.maxntid N, 1, 1
+  // Determine the kernel's required workgroup size, module-format independent.
+  // 1) Exact source of truth: the __launch_bounds__(N) emitted for this kernel by the
+  //    KERNEL(N) macro translation — parsed from preprocessedSource, which is carried
+  //    into the linked program for exactly this purpose.
+  // 2) Fallback: .maxntid from PTX text (PTX modules only).
+  // 3) CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK is used only to VALIDATE the result:
+  //    it is the max launchable size for the compiled function, not necessarily the
+  //    original reqd_work_group_size.
   k->reqWorkGroupSize = 256; // fallback
+  bool haveExact = false;
   {
+    // The carried preprocessedSource replaces the KERNEL *macro definition* but does not
+    // macro-expand its *uses*, so declarations appear in either form:
+    //   KERNEL(N) kernelName(...)              (unexpanded macro use)
+    //   __launch_bounds__(N) kernelName(...)   (already-expanded / hand-written)
+    // Parse both, restricted to the immediate declaration prefix (no ';' or '}' between
+    // the size annotation and the kernel name) so an unrelated earlier occurrence can
+    // never be associated with this kernel.
+    const string& src = prog->preprocessedSource;
+    if (!src.empty()) {
+      const string nm = name;
+      const string pats[2] = {"KERNEL(", "__launch_bounds__("};
+      size_t pos = 0;
+      while ((pos = src.find(nm, pos)) != string::npos) {
+        char before = pos ? src[pos - 1] : ' ';
+        size_t q = pos + nm.size();
+        while (q < src.size() && (src[q] == ' ' || src[q] == '\t')) q++;
+        bool isIdentUse = !(isalnum((unsigned char)before) || before == '_') && q < src.size() && src[q] == '(';
+        if (isIdentUse) {
+          // Immediate declaration prefix: at most 200 chars back, truncated to after the
+          // last statement boundary so we stay within this declaration.
+          size_t wstart = pos > 200 ? pos - 200 : 0;
+          string prefix = src.substr(wstart, pos - wstart);
+          size_t boundary = prefix.find_last_of(";}");
+          if (boundary != string::npos) prefix = prefix.substr(boundary + 1);
+          size_t best = string::npos;
+          size_t patLen = 0;
+          for (const string& pat : pats) {
+            size_t pp = prefix.rfind(pat);
+            if (pp != string::npos && (best == string::npos || pp > best)) { best = pp; patLen = pat.size(); }
+          }
+          if (best != string::npos) {
+            const char* s = prefix.c_str() + best + patLen;
+            while (*s == ' ' || *s == '\t') s++;
+            if (*s >= '0' && *s <= '9') {
+              int val = atoi(s);
+              if (val > 0) { k->reqWorkGroupSize = val; haveExact = true; }
+            }
+            // A non-numeric argument (e.g. KERNEL(G_W) with G_W a -D define) cannot be
+            // resolved textually; the PTX .maxntid / attribute paths below handle it.
+            break; // this was the declaration; stop scanning either way
+          }
+        }
+        pos += nm.size();
+      }
+    }
+  }
+  if (!haveExact) {
+    // PTX pattern: .visible .entry <name>(...)\n.maxntid N, 1, 1
     const string& ptx = prog->ptx;
     string entryPattern = ".entry " + string(name) + "(";
     size_t pos = ptx.find(entryPattern);
     if (pos != string::npos) {
-      // Found the kernel entry. Now find .maxntid before the next .entry or opening brace
       size_t searchEnd = ptx.find(".entry ", pos + 1);
       if (searchEnd == string::npos) searchEnd = ptx.size();
       string maxntidPattern = ".maxntid ";
       size_t mpos = ptx.find(maxntidPattern, pos);
       if (mpos != string::npos && mpos < searchEnd) {
         int val = atoi(ptx.c_str() + mpos + maxntidPattern.size());
-        if (val > 0) {
-          k->reqWorkGroupSize = val;
-        }
+        if (val > 0) { k->reqWorkGroupSize = val; haveExact = true; }
+      }
+    }
+  }
+  {
+    int maxThreads = 0;
+    if (cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func) == CUDA_SUCCESS
+        && maxThreads > 0) {
+      if (haveExact && k->reqWorkGroupSize > maxThreads) {
+        // An exact reqd_work_group_size that the compiled function cannot launch is a
+        // hard error: silently clamping (e.g. 256 -> 128) would run the kernel with
+        // incorrect semantics. Fail kernel creation explicitly instead.
+        fprintf(stderr,
+                "ERROR: kernel '%s': required workgroup size %d exceeds the compiled "
+                "maximum %d (register/shared-memory limited); refusing to create kernel\n",
+                name, k->reqWorkGroupSize, maxThreads);
+        delete k;
+        if (err) *err = CL_OUT_OF_RESOURCES;
+        return nullptr;
+      }
+      if (!haveExact && maxThreads < 1024) {
+        // No exact size available (source-less program, or a KERNEL(<macro>) argument
+        // not resolvable textually): fall back to the compiled bound, which for
+        // KERNEL(N)-originated kernels equals N.
+        k->reqWorkGroupSize = maxThreads;
       }
     }
   }
@@ -675,7 +751,10 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   ensureContextCurrent();
 
   size_t gs = globalSize[0];
-  size_t ls = localSize ? localSize[0] : 256;
+  // NULL localSize: OpenCL lets the runtime choose, and with reqd_work_group_size the
+  // chosen size must match it. Use the kernel's parsed/queried workgroup size instead of
+  // a blind 256, which breaks kernels compiled with __launch_bounds__ < 256.
+  size_t ls = localSize ? localSize[0] : (k->reqWorkGroupSize > 0 ? (size_t)k->reqWorkGroupSize : 256);
   size_t numBlocks = (gs + ls - 1) / ls;
 
   // Build args array
@@ -744,7 +823,12 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   if (r != CUDA_SUCCESS) {
     const char* errName = nullptr;
     cuGetErrorName(r, &errName);
-    fprintf(stderr, "cuLaunchKernel FAILED for '%s': %s (%d)\n", k->name.c_str(), errName ? errName : "?", (int)r);
+    int maxThreads = -1, regs = -1, shmem = -1;
+    cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func);
+    cuFuncGetAttribute(&regs, CU_FUNC_ATTRIBUTE_NUM_REGS, k->func);
+    cuFuncGetAttribute(&shmem, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, k->func);
+    fprintf(stderr, "cuLaunchKernel FAILED for '%s': %s (%d) | blocks=%zu threads/block=%zu | kernel maxThreads=%d regs=%d shmem=%d\n",
+            k->name.c_str(), errName ? errName : "?", (int)r, numBlocks, ls, maxThreads, regs, shmem);
   }
 
   if (event) *event = nullptr;
