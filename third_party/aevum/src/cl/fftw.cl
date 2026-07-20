@@ -4,7 +4,7 @@
 #include "fftwidth.cl"
 #include "middle.cl"
 
-#if FFT_TYPE == FFT3161 && PFA_RADIX
+#if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
 // Map one scalar produced by an inverse PFA width row directly to the
 // canonical transposed pair layout consumed by carry.cl.  This fuses the
 // former transform-sized pfaUnpack pass into fftW.
@@ -65,8 +65,26 @@ KERNEL(G_W) fftW(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   readCarryFusedLine(inF2, u, g, me);
   fft_WIDTH(lds, u, smallTrigF2, 1, me);
+#if FFT_TYPE == FFT323161 && PFA_RADIX
+  // Match the fused CRT scatter below.  The inverse tail swaps components:
+  // y carries the even binary digit and x carries the odd binary digit.
+  P(F) outScalarF = (P(F)) outF2;
+  const u32 row = g / SMALL_HEIGHT;
+  const u32 y = g - row * SMALL_HEIGHT;
+  const u32 firstBinaryPair = me * SMALL_HEIGHT + y;
+  u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
+  u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    outScalarF[pfaWCanonicalPairIndex(nEven) * 2u + 1u] = u[i].y;
+    outScalarF[pfaWCanonicalPairIndex(nOdd)  * 2u]      = u[i].x;
+    nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
+    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
+  }
+#else
   outF2 += WIDTH * g;
   write(G_W, NW, u, outF2, 0);
+#endif
 }
 
 #endif
@@ -93,7 +111,7 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   readCarryFusedLine(in31, u, g, me);
   fft_WIDTH(lds, u, smallTrig31, 1, me);
-#if FFT_TYPE == FFT3161 && PFA_RADIX
+#if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
   // The inverse tail leaves components swapped: y is the even binary digit,
   // x is the odd binary digit.  Scatter scalar stores so adjacent canonical
   // digits may safely originate in different Good-Thomas rows.
@@ -140,7 +158,7 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 
   readCarryFusedLine(in61, u, g, me);
   fft_WIDTH(lds, u, smallTrig61, 1, me);
-#if FFT_TYPE == FFT3161 && PFA_RADIX
+#if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
   P(Z61) outScalar61 = (P(Z61)) out61;
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;

@@ -383,10 +383,24 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
   fft4(u);
 #elif MIDDLE == 8
   fft8(u);
+#elif PFA_RADIX == 9 && MIDDLE == 9
+  fft9(u);
 #elif MIDDLE == 16
   fft16(u);
 #else
 #error UNRECOGNIZED MIDDLE
+#endif
+}
+
+void OVERLOAD ifft_MIDDLE(F2 *u) {
+#if PFA_RADIX == 9
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i].y = -u[i].y;
+  fft9(u);
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = U2(u[i].x * (1.0f / 9.0f), -u[i].y * (1.0f / 9.0f));
+#else
+  fft_MIDDLE(u);
 #endif
 }
 

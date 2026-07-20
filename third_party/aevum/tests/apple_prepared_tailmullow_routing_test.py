@@ -12,7 +12,8 @@ def must(x, msg):
     if not x:
         raise SystemExit("FAIL: " + msg)
 
-must("FFT3161" in api and "Aevum engine requires FFT3161" in api, "FFT3161 strictness")
+must("FFT3161" in api and "experimental FFT323161 PFA9" in api,
+     "FFT3161 plus explicit FFT323161 PFA9 strictness")
 must("prepared_count = 0" not in api, "prepared cache enabled on Apple")
 must("fftHin(prepared, buf1);" in gpu, "Apple prepared full-height transform")
 must("tailMulLow(buf1, prepared);" in gpu, "Apple prepared route remains selected")

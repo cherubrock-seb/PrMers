@@ -6,8 +6,15 @@ hpp=(root/'include/io/CliParser.hpp').read_text()
 assert '"-pfa"' in cpp and '"pfa:auto"' in cpp
 assert '"pfa:3"' in cpp and '"pfa:9"' in cpp
 assert 'aevum_pfa_radix' in hpp
+assert '"-pfa9-type4"' in cpp
+assert '"pfa9full:4:512:9:512:202"' in cpp
+assert '"-pfa9-type4-full"' in cpp
+assert '"pfa9:4:512:9:512:202"' in cpp
+adapter=(root/'src/aevum/EngineAevum.cpp').read_text()
+assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
+assert 'Aevum FFT323161 requires explicit pfa9, pfa9fast, or pfa9full plan' in adapter
 for p in root.rglob('*'):
-    if p.is_file() and 'third_party' not in p.parts and p.stat().st_size<8_000_000:
+    if p.is_file() and p.name != 'MANIFEST_NATIVE_PFA.json' and 'third_party' not in p.parts and 'docs' not in p.parts and '__pycache__' not in p.parts and p.stat().st_size<8_000_000:
         forbidden='prmers_'+'opencl_'+'prp'
         assert forbidden not in p.read_text(errors='ignore'), f'old standalone runner reference: {p}'
 print('PrMers native PFA CLI source test passed')

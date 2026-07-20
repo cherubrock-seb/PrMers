@@ -88,6 +88,11 @@ public:
 
   // Opt-in Good-Thomas/PFA odd axis. Zero keeps the stock GPUOwl/Aevum path.
   u32 pfa_radix = 0;
+  // pfa9fast:4 requests the FFT323161 capacity model, but permits an exact
+  // GF31+GF61 execution when the same PFA shape remains inside the FFT3161
+  // bound.  The full FP32 plane is then mathematically redundant.
+  bool adaptive_type4_request = false;
+  bool adaptive_type4_elided = false;
   bool isPfa() const { return pfa_radix == 3 || pfa_radix == 9; }
 
   explicit FFTConfig(const string& spec);

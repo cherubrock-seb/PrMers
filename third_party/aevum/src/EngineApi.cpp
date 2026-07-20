@@ -72,6 +72,22 @@ public:
 
     const std::string spec = fft_spec ? fft_spec : "";
     FFTConfig fft = FFTConfig::bestFit(args_, exponent_, spec);
+
+    // Full FFT323161 has three independent residue planes.  Overlap the
+    // GF61 queue with the FP32+GF31 queue by default; the planes touch
+    // disjoint transform ranges and are synchronized before carry.
+    if (fft.shape.fft_type == FFT323161 && fft.isPfa()) {
+      int multi_q = 1;
+      if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q"))
+        multi_q = std::atoi(value) != 0;
+      if (multi_q) {
+        args_.flags["MULTI_Q"] = "1";
+        if (verbose) log("Aevum optimized full type-4 PFA9: concurrent GF61 and FP32+GF31 queues enabled.\n");
+      } else if (verbose) {
+        log("Aevum full type-4 PFA9: multi-queue overlap disabled by AEVUM_TYPE4_MULTI_Q=0.\n");
+      }
+    }
+
     bool apple_diagnostic_plane = false;
 #if defined(__APPLE__)
     if (const char* diagnostic = std::getenv("AEVUM_APPLE_DIAGNOSTIC_PLANES")) {
@@ -79,8 +95,10 @@ public:
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    if (fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane)
-      throw std::runtime_error("Aevum engine requires FFT3161");
+    const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
+                                      (fft.shape.fft_type == FFT323161 && fft.isPfa() && fft.pfa_radix == 9);
+    if (!supported_aevum_type && !apple_diagnostic_plane)
+      throw std::runtime_error("Aevum engine requires FFT3161 or experimental FFT323161 PFA9");
 #if defined(__APPLE__)
     if (verbose && apple_diagnostic_plane) {
       log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",

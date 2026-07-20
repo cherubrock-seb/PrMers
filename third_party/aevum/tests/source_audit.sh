@@ -6,6 +6,9 @@ grep -q 'for (enum FFT_TYPES type : {FFT3161})' "$ROOT/src/FFTConfig.cpp"
 grep -q 'json("name", "aevum")' "$ROOT/src/Task.cpp"
 grep -q 'Aevum %s starting' "$ROOT/src/main.cpp"
 grep -q 'Aevum auto FFT:' "$ROOT/src/FFTConfig.cpp"
+grep -q 'pfa9full:' "$ROOT/src/FFTConfig.cpp"
+grep -q 'radix == 9 ? 202u : 101u' "$ROOT/src/FFTConfig.cpp"
+grep -q 'AEVUM_TYPE4_MULTI_Q' "$ROOT/src/EngineApi.cpp"
 ! grep -q 'vector<TuneEntry> tunes = TuneEntry::readTuneFile(args)' "$ROOT/src/FFTConfig.cpp"
 if grep -A5 "makeTransformBufVector" "$ROOT/src/Gpu.cpp" | grep -q "&queue, N"; then
   echo "Prepared transform buffers still use the integer buffer size" >&2

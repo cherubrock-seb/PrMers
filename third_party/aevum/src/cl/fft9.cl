@@ -65,3 +65,61 @@ void fft9(T2 *u) {
 }
 
 #endif
+
+#if FFT_FP32
+
+// FP32 form of the same optimized 9-point DFT.  This is used by the
+// experimental FFT323161 + PFA9 path so all three residue planes share the
+// exact Good-Thomas digit map.
+void fft9(F2 *u) {
+  const float
+      C0 = 0.766044443118978013f,
+      C1 = 0.939692620785908428f,
+      C2 = 0.173648177666930359f,
+      C3 = 0.866025403784438597f,
+      C4 = 0.642787609686539363f,
+      C5 = 0.342020143325668713f,
+      C6 = 0.984807753012208020f;
+
+  X2(u[1], u[8]);
+  X2(u[2], u[7]);
+  X2(u[3], u[6]);
+  X2(u[4], u[5]);
+
+  F2 m4 = (u[4] - u[2]) * C1;
+  F2 s0 = fmaT2(C0, u[2] - u[1], m4);
+
+  X2(u[1], u[4]);
+  F2 t5 = u[1] + u[2];
+  F2 m8  = mul_t4(u[8] + u[7]);
+  F2 m10 = mul_t4(u[8] - u[5]);
+
+  X2(u[5], u[7]);
+  F2 m9  = mul_t4(u[5]) * C5;
+  F2 t10 = u[8] + u[7];
+  F2 s2 = fmaT2(C4, m8, m9);
+  u[5]  = fmaT2(C6, m10, m9);
+
+  u[2] = fmaT2(-0.5f, u[3], u[0]);
+  u[0] += u[3];
+  u[3] = fmaT2(-0.5f, t5, u[0]);
+  u[0] += t5;
+
+  u[7] = mul_t4(u[6]) * C3;
+  u[8] = u[7] + s2;
+  u[6] = mul_t4(t10) * C3;
+  u[1] = u[2] - s0;
+  u[4] = fmaT2(C2, u[4], m4);
+
+  X2(u[2], u[4]);
+  u[4] += s0;
+  X2(u[5], u[7]);
+  u[5] -= s2;
+  X2(u[4], u[5]);
+  X2(u[3], u[6]);
+  X2(u[2], u[7]);
+  X2(u[1], u[8]);
+}
+
+#endif
+

@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.63-native-pfa-radix39-exp8
+AEVUM_VERSION ?= v0.3.66-pfa9-force-adaptive-exp11
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -21,12 +21,15 @@ CXX ?= c++
 DL_LIBS = -ldl
 ENGINE_LINK_FLAGS = -shared -Wl,-Bsymbolic
 EXAMPLE_RPATH = -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)'
+TEST_SECTION_FLAGS = -ffunction-sections -fdata-sections
+TEST_GC_LINK = -Wl,--gc-sections
 ifeq ($(HOST_OS), Darwin)
 export MACOSX_DEPLOYMENT_TARGET
 DARWIN_MIN_FLAGS = -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
 DL_LIBS =
 ENGINE_LINK_FLAGS = -dynamiclib -Wl,-install_name,@rpath/libaevum_engine.so $(DARWIN_MIN_FLAGS)
 EXAMPLE_RPATH = -Wl,-rpath,@loader_path/../$(ENGINE_BIN)
+TEST_GC_LINK = -Wl,-dead_strip
 endif
 
 ifeq ($(CUDA), 1)
@@ -174,6 +177,7 @@ HOST_TEST := build-tests/aevum-host-gf-test
 STATE_TEST := build-tests/aevum-state-compact-test
 OPENCL_STANDARD_TEST := build-tests/aevum-opencl-standard-test
 MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
+TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
 
 .PHONY: test test-host test-gpu
 
@@ -183,7 +187,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
@@ -211,6 +215,14 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
+	$(TYPE4_PLAN_TEST)
+
+
+$(TYPE4_PLAN_TEST): tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
 
 $(HOST_TEST): tests/host_gf_test.cpp
 	@mkdir -p build-tests

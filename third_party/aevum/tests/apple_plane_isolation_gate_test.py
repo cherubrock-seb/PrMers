@@ -9,9 +9,11 @@ for text in (fft, api):
     assert 'AEVUM_APPLE_DIAGNOSTIC_PLANES' in text
     assert '#if defined(__APPLE__)' in text
     assert 'fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61' in text
+    assert 'supported_aevum_type' in text
+    assert 'FFT323161' in text
+    assert 'pfa_radix == 9' in text
+    assert '!supported_aevum_type && !apple_diagnostic_plane' in text
 
-assert 'fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane' in fft
-assert 'fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane' in api
 assert 'Apple Aevum plane-isolation diagnostic' in api
-assert 'Aevum accepts only FFT type 1' in fft
-print('Apple plane-isolation compile gate audit passed')
+assert 'experimental FFT type 4 with explicit PFA9' in fft
+print('Apple plane-isolation compile gate and FFT323161 PFA9 audit passed')

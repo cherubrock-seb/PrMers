@@ -2,7 +2,6 @@
 
 #include "cudawrap.h"
 
-#include <cuda.h>
 #include <stdexcept>
 #include <sstream>
 #include <cstdio>
@@ -455,15 +454,6 @@ std::string NvrtcProgram::compile(const std::string& source, const std::string& 
     headerSources.push_back(hSource.c_str());
   }
 
-  // Debug: with PRPLL_DUMP_PTX set, log each registered header's name + first content line
-  if (getenv("PRPLL_DUMP_PTX")) {
-    for (auto& [hName, hSource] : headers) {
-      std::string firstLines = hSource.substr(0, 150);
-      for (auto& c : firstLines) if (c == '\n' || c == '\r') c = '|';
-      fprintf(stderr, "[hdr] %-22s (%zu bytes): %s\n", hName.c_str(), hSource.size(), firstLines.c_str());
-    }
-  }
-
   nvrtcProgram prog;
   NVRTC_CHECK(nvrtcCreateProgram(&prog, source.c_str(), name.c_str(),
                                   (int)headers.size(),
@@ -492,32 +482,7 @@ std::string NvrtcProgram::compile(const std::string& source, const std::string& 
     throw std::runtime_error("NVRTC compilation failed for " + name);
   }
 
-  // Prefer CUBIN (native SASS for the exact sm_ arch): loads via cuModuleLoadData without
-  // driver PTX JIT, so an NVRTC newer than the driver (e.g. 13.3 vs 13.1) still works.
-  // PTX from a newer NVRTC fails with CUDA_ERROR_UNSUPPORTED_PTX_VERSION on older drivers.
-  // EXCEPTIONS that keep the PTX path:
-  //   - a register cap was requested: --maxrregcount is enforced by rewriting .maxnreg in
-  //     the generated PTX, which a CUBIN would silently bypass;
-  //   - NVRTC too old for nvrtcGetCUBIN (< CUDA 11.2): compile-time guarded.
-  bool wantsRegCap = false;
-  for (const auto& o : options) {
-    if (o.find("maxrregcount") != std::string::npos) { wantsRegCap = true; break; }
-  }
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 11020)
-  if (!wantsRegCap) {
-    size_t cubinSize = 0;
-    if (nvrtcGetCUBINSize(prog, &cubinSize) == NVRTC_SUCCESS && cubinSize > 0) {
-      std::string cubin(cubinSize, '\0');
-      NVRTC_CHECK(nvrtcGetCUBIN(prog, cubin.data()));
-      nvrtcDestroyProgram(&prog);
-      return cubin;
-    }
-  }
-#else
-  (void)wantsRegCap;
-#endif
-
-  // Fallback: PTX (virtual compute_ arch, register-capped builds, or old NVRTC)
+  // Get PTX
   size_t ptxSize;
   NVRTC_CHECK(nvrtcGetPTXSize(prog, &ptxSize));
   std::string ptx(ptxSize, '\0');

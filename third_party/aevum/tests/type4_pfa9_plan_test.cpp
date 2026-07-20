@@ -1,0 +1,47 @@
+#include "FFTConfig.h"
+#include "Args.h"
+#include <cstdarg>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+
+// Minimal host-only stubs needed by FFTConfig.cpp.  Unused policy functions are
+// removed by --gc-sections in the test target.
+void log(const char*, ...) {}
+std::vector<std::string> split(const std::string& text, char delimiter) {
+  std::vector<std::string> result;
+  std::stringstream stream(text);
+  std::string part;
+  while (std::getline(stream, part, delimiter)) result.push_back(part);
+  return result;
+}
+
+int main() {
+  Args args(true);
+  FFTConfig plan("pfa9:4:512:9:512:202");
+  if (plan.shape.fft_type != FFT323161 || plan.pfa_radix != 9 ||
+      plan.shape.width != 512 || plan.shape.middle != 9 ||
+      plan.shape.height != 512 || plan.variant != 202 ||
+      plan.size() != 4718592 || plan.spec() != "pfa9:4:512:9:512:202") {
+    throw std::runtime_error("FFT323161 PFA9 plan resolution mismatch");
+  }
+  bool rejected = false;
+  try { FFTConfig invalid("pfa3:4:512:3:512:202"); (void) invalid; }
+  catch (...) { rejected = true; }
+  if (!rejected) throw std::runtime_error("FFT323161 radix-3 must be rejected");
+  FFTConfig adaptive = FFTConfig::bestFit(args, 175000039, "pfa9:4:512:9:512:202");
+  if (adaptive.shape.fft_type != FFT3161 || adaptive.pfa_radix != 9 ||
+      adaptive.variant != 202 || adaptive.size() != 4718592 || !adaptive.adaptive_type4_elided)
+    throw std::runtime_error("adaptive type-4 PFA9 did not select exact paired-NTT fast path");
+
+  FFTConfig full = FFTConfig::bestFit(args, 175000039, "pfa9full:4:512:9:512:202");
+  if (full.shape.fft_type != FFT323161 || full.adaptive_type4_elided)
+    throw std::runtime_error("full type-4 PFA9 plan was unexpectedly elided");
+
+  FFTConfig auto9 = FFTConfig::bestFit(args, 175000039, "pfa:9");
+  if (auto9.pfa_radix != 9 || auto9.variant != 202)
+    throw std::runtime_error("forced radix-9 did not select optimized variant 202");
+
+  std::cout << "Aevum force-adaptive/full FFT323161 PFA9 plan test passed" << std::endl;
+  return 0;
+}

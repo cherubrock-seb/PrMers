@@ -49,3 +49,40 @@ run_case() {
 }
 run_case 3 100000019 256 256 4 4 131072 2 196608
 run_case 9 175000001 512 512 8 8 524288 5 2359296
+
+# Experimental FFT323161 (type 4) + PFA9 configuration used by the RTX 3080
+# benchmark.  All three planes must parse together because carry.cl reconstructs
+# the canonical integer from FP32, GF31 and GF61.
+run_type4_pfa9() {
+  local defs=(
+    -Dcl_khr_fp64=1 -Xclang -cl-ext=+cl_khr_fp64
+    -DEXP=175000039u -DWIDTH=512u -DSMALL_HEIGHT=512u -DMIDDLE=9u
+    -DCARRY_LEN=8u -DNW=8u -DNH=8u
+    -DPFA_RADIX=9u -DPFA_BINARY_LENGTH=524288u -DPFA_L_INV=5u -DPFA_LOGICAL_STEP=589824u
+    -DPFA_LOG2_ROOT_TWO31=14u -DPFA_LOG2_ROOT_TWO61=30u
+    -DFFT_VARIANT=202u -DMAXBPW=3895u
+    '-DTAILT=U2(1.0f,0.0f)'
+    '-DTAILTGF31=U2(269176336u,500380354u)'
+    '-DTAILTGF61=U2(807738046998073027ul,30095103403839256ul)'
+    -DFFT_TYPE=4 -DWordSize=8u
+    -DDISTGF31=0 -DDISTWTRIGGF31=0 -DDISTMTRIGGF31=0 -DDISTHTRIGGF31=0
+    -DDISTGF61=1179648ul -DDISTWTRIGGF61=147776ul -DDISTMTRIGGF61=2560ul -DDISTHTRIGGF61=147776ul
+    -DFRAC_BPW_HI=375134435u -DFRAC_BPW_LO=2386092941u
+    -DFFT_FP64=0 -DFFT_FP32=1 -DNTT_GF31=1 -DNTT_GF61=1
+    -DTAIL_KERNELS=1 -DINPLACE=0 -DPAD=0
+    -DTAIL_TRIGS32=2 -DTAIL_TRIGS31=0 -DTAIL_TRIGS61=0
+    -DWEIGHT_STEP=0.0f -DIWEIGHT_STEP=0.0f -DTRIG_SCALE=1.0f
+    '-DTRIG_SIN={1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f}'
+    '-DTRIG_COS={1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f,1.0f}'
+    '-DTRIG_W={1.0f,0.0f,1.0f,0.0f,1.0f,0.0f,1.0f,0.0f}'
+    '-DTRIG_H={1.0f,0.0f,1.0f,0.0f,1.0f,0.0f,1.0f,0.0f}'
+    '-DTRIG_M={1.0f,0.0f,1.0f,0.0f,1.0f,0.0f,1.0f,0.0f}'
+    -DNVIDIAGPU=1 -DCC=806u -DNO_ASM=1
+  )
+  for f in "${roots[@]}"; do
+    "$CLANG_BIN" -x cl -cl-std=CL1.2 -fsyntax-only \
+      "$ROOT/build-tests/native-pfa-$f.cl" "${defs[@]}"
+  done
+  echo 'Experimental Aevum FFT323161 PFA9 OpenCL C 1.2 syntax passed'
+}
+run_type4_pfa9

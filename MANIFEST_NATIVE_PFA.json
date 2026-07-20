@@ -1,2041 +1,430 @@
 {
-  "format": 1,
-  "root": "PrMers-v99.70-Aevum-Native-PFA-Radix39-exp8",
+  "root": "PrMers-v99.73-Aevum-PFA9-Force-Adaptive-exp11",
+  "version": "4.20.67-alpha-v99.73-aevum-pfa9-force-adaptive-exp11",
+  "feature": "force-adaptive explicit type-4 PFA9 requests with full-path diagnostic escape",
+  "file_count": 422,
   "files": [
-    {
-      "path": ".github/workflows/build_linux.yml",
-      "size": 2415,
-      "sha256": "ff836f9d30fb614e7cd69329b737b374e5c0374fe26a7a0194d575edf5c4b3be"
-    },
-    {
-      "path": ".github/workflows/build_mac_os.yml",
-      "size": 13744,
-      "sha256": "f89be6a9f8995cd90131afe254bc94e2b67377ac1bd85ab0d725f9dc64a2236c"
-    },
-    {
-      "path": ".github/workflows/build_windows.yml",
-      "size": 10157,
-      "sha256": "96b1e3874d625caa5433e6a5f984b4e4acf9881551aa645c67bd6b52f25315d6"
-    },
-    {
-      "path": ".gitignore",
-      "size": 400,
-      "sha256": "f7c6453f7525d8702f1b545cb1a33d7c7590cc7683934f9327c3537aa0093e3e"
-    },
-    {
-      "path": "CMakeLists.txt",
-      "size": 1429,
-      "sha256": "54b3f70bd835ee9c5f870a2e2d1057f55d4ba187fd20d92b09fe2ff97b6963fb"
-    },
-    {
-      "path": "LICENSE",
-      "size": 1067,
-      "sha256": "7e6553b90ae0a45c9c1f081495b2e5e47c10e2812a1e04f9210108a9b9ff7c49"
-    },
-    {
-      "path": "LICENSES/GPL-3.0.txt",
-      "size": 35141,
-      "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
-    },
-    {
-      "path": "LICENSES/PrMers-MIT.txt",
-      "size": 1067,
-      "sha256": "7e6553b90ae0a45c9c1f081495b2e5e47c10e2812a1e04f9210108a9b9ff7c49"
-    },
-    {
-      "path": "LICENSES/README.md",
-      "size": 540,
-      "sha256": "621440a1863bdccda026f9db877f2f22316b1b4acf4f9348023162029c14a5d0"
-    },
-    {
-      "path": "Makefile",
-      "size": 5337,
-      "sha256": "9bda9ac17762d811c719060f3472ba36f01df304fa4039f1475725b60e3de8ec"
-    },
-    {
-      "path": "NOTICE.md",
-      "size": 1026,
-      "sha256": "96d0b311e626ea51272091e4fc45ca3e3ad0bf8d1b134b021108b3899b9ff09e"
-    },
-    {
-      "path": "README.md",
-      "size": 43379,
-      "sha256": "cdaeb547724a7239d61622de15ae45b5abebcebc1e030c25df707f926fe1620d"
-    },
-    {
-      "path": "README_AEVUM_REG.md",
-      "size": 5275,
-      "sha256": "c400aa379f9901622e6b4cba3252410102b684c81a3c2fb90ac72c642ced3078"
-    },
-    {
-      "path": "README_NATIVE_AEVUM_PFA.md",
-      "size": 437,
-      "sha256": "b9c6ed2df07d44fd975f2eeb12a15536b22210cc2fabae2eea5b08eed390bbd1"
-    },
-    {
-      "path": "build_and_test_native_pfa_ubuntu.sh",
-      "size": 280,
-      "sha256": "b9397cc01f76461f07616adb7d1c2cc94ea3b525218fb4ca605d023c6ce0f062"
-    },
-    {
-      "path": "chainpm1.sh",
-      "size": 1471,
-      "sha256": "81f374bdb91fcf981c7a3e9da5aead4c085fc4fe82287a2fc1be9efe5593c379"
-    },
-    {
-      "path": "chainpm1old.sh",
-      "size": 1051,
-      "sha256": "a2de8e48ec61eee8809aa0671fde33f41e1df52b5ba141a1d0277593c2172c50"
-    },
-    {
-      "path": "docs/ecm_benchmark.txt",
-      "size": 57553,
-      "sha256": "76074315b671575940c35df32413515d006598b959816f51c8cb2cf7431f5e96"
-    },
-    {
-      "path": "docs/mersenne2_mixed_crt_2d_half_fast/README.md",
-      "size": 14184,
-      "sha256": "7450ea1419a7277a34d6b629745294bc72d8712df2b5e7c6cf21e3f9aa012e27"
-    },
-    {
-      "path": "docs/mersenne2_mixed_crt_2d_half_fast/mersenne2_mixed_crt_2d_half_fast.cpp",
-      "size": 40491,
-      "sha256": "7e97094181acbd7418761b99f6cbbae643372e3398b7128346738d3d347a5d57"
-    },
-    {
-      "path": "docs/resume_p149_ECM_B1_20000.p95",
-      "size": 200,
-      "sha256": "fb4953daa392272c71eec92aafbbb8c37913a28c1cc4d45df23eceed2c5680cc"
-    },
-    {
-      "path": "docs/resume_p205271257_B1_1300000.p95",
-      "size": 25659258,
-      "sha256": "d8b4eb15273793301a9cb6727feb07469f00e9c064caa66cc36dd6759420f848"
-    },
-    {
-      "path": "docs/resume_p9815459_ECM_B1_10000.p95",
-      "size": 2454031,
-      "sha256": "18b6b8f46dd451518fd65f27ab49b69a119059eaf77fb6840c8eccb55c7e43db"
-    },
-    {
-      "path": "docs/webgui.png",
-      "size": 258096,
-      "sha256": "395edd7e891eaac41784a4a872ee6e768fd8e62822d9bfec007f5bae54605d23"
-    },
-    {
-      "path": "docs/webgui2.png",
-      "size": 373026,
-      "sha256": "94b68454352773f371c13cc62787bf61a89c6fb11d1a971297c141cf371701c5"
-    },
-    {
-      "path": "docs/webgui3.png",
-      "size": 291199,
-      "sha256": "3324a2afc69e6e6bfb15dbe273d958ca5293467653fb9f1939e002c05bfcf85d"
-    },
-    {
-      "path": "include/aevum/AutoPolicy.hpp",
-      "size": 608,
-      "sha256": "6669a8795c70adc2e41f4c879e1fd0a6f4c926c4d964c767719578dcc72de3f6"
-    },
-    {
-      "path": "include/aevum/EngineAevum.hpp",
-      "size": 993,
-      "sha256": "eeb915ae9d47fc86ffb7a71cb55d51db9b0c4d77b7b356ec8983e2117a392584"
-    },
-    {
-      "path": "include/core/AlgoUtils.hpp",
-      "size": 38469,
-      "sha256": "d97d7a851667195baee5a34fcc1f2cf5c1b9dfdc5033f4c81925e0145b39a227"
-    },
-    {
-      "path": "include/core/App.hpp",
-      "size": 3182,
-      "sha256": "5df5a4636b54f383ba4633ce24f60723fb1e21595a932a4ad05fd1ace038af44"
-    },
-    {
-      "path": "include/core/BackupManager.hpp",
-      "size": 2379,
-      "sha256": "c49e3daa0623cfafececdf988fdd143e1499d72468e6f5893a0f0f31043297ab"
-    },
-    {
-      "path": "include/core/Logger.hpp",
-      "size": 383,
-      "sha256": "7d4d800a7ccea07dadb9aceb88d85364e7c856b8e9c4a62249382fa075a8f88f"
-    },
-    {
-      "path": "include/core/Printer.hpp",
-      "size": 590,
-      "sha256": "96f407b42be3aab2593e622cb630ac536b876f9a90f8ca263eddada16eb54ed6"
-    },
-    {
-      "path": "include/core/Proof.hpp",
-      "size": 1284,
-      "sha256": "aad3b0324446c5f138842a0145d46118982c1f39f2f66f7334996d4633bcf04e"
-    },
-    {
-      "path": "include/core/ProofManager.hpp",
-      "size": 1119,
-      "sha256": "776b772f57727dab9af958335ebae1ead8ab0d91e43778ab6a4afe79b45be5bb"
-    },
-    {
-      "path": "include/core/ProofManagerMarin.hpp",
-      "size": 969,
-      "sha256": "d743537e7e0c869b79c7c6244b28506694fce0546f26d53ed1d858751c835ff9"
-    },
-    {
-      "path": "include/core/ProofMarin.hpp",
-      "size": 1199,
-      "sha256": "29d1deca502f4b15e569d189d45a63d482a53da188c53ce552ae7aad65bfdb2e"
-    },
-    {
-      "path": "include/core/ProofSet.hpp",
-      "size": 2493,
-      "sha256": "c946f6fa8be256c636019985edd284580f8cb8a5b3865f2fd75c1cb9f94e6736"
-    },
-    {
-      "path": "include/core/ProofSetMarin.hpp",
-      "size": 1512,
-      "sha256": "14ffd897c8e2d855efdfc7d6fcdbc124b7e9459b6e20dfb8a35a0e9041d8b439"
-    },
-    {
-      "path": "include/core/QuickChecker.hpp",
-      "size": 276,
-      "sha256": "cce64eaff06ddd66ff1f6a0479d4e739e070634e561a83825ad1ac2a0bd65e08"
-    },
-    {
-      "path": "include/core/Spinner.hpp",
-      "size": 1556,
-      "sha256": "50d68c7b44d23f96fd5eb0c95baace9d6ddc45086ae4b7018c61c7cd786d8e89"
-    },
-    {
-      "path": "include/core/Version.hpp",
-      "size": 213,
-      "sha256": "7c747e253dfd4e5d4673619fd0b90dab9c6ef984a3e1b236aff69ee8617a5c6f"
-    },
-    {
-      "path": "include/io/CliParser.hpp",
-      "size": 5944,
-      "sha256": "2c75516289d845e5f2d8fb413dbbb769189f5373cf357708c376faf9e3db74c0"
-    },
-    {
-      "path": "include/io/Hash.h",
-      "size": 2154,
-      "sha256": "63436a72163c7f70706b9ff999f3add8cc9a1ef1467ff9e8dfeceb7efdc9c61e"
-    },
-    {
-      "path": "include/io/JsonBuilder.hpp",
-      "size": 2291,
-      "sha256": "4e5610c40b48312039de76ea6687b77f02ca92fbea72436ac9fb4520877e8ffc"
-    },
-    {
-      "path": "include/io/MD5.h",
-      "size": 876,
-      "sha256": "d6639941217b65106df262687588b54f246e21e757407cf9de8da646a78a3981"
-    },
-    {
-      "path": "include/io/Sha3Hash.h",
-      "size": 1860,
-      "sha256": "4f3385d6e0720b7fa0472b57f4b7ef07e9c41467c8e3a1fe0b40958b58d13079"
-    },
-    {
-      "path": "include/io/WorktodoManager.hpp",
-      "size": 492,
-      "sha256": "cb3d8057d44101c5d7bd20315d973006caa961b271f2eb0795a909c7430fa7e7"
-    },
-    {
-      "path": "include/io/WorktodoParser.hpp",
-      "size": 1188,
-      "sha256": "9314aa35a87aeca022547dcb745fed941b0e588b605b7e79b11d25adb2168db0"
-    },
-    {
-      "path": "include/io/common.h",
-      "size": 3001,
-      "sha256": "ad8340af68ec41d927a098f3fc6f09cd111791eff9ce60b09005943a81345804"
-    },
-    {
-      "path": "include/io/sha3.h",
-      "size": 1740,
-      "sha256": "6429af3631c4b0c5b30c6460e60380677ecb77b6e0026b2b9e7f06736d35acff"
-    },
-    {
-      "path": "include/marin/arith.h",
-      "size": 2946,
-      "sha256": "1a73165aedbc0952f5b44b15306fdb08d1d548a32afffe3828987eed449ec72c"
-    },
-    {
-      "path": "include/marin/engine.h",
-      "size": 8892,
-      "sha256": "f8cee91a1c031f4bacfc29db545bc6af2050d041b0a3ed13a31dc1acd3292515"
-    },
-    {
-      "path": "include/marin/engine_gpu.h",
-      "size": 127946,
-      "sha256": "822030143a0182a087bbe1389849f1c2854f77f2185919ad3ac09fd122ec3a73"
-    },
-    {
-      "path": "include/marin/file.h",
-      "size": 2734,
-      "sha256": "2a72fbdcddf761c6d6ff616c3e2674211299f513ecd424453326a49ab6a223ed"
-    },
-    {
-      "path": "include/marin/ibdwt.h",
-      "size": 4307,
-      "sha256": "725917bfe7933b1bcc8a15fe227ed2c4d0ac3b4fab2ade0e49d36ed9787a503e"
-    },
-    {
-      "path": "include/marin/ocl/kernel.h",
-      "size": 98120,
-      "sha256": "889d74985dd3a3dfc8e011bb8dd9cbf4f6172d13e3bfb0b82e3cef000600f4c1"
-    },
-    {
-      "path": "include/marin/ocl.h",
-      "size": 22314,
-      "sha256": "af2ca57759ccac387022adca5414ef3c4c9bc125f0208c6a6ef3014bece50393"
-    },
-    {
-      "path": "include/math/Carry.hpp",
-      "size": 1189,
-      "sha256": "bd7ce7291b95a96169d099d2a5dffcfa2a329ed1f114bdd811255f6eaf44be0b"
-    },
-    {
-      "path": "include/math/Cofactor.hpp",
-      "size": 759,
-      "sha256": "64d96d65be0bd9e40e2dcff2eb34e2706830f1c61f033b7d2df813a267ddc256"
-    },
-    {
-      "path": "include/math/Mod64.hpp",
-      "size": 1539,
-      "sha256": "c02f4c3e9e72185c3a19e09e6e4b48aa8c110d41206ea109d6af47a66f67ce08"
-    },
-    {
-      "path": "include/math/Precompute.hpp",
-      "size": 1333,
-      "sha256": "7ed18c0f48e28351e366a21bba10676209146a3bb4a1a9b0e31354af4392db57"
-    },
-    {
-      "path": "include/opencl/Buffers.hpp",
-      "size": 1192,
-      "sha256": "709e6a49f8bb2b0161536bfbab888004cbd0e8468802e3cb49f32e955d677fdb"
-    },
-    {
-      "path": "include/opencl/Context.hpp",
-      "size": 2572,
-      "sha256": "556169ea22066b443dfc74986780ac22089105db0ebc5047bbeac1f04628ade4"
-    },
-    {
-      "path": "include/opencl/Kernels.hpp",
-      "size": 882,
-      "sha256": "2bc24b05d45e56a52cb72c2014820f82633dc38b0cbb141d8feee7df67fb225d"
-    },
-    {
-      "path": "include/opencl/NttEngine.hpp",
-      "size": 1941,
-      "sha256": "e1db9c988bb24c94a174e9c2572d8c856398e84a74149a9f8ba32f906ac07e01"
-    },
-    {
-      "path": "include/opencl/NttPipeline.hpp",
-      "size": 23596,
-      "sha256": "943fd41eb3040303f5a7dc8dc81a3bb8422d4a4b72f126d20787efdce17f0490"
-    },
-    {
-      "path": "include/opencl/Program.hpp",
-      "size": 818,
-      "sha256": "83f3a63650a51bbb0fbfb7a90cba15bfd77128f22dcf488131d0460578cf6a5d"
-    },
-    {
-      "path": "include/ui/WebGuiServer.hpp",
-      "size": 3164,
-      "sha256": "09b44d4cb6cf9b2a8a055ef83a00466dab2a6de9db75fb46d0b61017447cf129"
-    },
-    {
-      "path": "include/util/Color.hpp",
-      "size": 1084,
-      "sha256": "e7a8bbac542a3c9602c7d62176b492e019846b04d74edc2f759568353fe921cc"
-    },
-    {
-      "path": "include/util/Crc32.hpp",
-      "size": 244,
-      "sha256": "7aad5549e2c3bd01feb203918521172d9fe714520c1f19f4a2faa8ae4ae24fb6"
-    },
-    {
-      "path": "include/util/Fs.hpp",
-      "size": 133,
-      "sha256": "322e4501de4520535054052e9dc2f5eb6efb1a39dae105b20798faabb586191e"
-    },
-    {
-      "path": "include/util/GmpUtils.hpp",
-      "size": 578,
-      "sha256": "68efae12e6fb289993edfe519242ecb0559c95ae3482f29367f3c3cd89f603ab"
-    },
-    {
-      "path": "include/util/OpenCLError.hpp",
-      "size": 325,
-      "sha256": "336f245e52b51990409675c4f403f38ce4be1904140d7439801c61629522cfc7"
-    },
-    {
-      "path": "include/util/PathUtils.hpp",
-      "size": 87,
-      "sha256": "c8de5e21e8579e78e486af8180539535b186fd0c14d5d6d3dd48657296495e04"
-    },
-    {
-      "path": "include/util/StringUtils.hpp",
-      "size": 153,
-      "sha256": "92640eb2936cb8eb190e278163b6d822eb57dc8fc07d64fa065703605518a044"
-    },
-    {
-      "path": "include/util/Timer.hpp",
-      "size": 267,
-      "sha256": "389ff4ad9ef3db687171e666f84c87c0596715dc62fa1bd6834148f38b43e1c3"
-    },
-    {
-      "path": "kernels/marin.cl",
-      "size": 83371,
-      "sha256": "0255bc6097a1409f2031c89ba3865d3a22e9faacc5118fffc651b624c970ba7b"
-    },
-    {
-      "path": "kernels/prmers.cl",
-      "size": 62356,
-      "sha256": "8f51b72f7c1c24310ed81aa38a90c79e76fc39abcc4586db91f10052491778ab"
-    },
-    {
-      "path": "prmers.ipynb",
-      "size": 66383,
-      "sha256": "6a76ae09f5f4662cebb95a3270d88b9019e78b1320f03535753ccb78da11f265"
-    },
-    {
-      "path": "scripts/benchmark_aevum_vs_marin.sh",
-      "size": 464,
-      "sha256": "5e335b54c5d7be0f240aa7374390fab129b586cc9624881ac2a6dd115a98d367"
-    },
-    {
-      "path": "scripts/build_native_pfa.sh",
-      "size": 619,
-      "sha256": "549861c8069652c0c650ef69fe5d64e88b9e565e5e611ca1773272d7c93ca22e"
-    },
-    {
-      "path": "scripts/build_native_pfa_ubuntu.sh",
-      "size": 101,
-      "sha256": "39813ef46c8193118ca2ba1a15c1eb403add191753006aa7ea046886e3d8ffac"
-    },
-    {
-      "path": "scripts/check_macos_minos.sh",
-      "size": 1018,
-      "sha256": "3a26e903b45f26a17065c941a16065bcb2d39f113673ee9230de3e945c52fbbc"
-    },
-    {
-      "path": "scripts/fix_macos_download.sh",
-      "size": 973,
-      "sha256": "13b3f9293b0140f184928b7b874b81de1449d93eac489a216f7d4bcd86471444"
-    },
-    {
-      "path": "scripts/install_native_pfa_dependencies.sh",
-      "size": 176,
-      "sha256": "6da17526b8499bfc39acbe7c75b5255580ecf192528ff1a32ca8184fb7ae4913"
-    },
-    {
-      "path": "scripts/smoke_aevum_ll_macos.py",
-      "size": 5902,
-      "sha256": "4dc117356988ad2b72e17d4af32912aac6b38c0fc91ef6708873d512af9b8891"
-    },
-    {
-      "path": "scripts/test_native_pfa_gpu.sh",
-      "size": 371,
-      "sha256": "6ac7e370ecd11d86b7f4a5c1b2a41d330bfa5431fd8c9b61a2aa2a0926eee4e9"
-    },
-    {
-      "path": "src/aevum/AutoPolicy.cpp",
-      "size": 5255,
-      "sha256": "70b602caa937d6d36c6c5c2b7fe2c536dac8d923a93bd29610321c834be2a5e4"
-    },
-    {
-      "path": "src/aevum/EngineAevum.cpp",
-      "size": 24450,
-      "sha256": "0a9788a72fe48dd782dacb0d88b120aaad38bcc24fc06769d391b3328a4afb62"
-    },
-    {
-      "path": "src/core/AlgoUtils.cpp",
-      "size": 241,
-      "sha256": "f53540cf49faa891aa9b25f029a6352b3d7095509a70de473583a6b2a30f4b89"
-    },
-    {
-      "path": "src/core/App.cpp",
-      "size": 40540,
-      "sha256": "c694a96cb73555ae206f3a0ee2ce7c88325dbf1cf18c07fdd8f171d3d864a295"
-    },
-    {
-      "path": "src/core/BackupManager.cpp",
-      "size": 15490,
-      "sha256": "7e0a03b77dd2158facfd5c3d8d0d6a7b2ea10da643f280dde6402caa823a0530"
-    },
-    {
-      "path": "src/core/Logger.cpp",
-      "size": 1878,
-      "sha256": "29fb936377737d8e9fd15871baa08b9a90bb672e0842cacafee5059e194d18a3"
-    },
-    {
-      "path": "src/core/Printer.cpp",
-      "size": 3746,
-      "sha256": "b34c19da3f07081226482098cc7cae78cca1b1d2b75961f5424a894f9f359643"
-    },
-    {
-      "path": "src/core/Proof.cpp",
-      "size": 11155,
-      "sha256": "bc8a25a91987c95b4f5c2576e10ffd26aecef001dcd00f83af11ee636b70e6f3"
-    },
-    {
-      "path": "src/core/ProofManager.cpp",
-      "size": 6059,
-      "sha256": "ee37db8b383dad5b4a5187ff1022f6eaa3c92d371811ecbe0f7623430b273d46"
-    },
-    {
-      "path": "src/core/ProofManagerMarin.cpp",
-      "size": 5517,
-      "sha256": "4b094f3f8cd46d6b4538cbf32e26bdb2af55ebd966c102e86956c5059227565b"
-    },
-    {
-      "path": "src/core/ProofMarin.cpp",
-      "size": 7615,
-      "sha256": "28320cfef3217ca91f6ab20a3e08480677701dc6ac16ed5aaac5fe3f20786034"
-    },
-    {
-      "path": "src/core/ProofSet.cpp",
-      "size": 14053,
-      "sha256": "1299f00a8a74d0b5e23d854bfe65112fa1fcedc58f56c4d380ae50834e148db4"
-    },
-    {
-      "path": "src/core/ProofSetMarin.cpp",
-      "size": 10554,
-      "sha256": "ae358e492e947f647621cf3844a9f7bb5138387251809ddf9ca66f2d80254d44"
-    },
-    {
-      "path": "src/core/QuickChecker.cpp",
-      "size": 1619,
-      "sha256": "1b227c0f125bb7d34126da5a1ac5b07a5da5db4a09a0754cf452eb8d3dc773e1"
-    },
-    {
-      "path": "src/core/Spinner.cpp",
-      "size": 10419,
-      "sha256": "7349ed84eb5e8df4596dd3f5e6dcb6852577ba7292f930d3454e355a56d99dd1"
-    },
-    {
-      "path": "src/io/CliParser.cpp",
-      "size": 47047,
-      "sha256": "1fbd27e29473cf09cb3f88ae4dc816de3a0245934ec43d16b5d4cddf67c184c5"
-    },
-    {
-      "path": "src/io/JsonBuilder.cpp",
-      "size": 31264,
-      "sha256": "e873368754a331b28f2de82c28658bc0534a4bcca68ae9b7ed29f339c2b32359"
-    },
-    {
-      "path": "src/io/WorktodoManager.cpp",
-      "size": 2218,
-      "sha256": "7b05b7894e2087e6deed2ee688213b6eca44a6c4378ea0ca89539c74b0388682"
-    },
-    {
-      "path": "src/io/WorktodoParser.cpp",
-      "size": 17039,
-      "sha256": "8bf1b99eeae1e8b5c8a2ddabf86c412470b7c7088f1ad6996287d3906773d6c0"
-    },
-    {
-      "path": "src/io/common.cpp",
-      "size": 2502,
-      "sha256": "ede8f11d696aba7bbd44c0f245ef658888e8303887847de0974a08be4f610aad"
-    },
-    {
-      "path": "src/io/md5.cpp",
-      "size": 9173,
-      "sha256": "6c283362cbf83ec39e008b8e18efd329ff6a78c013275e4fa593f0fea1bc2209"
-    },
-    {
-      "path": "src/io/sha3.cpp",
-      "size": 12117,
-      "sha256": "0a977088dc249969d663bd86a3913a8b3576d69d2c387b412efc4e7c784933b8"
-    },
-    {
-      "path": "src/main.cpp",
-      "size": 5918,
-      "sha256": "4a35a10acf7a31c10db1407d2ee16f6b654ff45ce2ce0c6fe2301a27a1c3b375"
-    },
-    {
-      "path": "src/marin/gpu.cpp",
-      "size": 5606,
-      "sha256": "d7447cd404577914df3a2ebef2fb11d8d3a4067117815bd6c3ba6cd6e9b44051"
-    },
-    {
-      "path": "src/math/Carry.cpp",
-      "size": 9398,
-      "sha256": "ab084c6ca4f3fd604818ee61553d8bd9e96263ba7c2290fcc2a09f5b482db51c"
-    },
-    {
-      "path": "src/math/Cofactor.cpp",
-      "size": 2066,
-      "sha256": "376d5071e7421ec5c48deb8e2fa007ec04e9ed502653193ca6444c14f3288c32"
-    },
-    {
-      "path": "src/math/Mod64.cpp",
-      "size": 6404,
-      "sha256": "7e11792800cadb55c94b6832f45e103ae41b81e2af349f1b24c7357ba9342c45"
-    },
-    {
-      "path": "src/math/Precompute.cpp",
-      "size": 7752,
-      "sha256": "3737d18e2818f99cf173ed1a1292d00969adab9ba2b42bb278e8b74de53cf583"
-    },
-    {
-      "path": "src/modes/RunEcm.cpp",
-      "size": 134847,
-      "sha256": "c08020c792f04da7a8e334016d3741c1ee208c1324d84e92b786130e4edcc35c"
-    },
-    {
-      "path": "src/modes/RunEcmTwistedEdwards.cpp",
-      "size": 167856,
-      "sha256": "5128224718558d31d7fa94fd2f49ad27e176152bcef17f243d0872170e7941fd"
-    },
-    {
-      "path": "src/modes/RunLlSafeMarin.cpp",
-      "size": 34594,
-      "sha256": "68d8806957e7ef84cabb1113336c55e69853229f9e30419b3e1e2f38f7a0e4eb"
-    },
-    {
-      "path": "src/modes/RunMemTest.cpp",
-      "size": 31399,
-      "sha256": "fd182f4fe400ed3549ff611f341ac7edd99de490e5f915f2f0f1f2c036af6e99"
-    },
-    {
-      "path": "src/modes/RunPM1.cpp",
-      "size": 412934,
-      "sha256": "923e59b227bcd70896d1bbde84e81d311fd79f77496516b706d348d04bed24cc"
-    },
-    {
-      "path": "src/modes/RunPrpOrLl.cpp",
-      "size": 41020,
-      "sha256": "748df944bdc8b74264e3a04e7c006739f38edd0e330e66d82aaabb73aeb95dd1"
-    },
-    {
-      "path": "src/modes/RunPrpOrLlMarin.cpp",
-      "size": 31282,
-      "sha256": "68fd3882ecfc8422ab0f2c9f3043225812e38a986e21aea6e24498f0eee1c32d"
-    },
-    {
-      "path": "src/opencl/Buffers.cpp",
-      "size": 5334,
-      "sha256": "0b06add584626a85b6c02d87ac094599bb3a25fa950b92ecc0bd54dbd61a38b1"
-    },
-    {
-      "path": "src/opencl/Context.cpp",
-      "size": 20186,
-      "sha256": "de4be0f8984490aa970b970505fadbe63eea13eb20d538bf22620b48b3d1cc21"
-    },
-    {
-      "path": "src/opencl/Kernels.cpp",
-      "size": 3198,
-      "sha256": "4fe1cd6b1a94b3b951da924d52882c5c5711b3ca85a4f9e27b4b008aa8accfcf"
-    },
-    {
-      "path": "src/opencl/NttEngine.cpp",
-      "size": 19619,
-      "sha256": "861621e0bbd8350157bcb1b51c086b6337ff9b84da6a9513993fe918ee8c7cd2"
-    },
-    {
-      "path": "src/opencl/Program.cpp",
-      "size": 8492,
-      "sha256": "40e924dca5e2e01ab8e6e029549dda840cc16af9204be817b23de9d6afc31f73"
-    },
-    {
-      "path": "src/ui/WebGuiServer.cpp",
-      "size": 35106,
-      "sha256": "a193fd2e9003a3d709b53b22bfc2a7dcf09f8e005eb143eea0e8e85348febb59"
-    },
-    {
-      "path": "src/util/Color.cpp",
-      "size": 26,
-      "sha256": "26f66e94394d65ce117e479b6f1b41c459da729cef3b753e9658a99f9dc5db43"
-    },
-    {
-      "path": "src/util/Crc32.cpp",
-      "size": 5298,
-      "sha256": "2da7da0f929b4244e3dd3a8c1683d01066aba1c1b9e5023d15cef424d70a86f7"
-    },
-    {
-      "path": "src/util/Fs.cpp",
-      "size": 1892,
-      "sha256": "91b2ec848f50d59df8f713ec3be8bd32c94af910492743538e54bbe488eddc57"
-    },
-    {
-      "path": "src/util/GmpUtils.cpp",
-      "size": 4611,
-      "sha256": "df38d1527e811fd7c1d936e3edd452af1d7146a517b2a1d320b0abb60fced9f6"
-    },
-    {
-      "path": "src/util/OpenCLError.cpp",
-      "size": 5863,
-      "sha256": "7a6ae8f8b19601f04b4d0a264b67791a2f178a1b50f2723065633902e0a3402e"
-    },
-    {
-      "path": "src/util/PathUtils.cpp",
-      "size": 1814,
-      "sha256": "0e9dfcddb4d00ee681cbc3eda4cf776f821cf62b2fff9ab18f7e452551f8b080"
-    },
-    {
-      "path": "src/util/StringUtils.cpp",
-      "size": 362,
-      "sha256": "4b41f70b3b6fb87f7cd4306a42be48df77544fab32100378d04b72e9b7414ee7"
-    },
-    {
-      "path": "src/util/Timer.cpp",
-      "size": 1282,
-      "sha256": "655e77a627a8e84c875e91489dc59bc77944c44a3aec9ca48c6bc08047eb0f7c"
-    },
-    {
-      "path": "tests/aevum_apple_fused_fftp_test.py",
-      "size": 3551,
-      "sha256": "78eaf51bd28faedd41427731d8a1385c06e15429bc69f140d3be29cb95fd1b34"
-    },
-    {
-      "path": "tests/aevum_apple_fused_tailsquare_test.py",
-      "size": 5147,
-      "sha256": "b5e73cceee38972cd9cd366c07cab876b9abacf875b60e61c812a94b4590faf5"
-    },
-    {
-      "path": "tests/aevum_fake_engine.cpp",
-      "size": 4381,
-      "sha256": "dfe9d46458b1f858dd728839da6c22561046e88c935c3646b0a67ee8f64f7ec1"
-    },
-    {
-      "path": "tests/aevum_pm1_small_factor_policy_test.py",
-      "size": 682,
-      "sha256": "b42fd236dfd3b5063753cd98c89d2ae4d63788385d54ba6dbe61829e6d77e284"
-    },
-    {
-      "path": "tests/aevum_vtrace_prepared_cache_test.py",
-      "size": 1748,
-      "sha256": "c56ce68856845edcb5ffba50b43e740da61bb55367d2ba11de6f456429d27a1e"
-    },
-    {
-      "path": "tests/apple_strict_smoke_source_test.py",
-      "size": 848,
-      "sha256": "f201f9d785241b0155c049ae3cc7245de0d5d84f5e4eecd52d26a1013ec6d6fd"
-    },
-    {
-      "path": "tests/macos_default_marin_policy_test.py",
-      "size": 766,
-      "sha256": "bb158080bcb14917bc7cde6913534ced65879a31d8976e275194bd6c51e5f064"
-    },
-    {
-      "path": "tests/native_pfa_cli_source_test.py",
-      "size": 996,
-      "sha256": "dc4e18cf018fbdf3caedeb6c2c795be48e80748f9180123d8d511132a1681b6b"
-    },
-    {
-      "path": "tests/run_aevum_apple_plane_isolation_v5.sh",
-      "size": 5778,
-      "sha256": "5a13998ce3a0f83506c0ee78ea0e70bb02e63572a9c5809b74e8baaedfc26980"
-    },
-    {
-      "path": "tests/run_aevum_apple_stage_trace_v4.sh",
-      "size": 6228,
-      "sha256": "b8c50c2afcde19d392913b7579c9f7eef030579e339ade1a23be3b292a3d6423"
-    },
-    {
-      "path": "tests/run_aevum_auto_gpu_matrix.sh",
-      "size": 2112,
-      "sha256": "248f015a1ab8738594f25d06fb4289b91d04b61ce33a59e777862fd92dcd1923"
-    },
-    {
-      "path": "tests/run_aevum_forced_pm1_small_factor_regression.sh",
-      "size": 1235,
-      "sha256": "4752caed29e5bc70dab8cdfb530351c626e94dd1f38c12e6cf40b76c4bf8a258"
-    },
-    {
-      "path": "tests/run_aevum_gpu_smoke.sh",
-      "size": 950,
-      "sha256": "acb3d76f1602c22c36a8edf5484c3503728480ff7300f732ad9a35642e2fe1f8"
-    },
-    {
-      "path": "tests/run_aevum_prepared_buffer_regression.sh",
-      "size": 674,
-      "sha256": "8c4d33ecc25cf132c5b5d37c66a72c0b08348ec2c384d98a2ad5749c06942b0f"
-    },
-    {
-      "path": "tests/run_backend_validation_matrix.sh",
-      "size": 25301,
-      "sha256": "11db2392521d29c9bed7fbe36c846cc730194c8e89e831301759dc8fc674022f"
-    },
-    {
-      "path": "tests/source_aevum_engine_audit.sh",
-      "size": 6343,
-      "sha256": "d38a63be920c7ae9115ce2fd9ae3b541e490beed86f28744a58592525d79383f"
-    },
-    {
-      "path": "tests/source_v9935_apple_port_audit.sh",
-      "size": 6737,
-      "sha256": "cf27a1bd5e87d5d310a5165d5d32c2f420f473c69c7d83aa6a708b77863f473a"
-    },
-    {
-      "path": "tests/source_v9936_apple_port_audit.sh",
-      "size": 6773,
-      "sha256": "6301b5ee16bddf789049770df2a429eee31b8c632331df94f3b02c1469dc2723"
-    },
-    {
-      "path": "tests/source_v9937_apple_port_audit.sh",
-      "size": 6882,
-      "sha256": "d91f7de90cf98afe93a3f142ad8045e5860c09b5b16e45fccb515664a238c641"
-    },
-    {
-      "path": "tests/source_v9938_apple_port_audit.sh",
-      "size": 7150,
-      "sha256": "60841fae8166c8a293660e7b62b38ef65ad5e1a6aabde2ebfb4c9c0caf339ba8"
-    },
-    {
-      "path": "tests/source_v9939_apple_port_audit.sh",
-      "size": 7640,
-      "sha256": "7ecf4cad60b7a31854132f3ce14f41e873f301c609be2036237078e07691bce4"
-    },
-    {
-      "path": "tests/source_v9940_apple_port_audit.sh",
-      "size": 7968,
-      "sha256": "010dfabeb926e8211f11b1ab01019aa09cefaccf3625046623935945e6d154c5"
-    },
-    {
-      "path": "tests/source_v9941_apple_port_audit.sh",
-      "size": 8270,
-      "sha256": "db6ee8f44adc094af91ab6409cac0599648e968db326a55a012a2f4917ec45af"
-    },
-    {
-      "path": "tests/source_v9942_apple_port_audit.sh",
-      "size": 994,
-      "sha256": "9a4ca94252c3ea968971160ca3b81b0b022031cdb9e843327a9576bec0a305c1"
-    },
-    {
-      "path": "tests/source_v9949_github_exact_audit.py",
-      "size": 4885,
-      "sha256": "973e4cbbee4d52f3c56781856a7e0892811d023e90d985855a8209a74e7cd276"
-    },
-    {
-      "path": "tests/source_v9950_apple_ffthin_gf61_audit.py",
-      "size": 1036,
-      "sha256": "77d760cdec1d52caf5d1457dc643675fb08b1b6feca053fd09e9764ad077bf17"
-    },
-    {
-      "path": "tests/test_aevum_auto_policy.cpp",
-      "size": 3410,
-      "sha256": "ebb63842981b4a61e8e8161c051d36de8f0ede0b5af72aa64f2566bad59b2030"
-    },
-    {
-      "path": "tests/test_aevum_auto_policy.sh",
-      "size": 647,
-      "sha256": "7683d318c9edd4c93c7a7f94873d4bc675a759cbf390e75d231a9e271cf81b2a"
-    },
-    {
-      "path": "tests/test_aevum_default_backend.cpp",
-      "size": 584,
-      "sha256": "e975b4236fc4db4ce6049d60aca3a873ecf94937e71e18df3bd28de3210c4511"
-    },
-    {
-      "path": "tests/test_aevum_default_backend.sh",
-      "size": 312,
-      "sha256": "a19de4ec4864a8c383b6445de547848c67f111bc884458524a76aa0da7b703bc"
-    },
-    {
-      "path": "tests/test_aevum_reg_adapter.cpp",
-      "size": 2730,
-      "sha256": "02474ff24cc7b06c1fe9101c3e4fbf7638d5f552e08107626cdda0eeb9a3d343"
-    },
-    {
-      "path": "tests/test_aevum_reg_adapter.sh",
-      "size": 1374,
-      "sha256": "2ac68efc25a3d7ea0443667b755c29c24dbba5463dee4897076b13ce02f68575"
-    },
-    {
-      "path": "tests/test_backend_compatibility_cli.sh",
-      "size": 1069,
-      "sha256": "a929241becaf636541ce8fd462b9c40655c9ecb2a66d64c30f2dc66ab351feb0"
-    },
-    {
-      "path": "tests/test_web_gui_backend_state.cpp",
-      "size": 1372,
-      "sha256": "6a29f03c11db0ccaf51e389ae43713c5f3b4d35cab1871bb9a086575b529e9f6"
-    },
-    {
-      "path": "tests/test_web_gui_backend_state.sh",
-      "size": 353,
-      "sha256": "c9001779d22de1d7b119bccedcab3494e1fe207e463ba69dd4dd42d1650427b8"
-    },
-    {
-      "path": "third_party/aevum/.github/dependabot.yml",
-      "size": 119,
-      "sha256": "8912c495e7a2514170ad43170ceda3e1c0a48402c92bd096215c4b6ec6a31a03"
-    },
-    {
-      "path": "third_party/aevum/.github/workflows/ci.yml",
-      "size": 4257,
-      "sha256": "3a586bd034739d9c3012036cd55ad1f7b29df5ca25e392a9a5603b5e5c58ad35"
-    },
-    {
-      "path": "third_party/aevum/.gitignore",
-      "size": 186,
-      "sha256": "7fdfad7a5a36b3425881f2063a229bd1141f7bc06236319b81858fd1badff9b2"
-    },
-    {
-      "path": "third_party/aevum/CMakeLists.txt",
-      "size": 335,
-      "sha256": "b66367c8e1332192f2c870c9c302758c454b5ce5dd957cc83bc5894a29960edb"
-    },
-    {
-      "path": "third_party/aevum/FFT.md",
-      "size": 1461,
-      "sha256": "f5437b0ba159ccafc67f105ab2f5c3e249cfe7ff6379f36278c370e17f80505d"
-    },
-    {
-      "path": "third_party/aevum/LICENSE",
-      "size": 35141,
-      "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2"
-    },
-    {
-      "path": "third_party/aevum/Makefile",
-      "size": 9109,
-      "sha256": "8a0bc3f190bf2300376d75e0e2516cb3f13fbe1b884f4c896e2b0d6cdbe74b23"
-    },
-    {
-      "path": "third_party/aevum/NOTICE",
-      "size": 697,
-      "sha256": "4cb525de4f88b3e6f8b76eb5b78516e934649a821ebc7294942cc87a29d86017"
-    },
-    {
-      "path": "third_party/aevum/README.md",
-      "size": 8027,
-      "sha256": "dc1063a0b58811617ac5e7cbb5ff98fc458f62dce0970e471542242cad7e4009"
-    },
-    {
-      "path": "third_party/aevum/README_GPUOWL.md",
-      "size": 3153,
-      "sha256": "f86a9669b936f85490d52bcfef7b84b01d2f2d365b2bc745bcf4deff8d352457"
-    },
-    {
-      "path": "third_party/aevum/README_GPUOWL_LEGACY.txt",
-      "size": 991,
-      "sha256": "300c23835ac04ee854a0d28a64a20b4090190781c867bada5118527f0ed6a39b"
-    },
-    {
-      "path": "third_party/aevum/README_NATIVE_PFA.md",
-      "size": 465,
-      "sha256": "c2e5c427745a103fee5901447dd12e4983559b88fc8d0cdea799e0c2cc12ede5"
-    },
-    {
-      "path": "third_party/aevum/SP/Gpu.cpp",
-      "size": 8490,
-      "sha256": "62d953c632468faa7d9878acdaeca25c6e89a91ccdb5518b4f0d1c924417c303"
-    },
-    {
-      "path": "third_party/aevum/SP/Gpu.h",
-      "size": 626,
-      "sha256": "fd69d527b8cb7d937ad30a2ddd82e01dd64df43d37b031d83999066c961c6374"
-    },
-    {
-      "path": "third_party/aevum/SP/SConstruct",
-      "size": 912,
-      "sha256": "1dd2641ce9b9242ad7410d8bae2996ef4be5c14f89a7b6adc22a2416ab835add"
-    },
-    {
-      "path": "third_party/aevum/SP/head.txt",
-      "size": 13,
-      "sha256": "f3972466b9f1e5fac61c1e04a52f556b1e10b9b2cb28f1a4a5808a7c864dbb33"
-    },
-    {
-      "path": "third_party/aevum/SP/main.cpp",
-      "size": 159,
-      "sha256": "34039a89f3dcb20c4e522025c2ab97e388781f1a2716a2f0cef4e4cbfcb74a39"
-    },
-    {
-      "path": "third_party/aevum/SP/sp.cl",
-      "size": 15925,
-      "sha256": "e65a5dd2074c627d3cc0a313e15762866818353e52f412610b04c065a51cdee4"
-    },
-    {
-      "path": "third_party/aevum/SP/tail.txt",
-      "size": 12,
-      "sha256": "ad1f9bdd09044b733c5e43172e38fa3322667f2602bc7d373f5d5fd75bfd3f56"
-    },
-    {
-      "path": "third_party/aevum/UPSTREAM.md",
-      "size": 653,
-      "sha256": "6d51ac733d4dfcc9668741f0e8d18d2a4b3b53d605c926b1727f93d3ebc1c1b1"
-    },
-    {
-      "path": "third_party/aevum/build_and_test_native_pfa_ubuntu.sh",
-      "size": 319,
-      "sha256": "304f93537b5e163fb533d32c259592c78d3503c56f8d10cedbf272acf1033932"
-    },
-    {
-      "path": "third_party/aevum/codestyle.md",
-      "size": 458,
-      "sha256": "9efa8957d14a1268f21d1d77fdbb51d764f8f7415438a736053abcda80f73670"
-    },
-    {
-      "path": "third_party/aevum/examples/example_common.h",
-      "size": 1022,
-      "sha256": "82e4cd5c2668ccb878a2189036e9d3836908c6f9e874b8cbec385d92bd4f5363"
-    },
-    {
-      "path": "third_party/aevum/examples/fft_plans.cpp",
-      "size": 619,
-      "sha256": "b91ec333a127c9c9828df3d5fda4a23c7b51b6d60828116c39ac0b77861f87cf"
-    },
-    {
-      "path": "third_party/aevum/examples/power_chain.cpp",
-      "size": 1829,
-      "sha256": "3c34884e6d9e2475b9ef5c33b149bdb716413309d213049ab2668aca4850a5b6"
-    },
-    {
-      "path": "third_party/aevum/examples/register_ops.cpp",
-      "size": 2155,
-      "sha256": "75c190cd33fff5bd67966c7801ec6eb5778197cd0bc088d9e135345aef037e06"
-    },
-    {
-      "path": "third_party/aevum/genbundle.sh",
-      "size": 882,
-      "sha256": "da7fd9f0b35121fb67c862521510521550a8eb3de3d68254e7c8c91e3d023912"
-    },
-    {
-      "path": "third_party/aevum/m.sh",
-      "size": 134,
-      "sha256": "8a30a6e759d3987a24354fc379e4b21de038072174a91e6bcda2258cbe070667"
-    },
-    {
-      "path": "third_party/aevum/pm1/Makefile",
-      "size": 56,
-      "sha256": "f44f4e9fd2d34ca58192d3af2a354c5e7b012478deaf817b2b856d7e012e4668"
-    },
-    {
-      "path": "third_party/aevum/pm1/Primes.cpp",
-      "size": 3464,
-      "sha256": "da3aef64f775925dd00db8cad91060fa1cc55bff0f4f37488f33c99011c544e2"
-    },
-    {
-      "path": "third_party/aevum/pm1/Primes.h",
-      "size": 799,
-      "sha256": "1ca5bb0c109f204c67c975232981f5cfbe18556962c700b996c74b64f27edd6d"
-    },
-    {
-      "path": "third_party/aevum/pm1/merge.py",
-      "size": 347,
-      "sha256": "b03f1b0d2d9d4a8c76a0708ffe3e4d992d775b40cc1d4db43de698f5f16167e2"
-    },
-    {
-      "path": "third_party/aevum/pm1/pm1.cpp",
-      "size": 32175,
-      "sha256": "6441ed2c27c39b573604f064d587a474d8e3fd2afe40f77c58b8936a2bc91266"
-    },
-    {
-      "path": "third_party/aevum/scripts/build_native_pfa.sh",
-      "size": 873,
-      "sha256": "4111bedaf62b59b59adb407f411b203749725de349d921c9a06cf71398470a2c"
-    },
-    {
-      "path": "third_party/aevum/scripts/build_native_pfa_ubuntu.sh",
-      "size": 101,
-      "sha256": "39813ef46c8193118ca2ba1a15c1eb403add191753006aa7ea046886e3d8ffac"
-    },
-    {
-      "path": "third_party/aevum/scripts/check_macos_minos.sh",
-      "size": 1018,
-      "sha256": "3a26e903b45f26a17065c941a16065bcb2d39f113673ee9230de3e945c52fbbc"
-    },
-    {
-      "path": "third_party/aevum/scripts/install_ubuntu_dependencies.sh",
-      "size": 165,
-      "sha256": "5abfd6cf274a67484f25f1f21c65eaeb4dee19653c4ba6c01d1827f470cd5e59"
-    },
-    {
-      "path": "third_party/aevum/scripts/test_native_pfa_gpu.sh",
-      "size": 671,
-      "sha256": "d17909b52a908d477558cf663edfbfb95028a6478aec008be5cb0351dec2a451"
-    },
-    {
-      "path": "third_party/aevum/src/AllocTrac.cpp",
-      "size": 191,
-      "sha256": "6b96ef7592b53cd4b1f916ba31f4ff4c482676873ddfeac4370f9e0c63b1f6f2"
-    },
-    {
-      "path": "third_party/aevum/src/AllocTrac.h",
-      "size": 1360,
-      "sha256": "35b0184aa56f57ec738a6daf8b44336571866630203e9defcf686153ce82bdbd"
-    },
-    {
-      "path": "third_party/aevum/src/Args.cpp",
-      "size": 17739,
-      "sha256": "295bc5bcac87da3612e360598c080bb7379252af4e5d85501981b50435b29a71"
-    },
-    {
-      "path": "third_party/aevum/src/Args.h",
-      "size": 2031,
-      "sha256": "a7d1b126f0844a82219e0e172ea5762ea80f4836d831b37cab2a541a4b58f808"
-    },
-    {
-      "path": "third_party/aevum/src/Background.h",
-      "size": 1815,
-      "sha256": "508c58e80c9e71071ae3861a23fe056da17458b60a0729aa64c273b070090e73"
-    },
-    {
-      "path": "third_party/aevum/src/Blake2.h",
-      "size": 3355,
-      "sha256": "d022f82c3d42577581bbb194c868bd7e51d4d5eb23cd11defd3289e12d135342"
-    },
-    {
-      "path": "third_party/aevum/src/Buffer.h",
-      "size": 2584,
-      "sha256": "f176154d199eca303ae8f94317785080eaca470df565db776e8670fb99e4ec77"
-    },
-    {
-      "path": "third_party/aevum/src/CMakeLists.txt",
-      "size": 1291,
-      "sha256": "15cbf95c0e8bea53145f0fce826a7268916e160b3304942fb29bc74f80885f05"
-    },
-    {
-      "path": "third_party/aevum/src/Context.h",
-      "size": 304,
-      "sha256": "3ede0f4e384f72148e171c241921ef1b88d2c78772ae79560095b6a3ae0e55a5"
-    },
-    {
-      "path": "third_party/aevum/src/CycleFile.cpp",
-      "size": 422,
-      "sha256": "d6926cab4741b506171c5a3ed42275999c1fc3cfe0316760e3c7f98614378728"
-    },
-    {
-      "path": "third_party/aevum/src/CycleFile.h",
-      "size": 408,
-      "sha256": "5dfa83af8f809ed5ab03dd453062023fdeb4845e0a717c67d225f56afb71aaed"
-    },
-    {
-      "path": "third_party/aevum/src/EngineApi.cpp",
-      "size": 16938,
-      "sha256": "98af23b74cff14a686efbb56d0dc1f0e1068c8fbf59e63a99837bb26fe067dfd"
-    },
-    {
-      "path": "third_party/aevum/src/EngineApi.h",
-      "size": 2850,
-      "sha256": "a5ed0024d6d25666c93b739cfde4cc79d0d172af5e194b386ee9b36aea4d771e"
-    },
-    {
-      "path": "third_party/aevum/src/Event.cpp",
-      "size": 711,
-      "sha256": "789423b17e735d775a3980229c1bff03a0e5d3b85f3cf524b1ea8a4750113ba7"
-    },
-    {
-      "path": "third_party/aevum/src/Event.h",
-      "size": 405,
-      "sha256": "366847121384527af4e863e4f1dc1e5f42c38d73fabe57c56da30ad6d1a4cc93"
-    },
-    {
-      "path": "third_party/aevum/src/FFTConfig.cpp",
-      "size": 18213,
-      "sha256": "b45092e56338cb83b0d2ad7b82adb4bc18a4b673c2b25fe54aec1ec3cc5ac8e0"
-    },
-    {
-      "path": "third_party/aevum/src/FFTConfig.h",
-      "size": 3497,
-      "sha256": "d3c663a8e01dc7c96e9576a854680f1207d967203c682bee2dc42963cde015b8"
-    },
-    {
-      "path": "third_party/aevum/src/File.cpp",
-      "size": 1042,
-      "sha256": "53dc1f1bce9ddf1c285cf4bfaa0f606d049036908b7afe1267ced970e33e2e7c"
-    },
-    {
-      "path": "third_party/aevum/src/File.h",
-      "size": 6721,
-      "sha256": "4151b01b0c488000e8178fc16fce9ccb8304dc29e7407452e652ff6d4a2da81f"
-    },
-    {
-      "path": "third_party/aevum/src/Gpu.cpp",
-      "size": 158813,
-      "sha256": "fe38c311cac90d117f9677d3bd56053be4822c265506451d376d87f89d96c308"
-    },
-    {
-      "path": "third_party/aevum/src/Gpu.h",
-      "size": 17483,
-      "sha256": "ae0ee78105188cc4918636b5c2d88b325a6c16fab02d4733fe62a7ef81b53409"
-    },
-    {
-      "path": "third_party/aevum/src/GpuCommon.h",
-      "size": 278,
-      "sha256": "a8a5da7977a2752e143ef93b718ff9ee2aaf25d556c8c8285fcfb7ec7c9cd8ea"
-    },
-    {
-      "path": "third_party/aevum/src/Hash.h",
-      "size": 835,
-      "sha256": "b4ea530667e85a74de7697cba61351c69e8976efe5c9e85336ee275a86c25cd4"
-    },
-    {
-      "path": "third_party/aevum/src/Kernel.cpp",
-      "size": 1090,
-      "sha256": "f2d186ad5e17fe546d7e766e51a87468375f6c7285dc867877793b56fd5902b9"
-    },
-    {
-      "path": "third_party/aevum/src/Kernel.h",
-      "size": 2110,
-      "sha256": "9e596179b9f72fa8698d3b344f288ec9415ea5397fa627dd3c11569255f06fec"
-    },
-    {
-      "path": "third_party/aevum/src/KernelCompiler.cpp",
-      "size": 8662,
-      "sha256": "d5c421d67af72216fd924121ba2af0d801a6d4f67151ca320f52628ea731ddfe"
-    },
-    {
-      "path": "third_party/aevum/src/KernelCompiler.h",
-      "size": 858,
-      "sha256": "d323b7191b256066eb71c363699fd63be7b92183cc170ad9afa4d9582cba6f05"
-    },
-    {
-      "path": "third_party/aevum/src/MD5.h",
-      "size": 801,
-      "sha256": "05d0b3d91c7ce99c3268fcb6e41efd3d325e3c7de5e16a3eef41e55ebf8b986c"
-    },
-    {
-      "path": "third_party/aevum/src/OpenCLSourceBuilder.cpp",
-      "size": 3502,
-      "sha256": "eae075157ef00da56147234e7cfff39dc9e254742b390a1b86dbf397fc0a97e3"
-    },
-    {
-      "path": "third_party/aevum/src/OpenCLSourceBuilder.h",
-      "size": 436,
-      "sha256": "3ea473b3772eaae8aa0b8a9638077167e591972874fb36e8aad8ac61aed72240"
-    },
-    {
-      "path": "third_party/aevum/src/OpenCLStandard.h",
-      "size": 729,
-      "sha256": "b99677a9461d74688e2316dabf47d0182a053ebf80666eaa151f5cebeef4241e"
-    },
-    {
-      "path": "third_party/aevum/src/PRPState.cpp",
-      "size": 973,
-      "sha256": "e639efe1ebe4b894ece81e83649ae65d8ba5c3f5d92ccb2175f0c45fe9ce672a"
-    },
-    {
-      "path": "third_party/aevum/src/PRPState.h",
-      "size": 815,
-      "sha256": "d5cad43bd2c78cd0eb2dcc2e2181beffbb464db88c4a3f5e344081f9ce28ec2a"
-    },
-    {
-      "path": "third_party/aevum/src/Primes.cpp",
-      "size": 1201,
-      "sha256": "4aaa335786a03d3445c29c7fc569ef15cc1fe85cd1900c96b57b7f360d95c201"
-    },
-    {
-      "path": "third_party/aevum/src/Primes.h",
-      "size": 360,
-      "sha256": "73adca225f0b44cebfce890215c3c5751a26fe34fcd72a59d93fc16c54bd598d"
-    },
-    {
-      "path": "third_party/aevum/src/Profile.cpp",
-      "size": 548,
-      "sha256": "2b3f6ad92c9b666a8f1a6776c5a82cd3d4ce1635f59f0ff6aa6bf5627ad27898"
-    },
-    {
-      "path": "third_party/aevum/src/Profile.h",
-      "size": 322,
-      "sha256": "9d4dddefd9536dcdac716411ca1b7209b0445b97c00c2f9835cea14243fb0c62"
-    },
-    {
-      "path": "third_party/aevum/src/Proof.cpp",
-      "size": 8326,
-      "sha256": "3ef8af8b034aa205311a5f944306ebc67266d66395c799ace20556ec63f7c870"
-    },
-    {
-      "path": "third_party/aevum/src/Proof.h",
-      "size": 1947,
-      "sha256": "d8bad2548e68c77233f4818dae577857d8ed00af8578efe92e6d9816ff3cd33c"
-    },
-    {
-      "path": "third_party/aevum/src/Queue.cpp",
-      "size": 5483,
-      "sha256": "e62deed4baa206169b959b6bf6dc6e20c3762c0fc1e0f30ce38f2b1d7a855091"
-    },
-    {
-      "path": "third_party/aevum/src/Queue.h",
-      "size": 3022,
-      "sha256": "31d50f97bf14d4153a40d357be3d491a7c5158a563f67ee9d1177a89b2e14049"
-    },
-    {
-      "path": "third_party/aevum/src/Saver.cpp",
-      "size": 8706,
-      "sha256": "04c982d2063d37d9c742a9301f3dc8aefe16a940712b9ae94b3d78edbee58fdb"
-    },
-    {
-      "path": "third_party/aevum/src/Saver.h",
-      "size": 997,
-      "sha256": "caa56729e43d00e090e764e95622d26799a6057cbf35830b8329742dcdf00609"
-    },
-    {
-      "path": "third_party/aevum/src/Sha3Hash.h",
-      "size": 556,
-      "sha256": "7bdc299c02aceda1c2b9766e6fe4b4cd444ac0ecc35566c5641047a47efc0853"
-    },
-    {
-      "path": "third_party/aevum/src/Signal.cpp",
-      "size": 575,
-      "sha256": "bcf86e2edfe419a6d5b8075442e6fc4c7e210e8327ae283e4c08ffe66f19aa4b"
-    },
-    {
-      "path": "third_party/aevum/src/Signal.h",
-      "size": 171,
-      "sha256": "1cbbfc271632cc5aeb614df356a7f2c80e0bd32685982b6696c05278ed10c6f7"
-    },
-    {
-      "path": "third_party/aevum/src/Task.cpp",
-      "size": 9044,
-      "sha256": "fbfc8497c453313bea57aed714c5f04e92619440828c14139d186b38ca95555c"
-    },
-    {
-      "path": "third_party/aevum/src/Task.h",
-      "size": 884,
-      "sha256": "e26b0e1ac60fe1cec785e2d771125b84c360611e0648dcb98894bea5ae5ffc13"
-    },
-    {
-      "path": "third_party/aevum/src/TimeInfo.cpp",
-      "size": 136,
-      "sha256": "6336f8536fd3755d834e38acc13dacedb49e63d7f15b6a8bfb00e9977c277291"
-    },
-    {
-      "path": "third_party/aevum/src/TimeInfo.h",
-      "size": 639,
-      "sha256": "7ce41e41d8049e1c92a3ae96f86294d2fc5d96288cf3c7aabae3ef946183fb70"
-    },
-    {
-      "path": "third_party/aevum/src/Trig.cpp",
-      "size": 4173,
-      "sha256": "0a448e81d5429d9608f6c52e23965bf6d3a8f06067762f0bd5904cdbf14814dd"
-    },
-    {
-      "path": "third_party/aevum/src/Trig.h",
-      "size": 210,
-      "sha256": "525c47ca1124ebea08ced9990a8b3923fe84d65192c9518a0727d007e13f544a"
-    },
-    {
-      "path": "third_party/aevum/src/TrigBufCache.cpp",
-      "size": 40457,
-      "sha256": "0a1e55c96dc2a72d241c364c3cf4ee2d5ee3d9bf5a5acb04613ebcb70d9d0eda"
-    },
-    {
-      "path": "third_party/aevum/src/TrigBufCache.h",
-      "size": 5074,
-      "sha256": "f8563cec931f2433a9e7083d3a0bc7b2e8c8524d7896d5ef362bc305c46a85cb"
-    },
-    {
-      "path": "third_party/aevum/src/TuneEntry.cpp",
-      "size": 2443,
-      "sha256": "ef339596340d4b7739bac8b13fc6a86beb9d49f11c00238d7034cee5f99a1f5b"
-    },
-    {
-      "path": "third_party/aevum/src/TuneEntry.h",
-      "size": 374,
-      "sha256": "9a25dd84b76b77ac7a6b810f7d5b3eacdad9bde757f23ea6ae82b2a13d3d19f1"
-    },
-    {
-      "path": "third_party/aevum/src/U128.cpp",
-      "size": 6497,
-      "sha256": "a310ae7aca690466b4357c8aa29aecbe1d08997f20dc8880efa72d187203a183"
-    },
-    {
-      "path": "third_party/aevum/src/U128.h",
-      "size": 12330,
-      "sha256": "2b92ac59d573104ae507a837332172cb39ddcd6959eb4c5efba0cb02fdcccf0e"
-    },
-    {
-      "path": "third_party/aevum/src/Worktodo.cpp",
-      "size": 6465,
-      "sha256": "f88129b1563ad7d6398db5cf4362bac1ebfd824d2f02350e8204d7b85ceac608"
-    },
-    {
-      "path": "third_party/aevum/src/Worktodo.h",
-      "size": 261,
-      "sha256": "d3f62e7240c473c8d83769544bfafe1e154223d2b06606960e85aa4175b677c4"
-    },
-    {
-      "path": "third_party/aevum/src/bundle.cpp",
-      "size": 1057579,
-      "sha256": "d5c7b3e673a83e8e4316973ed374fc85c7c5bb92201008a40fcce1b687869edf"
-    },
-    {
-      "path": "third_party/aevum/src/cl/base.cl",
-      "size": 25633,
-      "sha256": "357d154d9d269e98b9649576d04c77e56b8c334f1eb5c26820a0cd730d93069c"
-    },
-    {
-      "path": "third_party/aevum/src/cl/carry.cl",
-      "size": 30739,
-      "sha256": "1df3b2505409d48f3bce1f535b1bbdc685f1034c5aae76e92c11f44003275dbc"
-    },
-    {
-      "path": "third_party/aevum/src/cl/carryb.cl",
-      "size": 1325,
-      "sha256": "d13128102edc4fa366e7ce2390a82a02aa6ec150692887d6117fceedd3ab1b59"
-    },
-    {
-      "path": "third_party/aevum/src/cl/carryfused.cl",
-      "size": 99476,
-      "sha256": "425b66885cbffdef494e3f59f4ef2902ab853e74d9bae07e9bba1d765c8442c6"
-    },
-    {
-      "path": "third_party/aevum/src/cl/carryinc.cl",
-      "size": 16937,
-      "sha256": "184ab765f96157d4e0c871aad95b731d0c23a1b7a7e2014397c6837fdbce3768"
-    },
-    {
-      "path": "third_party/aevum/src/cl/carryutil.cl",
-      "size": 32295,
-      "sha256": "52e5c7b6b409f8d7987834d2148d513da317d7b4c5a9d429a976dcbe78a80ea4"
-    },
-    {
-      "path": "third_party/aevum/src/cl/etc.cl",
-      "size": 1866,
-      "sha256": "0ba0ab9fbaf9c666dce1be1cd8be92ead3b76ef09f53c2da6dcd40103f2c2a2d"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft-middle.cl",
-      "size": 31633,
-      "sha256": "41f5e793ee7a712c54f7aa4fa271b621983012952ede9f66dde3f32f11ae4f87"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft10.cl",
-      "size": 415,
-      "sha256": "ac0852b993b29da4d5709e8e3bd16d21aa3366c975d5cf7db17ad5c7311e9071"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft11.cl",
-      "size": 5701,
-      "sha256": "9a072eb4b1d91fc07f97c98e414a1fee51c11674b60240d735f8110c8ac39265"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft12.cl",
-      "size": 2088,
-      "sha256": "619fc468e54ad7e2899deecd31d1b805f03137d8aedb5e026107aab13e6a5767"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft13.cl",
-      "size": 9288,
-      "sha256": "6d40e8bff4abb0de1e17d8f2e94357b5631b803653ef22bf7245884b35520b80"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft14.cl",
-      "size": 3362,
-      "sha256": "209973902eedb0532a746a788045d833c816c44befdf82dfd2dc62f7e7c1201c"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft15.cl",
-      "size": 1822,
-      "sha256": "0968611a3bdfaa92cbfe39ef67d3ddd52115f1d3f5d7cb7cce5daa8a497f5666"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft16.cl",
-      "size": 6422,
-      "sha256": "87f521f9e79e058657ffcc8650c4f2bf56215e07fe0efcae9f492f2ee6a4facf"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft3.cl",
-      "size": 577,
-      "sha256": "8685f05cb0d616a0f5626aece202ce003a688157dec629b6e0cffb40b106db92"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft4.cl",
-      "size": 4647,
-      "sha256": "f86e6844749508b4de8cf404747bbaa027d8a5fcb87e48173bb22563ccf64570"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft5.cl",
-      "size": 1176,
-      "sha256": "95a3b06911da33e02af669ef5b3637d3d7e4ca9f377415357b6957409e80a3f7"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft6.cl",
-      "size": 941,
-      "sha256": "47391637a3df86f2e1f2e8aa888fd4ed327c276344958bcb5bf4b68d97cc7051"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft7.cl",
-      "size": 3014,
-      "sha256": "5890d491c27db5ce149f6325d5df2ae95ff1774a93d78e4db3521cff353723fd"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft8.cl",
-      "size": 6397,
-      "sha256": "86fdd0bea6f6b7d512e4a6fae4d8144d62220b0e6d86eecc58d86e3bb693cf6e"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fft9.cl",
-      "size": 1508,
-      "sha256": "7bbadfbc0af64201bce06821955ecf16c34f1490446250b0fb632bc4142c5fcd"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftbase.cl",
-      "size": 80331,
-      "sha256": "03487f49ceffd69fdc1c3eddde9c49b055009b2330f117bd79e7c00305eb1fa8"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftheight.cl",
-      "size": 3948,
-      "sha256": "493dfb9920c51ba63bd3684c6544ada12f7dd7423d003f184e7e261cacdf0a0d"
-    },
-    {
-      "path": "third_party/aevum/src/cl/ffthin.cl",
-      "size": 7596,
-      "sha256": "0f1cf99aac7131f65ff6a4d60b661ed7d447e546b4cd1ece3a6addb161a071d4"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftmiddlein.cl",
-      "size": 20105,
-      "sha256": "3da9c2102c50d1fb89ae157bb40ca4d6a87d46c8fa0125f78a200b13d06afe8a"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftmiddleout.cl",
-      "size": 19362,
-      "sha256": "5129db6316378c5382df6e983e917f82b5528243066079639a5939cd56a0ec31"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftp.cl",
-      "size": 47590,
-      "sha256": "92bf9a702894a8d3011859e57068c1adfb8888fe1284f46d055c7a51d8132b11"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftw.cl",
-      "size": 12858,
-      "sha256": "6c6e7895ae2586520eccab7f7aac71bbd4c29923589949a420e6bda74cb0c845"
-    },
-    {
-      "path": "third_party/aevum/src/cl/fftwidth.cl",
-      "size": 3853,
-      "sha256": "90b95bb14db5abacda8492b3e521705c864f4847aab9cc4c428978f93c78c6b1"
-    },
-    {
-      "path": "third_party/aevum/src/cl/math.cl",
-      "size": 58705,
-      "sha256": "49aa58ec3c1b3b503ebc4f2cef0ace65e25a6c51f7bb14f5c339ea4430bd62be"
-    },
-    {
-      "path": "third_party/aevum/src/cl/middle.cl",
-      "size": 62643,
-      "sha256": "07d93d2d6f9204eb9fe4003a01fcf02642142ae56b576a5e8c5a69346f60511b"
-    },
-    {
-      "path": "third_party/aevum/src/cl/pfaunpack.cl",
-      "size": 1950,
-      "sha256": "127929aa914e55411c5743c0294dc3eca3516cc8e8486ee61d0b41573b562c4f"
-    },
-    {
-      "path": "third_party/aevum/src/cl/selftest.cl",
-      "size": 6463,
-      "sha256": "0460dc2e0dfe75fd2b5c15b5e2ec19c88236360f50d9fa9f73e2e2cb1f61b7d8"
-    },
-    {
-      "path": "third_party/aevum/src/cl/tailmul.cl",
-      "size": 26201,
-      "sha256": "c5018e8719f0af4ef92de2e18cd8766afa7c1bcc1053dfcaa76b578a9699f262"
-    },
-    {
-      "path": "third_party/aevum/src/cl/tailsquare.cl",
-      "size": 66147,
-      "sha256": "3a8875ed7389077c1d2a002a4d127adeb216b82ab2f5becd8e1aa37ff7d4e9e1"
-    },
-    {
-      "path": "third_party/aevum/src/cl/tailutil.cl",
-      "size": 20495,
-      "sha256": "6b6fedeb687dad97ea2c7c4268897b4824d8e692916b2a41d60eca9b932e2909"
-    },
-    {
-      "path": "third_party/aevum/src/cl/transpose.cl",
-      "size": 2928,
-      "sha256": "75043582b911b26716dc29cd0b4b476bbcfc5016927a7f21d05976c3a7fb7f78"
-    },
-    {
-      "path": "third_party/aevum/src/cl/trig.cl",
-      "size": 3113,
-      "sha256": "f672ded0532183b7187eceb19626b2aa670e2f12bb069f9e0eab2e403f793cf8"
-    },
-    {
-      "path": "third_party/aevum/src/cl/weight.cl",
-      "size": 5664,
-      "sha256": "98ac004f63bbc59e5233583c06edbedb6b538dcd86a7cb74a48558af56cf30ef"
-    },
-    {
-      "path": "third_party/aevum/src/clwrap.cpp",
-      "size": 15363,
-      "sha256": "ac04511d0bda9bf5249dc9298500bf7dffdb5767bb813a3c138ffef255b66b3d"
-    },
-    {
-      "path": "third_party/aevum/src/clwrap.h",
-      "size": 4777,
-      "sha256": "6677accf2170bba9129d485cc928b51643293ad6c8cd415d9396e52e393d48a7"
-    },
-    {
-      "path": "third_party/aevum/src/common.cpp",
-      "size": 1385,
-      "sha256": "07ee6e19f2d39e2abec74b8af87f7a5353bd918020f28c40e8d2602977120223"
-    },
-    {
-      "path": "third_party/aevum/src/common.h",
-      "size": 2159,
-      "sha256": "038894fd115a3abaf111a8426e85f0c0b27d427010fe6ee1f877425086aa3b12"
-    },
-    {
-      "path": "third_party/aevum/src/cuda/clwrap_cuda.cpp",
-      "size": 41376,
-      "sha256": "448249b859370044ccebb5a31f049dc04d64c7d0ffd34f75ded0a4ffc84cf35e"
-    },
-    {
-      "path": "third_party/aevum/src/cuda/cudawrap.cpp",
-      "size": 18598,
-      "sha256": "65b557a39f197c16307f449927964681f0e87701bbadf01f886d14332663a2f2"
-    },
-    {
-      "path": "third_party/aevum/src/cuda/cudawrap.h",
-      "size": 4181,
-      "sha256": "2c6cb5c12f259e5b919c34b03554c81f688ec0cf9c411731a84139bc75e9e709"
-    },
-    {
-      "path": "third_party/aevum/src/cuda/opencl_compat.cuh",
-      "size": 16123,
-      "sha256": "65d9fd675ed53b74b84c3b384ee7321fcb458a890412dde801b7ed68cb8373fc"
-    },
-    {
-      "path": "third_party/aevum/src/cuda/tinycuda.h",
-      "size": 12347,
-      "sha256": "67650a710dfd9a735dc7881c45e9bca231229486a41dae6b4502cda009d9cb19"
-    },
-    {
-      "path": "third_party/aevum/src/fftbpw.h",
-      "size": 15032,
-      "sha256": "30327f1efdc19842aaeafb90ac221c6ee8c54e273a976e2358c0a23c0f688b07"
-    },
-    {
-      "path": "third_party/aevum/src/fs.cpp",
-      "size": 1881,
-      "sha256": "c74689ac5f7a7a73790867dcb90964008bb5ed218c540af702d9b9e1d3f18199"
-    },
-    {
-      "path": "third_party/aevum/src/fs.h",
-      "size": 351,
-      "sha256": "48655bcc3833fc6f8ee317c322cb4150dee24ea3a943251d5814b913d8747f20"
-    },
-    {
-      "path": "third_party/aevum/src/gpuid.cpp",
-      "size": 2778,
-      "sha256": "bcdd2babcf60e3bd0cba79bc7e1aa713615df3ae82fc0f13fced84b994195f6d"
-    },
-    {
-      "path": "third_party/aevum/src/gpuid.h",
-      "size": 1917,
-      "sha256": "1fb80266823a998bf547f9494650ad246887722c984f73dbcf2036134731b48f"
-    },
-    {
-      "path": "third_party/aevum/src/log.cpp",
-      "size": 1292,
-      "sha256": "0ce368e742c5c974f8c0a35c3dfe876af5da8f74355ed0cc92c57f2b5b59f350"
-    },
-    {
-      "path": "third_party/aevum/src/log.h",
-      "size": 410,
-      "sha256": "9976185319b06441f6e2a68dc7cf8d7a6b817e3d05c5568eea4b6926edede46b"
-    },
-    {
-      "path": "third_party/aevum/src/main.cpp",
-      "size": 3975,
-      "sha256": "b5749656c8f0f83bd12a32c2ca89e26992e374640326225fbadd9c5d125b925a"
-    },
-    {
-      "path": "third_party/aevum/src/md5.cpp",
-      "size": 7911,
-      "sha256": "edf698e813b9f429a8091fb352c8ce205acab7fd4ced22f3900bd770c4cd19bf"
-    },
-    {
-      "path": "third_party/aevum/src/qdcheb.cpp",
-      "size": 14426,
-      "sha256": "c1f539c6def5e9756949064efb00f8b32f7fa6c665bbf7ee45ea870b47e42deb"
-    },
-    {
-      "path": "third_party/aevum/src/sha3.cpp",
-      "size": 12060,
-      "sha256": "af9b0e30333a9c3a010f9eb3a07606354dc82d25b24a9809b08e9dcae49a8bc8"
-    },
-    {
-      "path": "third_party/aevum/src/sha3.h",
-      "size": 1707,
-      "sha256": "89b7c504f035ad456a2828f4380b08fa0c63f769cf9a9c3d61d26f7f301ad8c9"
-    },
-    {
-      "path": "third_party/aevum/src/shared.h",
-      "size": 203,
-      "sha256": "8418fc31b672c86e81c5a264b44522d9a2085f37ff0f6be8947383277dad71b8"
-    },
-    {
-      "path": "third_party/aevum/src/sine_compare.cpp",
-      "size": 31762,
-      "sha256": "6dfa5da8bcde33bb3a7ee8bff53702453c519bc8488fc70c55f16528b50c1f42"
-    },
-    {
-      "path": "third_party/aevum/src/state.cpp",
-      "size": 3963,
-      "sha256": "3be78cbf7e4e5382804b2ded00219d9d4ddafb84fba754351a4b8c1e2addf08f"
-    },
-    {
-      "path": "third_party/aevum/src/state.h",
-      "size": 577,
-      "sha256": "40617bedde6c4141233c03fc808c20f4c6fc5b02e30aa4eeadeaff19f833955c"
-    },
-    {
-      "path": "third_party/aevum/src/timeutil.cpp",
-      "size": 441,
-      "sha256": "867e10aca387cbac638d733009ce6595ec4ed19dc6cc9d53e0c7be0503d08c62"
-    },
-    {
-      "path": "third_party/aevum/src/timeutil.h",
-      "size": 672,
-      "sha256": "4cde71ddf3ddbad7a707ce0611a4dfff2829723b2089d9b97136a65cec3c5cd6"
-    },
-    {
-      "path": "third_party/aevum/src/tinycl.h",
-      "size": 15414,
-      "sha256": "745f2ddf032ed9f20fa6a7668dd27a988d4f6d8ab8e8b4fabce79a750c6438f9"
-    },
-    {
-      "path": "third_party/aevum/src/tune.cpp",
-      "size": 60988,
-      "sha256": "031c9edaacb9b73d575beee60c7edc9d6292d7921eb717a8a3b256b1216609f7"
-    },
-    {
-      "path": "third_party/aevum/src/tune.h",
-      "size": 674,
-      "sha256": "c09263164434b839a2f7945d687b6dab283002cc140faebbbd71b90c93362070"
-    },
-    {
-      "path": "third_party/aevum/src/typeName.h",
-      "size": 282,
-      "sha256": "c5145121de2e1ab5f4e27d43878bcdf44c4a650bbec79a1221e10d6642c5c3f8"
-    },
-    {
-      "path": "third_party/aevum/src/version.cpp",
-      "size": 68,
-      "sha256": "21f97fe1d6f43db0997bb4954fcf4263a27a114ea5b4a07a5fe3e9263c06a2da"
-    },
-    {
-      "path": "third_party/aevum/src/version.h",
-      "size": 42,
-      "sha256": "8cb8db216861a932a3b615018eb32050012902bd9ff8a2a91c8f00f893619082"
-    },
-    {
-      "path": "third_party/aevum/src/version.inc",
-      "size": 34,
-      "sha256": "91fe600603040e9fc495bbaea5496a25d3c1f7a3225072a37532dc8996fcaf7a"
-    },
-    {
-      "path": "third_party/aevum/test-pm1/README",
-      "size": 563,
-      "sha256": "955e0485145c4f687952c578bf44a3154839ba2d59f6dbfba8e8576133c3f9df"
-    },
-    {
-      "path": "third_party/aevum/test-pm1/makeWork.py",
-      "size": 754,
-      "sha256": "3d2bab6c74dd46792b95a9f6f0ff28d642b5105ee5b571f902ed75b766b50143"
-    },
-    {
-      "path": "third_party/aevum/test-pm1/pm1.txt",
-      "size": 83516,
-      "sha256": "f4788728e72937786ca84483166372b34f8543279c59bfd849b20f5d92f119c1"
-    },
-    {
-      "path": "third_party/aevum/test-pm1/work50K1M.txt",
-      "size": 4014,
-      "sha256": "919d65ad178050cb10e5ac29b1c1e59ab1fe258ac936adc23886582b54f0ae60"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_canonical_set_u32_test.py",
-      "size": 627,
-      "sha256": "138ba12f977253d9b73da99fabba492c92e595ad8f5354c49e619108be0830a6"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_fused_fftp_test.py",
-      "size": 3512,
-      "sha256": "73ece658a50f760686c78a3dabdbbc74a896ea99c04e31d3314d31240da0d85c"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_generic_mul_safety_test.py",
-      "size": 1263,
-      "sha256": "15ce4f88f2835d60ac4aaf42f52cd9e5cbd8369f18988698632027413d4027f2"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf31_width_staging_test.py",
-      "size": 4205,
-      "sha256": "264519fe87dfa19c74ea9510be84afc2a3fa11e6f5701e68f3bc6ddcf6b40c84"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_ffthin_arg_order_test.py",
-      "size": 544,
-      "sha256": "7afa5cc94fec49ab2f8b0655283919c42eefe9c72f243c40a2a1425aa77bc9f2"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_ffthin_staging_test.py",
-      "size": 5031,
-      "sha256": "b73262c065ba075ed04029d787b6f1c40cf5b7fe446070532c051fc77e00ecaf"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_fftw_staging_test.py",
-      "size": 5837,
-      "sha256": "0f27f92d094d18b0cb61c8c762a6729414a1c6089bacaf9270c0a9f71373cd15"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_maintail_staging_test.py",
-      "size": 9668,
-      "sha256": "e555bb345a8e38bdcbf4f2fef8a46798eff407fcac5a2f55319d310105295bed"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_middlein_restrict_alias_test.py",
-      "size": 1241,
-      "sha256": "c254461c7926387d448022cb232d4c6f31d38765de0b34873c52c4b9142190b8"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_middlein_staging_test.py",
-      "size": 5761,
-      "sha256": "a227996b457d369248a2f01482b2e8e80f4aa58087bdc911e5191afe16f87305"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_middleout_staging_test.py",
-      "size": 5384,
-      "sha256": "c3a900ebff4b41a28c02171326ca7eb7fff9abb55d2cf01ea868e19c295b5c7f"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_scalar_mapping_test.py",
-      "size": 3094,
-      "sha256": "320a0fd98372f8e27d9e20cb54e7bcfa17d372318a68be151661e7f4f5c928f6"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_tail_two_kernel_policy_test.py",
-      "size": 1777,
-      "sha256": "1d6d42739ed09b5f9b4799e8f19e7f1b46d96735d47e8f997c49c0e71b28ae6c"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_tailmul_staging_test.py",
-      "size": 6375,
-      "sha256": "ce8f39882e63c3c1e036c4ffd35c621acaa40275862722016f723b2ee2450821"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_tailzero_staging_test.py",
-      "size": 10671,
-      "sha256": "d48df1a74de290d4c371e32761a3c202d462c8c0cc69b877095f1fe348fed7e4"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_gf61_width_staging_test.py",
-      "size": 4470,
-      "sha256": "3c59dbb75e1e1231885c95865ed0467492c41e2ff1a4d8e5ae3ec0e206a84ffb"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_global_transpose_test.py",
-      "size": 2338,
-      "sha256": "9b061959ccd1e6991492e13471b7a7305d333045ab0d2809cdd38f6385f6d481"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_opencl12_kernel_matrix_syntax.sh",
-      "size": 4631,
-      "sha256": "37da7542affea4dfc3e2caf5e1cd3143b28e5b6ee019cef25c052d14a52d45a9"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_plane_isolation_gate_test.py",
-      "size": 691,
-      "sha256": "44abca3a51dac945afb318d0ac226bd38391026ffbbd2702c08b4e1e179b7d8d"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_prepared_tailmullow_routing_test.py",
-      "size": 1808,
-      "sha256": "2910142e0564dfa4ffc15d7b3718dc67d4314a89a821d23a5e5215245ecaccf6"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_prepared_tailmullow_staging_test.py",
-      "size": 1923,
-      "sha256": "bac7c3a16c0ffcef27a0d0990e82fc2539d8070311dad8d53b2c8c20f3d6fa6e"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_queue_marker_flush_test.py",
-      "size": 1452,
-      "sha256": "f3b2c38a81244f59efa4b88da1ed446f41e861186b4e7edd96c1c7c2803b0f34"
-    },
-    {
-      "path": "third_party/aevum/tests/apple_readchecked_double_sync_test.py",
-      "size": 1199,
-      "sha256": "fd655d34feb821481613507c4fb6f5d91117e755449589be47c1f118ddb53601"
-    },
-    {
-      "path": "third_party/aevum/tests/check_macos_minos.sh",
-      "size": 1018,
-      "sha256": "3a26e903b45f26a17065c941a16065bcb2d39f113673ee9230de3e945c52fbbc"
-    },
-    {
-      "path": "third_party/aevum/tests/engine_api_load_test.cpp",
-      "size": 3134,
-      "sha256": "bc890549dbf6e1b26546414bdf23bcfe29e64326b93fd1647a5f9ff61e5e1e79"
-    },
-    {
-      "path": "third_party/aevum/tests/engine_small_factor_gpu_test.cpp",
-      "size": 3430,
-      "sha256": "b1c31ccbfefd5e52e3e626798dc0beca38a544593a4b88db60168908b6edff72"
-    },
-    {
-      "path": "third_party/aevum/tests/fft3161_exact_plan_test.py",
-      "size": 1056,
-      "sha256": "9eda3fa2238ce9941b8b9494821d1a658a20530fdb2fba7d1adb56dc53769ad0"
-    },
-    {
-      "path": "third_party/aevum/tests/gpu_init_order_test.py",
-      "size": 1574,
-      "sha256": "d2b9d8a49a11bac4a7784be10136ca59cb10ffb3a0435b3d4066f3961e5fe1dc"
-    },
-    {
-      "path": "third_party/aevum/tests/gpu_prp_smoke.sh",
-      "size": 604,
-      "sha256": "784cbb6cdc2da8f0a78aead38d894942b64c3a1ea2a2cdb8900f7bf77d0a59b3"
-    },
-    {
-      "path": "third_party/aevum/tests/host_gf_test.cpp",
-      "size": 3060,
-      "sha256": "237f6091d60408e76b8fdd90e069bf6a3dc8420d3b03bc662b45fe9abc89deb6"
-    },
-    {
-      "path": "third_party/aevum/tests/native_pfa_engine_compare.cpp",
-      "size": 3901,
-      "sha256": "f427d3b5c5a0bf4106ecaa5f24723b3606ece23e1408b56e3d0ff673cbfa9e8a"
-    },
-    {
-      "path": "third_party/aevum/tests/native_pfa_opencl_syntax.sh",
-      "size": 2500,
-      "sha256": "8b584bfcf13eb3d8c26acc58e511ec754f8e8917cd624cc532cc30a2fadea882"
-    },
-    {
-      "path": "third_party/aevum/tests/opencl12_syntax_test.sh",
-      "size": 1566,
-      "sha256": "1f6a6866fb2b283eb5c4bf8b634a9a517abcf2ea7e2c088f8ba1a0e93268cb6d"
-    },
-    {
-      "path": "third_party/aevum/tests/opencl_monolithic_source_test.cpp",
-      "size": 2569,
-      "sha256": "0da1257b0c4bbda20272757160ff1e65ff84af62160234478e8ecc9e6617a3d1"
-    },
-    {
-      "path": "third_party/aevum/tests/opencl_standard_test.cpp",
-      "size": 1013,
-      "sha256": "13a89093fb557b659939c609c891609cfb20d169f4a0f8919fb0104dae09b36a"
-    },
-    {
-      "path": "third_party/aevum/tests/run_aevum_apple_plane_isolation_v5.sh",
-      "size": 5778,
-      "sha256": "5a13998ce3a0f83506c0ee78ea0e70bb02e63572a9c5809b74e8baaedfc26980"
-    },
-    {
-      "path": "third_party/aevum/tests/run_aevum_apple_stage_trace_v4.sh",
-      "size": 6228,
-      "sha256": "b8c50c2afcde19d392913b7579c9f7eef030579e339ade1a23be3b292a3d6423"
-    },
-    {
-      "path": "third_party/aevum/tests/source_audit.sh",
-      "size": 7856,
-      "sha256": "f8efaa1fef2d8dc65703fd6e9f34c02520cd61488b0f7b6fe8aed8aa64bee420"
-    },
-    {
-      "path": "third_party/aevum/tests/state_compact_wrap_test.cpp",
-      "size": 2009,
-      "sha256": "949ca0403eb61a61a64c6284ea62d1fe167ee95f5443879cd80dc42d77e11293"
-    },
-    {
-      "path": "third_party/aevum/tools/README.md",
-      "size": 430,
-      "sha256": "4fc51c641aec9415443b52ed28d8435060392d4826e8260fdd99a781edf3f845"
-    },
-    {
-      "path": "third_party/aevum/tools/abstract.py",
-      "size": 251,
-      "sha256": "a2c7e8a5bb45debee805bd35693c34b4d8b7c7cf359d6e59b82f05fa7573b31f"
-    },
-    {
-      "path": "third_party/aevum/tools/abstract.sh",
-      "size": 91,
-      "sha256": "9ed157d74f44b17c24710c40bc43ad247e385229b9b0b490e485948fc5b69df7"
-    },
-    {
-      "path": "third_party/aevum/tools/counts.py",
-      "size": 1374,
-      "sha256": "8e9ce3b7f49e50e256696dedc7213f703e88ecd22e675937653f04efc280eebe"
-    },
-    {
-      "path": "third_party/aevum/tools/delta.sh",
-      "size": 681,
-      "sha256": "dc10329cc45b21fcfa3f5f5219e541dfb9f03accb02906f0aafdda9df3b525b4"
-    },
-    {
-      "path": "third_party/aevum/tools/device.py",
-      "size": 836,
-      "sha256": "37fcb063891ea48e20822502aa60300f72246a126b396a53f5fb24714af86853"
-    },
-    {
-      "path": "third_party/aevum/tools/df.sh",
-      "size": 211,
-      "sha256": "ceebde94ee083a4dce15f2c48133ff5e632cde0cdb05710a6f1547b1dd7d65ad"
-    },
-    {
-      "path": "third_party/aevum/tools/monitor.py",
-      "size": 3775,
-      "sha256": "dac93c4623384e3b73e8d1f2b4e02f56c9ed483bc097e6602b9207cfcdff6cda"
-    },
-    {
-      "path": "third_party/aevum/tools/native_pfa_explain.py",
-      "size": 2063,
-      "sha256": "bcd655c9de49f8edb6d09e729a08a722d6cdcf2fda26224312efd57a73e77ae2"
-    },
-    {
-      "path": "third_party/aevum/tools/native_pfa_plan_test.py",
-      "size": 2876,
-      "sha256": "8a109c6dd8ec31469ae2d95b1800fbcb49bd74984d192b1a6a98d39be6a118c6"
-    },
-    {
-      "path": "third_party/aevum/tools/native_pfa_reference_test.py",
-      "size": 6376,
-      "sha256": "fe618cfa4a405c4cc5c75827dc494519675b7ba2dc14f27a8df241c5b871e4a2"
-    },
-    {
-      "path": "third_party/aevum/tools/native_pfa_source_audit.py",
-      "size": 2298,
-      "sha256": "ff4da3efc351befccb86db3336f49ada49a41bbade54f27b00ce220dfb7ea7af"
-    },
-    {
-      "path": "third_party/aevum/tools/primenet.py",
-      "size": 6197,
-      "sha256": "5dbe7ada85fd7a0e49c62f87f38f1bc4a5883ff2d2496c8c7a9651aa4c60a2b8"
-    },
-    {
-      "path": "third_party/aevum/tools/upload.py",
-      "size": 4207,
-      "sha256": "e96788f8b3b22c003e89359ea0fc7e486956ecc3dc7d505922237095a5b8587d"
-    },
-    {
-      "path": "third_party/aevum/tune.txt",
-      "size": 5054,
-      "sha256": "2d89e2e5470d228cd4f3830b98fbfcde6319e92bc1cbacfd39e75c6ff2568d3b"
-    },
-    {
-      "path": "third_party/aevum/z.txt",
-      "size": 87702,
-      "sha256": "c8eaa61ae25c95b32cd69795b1257ba05c2fa51cf851481a3494bbb8584f69d8"
-    },
-    {
-      "path": "third_party/aevum/ztune.txt",
-      "size": 74613,
-      "sha256": "62a72b7db73e5c246a29677d8d0e6bf8590c4da0700ec42fe1d9174ed7391e37"
-    },
-    {
-      "path": "unit_test_all.sh",
-      "size": 1575,
-      "sha256": "a240b08cea7661ff15136fd8d413e9d2209b0941b94ce460622484364cfeb5b0"
-    },
-    {
-      "path": "unit_tests.sh",
-      "size": 9120,
-      "sha256": "303216e0f16b28cc286497320a12f94e85930f28903c96f23c05d020e7c0725e"
-    }
+    ".github/workflows/build_linux.yml",
+    ".github/workflows/build_mac_os.yml",
+    ".github/workflows/build_windows.yml",
+    ".gitignore",
+    "CMakeLists.txt",
+    "LICENSE",
+    "LICENSES/GPL-3.0.txt",
+    "LICENSES/PrMers-MIT.txt",
+    "LICENSES/README.md",
+    "MANIFEST_NATIVE_PFA.json",
+    "Makefile",
+    "NOTICE.md",
+    "README.md",
+    "README_AEVUM_REG.md",
+    "README_NATIVE_AEVUM_PFA.md",
+    "README_TYPE4_PFA9.md",
+    "build_and_test_native_pfa_ubuntu.sh",
+    "chainpm1.sh",
+    "chainpm1old.sh",
+    "docs/ecm_benchmark.txt",
+    "docs/mersenne2_mixed_crt_2d_half_fast/README.md",
+    "docs/mersenne2_mixed_crt_2d_half_fast/mersenne2_mixed_crt_2d_half_fast.cpp",
+    "docs/prmers-bananantt-split/README.md",
+    "docs/prmers-bananantt-split/find_x4_candidate_ranges.py",
+    "docs/prmers-bananantt-split/prmers_opencl_prp.cl",
+    "docs/prmers-bananantt-split/prmers_opencl_prp.cpp",
+    "docs/prmers-bananantt-split/test_mixed_row_lds_matrix.sh",
+    "docs/resume_p149_ECM_B1_20000.p95",
+    "docs/resume_p205271257_B1_1300000.p95",
+    "docs/resume_p9815459_ECM_B1_10000.p95",
+    "docs/webgui.png",
+    "docs/webgui2.png",
+    "docs/webgui3.png",
+    "include/aevum/AutoPolicy.hpp",
+    "include/aevum/EngineAevum.hpp",
+    "include/core/AlgoUtils.hpp",
+    "include/core/App.hpp",
+    "include/core/BackupManager.hpp",
+    "include/core/Logger.hpp",
+    "include/core/Printer.hpp",
+    "include/core/Proof.hpp",
+    "include/core/ProofManager.hpp",
+    "include/core/ProofManagerMarin.hpp",
+    "include/core/ProofMarin.hpp",
+    "include/core/ProofSet.hpp",
+    "include/core/ProofSetMarin.hpp",
+    "include/core/QuickChecker.hpp",
+    "include/core/Spinner.hpp",
+    "include/core/Version.hpp",
+    "include/io/CliParser.hpp",
+    "include/io/Hash.h",
+    "include/io/JsonBuilder.hpp",
+    "include/io/MD5.h",
+    "include/io/Sha3Hash.h",
+    "include/io/WorktodoManager.hpp",
+    "include/io/WorktodoParser.hpp",
+    "include/io/common.h",
+    "include/io/sha3.h",
+    "include/marin/arith.h",
+    "include/marin/engine.h",
+    "include/marin/engine_gpu.h",
+    "include/marin/file.h",
+    "include/marin/ibdwt.h",
+    "include/marin/ocl.h",
+    "include/marin/ocl/kernel.h",
+    "include/math/Carry.hpp",
+    "include/math/Cofactor.hpp",
+    "include/math/Mod64.hpp",
+    "include/math/Precompute.hpp",
+    "include/opencl/Buffers.hpp",
+    "include/opencl/Context.hpp",
+    "include/opencl/Kernels.hpp",
+    "include/opencl/NttEngine.hpp",
+    "include/opencl/NttPipeline.hpp",
+    "include/opencl/Program.hpp",
+    "include/ui/WebGuiServer.hpp",
+    "include/util/Color.hpp",
+    "include/util/Crc32.hpp",
+    "include/util/Fs.hpp",
+    "include/util/GmpUtils.hpp",
+    "include/util/OpenCLError.hpp",
+    "include/util/PathUtils.hpp",
+    "include/util/StringUtils.hpp",
+    "include/util/Timer.hpp",
+    "kernels/marin.cl",
+    "kernels/prmers.cl",
+    "prmers.ipynb",
+    "scripts/benchmark_aevum_vs_marin.sh",
+    "scripts/build_native_pfa.sh",
+    "scripts/build_native_pfa_ubuntu.sh",
+    "scripts/check_macos_minos.sh",
+    "scripts/fix_macos_download.sh",
+    "scripts/install_native_pfa_dependencies.sh",
+    "scripts/smoke_aevum_ll_macos.py",
+    "scripts/test_fft323161_pfa9_ubuntu.sh",
+    "scripts/test_native_pfa_gpu.sh",
+    "scripts/test_type4_optimized_ubuntu.sh",
+    "src/aevum/AutoPolicy.cpp",
+    "src/aevum/EngineAevum.cpp",
+    "src/core/AlgoUtils.cpp",
+    "src/core/App.cpp",
+    "src/core/BackupManager.cpp",
+    "src/core/Logger.cpp",
+    "src/core/Printer.cpp",
+    "src/core/Proof.cpp",
+    "src/core/ProofManager.cpp",
+    "src/core/ProofManagerMarin.cpp",
+    "src/core/ProofMarin.cpp",
+    "src/core/ProofSet.cpp",
+    "src/core/ProofSetMarin.cpp",
+    "src/core/QuickChecker.cpp",
+    "src/core/Spinner.cpp",
+    "src/io/CliParser.cpp",
+    "src/io/JsonBuilder.cpp",
+    "src/io/WorktodoManager.cpp",
+    "src/io/WorktodoParser.cpp",
+    "src/io/common.cpp",
+    "src/io/md5.cpp",
+    "src/io/sha3.cpp",
+    "src/main.cpp",
+    "src/marin/gpu.cpp",
+    "src/math/Carry.cpp",
+    "src/math/Cofactor.cpp",
+    "src/math/Mod64.cpp",
+    "src/math/Precompute.cpp",
+    "src/modes/RunEcm.cpp",
+    "src/modes/RunEcmTwistedEdwards.cpp",
+    "src/modes/RunLlSafeMarin.cpp",
+    "src/modes/RunMemTest.cpp",
+    "src/modes/RunPM1.cpp",
+    "src/modes/RunPrpOrLl.cpp",
+    "src/modes/RunPrpOrLlMarin.cpp",
+    "src/opencl/Buffers.cpp",
+    "src/opencl/Context.cpp",
+    "src/opencl/Kernels.cpp",
+    "src/opencl/NttEngine.cpp",
+    "src/opencl/Program.cpp",
+    "src/ui/WebGuiServer.cpp",
+    "src/util/Color.cpp",
+    "src/util/Crc32.cpp",
+    "src/util/Fs.cpp",
+    "src/util/GmpUtils.cpp",
+    "src/util/OpenCLError.cpp",
+    "src/util/PathUtils.cpp",
+    "src/util/StringUtils.cpp",
+    "src/util/Timer.cpp",
+    "tests/aevum_apple_fused_fftp_test.py",
+    "tests/aevum_apple_fused_tailsquare_test.py",
+    "tests/aevum_fake_engine.cpp",
+    "tests/aevum_pm1_small_factor_policy_test.py",
+    "tests/aevum_vtrace_prepared_cache_test.py",
+    "tests/apple_strict_smoke_source_test.py",
+    "tests/macos_default_marin_policy_test.py",
+    "tests/native_pfa_cli_source_test.py",
+    "tests/run_aevum_apple_plane_isolation_v5.sh",
+    "tests/run_aevum_apple_stage_trace_v4.sh",
+    "tests/run_aevum_auto_gpu_matrix.sh",
+    "tests/run_aevum_forced_pm1_small_factor_regression.sh",
+    "tests/run_aevum_gpu_smoke.sh",
+    "tests/run_aevum_prepared_buffer_regression.sh",
+    "tests/run_backend_validation_matrix.sh",
+    "tests/source_aevum_engine_audit.sh",
+    "tests/source_v9935_apple_port_audit.sh",
+    "tests/source_v9936_apple_port_audit.sh",
+    "tests/source_v9937_apple_port_audit.sh",
+    "tests/source_v9938_apple_port_audit.sh",
+    "tests/source_v9939_apple_port_audit.sh",
+    "tests/source_v9940_apple_port_audit.sh",
+    "tests/source_v9941_apple_port_audit.sh",
+    "tests/source_v9942_apple_port_audit.sh",
+    "tests/source_v9949_github_exact_audit.py",
+    "tests/source_v9950_apple_ffthin_gf61_audit.py",
+    "tests/test_aevum_auto_policy.cpp",
+    "tests/test_aevum_auto_policy.sh",
+    "tests/test_aevum_default_backend.cpp",
+    "tests/test_aevum_default_backend.sh",
+    "tests/test_aevum_reg_adapter.cpp",
+    "tests/test_aevum_reg_adapter.sh",
+    "tests/test_backend_compatibility_cli.sh",
+    "tests/test_web_gui_backend_state.cpp",
+    "tests/test_web_gui_backend_state.sh",
+    "third_party/aevum/.github/dependabot.yml",
+    "third_party/aevum/.github/workflows/ci.yml",
+    "third_party/aevum/.gitignore",
+    "third_party/aevum/CMakeLists.txt",
+    "third_party/aevum/FFT.md",
+    "third_party/aevum/LICENSE",
+    "third_party/aevum/MANIFEST_NATIVE_PFA.json",
+    "third_party/aevum/MODIFICATIONS.md",
+    "third_party/aevum/Makefile",
+    "third_party/aevum/NOTICE",
+    "third_party/aevum/README.md",
+    "third_party/aevum/README_GPUOWL.md",
+    "third_party/aevum/README_GPUOWL_LEGACY.txt",
+    "third_party/aevum/README_NATIVE_PFA.md",
+    "third_party/aevum/README_TYPE4_PFA9.md",
+    "third_party/aevum/SP/Gpu.cpp",
+    "third_party/aevum/SP/Gpu.h",
+    "third_party/aevum/SP/SConstruct",
+    "third_party/aevum/SP/head.txt",
+    "third_party/aevum/SP/main.cpp",
+    "third_party/aevum/SP/sp.cl",
+    "third_party/aevum/SP/tail.txt",
+    "third_party/aevum/UPSTREAM.md",
+    "third_party/aevum/build_and_test_native_pfa_ubuntu.sh",
+    "third_party/aevum/codestyle.md",
+    "third_party/aevum/examples/example_common.h",
+    "third_party/aevum/examples/fft_plans.cpp",
+    "third_party/aevum/examples/power_chain.cpp",
+    "third_party/aevum/examples/register_ops.cpp",
+    "third_party/aevum/genbundle.sh",
+    "third_party/aevum/m.sh",
+    "third_party/aevum/pm1/Makefile",
+    "third_party/aevum/pm1/Primes.cpp",
+    "third_party/aevum/pm1/Primes.h",
+    "third_party/aevum/pm1/merge.py",
+    "third_party/aevum/pm1/pm1.cpp",
+    "third_party/aevum/scripts/build_native_pfa.sh",
+    "third_party/aevum/scripts/build_native_pfa_ubuntu.sh",
+    "third_party/aevum/scripts/check_macos_minos.sh",
+    "third_party/aevum/scripts/install_ubuntu_dependencies.sh",
+    "third_party/aevum/scripts/test_native_pfa_gpu.sh",
+    "third_party/aevum/scripts/test_type4_pfa9_ubuntu.sh",
+    "third_party/aevum/src/AllocTrac.cpp",
+    "third_party/aevum/src/AllocTrac.h",
+    "third_party/aevum/src/Args.cpp",
+    "third_party/aevum/src/Args.h",
+    "third_party/aevum/src/Background.h",
+    "third_party/aevum/src/Blake2.h",
+    "third_party/aevum/src/Buffer.h",
+    "third_party/aevum/src/CMakeLists.txt",
+    "third_party/aevum/src/Context.h",
+    "third_party/aevum/src/CycleFile.cpp",
+    "third_party/aevum/src/CycleFile.h",
+    "third_party/aevum/src/EngineApi.cpp",
+    "third_party/aevum/src/EngineApi.h",
+    "third_party/aevum/src/Event.cpp",
+    "third_party/aevum/src/Event.h",
+    "third_party/aevum/src/FFTConfig.cpp",
+    "third_party/aevum/src/FFTConfig.h",
+    "third_party/aevum/src/File.cpp",
+    "third_party/aevum/src/File.h",
+    "third_party/aevum/src/Gpu.cpp",
+    "third_party/aevum/src/Gpu.h",
+    "third_party/aevum/src/GpuCommon.h",
+    "third_party/aevum/src/Hash.h",
+    "third_party/aevum/src/Kernel.cpp",
+    "third_party/aevum/src/Kernel.h",
+    "third_party/aevum/src/KernelCompiler.cpp",
+    "third_party/aevum/src/KernelCompiler.h",
+    "third_party/aevum/src/MD5.h",
+    "third_party/aevum/src/OpenCLSourceBuilder.cpp",
+    "third_party/aevum/src/OpenCLSourceBuilder.h",
+    "third_party/aevum/src/OpenCLStandard.h",
+    "third_party/aevum/src/PRPState.cpp",
+    "third_party/aevum/src/PRPState.h",
+    "third_party/aevum/src/Primes.cpp",
+    "third_party/aevum/src/Primes.h",
+    "third_party/aevum/src/Profile.cpp",
+    "third_party/aevum/src/Profile.h",
+    "third_party/aevum/src/Proof.cpp",
+    "third_party/aevum/src/Proof.h",
+    "third_party/aevum/src/Queue.cpp",
+    "third_party/aevum/src/Queue.h",
+    "third_party/aevum/src/Saver.cpp",
+    "third_party/aevum/src/Saver.h",
+    "third_party/aevum/src/Sha3Hash.h",
+    "third_party/aevum/src/Signal.cpp",
+    "third_party/aevum/src/Signal.h",
+    "third_party/aevum/src/Task.cpp",
+    "third_party/aevum/src/Task.h",
+    "third_party/aevum/src/TimeInfo.cpp",
+    "third_party/aevum/src/TimeInfo.h",
+    "third_party/aevum/src/Trig.cpp",
+    "third_party/aevum/src/Trig.h",
+    "third_party/aevum/src/TrigBufCache.cpp",
+    "third_party/aevum/src/TrigBufCache.h",
+    "third_party/aevum/src/TuneEntry.cpp",
+    "third_party/aevum/src/TuneEntry.h",
+    "third_party/aevum/src/U128.cpp",
+    "third_party/aevum/src/U128.h",
+    "third_party/aevum/src/Worktodo.cpp",
+    "third_party/aevum/src/Worktodo.h",
+    "third_party/aevum/src/bundle.cpp",
+    "third_party/aevum/src/cl/base.cl",
+    "third_party/aevum/src/cl/carry.cl",
+    "third_party/aevum/src/cl/carryb.cl",
+    "third_party/aevum/src/cl/carryfused.cl",
+    "third_party/aevum/src/cl/carryinc.cl",
+    "third_party/aevum/src/cl/carryutil.cl",
+    "third_party/aevum/src/cl/etc.cl",
+    "third_party/aevum/src/cl/fft-middle.cl",
+    "third_party/aevum/src/cl/fft10.cl",
+    "third_party/aevum/src/cl/fft11.cl",
+    "third_party/aevum/src/cl/fft12.cl",
+    "third_party/aevum/src/cl/fft13.cl",
+    "third_party/aevum/src/cl/fft14.cl",
+    "third_party/aevum/src/cl/fft15.cl",
+    "third_party/aevum/src/cl/fft16.cl",
+    "third_party/aevum/src/cl/fft3.cl",
+    "third_party/aevum/src/cl/fft4.cl",
+    "third_party/aevum/src/cl/fft5.cl",
+    "third_party/aevum/src/cl/fft6.cl",
+    "third_party/aevum/src/cl/fft7.cl",
+    "third_party/aevum/src/cl/fft8.cl",
+    "third_party/aevum/src/cl/fft9.cl",
+    "third_party/aevum/src/cl/fftbase.cl",
+    "third_party/aevum/src/cl/fftheight.cl",
+    "third_party/aevum/src/cl/ffthin.cl",
+    "third_party/aevum/src/cl/fftmiddlein.cl",
+    "third_party/aevum/src/cl/fftmiddleout.cl",
+    "third_party/aevum/src/cl/fftp.cl",
+    "third_party/aevum/src/cl/fftw.cl",
+    "third_party/aevum/src/cl/fftwidth.cl",
+    "third_party/aevum/src/cl/math.cl",
+    "third_party/aevum/src/cl/middle.cl",
+    "third_party/aevum/src/cl/pfaunpack.cl",
+    "third_party/aevum/src/cl/selftest.cl",
+    "third_party/aevum/src/cl/tailmul.cl",
+    "third_party/aevum/src/cl/tailsquare.cl",
+    "third_party/aevum/src/cl/tailutil.cl",
+    "third_party/aevum/src/cl/transpose.cl",
+    "third_party/aevum/src/cl/trig.cl",
+    "third_party/aevum/src/cl/weight.cl",
+    "third_party/aevum/src/clwrap.cpp",
+    "third_party/aevum/src/clwrap.h",
+    "third_party/aevum/src/common.cpp",
+    "third_party/aevum/src/common.h",
+    "third_party/aevum/src/cuda/clwrap_cuda.cpp",
+    "third_party/aevum/src/cuda/cudawrap.cpp",
+    "third_party/aevum/src/cuda/cudawrap.h",
+    "third_party/aevum/src/cuda/opencl_compat.cuh",
+    "third_party/aevum/src/cuda/tinycuda.h",
+    "third_party/aevum/src/fftbpw.h",
+    "third_party/aevum/src/fs.cpp",
+    "third_party/aevum/src/fs.h",
+    "third_party/aevum/src/gpuid.cpp",
+    "third_party/aevum/src/gpuid.h",
+    "third_party/aevum/src/log.cpp",
+    "third_party/aevum/src/log.h",
+    "third_party/aevum/src/main.cpp",
+    "third_party/aevum/src/md5.cpp",
+    "third_party/aevum/src/qdcheb.cpp",
+    "third_party/aevum/src/sha3.cpp",
+    "third_party/aevum/src/sha3.h",
+    "third_party/aevum/src/shared.h",
+    "third_party/aevum/src/sine_compare.cpp",
+    "third_party/aevum/src/state.cpp",
+    "third_party/aevum/src/state.h",
+    "third_party/aevum/src/timeutil.cpp",
+    "third_party/aevum/src/timeutil.h",
+    "third_party/aevum/src/tinycl.h",
+    "third_party/aevum/src/tune.cpp",
+    "third_party/aevum/src/tune.h",
+    "third_party/aevum/src/typeName.h",
+    "third_party/aevum/src/version.cpp",
+    "third_party/aevum/src/version.h",
+    "third_party/aevum/src/version.inc",
+    "third_party/aevum/test-pm1/README",
+    "third_party/aevum/test-pm1/makeWork.py",
+    "third_party/aevum/test-pm1/pm1.txt",
+    "third_party/aevum/test-pm1/work50K1M.txt",
+    "third_party/aevum/tests/apple_canonical_set_u32_test.py",
+    "third_party/aevum/tests/apple_fused_fftp_test.py",
+    "third_party/aevum/tests/apple_generic_mul_safety_test.py",
+    "third_party/aevum/tests/apple_gf31_width_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_ffthin_arg_order_test.py",
+    "third_party/aevum/tests/apple_gf61_ffthin_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_fftw_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_maintail_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_middlein_restrict_alias_test.py",
+    "third_party/aevum/tests/apple_gf61_middlein_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_middleout_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_scalar_mapping_test.py",
+    "third_party/aevum/tests/apple_gf61_tail_two_kernel_policy_test.py",
+    "third_party/aevum/tests/apple_gf61_tailmul_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_tailzero_staging_test.py",
+    "third_party/aevum/tests/apple_gf61_width_staging_test.py",
+    "third_party/aevum/tests/apple_global_transpose_test.py",
+    "third_party/aevum/tests/apple_opencl12_kernel_matrix_syntax.sh",
+    "third_party/aevum/tests/apple_plane_isolation_gate_test.py",
+    "third_party/aevum/tests/apple_prepared_tailmullow_routing_test.py",
+    "third_party/aevum/tests/apple_prepared_tailmullow_staging_test.py",
+    "third_party/aevum/tests/apple_queue_marker_flush_test.py",
+    "third_party/aevum/tests/apple_readchecked_double_sync_test.py",
+    "third_party/aevum/tests/check_macos_minos.sh",
+    "third_party/aevum/tests/engine_api_load_test.cpp",
+    "third_party/aevum/tests/engine_small_factor_gpu_test.cpp",
+    "third_party/aevum/tests/fft3161_exact_plan_test.py",
+    "third_party/aevum/tests/gpu_init_order_test.py",
+    "third_party/aevum/tests/gpu_prp_smoke.sh",
+    "third_party/aevum/tests/host_gf_test.cpp",
+    "third_party/aevum/tests/native_pfa_engine_compare.cpp",
+    "third_party/aevum/tests/native_pfa_opencl_syntax.sh",
+    "third_party/aevum/tests/opencl12_syntax_test.sh",
+    "third_party/aevum/tests/opencl_monolithic_source_test.cpp",
+    "third_party/aevum/tests/opencl_standard_test.cpp",
+    "third_party/aevum/tests/run_aevum_apple_plane_isolation_v5.sh",
+    "third_party/aevum/tests/run_aevum_apple_stage_trace_v4.sh",
+    "third_party/aevum/tests/source_audit.sh",
+    "third_party/aevum/tests/state_compact_wrap_test.cpp",
+    "third_party/aevum/tests/type4_pfa9_engine_compare.cpp",
+    "third_party/aevum/tests/type4_pfa9_plan_test.cpp",
+    "third_party/aevum/tools/README.md",
+    "third_party/aevum/tools/abstract.py",
+    "third_party/aevum/tools/abstract.sh",
+    "third_party/aevum/tools/counts.py",
+    "third_party/aevum/tools/delta.sh",
+    "third_party/aevum/tools/device.py",
+    "third_party/aevum/tools/df.sh",
+    "third_party/aevum/tools/monitor.py",
+    "third_party/aevum/tools/native_pfa_explain.py",
+    "third_party/aevum/tools/native_pfa_plan_test.py",
+    "third_party/aevum/tools/native_pfa_reference_test.py",
+    "third_party/aevum/tools/native_pfa_source_audit.py",
+    "third_party/aevum/tools/primenet.py",
+    "third_party/aevum/tools/upload.py",
+    "third_party/aevum/tune.txt",
+    "third_party/aevum/z.txt",
+    "third_party/aevum/ztune.txt",
+    "unit_test_all.sh",
+    "unit_tests.sh"
   ]
 }

@@ -145,10 +145,12 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
 
-  // PFA keeps the exact GF31/GF61 arithmetic but replaces the power-of-two
-  // middle axis by a 3/9 Good-Thomas axis.  Until tune data is collected, use
-  // the next stock power-of-two plan as a conservative capacity estimate.
-  if (t == FFT3161 && (m == 3 || m == 9)) {
+  // PFA replaces the power-of-two middle axis by a 3/9 Good-Thomas axis.
+  // Type 1 keeps the paired GF31/GF61 arithmetic.  Experimental type 4 adds
+  // the upstream FP32 residue plane and currently supports radix 9 only.
+  // Until dedicated tune data is collected, inherit the next stock
+  // power-of-two plan and keep a conservative capacity margin.
+  if ((t == FFT3161 && (m == 3 || m == 9)) || (t == FFT323161 && m == 9)) {
     const u32 reference_middle = m == 3 ? 4 : 16;
     bpw = FFTShape{t, w, reference_middle, h}.bpw;
     for (float& value : bpw) value -= 0.20f;
@@ -230,7 +232,11 @@ bool FFTShape::isFavoredShape() const {
 FFTConfig::FFTConfig(const string& input_spec) {
   string spec = input_spec;
   u32 requested_pfa = 0;
+  bool adaptive_type4 = false;
+  bool force_full_type4 = false;
   if (startsWith(spec, "pfa3:")) { requested_pfa = 3; spec = spec.substr(5); }
+  else if (startsWith(spec, "pfa9full:")) { requested_pfa = 9; force_full_type4 = true; spec = spec.substr(9); }
+  else if (startsWith(spec, "pfa9fast:")) { requested_pfa = 9; adaptive_type4 = true; spec = spec.substr(9); }
   else if (startsWith(spec, "pfa9:")) { requested_pfa = 9; spec = spec.substr(5); }
   auto v = split(spec, ':');
 
@@ -279,9 +285,21 @@ FFTConfig::FFTConfig(const string& input_spec) {
     throw "FFT spec";
   }
   if (requested_pfa) {
-    if (shape.fft_type != FFT3161 || shape.middle != requested_pfa)
-      throw std::runtime_error("PFA plans require FFT3161 and middle 3 or 9");
+    const bool paired_ntt = shape.fft_type == FFT3161 &&
+                            (requested_pfa == 3 || requested_pfa == 9);
+    const bool hybrid_fp32_crt = shape.fft_type == FFT323161 && requested_pfa == 9;
+    if ((!paired_ntt && !hybrid_fp32_crt) || shape.middle != requested_pfa)
+      throw std::runtime_error("PFA plans require FFT3161 middle 3/9 or FFT323161 middle 9");
     pfa_radix = requested_pfa;
+    // A type-4 PFA9 request is capacity-adaptive by default.  The FP32 plane
+    // is mathematically redundant whenever the exact GF31*GF61 CRT limit is
+    // sufficient, so do not pay for a third transform unless pfa9full: is
+    // explicitly requested.  pfa9fast: remains a compatibility alias.
+    adaptive_type4_request = shape.fft_type == FFT323161 && !force_full_type4;
+    if (adaptive_type4 && shape.fft_type != FFT323161)
+      throw std::runtime_error("pfa9fast requires an FFT323161 type-4 request");
+    if (force_full_type4 && shape.fft_type != FFT323161)
+      throw std::runtime_error("pfa9full requires an FFT323161 type-4 request");
   }
 }
 
@@ -346,7 +364,10 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
       for (u32 width : {256u, 512u, 1024u, 4096u}) {
         for (u32 height : {256u, 512u, 1024u}) {
           if (width == 256 && height == 1024) continue;
-          FFTConfig c{FFTShape{FFT3161, width, radix, height}, 101, CARRY_AUTO};
+          // RTX 3080 measurements favor variant 202 for radix-9.  Keep
+          // radix-3 on the validated 101 pipeline.
+          const u32 variant = radix == 9 ? 202u : 101u;
+          FFTConfig c{FFTShape{FFT3161, width, radix, height}, variant, CARRY_AUTO};
           c.pfa_radix = radix;
           const double bpw = E / double(c.size());
           if (bpw < c.minBpw()) continue;
@@ -397,6 +418,31 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // A FFT-spec was given, simply take the first FFT from the spec that can handle E
   if (!spec.empty()) {
     FFTConfig fft{spec};
+
+    // FFT323161 only pays for itself when its FP32 plane is required to lift
+    // the coefficient range beyond the 92-bit GF31*GF61 CRT.  Every ordinary
+    // pfa9:4 request is therefore capacity-adaptive: if the exact paired NTT
+    // fits, execute the same requested shape/variant without the redundant
+    // FP32 plane.  Use pfa9full:4 only for the true three-plane diagnostic path.
+    if (fft.adaptive_type4_request) {
+      FFTConfig paired{FFTShape{FFT3161, fft.shape.width, fft.shape.middle, fft.shape.height},
+                       fft.variant, fft.carry};
+      paired.pfa_radix = fft.pfa_radix;
+      paired.adaptive_type4_request = true;
+      const double requested_bpw = E / double(fft.size());
+      const double paired_limit = paired.maxBpw() * args.fftOverdrive;
+      if (paired.maxExp() * args.fftOverdrive >= E) {
+        paired.adaptive_type4_elided = true;
+        log("Aevum optimized type-4 PFA9: FP32 plane elided at %.2f bpw; "
+            "exact FFT3161 limit %.2f bpw, executing %s.\n",
+            requested_bpw, paired_limit, paired.spec().c_str());
+        return paired;
+      }
+      log("Aevum optimized type-4 PFA9: %.2f bpw exceeds exact FFT3161 limit "
+          "%.2f bpw; retaining full FP32+GF31+GF61 plan %s.\n",
+          requested_bpw, paired_limit, fft.spec().c_str());
+    }
+
     bool apple_diagnostic_plane = false;
 #if defined(__APPLE__)
     if (const char* diagnostic = std::getenv("AEVUM_APPLE_DIAGNOSTIC_PLANES")) {
@@ -404,8 +450,10 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    if (fft.shape.fft_type != FFT3161 && !apple_diagnostic_plane) {
-      log("Aevum accepts only FFT type 1, GF(M31^2) x GF(M61^2).\n");
+    const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
+                                      (fft.shape.fft_type == FFT323161 && fft.isPfa() && fft.pfa_radix == 9);
+    if (!supported_aevum_type && !apple_diagnostic_plane) {
+      log("Aevum accepts FFT type 1, or experimental FFT type 4 with explicit PFA9.\n");
       throw "Aevum FFT type";
     }
 #if defined(__APPLE__)

@@ -287,6 +287,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   if (fft.isPfa()) {
     config.try_emplace("TAIL_KERNELS", "1");
     config.try_emplace("INPLACE", "0");
+    config.try_emplace("TAIL_TRIGS32", "2");
     config.try_emplace("TAIL_TRIGS31", "0");
     config.try_emplace("TAIL_TRIGS61", "0");
   }
@@ -319,6 +320,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
                               "PAD",
                               "MIDDLE_IN_LDS_TRANSPOSE",
                               "MIDDLE_OUT_LDS_TRANSPOSE",
+                              "MULTI_Q",
                               "TAIL_KERNELS",
                               "TAIL_TRIGS",
                               "TAIL_TRIGS31",
@@ -353,6 +355,14 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
     in_place = 0;
     config["INPLACE"] = "0";
+  }
+
+  if (fft.shape.fft_type == FFT323161 && fft.isPfa() &&
+      (!tail_single_wide || tail_single_kernel)) {
+    log("Experimental FFT323161 PFA9 requires single-wide two-kernel tails; forcing TAIL_KERNELS=1.\n");
+    tail_single_wide = true;
+    tail_single_kernel = false;
+    config["TAIL_KERNELS"] = "1";
   }
 
 #if defined(__APPLE__)
@@ -866,11 +876,11 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
   K(kfftMidIn,             "fftmiddlein.cl",  "fftMiddleIn",  hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDIN)).c_str()),
   K(kfftHin,               "ffthin.cl",  "fftHin",  hN / nH, kernelDefines(KFP).c_str()),
-  K(ktailSquareZero,       "tailsquare.cl", "tailSquareZero", SMALL_H / nH * 2, kernelDefines(KFP).c_str()),
+  K(ktailSquareZero,       "tailsquare.cl", "tailSquareZero", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(KFP).c_str()),
   K(ktailSquare,           "tailsquare.cl", "tailSquare",
                                                !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel
-                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH :                      // Single-wide tailSquare with two kernels
+                                               !tail_single_kernel ? hN / nH / 2 - SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix : 1) : // Single-wide tailSquare with two kernels
                                                hN / nH / 2, (kernelDefines(KFP) + numCudaRegisters(TAIL)).c_str()),    // Single-wide tailSquare with one kernel
   K(ktailMul,              "tailmul.cl", "tailMul", hN / nH / 2, kernelDefines(KFP).c_str()),
   K(ktailMulLow,           "tailmul.cl", "tailMul", hN / nH / 2, (kernelDefines(KFP) + "-DMUL_LOW=1").c_str()),
@@ -1349,7 +1359,12 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   float bitsPerWord = E / float(N);
   if (logFftSize) {
     log("FFT: %s %s (%.2f bpw)\n", numberK(N).c_str(), fft.spec().c_str(), bitsPerWord);
-    if (fft.isPfa()) log("Aevum native PFA active: radix-%u Good-Thomas digit map, binary half-real rows, native GF31/GF61 carry.\n", fft.pfa_radix);
+    if (fft.isPfa()) {
+      if (fft.shape.fft_type == FFT323161)
+        log("Aevum experimental type-4 PFA active: radix-%u Good-Thomas digit map, FP32+GF31+GF61 planes, binary half-real rows.\n", fft.pfa_radix);
+      else
+        log("Aevum native PFA active: radix-%u Good-Thomas digit map, binary half-real rows, native GF31/GF61 carry.\n", fft.pfa_radix);
+    }
 
     // Sometimes we do want to run a FFT beyond a reasonable BPW (e.g. during -ztune), and these situations
     // coincide with logFftSize == false

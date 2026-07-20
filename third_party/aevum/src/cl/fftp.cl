@@ -943,6 +943,8 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
 
 #elif FFT_TYPE == FFT323161
 
+#if !PFA_RADIX
+
 // fftPremul: weight words with IBDWT weights followed by FFT-width.
 KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIGHTS) {
   local GF61 lds61[LDS_BYTES / sizeof(GF61)];
@@ -1033,6 +1035,113 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
   fft_WIDTH(lds61, u61, smallTrig61, 1, me);
   writeCarryFusedLine(u61, out61, g, me);
 }
+
+#else
+
+// Experimental hybrid PFA9 pack.  The FP32, GF31 and GF61 planes gather the
+// same Good-Thomas logical digits before their stock width transforms.
+inline u32 pfaLogicalIndex(u32 row, u32 binary_index) {
+  const u32 delta = (row + PFA_RADIX - binary_index % PFA_RADIX) % PFA_RADIX;
+  const u32 t = (delta * PFA_L_INV) % PFA_RADIX;
+  return binary_index + PFA_BINARY_LENGTH * t;
+}
+
+inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
+  const u32 pair = logical >> 1;
+  const u32 x = pair / BIG_HEIGHT;
+  const u32 line = pair - x * BIG_HEIGHT;
+  const Word2 value = in[line * WIDTH + x];
+  return (logical & 1u) ? value.y : value.x;
+}
+
+inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+  const u64 frac = comboFracBits(logical);
+  union { uint2 a; u64 b; } c31, c61;
+  c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
+  c61.b = frac + make_u64(((logical % 61u) * step61) % 61u, 0xFFFFFFFFu);
+  return U2(c31.a[1] % 31u, c61.a[1] % 61u);
+}
+
+// Reconstruct the stock separable FP32 IBDWT weight for an arbitrary
+// canonical logical digit.  This avoids native_exp2 and keeps the same table,
+// fancy-multiply and half-correction behavior as the power-of-two type-4 path.
+inline F pfaWeightFP32(u32 logical, BigTabFP32 THREAD_WEIGHTS) {
+  const u32 even_logical = logical & ~1u;
+  const u32 pair = even_logical >> 1;
+  const u32 x = pair / BIG_HEIGHT;
+  const u32 line = pair - x * BIG_HEIGHT;
+  const u32 lane = x % G_W;
+  const u32 slot = x / G_W;
+
+  const u32 lane_frac = fracBits(lane * BIG_HEIGHT * 2u);
+  const u32 line_frac = fracBits(line * 2u);
+  const u32 base_frac = lane_frac + line_frac;
+  F base = optionalHalve(fancyMul(THREAD_WEIGHTS[lane].y,
+                                  THREAD_WEIGHTS[G_W + line].y),
+                         base_frac > line_frac);
+  const u32 even_frac = fracBits(even_logical);
+  F w = slot == 0u ? base
+                   : optionalHalve(fancyMul(base, fweightStep(slot)),
+                                   even_frac > base_frac);
+  if (logical & 1u)
+    w = optionalHalve(fancyMul(w, WEIGHT_STEP),
+                      even_frac + FRAC_BPW_HI > FRAC_BPW_HI);
+  return w;
+}
+
+KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIGHTS) {
+  local GF61 lds61[LDS_BYTES / sizeof(GF61)];
+  local F2 *ldsF2 = (local F2 *) lds61;
+  local GF31 *lds31 = (local GF31 *) lds61;
+  F2 uF2[NW];
+  GF31 u31[NW];
+  GF61 u61[NW];
+
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 row = g / SMALL_HEIGHT;
+  const u32 y = g - row * SMALL_HEIGHT;
+
+  P(F2) outF2 = (P(F2)) out;
+  TrigFP32 smallTrigF2 = (TrigFP32) smallTrig;
+  P(GF31) out31 = (P(GF31)) (out + DISTGF31);
+  TrigGF31 smallTrig31 = (TrigGF31) (smallTrig + DISTWTRIGGF31);
+  P(GF61) out61 = (P(GF61)) (out + DISTGF61);
+  TrigGF61 smallTrig61 = (TrigGF61) (smallTrig + DISTWTRIGGF61);
+
+  const u32 m31_bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * M31_LOG2_ROOT_TWO % 31u;
+  const u32 m31_step = (m31_bigword_weight_shift + 30u) % 31u;
+  const u32 m61_bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * M61_LOG2_ROOT_TWO % 61u;
+  const u32 m61_step = (m61_bigword_weight_shift + 60u) % 61u;
+
+  const u32 first_binary_pair = me * SMALL_HEIGHT + y;
+  u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
+  u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const Word word0 = pfaLoadCanonicalWord(in, n0);
+    const Word word1 = pfaLoadCanonicalWord(in, n1);
+    const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
+    const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+    uF2[i] = U2((F) word0 * pfaWeightFP32(n0, THREAD_WEIGHTS),
+                 (F) word1 * pfaWeightFP32(n1, THREAD_WEIGHTS));
+    u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
+    u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
+    n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
+    n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
+  }
+
+  fft_WIDTH(ldsF2, uF2, smallTrigF2, 1, me);
+  writeCarryFusedLine(uF2, outF2, g, me);
+  fft_WIDTH(lds31, u31, smallTrig31, 1, me);
+  writeCarryFusedLine(u31, out31, g, me);
+  fft_WIDTH(lds61, u61, smallTrig61, 1, me);
+  writeCarryFusedLine(u61, out61, g, me);
+}
+
+#endif  // PFA_RADIX
 
 
 #else

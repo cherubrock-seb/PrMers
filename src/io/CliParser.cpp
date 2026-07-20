@@ -126,11 +126,13 @@ void printUsage(const char* progName) {
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
     std::cout << "  Backend selection (default: automatic Marin/Aevum):" << std::endl;
-    std::cout << "  -aevum               : Strictly force Aevum; exit with an error when no FFT3161 plan is available" << std::endl;
+    std::cout << "  -aevum               : Strictly force Aevum; exit with an error when no supported Aevum plan is available" << std::endl;
     std::cout << "  -engine-marin        : Force the Marin engine::Reg backend" << std::endl;
     std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode (macOS still defaults to Marin unless -aevum is used)" << std::endl;
     std::cout << "  -marin               : Legacy internal PrMers NTT path (not supported with -llunsafe)" << std::endl;
-    std::cout << "  -aevum-fft <spec>    : Force an Aevum FFT3161 shape, for example 1:1024:8:512" << std::endl;
+    std::cout << "  -aevum-fft <spec>    : Force an Aevum plan; pfa9:4 is capacity-adaptive, pfa9full:4 forces all three planes" << std::endl;
+    std::cout << "  -pfa9-type4          : Force type-4 policy; automatically elides redundant FP32 when exact FFT3161 is sufficient" << std::endl;
+    std::cout << "  -pfa9-type4-full     : Diagnostic only: force full FP32+GF31+GF61 PFA9 plan" << std::endl;
     std::cout << "  -pfa [3|9]           : Enable/force native Aevum Good-Thomas PFA (auto when omitted)" << std::endl;
     std::cout << "  -pfa3 / -pfa9        : Force native Aevum PFA radix 3 or radix 9" << std::endl;
     std::cout << "  -pfa-off             : Keep the stock power-of-two Aevum plan" << std::endl;
@@ -269,6 +271,26 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.force_engine_marin = false;
             opts.marin = true;
             opts.aevum_fft_spec = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-pfa9-type4") == 0 ||
+                 std::strcmp(argv[i], "-pfa9-type4-fast") == 0 ||
+                 std::strcmp(argv[i], "-pfa9-fft323161") == 0) {
+            opts.aevum = true;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+            opts.aevum_pfa_radix = 9;
+            opts.aevum_pfa_off = false;
+            opts.aevum_fft_spec = "pfa9:4:512:9:512:202";
+        }
+        else if (std::strcmp(argv[i], "-pfa9-type4-full") == 0) {
+            opts.aevum = true;
+            opts.aevum_auto = false;
+            opts.force_engine_marin = false;
+            opts.marin = true;
+            opts.aevum_pfa_radix = 9;
+            opts.aevum_pfa_off = false;
+            opts.aevum_fft_spec = "pfa9full:4:512:9:512:202";
         }
         else if (std::strcmp(argv[i], "-pfa-off") == 0 ||
                  std::strcmp(argv[i], "-no-pfa") == 0) {

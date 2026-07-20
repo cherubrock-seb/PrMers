@@ -106,14 +106,19 @@ KERNEL(OUT_WG) fftMiddleOut(P(T2) out, CP(T2) in, Trig trig) {
 
   readMiddleOutLine(u, inF2, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+  // The odd-axis inverse above is normalized.  Width/height still contribute
+  // the binary transform length, so exclude PFA_RADIX from the final scale.
+  const float factor = (float) PFA_RADIX / (NWORDS * 2);
+#pragma unroll
+  for (u32 i = 0; i < MIDDLE; ++i) u[i] *= factor;
+#else
   middleMul(u, x, trigF2);
-
   fft_MIDDLE(u);
-
-  // FFT results come out multiplied by the FFT length (NWORDS * 2).
   const float factor = 1.0f / (NWORDS * 2);
-
   middleMul2(u, y, x, factor, trigF2);
+#endif
 
   dependentLaunch();       // Next kernel will be carryFused which must dependentLaunchWait before reading data
 
@@ -499,14 +504,19 @@ KERNEL(256) fftMiddleOut(P(T2) out, P(T2) in, Trig trig) {
 
   readMiddleOutLine(u, inF2, y, x);
 
+#if PFA_RADIX
+  ifft_MIDDLE(u);
+  // The odd-axis inverse above is normalized.  Width/height still contribute
+  // the binary transform length, so exclude PFA_RADIX from the final scale.
+  const float factor = (float) PFA_RADIX / (NWORDS * 2);
+#pragma unroll
+  for (u32 i = 0; i < MIDDLE; ++i) u[i] *= factor;
+#else
   middleMul(u, x, trigF2);
-
   fft_MIDDLE(u);
-
-  // FFT results come out multiplied by the FFT length (NWORDS * 2).
   const float factor = 1.0f / (NWORDS * 2);
-
   middleMul2(u, y, x, factor, trigF2);
+#endif
 
   dependentLaunch();       // Next kernel will be carryFused which must dependentLaunchWait before reading data
 
