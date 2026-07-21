@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.70-alpha-v99.76-aevum-macos-throughput-policy-fix";
+    const std::string PRMERS_VERSION = "4.20.71-alpha-v99.77-aevum-macos-throughput-policy-fix-release";
 } // namespace core
 
 #endif // VERSION_HPP
