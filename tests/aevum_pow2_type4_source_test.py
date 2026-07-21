@@ -18,7 +18,7 @@ assert 'fft.pfa_radix == 9' in gpu
 assert 'throughput:auto' in fft
 assert 'AEVUM_AUTO_POW2_TYPE4_COST' in fft
 assert 'AEVUM_AUTO_PFA9_COST' in fft
-assert '4.20.69-alpha-v99.75-aevum-throughput-auto-pfa-bridge-exp13' in version
+assert '4.20.70-alpha-v99.76-aevum-macos-throughput-policy-fix' in version
 assert 'AEVUM_PFA_LEAD_BRIDGE' in engine
 assert 'fftPCarryB' in gpu
 print('PrMers Aevum throughput-auto and PFA9 bridge source test passed')

@@ -51,14 +51,51 @@ int main() {
     throw std::runtime_error("forced radix-9 did not select optimized variant 202");
 
   FFTConfig throughput = FFTConfig::bestFit(args, 175000039, "throughput:auto");
-  if (throughput.spec() != "4:512:8:512:202" || throughput.size() != 4194304) {
-    std::cerr << "throughput selected " << throughput.spec() << " size=" << throughput.size() << std::endl;
-    throw std::runtime_error("throughput selector did not choose the measured 4M FFT323161 lead-cache plan");
+#if defined(__APPLE__)
+  // The FFT323161 lead-cache candidates are intentionally disabled on Apple.
+  // throughput:auto must therefore use the admissible native PFA9 plan.
+  FFTConfig applePfa = FFTConfig::bestFit(args, 175000039, "pfa:auto");
+  if (!throughput.isPfa() || throughput.pfa_radix != 9 ||
+      throughput.spec() != applePfa.spec() ||
+      throughput.size() != applePfa.size()) {
+    std::cerr << "macOS throughput selected " << throughput.spec()
+              << " size=" << throughput.size()
+              << ", expected " << applePfa.spec()
+              << " size=" << applePfa.size() << std::endl;
+    throw std::runtime_error(
+        "macOS throughput selector did not choose the native PFA9 plan");
   }
-  FFTConfig pow2auto = FFTConfig::bestFit(args, 175000039, "pow2:auto");
-  if (pow2auto.spec() != "4:512:8:512:202")
-    throw std::runtime_error("power-of-two selector did not choose the measured FFT323161 plan");
+#else
+  if (throughput.spec() != "4:512:8:512:202" ||
+      throughput.size() != 4194304) {
+    std::cerr << "throughput selected " << throughput.spec()
+              << " size=" << throughput.size() << std::endl;
+    throw std::runtime_error(
+        "throughput selector did not choose the measured 4M FFT323161 lead-cache plan");
+  }
+#endif
 
-  std::cout << "Aevum throughput-auto, power-of-two and PFA9 plan test passed" << std::endl;
+  FFTConfig pow2auto = FFTConfig::bestFit(args, 175000039, "pow2:auto");
+#if defined(__APPLE__)
+  // pow2:auto falls back to the normal stock plan when Apple excludes the
+  // experimental FFT323161 lead-cache family.
+  FFTConfig appleStock = FFTConfig::bestFit(args, 175000039, "");
+  if (pow2auto.isPfa() ||
+      pow2auto.spec() != appleStock.spec() ||
+      pow2auto.size() != appleStock.size()) {
+    std::cerr << "macOS pow2:auto selected " << pow2auto.spec()
+              << " size=" << pow2auto.size()
+              << ", expected stock " << appleStock.spec()
+              << " size=" << appleStock.size() << std::endl;
+    throw std::runtime_error(
+        "macOS power-of-two selector did not retain the stock plan");
+  }
+#else
+  if (pow2auto.spec() != "4:512:8:512:202")
+    throw std::runtime_error(
+        "power-of-two selector did not choose the measured FFT323161 plan");
+#endif
+
+  std::cout << "Aevum platform-aware throughput-auto, power-of-two and PFA9 plan test passed" << std::endl;
   return 0;
 }
