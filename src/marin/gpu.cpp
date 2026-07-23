@@ -85,6 +85,25 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                 decision.aevum_transform, decision.fft_spec);
     }
 
+#if defined(__APPLE__)
+    if (selected == gpu_backend::aevum &&
+        selected_workload != gpu_workload::prp &&
+        selected_workload != gpu_workload::ll) {
+        const std::string reason =
+            "Apple OpenCL 1.2 Aevum is currently validated only for PRP/LL stock FFT3161; "
+            "ECM and P-1 use Marin because Aevum mixed/prepared multiplication failed invariant/Gerbicz validation";
+        publish(configured == gpu_backend::auto_select ? "Auto" : "Forced Aevum rejected",
+                configured == gpu_backend::auto_select ? "Marin" : "Unavailable",
+                reason, 0, "");
+        if (configured == gpu_backend::auto_select) {
+            std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
+                      << ": Marin selected (" << reason << ")." << std::endl;
+            return new engine_gpu(p, reg_count, device, verbose);
+        }
+        throw std::runtime_error(reason);
+    }
+#endif
+
     if (selected == gpu_backend::aevum) {
         if (configured != gpu_backend::auto_select) {
             std::cout << "[Backend Aevum] " << aevum_workload_name(selected_workload)

@@ -74,11 +74,22 @@ int main(int argc, char** argv) {
   }
 
   char type4[64]{};
+#if defined(__APPLE__)
+  if (resolve(175000039u, "4:512:8:512:202", type4, sizeof(type4))) {
+    throw std::runtime_error(std::string("Apple unexpectedly accepted FFT323161 plan: ") + type4);
+  }
+  const std::string apple_type4_error = error() ? error() : "";
+  if (apple_type4_error.find("supports only stock FFT3161") == std::string::npos) {
+    throw std::runtime_error(std::string("unexpected Apple FFT323161 rejection: ") + apple_type4_error);
+  }
+  std::cout << "Aevum Apple type4 rejection -> " << apple_type4_error << std::endl;
+#else
   if (!resolve(175000039u, "4:512:8:512:202", type4, sizeof(type4)) ||
       std::string(type4) != "4:512:8:512:202") {
     throw std::runtime_error(std::string("power-of-two FFT323161 resolution failed: ") + error());
   }
   std::cout << "Aevum power-of-two type4 -> " << type4 << std::endl;
+#endif
 
   char invalid[64]{};
   if (resolve(216091u, "1:1024:13:256", invalid, sizeof(invalid))) {

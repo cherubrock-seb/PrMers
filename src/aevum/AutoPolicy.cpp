@@ -26,6 +26,13 @@ struct PolicyProfile {
     const char* compatibility_reason = nullptr;
 };
 
+const char* plan_family(const std::string& spec) {
+    if (spec.rfind("4:", 0) == 0) return "Type4 FFT323161";
+    if (spec.rfind("pfa9:", 0) == 0) return "PFA9";
+    if (spec.rfind("pfa3:", 0) == 0) return "PFA3";
+    return "Type1 FFT3161";
+}
+
 PolicyProfile profile_for(const engine::gpu_workload workload, const std::size_t register_count) {
     switch (workload) {
         case engine::gpu_workload::prp:
@@ -118,6 +125,7 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
         << ", Marin=" << result.marin_transform
         << ", ratio=" << std::fixed << std::setprecision(2) << ratio
         << ", limit=" << std::fixed << std::setprecision(2) << limit
+        << ", family=" << plan_family(result.fft_spec)
         << ", FFT=" << result.fft_spec;
     result.detail = out.str();
     result.use_aevum = ratio <= limit;

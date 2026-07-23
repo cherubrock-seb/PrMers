@@ -193,11 +193,14 @@ int App::runECMMarin()
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
     const bool forceCurveSeed = (options.curve_seed != 0ULL);   // deterministic RNG seed
+    const uint64_t forcedCurveSeedValue = options.curve_seed;
     const bool forceSigma = !options.sigma.empty();      // force Suyama sigma (curve)
     const uint32_t ui_interval_ms = options.ecm_progress_interval_ms ? options.ecm_progress_interval_ms : 2000;
 
-   // const uint32_t ui_interval_ms = options.ecm_progress_interval_ms ? options.ecm_progress_interval_ms : 2000;
-    if (forceCurveSeed || forceSigma) curves = 1ULL;
+    // Preserve the old single-curve meaning of -seed, except when the caller
+    // explicitly asks to continue through K>1 curves after a factor.
+    const bool forcedSeedSeries = forceCurveSeed && options.ecm_continue_after_factor && curves > 1;
+    if ((forceCurveSeed && !forcedSeedSeries) || forceSigma) curves = 1ULL;
 
     auto splitmix64_step = [](uint64_t& x)->uint64_t{ x += 0x9E3779B97f4A7C15ULL; uint64_t z=x; z^=z>>30; z*=0xBF58476D1CE4E5B9ULL; z^=z>>27; z*=0x94D049BB133111EBULL; z^=z>>31; return z; };
     auto splitmix64_u64 = [&](uint64_t seed0)->uint64_t{ uint64_t s=seed0; return splitmix64_step(s); };
@@ -629,7 +632,7 @@ int App::runECMMarin()
     auto now_ns_seed = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
     uint64_t base_seed = 0;
     if (forceCurveSeed) {
-        base_seed = options.curve_seed;
+        base_seed = forcedCurveSeedValue;
     } else if (options.seed) {
         base_seed = options.seed;
     } else if (have_resume_seed) {
@@ -682,7 +685,13 @@ int App::runECMMarin()
         } else {
             curve_seed = mix64(base_seed, c);
         }
-        if (forceCurveSeed) { curve_seed = options.curve_seed; base_seed = curve_seed; }
+        if (forcedSeedSeries) {
+            curve_seed = (c == 0) ? forcedCurveSeedValue : mix64(forcedCurveSeedValue, c);
+            base_seed = forcedCurveSeedValue;
+        } else if (forceCurveSeed) {
+            curve_seed = forcedCurveSeedValue;
+            base_seed = forcedCurveSeedValue;
+        }
 
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
@@ -1322,8 +1331,8 @@ int App::runECMMarin()
                 mode_name="montgomery"; torsion_name="none";
 
                 mpz_class sigma_mpz;
-                if (forceCurveSeed){
-                    curve_seed = options.curve_seed;
+                if (forceCurveSeed && !forcedSeedSeries){
+                    curve_seed = forcedCurveSeedValue;
                 }
 
                 if (forceSigma) {
@@ -1462,8 +1471,8 @@ int App::runECMMarin()
                     xr = RX; yr=RY; return 0;
                 };
 
-                if (forceCurveSeed){
-                    base_seed = options.curve_seed;
+                if (forceCurveSeed && !forcedSeedSeries){
+                    base_seed = forcedCurveSeedValue;
                 }
                 curve_seed = base_seed;
                 uint64_t k = 2 + (mix64(base_seed, c ^ 0xA5A5A5A5ULL) % 64ULL);
@@ -1518,8 +1527,8 @@ int App::runECMMarin()
             }
             else if (picked_mode == 2)
             {
-                if (forceCurveSeed){
-                    curve_seed = options.curve_seed;
+                if (forceCurveSeed && !forcedSeedSeries){
+                    curve_seed = forcedCurveSeedValue;
                 }
                 mode_name="montgomery"; torsion_name="8";
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
@@ -1549,8 +1558,8 @@ int App::runECMMarin()
             {
                 mode_name="edwards--conv-->montgomery"; torsion_name="none";
                 mpz_class sigma_mpz;
-                if (forceCurveSeed){
-                    curve_seed = options.curve_seed;
+                if (forceCurveSeed && !forcedSeedSeries){
+                    curve_seed = forcedCurveSeedValue;
                 }
 
                 if (forceSigma) {
@@ -1609,8 +1618,8 @@ int App::runECMMarin()
             else
             {
                 mode_name="edwards--conv-->montgomery"; torsion_name="8";
-                if (forceCurveSeed){
-                    curve_seed = options.curve_seed;
+                if (forceCurveSeed && !forcedSeedSeries){
+                    curve_seed = forcedCurveSeedValue;
                 }
                 mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
                 options.sigma_hex = a.get_str(16);
@@ -1822,6 +1831,12 @@ int App::runECMMarin()
                 write_result(); publish_json();
                 options.B2 = B2;
                 delete eng;
+                if (!known && !options.ecm_continue_after_factor) {
+                    std::cout << "[ECM] New factor found; stopping ECM by default. "
+                                 "Use -ecm-continue-after-factor to run later curves.\n";
+                    return 0;
+                }
+                if (!known) std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                 continue;
             }
             else{
@@ -2056,7 +2071,12 @@ int App::runECMMarin()
 
                     if (!resume_this_chunk) {
                         int setup_rc = setup_te_stage2_base();
-                        if (setup_rc == 2) return 0;
+                        if (setup_rc == 2) {
+                            if (!options.ecm_continue_after_factor) return 0;
+                            std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
+                            handled_known_factor = true;
+                            break;
+                        }
                         if (setup_rc == 1) {
                             handled_known_factor = true;
                             break;
@@ -2127,7 +2147,9 @@ int App::runECMMarin()
                     if (gz > 1 && gz < N) {
                         std::cout << std::endl;
                         int factor_rc = publish_stage2_factor(gz);
-                        if (factor_rc == 2) return 0;
+                        if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                        if (factor_rc == 2)
+                            std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                         handled_known_factor = true;
                         break;
                     }
@@ -2224,7 +2246,11 @@ auto setup_stage2_base = [&]() -> int {
 
             if (!resume_stage2) {
                 int setup_rc = setup_stage2_base();
-                if (setup_rc == 2) return 0;
+                if (setup_rc == 2) {
+                    if (!options.ecm_continue_after_factor) return 0;
+                    std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
+                    continue;
+                }
                 if (setup_rc == 1) continue;
                 if (setup_rc < 0) {
                     delete eng;
@@ -2386,7 +2412,9 @@ auto setup_stage2_base = [&]() -> int {
                     if (gz > 1 && gz < N) {
                         std::cout << std::endl;
                         int factor_rc = publish_stage2_factor(gz);
-                        if (factor_rc == 2) return 0;
+                        if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                        if (factor_rc == 2)
+                            std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                         next_curve_after_stage2 = true;
                         break;
                     }
@@ -2397,7 +2425,9 @@ auto setup_stage2_base = [&]() -> int {
                         mpz_class gg_hit = result_factor > 1 ? result_factor : gz;
                         std::cout << std::endl;
                         int factor_rc = publish_stage2_factor(gg_hit);
-                        if (factor_rc == 2) return 0;
+                        if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                        if (factor_rc == 2)
+                            std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                         next_curve_after_stage2 = true;
                         break;
                     }
@@ -2468,7 +2498,9 @@ auto setup_stage2_base = [&]() -> int {
             bool found2 = (gg2 > 1 && gg2 < N);
             if (found2) {
                 int factor_rc = publish_stage2_factor(gg2);
-                if (factor_rc == 2) return 0;
+                if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                if (factor_rc == 2)
+                    std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                 continue;
             }
             }

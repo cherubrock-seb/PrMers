@@ -842,8 +842,14 @@ int App::runECMMarinTwistedEdwards()
     uint64_t curves = options.nmax ? options.nmax : (options.K ? options.K : 250);
     const bool verbose = true;
     const bool forceCurve = (options.curve_seed != 0ULL);
+    const uint64_t forcedCurveSeedValue = options.curve_seed;
     const bool forceSigma = !options.sigma.empty();
-    if (forceCurve) curves =1ULL;
+    // A fixed curve seed historically implied exactly one curve.  When the
+    // caller explicitly requests continuation and K>1, use that seed for curve
+    // 1 and derive later deterministic seeds from it so the continuation option
+    // can actually exercise subsequent curves.
+    const bool forcedSeedSeries = forceCurve && options.ecm_continue_after_factor && curves > 1;
+    if (forceCurve && !forcedSeedSeries) curves = 1ULL;
     const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
     const bool stage2_debug_checks = true;
@@ -1705,7 +1711,9 @@ int App::runECMMarinTwistedEdwards()
     auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 
     uint64_t base_seed;
-    if (options.seed) {
+    if (forceCurve) {
+        base_seed = forcedCurveSeedValue;
+    } else if (options.seed) {
         base_seed = options.seed;
     } else if (have_resume_seed) {
         base_seed = resume_curve_seed;
@@ -1799,11 +1807,14 @@ int App::runECMMarinTwistedEdwards()
         if (!options.seed && have_resume_seed && c == resume_curve_idx) {
             curve_seed = resume_curve_seed;
             base_seed  = curve_seed;
+        } else if (forcedSeedSeries) {
+            curve_seed = (c == 0) ? forcedCurveSeedValue : mix64(forcedCurveSeedValue, c);
+            base_seed = forcedCurveSeedValue;
         } else {
             curve_seed = mix64(base_seed, c);
-            if (forceCurve){
-                curve_seed = options.curve_seed;
-                base_seed  = curve_seed;
+            if (forceCurve) {
+                curve_seed = forcedCurveSeedValue;
+                base_seed  = forcedCurveSeedValue;
             }
         }
 
@@ -3441,7 +3452,18 @@ int App::runECMMarinTwistedEdwards()
                     publish_json();
                 }
 
+                if (!known && options.ecm_continue_after_factor) {
+                    const std::string fs = gf.get_str();
+                    if (std::find(options.knownFactors.begin(), options.knownFactors.end(), fs) == options.knownFactors.end())
+                        options.knownFactors.push_back(fs);
+                    std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
+                }
                 delete eng;
+                if (!known && !options.ecm_continue_after_factor) {
+                    std::cout << "[ECM] New factor found; stopping ECM by default. "
+                                 "Use -ecm-continue-after-factor to run later curves.\n";
+                    return 0;
+                }
                 continue;
             }
         }
@@ -3502,6 +3524,9 @@ int App::runECMMarinTwistedEdwards()
                 fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
 
                 if (!known) {
+                    const std::string fs = gg.get_str();
+                    if (std::find(options.knownFactors.begin(), options.knownFactors.end(), fs) == options.knownFactors.end())
+                        options.knownFactors.push_back(fs);
                     result_factor = gg;
                     result_status = "found";
                     curves_tested_for_found = c+1;
@@ -3687,7 +3712,8 @@ int App::runECMMarinTwistedEdwards()
                     int setup_rc = setup_te_stage2_base();
                     if (setup_rc == 1) {
                         int factor_rc = publish_stage2_factor(result_factor);
-                        if (factor_rc == 2) return 0;
+                        if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                        if (factor_rc == 2) std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                         handled_known_factor = true;
                         break;
                     }
@@ -3762,7 +3788,8 @@ int App::runECMMarinTwistedEdwards()
                 if (gz > 1 && gz < N) {
                     std::cout << std::endl;
                     int factor_rc = publish_stage2_factor(gz);
-                    if (factor_rc == 2) return 0;
+                    if (factor_rc == 2 && !options.ecm_continue_after_factor) return 0;
+                    if (factor_rc == 2) std::cout << "[ECM] Continuing with later curves by -ecm-continue-after-factor.\n";
                     handled_known_factor = true;
                     break;
                 }

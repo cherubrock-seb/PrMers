@@ -101,6 +101,9 @@ struct CliOptions {
     bool pm1_vtrace_product_tree = false; // Experimental v62 bucket-local product-tree Stage 2 accumulation (opt-in)
     uint32_t pm1_vtrace_product_tree_width = 16; // Scratch fan-in/chunk width for product-tree experiment
     bool pm1_no_stage1_gcd = false;
+    // Default safety policy: a newly discovered Stage-1 factor completes the
+    // requested P-1 job. Opt in only when Stage 2 is intentionally required.
+    bool pm1_continue_stage2_after_factor = false;
     std::string p95path;
     int max_local_size1 = 0;
     int max_local_size2 = 0;
@@ -135,6 +138,9 @@ struct CliOptions {
     uint64_t curves_tested_for_found = 0;
     int invarianterror = 0;
     uint32_t ecm_progress_interval_ms = 2000;
+    // Default ECM policy stops after the first factor that was not supplied in
+    // -factors. This flag keeps running the remaining curves after reporting it.
+    bool ecm_continue_after_factor = false;
     bool s3only = false;
     bool s4only = false;
 };
