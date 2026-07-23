@@ -1183,3 +1183,22 @@ The exact plan `4:512:8:512:202` is now accepted by Aevum.  Consecutive
 GPU retains `LEAD_WIDTH` and upstream `carryFused` between iterations.  See
 `README_POW2_TYPE4_LEAD_CACHE.md` for validation and A/B commands.
 
+
+### Stable correctness release v99.85
+
+The v99.85 release excludes the experimental M19 path. It contains the classic
+P-1 Stage 2 BSGS correctness fix, deterministic ECM/P-1 stop/continue policies,
+and the conservative Apple Aevum safety policy described in
+`RELEASE_V99.85.md`.
+
+To compare Aevum Type1, Type4 and PFA plans by workload on Linux, run:
+
+```bash
+PRMERS_DEVICE=1 PRMERS_PLAN_AUDIT_PROFILE=standard \
+  ./scripts/audit_aevum_plans_ubuntu.sh
+```
+
+The audit requires word-exact results before a faster plan can be recommended.
+`throughput:auto` remains the PRP/LL policy; ECM and P-1 Stage 1 remain on the
+validated Type1 policy until the workload audit proves a faster exact plan.
+P-1 Stage 2 V-trace and classic BSGS use Marin.

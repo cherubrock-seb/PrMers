@@ -104,6 +104,7 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-vtrace-product-tree-width <N> : (Experimental) Product-tree scratch/chunk width, default 16" << std::endl;
     std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested" << std::endl;
     std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
+    std::cout << "  -pm1-continue-stage2-after-factor : Continue requested Stage 2 even when Stage 1 finds a new factor (default: stop)" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
@@ -121,6 +122,7 @@ void printUsage(const char* progName) {
     
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
     std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
+    std::cout << "  -ecm-continue-after-factor  : Continue with later curves after finding a new factor (default: stop)" << std::endl;
     std::cout << "  -p95path <path>      : (Optional) Prime95/mprime directory for ECM Stage2 handoff; enables Prime95 Stage2" << std::endl;
     std::cout << "  -nop95stage2         : (Optional) Disable Prime95 Stage2 handoff even if -p95path is set" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
@@ -495,6 +497,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.erroriter = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
         }
+        else if (std::strcmp(argv[i], "-ecm-continue-after-factor") == 0 ||
+                 std::strcmp(argv[i], "--ecm-continue-after-factor") == 0 ||
+                 std::strcmp(argv[i], "-ecm-continue-curves-after-factor") == 0) {
+            opts.ecm_continue_after_factor = true;
+        }
         else if (std::strcmp(argv[i], "-ecm_check_interval") == 0 && i + 1 < argc) {
             opts.ecm_check_interval = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
             ++i;
@@ -611,6 +618,11 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.pm1_ultralowmem = true;
             opts.pm1_s2_resume2reg = true;
             opts.gerbiczli = false;
+        }
+        else if (std::strcmp(argv[i], "-pm1-continue-stage2-after-factor") == 0 ||
+                 std::strcmp(argv[i], "--pm1-continue-stage2-after-factor") == 0 ||
+                 std::strcmp(argv[i], "-pm1-continue-after-factor") == 0) {
+            opts.pm1_continue_stage2_after_factor = true;
         }
         else if (std::strcmp(argv[i], "-pm1-vtrace-off") == 0 ||
                  std::strcmp(argv[i], "--pm1-vtrace-off") == 0 ||

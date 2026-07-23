@@ -937,7 +937,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #endif
   K(ktailMulLowGF61,       "tailmul.cl", "tailMulGF61", hN / nH / 2, (kernelDefines(K61) + "-DMUL_LOW=1").c_str()),
 #if defined(__APPLE__)
-  K(kfftMidOutGF61,        "fftmiddleout.cl", fft.shape.middle >= 8 ? "fftMiddleOutGF61ApplePlaceholder" : "fftMiddleOutGF61", hN / (BIG_H / SMALL_H), (kernelDefines(K61) + numCudaRegisters(MIDOUT61)).c_str()),
+  K(kfftMidOutGF61,        "fftmiddleout.cl", "fftMiddleOutGF61ApplePlaceholder", hN / (BIG_H / SMALL_H), (kernelDefines(K61) + numCudaRegisters(MIDOUT61)).c_str()),
   K(kfftMidOutGF61LoadScalarApple, "fftmiddleout.cl", "fftMiddleOutGF61LoadScalarApple",
       hN / (BIG_H / SMALL_H) * fft.shape.middle, kernelDefines(K61).c_str()),
   K(kfftMidOutGF61MulScalarApple, "fftmiddleout.cl", "fftMiddleOutGF61MulScalarApple",
@@ -2105,7 +2105,7 @@ void Gpu::replay(void) {
         if (cache_group == 2) kfftMidOutGF31(*out, *in);
         if (cache_group == 3) {
 #if defined(__APPLE__)
-          if (fft.shape.fft_type == FFT3161 && fft.shape.middle >= 8) {
+          if (fft.shape.fft_type == FFT3161) {
             kfftMidOutGF61LoadScalarApple(bufAppleTailMulGF61, *in);
             kfftMidOutGF61MulScalarApple(bufAppleTailMulGF61, bufTrigM);
             kfftMidOutGF61FftApple(bufAppleTailMulGF61);

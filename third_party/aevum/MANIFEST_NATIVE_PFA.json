@@ -1,6 +1,6 @@
 {
-  "root": "aevum-engine-v0.3.68-throughput-auto-pfa-bridge-exp13",
-  "version": "v0.3.68-throughput-auto-pfa-bridge-exp13",
+  "root": "aevum-engine-v0.3.77-stable-apple-safety-bsgs-fix",
+  "version": "v0.3.77-stable-apple-safety-bsgs-fix",
   "feature": "throughput-cost auto selector, validated power-of-two lead cache, opt-in PFA9 carry/fftP bridge",
   "file_count": 248,
   "files": [

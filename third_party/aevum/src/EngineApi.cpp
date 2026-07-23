@@ -283,10 +283,16 @@ public:
     check_reg(src);
     flush_pending_square();
     if (factor == 0) throw std::runtime_error("Aevum multiplication factor must be positive");
-    const size_t slot = find_prepared(src, true);
+    size_t slot = find_prepared(src, true);
 #if defined(__APPLE__)
+    // ECM keeps more prepared constants than the deliberately small Apple LRU.
+    // Rebuild an evicted operand from its canonical register instead of falling
+    // through to the unsupported generic Apple tailMul path.
     if (slot == no_prepared) {
-      throw std::runtime_error("Apple Aevum multiplication requires set_multiplicand/prepare; unprepared generic tailMul is not used");
+      if (prepared_buffers_.empty())
+        throw std::runtime_error("Apple Aevum prepared multiplication cache is unavailable");
+      slot = acquire_prepared(src);
+      gpu_->regPrepare(prepared_buffers_[slot], reg(src));
     }
     gpu_->regMulPrepared(reg(dst), prepared_buffers_[slot], 1);
 #else

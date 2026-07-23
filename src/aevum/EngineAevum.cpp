@@ -266,6 +266,7 @@ public:
         }
         std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT323161"
                   << " | transform=" << transform_size_
+                  << " | requested-plan=" << (fft_spec.empty() ? "plugin-auto" : fft_spec)
                   << " | regs=" << register_count_
                   << " | plugin=" << api_.path
                   << " | tune=" << api_.tune_dir().string()

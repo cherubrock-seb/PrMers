@@ -29,7 +29,7 @@ for member in (
 ):
     assert f"Kernel {member};" in hdr
 
-assert 'fft.shape.middle >= 8 ? "fftMiddleOutGF61ApplePlaceholder" : "fftMiddleOutGF61"' in gpu
+assert 'K(kfftMidOutGF61,        "fftmiddleout.cl", "fftMiddleOutGF61ApplePlaceholder"' in gpu
 
 # All stages except the isolated FFT are scalar in MIDDLE.
 load = cl[cl.index("KERNEL(OUT_WG) fftMiddleOutGF61LoadScalarApple"):
@@ -118,7 +118,7 @@ for middle in (2, 4, 8, 16):
     assert [k for k in range(middle)] == list(range(middle))
 
 # Dispatch uses the existing GF61-only scratch in strict algorithm order.
-needle = "if (fft.shape.fft_type == FFT3161 && fft.shape.middle >= 8)"
+needle = "if (fft.shape.fft_type == FFT3161)"
 start = gpu.index(needle, gpu.index("if (kern == KMIDOUT)"))
 block = gpu[start:gpu.index("} else {", start)]
 ordered = [
@@ -132,4 +132,4 @@ positions = [block.index(x) for x in ordered]
 assert positions == sorted(positions)
 assert "Buffer<double> bufAppleMiddleOut" not in hdr
 
-print("Aevum Apple GF61 middle-out scalar five-stage test passed")
+print("Aevum Apple GF61 middle-out scalar five-stage all-middle test passed")

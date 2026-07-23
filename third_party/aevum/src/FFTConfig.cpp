@@ -357,6 +357,15 @@ float FFTConfig::maxBpw() const {
 }
 
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
+#if defined(__APPLE__)
+  // Apple exposes OpenCL 1.2 through a legacy compiler.  The staged FFT3161
+  // path is supported, while the monolithic Type-4 and native-PFA pipelines
+  // are not yet runtime-safe.  Reject explicit requests before kernel creation
+  // instead of failing later with CL_INVALID_KERNEL.
+  if (spec.rfind("4:", 0) == 0 || spec.rfind("pfa", 0) == 0) {
+    throw runtime_error("Apple OpenCL 1.2 supports only stock FFT3161 Aevum plans; Type4/PFA is disabled");
+  }
+#endif
   // Throughput selector for long PRP/LL square chains.  Transform length is
   // not a sufficient proxy: a non-PFA FFT323161 plan can retain LEAD_WIDTH
   // and replace fftW+carryA+carryB+fftP with carryFused.  The default cost
@@ -391,6 +400,7 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     }
 #endif
 
+#if !defined(__APPLE__)
     if (spec == "throughput:auto") {
       FFTConfig pfa = bestFit(args, E, "pfa:auto");
       if (pfa.isPfa()) {
@@ -401,6 +411,7 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
                               pfa.pfa_radix == 9 ? "PFA9 FFT3161" : "PFA3 FFT3161"});
       }
     }
+#endif
 
     sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
       if (a.score != b.score) return a.score < b.score;

@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.68-throughput-auto-pfa-bridge-exp13
+AEVUM_VERSION ?= v0.3.77-stable-apple-safety-bsgs-fix
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -164,6 +164,7 @@ include $(wildcard $(patsubst %,$(DEPDIR)/%.d,$(basename $(SRCS1))))
 
 
 ENGINE_API_TEST := build-tests/aevum-engine-api-load-test
+WORKLOAD_PLAN_AUDIT := build-tests/aevum-workload-plan-audit
 
 .PHONY: test-engine-api
 test-engine-api: engine-lib $(ENGINE_API_TEST)
@@ -172,6 +173,13 @@ test-engine-api: engine-lib $(ENGINE_API_TEST)
 $(ENGINE_API_TEST): tests/engine_api_load_test.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) $< $(DL_LIBS) -o $@
+
+.PHONY: workload-plan-audit-build
+workload-plan-audit-build: engine-lib $(WORKLOAD_PLAN_AUDIT)
+
+$(WORKLOAD_PLAN_AUDIT): tests/workload_plan_audit.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $< $(DL_LIBS) -o $@
 
 HOST_TEST := build-tests/aevum-host-gf-test
 STATE_TEST := build-tests/aevum-state-compact-test

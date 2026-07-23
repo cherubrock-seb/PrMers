@@ -345,13 +345,25 @@ App::App(int argc, char** argv)
 
     // PRP/LL select by predicted iteration cost, not transform length alone.
     // The power-of-two FFT323161 lead-cache path can beat a smaller PFA plan
-    // because it retains LEAD_WIDTH and uses carryFused.  -pfa-off keeps the
-    // same throughput selector but restricts it to power-of-two candidates.
+    // because it retains LEAD_WIDTH and uses carryFused.  Apple remains on the
+    // staged stock FFT3161 path: its legacy OpenCL 1.2 compiler does not yet
+    // support the monolithic Type4/PFA kernels safely.
     if (o.aevum_fft_spec.empty() &&
         (workload == engine::gpu_workload::prp || workload == engine::gpu_workload::ll)) {
+#if defined(__APPLE__)
+        o.aevum_fft_spec = "pow2:auto";
+        if (o.aevum) {
+            std::cout << "[Backend Apple Aevum] PRP/LL uses staged stock Type1 FFT3161; Type4/PFA remains disabled.\n";
+        }
+#else
         o.aevum_fft_spec = o.aevum_pfa_off ? "pow2:auto" : "throughput:auto";
+#endif
     }
 #if defined(__APPLE__)
+    if (o.aevum_fft_spec == "throughput:auto") {
+        std::cout << "[Backend Apple Aevum] throughput:auto normalized to pow2:auto (stock Type1 FFT3161).\n";
+        o.aevum_fft_spec = "pow2:auto";
+    }
     // Apple ships the legacy OpenCL 1.2 stack. Keep Marin as the safe default
     // on macOS and make Aevum an explicit opt-in only.
     const engine::gpu_backend selected_backend = (!o.marin || o.force_engine_marin)
