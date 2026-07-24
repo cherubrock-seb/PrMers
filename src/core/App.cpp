@@ -33,6 +33,7 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "marin/engine.h"
+#include "aevum/AutoPolicy.hpp"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
@@ -53,6 +54,7 @@
 # include <windows.h>
 #endif
 #include <csignal>
+#include <cstdlib>
 #include <chrono>
 #include <vector>
 #include <iomanip>
@@ -343,25 +345,56 @@ App::App(int argc, char** argv)
     }
     else if (o.mode == "ecm") workload = engine::gpu_workload::ecm;
 
-    // PRP/LL select by predicted iteration cost, not transform length alone.
-    // The power-of-two FFT323161 lead-cache path can beat a smaller PFA plan
-    // because it retains LEAD_WIDTH and uses carryFused.  Apple remains on the
-    // staged stock FFT3161 path: its legacy OpenCL 1.2 compiler does not yet
-    // support the monolithic Type4/PFA kernels safely.
-    if (o.aevum_fft_spec.empty() &&
-        (workload == engine::gpu_workload::prp || workload == engine::gpu_workload::ll)) {
+    // Select Aevum plans by workload, not by transform length alone.  PRP,
+    // LL, P-1 Stage 1 and ECM use different operation mixes and therefore may
+    // prefer different FFT323161 geometries.  Explicit -aevum-fft requests are
+    // never rewritten.
+    if (o.aevum_fft_spec.empty()) {
 #if defined(__APPLE__)
-        o.aevum_fft_spec = "pow2:auto";
-        if (o.aevum) {
-            std::cout << "[Backend Apple Aevum] PRP/LL uses staged stock Type1 FFT3161; Type4/PFA remains disabled.\n";
+        if (workload == engine::gpu_workload::prp ||
+            workload == engine::gpu_workload::ll) {
+            o.aevum_fft_spec = "pow2:auto";
+            if (o.aevum) {
+                std::cout << "[Backend Apple Aevum] PRP/LL uses staged stock Type1 FFT3161; Type4/PFA remains disabled.\n";
+            }
         }
 #else
-        o.aevum_fft_spec = o.aevum_pfa_off ? "pow2:auto" : "throughput:auto";
+        const char* plan_override = nullptr;
+        switch (workload) {
+            case engine::gpu_workload::prp:
+                plan_override = std::getenv("PRMERS_AEVUM_PRP_FFT");
+                o.aevum_fft_spec = plan_override && *plan_override
+                    ? plan_override : "throughput:prp";
+                break;
+            case engine::gpu_workload::ll:
+                plan_override = std::getenv("PRMERS_AEVUM_LL_FFT");
+                o.aevum_fft_spec = plan_override && *plan_override
+                    ? plan_override : "throughput:ll";
+                break;
+            case engine::gpu_workload::pm1:
+            case engine::gpu_workload::pm1_lowmem:
+                plan_override = std::getenv("PRMERS_AEVUM_PM1_FFT");
+                o.aevum_fft_spec = plan_override && *plan_override
+                    ? plan_override : "throughput:pm1";
+                break;
+            case engine::gpu_workload::ecm:
+                plan_override = std::getenv("PRMERS_AEVUM_ECM_FFT");
+                o.aevum_fft_spec = plan_override && *plan_override
+                    ? plan_override : "throughput:ecm";
+                break;
+            default:
+                break;
+        }
+        if (plan_override && *plan_override) {
+            std::cout << "[Aevum workload plan override] "
+                      << aevum_workload_name(workload) << "="
+                      << o.aevum_fft_spec << "\n";
+        }
 #endif
     }
 #if defined(__APPLE__)
-    if (o.aevum_fft_spec == "throughput:auto") {
-        std::cout << "[Backend Apple Aevum] throughput:auto normalized to pow2:auto (stock Type1 FFT3161).\n";
+    if (o.aevum_fft_spec.rfind("throughput:", 0) == 0) {
+        std::cout << "[Backend Apple Aevum] workload throughput selector normalized to pow2:auto (stock Type1 FFT3161).\n";
         o.aevum_fft_spec = "pow2:auto";
     }
     // Apple ships the legacy OpenCL 1.2 stack. Keep Marin as the safe default
@@ -785,6 +818,7 @@ namespace {
 #if defined(_WIN32)
 #include <windows.h>
 #include <csignal>
+#include <cstdlib>
 static BOOL WINAPI prmers_ctrl_handler(DWORD type){
     switch(type){
         case CTRL_C_EVENT:

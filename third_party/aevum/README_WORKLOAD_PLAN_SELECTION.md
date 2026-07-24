@@ -16,8 +16,9 @@ not automatically the fastest ECM or P-1 plan:
 - PrMers P-1 Stage 2 V-trace and classic BSGS currently use Marin, so an Aevum
   FFT choice does not apply to those Stage 2 implementations.
 
-For this reason PrMers keeps the automatic ECM and P-1 Stage 1 policy on the
-stock Type 1 plan until a candidate is both:
+PrMers v99.86 now uses separate workload selectors. The RTX 3080 audit moved
+P-1 Stage 1 to the exact faster Type4 plan while ECM remains on Type1. A new
+candidate is promoted only when it is both:
 
 1. word-exact against Type 1 for the representative workload operation mix;
 2. faster in an actual complete ECM/P-1 run after kernel compilation is removed
@@ -42,8 +43,9 @@ The command prints the resolved plans, transform sizes, timings and canonical
 output hashes, then fails if the two plans do not produce the same words.
 
 The PrMers repository also ships `scripts/audit_aevum_plans.py`, which discovers
-all candidates reported by `throughput:auto`, runs these differential tests and
-then measures real PRP, LL, ECM and P-1 Stage 1 commands.
+all candidates, runs these differential tests, compares canonical mathematical
+resume fields, repeats real measurements and audits the built-in selectors
+`throughput:prp`, `throughput:ll`, `throughput:pm1` and `throughput:ecm`.
 
 ## Apple OpenCL 1.2
 

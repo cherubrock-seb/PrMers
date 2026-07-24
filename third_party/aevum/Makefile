@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.77-stable-apple-safety-bsgs-fix
+AEVUM_VERSION ?= v0.3.78-workload-plan-policy-audit-fix
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is

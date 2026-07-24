@@ -122,6 +122,8 @@ test-gui-state:
 
 test-aevum-source:
 	python3 tests/aevum_pow2_type4_source_test.py
+	python3 tests/stable_backend_stop_bsgs_apple_source_test.py
+	python3 tests/workload_plan_audit_parser_test.py
 	bash tests/source_aevum_engine_audit.sh
 
 test-backend-compat: all

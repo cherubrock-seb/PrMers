@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cassert>
+#include <cctype>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -366,21 +367,71 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     throw runtime_error("Apple OpenCL 1.2 supports only stock FFT3161 Aevum plans; Type4/PFA is disabled");
   }
 #endif
-  // Throughput selector for long PRP/LL square chains.  Transform length is
-  // not a sufficient proxy: a non-PFA FFT323161 plan can retain LEAD_WIDTH
-  // and replace fftW+carryA+carryB+fftP with carryFused.  The default cost
-  // multipliers are calibrated from the RTX 3080 M175000039 measurements and
-  // remain environment-overridable for other devices.
-  if (spec == "throughput:auto" || spec == "pow2:auto") {
+  // Workload-aware throughput selectors. Transform length alone is not a
+  // sufficient proxy: the fastest geometry depends on the operation mix.
+  //
+  // Calibrated and word-exact on RTX 3080:
+  //   PRP  -> 4:512:8:512:202
+  //   LL   -> 4:1K:2:1K:202
+  //   P-1  -> 4:256:16:256:202
+  //   ECM  -> stock Type1 until a repeatable gain is demonstrated.
+  //
+  // The selectors remain capacity-aware and environment-overridable. Explicit
+  // plans are always honored. The legacy throughput:auto selector retains the
+  // broad candidate set, including PFA diagnostics.
+  const bool throughput_selector =
+      spec == "throughput:auto" || spec == "pow2:auto" ||
+      spec == "throughput:prp" || spec == "throughput:ll" ||
+      spec == "throughput:pm1" || spec == "throughput:ecm";
+  if (throughput_selector) {
     struct Candidate { FFTConfig fft; double score; const char* family; };
     vector<Candidate> candidates;
 
+    const string selector =
+        spec == "throughput:prp" ? "prp" :
+        spec == "throughput:ll"  ? "ll"  :
+        spec == "throughput:pm1" ? "pm1" :
+        spec == "throughput:ecm" ? "ecm" : "generic";
+
+    auto envCost = [&](const char* suffix, double fallback) {
+      string upper = selector;
+      transform(upper.begin(), upper.end(), upper.begin(),
+                [](unsigned char c) { return char(std::toupper(c)); });
+      const string specific = "AEVUM_AUTO_" + upper + "_" + suffix;
+      return positiveEnv(specific.c_str(), fallback);
+    };
+
+    double stock_default = 1.00;
+    double type4_default = 1.00;
+    double target_w = 9.0;  // log2(512)
+    double target_m = 3.0;  // log2(8)
+    double target_h = 9.0;  // log2(512)
+
+    if (selector == "prp") {
+      type4_default = 0.90;
+    } else if (selector == "ll") {
+      type4_default = 0.90;
+      target_w = 10.0; target_m = 1.0; target_h = 10.0;
+    } else if (selector == "pm1") {
+      type4_default = 0.90;
+      target_w = 8.0; target_m = 4.0; target_h = 8.0;
+    } else if (selector == "ecm") {
+      // ECM's 51-register mixed-operation path showed no repeatable Type4
+      // advantage in the first audit. Keep Type1 unless a smaller transform
+      // overcomes this conservative cost margin.
+      type4_default = 1.12;
+      target_w = 8.0; target_m = 4.0; target_h = 8.0;
+    }
+
     FFTConfig stock = bestFit(args, E, "");
-    candidates.push_back({stock, double(stock.size()) * positiveEnv("AEVUM_AUTO_STOCK_COST", 1.00), "stock FFT3161"});
+    candidates.push_back({
+        stock,
+        double(stock.size()) * envCost("STOCK_COST",
+            positiveEnv("AEVUM_AUTO_STOCK_COST", stock_default)),
+        "stock FFT3161"
+    });
 
 #if !defined(__APPLE__)
-    // Enumerate the same tuned power-of-two geometry with the hybrid type-4
-    // capacity model.  Variant 202 is the validated fast path on NVIDIA.
     for (u32 width : {256u, 512u, 1024u, 4096u}) {
       for (u32 height : {256u, 512u, 1024u}) {
         if (width == 256u && height == 1024u) continue;
@@ -389,18 +440,29 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
           const double bpw = E / double(hybrid.size());
           if (bpw < hybrid.minBpw()) continue;
           if (hybrid.maxExp() * args.fftOverdrive < E) continue;
-          const double aspect_penalty = 0.010 * std::abs(std::log2(double(width) / double(height)));
-          const double middle_penalty = 0.002 * std::abs(std::log2(double(middle)) - 3.0);
-          const double geometry = 1.0 + aspect_penalty + middle_penalty;
-          candidates.push_back({hybrid, double(hybrid.size()) *
-                                positiveEnv("AEVUM_AUTO_POW2_TYPE4_COST", 1.00) * geometry,
-                                "power-of-two FFT323161 lead-cache"});
+
+          const double geometry =
+              1.0 +
+              0.020 * std::abs(std::log2(double(width)) - target_w) +
+              0.020 * std::abs(std::log2(double(middle)) - target_m) +
+              0.020 * std::abs(std::log2(double(height)) - target_h);
+
+          candidates.push_back({
+              hybrid,
+              double(hybrid.size()) *
+                  envCost("TYPE4_COST",
+                      positiveEnv("AEVUM_AUTO_POW2_TYPE4_COST", type4_default)) *
+                  geometry,
+              "power-of-two FFT323161 lead-cache"
+          });
         }
       }
     }
 #endif
 
 #if !defined(__APPLE__)
+    // PFA remains available in the legacy diagnostic selector, but is excluded
+    // from workload-specific defaults until its differential tests are exact.
     if (spec == "throughput:auto") {
       FFTConfig pfa = bestFit(args, E, "pfa:auto");
       if (pfa.isPfa()) {
@@ -419,12 +481,12 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     });
     const Candidate& selected = candidates.front();
     log("Aevum throughput auto: %s selected for exponent %" PRIu64
-        " (family %s, score %.3fM, words %.3fM).\n",
-        selected.fft.spec().c_str(), E, selected.family,
+        " (selector %s, family %s, score %.3fM, words %.3fM).\n",
+        selected.fft.spec().c_str(), E, selector.c_str(), selected.family,
         selected.score / 1048576.0, double(selected.fft.size()) / 1048576.0);
-    for (size_t i = 1; i < candidates.size() && i < 4; ++i) {
-      log("Aevum throughput candidate: %s, family %s, score %.3fM, words %.3fM.\n",
-          candidates[i].fft.spec().c_str(), candidates[i].family,
+    for (size_t i = 1; i < candidates.size() && i < 6; ++i) {
+      log("Aevum throughput candidate: %s, selector %s, family %s, score %.3fM, words %.3fM.\n",
+          candidates[i].fft.spec().c_str(), selector.c_str(), candidates[i].family,
           candidates[i].score / 1048576.0, double(candidates[i].fft.size()) / 1048576.0);
     }
     return selected.fft;
