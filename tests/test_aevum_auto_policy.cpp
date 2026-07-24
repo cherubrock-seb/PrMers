@@ -31,6 +31,18 @@ int main() {
     if (throughput175.aevum_transform != 4194304 ||
         throughput175.fft_spec != "4:512:8:512:202") return 6;
 
+    auto prp_workload = aevum_auto_decide(175000039u, 8, engine::gpu_workload::prp, "throughput:prp");
+    if (!prp_workload.use_aevum || prp_workload.fft_spec != "4:512:8:512:202") return 61;
+
+    auto ll_workload = aevum_auto_decide(175000039u, 18, engine::gpu_workload::ll, "throughput:ll");
+    if (!ll_workload.use_aevum || ll_workload.fft_spec != "4:1K:2:1K:202") return 62;
+
+    auto pm1_workload = aevum_auto_decide(55050557u, 11, engine::gpu_workload::pm1, "throughput:pm1");
+    if (!pm1_workload.use_aevum || pm1_workload.fft_spec != "4:256:16:256:202") return 63;
+
+    auto ecm_workload = aevum_auto_decide(55050557u, 51, engine::gpu_workload::ecm, "throughput:ecm");
+    if (!ecm_workload.use_aevum || ecm_workload.fft_spec != "1:1K:4:256:101") return 64;
+
     auto small_stage1 = aevum_auto_decide(1362763u, 11, engine::gpu_workload::pm1);
     expect(small_stage1.use_aevum, false, "small P-1 Stage 1");
 

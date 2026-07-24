@@ -91,6 +91,30 @@ int main() {
   }
 #endif
 
+
+  FFTConfig selectorPrp = FFTConfig::bestFit(args, 175000039, "throughput:prp");
+  FFTConfig selectorLl = FFTConfig::bestFit(args, 175000039, "throughput:ll");
+  FFTConfig selectorPm1 = FFTConfig::bestFit(args, 55050557, "throughput:pm1");
+  FFTConfig selectorEcm = FFTConfig::bestFit(args, 55050557, "throughput:ecm");
+#if defined(__APPLE__)
+  if (selectorPrp.spec() != appleStock.spec() ||
+      selectorLl.spec() != appleStock.spec() ||
+      selectorPm1.shape.fft_type != FFT3161 ||
+      selectorEcm.shape.fft_type != FFT3161) {
+    throw std::runtime_error("Apple workload selectors must retain stock FFT3161");
+  }
+#else
+  if (selectorPrp.spec() != "4:512:8:512:202")
+    throw std::runtime_error("PRP selector did not choose 4:512:8:512:202");
+  if (selectorLl.spec() != "4:1K:2:1K:202")
+    throw std::runtime_error("LL selector did not choose 4:1K:2:1K:202");
+  if (selectorPm1.spec() != "4:256:16:256:202")
+    throw std::runtime_error("P-1 selector did not choose 4:256:16:256:202");
+  FFTConfig ecmStock = FFTConfig::bestFit(args, 55050557, "");
+  if (selectorEcm.spec() != ecmStock.spec())
+    throw std::runtime_error("ECM selector must remain on stock Type1 until a gain is proven");
+#endif
+
   FFTConfig pow2auto = FFTConfig::bestFit(args, 175000039, "pow2:auto");
 #if defined(__APPLE__)
   // pow2:auto falls back to the normal stock plan when Apple excludes the
@@ -111,6 +135,6 @@ int main() {
         "power-of-two selector did not choose the measured FFT323161 plan");
 #endif
 
-  std::cout << "Aevum platform-aware throughput-auto, Apple stock safety and PFA9 plan test passed" << std::endl;
+  std::cout << "Aevum workload-aware throughput selectors, Apple stock safety and PFA9 plan test passed" << std::endl;
   return 0;
 }

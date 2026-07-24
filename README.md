@@ -1202,3 +1202,9 @@ The audit requires word-exact results before a faster plan can be recommended.
 `throughput:auto` remains the PRP/LL policy; ECM and P-1 Stage 1 remain on the
 validated Type1 policy until the workload audit proves a faster exact plan.
 P-1 Stage 2 V-trace and classic BSGS use Marin.
+
+### Workload-aware Aevum plans (v99.86)
+
+Automatic Aevum plans are selected separately for PRP, LL, P-1 Stage 1 and
+ECM. Run `scripts/audit_aevum_plans_ubuntu.sh` to compare exact candidates and
+produce a local override profile. See `RELEASE_V99.86.md`.

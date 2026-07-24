@@ -23,7 +23,10 @@ print('PrMers native PFA CLI source test passed')
 app=(root/'src/core/App.cpp').read_text()
 assert '-pfa-off' in cpp
 assert 'aevum_pfa_off' in hpp
-assert 'o.aevum_fft_spec = o.aevum_pfa_off ? "pow2:auto" : "throughput:auto"' in app
+assert '"throughput:prp"' in app
+assert '"throughput:ll"' in app
+assert '"throughput:pm1"' in app
+assert '"throughput:ecm"' in app
 
 policy=(root/'src/aevum/AutoPolicy.cpp').read_text()
 gpu=(root/'src/marin/gpu.cpp').read_text()

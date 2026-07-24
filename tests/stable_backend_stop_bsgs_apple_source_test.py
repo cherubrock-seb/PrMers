@@ -51,10 +51,14 @@ assert pm1.count("P-1 factor stage 2 found:") >= 8
 
 # Workload-specific plan audit is shipped and requires exact outputs before
 # it can recommend a faster plan.
-assert "synthetic differential failed" in audit_script
-assert "actual state hash differs from Type1 baseline" in audit_script
+assert "word differential mismatch" in audit_script
+assert "canonical mathematical state differs from Type1 baseline" in audit_script
 assert "AEVUM WORKLOAD PLAN DIFFERENTIAL PASSED" in workload_audit
 assert "workload must be prp, ll, pm1, or ecm" in workload_audit
+assert "parse_resume_record" in audit_script
+assert "canonical_state" in audit_script
+assert "recommended-workload-plans.env" in audit_script
+assert "--strict-policy" in audit_script
 
 # Backend reporting and Apple safety policy.
 assert '<< ", family=" << plan_family(result.fft_spec)' in auto_policy
@@ -62,10 +66,17 @@ assert "Type4 FFT323161" in auto_policy
 assert "requested-plan=" in engine_aevum
 assert "PRP/LL uses staged stock Type1 FFT3161" in app
 assert 'o.aevum_fft_spec = "pow2:auto"' in app
+assert '"throughput:prp"' in app
+assert '"throughput:ll"' in app
+assert '"throughput:pm1"' in app
+assert '"throughput:ecm"' in app
+assert "PRMERS_AEVUM_PM1_FFT" in app
+assert 'spec == "throughput:pm1"' in fftconfig
+assert 'spec == "throughput:ecm"' in fftconfig
 assert "Apple OpenCL 1.2 supports only stock FFT3161" in fftconfig
 assert "validated only for PRP/LL stock FFT3161" in gpu
 assert "mixed/prepared multiplication failed invariant/Gerbicz validation" in gpu
 assert "#if defined(__APPLE__)" in engine_api_test
 assert "Aevum Apple type4 rejection" in engine_api_test
 
-print("PrMers v99.85 stable release/source policy test passed")
+print("PrMers v99.86 workload plan policy/source test passed")

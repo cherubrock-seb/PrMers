@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import ctypes
 import hashlib
 import os
 import platform
 import re
 import signal
+import statistics
 import subprocess
 import sys
 import time
@@ -104,22 +106,70 @@ def family(spec: str) -> str:
     return "Type1 FFT3161"
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def normalize_scalar(value: str) -> str:
+    value = value.strip()
+    if value.lower().startswith("0x"):
+        digits = value[2:].lower().lstrip("0") or "0"
+        return "0x" + digits
+    if re.fullmatch(r"[+-]?[0-9]+", value):
+        try:
+            return str(int(value))
+        except ValueError:
+            return value
+    return value
 
 
-def state_hash(case_dir: Path) -> str:
-    candidates = sorted(case_dir.glob("*.p95")) + sorted(case_dir.glob("*.save"))
-    if not candidates:
+def parse_resume_record(line: str) -> str:
+    fields: dict[str, str] = {}
+    for part in line.strip().split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        normalized_key = key.strip().upper()
+        normalized_value = normalize_scalar(value)
+        if normalized_key in {"X", "X0", "Y", "Y0"} and not normalized_value.startswith("0x"):
+            try:
+                normalized_value = "0x" + format(int(normalized_value), "x")
+            except ValueError:
+                pass
+        fields[normalized_key] = normalized_value
+
+    method = fields.get("METHOD", "")
+    if not method:
         return ""
-    # Prime95-format files are preferred because they are normally stable and
-    # contain the exact canonical state used for Stage 2 handoff.
-    chosen = next((p for p in candidates if p.suffix == ".p95"), candidates[0])
-    return sha256_file(chosen)
+
+    preferred = {
+        "P-1": ("METHOD", "B1", "N", "X", "X0", "Y", "Y0", "CHECKSUM"),
+        "ECM": ("METHOD", "SIGMA", "A", "B1", "N", "X", "X0", "Y0", "CHECKSUM"),
+    }
+    keys = preferred.get(method, tuple(sorted(
+        key for key in fields if key not in {"PROGRAM", "TIME", "WHO"})))
+    return ";".join(f"{key}={fields[key]}" for key in keys if key in fields)
+
+
+def canonical_state(case_dir: Path) -> tuple[str, str]:
+    records: set[str] = set()
+    candidates = sorted(case_dir.glob("*.p95"))
+    candidates += sorted(case_dir.glob("*.save"))
+    for path in candidates:
+        try:
+            data = path.read_bytes()
+            if b"\0" in data[:4096]:
+                continue
+            text = data.decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            record = parse_resume_record(line)
+            if record:
+                records.add(record)
+
+    canonical = "\n".join(sorted(records))
+    if not canonical:
+        return "", ""
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    (case_dir / "canonical-state.txt").write_text(canonical + "\n", encoding="utf-8")
+    return digest, canonical
 
 
 def make_cache_link(case_dir: Path, cache: Path) -> None:
@@ -165,6 +215,27 @@ def parse_plan_line(line: str) -> dict[str, str]:
     return result
 
 
+def resolve_with_library(lib: Path, exponent: int, spec: str) -> str:
+    library = ctypes.CDLL(str(lib))
+    resolve = library.aevum_engine_resolve_fft
+    resolve.argtypes = [
+        ctypes.c_uint32, ctypes.c_char_p,
+        ctypes.POINTER(ctypes.c_char), ctypes.c_size_t,
+    ]
+    resolve.restype = ctypes.c_int
+    last_error = library.aevum_engine_last_error
+    last_error.argtypes = []
+    last_error.restype = ctypes.c_char_p
+    buffer = ctypes.create_string_buffer(256)
+    rc = resolve(exponent, spec.encode("utf-8"), buffer, len(buffer))
+    if not rc:
+        detail = last_error()
+        raise RuntimeError(
+            f"cannot resolve {spec} for exponent {exponent}: "
+            f"{detail.decode(errors='replace') if detail else 'unknown error'}")
+    return buffer.value.decode("utf-8")
+
+
 def synthetic_compare(tool: Path, lib: Path, device: int, exponent: int,
                       workload: str, stock: str, candidate: str,
                       iterations: int, root: Path, cache: Path) -> tuple[bool, dict[str, str], str]:
@@ -189,8 +260,9 @@ def parse_ips(text: str) -> float | None:
 
 
 def actual_smoke(binary: Path, device: int, exponent: int, workload: str,
-                 spec: str, seconds: int, root: Path, cache: Path) -> tuple[bool, str, str, str]:
-    case = root / "actual" / workload / slug(spec)
+                 spec: str, seconds: int, root: Path, cache: Path,
+                 repeat: int = 0) -> tuple[bool, str, str, str]:
+    case = root / "actual" / workload / slug(spec) / f"repeat-{repeat + 1}"
     case.mkdir(parents=True, exist_ok=True)
     make_cache_link(case, cache)
     mode_args = ["-prp", "-proof", "0"] if workload == "prp" else ["-ll"]
@@ -206,8 +278,9 @@ def actual_smoke(binary: Path, device: int, exponent: int, workload: str,
 
 
 def actual_finite(binary: Path, device: int, workload: str, spec: str,
-                  root: Path, cache: Path, timeout: int) -> tuple[bool, str, str, str, str]:
-    case = root / "actual" / workload / slug(spec)
+                  root: Path, cache: Path, timeout: int,
+                  repeat: int = 0) -> tuple[bool, str, str, str, str, str]:
+    case = root / "actual" / workload / slug(spec) / f"repeat-{repeat + 1}"
     case.mkdir(parents=True, exist_ok=True)
     make_cache_link(case, cache)
     if workload == "pm1":
@@ -235,9 +308,9 @@ def actual_finite(binary: Path, device: int, workload: str, spec: str,
     metric = f"{float(internal):.3f}s internal" if internal else f"{wall:.3f}s wall"
     resolved = last_match(text, [r"FFT:\s*[^\n]*?\s([0-9]+:[^\s]+)\s*\(",
                                  r"Aevum throughput auto:\s*([^\s]+)\s+selected"], spec)
-    state = state_hash(case)
+    state, canonical = canonical_state(case)
     ok = rc in {0, 1} and not fatal and bool(state)
-    return ok, metric, resolved, state, fatal
+    return ok, metric, resolved, state, canonical, fatal
 
 
 def metric_number(value: str) -> float | None:
@@ -266,7 +339,22 @@ def main() -> int:
     parser.add_argument("--plans", help="comma-separated plan list used for both exponent groups; prefer the workload-specific options")
     parser.add_argument("--large-plans", help="comma-separated explicit plans for PRP/LL at --large-exponent")
     parser.add_argument("--factoring-plans", help="comma-separated explicit plans for P-1/ECM at --factoring-exponent")
+    parser.add_argument("--extra-large-exponents",
+                        help="comma-separated extra PRP/LL exponents for synthetic exactness")
+    parser.add_argument("--extra-factoring-exponents",
+                        help="comma-separated extra P-1/ECM exponents for synthetic exactness")
+    parser.add_argument("--repeats", type=int,
+                        help="measurement repetitions (quick=1, standard=2, full=3)")
+    parser.add_argument(
+        "--strict-policy", action="store_true",
+        default=os.environ.get("PRMERS_PLAN_AUDIT_STRICT_POLICY", "0") == "1",
+        help="fail when a built-in workload selector does not match the measured exact winner")
     ns = parser.parse_args()
+    repeats = ns.repeats if ns.repeats is not None else {
+        "quick": 1, "standard": 2, "full": 3
+    }[ns.profile]
+    if repeats < 1:
+        raise SystemExit("--repeats must be at least 1")
 
     root = ns.root.resolve()
     binary = root / "prmers"
@@ -290,6 +378,26 @@ def main() -> int:
 
     def parse_plan_list(value: str | None) -> list[str] | None:
         return [item.strip() for item in value.split(",") if item.strip()] if value else None
+
+    def parse_exponent_list(value: str | None, defaults: list[int]) -> list[int]:
+        if value is None:
+            return defaults
+        return [int(item.strip()) for item in value.split(",") if item.strip()]
+
+    default_extra_large = {
+        "quick": [],
+        "standard": [142606549],
+        "full": [95000011, 142606549],
+    }[ns.profile]
+    default_extra_factoring = {
+        "quick": [],
+        "standard": [95000011],
+        "full": [31284263, 95000011],
+    }[ns.profile]
+    extra_large_exponents = parse_exponent_list(
+        ns.extra_large_exponents, default_extra_large)
+    extra_factoring_exponents = parse_exponent_list(
+        ns.extra_factoring_exponents, default_extra_factoring)
 
     common_plans = parse_plan_list(ns.plans)
     explicit_large = parse_plan_list(ns.large_plans) or common_plans
@@ -331,10 +439,51 @@ def main() -> int:
             row.transform = parsed.get("transform", "")
             row.synthetic_rate = parsed.get("iter_per_s", "")
             row.exact = "yes" if ok else "no"
-            row.status = "PASS" if ok else "FAIL"
-            row.note = fatal or ("word-exact against Type1" if ok else "differential failed")
+            row.status = "PASS" if ok else "REJECTED"
+            row.note = fatal or ("word-exact against Type1" if ok else "word differential mismatch")
             exact_by_key[(workload, candidate)] = ok
             rows.append(row)
+
+
+    # Cross-size synthetic exactness matrix. These runs are intentionally
+    # shorter than the primary measurements; they verify that a workload
+    # selector is not exact only at the calibration exponent.
+    extra_groups = [
+        (extra_large_exponents, ("prp", "ll"), 512),
+        (extra_factoring_exponents, ("pm1", "ecm"), 192),
+    ]
+    for exponents, workloads, iterations in extra_groups:
+        for exponent in exponents:
+            plans = discover_plans(binary, ns.device, exponent, report)
+            base_plan = stock(plans)
+            print(f"Extra exactness exponent {exponent}: {plans}", flush=True)
+            for workload in workloads:
+                workload_iterations = max(12, iterations // 8) if workload == "ecm" else iterations
+                for candidate in plans:
+                    row = Row(
+                        workload=f"synthetic-{workload}-extra",
+                        exponent=exponent,
+                        requested=candidate,
+                        family=family(candidate),
+                    )
+                    if candidate == base_plan:
+                        row.exact = "baseline"
+                        row.status = "PASS"
+                        rows.append(row)
+                        continue
+                    ok, parsed, fatal = synthetic_compare(
+                        tool, lib, ns.device, exponent, workload,
+                        base_plan, candidate, workload_iterations,
+                        report / f"extra-{exponent}", cache_root / slug(candidate))
+                    row.resolved = parsed.get("resolved", candidate)
+                    row.transform = parsed.get("transform", "")
+                    row.synthetic_rate = parsed.get("iter_per_s", "")
+                    row.exact = "yes" if ok else "no"
+                    row.status = "PASS" if ok else "REJECTED"
+                    row.note = fatal or (
+                        "word-exact against Type1"
+                        if ok else "word differential mismatch")
+                    rows.append(row)
 
     # PRP/LL actual hot-loop measurements.  Candidate plans that failed the
     # matching differential are not allowed to win the recommendation.
@@ -349,16 +498,27 @@ def main() -> int:
                 row.note = "synthetic differential failed"
                 rows.append(row)
                 continue
-            ok, metric, resolved, fatal = actual_smoke(
-                binary, ns.device, ns.large_exponent, workload, candidate,
-                max(20, ns.seconds if ns.profile != "quick" else 25), report,
-                cache_root / slug(candidate))
-            row.resolved = resolved
+            measurements: list[float] = []
+            resolved_values: list[str] = []
+            errors: list[str] = []
+            for repeat in range(repeats):
+                ok, metric, resolved, fatal = actual_smoke(
+                    binary, ns.device, ns.large_exponent, workload, candidate,
+                    max(20, ns.seconds if ns.profile != "quick" else 25), report,
+                    cache_root / slug(candidate), repeat)
+                value = metric_number(metric)
+                if ok and value is not None:
+                    measurements.append(value)
+                    resolved_values.append(resolved)
+                else:
+                    errors.append(fatal or f"repeat {repeat + 1} failed")
+            row.resolved = resolved_values[-1] if resolved_values else candidate
             row.transform = ""
             row.exact = "yes"
-            row.actual_metric = metric
-            row.status = "PASS" if ok else "FAIL"
-            row.note = fatal
+            if measurements:
+                row.actual_metric = f"{statistics.median(measurements):.3f} IPS median/{len(measurements)}"
+            row.status = "PASS" if len(measurements) == repeats else "FAIL"
+            row.note = "; ".join(errors)
             rows.append(row)
 
     # Finite P-1/ECM measurements with deterministic output-state hashes.
@@ -377,15 +537,36 @@ def main() -> int:
                 rows.append(row)
                 continue
             timeout = 240 if workload == "pm1" else 420
-            ok, metric, resolved, state, fatal = actual_finite(
-                binary, ns.device, workload, candidate, report,
-                cache_root / slug(candidate), timeout)
-            row.resolved = resolved
+            measurements: list[float] = []
+            resolved_values: list[str] = []
+            states: list[str] = []
+            canonicals: list[str] = []
+            errors: list[str] = []
+            used_internal = False
+            for repeat in range(repeats):
+                ok, metric, resolved, state, canonical, fatal = actual_finite(
+                    binary, ns.device, workload, candidate, report,
+                    cache_root / slug(candidate), timeout, repeat)
+                value = metric_number(metric)
+                used_internal = used_internal or "internal" in metric
+                if ok and value is not None:
+                    measurements.append(value)
+                    resolved_values.append(resolved)
+                    states.append(state)
+                    canonicals.append(canonical)
+                else:
+                    errors.append(fatal or f"repeat {repeat + 1} failed")
+            row.resolved = resolved_values[-1] if resolved_values else candidate
             row.exact = "yes"
-            row.actual_metric = metric
-            row.state_sha256 = state
-            row.status = "PASS" if ok else "FAIL"
-            row.note = fatal
+            if measurements:
+                unit = "s internal" if used_internal else "s wall"
+                row.actual_metric = f"{statistics.median(measurements):.3f}{unit} median/{len(measurements)}"
+            if states:
+                row.state_sha256 = states[0]
+            if len(set(states)) > 1 or len(set(canonicals)) > 1:
+                errors.append("canonical state differs between repetitions")
+            row.status = "PASS" if len(measurements) == repeats and not errors else "FAIL"
+            row.note = "; ".join(errors)
             rows.append(row)
 
     # Enforce identical finite-mode states.  A fast plan cannot be recommended
@@ -399,13 +580,14 @@ def main() -> int:
             if row.state_sha256 != baseline:
                 row.status = "FAIL"
                 row.exact = "no"
-                row.note = "actual state hash differs from Type1 baseline"
+                row.note = "canonical mathematical state differs from Type1 baseline"
 
     summary = report / "summary.tsv"
     write_summary(rows, summary)
 
     print("\nRecommended plans (only exact PASS rows are eligible):", flush=True)
     recommendations: list[str] = []
+    winners: dict[str, Row] = {}
     for workload in ("prp", "ll", "pm1", "ecm", "ecm-stage2"):
         candidates = [r for r in rows if r.workload == workload and r.status == "PASS" and r.actual_metric]
         if not candidates:
@@ -417,11 +599,54 @@ def main() -> int:
         line = (f"{workload}: {winner.requested} -> {winner.resolved or winner.requested} "
                 f"[{winner.family}] {winner.actual_metric}")
         recommendations.append(line)
+        winners[workload] = winner
         print("  " + line, flush=True)
 
     (report / "recommendations.txt").write_text("\n".join(recommendations) + "\n")
+
+    env_names = {
+        "prp": "PRMERS_AEVUM_PRP_FFT",
+        "ll": "PRMERS_AEVUM_LL_FFT",
+        "pm1": "PRMERS_AEVUM_PM1_FFT",
+        "ecm": "PRMERS_AEVUM_ECM_FFT",
+    }
+    env_lines = [
+        f"export {env_names[workload]}='{winner.resolved or winner.requested}'"
+        for workload, winner in winners.items() if workload in env_names
+    ]
+    (report / "recommended-workload-plans.env").write_text(
+        "\n".join(env_lines) + ("\n" if env_lines else ""), encoding="utf-8")
+
+    selector_specs = {
+        "prp": ("throughput:prp", ns.large_exponent),
+        "ll": ("throughput:ll", ns.large_exponent),
+        "pm1": ("throughput:pm1", ns.factoring_exponent),
+        "ecm": ("throughput:ecm", ns.factoring_exponent),
+    }
+    policy_lines = ["workload\tselector\tresolved\tmeasured_winner\tmatch"]
+    policy_mismatches = 0
+    print("\nBuilt-in workload selector audit:", flush=True)
+    for workload, (selector, exponent) in selector_specs.items():
+        if workload not in winners:
+            continue
+        resolved = resolve_with_library(lib, exponent, selector)
+        measured = winners[workload].resolved or winners[workload].requested
+        match = resolved == measured
+        policy_mismatches += 0 if match else 1
+        policy_lines.append(
+            f"{workload}\t{selector}\t{resolved}\t{measured}\t"
+            f"{'yes' if match else 'no'}")
+        print(f"  {workload}: {selector} -> {resolved}; measured={measured}; "
+              f"match={'yes' if match else 'NO'}", flush=True)
+    (report / "policy.tsv").write_text("\n".join(policy_lines) + "\n", encoding="utf-8")
+
     failures = sum(1 for row in rows if row.status == "FAIL")
+    if ns.strict_policy:
+        failures += policy_mismatches
+    rejected = sum(1 for row in rows if row.status == "REJECTED")
     print(f"Summary: {summary}", flush=True)
+    print(f"Rejected candidates: {rejected}", flush=True)
+    print(f"Policy mismatches: {policy_mismatches}", flush=True)
     print(f"Failures: {failures}", flush=True)
     print("Note: PrMers P-1 Stage 2 V-trace/classic BSGS use Marin; no Aevum FFT plan is selected there.", flush=True)
     return 1 if failures else 0
