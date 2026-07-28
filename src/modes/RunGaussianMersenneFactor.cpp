@@ -35,7 +35,7 @@ using core::algo::interrupted;
 
 constexpr std::array<char, 8> GMF_MAGIC{{'P','R','G','M','F','A','C','T'}};
 constexpr std::uint32_t GMF_VERSION = 3;
-constexpr const char* GM_RELEASE = "v99.90";
+constexpr const char* GM_RELEASE = "v99.91";
 
 struct GmTarget {
     std::uint32_t p = 0;
