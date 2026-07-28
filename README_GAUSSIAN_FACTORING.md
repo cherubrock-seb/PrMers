@@ -1,4 +1,4 @@
-# Gaussian-Mersenne P-1 and ECM — PrMers v99.89
+# Gaussian-Mersenne P-1 and ECM — PrMers v99.90
 
 This extension factors the Gaussian-Mersenne norm
 

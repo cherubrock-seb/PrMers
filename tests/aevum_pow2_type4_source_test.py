@@ -18,7 +18,7 @@ assert 'fft.pfa_radix == 9' in gpu
 assert 'throughput:auto' in fft
 assert 'AEVUM_AUTO_POW2_TYPE4_COST' in fft
 assert 'AEVUM_AUTO_PFA9_COST' in fft
-assert '4.20.78-alpha-v99.89-gaussian-worktodo-progress-json' in version
+assert '4.20.79-alpha-v99.90-gaussian-macos-u64-fix' in version
 assert 'AEVUM_PFA_LEAD_BRIDGE' in engine
 assert 'fftPCarryB' in gpu
 print('PrMers Aevum throughput-auto and PFA9 bridge source test passed')

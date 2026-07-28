@@ -31,7 +31,7 @@ namespace {
 
 using clock_type = std::chrono::steady_clock;
 
-constexpr const char* GM_RELEASE = "v99.89";
+constexpr const char* GM_RELEASE = "v99.90";
 
 std::string json_escape(const std::string& value) {
     std::ostringstream out;

@@ -192,6 +192,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          make test-gm
           make test-aevum-host MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
           make test-aevum-source
           make test-backend-compat
