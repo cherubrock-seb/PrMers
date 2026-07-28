@@ -55,7 +55,7 @@ LDFLAGS += -lgmpxx -lgmp
 CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -125,6 +125,14 @@ test-aevum-source:
 	python3 tests/stable_backend_stop_bsgs_apple_source_test.py
 	python3 tests/workload_plan_audit_parser_test.py
 	bash tests/source_aevum_engine_audit.sh
+
+test-gm:
+	python3 tests/gaussian_mersenne_math_test.py
+	python3 tests/gaussian_mersenne_isolation_test.py
+	python3 tests/gaussian_mersenne_factor_math_test.py
+	python3 tests/gaussian_mersenne_factor_isolation_test.py
+	python3 tests/test_gaussian_worktodo_generator.py
+	bash tests/test_gaussian_worktodo_parser.sh
 
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
