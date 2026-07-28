@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.79-alpha-v99.90-gaussian-macos-u64-fix";
+    const std::string PRMERS_VERSION = "4.20.80-alpha-v99.91-gaussian-ci-gmp-path-fix";
 } // namespace core
 
 #endif // VERSION_HPP
