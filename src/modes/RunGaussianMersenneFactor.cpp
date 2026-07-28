@@ -35,7 +35,7 @@ using core::algo::interrupted;
 
 constexpr std::array<char, 8> GMF_MAGIC{{'P','R','G','M','F','A','C','T'}};
 constexpr std::uint32_t GMF_VERSION = 3;
-constexpr const char* GM_RELEASE = "v99.89";
+constexpr const char* GM_RELEASE = "v99.90";
 
 struct GmTarget {
     std::uint32_t p = 0;
@@ -695,7 +695,15 @@ struct CurveSetup {
 
 CurveSetup make_suyama_curve(const mpz_class& n, std::uint64_t sigma64) {
     CurveSetup out;
-    mpz_class sigma = sigma64;
+    mpz_class sigma;
+    mpz_import(
+        sigma.get_mpz_t(),
+        1,
+        1,
+        sizeof(sigma64),
+        0,
+        0,
+        &sigma64);
     sigma %= n;
     if (sigma < 6) sigma += 6;
     mpz_class u = mod_positive(sigma * sigma - 5, n);

@@ -30,7 +30,12 @@ assert 'options.mode == "gm-pm1"' in app
 assert 'options.mode == "gm-ecm"' in app
 assert 'options.mode == "gm-chain"' in app
 assert "removeProcessedLine(activeWorktodoRawLine_)" in app
-assert "4.20.78-alpha-v99.89-gaussian-worktodo-progress-json" in version
+assert "4.20.79-alpha-v99.90-gaussian-macos-u64-fix" in version
+
+# GMP C++ has no unambiguous unsigned-long-long constructor on every ABI.
+assert "mpz_class sigma = sigma64;" not in source
+assert "mpz_import(" in source
+assert "sizeof(sigma64)" in source
 
 # Dedicated opt-in dispatch: ordinary modes remain on their historical functions.
 assert 'if(options.mode == "ecm")' in app

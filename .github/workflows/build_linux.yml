@@ -29,6 +29,7 @@ jobs:
 
       - name: Run host and routing tests
         run: |
+          make test-gm
           make test-aevum-host
           make test-aevum-auto
           make test-aevum-default
