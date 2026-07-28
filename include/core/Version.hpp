@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.80-alpha-v99.91-gaussian-ci-gmp-path-fix";
+    const std::string PRMERS_VERSION = "4.20.81-alpha-v99.92-gaussian-windows-msvc-portability-fix";
 } // namespace core
 
 #endif // VERSION_HPP

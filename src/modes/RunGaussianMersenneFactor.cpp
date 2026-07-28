@@ -27,6 +27,10 @@
 #include <string>
 #include <vector>
 
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
+#endif
+
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -35,7 +39,7 @@ using core::algo::interrupted;
 
 constexpr std::array<char, 8> GMF_MAGIC{{'P','R','G','M','F','A','C','T'}};
 constexpr std::uint32_t GMF_VERSION = 3;
-constexpr const char* GM_RELEASE = "v99.91";
+constexpr const char* GM_RELEASE = "v99.92";
 
 struct GmTarget {
     std::uint32_t p = 0;
@@ -46,8 +50,54 @@ struct GmTarget {
     std::uint64_t digits = 0;
 };
 
-std::uint64_t mul_mod_u64(std::uint64_t a, std::uint64_t b, std::uint64_t mod) {
-    return static_cast<std::uint64_t>((static_cast<unsigned __int128>(a) * b) % mod);
+std::uint64_t add_mod_u64(std::uint64_t a,
+                          std::uint64_t b,
+                          std::uint64_t mod) {
+    // Preconditions: a < mod and b < mod.
+    return a >= mod - b ? a - (mod - b) : a + b;
+}
+
+std::uint64_t mul_mod_u64(std::uint64_t a,
+                          std::uint64_t b,
+                          std::uint64_t mod) {
+    if (mod == 0) {
+        throw std::runtime_error("mul_mod_u64 requires a non-zero modulus");
+    }
+
+    a %= mod;
+    b %= mod;
+
+#if defined(_MSC_VER) && defined(_M_X64)
+    unsigned __int64 high = 0;
+    const unsigned __int64 low = _umul128(a, b, &high);
+    unsigned __int64 remainder = 0;
+
+    // Since a,b < mod, the quotient of a*b by mod fits in 64 bits.
+    (void)_udiv128(high, low, mod, &remainder);
+    return static_cast<std::uint64_t>(remainder);
+
+#elif defined(__SIZEOF_INT128__)
+    return static_cast<std::uint64_t>(
+        (static_cast<unsigned __int128>(a) * b) % mod
+    );
+
+#else
+    std::uint64_t result = 0;
+
+    while (b != 0) {
+        if ((b & 1U) != 0) {
+            result = add_mod_u64(result, a, mod);
+        }
+
+        b >>= 1U;
+
+        if (b != 0) {
+            a = add_mod_u64(a, a, mod);
+        }
+    }
+
+    return result;
+#endif
 }
 
 std::uint64_t pow_mod_u64(std::uint64_t a, std::uint64_t e, std::uint64_t mod) {
@@ -111,17 +161,17 @@ GmTarget make_target(std::uint64_t p64) {
 std::uint64_t find_admissible_small_factor(const GmTarget& t, std::uint64_t limit) {
     if (limit < 5) return 0;
     if (mpz_divisible_ui_p(t.n.get_mpz_t(), 5) && mpz_cmp_ui(t.n.get_mpz_t(), 5) != 0) return 5;
-    const unsigned __int128 step128 = static_cast<unsigned __int128>(4) * t.p;
-    if (step128 > limit) return 0;
-    const std::uint64_t step = static_cast<std::uint64_t>(step128);
+    const std::uint64_t p64 = static_cast<std::uint64_t>(t.p);
+    if (p64 > std::numeric_limits<std::uint64_t>::max() / 4ULL) return 0;
+    const std::uint64_t step = 4ULL * p64;
+    if (step > limit) return 0;
     const std::uint64_t max_k = (limit - 1) / step;
     if (max_k > 100'000'000ULL) {
         throw std::runtime_error("-gm-sieve would inspect more than 100000000 admissible factors; lower the bound");
     }
     for (std::uint64_t k = 1; k <= max_k; ++k) {
-        const unsigned __int128 q128 = static_cast<unsigned __int128>(step) * k + 1;
-        if (q128 > limit || q128 > std::numeric_limits<std::uint64_t>::max()) break;
-        const std::uint64_t q = static_cast<std::uint64_t>(q128);
+        const std::uint64_t q = step * k + 1;
+        if (q > limit) break;
         if (!is_prime_u64(q)) continue;
         const std::uint64_t a = pow_mod_u64(2, t.p, q);
         const std::uint64_t b = pow_mod_u64(2, t.middle, q);
