@@ -14,6 +14,23 @@ struct CliOptions {
     uint64_t iterforce2 = 0;
     bool torus = false;
     bool wagstaff = false;
+    // Gaussian-Mersenne norm G_p = 2^p - (2/p)2^((p+1)/2) + 1.
+    // The GPU path uses the exact factor lift G_p | 2^(4p)-1, so the existing
+    // Mersenne arithmetic remains untouched.
+    bool gaussian_mersenne = false;
+    bool gm_prp_only = false;
+    bool gm_cpu = false;
+    bool gm_safe_replay = false;
+    uint32_t gm_base = 0;
+    uint64_t gm_sieve_limit = 1'000'000ULL;
+    uint64_t gm_replay_block = 0;
+    // Product-exponent chunk target for Gaussian-Mersenne P-1/ECM Stage 2.
+    uint64_t gm_factor_chunk_bits = 0;
+    // Native worktodo-only conditional pipeline: P-1 -> optional ECM -> Proth.
+    bool gm_pipeline = false;
+    uint64_t gm_pipeline_ecm_B1 = 0;
+    uint64_t gm_pipeline_ecm_B2 = 0;
+    uint64_t gm_pipeline_ecm_curves = 0;
     int device_id = 0;
     bool tune = false;
     std::string mode = "prp";                // "prp" ou "ll"

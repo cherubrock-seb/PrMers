@@ -84,9 +84,11 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
 
     std::string line;
     while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '#') continue;
+        std::string trimmedLine = line;
+        trim_inplace(trimmedLine);
+        if (trimmedLine.empty() || trimmedLine[0] == '#' || trimmedLine[0] == ';') continue;
 
-        auto top = util::split(line, '=');
+        auto top = util::split(trimmedLine, '=');
         if (top.size() < 2) continue;
 
         std::string keyword = top[0];
@@ -101,7 +103,13 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         bool isPF   = (keywordUpper == "PFACTOR");
         bool isPM1  = (keywordUpper == "PMINUS1");
         bool isECM2 = (keywordUpper == "ECM2");
-        if (!(isPRP || isLL || isPF || isPM1 || isECM2)) continue;
+        bool isGMPRP = (keywordUpper == "GMPRP");
+        bool isGMPROTH = (keywordUpper == "GMPROTH" || keywordUpper == "GMTEST");
+        bool isGMPM1 = (keywordUpper == "GMPMINUS1" || keywordUpper == "GMPM1");
+        bool isGMECM = (keywordUpper == "GMECM");
+        bool isGMCHAIN = (keywordUpper == "GMCHAIN" || keywordUpper == "GMCAMPAIGN");
+        if (!(isPRP || isLL || isPF || isPM1 || isECM2 ||
+              isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN)) continue;
 
         auto parts = splitRespectingQuotes(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
@@ -160,6 +168,84 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         }
 
         try {
+
+            // Native PrMers Gaussian-Mersenne worktodo formats. These are
+            // deliberately separate from Prime95 syntax because the target is
+            // G_p = 2^p - (2/p)2^((p+1)/2) + 1, not M_p.
+            //
+            //   GMPROTH=p[,sieve_limit]
+            //   GMPRP=p[,sieve_limit]
+            //   GMPMINUS1=p,B1,B2[,base[,sieve_limit[,chunk_bits]]]
+            //   GMECM=p,B1,B2,curves[,sigma[,sieve_limit[,chunk_bits]]]
+            //   GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits]]]]]
+            // GMCHAIN is conditional: a P-1/ECM factor stops the line; otherwise
+            // PrMers continues to the deterministic Proth test.
+            if (isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN) {
+                for (std::string& part : parts) trim_inplace(part);
+                const size_t required = (isGMPRP || isGMPROTH) ? 1 :
+                                        ((isGMPM1 || isGMCHAIN) ? 3 : 4);
+                if (parts.size() < required || !isIntegerToken(parts[0])) continue;
+
+                const uint64_t p64 = std::stoull(parts[0]);
+                if (p64 < 3 || p64 > std::numeric_limits<uint32_t>::max()) continue;
+
+                WorktodoEntry entry;
+                entry.gaussianMersenne = true;
+                entry.gmPrpOnly = isGMPRP;
+                entry.gmPipeline = isGMCHAIN;
+                entry.pm1Test = isGMPM1 || isGMCHAIN;
+                entry.ecmTest = isGMECM;
+                entry.prpTest = isGMPRP || isGMPROTH || isGMCHAIN;
+                entry.exponent = static_cast<uint32_t>(p64);
+                entry.rawLine = line;
+
+                if (isGMPRP || isGMPROTH) {
+                    if (parts.size() >= 2 && !parts[1].empty())
+                        entry.gmSieveLimit = std::stoull(parts[1]);
+                } else if (isGMPM1) {
+                    entry.B1 = std::stoull(parts[1]);
+                    entry.B2 = std::stoull(parts[2]);
+                    if (parts.size() >= 4 && !parts[3].empty())
+                        entry.gmBase = static_cast<uint32_t>(std::stoul(parts[3]));
+                    if (parts.size() >= 5 && !parts[4].empty())
+                        entry.gmSieveLimit = std::stoull(parts[4]);
+                    if (parts.size() >= 6 && !parts[5].empty())
+                        entry.gmFactorChunkBits = std::stoull(parts[5]);
+                } else if (isGMCHAIN) {
+                    entry.B1 = std::stoull(parts[1]);
+                    entry.B2 = std::stoull(parts[2]);
+                    if (parts.size() >= 4 && !parts[3].empty()) entry.gmEcmB1 = std::stoull(parts[3]);
+                    if (parts.size() >= 5 && !parts[4].empty()) entry.gmEcmB2 = std::stoull(parts[4]);
+                    if (parts.size() >= 6 && !parts[5].empty()) entry.gmEcmCurves = std::stoull(parts[5]);
+                    if (parts.size() >= 7 && !parts[6].empty()) entry.gmSieveLimit = std::stoull(parts[6]);
+                    if (parts.size() >= 8 && !parts[7].empty()) entry.gmFactorChunkBits = std::stoull(parts[7]);
+                } else {
+                    entry.B1 = std::stoull(parts[1]);
+                    entry.B2 = std::stoull(parts[2]);
+                    entry.curves = std::stoull(parts[3]);
+                    if (entry.curves == 0) entry.curves = 1;
+                    if (parts.size() >= 5 && !parts[4].empty() && parts[4] != "0")
+                        entry.sigma = parts[4];
+                    if (parts.size() >= 6 && !parts[5].empty())
+                        entry.gmSieveLimit = std::stoull(parts[5]);
+                    if (parts.size() >= 7 && !parts[6].empty())
+                        entry.gmFactorChunkBits = std::stoull(parts[6]);
+                }
+
+                const char* kind = isGMPRP ? "GMPRP" : isGMPROTH ? "GMPROTH" :
+                                   isGMPM1 ? "GMPMINUS1" : isGMCHAIN ? "GMCHAIN" : "GMECM";
+                std::cout << "Loaded entry: " << kind << " exponent=" << entry.exponent;
+                if (isGMPM1 || isGMECM || isGMCHAIN)
+                    std::cout << " B1=" << entry.B1 << " B2=" << entry.B2;
+                if (isGMECM) std::cout << " curves=" << entry.curves;
+                if (isGMCHAIN) std::cout << " ecm=" << entry.gmEcmB1 << "/" << entry.gmEcmB2
+                                          << " curves=" << entry.gmEcmCurves;
+                std::cout << " sieve=" << entry.gmSieveLimit;
+                if (entry.gmFactorChunkBits != 0)
+                    std::cout << " chunk_bits=" << entry.gmFactorChunkBits;
+                std::cout << "\n";
+                return entry;
+            }
 
             if (isPF) {
                 if (parts.size() < 6) continue;
@@ -399,6 +485,41 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
     return std::nullopt;
 }
 
+bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
+    std::ifstream inFile(filename_);
+    std::ofstream tempFile(filename_ + ".tmp");
+    std::ofstream saveFile("worktodo_save.txt", std::ios::app);
+    if (!inFile || !tempFile || !saveFile) return false;
+
+    std::string expected = rawLine;
+    trim_inplace(expected);
+    std::string line;
+    bool removed = false;
+    while (std::getline(inFile, line)) {
+        std::string trimmed = line;
+        trim_inplace(trimmed);
+        if (!removed && trimmed == expected) {
+            removed = true;
+            saveFile << line << "\n";
+            continue;
+        }
+        tempFile << line << "\n";
+    }
+
+    inFile.close();
+    tempFile.close();
+    saveFile.close();
+    if (!removed) {
+        std::remove((filename_ + ".tmp").c_str());
+        return false;
+    }
+    if (std::remove(filename_.c_str()) != 0 ||
+        std::rename((filename_ + ".tmp").c_str(), filename_.c_str()) != 0) {
+        return false;
+    }
+    return true;
+}
+
 bool WorktodoParser::removeFirstProcessed() {
     std::ifstream inFile(filename_);
     std::ofstream tempFile(filename_ + ".tmp");
@@ -408,7 +529,10 @@ bool WorktodoParser::removeFirstProcessed() {
     std::string line;
     bool skipped = false;
     while (std::getline(inFile, line)) {
-        if (!skipped && !line.empty()) {
+        std::string trimmed = line;
+        trim_inplace(trimmed);
+        const bool actionable = !trimmed.empty() && trimmed[0] != '#' && trimmed[0] != ';';
+        if (!skipped && actionable) {
             skipped = true;
             saveFile << line << "\n";
             continue;

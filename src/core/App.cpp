@@ -276,12 +276,39 @@ App::App(int argc, char** argv)
     auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
 
     io::WorktodoParser wp{o.worktodo_path};
-    if (auto e = wp.parse()) {
+    // An explicit Gaussian-Mersenne command is self-contained and must not be
+    // replaced by an unrelated default worktodo entry.
+    std::optional<io::WorktodoEntry> worktodo_entry;
+    if (!o.gaussian_mersenne) worktodo_entry = wp.parse();
+    if (auto e = worktodo_entry) {
         o.exponent     = e->exponent;
-        o.mode         = e->ecmTest ? "ecm"
-                        : (e->prpTest ? "prp"
-                        : (e->llTest ? ((e->doubleCheck && !cliForceLlUnsafe) ? "llsafe" : "ll")
-                        : (e->pm1Test ? "pm1" : "")));
+        if (e->gaussianMersenne) {
+            o.gaussian_mersenne = true;
+            o.gm_prp_only = e->gmPrpOnly;
+            o.gm_pipeline = e->gmPipeline;
+            o.mode = e->gmPipeline ? "gm-chain"
+                   : (e->ecmTest ? "gm-ecm"
+                   : (e->pm1Test ? "gm-pm1"
+                   : (e->gmPrpOnly ? "gm-prp" : "gm-proth")));
+            o.proof = false;
+            o.B1 = e->B1;
+            o.B2 = e->B2;
+            o.K = e->curves;
+            o.nmax = e->curves;
+            o.gm_base = e->gmBase;
+            o.gm_sieve_limit = e->gmSieveLimit;
+            o.gm_factor_chunk_bits = e->gmFactorChunkBits;
+            o.gm_pipeline_ecm_B1 = e->gmEcmB1;
+            o.gm_pipeline_ecm_B2 = e->gmEcmB2;
+            o.gm_pipeline_ecm_curves = e->gmEcmCurves;
+            o.sigma = e->sigma;
+            if (e->ecmTest) o.compute_edwards = false;
+        } else {
+            o.mode = e->ecmTest ? "ecm"
+                   : (e->prpTest ? "prp"
+                   : (e->llTest ? ((e->doubleCheck && !cliForceLlUnsafe) ? "llsafe" : "ll")
+                   : (e->pm1Test ? "pm1" : "")));
+        }
         o.aid          = e->aid;
         o.doubleCheck  = e->doubleCheck;
 
@@ -319,6 +346,7 @@ App::App(int argc, char** argv)
             o.K    = e->curves;
         }
 
+        activeWorktodoRawLine_ = e->rawLine;
         hasWorktodoEntry_ = true;
     }
 
@@ -336,7 +364,9 @@ App::App(int argc, char** argv)
     //std::exit(-1);
     }
     engine::gpu_workload workload = engine::gpu_workload::generic;
-    if (o.mode == "prp") workload = engine::gpu_workload::prp;
+    if (o.mode == "prp" || o.mode == "gm-proth" || o.mode == "gm-prp") workload = engine::gpu_workload::prp;
+    else if (o.mode == "gm-pm1" || o.mode == "gm-chain") workload = engine::gpu_workload::pm1;
+    else if (o.mode == "gm-ecm") workload = engine::gpu_workload::ecm;
     else if (o.mode == "ll" || o.mode == "llsafe" || o.mode == "llsafe2") workload = engine::gpu_workload::ll;
     else if (o.mode == "pm1") {
         if (o.pm1_ultralowmem) workload = engine::gpu_workload::pm1_ultralowmem;
@@ -894,6 +924,7 @@ int App::run() {
         const std::string gui_workload = options.mode == "pm1" ? "P-1"
                                        : options.mode == "ecm" ? "ECM"
                                        : (options.mode == "ll" || options.mode == "llsafe" || options.mode == "llsafe2") ? "LL"
+                                       : (options.mode == "gm-proth" || options.mode == "gm-prp" || options.mode == "gm-pm1" || options.mode == "gm-ecm") ? "Gaussian-Mersenne"
                                        : "PRP";
         if (!options.marin) {
             guiServer_->setBackendInfo("Internal PrMers NTT", "Internal NTT", gui_workload,
@@ -943,6 +974,65 @@ int App::run() {
 
     int rc = 1;
     bool ran = false;
+    if (options.mode == "gm-chain") {
+        // One native conditional worktodo job. P-1 is always attempted first;
+        // ECM is optional; deterministic Proth runs only when no factor was found.
+        const std::string pipeline_mode = options.mode;
+        const std::uint64_t pm1_B1 = options.B1;
+        const std::uint64_t pm1_B2 = options.B2;
+        const std::uint64_t ecm_B1 = options.gm_pipeline_ecm_B1;
+        const std::uint64_t ecm_B2 = options.gm_pipeline_ecm_B2;
+        const std::uint64_t ecm_curves = options.gm_pipeline_ecm_curves;
+
+        std::cout << "[GMCHAIN] P-1 B1=" << pm1_B1 << " B2=" << pm1_B2;
+        if (ecm_curves != 0)
+            std::cout << ", then ECM B1=" << ecm_B1 << " B2=" << ecm_B2
+                      << " curves=" << ecm_curves;
+        std::cout << ", then deterministic Proth if no factor is found.\n";
+
+        options.mode = "gm-pm1";
+        rc = runGaussianMersennePM1();
+        ran = true;
+
+        if (!interrupted && rc == 1 && ecm_curves != 0) {
+            options.mode = "gm-ecm";
+            options.B1 = ecm_B1;
+            options.B2 = ecm_B2;
+            options.K = ecm_curves;
+            options.nmax = ecm_curves;
+            options.gm_sieve_limit = 0; // already performed by P-1
+            rc = runGaussianMersenneECM();
+        }
+
+        if (!interrupted && rc == 1) {
+            options.mode = "gm-proth";
+            options.gm_prp_only = false;
+            options.B1 = 0;
+            options.B2 = 0;
+            options.K = 0;
+            options.nmax = 0;
+            options.gm_sieve_limit = 0; // already performed by P-1
+            rc = runGaussianMersenne();
+        }
+
+        options.mode = pipeline_mode;
+        options.B1 = pm1_B1;
+        options.B2 = pm1_B2;
+        options.K = ecm_curves;
+        options.nmax = ecm_curves;
+    }
+    if (options.mode == "gm-proth" || options.mode == "gm-prp") {
+        rc = runGaussianMersenne();
+        ran = true;
+    }
+    if (options.mode == "gm-pm1") {
+        rc = runGaussianMersennePM1();
+        ran = true;
+    }
+    if (options.mode == "gm-ecm") {
+        rc = runGaussianMersenneECM();
+        ran = true;
+    }
     if(options.mode == "ecm"){
         if(options.compute_edwards){
             rc = runECMMarinTwistedEdwards();
@@ -1074,6 +1164,38 @@ int App::run() {
             std::cout << "P-1 factoring (stage 1) need exponent >= 241" << std::endl;
         }
     }
+    // Native Gaussian-Mersenne worktodo entries are handled here because the
+    // dedicated modes intentionally remain isolated from the historical
+    // Prime95-compatible mode implementations. A completed task (factor,
+    // no-factor, prime or composite) is archived, then PrMers restarts on the
+    // next non-comment line. Interrupted/error runs keep the current line.
+    if (hasWorktodoEntry_ && options.gaussian_mersenne && !interrupted &&
+        (rc == 0 || rc == 1)) {
+        if (worktodoParser_ && worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+            std::cout << "Gaussian-Mersenne entry removed from "
+                      << options.worktodo_path << " and saved to worktodo_save.txt\n";
+            bool pending = false;
+            std::ifstream wt(options.worktodo_path);
+            std::string line;
+            while (std::getline(wt, line)) {
+                const auto first = line.find_first_not_of(" \t\r\n");
+                if (first != std::string::npos && line[first] != '#' && line[first] != ';') {
+                    pending = true;
+                    break;
+                }
+            }
+            if (pending) {
+                std::cout << "Restarting for next Gaussian-Mersenne worktodo entry.\n";
+                restart_self(argc_, argv_);
+            } else {
+                std::cout << "No more Gaussian-Mersenne worktodo entries.\n";
+            }
+        } else {
+            std::cerr << "Failed to update " << options.worktodo_path << "\n";
+            return 2;
+        }
+    }
+
     if (options.gui) {
         if (guiServer_) {
             std::cout << "GUI " << guiServer_->url() << std::endl;

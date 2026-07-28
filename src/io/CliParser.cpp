@@ -107,6 +107,18 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-continue-stage2-after-factor : Continue requested Stage 2 even when Stage 1 finds a new factor (default: stop)" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
+    std::cout << "  -gm | -gm-proth      : Deterministic Gaussian-Mersenne Proth test for G_p = Norm((1+i)^p-1)" << std::endl;
+    std::cout << "  -gm-prp              : Base-a Fermat PRP for G_p (fast screening, not a proof)" << std::endl;
+    std::cout << "  -gm-base <a>         : Small base for Gaussian-Mersenne test; Proth mode requires Jacobi(a/G_p)=-1" << std::endl;
+    std::cout << "  -gm-sieve <limit>    : Search admissible prime factors q=4kp+1 through limit (default 1000000, 0 disables)" << std::endl;
+    std::cout << "  -gm-cpu              : GMP reference implementation instead of GPU" << std::endl;
+    std::cout << "  -gm-safe             : Full independent block replay check (strong safety, about 2x arithmetic)" << std::endl;
+    std::cout << "  -gm-replay-block <N> : Override safe replay block length" << std::endl;
+    std::cout << "  -gm-pm1 -b1 <B1> [-b2 <B2>] : P-1 factor G_p through the exact 2^(4p)-1 lift" << std::endl;
+    std::cout << "  -gm-ecm -b1 <B1> [-b2 <B2>] -K <curves> : ECM factor G_p with lifted Montgomery arithmetic" << std::endl;
+    std::cout << "  -gm-factor-chunk-bits <N> : Stage 2 product-exponent chunk target (P-1 default 262144, ECM 131072)" << std::endl;
+    std::cout << "  Native Gaussian worktodo: GMPROTH, GMPRP, GMPMINUS1, GMECM and conditional GMCHAIN" << std::endl;
+    std::cout << "    GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve[,chunk_bits]]]]]" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
     
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
@@ -197,6 +209,81 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
             opts.device_id = to_u64(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "-gm") == 0 ||
+                 std::strcmp(argv[i], "--gm") == 0 ||
+                 std::strcmp(argv[i], "-gm-proth") == 0 ||
+                 std::strcmp(argv[i], "--gm-proth") == 0 ||
+                 std::strcmp(argv[i], "-gaussian-mersenne") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_prp_only = false;
+            opts.mode = "gm-proth";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-gm-prp") == 0 ||
+                 std::strcmp(argv[i], "--gm-prp") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_prp_only = true;
+            opts.mode = "gm-prp";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-gm-pm1") == 0 ||
+                 std::strcmp(argv[i], "--gm-pm1") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_prp_only = false;
+            opts.mode = "gm-pm1";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-gm-ecm") == 0 ||
+                 std::strcmp(argv[i], "--gm-ecm") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_prp_only = false;
+            opts.mode = "gm-ecm";
+            opts.proof = false;
+            opts.compute_edwards = false;
+        }
+        else if (std::strcmp(argv[i], "-gm-cpu") == 0 ||
+                 std::strcmp(argv[i], "--gm-cpu") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_cpu = true;
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm") opts.mode = "gm-proth";
+            opts.proof = false;
+        }
+        else if (std::strcmp(argv[i], "-gm-safe") == 0 ||
+                 std::strcmp(argv[i], "--gm-safe") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_safe_replay = true;
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm") opts.mode = "gm-proth";
+            opts.proof = false;
+        }
+        else if ((std::strcmp(argv[i], "-gm-base") == 0 ||
+                  std::strcmp(argv[i], "--gm-base") == 0) && i + 1 < argc) {
+            const uint64_t value = to_u64(argv[++i]);
+            if (value < 2 || value > 0xffffffffULL) {
+                throw std::runtime_error("-gm-base must be between 2 and 4294967295");
+            }
+            opts.gm_base = static_cast<uint32_t>(value);
+        }
+        else if ((std::strcmp(argv[i], "-gm-sieve") == 0 ||
+                  std::strcmp(argv[i], "--gm-sieve") == 0) && i + 1 < argc) {
+            opts.gm_sieve_limit = to_u64(argv[++i]);
+        }
+        else if ((std::strcmp(argv[i], "-gm-replay-block") == 0 ||
+                  std::strcmp(argv[i], "--gm-replay-block") == 0) && i + 1 < argc) {
+            opts.gaussian_mersenne = true;
+            opts.gm_replay_block = to_u64(argv[++i]);
+            opts.gm_safe_replay = true;
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm") opts.mode = "gm-proth";
+            opts.proof = false;
+        }
+        else if ((std::strcmp(argv[i], "-gm-factor-chunk-bits") == 0 ||
+                  std::strcmp(argv[i], "--gm-factor-chunk-bits") == 0) && i + 1 < argc) {
+            opts.gaussian_mersenne = true;
+            opts.gm_factor_chunk_bits = to_u64(argv[++i]);
+            if (opts.gm_factor_chunk_bits < 1024) {
+                throw std::runtime_error("-gm-factor-chunk-bits must be >= 1024");
+            }
+            opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-prp") == 0) {
             opts.mode = "prp";
@@ -774,6 +861,15 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else {
             std::cerr << "Warning: Unknown option '" << argv[i] << "'\n";
         }
+    }
+    if (opts.gaussian_mersenne) {
+        if (opts.mode != "gm-pm1" && opts.mode != "gm-ecm") {
+            opts.mode = opts.gm_prp_only ? "gm-prp" : "gm-proth";
+        }
+        opts.proof = false;
+        // Gaussian factors are factors of G_p, not of the lifted M_(4p).  Keep
+        // supplied factors only for the dedicated factoring modes.
+        if (opts.mode == "gm-proth" || opts.mode == "gm-prp") opts.knownFactors.clear();
     }
     if(opts.wagstaff){
         //std::cout << "[WAGSTAFF MODE] This test will check if (2^)" << options.exponent << " + 1)/3 is PRP prime" << std::endl;
