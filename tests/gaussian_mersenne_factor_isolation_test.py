@@ -30,7 +30,7 @@ assert 'options.mode == "gm-pm1"' in app
 assert 'options.mode == "gm-ecm"' in app
 assert 'options.mode == "gm-chain"' in app
 assert "removeProcessedLine(activeWorktodoRawLine_)" in app
-assert "4.20.80-alpha-v99.91-gaussian-ci-gmp-path-fix" in version
+assert "4.20.81-alpha-v99.92-gaussian-windows-msvc-portability-fix" in version
 
 # GMP C++ has no unambiguous unsigned-long-long constructor on every ABI.
 assert "mpz_class sigma = sigma64;" not in source
