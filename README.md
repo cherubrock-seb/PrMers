@@ -2,8 +2,6 @@
 
 GPU-accelerated PRP, Lucas-Lehmer, P-1 and ECM testing for Mersenne numbers.
 
-**v99.88 experimental extension:** deterministic Proth/PRP testing plus dedicated P-1 and ECM factoring for Gaussian-Mersenne norms are available with `-gm`, `-gm-pm1` and `-gm-ecm`. See [README_GAUSSIAN_MERSENNE.md](README_GAUSSIAN_MERSENNE.md) and [README_GAUSSIAN_FACTORING.md](README_GAUSSIAN_FACTORING.md). The extension uses an exact factor lift and does not modify existing Aevum kernels.
-
 https://github.com/cherubrock-seb/PrMers
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
@@ -19,8 +17,7 @@ The default backend policy is automatic on Linux and Windows. On macOS, Marin is
 Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to request the default policy explicitly. The historical `-marin` option keeps its previous meaning and selects the internal PrMers NTT path. The standalone engine is intended for publication at https://github.com/cherubrock-seb/aevum-engine.
 ## Contents
 
-- [Gaussian-Mersenne extension](README_GAUSSIAN_MERSENNE.md)
-- [Gaussian-Mersenne P-1/ECM](README_GAUSSIAN_FACTORING.md)
+
 - [What PrMers can do](#what-prmers-can-do)
 - [Quick start](#quick-start)
 - [Build from source](#build-from-source)
@@ -31,6 +28,8 @@ Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to
 - [ECM factoring](#ecm-factoring)
 - [worktodo.txt and AutoPrimeNet](#worktodotxt-and-autoprimenet)
 - [Prime95 and mprime interop](#prime95-and-mprime-interop)
+- [Gaussian-Mersenne extension](README_GAUSSIAN_MERSENNE.md)
+- [Gaussian-Mersenne P-1/ECM](README_GAUSSIAN_FACTORING.md)
 - [Web GUI](#web-gui)
 - [GPU memory test](#gpu-memory-test)
 - [NTT and IBDWT transform sizes](#ntt-and-ibdwt-transform-sizes)
