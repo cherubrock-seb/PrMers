@@ -250,7 +250,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     std::cout << " B1=" << entry.B1 << " B2=" << entry.B2;
                 if (isGMECM) std::cout << " curves=" << entry.curves;
                 if (isGMCHAIN) std::cout << " ecm=" << entry.gmEcmB1 << "/" << entry.gmEcmB2
-                                          << " curves=" << entry.gmEcmCurves;
+                                          << " curves=" << entry.gmEcmCurves
+                                           << " finish=" << (entry.gmPipelineProth ? "proth" : "factor");
                 std::cout << " sieve=" << entry.gmSieveLimit;
                 if (entry.gmFactorChunkBits != 0)
                     std::cout << " chunk_bits=" << entry.gmFactorChunkBits;

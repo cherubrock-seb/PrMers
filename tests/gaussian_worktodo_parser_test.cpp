@@ -12,6 +12,7 @@ int main() {
         out << "# preserved comment\n";
         out << "; preserved semicolon comment\n";
         out << "GMCHAIN=45951761,100000,1000000,2000,0,2,1000000000000,262144\n";
+        out << "GMCHAIN=45951771,100000,1000000,2000,250000,2,0,262144,factor\n";
         out << "GMPROTH=45951781,0\n";
     }
 
@@ -22,7 +23,7 @@ int main() {
         entry->B2 != 1000000ULL || entry->gmEcmB1 != 2000ULL ||
         entry->gmEcmB2 != 0ULL || entry->gmEcmCurves != 2ULL ||
         entry->gmSieveLimit != 1000000000000ULL ||
-        entry->gmFactorChunkBits != 262144ULL) {
+        entry->gmFactorChunkBits != 262144ULL || !entry->gmPipelineProth) {
         std::cerr << "GMCHAIN parse mismatch\n";
         return 1;
     }
@@ -36,9 +37,23 @@ int main() {
     const std::string text((std::istreambuf_iterator<char>(remaining)), {});
     if (text.find("# preserved comment") == std::string::npos ||
         text.find("; preserved semicolon comment") == std::string::npos ||
-        text.find("GMCHAIN=") != std::string::npos ||
+        text.find("GMCHAIN=45951761") != std::string::npos ||
+        text.find("GMCHAIN=45951771") == std::string::npos ||
         text.find("GMPROTH=45951781,0") == std::string::npos) {
         std::cerr << "worktodo removal did not preserve comments/next entry\n";
+        return 1;
+    }
+
+    auto factor_only = parser.parse();
+    if (!factor_only || !factor_only->gaussianMersenne ||
+        !factor_only->gmPipeline || factor_only->gmPipelineProth ||
+        factor_only->exponent != 45951771U) {
+        std::cerr << "factor-only GMCHAIN parse mismatch\n";
+        return 1;
+    }
+
+    if (!parser.removeFirstProcessed()) {
+        std::cerr << "failed to remove factor-only entry\n";
         return 1;
     }
 

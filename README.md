@@ -1213,3 +1213,22 @@ P-1 Stage 2 V-trace and classic BSGS use Marin.
 Automatic Aevum plans are selected separately for PRP, LL, P-1 Stage 1 and
 ECM. Run `scripts/audit_aevum_plans_ubuntu.sh` to compare exact candidates and
 produce a local override profile. See `RELEASE_V99.86.md`.
+
+## GMNet distributed Gaussian Mersenne search
+
+PrMers is the GPU calculation engine used by GMNet:
+
+```text
+https://gmnet.gaussianmersenne.workers.dev/
+```
+
+GMRelay obtains assignments, updates `worktodo.txt`, renews leases, and submits
+the JSON result files written by PrMers:
+
+```text
+https://github.com/cherubrock-seb/gmrelay
+```
+
+A deep P-1 Stage 1 job uses `B2 = B1`, which disables Stage 2. A mixed
+factorization campaign uses `GMCHAIN=...,factor`, which runs P-1 and optional
+ECM and then stops without starting a Proth test.

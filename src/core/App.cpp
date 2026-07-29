@@ -286,6 +286,7 @@ App::App(int argc, char** argv)
             o.gaussian_mersenne = true;
             o.gm_prp_only = e->gmPrpOnly;
             o.gm_pipeline = e->gmPipeline;
+            o.gm_pipeline_proth = e->gmPipelineProth;
             o.mode = e->gmPipeline ? "gm-chain"
                    : (e->ecmTest ? "gm-ecm"
                    : (e->pm1Test ? "gm-pm1"
@@ -976,7 +977,8 @@ int App::run() {
     bool ran = false;
     if (options.mode == "gm-chain") {
         // One native conditional worktodo job. P-1 is always attempted first;
-        // ECM is optional; deterministic Proth runs only when no factor was found.
+        // ECM is optional. Legacy lines continue to deterministic Proth, while
+        // a final `factor` token stops after the factoring phases.
         const std::string pipeline_mode = options.mode;
         const std::uint64_t pm1_B1 = options.B1;
         const std::uint64_t pm1_B2 = options.B2;
@@ -988,7 +990,10 @@ int App::run() {
         if (ecm_curves != 0)
             std::cout << ", then ECM B1=" << ecm_B1 << " B2=" << ecm_B2
                       << " curves=" << ecm_curves;
-        std::cout << ", then deterministic Proth if no factor is found.\n";
+        if (options.gm_pipeline_proth)
+            std::cout << ", then deterministic Proth if no factor is found.\n";
+        else
+            std::cout << ", then stop after factoring.\n";
 
         options.mode = "gm-pm1";
         rc = runGaussianMersennePM1();
@@ -1004,7 +1009,7 @@ int App::run() {
             rc = runGaussianMersenneECM();
         }
 
-        if (!interrupted && rc == 1) {
+        if (!interrupted && rc == 1 && options.gm_pipeline_proth) {
             options.mode = "gm-proth";
             options.gm_prp_only = false;
             options.B1 = 0;

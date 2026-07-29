@@ -29,8 +29,10 @@ assert 'opts.mode = "gm-ecm"' in parser
 assert 'options.mode == "gm-pm1"' in app
 assert 'options.mode == "gm-ecm"' in app
 assert 'options.mode == "gm-chain"' in app
+assert "gm_pipeline_proth" in app
+assert "gm_pipeline_proth" in options
 assert "removeProcessedLine(activeWorktodoRawLine_)" in app
-assert "4.20.81-alpha-v99.92-gaussian-windows-msvc-portability-fix" in version
+assert "4.20.82-alpha-v99.93-gmnet-factor-only-campaigns" in version
 
 # GMP C++ has no unambiguous unsigned-long-long constructor on every ABI.
 assert "mpz_class sigma = sigma64;" not in source

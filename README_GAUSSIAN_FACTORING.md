@@ -1,4 +1,4 @@
-# Gaussian-Mersenne P-1 and ECM — PrMers v99.92
+# Gaussian-Mersenne P-1 and ECM — PrMers v99.93
 
 This extension factors the Gaussian-Mersenne norm
 
@@ -69,6 +69,17 @@ Useful options:
 -r                         resume CRC32 checkpoints
 -t SECONDS                 ordinary PrMers checkpoint interval where applicable
 -f DIRECTORY               result/checkpoint directory
+```
+
+
+### Stage 1 only
+
+Set `B2` equal to `B1` to run only Stage 1 and its final CPU GCD. PrMers writes
+a normal Stage 1 JSON result and does not enter Stage 2.
+
+```bash
+./prmers 15317219 -gm-pm1 -b1 250000 -b2 250000 \
+  -aevum -d 0 -f ./gm-results/15317219-stage1
 ```
 
 ## ECM mode
@@ -268,3 +279,12 @@ The convenience wrapper `scripts/run_gm_record_campaign.sh` generates the
 queue when absent and launches the same resumable workflow.
 
 A ready-to-edit queue example is provided in `WORKTODO_GAUSSIAN_EXAMPLE.txt`.
+
+### Factor-only mixed campaign
+
+```text
+GMCHAIN=45951761,100000,2000000,5000,250000,5,1000000000000,262144,factor
+```
+
+This runs P-1 Stage 1 and Stage 2, then the requested ECM curves, and stops.
+Old GMCHAIN lines without the final field still continue to Proth.
