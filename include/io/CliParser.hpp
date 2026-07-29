@@ -26,8 +26,10 @@ struct CliOptions {
     uint64_t gm_replay_block = 0;
     // Product-exponent chunk target for Gaussian-Mersenne P-1/ECM Stage 2.
     uint64_t gm_factor_chunk_bits = 0;
-    // Native worktodo-only conditional pipeline: P-1 -> optional ECM -> Proth.
+    // Native worktodo-only conditional pipeline: P-1 -> optional ECM.
     bool gm_pipeline = false;
+    // Backward-compatible default: continue to Proth unless GMCHAIN ends in factor.
+    bool gm_pipeline_proth = true;
     uint64_t gm_pipeline_ecm_B1 = 0;
     uint64_t gm_pipeline_ecm_B2 = 0;
     uint64_t gm_pipeline_ecm_curves = 0;

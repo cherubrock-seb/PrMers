@@ -177,9 +177,9 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             //   GMPRP=p[,sieve_limit]
             //   GMPMINUS1=p,B1,B2[,base[,sieve_limit[,chunk_bits]]]
             //   GMECM=p,B1,B2,curves[,sigma[,sieve_limit[,chunk_bits]]]
-            //   GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits]]]]]
-            // GMCHAIN is conditional: a P-1/ECM factor stops the line; otherwise
-            // PrMers continues to the deterministic Proth test.
+            //   GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits[,finish]]]]]]
+            // finish is proth by default for compatibility. finish=factor stops
+            // after P-1 and optional ECM without running a primality test.
             if (isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN) {
                 for (std::string& part : parts) trim_inplace(part);
                 const size_t required = (isGMPRP || isGMPROTH) ? 1 :
@@ -219,6 +219,17 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     if (parts.size() >= 6 && !parts[5].empty()) entry.gmEcmCurves = std::stoull(parts[5]);
                     if (parts.size() >= 7 && !parts[6].empty()) entry.gmSieveLimit = std::stoull(parts[6]);
                     if (parts.size() >= 8 && !parts[7].empty()) entry.gmFactorChunkBits = std::stoull(parts[7]);
+                    if (parts.size() >= 9 && !parts[8].empty()) {
+                        std::string finish = parts[8];
+                        std::transform(finish.begin(), finish.end(), finish.begin(),
+                                       [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                        if (finish == "factor" || finish == "factoring" || finish == "none")
+                            entry.gmPipelineProth = false;
+                        else if (finish == "proth" || finish == "exact")
+                            entry.gmPipelineProth = true;
+                        else
+                            continue;
+                    }
                 } else {
                     entry.B1 = std::stoull(parts[1]);
                     entry.B2 = std::stoull(parts[2]);
