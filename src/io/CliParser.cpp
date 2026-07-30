@@ -23,6 +23,7 @@
 #include "io/CliParser.hpp"
 #include "util/StringUtils.hpp"
 #include <iostream>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include "util/PathUtils.hpp"
@@ -109,7 +110,8 @@ void printUsage(const char* progName) {
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -gm | -gm-proth      : Deterministic Gaussian-Mersenne Proth test for G_p = Norm((1+i)^p-1)" << std::endl;
     std::cout << "  -gm-prp              : Base-a Fermat PRP for G_p (fast screening, not a proof)" << std::endl;
-    std::cout << "  -gm-base <a>         : Small base for Gaussian-Mersenne test; Proth mode requires Jacobi(a/G_p)=-1" << std::endl;
+    std::cout << "  -gm-family <GM|GQ|BOTH> : Select the Gaussian norm(s); legacy default is GM" << std::endl;
+    std::cout << "  -gm-base <a>         : Small base; deterministic Proth applies to GM, while GQ uses Fermat PRP" << std::endl;
     std::cout << "  -gm-sieve <limit>    : Search admissible prime factors q=4kp+1 through limit (default 1000000, 0 disables)" << std::endl;
     std::cout << "  -gm-cpu              : GMP reference implementation instead of GPU" << std::endl;
     std::cout << "  -gm-safe             : Full independent block replay check (strong safety, about 2x arithmetic)" << std::endl;
@@ -117,8 +119,10 @@ void printUsage(const char* progName) {
     std::cout << "  -gm-pm1 -b1 <B1> [-b2 <B2>] : P-1 factor G_p through the exact 2^(4p)-1 lift" << std::endl;
     std::cout << "  -gm-ecm -b1 <B1> [-b2 <B2>] -K <curves> : ECM factor G_p with lifted Montgomery arithmetic" << std::endl;
     std::cout << "  -gm-factor-chunk-bits <N> : Stage 2 product-exponent chunk target (P-1 default 262144, ECM 131072)" << std::endl;
-    std::cout << "  Native Gaussian worktodo: GMPROTH, GMPRP, GMPMINUS1, GMECM and conditional GMCHAIN" << std::endl;
-    std::cout << "    GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve[,chunk_bits]]]]]" << std::endl;
+    std::cout << "  Native Gaussian worktodo: every type accepts an optional final GM|GQ|BOTH family" << std::endl;
+    std::cout << "    GMPROTH=p[,sieve[,family]], GMPRP=p[,sieve[,family]]" << std::endl;
+    std::cout << "    GMPMINUS1/GMECM append family after their optional fields" << std::endl;
+    std::cout << "    GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve[,chunk_bits[,finish[,family]]]]]]]" << std::endl;
     std::cout << "  -ecm -b1 <B1> [-b2 <B2>] -K <curves> : Run ECM factoring with bounds B1 [and optional B2], on given number of curves" << std::endl;
 
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
@@ -590,6 +594,18 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm") opts.mode = "gm-proth";
             opts.proof = false;
         }
+        else if ((std::strcmp(argv[i], "-gm-family") == 0 ||
+                  std::strcmp(argv[i], "--gm-family") == 0) && i + 1 < argc) {
+            std::string family = argv[++i];
+            std::transform(family.begin(), family.end(), family.begin(),
+                           [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+            if (family != "GM" && family != "GQ" && family != "BOTH") {
+                throw std::runtime_error("-gm-family accepts only GM, GQ, or BOTH");
+            }
+            opts.gaussian_mersenne = true;
+            opts.gm_family = family;
+            opts.proof = false;
+        }
         else if ((std::strcmp(argv[i], "-gm-base") == 0 ||
                   std::strcmp(argv[i], "--gm-base") == 0) && i + 1 < argc) {
             const uint64_t value = to_u64(argv[++i]);
@@ -694,6 +710,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.force_engine_marin = false;
             opts.marin = true;
             opts.aevum_fft_spec = argv[++i];
+            opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-pfa9-type4") == 0 ||
                  std::strcmp(argv[i], "-pfa9-type4-fast") == 0 ||
@@ -705,6 +722,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.aevum_pfa_radix = 9;
             opts.aevum_pfa_off = false;
             opts.aevum_fft_spec = "pfa9:4:512:9:512:202";
+            opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-pfa9-type4-full") == 0) {
             opts.aevum = true;
@@ -714,12 +732,14 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.aevum_pfa_radix = 9;
             opts.aevum_pfa_off = false;
             opts.aevum_fft_spec = "pfa9full:4:512:9:512:202";
+            opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-pfa-off") == 0 ||
                  std::strcmp(argv[i], "-no-pfa") == 0) {
             opts.aevum_pfa_radix = 0;
             opts.aevum_pfa_off = true;
             opts.aevum_fft_spec.clear();
+            opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-pfa") == 0 ||
                  std::strcmp(argv[i], "-pfa-auto") == 0 ||
@@ -747,6 +767,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.aevum_pfa_radix = radix;
             opts.aevum_pfa_off = false;
             opts.aevum_fft_spec = radix == 3 ? "pfa:3" : radix == 9 ? "pfa:9" : "pfa:auto";
+            opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-s3") == 0) {
             opts.s3only = true;

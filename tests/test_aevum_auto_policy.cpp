@@ -81,6 +81,32 @@ int main() {
     auto too_small = aevum_auto_decide(216091u, 8, engine::gpu_workload::prp);
     expect(too_small.use_aevum, false, "unsupported PRP");
 
+#if !defined(__APPLE__)
+    // GMNet/PrimePages known Gaussian-Mersenne prime exponent 3,704,053.
+    // Gaussian arithmetic is lifted to 4p = 14,816,212, which is large
+    // enough to exercise the real Aevum policy while remaining a practical
+    // installation smoke-test size.
+    constexpr std::uint32_t gaussian_smoke_lift = 4u * 3704053u;
+
+    auto gaussian_prp = aevum_auto_decide(
+        gaussian_smoke_lift, 1, engine::gpu_workload::prp, "throughput:prp");
+    expect(gaussian_prp.use_aevum, true, "Gaussian lifted PRP");
+    if (gaussian_prp.aevum_transform != 524288 ||
+        gaussian_prp.fft_spec != "4:256:4:256:202") return 9;
+
+    auto gaussian_pm1 = aevum_auto_decide(
+        gaussian_smoke_lift, 15, engine::gpu_workload::pm1, "throughput:pm1");
+    expect(gaussian_pm1.use_aevum, true, "Gaussian lifted P-1");
+    if (gaussian_pm1.aevum_transform != 524288 ||
+        gaussian_pm1.fft_spec != "4:256:4:256:202") return 10;
+
+    auto gaussian_ecm = aevum_auto_decide(
+        gaussian_smoke_lift, 24, engine::gpu_workload::ecm, "throughput:ecm");
+    expect(gaussian_ecm.use_aevum, true, "Gaussian lifted ECM");
+    if (gaussian_ecm.aevum_transform != 524288 ||
+        gaussian_ecm.fft_spec != "1:256:4:256:101") return 11;
+#endif
+
 #if !defined(_WIN32)
     setenv("AEVUM_AUTO_PM1_STAGE1_MAX_RATIO", "0.40", 1);
     auto forced_conservative = aevum_auto_decide(136279841u, 11, engine::gpu_workload::pm1);

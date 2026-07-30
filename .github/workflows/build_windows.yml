@@ -21,7 +21,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Audit Gaussian Windows portability
-        run: python tests/gaussian_mersenne_windows_portability_test.py
+        shell: powershell
+        run: |
+          python tests/gaussian_mersenne_windows_portability_test.py
+          python tests/gaussian_pair_tf_math_test.py
 
       - name: Install zip utility
         run: choco install zip --no-progress

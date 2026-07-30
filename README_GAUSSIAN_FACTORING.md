@@ -288,3 +288,40 @@ GMCHAIN=45951761,100000,2000000,5000,250000,5,1000000000000,262144,factor
 
 This runs P-1 Stage 1 and Stage 2, then the requested ECM curves, and stops.
 Old GMCHAIN lines without the final field still continue to Proth.
+
+## GPU trial factoring for the Gaussian pair (v99.94)
+
+```text
+./prmers 15317251 -gm-tf 40 52 -gm-family BOTH -d 0
+```
+
+Worktodo equivalent:
+
+```text
+GMTF=15317251,40,52,BOTH,4194304,65536
+```
+
+The GPU performs one modular exponentiation per surviving q=4kp+1 candidate
+and classifies factors of both GM(p) and the complementary GQ(p). Use `GM` or
+`GQ` instead of `BOTH` when a campaign searches only one family.
+
+## Full GM/GQ pipeline in v99.95
+
+All Gaussian commands accept `-gm-family GM`, `-gm-family GQ`, or
+`-gm-family BOTH`. The legacy default remains GM.
+
+Examples:
+
+    ./prmers 19 -gm-pm1 -gm-family BOTH -b1 1000 -b2 10000 -aevum-auto -d 0
+    ./prmers 19 -gm-ecm -gm-family BOTH -b1 2000 -b2 50000 -K 2 -aevum-auto -d 0
+    ./prmers 13 -gm-prp -gm-family BOTH -gm-sieve 0 -aevum-auto -d 0
+    ./prmers 13 -gm-proth -gm-family BOTH -gm-sieve 0 -aevum-auto -d 0
+
+`GMCHAIN` executes a complete P-1 → ECM → primality pipeline independently
+for each family and switches the Aevum/Marin workload selector at every phase.
+GPU TF remains a direct OpenCL integer kernel and intentionally does not use
+Aevum or Marin.
+
+The GQ side of `-gm-proth` is reported honestly as a Fermat PRP, not as a
+Proth proof. Non-TF pair modes currently run the two family computations
+sequentially; only GPU TF shares one candidate pass.

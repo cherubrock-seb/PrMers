@@ -4,6 +4,8 @@ GPU-accelerated PRP, Lucas-Lehmer, P-1 and ECM testing for Mersenne numbers.
 
 https://github.com/cherubrock-seb/PrMers
 
+Distributed Gaussian-Mersenne work, public factors and result tracking are available on [GMNet](https://gmnet.gaussianmersenne.workers.dev/results).
+
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cherubrock-seb/PrMers/blob/main/prmers.ipynb)
 
 Releases for Linux, macOS and Windows are available here:

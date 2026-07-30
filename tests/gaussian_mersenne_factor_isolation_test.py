@@ -12,14 +12,14 @@ version = (root / "include/core/Version.hpp").read_text()
 for token in (
     "runGaussianMersennePM1",
     "runGaussianMersenneECM",
-    "G_p | 2^(2p)+1 | 2^(4p)-1",
+    "target | 2^(4p)-1",
     "make_suyama_curve",
     "montgomery_ladder",
     "project_reg",
     "gm_factor_chunk_bits",
     "GM P-1 Stage 2:",
     "gm_result_json",
-    r'\"schema_version\": 1',
+    r'\"schema_version\": 2',
     "h.version >= 2 && h.version <= GMF_VERSION",
 ):
     assert token in source or token in parser or token in app or token in header or token in options
@@ -32,7 +32,7 @@ assert 'options.mode == "gm-chain"' in app
 assert "gm_pipeline_proth" in app
 assert "gm_pipeline_proth" in options
 assert "removeProcessedLine(activeWorktodoRawLine_)" in app
-assert "4.20.82-alpha-v99.93-gmnet-factor-only-campaigns" in version
+assert "4.20.84-alpha-v99.95-gaussian-pair-full-pipeline" in version
 
 # GMP C++ has no unambiguous unsigned-long-long constructor on every ABI.
 assert "mpz_class sigma = sigma64;" not in source
@@ -43,6 +43,8 @@ assert "sizeof(sigma64)" in source
 assert 'if(options.mode == "ecm")' in app
 assert 'else if (options.mode == "pm1"' in app
 assert source.count("engine::create_gpu(t.lift") == 2
+assert 'target_family' in source
+assert 'requested == "BOTH"' in source
 assert "2^(4p)-1" in source
 
 # No native sparse-modulus kernel was added: the implementation is host-side

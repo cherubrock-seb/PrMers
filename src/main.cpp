@@ -22,6 +22,7 @@
 #include "core/App.hpp"
 #include "io/CliParser.hpp"
 #include "aevum/EngineAevum.hpp"
+#include "modes/GaussianTrialFactor.hpp"
 #include <fstream>
 #include <streambuf>
 #include <iostream>
@@ -155,6 +156,12 @@ int validateCompatibilityBeforeApp(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     LogTee _tee("prmers.log");
+    try {
+        if (const auto tf = core::tryRunGaussianTrialFactor(argc, argv)) return *tf;
+    } catch (const std::exception& e) {
+        std::cerr << "Gaussian TF error: " << e.what() << '\n';
+        return 2;
+    }
     if (const int rc = validateCompatibilityBeforeApp(argc, argv); rc != 0) return rc;
     try {
         return core::App(argc, argv).run();

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <ctime>
@@ -39,9 +40,10 @@ using core::algo::interrupted;
 
 constexpr std::array<char, 8> GMF_MAGIC{{'P','R','G','M','F','A','C','T'}};
 constexpr std::uint32_t GMF_VERSION = 3;
-constexpr const char* GM_RELEASE = "v99.92";
+constexpr const char* GM_RELEASE = "v99.95";
 
 struct GmTarget {
+    std::string family = "GM";
     std::uint32_t p = 0;
     std::uint32_t lift = 0;
     std::uint64_t middle = 0;
@@ -135,25 +137,35 @@ bool is_prime_u64(std::uint64_t n) {
     return true;
 }
 
-GmTarget make_target(std::uint64_t p64) {
+GmTarget make_target(std::uint64_t p64, const std::string& family) {
     if (p64 < 3 || (p64 & 1ULL) == 0 || !is_prime_u64(p64)) {
-        throw std::runtime_error("Gaussian-Mersenne factoring requires an odd prime exponent p >= 3");
+        throw std::runtime_error("Gaussian pair factoring requires an odd prime exponent p >= 3");
     }
     if (p64 > std::numeric_limits<std::uint32_t>::max() / 4ULL) {
-        throw std::runtime_error("Gaussian-Mersenne lift requires 4p <= 2^32-1");
+        throw std::runtime_error("Gaussian pair lift requires 4p <= 2^32-1");
+    }
+    if (family != "GM" && family != "GQ") {
+        throw std::runtime_error("Gaussian target family must be GM or GQ");
     }
     GmTarget t;
+    t.family = family;
     t.p = static_cast<std::uint32_t>(p64);
     t.lift = static_cast<std::uint32_t>(4ULL * p64);
     t.middle = (p64 + 1) / 2;
     const std::uint64_t r = p64 & 7ULL;
     t.chi = (r == 1 || r == 7) ? 1 : -1;
+    const bool gq = family == "GQ";
     t.n = mpz_class(1) << p64;
     const mpz_class mid = mpz_class(1) << t.middle;
-    if (t.chi > 0) t.n -= mid;
+    if ((!gq && t.chi > 0) || (gq && t.chi < 0)) t.n -= mid;
     else t.n += mid;
     t.n += 1;
-    t.digits = static_cast<std::uint64_t>(std::floor(p64 * std::log10(2.0))) + 1;
+    if (gq) {
+        if (!mpz_divisible_ui_p(t.n.get_mpz_t(), 5))
+            throw std::runtime_error("Gaussian cofactor numerator is not divisible by 5");
+        mpz_divexact_ui(t.n.get_mpz_t(), t.n.get_mpz_t(), 5);
+    }
+    t.digits = static_cast<std::uint64_t>(mpz_sizeinbase(t.n.get_mpz_t(), 10));
     return t;
 }
 
@@ -173,10 +185,8 @@ std::uint64_t find_admissible_small_factor(const GmTarget& t, std::uint64_t limi
         const std::uint64_t q = step * k + 1;
         if (q > limit) break;
         if (!is_prime_u64(q)) continue;
-        const std::uint64_t a = pow_mod_u64(2, t.p, q);
-        const std::uint64_t b = pow_mod_u64(2, t.middle, q);
-        const std::uint64_t signed_b = t.chi > 0 ? b : (b == 0 ? 0 : q - b);
-        if ((a + q - signed_b + 1) % q == 0 && mpz_cmp_ui(t.n.get_mpz_t(), q) != 0) return q;
+        if (mpz_divisible_ui_p(t.n.get_mpz_t(), static_cast<unsigned long>(q)) &&
+            mpz_cmp_ui(t.n.get_mpz_t(), static_cast<unsigned long>(q)) != 0) return q;
     }
     return 0;
 }
@@ -312,10 +322,10 @@ std::size_t choose_chunk_end(const std::vector<std::uint32_t>& primes,
 void print_target(const char* label, const GmTarget& t) {
     std::cout << label << "\n"
               << "  p              : " << t.p << "\n"
-              << "  G_p            : 2^" << t.p << (t.chi > 0 ? " - " : " + ")
-              << "2^" << t.middle << " + 1\n"
+              << "  target family  : " << t.family << "\n"
+              << "  norm           : " << (t.family == "GM" ? "2^p-(2/p)2^m+1" : "(2^p+(2/p)2^m+1)/5") << "\n"
               << "  decimal digits : " << t.digits << "\n"
-              << "  exact lift     : G_p | 2^(2p)+1 | 2^(4p)-1\n"
+              << "  exact lift     : target | 2^(4p)-1\n"
               << "  lift exponent  : " << t.lift << "\n";
 }
 
@@ -437,11 +447,12 @@ std::string gm_result_json(const std::string& mode,
     std::ostringstream json;
     json << std::fixed << std::setprecision(3);
     json << "{\n"
-         << "  \"schema_version\": 1,\n"
+         << "  \"schema_version\": 2,\n"
          << "  \"program\": \"PrMers\",\n"
          << "  \"program_version\": \"" << GM_RELEASE << "\",\n"
          << "  \"program_build\": \"" << json_escape(core::PRMERS_VERSION) << "\",\n"
-         << "  \"family\": \"gaussian-mersenne\",\n"
+         << "  \"family\": \"gaussian-pair\",\n"
+         << "  \"target_family\": \"" << target.family << "\",\n"
          << "  \"mode\": \"" << json_escape(mode) << "\",\n"
          << "  \"outcome\": \"" << json_escape(outcome) << "\",\n"
          << "  \"stage\": " << stage << ",\n"
@@ -952,13 +963,36 @@ PointProjection project_point(engine* eng,
     return out;
 }
 
+std::string normalized_family(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+    return value;
+}
+
+std::string factor_result_filename(const std::string& mode, const GmTarget& t) {
+    const std::string prefix = t.family == "GQ" ? "gq" : "gm";
+    return prefix + "_" + mode + "_p" + std::to_string(t.p) + "_result.json";
+}
+
 } // namespace
 
 namespace core {
 
 int App::runGaussianMersennePM1() {
+    const std::string requested = normalized_family(options.gm_family);
+    if (requested == "BOTH") {
+        const std::string saved = options.gm_family;
+        options.gm_family = "GM";
+        const int gm_rc = runGaussianMersennePM1();
+        if (interrupted) { options.gm_family = saved; return gm_rc; }
+        options.gm_family = "GQ";
+        const int gq_rc = runGaussianMersennePM1();
+        options.gm_family = saved;
+        if (gm_rc == 2 || gq_rc == 2) return 2;
+        return (gm_rc == 0 && gq_rc == 0) ? 0 : 1;
+    }
     GmTarget t;
-    try { t = make_target(options.exponent); }
+    try { t = make_target(options.exponent, requested); }
     catch (const std::exception& ex) { std::cerr << ex.what() << "\n"; return 2; }
 
     const std::uint64_t B1 = options.B1 != 0 ? options.B1 : 100000ULL;
@@ -974,14 +1008,14 @@ int App::runGaussianMersennePM1() {
     };
     const std::string device_name = opencl_device_name(static_cast<std::size_t>(options.device_id));
 
-    print_target("Gaussian-Mersenne P-1 factoring", t);
+    print_target("Gaussian pair P-1 factoring", t);
     if (options.gm_sieve_limit != 0) {
         std::cout << "  admissible sieve: q=4kp+1 through " << options.gm_sieve_limit << "\n";
         const std::uint64_t sf = find_admissible_small_factor(t, options.gm_sieve_limit);
         if (sf != 0) {
-            std::cout << ">>> Gaussian-Mersenne admissible-sieve factor: " << sf << "\n";
+            std::cout << ">>> Gaussian pair admissible-sieve factor: " << sf << "\n";
             write_json_result(
-                save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+                save_dir, factor_result_filename("pm1", t),
                 gm_result_json("gm-pm1", "factor", 0, t, B1,
                                B2 > B1 ? std::optional<std::uint64_t>(B2) : std::nullopt,
                                std::nullopt, std::nullopt, std::nullopt,
@@ -992,15 +1026,15 @@ int App::runGaussianMersennePM1() {
     }
     std::cout << "  B1 / B2        : " << B1 << " / " << B2 << "\n"
               << "  base           : " << base << "\n"
-              << "  optimization   : exponent includes guaranteed factor 4p of every q-1 (q | G_p, q != 5)\n"
-              << "  projection     : CPU reduction/GCD modulo G_p only at stage boundaries\n";
+              << "  optimization   : exponent includes guaranteed factor 4p of every q-1 (q | selected norm, q != 5)\n"
+              << "  projection     : CPU reduction/GCD modulo selected norm only at stage boundaries\n";
 
     mpz_class base_gcd;
     mpz_gcd_ui(base_gcd.get_mpz_t(), t.n.get_mpz_t(), base);
     if (is_proper_factor(base_gcd, t.n)) {
         std::cout << "P-1 base gcd found factor " << base_gcd << "\n";
         write_json_result(
-            save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+            save_dir, factor_result_filename("pm1", t),
             gm_result_json("gm-pm1", "factor", 0, t, B1,
                            B2 > B1 ? std::optional<std::uint64_t>(B2) : std::nullopt,
                            std::nullopt, std::nullopt, std::nullopt, base_gcd.get_str(),
@@ -1031,7 +1065,7 @@ int App::runGaussianMersennePM1() {
               << "  safe replay    : " << (options.gm_safe_replay ? "enabled" : "disabled") << "\n"
               << "  Stage 2 power  : width-4 sliding window with 8 prepared odd powers\n";
 
-    const std::filesystem::path s1_ckpt = save_dir / ("gm_pm1_p" + std::to_string(t.p) + "_stage1.ckpt");
+    const std::filesystem::path s1_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_pm1_p") + std::to_string(t.p) + "_stage1.ckpt");
     std::uint64_t remaining = exponent_bits;
     double restored = 0.0;
     if (options.resume) {
@@ -1067,25 +1101,25 @@ int App::runGaussianMersennePM1() {
     mpz_class g = proper_gcd(mod_positive(h - 1, t.n), t.n);
     std::cout << "Stage 1 residue low64: 0x" << low_hex(h, 64) << "\n";
     if (is_proper_factor(g, t.n)) {
-        std::cout << ">>> Gaussian-Mersenne P-1 Stage 1 factor: " << g << "\n";
+        std::cout << ">>> Gaussian pair P-1 Stage 1 factor: " << g << "\n";
         write_json_result(
-            save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+            save_dir, factor_result_filename("pm1", t),
             gm_result_json("gm-pm1", "factor", 1, t, B1, std::nullopt,
                            std::nullopt, std::nullopt, std::nullopt, g.get_str(),
                            backend, device_name, job_elapsed()));
         if (B2 <= B1 || !options.pm1_continue_stage2_after_factor) return 0;
         std::cout << "Continuing Stage 2 by explicit -pm1-continue-stage2-after-factor.\n";
     } else if (g == t.n) {
-        std::cout << "Stage 1 gcd=G_p (all remaining factors were killed); retry with a smaller B1 or another base to isolate one.\n";
+        std::cout << "Stage 1 gcd=target (all remaining factors were killed); retry with a smaller B1 or another base to isolate one.\n";
         if (B2 <= B1) return 1;
     } else {
-        std::cout << "No Gaussian-Mersenne P-1 Stage 1 factor.\n";
+        std::cout << "No Gaussian pair P-1 Stage 1 factor.\n";
     }
 
     if (B2 <= B1) {
         std::cout << "Stage 2 disabled (B2 <= B1).\n";
         write_json_result(
-            save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+            save_dir, factor_result_filename("pm1", t),
             gm_result_json("gm-pm1", "no-factor", 1, t, B1, std::nullopt,
                            std::nullopt, std::nullopt, std::nullopt, std::nullopt,
                            backend, device_name, job_elapsed()));
@@ -1098,14 +1132,14 @@ int App::runGaussianMersennePM1() {
               << " | chunk target " << chunk_bits << " bits\n";
     if (s2primes.empty()) {
         write_json_result(
-            save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+            save_dir, factor_result_filename("pm1", t),
             gm_result_json("gm-pm1", "no-factor", 2, t, B1, B2,
                            std::nullopt, std::nullopt, std::nullopt, std::nullopt,
                            backend, device_name, job_elapsed()));
         return 1;
     }
 
-    const std::filesystem::path s2_ckpt = save_dir / ("gm_pm1_p" + std::to_string(t.p) + "_stage2.ckpt");
+    const std::filesystem::path s2_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_pm1_p") + std::to_string(t.p) + "_stage2.ckpt");
     std::size_t prime_index = 0;
     double s2_restored = 0.0;
     std::uint64_t token = 0;
@@ -1193,25 +1227,25 @@ int App::runGaussianMersennePM1() {
                   << " | elapsed=" << s2_elapsed() << " s\n";
         if (is_proper_factor(g, t.n)) {
             clear_checkpoint(s2_ckpt);
-            std::cout << ">>> Gaussian-Mersenne P-1 Stage 2 factor: " << g << "\n";
+            std::cout << ">>> Gaussian pair P-1 Stage 2 factor: " << g << "\n";
             write_json_result(
-                save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+                save_dir, factor_result_filename("pm1", t),
                 gm_result_json("gm-pm1", "factor", 2, t, B1, B2,
                                std::nullopt, std::nullopt, std::nullopt, g.get_str(),
                                backend, device_name, job_elapsed()));
             return 0;
         }
         if (g == t.n) {
-            std::cout << "Stage 2 gcd=G_p; reduce -gm-factor-chunk-bits to isolate a factor.\n";
+            std::cout << "Stage 2 gcd=target; reduce -gm-factor-chunk-bits to isolate a factor.\n";
             clear_checkpoint(s2_ckpt);
             return 1;
         }
     }
 
     clear_checkpoint(s2_ckpt);
-    std::cout << "No Gaussian-Mersenne P-1 factor through B2=" << B2 << ".\n";
+    std::cout << "No Gaussian pair P-1 factor through B2=" << B2 << ".\n";
     write_json_result(
-        save_dir, "gm_pm1_p" + std::to_string(t.p) + "_result.json",
+        save_dir, factor_result_filename("pm1", t),
         gm_result_json("gm-pm1", "no-factor", 2, t, B1, B2,
                        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
                        backend, device_name, job_elapsed()));
@@ -1219,8 +1253,20 @@ int App::runGaussianMersennePM1() {
 }
 
 int App::runGaussianMersenneECM() {
+    const std::string requested = normalized_family(options.gm_family);
+    if (requested == "BOTH") {
+        const std::string saved = options.gm_family;
+        options.gm_family = "GM";
+        const int gm_rc = runGaussianMersenneECM();
+        if (interrupted) { options.gm_family = saved; return gm_rc; }
+        options.gm_family = "GQ";
+        const int gq_rc = runGaussianMersenneECM();
+        options.gm_family = saved;
+        if (gm_rc == 2 || gq_rc == 2) return 2;
+        return (gm_rc == 0 && gq_rc == 0) ? 0 : 1;
+    }
     GmTarget t;
-    try { t = make_target(options.exponent); }
+    try { t = make_target(options.exponent, requested); }
     catch (const std::exception& ex) { std::cerr << ex.what() << "\n"; return 2; }
 
     const std::uint64_t B1 = options.B1 != 0 ? options.B1 : 50000ULL;
@@ -1236,14 +1282,14 @@ int App::runGaussianMersenneECM() {
     };
     const std::string device_name = opencl_device_name(static_cast<std::size_t>(options.device_id));
 
-    print_target("Gaussian-Mersenne ECM factoring", t);
+    print_target("Gaussian pair ECM factoring", t);
     if (options.gm_sieve_limit != 0) {
         std::cout << "  admissible sieve: q=4kp+1 through " << options.gm_sieve_limit << "\n";
         const std::uint64_t sf = find_admissible_small_factor(t, options.gm_sieve_limit);
         if (sf != 0) {
-            std::cout << ">>> Gaussian-Mersenne admissible-sieve factor: " << sf << "\n";
+            std::cout << ">>> Gaussian pair admissible-sieve factor: " << sf << "\n";
             write_json_result(
-                save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+                save_dir, factor_result_filename("ecm", t),
                 gm_result_json("gm-ecm", "factor", 0, t, B1,
                                B2 > B1 ? std::optional<std::uint64_t>(B2) : std::nullopt,
                                curves, std::nullopt, std::nullopt, std::to_string(sf),
@@ -1255,8 +1301,8 @@ int App::runGaussianMersenneECM() {
     std::cout << "  B1 / B2        : " << B1 << " / " << B2 << "\n"
               << "  curves         : " << curves << "\n"
               << "  curve family   : Suyama Montgomery, projective x/z\n"
-              << "  projection     : exact CPU reduction modulo G_p after Stage 1 and each Stage 2 chunk\n"
-              << "  inversions     : only modulo G_p on CPU; never modulo the lifted cofactor ring\n";
+              << "  projection     : exact CPU reduction modulo selected norm after Stage 1 and each Stage 2 chunk\n"
+              << "  inversions     : only modulo selected norm on CPU; never modulo the lifted cofactor ring\n";
 
     const mpz_class K = buildE(B1);
     const std::uint64_t kbits = static_cast<std::uint64_t>(mpz_sizeinbase(K.get_mpz_t(), 2));
@@ -1285,9 +1331,9 @@ int App::runGaussianMersenneECM() {
         std::cout << "\n[GM ECM] curve " << (curve + 1) << "/" << curves << " sigma=" << sigma << "\n";
         CurveSetup setup = make_suyama_curve(t.n, sigma);
         if (is_proper_factor(setup.factor, t.n)) {
-            std::cout << ">>> Gaussian-Mersenne ECM setup factor: " << setup.factor << "\n";
+            std::cout << ">>> Gaussian pair ECM setup factor: " << setup.factor << "\n";
             write_json_result(
-                save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+                save_dir, factor_result_filename("ecm", t),
                 gm_result_json("gm-ecm", "factor", 0, t, B1,
                                B2 > B1 ? std::optional<std::uint64_t>(B2) : std::nullopt,
                                curves, curve + 1, std::to_string(sigma), setup.factor.get_str(),
@@ -1300,7 +1346,7 @@ int App::runGaussianMersenneECM() {
         }
 
         montgomery_init_ladder(eng.get(), r, setup.x_affine, setup.a24, t.n);
-        const std::filesystem::path ckpt = save_dir / ("gm_ecm_p" + std::to_string(t.p) + "_c" +
+        const std::filesystem::path ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_p") + std::to_string(t.p) + "_c" +
                                                          std::to_string(curve) + "_stage1.ckpt");
         std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
         double restored = 0.0;
@@ -1352,9 +1398,9 @@ int App::runGaussianMersenneECM() {
         eng->sync();
         PointProjection point = project_point(eng.get(), r, t.n);
         if (is_proper_factor(point.factor, t.n)) {
-            std::cout << ">>> Gaussian-Mersenne ECM Stage 1 factor: " << point.factor << "\n";
+            std::cout << ">>> Gaussian pair ECM Stage 1 factor: " << point.factor << "\n";
             write_json_result(
-                save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+                save_dir, factor_result_filename("ecm", t),
                 gm_result_json("gm-ecm", "factor", 1, t, B1, std::nullopt,
                                curves, curve + 1, std::to_string(sigma), point.factor.get_str(),
                                backend, device_name, job_elapsed()));
@@ -1368,7 +1414,7 @@ int App::runGaussianMersenneECM() {
                   << " | elapsed=" << std::fixed << std::setprecision(2) << elapsed() << " s\n";
 
         if (s2primes.empty()) continue;
-        const std::filesystem::path s2_ckpt = save_dir / ("gm_ecm_p" + std::to_string(t.p) + "_c" +
+        const std::filesystem::path s2_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_p") + std::to_string(t.p) + "_c" +
                                                             std::to_string(curve) + "_stage2.ckpt");
         std::size_t index = 0;
         double s2_restored = 0.0;
@@ -1381,10 +1427,10 @@ int App::runGaussianMersenneECM() {
             eng->sync();
             point = project_point(eng.get(), r, t.n);
             if (is_proper_factor(point.factor, t.n)) {
-                std::cout << ">>> Gaussian-Mersenne ECM Stage 2 checkpoint contains factor: "
+                std::cout << ">>> Gaussian pair ECM Stage 2 checkpoint contains factor: "
                           << point.factor << "\n";
                 write_json_result(
-                    save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+                    save_dir, factor_result_filename("ecm", t),
                     gm_result_json("gm-ecm", "factor", 2, t, B1, B2, curves,
                                    curve + 1, std::to_string(sigma), point.factor.get_str(),
                                    backend, device_name, job_elapsed(),
@@ -1432,7 +1478,7 @@ int App::runGaussianMersenneECM() {
 
             // Re-embed the exact projected Stage-1/current point.  This avoids
             // every inversion in the lifted ring and makes each chunk a clean
-            // homomorphic scalar multiplication modulo G_p.
+            // homomorphic scalar multiplication modulo selected norm.
             montgomery_init_ladder(eng.get(), r, point.x, setup.a24, t.n);
             std::vector<char> safe_chunk_start;
             if (options.gm_safe_replay) {
@@ -1476,9 +1522,9 @@ int App::runGaussianMersenneECM() {
                                    0, static_cast<std::uint32_t>(curve), sigma,
                                    index, total_s2_elapsed());
             if (is_proper_factor(point.factor, t.n)) {
-                std::cout << ">>> Gaussian-Mersenne ECM Stage 2 factor: " << point.factor << "\n";
+                std::cout << ">>> Gaussian pair ECM Stage 2 factor: " << point.factor << "\n";
                 write_json_result(
-                    save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+                    save_dir, factor_result_filename("ecm", t),
                     gm_result_json("gm-ecm", "factor", 2, t, B1, B2, curves,
                                    curve + 1, std::to_string(sigma), point.factor.get_str(),
                                    backend, device_name, job_elapsed()));
@@ -1497,9 +1543,9 @@ int App::runGaussianMersenneECM() {
         clear_checkpoint(s2_ckpt);
     }
 
-    std::cout << "No Gaussian-Mersenne ECM factor found in " << curves << " curve(s).\n";
+    std::cout << "No Gaussian pair ECM factor found in " << curves << " curve(s).\n";
     write_json_result(
-        save_dir, "gm_ecm_p" + std::to_string(t.p) + "_result.json",
+        save_dir, factor_result_filename("ecm", t),
         gm_result_json("gm-ecm", "no-factor", B2 > B1 ? 2 : 1, t, B1,
                        B2 > B1 ? std::optional<std::uint64_t>(B2) : std::nullopt,
                        curves, std::nullopt, std::nullopt, std::nullopt,

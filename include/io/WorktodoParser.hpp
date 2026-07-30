@@ -16,6 +16,7 @@ struct WorktodoEntry {
     bool gaussianMersenne = false;   // Native PrMers Gaussian-Mersenne worktodo entry
     bool gmPrpOnly = false;          // GMPRP rather than deterministic GMPROTH
     bool gmPipeline = false;         // GMCHAIN conditional P-1 -> optional ECM
+    std::string gmFamily = "GM";      // GM, GQ, or BOTH
     bool gmPipelineProth = true;     // legacy default; false stops after factoring
     bool pminus1ed = true;           // Prime95 Test/DoubleCheck third field; informational for now
     uint32_t exponent = 0;

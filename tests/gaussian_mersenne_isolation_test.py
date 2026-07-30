@@ -8,7 +8,7 @@ cli = (root / "src/io/CliParser.cpp").read_text()
 app = (root / "src/core/App.cpp").read_text()
 hpp = (root / "include/io/CliParser.hpp").read_text()
 
-for flag in ("-gm-proth", "-gm-prp", "-gm-safe", "-gm-sieve", "-gm-base"):
+for flag in ("-gm-proth", "-gm-prp", "-gm-safe", "-gm-sieve", "-gm-base", "-gm-family"):
     assert flag in cli
 assert "runGaussianMersenne" in app
 assert "gaussian_mersenne = false" in hpp
@@ -26,3 +26,6 @@ if (root / ".git").exists():
     assert not changed, f"Gaussian extension modified existing Aevum sources: {changed}"
 
 print("Gaussian-Mersenne CLI/isolation test passed")
+
+assert 'std::string gm_family = "GM"' in hpp
+assert 'o.gm_family = e->gmFamily' in app

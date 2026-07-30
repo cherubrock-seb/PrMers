@@ -157,6 +157,62 @@ static int askExponentInteractively() {
     }
   #endif
 }
+static engine::gpu_backend gaussian_selected_backend(const io::CliOptions& options) {
+#if defined(__APPLE__)
+    return (!options.marin || options.force_engine_marin)
+        ? engine::gpu_backend::marin
+        : (options.aevum ? engine::gpu_backend::aevum : engine::gpu_backend::marin);
+#else
+    return (!options.marin || options.force_engine_marin)
+        ? engine::gpu_backend::marin
+        : (options.aevum ? engine::gpu_backend::aevum : engine::gpu_backend::auto_select);
+#endif
+}
+
+static std::string gaussian_workload_fft_spec(const io::CliOptions& options,
+                                               const engine::gpu_workload workload) {
+    if (options.aevum_fft_spec_explicit) return options.aevum_fft_spec;
+#if defined(__APPLE__)
+    if (workload == engine::gpu_workload::prp || workload == engine::gpu_workload::ll)
+        return "pow2:auto";
+    return {};
+#else
+    const char* override_value = nullptr;
+    const char* fallback = nullptr;
+    switch (workload) {
+        case engine::gpu_workload::prp:
+            override_value = std::getenv("PRMERS_AEVUM_PRP_FFT");
+            fallback = "throughput:prp";
+            break;
+        case engine::gpu_workload::pm1:
+        case engine::gpu_workload::pm1_lowmem:
+            override_value = std::getenv("PRMERS_AEVUM_PM1_FFT");
+            fallback = "throughput:pm1";
+            break;
+        case engine::gpu_workload::ecm:
+            override_value = std::getenv("PRMERS_AEVUM_ECM_FFT");
+            fallback = "throughput:ecm";
+            break;
+        default:
+            return options.aevum_fft_spec;
+    }
+    return override_value && *override_value ? override_value : fallback;
+#endif
+}
+
+static void configure_gaussian_phase_backend(io::CliOptions& options,
+                                              const engine::gpu_workload workload,
+                                              const char* phase) {
+    const std::string fft_spec = gaussian_workload_fft_spec(options, workload);
+    engine::configure_gpu_backend(gaussian_selected_backend(options), fft_spec, workload);
+    options.aevum_fft_spec = fft_spec;
+    std::cout << "[Gaussian backend policy] " << phase
+              << " workload=" << aevum_workload_name(workload)
+              << " backend=" << engine::configured_gpu_backend_name();
+    if (!fft_spec.empty()) std::cout << " fft=" << fft_spec;
+    std::cout << "\n";
+}
+
 void App::tuneIterforce() {
     double maxTestSeconds = 60.0;
     uint64_t defaultTestIters = 1024;
@@ -285,6 +341,7 @@ App::App(int argc, char** argv)
         if (e->gaussianMersenne) {
             o.gaussian_mersenne = true;
             o.gm_prp_only = e->gmPrpOnly;
+            o.gm_family = e->gmFamily;
             o.gm_pipeline = e->gmPipeline;
             o.gm_pipeline_proth = e->gmPipelineProth;
             o.mode = e->gmPipeline ? "gm-chain"
@@ -976,55 +1033,90 @@ int App::run() {
     int rc = 1;
     bool ran = false;
     if (options.mode == "gm-chain") {
-        // One native conditional worktodo job. P-1 is always attempted first;
-        // ECM is optional. Legacy lines continue to deterministic Proth, while
-        // a final `factor` token stops after the factoring phases.
+        // Run a complete conditional pipeline independently for each requested
+        // Gaussian family.  This avoids repeating work on a family already
+        // eliminated by an earlier phase and lets every phase use its native
+        // Aevum/Marin workload policy.
         const std::string pipeline_mode = options.mode;
+        const std::string requested_family = options.gm_family;
         const std::uint64_t pm1_B1 = options.B1;
         const std::uint64_t pm1_B2 = options.B2;
         const std::uint64_t ecm_B1 = options.gm_pipeline_ecm_B1;
         const std::uint64_t ecm_B2 = options.gm_pipeline_ecm_B2;
         const std::uint64_t ecm_curves = options.gm_pipeline_ecm_curves;
+        const std::uint64_t sieve_limit = options.gm_sieve_limit;
+        const bool saved_prp_only = options.gm_prp_only;
 
-        std::cout << "[GMCHAIN] P-1 B1=" << pm1_B1 << " B2=" << pm1_B2;
+        std::cout << "[GMCHAIN] family=" << requested_family
+                  << " P-1 B1=" << pm1_B1 << " B2=" << pm1_B2;
         if (ecm_curves != 0)
             std::cout << ", then ECM B1=" << ecm_B1 << " B2=" << ecm_B2
                       << " curves=" << ecm_curves;
         if (options.gm_pipeline_proth)
-            std::cout << ", then deterministic Proth if no factor is found.\n";
+            std::cout << ", then GM Proth / GQ Fermat PRP if no factor is found.\n";
         else
             std::cout << ", then stop after factoring.\n";
 
-        options.mode = "gm-pm1";
-        rc = runGaussianMersennePM1();
-        ran = true;
-
-        if (!interrupted && rc == 1 && ecm_curves != 0) {
-            options.mode = "gm-ecm";
-            options.B1 = ecm_B1;
-            options.B2 = ecm_B2;
-            options.K = ecm_curves;
-            options.nmax = ecm_curves;
-            options.gm_sieve_limit = 0; // already performed by P-1
-            rc = runGaussianMersenneECM();
-        }
-
-        if (!interrupted && rc == 1 && options.gm_pipeline_proth) {
-            options.mode = "gm-proth";
-            options.gm_prp_only = false;
-            options.B1 = 0;
-            options.B2 = 0;
+        auto run_family_pipeline = [&](const std::string& family) -> int {
+            options.gm_family = family;
+            options.mode = "gm-pm1";
+            options.B1 = pm1_B1;
+            options.B2 = pm1_B2;
             options.K = 0;
             options.nmax = 0;
-            options.gm_sieve_limit = 0; // already performed by P-1
-            rc = runGaussianMersenne();
+            options.gm_sieve_limit = sieve_limit;
+            options.gm_prp_only = false;
+            configure_gaussian_phase_backend(options, engine::gpu_workload::pm1, "P-1");
+            int family_rc = runGaussianMersennePM1();
+
+            if (!interrupted && family_rc == 1 && ecm_curves != 0) {
+                options.mode = "gm-ecm";
+                options.B1 = ecm_B1;
+                options.B2 = ecm_B2;
+                options.K = ecm_curves;
+                options.nmax = ecm_curves;
+                options.gm_sieve_limit = 0; // already performed by P-1
+                configure_gaussian_phase_backend(options, engine::gpu_workload::ecm, "ECM");
+                family_rc = runGaussianMersenneECM();
+            }
+
+            if (!interrupted && family_rc == 1 && options.gm_pipeline_proth) {
+                options.mode = "gm-proth";
+                options.gm_prp_only = false;
+                options.B1 = 0;
+                options.B2 = 0;
+                options.K = 0;
+                options.nmax = 0;
+                options.gm_sieve_limit = 0; // already performed by P-1
+                configure_gaussian_phase_backend(options, engine::gpu_workload::prp,
+                                                  family == "GQ" ? "GQ Fermat PRP" : "GM Proth");
+                family_rc = runGaussianMersenne();
+            }
+            return family_rc;
+        };
+
+        if (requested_family == "BOTH") {
+            const int gm_rc = run_family_pipeline("GM");
+            if (interrupted) {
+                rc = gm_rc;
+            } else {
+                const int gq_rc = run_family_pipeline("GQ");
+                rc = (gm_rc == 2 || gq_rc == 2) ? 2
+                   : (gm_rc == 0 && gq_rc == 0) ? 0 : 1;
+            }
+        } else {
+            rc = run_family_pipeline(requested_family);
         }
+        ran = true;
 
         options.mode = pipeline_mode;
+        options.gm_family = requested_family;
+        options.gm_prp_only = saved_prp_only;
         options.B1 = pm1_B1;
         options.B2 = pm1_B2;
         options.K = ecm_curves;
         options.nmax = ecm_curves;
+        options.gm_sieve_limit = sieve_limit;
     }
     if (options.mode == "gm-proth" || options.mode == "gm-prp") {
         rc = runGaussianMersenne();
