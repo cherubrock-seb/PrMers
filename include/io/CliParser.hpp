@@ -19,6 +19,8 @@ struct CliOptions {
     // Mersenne arithmetic remains untouched.
     bool gaussian_mersenne = false;
     bool gm_prp_only = false;
+    // Target norm: GM, GQ, or BOTH. Old worktodo/CLI defaults to GM.
+    std::string gm_family = "GM";
     bool gm_cpu = false;
     bool gm_safe_replay = false;
     uint32_t gm_base = 0;
@@ -48,6 +50,7 @@ struct CliOptions {
     bool aevum_auto = true;
     bool force_engine_marin = false;
     std::string aevum_fft_spec = "";
+    bool aevum_fft_spec_explicit = false;
     int aevum_pfa_radix = -1;             // -1=auto, 0=disabled, 3 or 9
     bool aevum_pfa_off = false;            // keep the stock power-of-two Aevum plan
     bool bench = false;

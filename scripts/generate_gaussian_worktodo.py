@@ -53,6 +53,7 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=Path("worktodo-gm.txt"))
     ap.add_argument("--append", action="store_true")
     ap.add_argument("--mode", choices=("chain", "pm1", "ecm", "proth", "prp"), default="chain")
+    ap.add_argument("--family", choices=("GM", "GQ", "BOTH"), default="BOTH")
     ap.add_argument("--pm1-b1", type=int, default=100_000)
     ap.add_argument("--pm1-b2", type=int, default=1_000_000)
     ap.add_argument("--base", type=int, default=3)
@@ -75,22 +76,22 @@ def main() -> int:
         if args.mode == "chain":
             lines.append(
                 f"GMCHAIN={p},{args.pm1_b1},{args.pm1_b2},"
-                f"{args.ecm_b1},{args.ecm_b2},{args.curves},{args.sieve},{args.chunk_bits}"
+                f"{args.ecm_b1},{args.ecm_b2},{args.curves},{args.sieve},{args.chunk_bits},proth,{args.family}"
             )
         elif args.mode == "pm1":
             lines.append(
                 f"GMPMINUS1={p},{args.pm1_b1},{args.pm1_b2},"
-                f"{args.base},{args.sieve},{args.chunk_bits}"
+                f"{args.base},{args.sieve},{args.chunk_bits},{args.family}"
             )
         elif args.mode == "ecm":
             lines.append(
                 f"GMECM={p},{args.ecm_b1},{args.ecm_b2},{max(1, args.curves)},"
-                f"{args.sigma},{args.sieve},{args.chunk_bits}"
+                f"{args.sigma},{args.sieve},{args.chunk_bits},{args.family}"
             )
         elif args.mode == "proth":
-            lines.append(f"GMPROTH={p},{args.sieve}")
+            lines.append(f"GMPROTH={p},{args.sieve},{args.family}")
         else:
-            lines.append(f"GMPRP={p},{args.sieve}")
+            lines.append(f"GMPRP={p},{args.sieve},{args.family}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     mode = "a" if args.append else "w"

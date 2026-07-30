@@ -173,13 +173,22 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
             // deliberately separate from Prime95 syntax because the target is
             // G_p = 2^p - (2/p)2^((p+1)/2) + 1, not M_p.
             //
-            //   GMPROTH=p[,sieve_limit]
-            //   GMPRP=p[,sieve_limit]
-            //   GMPMINUS1=p,B1,B2[,base[,sieve_limit[,chunk_bits]]]
-            //   GMECM=p,B1,B2,curves[,sigma[,sieve_limit[,chunk_bits]]]
-            //   GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits[,finish]]]]]]
+            //   GMPROTH=p[,sieve_limit[,GM|GQ|BOTH]]
+            //   GMPRP=p[,sieve_limit[,GM|GQ|BOTH]]
+            //   GMPMINUS1=p,B1,B2[,base[,sieve_limit[,chunk_bits[,GM|GQ|BOTH]]]]
+            //   GMECM=p,B1,B2,curves[,sigma[,sieve_limit[,chunk_bits[,GM|GQ|BOTH]]]]
+            //   GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits[,finish[,GM|GQ|BOTH]]]]]]]
             // finish is proth by default for compatibility. finish=factor stops
             // after P-1 and optional ECM without running a primality test.
+            auto parseGmFamily = [](const std::string& raw, std::string& out) -> bool {
+                std::string value = raw;
+                std::transform(value.begin(), value.end(), value.begin(),
+                               [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+                if (value != "GM" && value != "GQ" && value != "BOTH") return false;
+                out = value;
+                return true;
+            };
+
             if (isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN) {
                 for (std::string& part : parts) trim_inplace(part);
                 const size_t required = (isGMPRP || isGMPROTH) ? 1 :
@@ -202,6 +211,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 if (isGMPRP || isGMPROTH) {
                     if (parts.size() >= 2 && !parts[1].empty())
                         entry.gmSieveLimit = std::stoull(parts[1]);
+                    if (parts.size() >= 3 && !parts[2].empty() && !parseGmFamily(parts[2], entry.gmFamily))
+                        continue;
                 } else if (isGMPM1) {
                     entry.B1 = std::stoull(parts[1]);
                     entry.B2 = std::stoull(parts[2]);
@@ -211,6 +222,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                         entry.gmSieveLimit = std::stoull(parts[4]);
                     if (parts.size() >= 6 && !parts[5].empty())
                         entry.gmFactorChunkBits = std::stoull(parts[5]);
+                    if (parts.size() >= 7 && !parts[6].empty() && !parseGmFamily(parts[6], entry.gmFamily))
+                        continue;
                 } else if (isGMCHAIN) {
                     entry.B1 = std::stoull(parts[1]);
                     entry.B2 = std::stoull(parts[2]);
@@ -220,16 +233,20 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     if (parts.size() >= 7 && !parts[6].empty()) entry.gmSieveLimit = std::stoull(parts[6]);
                     if (parts.size() >= 8 && !parts[7].empty()) entry.gmFactorChunkBits = std::stoull(parts[7]);
                     if (parts.size() >= 9 && !parts[8].empty()) {
-                        std::string finish = parts[8];
-                        std::transform(finish.begin(), finish.end(), finish.begin(),
-                                       [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-                        if (finish == "factor" || finish == "factoring" || finish == "none")
-                            entry.gmPipelineProth = false;
-                        else if (finish == "proth" || finish == "exact")
-                            entry.gmPipelineProth = true;
-                        else
-                            continue;
+                        if (!parseGmFamily(parts[8], entry.gmFamily)) {
+                            std::string finish = parts[8];
+                            std::transform(finish.begin(), finish.end(), finish.begin(),
+                                           [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                            if (finish == "factor" || finish == "factoring" || finish == "none")
+                                entry.gmPipelineProth = false;
+                            else if (finish == "proth" || finish == "exact")
+                                entry.gmPipelineProth = true;
+                            else
+                                continue;
+                        }
                     }
+                    if (parts.size() >= 10 && !parts[9].empty() && !parseGmFamily(parts[9], entry.gmFamily))
+                        continue;
                 } else {
                     entry.B1 = std::stoull(parts[1]);
                     entry.B2 = std::stoull(parts[2]);
@@ -241,6 +258,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                         entry.gmSieveLimit = std::stoull(parts[5]);
                     if (parts.size() >= 7 && !parts[6].empty())
                         entry.gmFactorChunkBits = std::stoull(parts[6]);
+                    if (parts.size() >= 8 && !parts[7].empty() && !parseGmFamily(parts[7], entry.gmFamily))
+                        continue;
                 }
 
                 const char* kind = isGMPRP ? "GMPRP" : isGMPROTH ? "GMPROTH" :
@@ -252,7 +271,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 if (isGMCHAIN) std::cout << " ecm=" << entry.gmEcmB1 << "/" << entry.gmEcmB2
                                           << " curves=" << entry.gmEcmCurves
                                            << " finish=" << (entry.gmPipelineProth ? "proth" : "factor");
-                std::cout << " sieve=" << entry.gmSieveLimit;
+                std::cout << " family=" << entry.gmFamily << " sieve=" << entry.gmSieveLimit;
                 if (entry.gmFactorChunkBits != 0)
                     std::cout << " chunk_bits=" << entry.gmFactorChunkBits;
                 std::cout << "\n";

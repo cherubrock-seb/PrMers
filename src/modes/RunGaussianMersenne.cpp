@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <ctime>
@@ -35,7 +36,7 @@ namespace {
 
 using clock_type = std::chrono::steady_clock;
 
-constexpr const char* GM_RELEASE = "v99.92";
+constexpr const char* GM_RELEASE = "v99.95";
 
 std::string json_escape(const std::string& value) {
     std::ostringstream out;
@@ -118,6 +119,8 @@ std::string nullable_json_string(const std::optional<std::string>& value) {
 
 std::string gm_test_result_json(const std::string& mode,
                                 const std::string& outcome,
+                                const std::string& target_family,
+                                const std::string& test_method,
                                 std::uint32_t exponent,
                                 std::uint64_t digits,
                                 std::uint32_t lift_exponent,
@@ -133,11 +136,13 @@ std::string gm_test_result_json(const std::string& mode,
     std::ostringstream json;
     json << std::fixed << std::setprecision(3);
     json << "{\n"
-         << "  \"schema_version\": 1,\n"
+         << "  \"schema_version\": 2,\n"
          << "  \"program\": \"PrMers\",\n"
          << "  \"program_version\": \"" << GM_RELEASE << "\",\n"
          << "  \"program_build\": \"" << json_escape(core::PRMERS_VERSION) << "\",\n"
-         << "  \"family\": \"gaussian-mersenne\",\n"
+         << "  \"family\": \"gaussian-pair\",\n"
+         << "  \"target_family\": \"" << json_escape(target_family) << "\",\n"
+         << "  \"test_method\": \"" << json_escape(test_method) << "\",\n"
          << "  \"mode\": \"" << json_escape(mode) << "\",\n"
          << "  \"outcome\": \"" << json_escape(outcome) << "\",\n"
          << "  \"stage\": 0,\n"
@@ -256,18 +261,23 @@ int legendre_two_for_odd_prime(std::uint64_t p) {
     return (r == 1 || r == 7) ? 1 : -1;
 }
 
-mpz_class gaussian_mersenne_norm(std::uint64_t p, int chi) {
+mpz_class gaussian_pair_norm(std::uint64_t p, int chi, bool gq) {
     if (p == 2) return mpz_class(5);
     const std::uint64_t m = (p + 1) / 2;
     mpz_class n = mpz_class(1) << p;
     const mpz_class middle = mpz_class(1) << m;
-    if (chi > 0) n -= middle;
+    if ((!gq && chi > 0) || (gq && chi < 0)) n -= middle;
     else n += middle;
     n += 1;
+    if (gq) {
+        if (!mpz_divisible_ui_p(n.get_mpz_t(), 5))
+            throw std::runtime_error("Gaussian cofactor numerator is not divisible by 5");
+        mpz_divexact_ui(n.get_mpz_t(), n.get_mpz_t(), 5);
+    }
     return n;
 }
 
-std::uint64_t find_small_factor(std::uint64_t p, int chi, std::uint64_t limit, const mpz_class& n) {
+std::uint64_t find_small_factor(std::uint64_t p, int /*chi*/, std::uint64_t limit, const mpz_class& n) {
     if (limit < 5) return 0;
     const std::uint64_t m = (p + 1) / 2;
 
@@ -288,11 +298,8 @@ std::uint64_t find_small_factor(std::uint64_t p, int chi, std::uint64_t limit, c
         const std::uint64_t q = step * k + 1;
         if (q > limit) break;
         if (!is_prime_u64(q)) continue;
-        const std::uint64_t a = pow_mod_u64(2, p, q);
-        const std::uint64_t b = pow_mod_u64(2, m, q);
-        const std::uint64_t signed_b = chi > 0 ? b : (b == 0 ? 0 : q - b);
-        const std::uint64_t residue = (a + q - signed_b + 1) % q;
-        if (residue == 0 && mpz_cmp_ui(n.get_mpz_t(), q) != 0) return q;
+        if (mpz_divisible_ui_p(n.get_mpz_t(), static_cast<unsigned long>(q)) &&
+            mpz_cmp_ui(n.get_mpz_t(), static_cast<unsigned long>(q)) != 0) return q;
     }
     return 0;
 }
@@ -373,6 +380,32 @@ bool checkpoint_header_matches(const GmCheckpointHeader& h,
 namespace core {
 
 int App::runGaussianMersenne() {
+    std::string requested_family = options.gm_family;
+    std::transform(requested_family.begin(), requested_family.end(), requested_family.begin(),
+                   [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+    if (requested_family != "GM" && requested_family != "GQ" && requested_family != "BOTH") {
+        std::cerr << "Gaussian family must be GM, GQ, or BOTH.\n";
+        return 2;
+    }
+    if (requested_family == "BOTH") {
+        const std::string saved_family = options.gm_family;
+        options.gm_family = "GM";
+        const int gm_rc = runGaussianMersenne();
+        if (core::algo::interrupted) { options.gm_family = saved_family; return gm_rc; }
+        options.gm_family = "GQ";
+        const int gq_rc = runGaussianMersenne();
+        options.gm_family = saved_family;
+        if (gm_rc == 2 || gq_rc == 2) return 2;
+        return (gm_rc == 0 && gq_rc == 0) ? 0 : 1;
+    }
+    const bool is_gq = requested_family == "GQ";
+    const bool prp_only = options.gm_prp_only || is_gq;
+    const std::string target_label = is_gq ? "GQ" : "GM";
+    const std::string file_prefix = is_gq ? "gq" : "gm";
+    const std::string test_method = (!is_gq && !prp_only) ? "proth" : "fermat-prp";
+    const std::string result_mode = options.gm_prp_only ? "gm-prp" : "gm-proth";
+    const std::string output_mode_tag = options.gm_prp_only ? "prp" : "proth";
+
     const std::uint64_t p64 = options.exponent;
     if (p64 < 2) {
         std::cerr << "Gaussian-Mersenne exponent must be at least 2.\n";
@@ -383,7 +416,7 @@ int App::runGaussianMersenne() {
         return 1;
     }
     if (p64 == 2) {
-        std::cout << "G_2 = Norm((1+i)^2-1) = 5 is prime.\n";
+        std::cout << target_label << "_2 special value 5 is prime.\n";
         return 0;
     }
     if (p64 > std::numeric_limits<std::uint32_t>::max() / 4ULL) {
@@ -394,9 +427,8 @@ int App::runGaussianMersenne() {
 
     const std::uint32_t p = static_cast<std::uint32_t>(p64);
     const std::uint32_t lift_exponent = static_cast<std::uint32_t>(4ULL * p64);
-    const std::uint64_t m = (p64 + 1) / 2;
     const int chi = legendre_two_for_odd_prime(p64);
-    const mpz_class n = gaussian_mersenne_norm(p64, chi);
+    const mpz_class n = gaussian_pair_norm(p64, chi, is_gq);
     const std::uint64_t decimal_digits = static_cast<std::uint64_t>(std::floor(p64 * std::log10(2.0))) + 1;
     const std::filesystem::path save_dir = options.save_path.empty() ? "." : options.save_path;
     std::filesystem::create_directories(save_dir);
@@ -419,13 +451,13 @@ int App::runGaussianMersenne() {
         std::cout << "Result file: " << path << "\n";
     };
 
-    std::cout << "Gaussian-Mersenne norm test\n"
+    std::cout << "Gaussian pair norm test\n"
               << "  p             : " << p << "\n"
-              << "  G_p           : 2^" << p << (chi > 0 ? " - " : " + ")
-              << "2^" << m << " + 1\n"
+              << "  target        : " << target_label << "\n"
+              << "  value         : " << (is_gq ? "(2^p + (2/p)2^m + 1)/5" : "2^p - (2/p)2^m + 1") << "\n"
               << "  decimal digits: " << decimal_digits << "\n"
-              << "  exact lift    : G_p divides 2^(2p)+1 and therefore 2^(4p)-1\n"
-              << "  Aevum exponent: " << lift_exponent << "\n";
+              << "  exact lift    : target divides 2^(4p)-1\n"
+              << "  engine exponent: " << lift_exponent << "\n";
 
     if (options.gm_sieve_limit != 0) {
         std::cout << "Small-factor sieve through " << options.gm_sieve_limit << "..." << std::flush;
@@ -433,8 +465,8 @@ int App::runGaussianMersenne() {
         if (factor != 0) {
             std::cout << " factor " << factor << " found.\n";
             write_result(
-                "gm_factor_p" + std::to_string(p) + "_result.json",
-                gm_test_result_json(options.gm_prp_only ? "gm-prp" : "gm-proth", "factor",
+                file_prefix + "_factor_p" + std::to_string(p) + "_result.json",
+                gm_test_result_json(result_mode, "factor", target_label, test_method,
                                     p, decimal_digits, lift_exponent, std::nullopt, std::nullopt,
                                     std::to_string(factor), std::string("q=4kp+1 sieve"),
                                     "CPU sieve", device_name, job_elapsed()));
@@ -444,15 +476,16 @@ int App::runGaussianMersenne() {
     }
 
     BaseSelection selected;
-    if (options.gm_prp_only) {
+    if (prp_only) {
         selected.base = options.gm_base != 0 ? options.gm_base : 3U;
         mpz_class g;
         mpz_gcd_ui(g.get_mpz_t(), n.get_mpz_t(), selected.base);
         if (g > 1 && g < n) {
             std::cout << "Base gcd found factor " << g << ".\n";
             write_result(
-                "gm_factor_p" + std::to_string(p) + "_result.json",
-                gm_test_result_json("gm-prp", "factor", p, decimal_digits, lift_exponent,
+                file_prefix + "_factor_p" + std::to_string(p) + "_result.json",
+                gm_test_result_json(result_mode, "factor", target_label, test_method,
+                                    p, decimal_digits, lift_exponent,
                                     selected.base, std::nullopt, g.get_str(),
                                     std::string("base gcd"), "CPU gcd", device_name, job_elapsed()));
             return 1;
@@ -463,49 +496,49 @@ int App::runGaussianMersenne() {
         if (selected.factor != 0) {
             std::cout << "Proth base selection found factor " << selected.factor << ".\n";
             write_result(
-                "gm_factor_p" + std::to_string(p) + "_result.json",
-                gm_test_result_json("gm-proth", "factor", p, decimal_digits, lift_exponent,
+                file_prefix + "_factor_p" + std::to_string(p) + "_result.json",
+                gm_test_result_json(result_mode, "factor", target_label, test_method,
+                                    p, decimal_digits, lift_exponent,
                                     selected.base, std::nullopt, std::to_string(selected.factor),
                                     std::string("Proth base gcd"), "CPU gcd", device_name, job_elapsed()));
             return 1;
         }
         if (selected.jacobi != -1) {
-            std::cerr << "Deterministic Proth mode requires Jacobi(base/G_p) = -1; base "
+            std::cerr << "Deterministic Proth mode requires Jacobi(base/GM_p) = -1; base "
                       << selected.base << " has Jacobi " << selected.jacobi << ".\n";
             return 2;
         }
     }
 
-    std::cout << "  mode          : " << (options.gm_prp_only ? "Fermat PRP" : "deterministic Proth proof") << "\n"
+    std::cout << "  mode          : " << (prp_only ? "Fermat PRP" : "deterministic Proth proof") << "\n"
               << "  base          : " << selected.base << " (Jacobi " << selected.jacobi << ")\n";
 
-    const std::uint64_t phase_a = chi > 0 ? (m - 2) : (m - 1);
-    const std::uint64_t phase_mul = chi > 0 ? 0 : 1;
-    const std::uint64_t phase_b = m - 1;
-    const std::uint64_t euler_ops = phase_a + phase_mul + phase_b;
-    const std::uint64_t total_ops = euler_ops + (options.gm_prp_only ? 1 : 0);
+    mpz_class test_exponent = n - 1;
+    if (!prp_only) test_exponent /= 2;
+    const std::uint64_t exponent_bits = static_cast<std::uint64_t>(
+        mpz_sizeinbase(test_exponent.get_mpz_t(), 2));
+    const std::uint64_t total_ops = exponent_bits > 0 ? exponent_bits - 1 : 0;
 
     if (options.gm_cpu) {
         std::cout << "CPU GMP reference path selected.\n";
-        mpz_class exponent = (n - 1) / 2;
-        if (options.gm_prp_only) exponent *= 2;
         mpz_class residue;
         const auto t0 = clock_type::now();
-        mpz_powm(residue.get_mpz_t(), mpz_class(selected.base).get_mpz_t(), exponent.get_mpz_t(), n.get_mpz_t());
+        mpz_powm(residue.get_mpz_t(), mpz_class(selected.base).get_mpz_t(),
+                 test_exponent.get_mpz_t(), n.get_mpz_t());
         const double elapsed = std::chrono::duration<double>(clock_type::now() - t0).count();
-        const bool pass = options.gm_prp_only ? residue == 1 : residue == n - 1;
+        const bool pass = prp_only ? residue == 1 : residue == n - 1;
         std::cout << "CPU residue low64 = 0x" << hex_low(residue, 64) << "\n";
-        std::cout << "G_" << p << (pass ? (options.gm_prp_only ? " is a probable prime" : " is prime by Proth") : " is composite")
+        std::cout << target_label << "_" << p << (pass ? (prp_only ? " is a probable prime" : " is prime by Proth") : " is composite")
                   << ", time = " << std::fixed << std::setprecision(2) << elapsed << " s.\n";
         const std::string cpu_res64 = hex_low(residue, 64);
         const std::string cpu_res2048 = hex_low(residue, 2048);
         const std::string outcome = pass
-            ? (options.gm_prp_only ? "probable-prime" : "prime")
+            ? (prp_only ? "probable-prime" : "prime")
             : "composite";
         write_result(
-            "gm_" + std::string(options.gm_prp_only ? "prp" : "proth") + "_p" + std::to_string(p) + "_result.json",
-            gm_test_result_json(options.gm_prp_only ? "gm-prp" : "gm-proth", outcome,
-                                p, decimal_digits, lift_exponent, selected.base, selected.jacobi,
+            file_prefix + "_" + output_mode_tag + "_p" + std::to_string(p) + "_result.json",
+            gm_test_result_json(result_mode, outcome, target_label, test_method,
+                                    p, decimal_digits, lift_exponent, selected.base, selected.jacobi,
                                 std::nullopt, std::nullopt, "GMP", "CPU",
                                 elapsed, cpu_res64, cpu_res2048));
         return pass ? 0 : 1;
@@ -515,11 +548,9 @@ int App::runGaussianMersenne() {
     // are not changed. Arithmetic occurs modulo M_(4p), then the final residue is
     // projected modulo the exact factor G_p.
     constexpr engine::Reg RSTATE = 0;
-    constexpr engine::Reg RBASE = 1;
-    constexpr engine::Reg RBASE_PREP = 2;
-    constexpr engine::Reg RSTART = 3;
-    constexpr engine::Reg RVERIFY = 4;
-    const std::size_t register_count = options.gm_safe_replay ? 5U : (chi < 0 ? 3U : 1U);
+    constexpr engine::Reg RSTART = 1;
+    constexpr engine::Reg RVERIFY = 2;
+    const std::size_t register_count = options.gm_safe_replay ? 3U : 1U;
 
     std::unique_ptr<engine> eng(engine::create_gpu(lift_exponent, register_count,
                                                     static_cast<std::size_t>(options.device_id), true));
@@ -537,32 +568,21 @@ int App::runGaussianMersenne() {
     }
 
     eng->set(RSTATE, selected.base);
-    if (chi < 0) {
-        eng->set(RBASE, selected.base);
-        eng->set_multiplicand(RBASE_PREP, RBASE);
-    }
     if (options.gm_safe_replay) {
         eng->copy(RSTART, RSTATE);
         eng->copy(RVERIFY, RSTATE);
     }
 
     auto apply_operation = [&](engine::Reg reg, std::uint64_t op) {
-        if (options.gm_prp_only && op == euler_ops) {
+        const std::uint64_t bit_index = total_ops - 1 - op;
+        if (mpz_tstbit(test_exponent.get_mpz_t(), static_cast<mp_bitcnt_t>(bit_index)) != 0)
+            eng->square_mul(reg, selected.base);
+        else
             eng->square_mul(reg);
-            return;
-        }
-        if (chi > 0) {
-            if (op < phase_a) eng->square_mul(reg, selected.base);
-            else eng->square_mul(reg);
-        } else {
-            if (op < phase_a) eng->square_mul(reg);
-            else if (op == phase_a) eng->mul(reg, RBASE_PREP);
-            else eng->square_mul(reg);
-        }
     };
 
-    const std::string mode_tag = options.gm_prp_only ? "prp" : "proth";
-    const std::filesystem::path checkpoint_path = save_dir / ("gm_" + mode_tag + "_p" + std::to_string(p) + ".ckpt");
+    const std::string mode_tag = output_mode_tag;
+    const std::filesystem::path checkpoint_path = save_dir / (file_prefix + "_" + mode_tag + "_p" + std::to_string(p) + ".ckpt");
 
     auto load_checkpoint = [&](const std::filesystem::path& path, std::uint64_t& next, double& elapsed) -> bool {
         File f(path.string());
@@ -571,7 +591,7 @@ int App::runGaussianMersenne() {
         if (!f.read(reinterpret_cast<char*>(&h), sizeof(h))) return false;
         const std::size_t bytes = eng->get_checkpoint_size();
         if (!checkpoint_header_matches(h, p, lift_exponent, selected.base, chi,
-                                       options.gm_prp_only, options.gm_safe_replay,
+                                       prp_only, options.gm_safe_replay,
                                        total_ops, bytes)) {
             std::cout << "[GM checkpoint] Ignoring incompatible " << path << ".\n";
             return false;
@@ -594,7 +614,7 @@ int App::runGaussianMersenne() {
         h.lift_exponent = lift_exponent;
         h.base = selected.base;
         h.chi = chi;
-        h.prp_only = static_cast<std::uint32_t>(options.gm_prp_only);
+        h.prp_only = static_cast<std::uint32_t>(prp_only);
         h.safe_replay = static_cast<std::uint32_t>(options.gm_safe_replay);
         h.next_operation = next;
         h.total_operations = total_ops;
@@ -626,7 +646,6 @@ int App::runGaussianMersenne() {
         }
     }
     if (next_op != 0) {
-        if (chi < 0) eng->set_multiplicand(RBASE_PREP, RBASE);
         std::cout << "Resuming at operation " << next_op << " / " << total_ops << ".\n";
     }
 
@@ -721,29 +740,29 @@ int App::runGaussianMersenne() {
     mpz_class residue = lifted_residue % n;
     if (residue < 0) residue += n;
 
-    const bool pass = options.gm_prp_only ? residue == 1 : residue == n - 1;
+    const bool pass = prp_only ? residue == 1 : residue == n - 1;
     const double elapsed = elapsed_now();
     const std::string status = pass
-        ? (options.gm_prp_only ? "probable-prime" : "prime")
+        ? (prp_only ? "probable-prime" : "prime")
         : "composite";
     const std::string res64 = hex_low(residue, 64);
     const std::string res2048 = hex_low(residue, 2048);
 
-    std::cout << "Final residue modulo G_p low64: 0x" << res64 << "\n";
-    if (pass && !options.gm_prp_only) {
-        std::cout << "G_" << p << " is PRIME by Proth's theorem.\n";
+    std::cout << "Final residue modulo selected norm low64: 0x" << res64 << "\n";
+    if (pass && !prp_only) {
+        std::cout << "GM_" << p << " is PRIME by Proth's theorem.\n";
     } else if (pass) {
-        std::cout << "G_" << p << " is a base-" << selected.base << " probable prime.\n";
+        std::cout << target_label << "_" << p << " is a base-" << selected.base << " probable prime.\n";
     } else {
-        std::cout << "G_" << p << " is composite.\n";
+        std::cout << target_label << "_" << p << " is composite.\n";
     }
     std::cout << "Total time: " << std::fixed << std::setprecision(2) << elapsed
               << " s; replay mismatches: " << error_count << ".\n";
 
     write_result(
-        "gm_" + mode_tag + "_p" + std::to_string(p) + "_result.json",
-        gm_test_result_json(options.gm_prp_only ? "gm-prp" : "gm-proth", status,
-                            p, decimal_digits, lift_exponent, selected.base, selected.jacobi,
+        file_prefix + "_" + mode_tag + "_p" + std::to_string(p) + "_result.json",
+        gm_test_result_json(result_mode, status, target_label, test_method,
+                                    p, decimal_digits, lift_exponent, selected.base, selected.jacobi,
                             std::nullopt, std::nullopt,
                             eng->is_aevum_backend() ? "Aevum" : "Marin", device_name,
                             elapsed, res64, res2048));
