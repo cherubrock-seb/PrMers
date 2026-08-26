@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.86-alpha-v99.97-gaussian-ecm-naf-stage1";
+    const std::string PRMERS_VERSION = "4.20.87-alpha-v99.98-gaussian-ecm-fused-bsgs";
 } // namespace core
 
 #endif // VERSION_HPP

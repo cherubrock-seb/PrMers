@@ -47,6 +47,7 @@ public:
     // v99.97 keeps the v99.96 GM-ECM implementation available byte-for-byte
     // as a private fallback implementation selected by the new wrapper.
     int runGaussianMersenneECMLegacy();
+    int runGaussianMersenneECMOptimized();
     int runPrpOrLlMarin();
     int runLlSafeMarin();
     int runLlSafeMarinDoubling();

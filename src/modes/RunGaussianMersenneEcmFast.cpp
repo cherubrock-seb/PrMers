@@ -603,6 +603,9 @@ namespace core {
 // legacy.  -edwards enables the Stage-1 twisted-Edwards/NAF accelerator while
 // preserving the same Suyama sigma/curve stream.
 int App::runGaussianMersenneECM() {
+    // v99.98: opt-in fused Montgomery Stage1 + true BSGS Stage2.
+    // Legacy and v99.97 Edwards paths remain independently selectable.
+    if (options.bsgs && !options.edwards) return runGaussianMersenneECMOptimized();
     if (!options.edwards) return runGaussianMersenneECMLegacy();
 
     // v99.97 deliberately accelerates Stage 1 first.  Stage 2 and optional
