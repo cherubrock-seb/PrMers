@@ -54,6 +54,11 @@ endif
 LDFLAGS += -lgmpxx -lgmp
 CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 
+# v99.97: keep the v99.96 Gaussian factoring source untouched and compile its
+# runGaussianMersenneECM method under the legacy symbol.  The new source file
+# owns the public method and can fall back to this exact implementation.
+$(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp
+
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
         install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
@@ -132,6 +137,7 @@ test-gm:
 	python3 tests/gaussian_mersenne_factor_math_test.py
 	python3 tests/gaussian_mersenne_factor_isolation_test.py
 	python3 tests/gaussian_mersenne_ecm_seed_regression_test.py
+	python3 tests/gaussian_mersenne_ecm_naf_regression_test.py
 	python3 tests/gaussian_mersenne_windows_portability_test.py
 	python3 tests/gaussian_pair_full_pipeline_test.py
 	python3 tests/gaussian_pair_backend_policy_test.py
