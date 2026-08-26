@@ -1319,7 +1319,7 @@ int App::runGaussianMersenneECM() {
               << "  registers      : " << MontgomeryRegs::count << "\n"
               << "  safe replay    : " << (options.gm_safe_replay ? "full Stage 1 + every Stage 2 chunk" : "disabled") << "\n";
 
-    const std::uint64_t base_seed = options.seed != 0 ? options.seed : 0x474d45434d763938ULL;
+    const std::uint64_t base_seed = options.curve_seed != 0 ? options.curve_seed : 0x474d45434d763938ULL;
     for (std::uint64_t curve = 0; curve < curves; ++curve) {
         std::uint64_t sigma = 0;
         if (!options.sigma.empty() && curve == 0) {
