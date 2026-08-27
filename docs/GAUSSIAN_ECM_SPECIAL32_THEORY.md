@@ -1,4 +1,4 @@
-# Gaussian-Mersenne ECM Special32 — mathematical implementation note
+# Gaussian-Mersenne ECM Special32 - mathematical implementation note
 
 ## Status
 
