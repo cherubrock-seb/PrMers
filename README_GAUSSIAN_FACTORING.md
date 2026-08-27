@@ -1,4 +1,4 @@
-# Gaussian-Mersenne P-1 and ECM — PrMers v99.93
+# Gaussian-Mersenne P-1 and ECM — PrMers v100.00
 
 This extension factors the Gaussian-Mersenne norm
 
@@ -6,9 +6,9 @@ This extension factors the Gaussian-Mersenne norm
 G_p = 2^p - (2/p) * 2^((p+1)/2) + 1
 ```
 
-for a prime exponent `p`.  It is strictly opt-in through `-gm-pm1` and
-`-gm-ecm`.  Ordinary Mersenne PRP/LL/P-1/ECM dispatch, kernels and Aevum plans
-are unchanged.
+for a prime exponent `p`.  It is strictly opt-in through `-gm-pm1`,
+`-gm-ecm`, or the GM-specific deterministic `-gm-ecm-special32` prepass.
+Ordinary Mersenne PRP/LL/P-1/ECM dispatch, kernels and Aevum plans are unchanged.
 
 ## Exact lifted arithmetic
 
@@ -109,6 +109,39 @@ Useful options:
 -r                         resume Stage 1 and Stage 2 CRC32 checkpoints
 -f DIRECTORY               result/checkpoint directory
 ```
+
+### GM-specific Special32 prepass — v100.00
+
+PrMers also provides `-gm-ecm-special32`, an experimental deterministic
+GM-only ECM prepass using exactly three fixed Montgomery x/z profiles A/B/C.
+
+Usage:
+
+    ./prmers P -gm-ecm-special32 -gm-family GM \
+      -b1 B1 -b2 B2 -aevum -d DEVICE -f DIRECTORY
+
+Parameters:
+
+- `-gm-family GM` — required; Special32 v1 is GM-only.
+- `-b1 B1` — Stage 1 bound; default 50000.
+- `-b2 B2` — optional BSGS Stage 2 bound.
+- `-aevum` / `-engine-marin` — select the backend explicitly.
+- `-d DEVICE` — OpenCL device.
+- `-f DIRECTORY` — result/checkpoint directory.
+- `-r` — resume compatible checkpoints.
+
+`-K`, `-sigma` and `-seed` do not create more Special32 curves: the
+portfolio is always exactly A/B/C. `-gm-safe` is not implemented in
+Special32 v1. Ordinary `-gm-ecm` remains the Suyama curve stream.
+
+The mathematical construction, 2-descent argument, fixed curves and points,
+coverage by a curve order divisible by 32, limitations, validation cases and
+fair Suyama benchmark protocol are documented in:
+
+[Gaussian-Mersenne ECM Special32 — mathematical implementation note](docs/GAUSSIAN_ECM_SPECIAL32_THEORY.md)
+
+A fair comparison is one Special32 portfolio against exactly three ordinary
+Suyama curves at the same B1/B2 and on the same backend.
 
 ## Known validation cases
 

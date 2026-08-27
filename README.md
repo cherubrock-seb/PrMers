@@ -32,6 +32,7 @@ Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to
 - [Prime95 and mprime interop](#prime95-and-mprime-interop)
 - [Gaussian-Mersenne extension](README_GAUSSIAN_MERSENNE.md)
 - [Gaussian-Mersenne P-1/ECM](README_GAUSSIAN_FACTORING.md)
+- [Gaussian-Mersenne ECM Special32 — mathematical note](docs/GAUSSIAN_ECM_SPECIAL32_THEORY.md)
 - [Web GUI](#web-gui)
 - [GPU memory test](#gpu-memory-test)
 - [NTT and IBDWT transform sizes](#ntt-and-ibdwt-transform-sizes)
@@ -47,7 +48,7 @@ Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to
 | Area | Status | Notes |
 |---|---|---|
 | Gaussian-Mersenne Proth/PRP | Experimental v99.88 | Opt-in `-gm`; exact lift into `2^(4p)-1`, no Aevum-kernel changes |
-| Gaussian-Mersenne P-1/ECM | Experimental v99.88 | Opt-in `-gm-pm1` / `-gm-ecm`; projected GCD/inversion modulo `G_p` |
+| Gaussian-Mersenne P-1/ECM | Experimental v100.00 | Opt-in `-gm-pm1` / `-gm-ecm`; deterministic GM Special32 prepass via `-gm-ecm-special32` |
 | Mersenne PRP | Supported | Default mode; automatic Marin/Aevum on Linux/Windows, Marin by default on macOS |
 | Mersenne Lucas-Lehmer | Supported | Safe GL mode, classic unsafe mode, doubling safe mode |
 | P-1 factoring | Supported | Stage 1, default V-trace Stage 2, classic Stage 2 fallback, resume export, Prime95 handoff |
