@@ -11,7 +11,10 @@ ver = (root / "include/core/Version.hpp").read_text()
 assert "runGaussianMersenneECMOptimized" in app
 assert "options.bsgs && !options.edwards" in fast
 assert "runGaussianMersenneECMOptimized()" in fast
-assert "4.20.87-alpha-v99.98-gaussian-ecm-fused-bsgs" in ver
+assert any(version in ver for version in (
+    "4.20.87-alpha-v99.98-gaussian-ecm-fused-bsgs",
+    "4.20.88-alpha-v99.99-marin-exact-subtraction",
+))
 
 # The optimized path must use the fused engine primitives and a real
 # differential baby/giant Stage 2, not the old product-of-primes exponent.

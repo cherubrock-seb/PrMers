@@ -100,6 +100,10 @@ private:
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
 	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_addsub_p2 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_addsub_p2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr, _subtract_reg = nullptr;
+	// v99.99: exact parallel mixed-radix subtraction for Marin.
+	cl_kernel _subtract_reg_group_p1 = nullptr;
+	cl_kernel _subtract_reg_group_scan = nullptr;
+	cl_kernel _subtract_reg_group_apply = nullptr;
 	cl_kernel _carry_weight_muladd_p1 = nullptr, _carry_weight_muladd_p2 = nullptr;
 
 	std::vector<cl_kernel> _kernels;
@@ -740,6 +744,36 @@ public:
 		else _set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_digit_width);
 		_kernels.push_back(_subtract_reg);
 
+		const bool sub_extra_weight = _aux_split || _weight_compact;
+
+		_subtract_reg_group_p1 = _create_kernel("subtract_reg_group_p1");
+		_set_kernel_arg(_subtract_reg_group_p1, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(_subtract_reg_group_p1, 1, sizeof(cl_mem), &_carry);
+		_set_kernel_arg(_subtract_reg_group_p1, 2, sizeof(cl_mem), &_weight);
+		if (sub_extra_weight)
+		{
+			_set_kernel_arg(_subtract_reg_group_p1, 3, sizeof(cl_mem), &_weight1);
+			_set_kernel_arg(_subtract_reg_group_p1, 4, sizeof(cl_mem), &_digit_width);
+		}
+		else _set_kernel_arg(_subtract_reg_group_p1, 3, sizeof(cl_mem), &_digit_width);
+		_kernels.push_back(_subtract_reg_group_p1);
+
+		_subtract_reg_group_scan = _create_kernel("subtract_reg_group_scan");
+		_set_kernel_arg(_subtract_reg_group_scan, 0, sizeof(cl_mem), &_carry);
+		_kernels.push_back(_subtract_reg_group_scan);
+
+		_subtract_reg_group_apply = _create_kernel("subtract_reg_group_apply");
+		_set_kernel_arg(_subtract_reg_group_apply, 0, sizeof(cl_mem), &_reg);
+		_set_kernel_arg(_subtract_reg_group_apply, 1, sizeof(cl_mem), &_carry);
+		_set_kernel_arg(_subtract_reg_group_apply, 2, sizeof(cl_mem), &_weight);
+		if (sub_extra_weight)
+		{
+			_set_kernel_arg(_subtract_reg_group_apply, 3, sizeof(cl_mem), &_weight1);
+			_set_kernel_arg(_subtract_reg_group_apply, 4, sizeof(cl_mem), &_digit_width);
+		}
+		else _set_kernel_arg(_subtract_reg_group_apply, 3, sizeof(cl_mem), &_digit_width);
+		_kernels.push_back(_subtract_reg_group_apply);
+
 
 	}
 
@@ -1111,9 +1145,33 @@ public:
 
 
 
+	void subtract_reg_group_exact(const size_t dst, const size_t src)
+	{
+		const segloc d = seg_loc(dst);
+		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
+
+		bind_reg_segment(_subtract_reg_group_p1, d.seg);
+		bind_reg_segment(_subtract_reg_group_apply, d.seg);
+
+		const bool extraWeight = _aux_split || _weight_compact;
+		const uint32 argBase = extraWeight ? 5u : 4u;
+		const uint32 offY = uint32(d.local * _n);
+		const uint32 offX = uint32(srcLocal * _n);
+
+		_set_kernel_arg(_subtract_reg_group_p1, argBase, sizeof(uint32), &offY);
+		_set_kernel_arg(_subtract_reg_group_p1, argBase + 1, sizeof(uint32), &offX);
+
+		const size_t groups = (_n / 4) >> _lcwm_wg_size;
+		_execute_kernel(_subtract_reg_group_p1, groups);
+		_execute_kernel(_subtract_reg_group_scan, 1);
+
+		_set_kernel_arg(_subtract_reg_group_apply, argBase, sizeof(uint32), &offY);
+		_execute_kernel(_subtract_reg_group_apply, groups);
+	}
+
 	void carry_weight_sub_safe(const size_t dst, const size_t src)
 	{
-		carry_weight_sub(dst, src);
+		subtract_reg_group_exact(dst, src);
 	}
 
 	
@@ -1321,7 +1379,113 @@ public:
 		}
 		src << std::endl;
 
+
 		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
+
+		// v99.99: exact, parallel Marin subtraction.
+		// Historical fast weighted subtraction can lose a high mixed-radix
+		// borrow. The serial subtract_reg kernel is exact but too slow for
+		// multi-million-word transforms. These kernels split the exact standard
+		// subtraction into independent groups and resolve the cyclic borrow.
+		src << R"PRMERS_V999_CLC(
+
+__kernel
+void subtract_reg_group_p1(__global uint64 * restrict const reg,
+    __global uint64 * restrict const carry,
+    __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,
+    __global const uint_8 * restrict const width,
+    const sz_t offset_y, const sz_t offset_x)
+{
+    __global uint64 * restrict const y = &reg[offset_y];
+    __global const uint64 * restrict const x = &reg[offset_x];
+    DECLARE_WEIGHT2();
+
+    const sz_t grp = (sz_t)get_global_id(0);
+    const sz_t ngr = (sz_t)((N_SZ / 4u) / CWM_WG_SZ);
+    if (grp >= ngr) return;
+
+    const sz_t begin = grp * (sz_t)(4u * CWM_WG_SZ);
+    const sz_t end = begin + (sz_t)(4u * CWM_WG_SZ);
+
+    uint32 borrow = 0u;
+    uint32 equal = 1u;
+
+    for (sz_t k = begin; k < end; ++k)
+    {
+        const sz_t wi_idx = k / 4u + (k % 4u) * (N_SZ / 4u);
+        const uint64_2 w = W2_AT(wi_idx);
+
+        const uint64 yv = mod_mul(y[k], w.s1);
+        const uint64 xv = mod_mul(x[k], w.s1);
+
+        if (yv != xv) equal = 0u;
+        y[k] = mod_mul(sbc_reg(yv, xv, width[k], &borrow), w.s0);
+    }
+
+    carry[grp] = (uint64)(borrow | (equal << 1));
+}
+
+__kernel
+void subtract_reg_group_scan(__global uint64 * restrict const carry)
+{
+    if ((sz_t)get_global_id(0) != 0u) return;
+
+    const sz_t ngr = (sz_t)((N_SZ / 4u) / CWM_WG_SZ);
+    uint32 b = 0u;
+
+    for (sz_t g = 0; g < ngr; ++g)
+    {
+        const uint64 m = carry[g];
+        const uint32 gen = (uint32)(m & 1ul);
+        const uint32 eq  = (uint32)((m >> 1) & 1ul);
+        carry[ngr + g] = (uint64)b;
+        b = gen | (eq & b);
+    }
+
+    if (b != 0u)
+    {
+        b = 1u;
+        for (sz_t g = 0; g < ngr; ++g)
+        {
+            const uint64 m = carry[g];
+            const uint32 gen = (uint32)(m & 1ul);
+            const uint32 eq  = (uint32)((m >> 1) & 1ul);
+            carry[ngr + g] = (uint64)b;
+            b = gen | (eq & b);
+        }
+    }
+}
+
+__kernel
+void subtract_reg_group_apply(__global uint64 * restrict const reg,
+    __global uint64 * restrict const carry,
+    __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,
+    __global const uint_8 * restrict const width,
+    const sz_t offset_y)
+{
+    __global uint64 * restrict const y = &reg[offset_y];
+    DECLARE_WEIGHT2();
+
+    const sz_t grp = (sz_t)get_global_id(0);
+    const sz_t ngr = (sz_t)((N_SZ / 4u) / CWM_WG_SZ);
+    if (grp >= ngr) return;
+    if ((carry[ngr + grp] & 1ul) == 0ul) return;
+
+    const sz_t begin = grp * (sz_t)(4u * CWM_WG_SZ);
+    const sz_t end = begin + (sz_t)(4u * CWM_WG_SZ);
+
+    uint32 borrow = 1u;
+    for (sz_t k = begin; k < end; ++k)
+    {
+        const sz_t wi_idx = k / 4u + (k % 4u) * (N_SZ / 4u);
+        const uint64_2 w = W2_AT(wi_idx);
+        const uint64 yv = mod_mul(y[k], w.s1);
+        y[k] = mod_mul(sbc(yv, width[k], &borrow), w.s0);
+        if (borrow == 0u) break;
+    }
+}
+
+)PRMERS_V999_CLC";
 
 		_gpu->load_program(src.str());
 		_gpu->alloc_memory();
@@ -2096,13 +2260,14 @@ public:
 
 	void addsub(const Reg sum_out, const Reg diff_out, const Reg a, const Reg b) const override
 	{
-		_gpu->carry_weight_addsub((size_t)sum_out, (size_t)diff_out, (size_t)a, (size_t)b);
+		// v99.99: fast Marin add + exact group-parallel subtraction.
+		engine::addsub(sum_out, diff_out, a, b);
 	}
 
 	void addsub_copy(const Reg sum, const Reg diff, const Reg sum_copy, const Reg diff_copy,
 					const Reg a, const Reg b) const override
 	{
-		_gpu->addsub_copy((size_t)sum, (size_t)diff, (size_t)sum_copy, (size_t)diff_copy, (size_t)a, (size_t)b);
+		engine::addsub_copy(sum, diff, sum_copy, diff_copy, a, b);
 	}
 	void mul_pair_prepared(const Reg rdst0, const Reg rsrc0,
 						const Reg rdst1, const Reg rsrc1,
