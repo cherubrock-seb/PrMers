@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.88-alpha-v99.99-marin-exact-subtraction";
+    const std::string PRMERS_VERSION = "4.20.89-alpha-v100.00-gm-ecm-special32";
 } // namespace core
 
 #endif // VERSION_HPP

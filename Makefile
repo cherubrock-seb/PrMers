@@ -139,6 +139,7 @@ test-gm:
 	python3 tests/gaussian_mersenne_ecm_seed_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_naf_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_optimized_regression_test.py
+	python3 tests/gaussian_mersenne_ecm_special32_regression_test.py
 	python3 tests/gaussian_mersenne_windows_portability_test.py
 	python3 tests/gaussian_mersenne_windows_linkage_test.py
 	python3 tests/gaussian_pair_full_pipeline_test.py

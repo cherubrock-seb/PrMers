@@ -45,6 +45,7 @@ constexpr std::uint32_t GM_OPT_CHECKPOINT_VERSION = 1;
 
 struct OptTarget {
     std::string family = "GM";
+    bool special32 = false;
     std::uint32_t p = 0;
     std::uint32_t lift = 0;
     std::uint64_t middle = 0;
@@ -224,7 +225,8 @@ void write_opt_result(const std::filesystem::path& dir,
     std::filesystem::create_directories(dir);
     const std::string prefix = t.family == "GQ" ? "gq" : "gm";
     const std::filesystem::path result =
-        dir / (prefix + "_ecm_p" + std::to_string(t.p) + "_result.json");
+        dir / (prefix + (t.special32 ? "_ecm_special32_p" : "_ecm_p") +
+               std::to_string(t.p) + "_result.json");
 
     std::ostringstream j;
     j << std::fixed << std::setprecision(3);
@@ -235,7 +237,7 @@ void write_opt_result(const std::filesystem::path& dir,
       << "  \"program_build\": \"" << json_escape_opt(core::PRMERS_VERSION) << "\",\n"
       << "  \"family\": \"gaussian-pair\",\n"
       << "  \"target_family\": \"" << t.family << "\",\n"
-      << "  \"mode\": \"gm-ecm\",\n"
+      << "  \"mode\": \"" << (t.special32 ? "gm-ecm-special32" : "gm-ecm") << "\",\n"
       << "  \"engine\": \"montgomery-fused-bsgs\",\n"
       << "  \"outcome\": \"" << (factor ? "factor" : "no-factor") << "\",\n"
       << "  \"stage\": " << stage << ",\n"
@@ -244,7 +246,7 @@ void write_opt_result(const std::filesystem::path& dir,
       << "  \"B2\": " << (B2 > B1 ? ("\"" + std::to_string(B2) + "\"") : "null") << ",\n"
       << "  \"curves\": " << curves << ",\n"
       << "  \"curve\": " << (curve ? std::to_string(*curve) : "null") << ",\n"
-      << "  \"sigma\": " << (sigma ? ("\"" + std::to_string(*sigma) + "\"") : "null") << ",\n"
+      << "  \"sigma\": " << (t.special32 ? "null" : (sigma ? ("\"" + std::to_string(*sigma) + "\"") : "null")) << ",\n"
       << "  \"factor\": " << (factor ? ("\"" + factor->get_str() + "\"") : "null") << ",\n"
       << "  \"backend\": \"" << json_escape_opt(backend) << "\",\n"
       << "  \"device\": \"device " << device << "\",\n"
@@ -303,6 +305,71 @@ SuyamaSetupOpt make_suyama_opt(const mpz_class& n, std::uint64_t sigma64) {
         return out;
     }
     out.a24 = mod_pos_opt(numerator * invden, n);
+    out.ok = true;
+    return out;
+}
+
+/*
+ * Gaussian-Mersenne Special32 deterministic portfolio.
+ *
+ * For G_p = 2^p - (2/p) 2^((p+1)/2) + 1 define
+ *
+ *   I = (-1)^((p+1)/2) 2^p  (mod G_p).
+ *
+ * The three fixed x-only Montgomery profiles are:
+ *
+ *   A: x=-1+I,       A24=( 7+I)/8
+ *   B: x=-4,         A24=( 7+I)/8
+ *   C: x=(1-7I)/4,   A24=(-1+7I)/16
+ *
+ * No y-coordinate or modular square root is needed.  The existing fused
+ * Montgomery ladder consumes only (x,A24), so the normal Stage1/BSGS pipeline
+ * below remains unchanged.
+ */
+SuyamaSetupOpt make_special32_opt(const OptTarget& t, std::uint64_t profile) {
+    SuyamaSetupOpt out;
+    if (t.family != "GM")
+        throw std::runtime_error("GM ECM Special32 is defined only for the GM family");
+
+    mpz_class I = mod_pos_opt(mpz_class(1) << t.p, t.n);
+    const std::uint64_t half = (static_cast<std::uint64_t>(t.p) + 1ULL) / 2ULL;
+    if ((half & 1ULL) != 0ULL) I = mod_pos_opt(-I, t.n);
+
+    mpz_class inv4, inv8, inv16;
+    const mpz_class d4 = 4, d8 = 8, d16 = 16;
+    if (mpz_invert(inv4.get_mpz_t(), d4.get_mpz_t(), t.n.get_mpz_t()) == 0 ||
+        mpz_invert(inv8.get_mpz_t(), d8.get_mpz_t(), t.n.get_mpz_t()) == 0 ||
+        mpz_invert(inv16.get_mpz_t(), d16.get_mpz_t(), t.n.get_mpz_t()) == 0) {
+        return out; // impossible for an odd GM norm, kept as a defensive guard
+    }
+
+    switch (profile) {
+        case 0: // A: E1(PA)
+            out.x = mod_pos_opt(-1 + I, t.n);
+            out.a24 = mod_pos_opt((7 + I) * inv8, t.n);
+            break;
+        case 1: // B: E1(PB)
+            out.x = mod_pos_opt(-4, t.n);
+            out.a24 = mod_pos_opt((7 + I) * inv8, t.n);
+            break;
+        case 2: // C: E3(PC)
+            out.x = mod_pos_opt((1 - 7 * I) * inv4, t.n);
+            out.a24 = mod_pos_opt((-1 + 7 * I) * inv16, t.n);
+            break;
+        default:
+            throw std::runtime_error("internal GM ECM Special32 profile index");
+    }
+
+    // Montgomery singularity: A^2-4 = 0 iff A24(A24-1)=0.
+    // A non-trivial gcd is a factor, not a setup failure.
+    const mpz_class singular =
+        gcd_opt(mod_pos_opt(out.a24 * (out.a24 - 1), t.n), t.n);
+    if (proper_factor_opt(singular, t.n)) {
+        out.factor = singular;
+        return out;
+    }
+    if (singular == t.n) return out;
+
     out.ok = true;
     return out;
 }
@@ -833,18 +900,51 @@ std::size_t baby_index_opt(const Stage2Plan& plan, std::uint32_t d) {
 namespace core {
 
 int App::runGaussianMersenneECMOptimized() {
+    const bool special32 = options.mode == "gm-ecm-special32";
+
+    if (special32) {
+        std::string requested = options.gm_family;
+        std::transform(requested.begin(), requested.end(), requested.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+        if (requested != "GM") {
+            std::cerr << "GM ECM Special32 v1 is GM-only; use -gm-family GM.\n";
+            return 2;
+        }
+        if (options.gm_safe_replay) {
+            std::cerr << "GM ECM Special32 v1 does not yet implement -gm-safe replay.\n";
+            return 2;
+        }
+        if (!options.notorsion || options.torsion16) {
+            std::cerr << "GM ECM Special32 owns its fixed curve portfolio; "
+                         "legacy torsion-family flags are not applicable.\n";
+            return 2;
+        }
+        if (options.gm_sieve_limit != 0) {
+            std::cout << "[GM ECM Special32] ignoring -gm-sieve; this mode is the "
+                         "deterministic three-profile prepass.\n";
+        }
+        if (options.K != 0 || options.nmax != 0) {
+            std::cout << "[GM ECM Special32] -K/curve count ignored; exactly "
+                         "profiles A, B and C are executed once.\n";
+        }
+        if (!options.sigma.empty() || options.curve_seed != 0) {
+            std::cout << "[GM ECM Special32] -sigma/-seed ignored; profile stream "
+                         "is deterministic.\n";
+        }
+    }
+
     // Keep every unusual/safety mode on the already-proven implementation.
     // The optimized path is deliberately narrow until it has production hours.
-    if (options.gm_safe_replay) {
+    if (!special32 && options.gm_safe_replay) {
         std::cout << "[GM ECM v99.98] -gm-safe requested; using legacy replay path.\n";
         return runGaussianMersenneECMLegacy();
     }
-    if (!options.notorsion || options.torsion16) {
+    if (!special32 && (!options.notorsion || options.torsion16)) {
         std::cout << "[GM ECM v99.98] explicit torsion family requested; "
                      "using legacy path.\n";
         return runGaussianMersenneECMLegacy();
     }
-    if (options.gm_sieve_limit != 0) {
+    if (!special32 && options.gm_sieve_limit != 0) {
         std::cout << "[GM ECM v99.98] non-zero -gm-sieve keeps the legacy "
                      "sieve+ECM path. Use -gm-sieve 0 for fused/BSGS mode.\n";
         return runGaussianMersenneECMLegacy();
@@ -871,11 +971,13 @@ int App::runGaussianMersenneECMOptimized() {
         std::cerr << ex.what() << '\n';
         return 2;
     }
+    t.special32 = special32;
 
     const std::uint64_t B1 = options.B1 != 0 ? options.B1 : 50000ULL;
     const std::uint64_t B2 = options.B2;
-    const std::uint64_t curves =
-        options.K != 0 ? options.K : (options.nmax != 0 ? options.nmax : 20ULL);
+    const std::uint64_t curves = special32
+        ? 3ULL
+        : (options.K != 0 ? options.K : (options.nmax != 0 ? options.nmax : 20ULL));
     const std::filesystem::path save_dir =
         options.save_path.empty() ? "." : options.save_path;
     std::filesystem::create_directories(save_dir);
@@ -905,7 +1007,10 @@ int App::runGaussianMersenneECMOptimized() {
               << "  curves         : " << curves << "\n"
               << "  Stage1 engine  : Montgomery fused ladder (v99.98)\n"
               << "  Stage1 bits    : " << kbits << "\n"
-              << "  curve stream   : exact legacy Suyama sigma sequence\n";
+              << "  curve stream   : "
+              << (special32 ? "deterministic Special32 profiles A/B/C"
+                            : "exact legacy Suyama sigma sequence")
+              << "\n";
 
     if (B2 > B1) {
         std::cout << "  Stage2 engine  : Montgomery baby-step/giant-step\n"
@@ -939,7 +1044,10 @@ int App::runGaussianMersenneECMOptimized() {
 
     for (std::uint64_t curve = 0; curve < curves; ++curve) {
         std::uint64_t sigma = 0;
-        if (!options.sigma.empty() && curve == 0) {
+        if (special32) {
+            // Stable checkpoint discriminator; it is not a Suyama sigma.
+            sigma = 0x5333320000000000ULL + curve + 1ULL;
+        } else if (!options.sigma.empty() && curve == 0) {
             try { sigma = std::stoull(options.sigma); }
             catch (...) {
                 std::cerr << "Invalid -sigma for Gaussian ECM; expected unsigned 64-bit integer.\n";
@@ -950,10 +1058,18 @@ int App::runGaussianMersenneECMOptimized() {
                          0x7ffffffffffffff0ULL);
         }
 
-        std::cout << "\n[GM ECM] curve " << (curve + 1) << "/" << curves
-                  << " sigma=" << sigma << "\n";
+        if (special32) {
+            const char profile = static_cast<char>('A' + curve);
+            std::cout << "\n[GM ECM Special32] profile " << profile
+                      << " (fixed curve/point)\n";
+        } else {
+            std::cout << "\n[GM ECM] curve " << (curve + 1) << "/" << curves
+                      << " sigma=" << sigma << "\n";
+        }
 
-        SuyamaSetupOpt setup = make_suyama_opt(t.n, sigma);
+        SuyamaSetupOpt setup = special32
+            ? make_special32_opt(t, curve)
+            : make_suyama_opt(t.n, sigma);
         if (proper_factor_opt(setup.factor, t.n)) {
             std::cout << ">>> Gaussian pair ECM setup factor: "
                       << setup.factor << "\n";
@@ -969,7 +1085,7 @@ int App::runGaussianMersenneECMOptimized() {
 
         const std::filesystem::path s1ck =
             save_dir / ((t.family == "GQ" ? "gq" : "gm") +
-                        std::string("_ecm_p") + std::to_string(t.p) +
+                        (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p")) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage1_fused.ckpt");
 
         std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
@@ -1047,7 +1163,7 @@ int App::runGaussianMersenneECMOptimized() {
 
         const std::filesystem::path s2ck =
             save_dir / ((t.family == "GQ" ? "gq" : "gm") +
-                        std::string("_ecm_p") + std::to_string(t.p) +
+                        (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p")) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage2_bsgs.ckpt");
 
         std::uint64_t current_k = s2plan.k_min;
@@ -1279,8 +1395,12 @@ int App::runGaussianMersenneECMOptimized() {
                   << " | elapsed=" << s2_elapsed() << " s\n";
     }
 
-    std::cout << "No Gaussian pair ECM factor found in "
-              << curves << " curve(s).\n";
+    if (special32) {
+        std::cout << "GM ECM Special32 finished: no factor found in profiles A/B/C.\n";
+    } else {
+        std::cout << "No Gaussian pair ECM factor found in "
+                  << curves << " curve(s).\n";
+    }
     write_opt_result(save_dir, t, B1, B2, curves,
                      std::nullopt, std::nullopt,
                      B2 > B1 ? 2 : 1,

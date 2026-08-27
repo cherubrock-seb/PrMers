@@ -12,7 +12,10 @@ for needle in (
     "engine::addsub_copy(sum, diff, sum_copy, diff_copy, a, b);",
 ):
     assert needle in s, needle
-assert "4.20.88-alpha-v99.99-marin-exact-subtraction" in v
+assert any(version in v for version in (
+    "4.20.88-alpha-v99.99-marin-exact-subtraction",
+    "4.20.89-alpha-v100.00-gm-ecm-special32",
+))
 
 def group_sub(y, x, widths, group_digits):
     n = len(y)

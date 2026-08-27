@@ -603,6 +603,11 @@ namespace core {
 // legacy.  -edwards enables the Stage-1 twisted-Edwards/NAF accelerator while
 // preserving the same Suyama sigma/curve stream.
 int App::runGaussianMersenneECM() {
+    // Special32 is a distinct deterministic portfolio, not a Suyama
+    // curve-stream option. It always uses the fused Montgomery/BSGS engine.
+    if (options.mode == "gm-ecm-special32")
+        return runGaussianMersenneECMOptimized();
+
     // v99.98: opt-in fused Montgomery Stage1 + true BSGS Stage2.
     // Legacy and v99.97 Edwards paths remain independently selectable.
     if (options.bsgs && !options.edwards) return runGaussianMersenneECMOptimized();

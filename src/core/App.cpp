@@ -424,7 +424,7 @@ App::App(int argc, char** argv)
     engine::gpu_workload workload = engine::gpu_workload::generic;
     if (o.mode == "prp" || o.mode == "gm-proth" || o.mode == "gm-prp") workload = engine::gpu_workload::prp;
     else if (o.mode == "gm-pm1" || o.mode == "gm-chain") workload = engine::gpu_workload::pm1;
-    else if (o.mode == "gm-ecm") workload = engine::gpu_workload::ecm;
+    else if (o.mode == "gm-ecm" || o.mode == "gm-ecm-special32") workload = engine::gpu_workload::ecm;
     else if (o.mode == "ll" || o.mode == "llsafe" || o.mode == "llsafe2") workload = engine::gpu_workload::ll;
     else if (o.mode == "pm1") {
         if (o.pm1_ultralowmem) workload = engine::gpu_workload::pm1_ultralowmem;
@@ -982,7 +982,7 @@ int App::run() {
         const std::string gui_workload = options.mode == "pm1" ? "P-1"
                                        : options.mode == "ecm" ? "ECM"
                                        : (options.mode == "ll" || options.mode == "llsafe" || options.mode == "llsafe2") ? "LL"
-                                       : (options.mode == "gm-proth" || options.mode == "gm-prp" || options.mode == "gm-pm1" || options.mode == "gm-ecm") ? "Gaussian-Mersenne"
+                                       : (options.mode == "gm-proth" || options.mode == "gm-prp" || options.mode == "gm-pm1" || options.mode == "gm-ecm" || options.mode == "gm-ecm-special32") ? "Gaussian-Mersenne"
                                        : "PRP";
         if (!options.marin) {
             guiServer_->setBackendInfo("Internal PrMers NTT", "Internal NTT", gui_workload,
@@ -1126,7 +1126,7 @@ int App::run() {
         rc = runGaussianMersennePM1();
         ran = true;
     }
-    if (options.mode == "gm-ecm") {
+    if (options.mode == "gm-ecm" || options.mode == "gm-ecm-special32") {
         rc = runGaussianMersenneECM();
         ran = true;
     }
