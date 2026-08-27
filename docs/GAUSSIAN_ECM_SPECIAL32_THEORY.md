@@ -57,14 +57,14 @@ The 2-descent analysis gives two complementary criteria. In the notation of the
 derivation,
 
 $$
-\beta=1 \Longrightarrow 32\mid \#E_w(\mathbf F_q),
+\beta=1 \Longrightarrow 32\mid \lvert E_w(\mathbf F_q)\rvert,
 $$
 
 and
 
 $$
 q\equiv5\pmod 8,\quad \alpha=-1
-\Longrightarrow 32\mid \#E_w(\mathbf F_q).
+\Longrightarrow 32\mid \lvert E_w(\mathbf F_q)\rvert.
 $$
 
 The delicate branches lift respectively to group structures containing
@@ -93,9 +93,9 @@ The coverage statement used by Special32 is
 
 $$
 \forall q\mid G_p,\qquad
-32\mid\#E_1(\mathbf F_q)
+32\mid\lvert E_1(\mathbf F_q)\rvert
 \quad\text{or}\quad
-32\mid\#E_3(\mathbf F_q).
+32\mid\lvert E_3(\mathbf F_q)\rvert.
 $$
 
 This is a **portfolio statement**: the implementation therefore runs all three
