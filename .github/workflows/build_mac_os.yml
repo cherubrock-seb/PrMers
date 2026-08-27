@@ -50,13 +50,34 @@ jobs:
 
           rm -rf "$SOURCE_DIR" "$GMP_PREFIX" "$ARCHIVE"
 
-          # gmplib.org blocks some GitHub runner addresses. Use GNU's mirror,
-          # then verify the official GMP 6.3.0 archive checksum.
-          curl --fail --location --silent --show-error \
-            --retry 5 --retry-delay 2 --retry-all-errors \
-            "https://ftpmirror.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" \
-            --output "$ARCHIVE"
+          # Download GMP from multiple official GNU/GMP sources.
+          # ftpmirror.gnu.org can occasionally return HTTP 502 from GitHub runners.
+          URLS=(
+            "https://ftpmirror.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz"
+          )
 
+          rm -f "$ARCHIVE"
+
+          for url in "${URLS[@]}"; do
+            echo "Trying GMP source: $url"
+
+            if curl --fail --location --silent --show-error \
+                --retry 2 --retry-delay 2 --retry-all-errors \
+                "$url" \
+                --output "$ARCHIVE"; then
+              echo "Downloaded GMP from: $url"
+              break
+            fi
+
+            rm -f "$ARCHIVE"
+          done
+
+          test -s "$ARCHIVE"
+
+          # Always verify the official GMP archive checksum, regardless
+          # of which mirror supplied the file.
           printf '%s  %s\n' "$GMP_SHA256" "$ARCHIVE" | shasum -a 256 --check
 
           mkdir -p "$SOURCE_DIR"
