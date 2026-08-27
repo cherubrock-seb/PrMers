@@ -32,7 +32,7 @@ Use `-engine-marin` to force Marin, `-aevum` to force Aevum, or `-aevum-auto` to
 - [Prime95 and mprime interop](#prime95-and-mprime-interop)
 - [Gaussian-Mersenne extension](README_GAUSSIAN_MERSENNE.md)
 - [Gaussian-Mersenne P-1/ECM](README_GAUSSIAN_FACTORING.md)
-- [Gaussian-Mersenne ECM Special32 — mathematical note](docs/GAUSSIAN_ECM_SPECIAL32_THEORY.md)
+- [Gaussian-Mersenne ECM Special32 - mathematical note](docs/GAUSSIAN_ECM_SPECIAL32_THEORY.md)
 - [Web GUI](#web-gui)
 - [GPU memory test](#gpu-memory-test)
 - [NTT and IBDWT transform sizes](#ntt-and-ibdwt-transform-sizes)
