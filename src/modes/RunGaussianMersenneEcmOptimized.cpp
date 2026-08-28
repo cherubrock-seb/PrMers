@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <ctime>
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
@@ -39,7 +40,7 @@ using Clock = std::chrono::steady_clock;
 using core::algo::buildE;
 using core::algo::interrupted;
 
-constexpr const char* GM_ECM_OPT_RELEASE = "v99.98";
+constexpr const char* GM_ECM_OPT_RELEASE = "v100.01";
 constexpr std::array<char, 8> GM_OPT_MAGIC{{'P','R','G','M','O','P','T','1'}};
 constexpr std::uint32_t GM_OPT_CHECKPOINT_VERSION = 1;
 
@@ -210,6 +211,22 @@ std::string json_escape_opt(const std::string& s) {
     return out.str();
 }
 
+
+std::string utc_timestamp_opt() {
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+
+#if defined(_WIN32)
+    gmtime_s(&utc, &now);
+#else
+    gmtime_r(&now, &utc);
+#endif
+
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
+}
+
 void write_opt_result(const std::filesystem::path& dir,
                       const OptTarget& t,
                       std::uint64_t B1,
@@ -238,7 +255,6 @@ void write_opt_result(const std::filesystem::path& dir,
       << "  \"family\": \"gaussian-pair\",\n"
       << "  \"target_family\": \"" << t.family << "\",\n"
       << "  \"mode\": \"" << (t.special32 ? "gm-ecm-special32" : "gm-ecm") << "\",\n"
-      << "  \"engine\": \"montgomery-fused-bsgs\",\n"
       << "  \"outcome\": \"" << (factor ? "factor" : "no-factor") << "\",\n"
       << "  \"stage\": " << stage << ",\n"
       << "  \"exponent\": " << t.p << ",\n"
@@ -250,7 +266,8 @@ void write_opt_result(const std::filesystem::path& dir,
       << "  \"factor\": " << (factor ? ("\"" + factor->get_str() + "\"") : "null") << ",\n"
       << "  \"backend\": \"" << json_escape_opt(backend) << "\",\n"
       << "  \"device\": \"device " << device << "\",\n"
-      << "  \"elapsed_seconds\": " << elapsed << "\n"
+      << "  \"elapsed_seconds\": " << elapsed << ",\n"
+      << "  \"timestamp\": \"" << utc_timestamp_opt() << "\"\n"
       << "}";
 
     {

@@ -40,7 +40,7 @@ using core::algo::interrupted;
 
 constexpr std::array<char, 8> GMF_MAGIC{{'P','R','G','M','F','A','C','T'}};
 constexpr std::uint32_t GMF_VERSION = 3;
-constexpr const char* GM_RELEASE = "v99.95";
+constexpr const char* GM_RELEASE = "v100.01";
 
 struct GmTarget {
     std::string family = "GM";
