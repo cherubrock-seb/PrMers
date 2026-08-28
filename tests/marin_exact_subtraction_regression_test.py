@@ -15,6 +15,7 @@ for needle in (
 assert any(version in v for version in (
     "4.20.88-alpha-v99.99-marin-exact-subtraction",
     "4.20.89-alpha-v100.00-gm-ecm-special32",
+    "4.20.89-alpha-v100.01-gm-ecm-special32",
 ))
 
 def group_sub(y, x, widths, group_digits):
