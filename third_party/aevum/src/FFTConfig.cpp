@@ -463,14 +463,25 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
 #if !defined(__APPLE__)
     // PFA remains available in the legacy diagnostic selector, but is excluded
     // from workload-specific defaults until its differential tests are exact.
-    if (spec == "throughput:auto") {
-      FFTConfig pfa = bestFit(args, E, "pfa:auto");
-      if (pfa.isPfa()) {
+    if (spec == "throughput:auto" || spec == "throughput:prp") {
+      FFTConfig pfa = spec == "throughput:prp"
+          ? FFTConfig("pfa9full:4:512:9:512:202")
+          : bestFit(args, E, "pfa:auto");
+
+      const double bpw = E / double(pfa.size());
+      if (pfa.isPfa() &&
+          bpw >= pfa.minBpw() &&
+          pfa.maxExp() * args.fftOverdrive >= E) {
         const double factor = pfa.pfa_radix == 9
             ? positiveEnv("AEVUM_AUTO_PFA9_COST", 1.20)
             : positiveEnv("AEVUM_AUTO_PFA3_COST", 1.10);
-        candidates.push_back({pfa, double(pfa.size()) * factor,
-                              pfa.pfa_radix == 9 ? "PFA9 FFT3161" : "PFA3 FFT3161"});
+        candidates.push_back({
+            pfa,
+            double(pfa.size()) * factor,
+            pfa.shape.fft_type == FFT323161
+                ? "PFA9 FFT323161 resident"
+                : (pfa.pfa_radix == 9 ? "PFA9 FFT3161" : "PFA3 FFT3161")
+        });
       }
     }
 #endif

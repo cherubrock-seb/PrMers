@@ -93,6 +93,7 @@ int main() {
 
 
   FFTConfig selectorPrp = FFTConfig::bestFit(args, 175000039, "throughput:prp");
+  FFTConfig selectorPrp200 = FFTConfig::bestFit(args, 200000033, "throughput:prp");
   FFTConfig selectorLl = FFTConfig::bestFit(args, 175000039, "throughput:ll");
   FFTConfig selectorPm1 = FFTConfig::bestFit(args, 55050557, "throughput:pm1");
   FFTConfig selectorEcm = FFTConfig::bestFit(args, 55050557, "throughput:ecm");
@@ -105,7 +106,15 @@ int main() {
   }
 #else
   if (selectorPrp.spec() != "4:512:8:512:202")
-    throw std::runtime_error("PRP selector did not choose 4:512:8:512:202");
+    throw std::runtime_error("PRP selector did not choose 4:512:8:512:202 at 175M");
+
+  if (!selectorPrp200.isPfa() ||
+      selectorPrp200.pfa_radix != 9 ||
+      selectorPrp200.shape.fft_type != FFT323161 ||
+      selectorPrp200.size() != 4718592 ||
+      selectorPrp200.adaptive_type4_elided)
+    throw std::runtime_error("PRP selector did not choose full Type4 PFA9 4.5M at 200M");
+
   if (selectorLl.spec() != "4:1K:2:1K:202")
     throw std::runtime_error("LL selector did not choose 4:1K:2:1K:202");
   if (selectorPm1.spec() != "4:256:16:256:202")

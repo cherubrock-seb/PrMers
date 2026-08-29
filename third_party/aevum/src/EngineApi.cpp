@@ -83,7 +83,12 @@ public:
         multi_q = std::atoi(value) != 0;
       if (multi_q) {
         args_.flags["MULTI_Q"] = "1";
-        if (verbose) log("Aevum optimized full type-4 PFA9: concurrent GF61 and FP32+GF31 queues enabled.\n");
+        if (verbose) {
+          if (fft.isPfa())
+            log("Aevum optimized full type-4 PFA9: concurrent GF61 and FP32+GF31 queues enabled.\n");
+          else
+            log("Aevum full type-4: concurrent GF61 and FP32+GF31 queues enabled.\n");
+        }
       } else if (verbose) {
         log("Aevum full type-4: multi-queue overlap disabled by AEVUM_TYPE4_MULTI_Q=0.\n");
       }
@@ -133,7 +138,13 @@ public:
     // keeps Word data in the exact Good-Thomas gather order between adjacent
     // squares; the older carry/fftP bridge remains available independently.
     const char* resident_value = std::getenv("AEVUM_PFA_RESIDENT");
-    const bool pfa_resident_requested = resident_value && std::atoi(resident_value) != 0;
+    bool pfa_resident_requested =
+        fft.isPfa() &&
+        fft.pfa_radix == 9 &&
+        fft.shape.fft_type == FFT323161 &&
+        spec == "throughput:prp";
+    if (resident_value)
+      pfa_resident_requested = std::atoi(resident_value) != 0;
     if (fft.isPfa()) {
       const char* bridge_value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
       const bool bridge_requested = bridge_value && std::atoi(bridge_value) != 0;
