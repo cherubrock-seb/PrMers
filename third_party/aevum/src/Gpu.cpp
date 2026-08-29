@@ -886,6 +886,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(ktailMulLow,           "tailmul.cl", "tailMul", hN / nH / 2, (kernelDefines(KFP) + "-DMUL_LOW=1").c_str()),
   K(kfftMidOut,            "fftmiddleout.cl", "fftMiddleOut", hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDOUT)).c_str()),
   K(kfftW,                 "fftw.cl", "fftW", hN / nW, kernelDefines(KFP).c_str()),
+  K(kfftWResident,         "fftw.cl", "fftW", hN / nW, (kernelDefines(KFP) + "-DPFA_RESIDENT=1").c_str()),
 
   K(kfftMidInGF31,         "fftmiddlein.cl",  "fftMiddleInGF31",  hN / (BIG_H / SMALL_H), (kernelDefines(K31) + numCudaRegisters(MIDIN31)).c_str()),
   K(kfftHinGF31,           "ffthin.cl",  "fftHinGF31",  hN / nH, kernelDefines(K31).c_str()),
@@ -899,6 +900,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(ktailMulLowGF31,       "tailmul.cl", "tailMulGF31", hN / nH / 2, (kernelDefines(K31) + "-DMUL_LOW=1").c_str()),
   K(kfftMidOutGF31,        "fftmiddleout.cl", "fftMiddleOutGF31", hN / (BIG_H / SMALL_H), (kernelDefines(K31) + numCudaRegisters(MIDOUT31)).c_str()),
   K(kfftWGF31,             "fftw.cl", "fftWGF31", hN / nW, kernelDefines(K31).c_str()),
+  K(kfftWGF31Resident,     "fftw.cl", "fftWGF31", hN / nW, (kernelDefines(K31) + "-DPFA_RESIDENT=1").c_str()),
 
   K(kfftMidInGF61,         "fftmiddlein.cl",  "fftMiddleInGF61",  hN / (BIG_H / SMALL_H), (kernelDefines(K61) + numCudaRegisters(MIDIN61)).c_str()),
 #if defined(__APPLE__)
@@ -974,9 +976,11 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #else
   K(kfftWGF61,             "fftw.cl", "fftWGF61", hN / nW, kernelDefines(K61).c_str()),
 #endif
+  K(kfftWGF61Resident,     "fftw.cl", "fftWGF61", hN / nW, (kernelDefines(K61) + "-DPFA_RESIDENT=1").c_str()),
 
   K(kfftP,                 "fftp.cl", "fftP", hN / nW, kernelDefines(KALL).c_str()),
   K(kfftPCarryB,           "fftp.cl", "fftPCarryB", hN / nW, kernelDefines(KALL).c_str()),
+  K(kfftPResident,         "fftp.cl", "fftP", hN / nW, (kernelDefines(KALL) + "-DPFA_RESIDENT=1").c_str()),
 #if defined(__APPLE__)
   K(kfftMidInGF61LoadScalarApple, "fftmiddlein.cl", "fftMiddleInGF61LoadScalarApple",
       hN / (BIG_H / SMALL_H) * fft.shape.middle, kernelDefines(K61).c_str()),
@@ -1057,6 +1061,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #endif
   K(kCarryA,               "carry.cl", "carry", hN / CARRY_LEN, kernelDefines(KALL).c_str()),
   K(kCarryAROE,            "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DROE=1").c_str()),
+  K(kCarryAResident,       "carry.cl", "carryResidentATiledBlock4", hN / (CARRY_LEN * 4), (kernelDefines(KALL) + "-DPFA_RESIDENT=1").c_str()),
+  K(kCarryAResidentROE,    "carry.cl", "carryResidentATiledBlock4", hN / (CARRY_LEN * 4), (kernelDefines(KALL) + "-DPFA_RESIDENT=1 -DROE=1").c_str()),
   K(kCarryM,               "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DMUL3=1").c_str()),
   K(kCarryMROE,            "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DMUL3=1 -DROE=1").c_str()),
   K(kCarryLL,              "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DLL=1").c_str()),
@@ -1067,6 +1073,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kCarryFusedLL,         "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DLL=1").c_str()),
 
   K(carryB,                "carryb.cl", "carryB",   hN / CARRY_LEN, kernelDefines(KALL).c_str()),
+  K(kCarryBResident,       "carryb.cl", "carryBResidentQBlock4", hN / (CARRY_LEN * 4), (kernelDefines(KALL) + "-DPFA_RESIDENT=1").c_str()),
 
   // 64
 #if defined(__APPLE__)
@@ -1381,6 +1388,15 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
   useLongCarry = useLongCarry || (bitsPerWord < 10.0);
 
+#if !defined(__APPLE__)
+  if (!useLongCarry && fft.isPfa() && fft.pfa_radix == 9 && fft.shape.fft_type == FFT323161) {
+    if (const char* value = std::getenv("AEVUM_PFA_RESIDENT"))
+      pfa_resident_enabled = std::atoi(value) != 0;
+  }
+  if (pfa_resident_enabled)
+    log("Aevum PFA9 resident-word mode enabled: carry remains canonical but stores directly in next fftP Good-Thomas order.\n");
+#endif
+
   if (useLongCarry) { log("Using long carry!\n"); }
 #if defined(__APPLE__)
   if (fft.shape.fft_type == FFT3161) {
@@ -1397,6 +1413,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     ktailMul.setFixedArgs(3, bufTrigH);
     kfftMidOut.setFixedArgs(2, bufTrigM);
     kfftW.setFixedArgs(2, bufTrigW);
+    kfftWResident.setFixedArgs(2, bufTrigW);
   }
 
   if (fft.NTT_GF31) {
@@ -1408,6 +1425,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     ktailMulGF31.setFixedArgs(3, bufTrigH);
     kfftMidOutGF31.setFixedArgs(2, bufTrigM);
     kfftWGF31.setFixedArgs(2, bufTrigW);
+    kfftWGF31Resident.setFixedArgs(2, bufTrigW);
   }
 
   if (fft.NTT_GF61) {
@@ -1426,6 +1444,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     ktailMulGF61.setFixedArgs(3, bufTrigH);
     kfftMidOutGF61.setFixedArgs(2, bufTrigM);
     kfftWGF61.setFixedArgs(2, bufTrigW);
+    kfftWGF61Resident.setFixedArgs(2, bufTrigW);
 #if defined(__APPLE__)
     for (Kernel* k : {&kfftWGF61TwiddleShuffle1Apple, &kfftWGF61TwiddleShuffle4Apple,
                       &kfftWGF61TwiddleShuffle8Apple, &kfftWGF61TwiddleShuffle16Apple,
@@ -1443,9 +1462,14 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
   if (fft.FFT_FP64 || fft.FFT_FP32) {                         // The FP versions take bufWeight arguments
     kfftP.setFixedArgs(2, bufTrigW, bufWeights);
+    kfftPResident.setFixedArgs(2, bufTrigW, bufWeights);
     for (Kernel* k : {&kCarryA, &kCarryAROE, &kCarryM, &kCarryMROE, &kCarryLL}) { k->setFixedArgs(3, bufCarry, bufWeights); }
+    kCarryAResident.setFixedArgs(3, bufCarry, bufWeights);
+    kCarryAResidentROE.setFixedArgs(3, bufCarry, bufWeights);
     for (Kernel* k : {&kCarryA, &kCarryM, &kCarryLL}) { k->setFixedArgs(5, bufStatsCarry); }
+    kCarryAResident.setFixedArgs(5, bufStatsCarry);
     for (Kernel* k : {&kCarryAROE, &kCarryMROE})      { k->setFixedArgs(5, bufROE); }
+    kCarryAResidentROE.setFixedArgs(5, bufROE);
     for (Kernel* k : {&kCarryFused, &kCarryFusedROE, &kCarryFusedMul, &kCarryFusedMulROE, &kCarryFusedLL}) {
       k->setFixedArgs(3, bufCarry, bufReady, bufTrigW, bufConstWeights, bufWeights);
     }
@@ -1488,6 +1512,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   }
 
   carryB.setFixedArgs(1, bufCarry);
+  kCarryBResident.setFixedArgs(1, bufCarry);
 
   kernIsEqual.setFixedArgs(2, bufTrue);
 
@@ -1590,6 +1615,7 @@ void Gpu::splitQueue(void) {
       kfftMidOutGF61WriteScalarApple.setQueue(&auxQueues[which_queue]);
 #endif
       kfftWGF61.setQueue(&auxQueues[which_queue]);
+      kfftWGF61Resident.setQueue(&auxQueues[which_queue]);
 #if defined(__APPLE__)
       kfftWGF61LoadScalarApple.setQueue(&auxQueues[which_queue]);
       kfftWGF61WidthRadixApple.setQueue(&auxQueues[which_queue]);
@@ -1624,6 +1650,7 @@ void Gpu::splitQueue(void) {
       ktailMulLow.setQueue(&auxQueues[which_queue]);
       kfftMidOut.setQueue(&auxQueues[which_queue]);
       kfftW.setQueue(&auxQueues[which_queue]);
+      kfftWResident.setQueue(&auxQueues[which_queue]);
     }
     // For no particularly good reason, put kernels that operate on 32-bit value in the same queue unless there are no kernels operating on 64-bit values
     if (fft.FFT_FP64 || (fft.FFT_FP32 && which_queue == -1)) {
@@ -1641,6 +1668,7 @@ void Gpu::splitQueue(void) {
       ktailMulLowGF31.setQueue(&auxQueues[which_queue]);
       kfftMidOutGF31.setQueue(&auxQueues[which_queue]);
       kfftWGF31.setQueue(&auxQueues[which_queue]);
+      kfftWGF31Resident.setQueue(&auxQueues[which_queue]);
     }
     //which_queue++;
   }
@@ -1711,6 +1739,7 @@ void Gpu::mergeQueue(void) {
     kfftMidOutGF61WriteScalarApple.setQueue(&queue);
 #endif
     kfftWGF61.setQueue(&queue);
+    kfftWGF61Resident.setQueue(&queue);
 #if defined(__APPLE__)
     kfftWGF61LoadScalarApple.setQueue(&queue);
     kfftWGF61WidthRadixApple.setQueue(&queue);
@@ -1741,6 +1770,7 @@ void Gpu::mergeQueue(void) {
     ktailMulLow.setQueue(&queue);
     kfftMidOut.setQueue(&queue);
     kfftW.setQueue(&queue);
+    kfftWResident.setQueue(&queue);
   }
   if (fft.NTT_GF31) {
     kfftMidInGF31.setQueue(&queue);
@@ -1751,6 +1781,7 @@ void Gpu::mergeQueue(void) {
     ktailMulLowGF31.setQueue(&queue);
     kfftMidOutGF31.setQueue(&queue);
     kfftWGF31.setQueue(&queue);
+    kfftWGF31Resident.setQueue(&queue);
   }
 }
 
@@ -2120,6 +2151,18 @@ void Gpu::replay(void) {
         }
       }
 
+      if (kern == KFFTW_RESIDENT) {
+        Buffer<double> *out = recorded_kernel_args[arg++];
+        Buffer<double> *in = recorded_kernel_args[arg++];
+#if defined(__APPLE__)
+        throw std::runtime_error("PFA resident fftW replay is disabled on Apple");
+#else
+        if (cache_group == 1) kfftWResident(*out, *in);
+        if (cache_group == 2) kfftWGF31Resident(*out, *in);
+        if (cache_group == 3) kfftWGF61Resident(*out, *in);
+#endif
+      }
+
       if (kern == KFFTW) {
         Buffer<double> *out = recorded_kernel_args[arg++];
         Buffer<double> *in = recorded_kernel_args[arg++];
@@ -2320,6 +2363,18 @@ void Gpu::fftP(Buffer<double>& buf, Buffer<Word>& in) {
   kfftP(*out, in);
 }
 
+void Gpu::fftPResident(Buffer<double>& buf, Buffer<Word>& in) {
+#if defined(__APPLE__)
+  (void) buf; (void) in;
+  throw std::runtime_error("PFA resident mode is disabled on Apple");
+#else
+  if (!pfa_resident_enabled)
+    throw std::runtime_error("PFA resident fftP requested outside the enabled radix-9 FFT323161 experiment");
+  Buffer<double>* out = in_place ? &buf : &buf3;
+  kfftPResident(*out, in);
+#endif
+}
+
 void Gpu::fftPCarryB(Buffer<double>& buf, Buffer<Word>& in) {
 #if defined(__APPLE__)
   (void) buf; (void) in;
@@ -2382,10 +2437,33 @@ void Gpu::fftW(Buffer<double>& out, Buffer<double>& in) {
   // pfaUnpack full-memory pass is intentionally eliminated.
 }
 
+void Gpu::fftWResident(Buffer<double>& out, Buffer<double>& in) {
+  if (!pfa_resident_enabled)
+    throw std::runtime_error("PFA resident fftW requested while resident mode is disabled");
+  recorded_kernels.push_back(KFFTW_RESIDENT);
+  recorded_kernel_args.push_back(&out);
+  recorded_kernel_args.push_back(&in);
+  replay();
+}
+
 void Gpu::carryA(Buffer<Word>& out, Buffer<double>& in) {
   assert(roePos <= ROE_SIZE);
   roePos < wantROE ? kCarryAROE(out, in, roePos++)
                    : kCarryA(out, in, updateCarryPos(1 << 2));
+}
+
+void Gpu::carryAResident(Buffer<Word>& out, Buffer<double>& in) {
+  if (!pfa_resident_enabled)
+    throw std::runtime_error("PFA resident carry requested while resident mode is disabled");
+  assert(roePos <= ROE_SIZE);
+  roePos < wantROE ? kCarryAResidentROE(out, in, roePos++)
+                   : kCarryAResident(out, in, updateCarryPos(1 << 2));
+}
+
+void Gpu::carryBResident(Buffer<Word>& io) {
+  if (!pfa_resident_enabled)
+    throw std::runtime_error("PFA resident carryB requested while resident mode is disabled");
+  kCarryBResident(io);
 }
 
 void Gpu::carryM(Buffer<Word>& out, Buffer<double>& in) {
@@ -2537,7 +2615,8 @@ bool Gpu::regSupportsLeadCache() const {
   return false;
 #else
   return !useLongCarry && (!fft.isPfa() ||
-         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9));
+         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9) ||
+         (pfa_resident_enabled && fft.shape.fft_type == FFT323161 && fft.pfa_radix == 9));
 #endif
 }
 
@@ -2995,7 +3074,8 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   // If leadIn is LEAD_WIDTH, buf1 (or buf3 if not in place) contains the input data, squaring starts at fftMidIn
   // If leadIn is LEAD_MIDDLE, buf1 contains the input data, squaring starts at tailSquare
   // If leadOut is LEAD_WIDTH, then buf1 (or buf3 if not in place) will contain the output of carryFused -- to be used as input to the next squaring.
-  if (leadIn == LEAD_NONE) fftP(buf1, in);
+  if (pfa_resident_enabled && leadIn == LEAD_WIDTH) fftPResident(buf1, in);
+  else if (leadIn == LEAD_NONE) fftP(buf1, in);
   if (leadIn != LEAD_MIDDLE) fftMidIn(buf1);
   tailSquare(buf1);
   fftMidOut(buf1);
@@ -3023,9 +3103,15 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
     assert(!doMul3);
     if (fft.isPfa()) {
       assert(!doLL);
-      fftW(buf3, buf1);
-      carryA(out, buf3);
-      fftPCarryB(buf1, out);
+      if (pfa_resident_enabled) {
+        fftWResident(buf3, buf1);
+        carryAResident(out, buf3);
+        carryBResident(out);
+      } else {
+        fftW(buf3, buf1);
+        carryA(out, buf3);
+        fftPCarryB(buf1, out);
+      }
     } else if (doLL) {
       carryFusedLL(buf1);
     } else {

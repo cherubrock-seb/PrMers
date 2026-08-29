@@ -66,8 +66,18 @@ KERNEL(G_W) fftW(P(T2) out, CP(T2) in, Trig smallTrig) {
   readCarryFusedLine(inF2, u, g, me);
   fft_WIDTH(lds, u, smallTrigF2, 1, me);
 #if FFT_TYPE == FFT323161 && PFA_RADIX
-  // Match the fused CRT scatter below.  The inverse tail swaps components:
-  // y carries the even binary digit and x carries the odd binary digit.
+#if PFA_RESIDENT
+  // EXP7: do not scatter through canonical memory.  The inverse tail leaves
+  // components swapped, so normalize each native Good-Thomas pair once:
+  // resident.x=even-binary word, resident.y=odd-binary word.
+  outF2 += WIDTH * g;
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 q = G_W * i + me;
+    outF2[q] = U2(u[i].y, u[i].x);
+  }
+#else
+  // Canonical boundary path retained exactly.
   P(F) outScalarF = (P(F)) outF2;
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;
@@ -81,6 +91,7 @@ KERNEL(G_W) fftW(P(T2) out, CP(T2) in, Trig smallTrig) {
     nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
     nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
   }
+#endif
 #else
   outF2 += WIDTH * g;
   write(G_W, NW, u, outF2, 0);
@@ -112,9 +123,15 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
   readCarryFusedLine(in31, u, g, me);
   fft_WIDTH(lds, u, smallTrig31, 1, me);
 #if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
-  // The inverse tail leaves components swapped: y is the even binary digit,
-  // x is the odd binary digit.  Scatter scalar stores so adjacent canonical
-  // digits may safely originate in different Good-Thomas rows.
+#if PFA_RESIDENT && FFT_TYPE == FFT323161
+  out31 += WIDTH * g;
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 q = G_W * i + me;
+    out31[q] = U2(u[i].y, u[i].x);
+  }
+#else
+  // Canonical boundary path retained exactly.
   P(Z31) outScalar31 = (P(Z31)) out31;
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;
@@ -128,6 +145,7 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
     nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
     nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
   }
+#endif
 #else
   out31 += WIDTH * g;
   write(G_W, NW, u, out31, 0);
@@ -159,6 +177,14 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   readCarryFusedLine(in61, u, g, me);
   fft_WIDTH(lds, u, smallTrig61, 1, me);
 #if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
+#if PFA_RESIDENT && FFT_TYPE == FFT323161
+  out61 += WIDTH * g;
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 q = G_W * i + me;
+    out61[q] = U2(u[i].y, u[i].x);
+  }
+#else
   P(Z61) outScalar61 = (P(Z61)) out61;
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;
@@ -172,6 +198,7 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
     nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
     nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
   }
+#endif
 #else
   out61 += WIDTH * g;
   write(G_W, NW, u, out61, 0);

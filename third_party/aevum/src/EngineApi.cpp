@@ -129,21 +129,26 @@ public:
     transform_size_ = gpu_->getFFTSize();
 
     lead_cache_enabled_ = gpu_->regSupportsLeadCache();
-    // The power-of-two lead cache is validated and enabled by default.  The
-    // PFA9 bridge changes the carry/pack boundary and therefore remains an
-    // explicit experiment until the word-exact GPU differential and an A/B
-    // throughput run have passed on the target device.
+    // PFA retained-state modes remain explicit experiments.  Resident mode
+    // keeps Word data in the exact Good-Thomas gather order between adjacent
+    // squares; the older carry/fftP bridge remains available independently.
+    const char* resident_value = std::getenv("AEVUM_PFA_RESIDENT");
+    const bool pfa_resident_requested = resident_value && std::atoi(resident_value) != 0;
     if (fft.isPfa()) {
-      const char* value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
-      lead_cache_enabled_ = lead_cache_enabled_ && value && std::atoi(value) != 0;
+      const char* bridge_value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
+      const bool bridge_requested = bridge_value && std::atoi(bridge_value) != 0;
+      lead_cache_enabled_ = lead_cache_enabled_ && (pfa_resident_requested || bridge_requested);
     }
     if (const char* value = std::getenv("AEVUM_REG_LEAD_CACHE"))
       lead_cache_enabled_ = lead_cache_enabled_ && std::atoi(value) != 0;
     if (verbose) {
       if (lead_cache_enabled_) {
-        if (fft.isPfa())
-          log("Aevum PFA9 lead bridge enabled: consecutive square_mul(reg,1) calls fuse carryB with the next fftP gather.\n");
-        else
+        if (fft.isPfa()) {
+          if (pfa_resident_requested)
+            log("Aevum PFA9 resident-word chain enabled: consecutive square_mul(reg,1) calls keep words in direct Good-Thomas fftP order.\n");
+          else
+            log("Aevum PFA9 lead bridge enabled: consecutive square_mul(reg,1) calls fuse carryB with the next fftP gather.\n");
+        } else
           log("Aevum register lead cache enabled: consecutive square_mul(reg,1) calls retain the width transform and use carryFused.\n");
       } else if (!fft.isPfa()) {
         log("Aevum register lead cache disabled; set AEVUM_REG_LEAD_CACHE=1 only on a supported non-Apple, short-carry plan.\n");

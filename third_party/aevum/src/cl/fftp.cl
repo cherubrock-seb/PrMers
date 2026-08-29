@@ -1202,8 +1202,16 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
+#if PFA_RESIDENT
+    // Resident layout is exactly [Good-Thomas group][width slot].  This turns
+    // the old arbitrary canonical gather into one coalesced Word2 load.
+    const Word2 residentPair = in[g * WIDTH + G_W * i + me];
+    const Word word0 = residentPair.x;
+    const Word word1 = residentPair.y;
+#else
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
+#endif
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
     uF2[i] = U2((F) word0 * pfaWeightFP32(n0, THREAD_WEIGHTS),

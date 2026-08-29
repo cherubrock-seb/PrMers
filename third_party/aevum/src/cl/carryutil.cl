@@ -18,6 +18,23 @@ typedef i32 CarryABM;
 /*       Helper routines        */
 /********************************/
 
+// Experimental PFA-resident register layout.  The carry kernels still walk
+// canonical logical digits (required for exact carry propagation), but may
+// scatter each resulting scalar word into the slot consumed contiguously by
+// the next Good-Thomas fftP gather.
+#if PFA_RADIX
+inline u32 pfaResidentScalarIndex(u32 logical) {
+  const u32 binary = logical % PFA_BINARY_LENGTH;
+  const u32 row = logical % PFA_RADIX;
+  const u32 wordHalf = binary & 1u;
+  const u32 pair = binary >> 1;
+  const u32 q = pair / SMALL_HEIGHT;
+  const u32 y = pair - q * SMALL_HEIGHT;
+  const u32 residentPair = (row * SMALL_HEIGHT + y) * WIDTH + q;
+  return residentPair * 2u + wordHalf;
+}
+#endif
+
 // Return unsigned low bits (number of bits must be between 1 and 31)
 #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_ubfe)
 u32 OVERLOAD ulowBits(i32 u, u32 bits) { return __builtin_amdgcn_ubfe(u, 0, bits); }
