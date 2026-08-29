@@ -605,7 +605,8 @@ namespace core {
 int App::runGaussianMersenneECM() {
     // Special32 is a distinct deterministic portfolio, not a Suyama
     // curve-stream option. It always uses the fused Montgomery/BSGS engine.
-    if (options.mode == "gm-ecm-special32")
+    if (options.mode == "gm-ecm-special32" ||
+        options.mode == "gm-ecm-special4096")
         return runGaussianMersenneECMOptimized();
 
     // v99.98: opt-in fused Montgomery Stage1 + true BSGS Stage2.

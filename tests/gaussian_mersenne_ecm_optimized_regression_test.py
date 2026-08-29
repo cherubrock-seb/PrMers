@@ -16,6 +16,7 @@ assert any(version in ver for version in (
     "4.20.88-alpha-v99.99-marin-exact-subtraction",
     "4.20.89-alpha-v100.00-gm-ecm-special32",
     "4.20.89-alpha-v100.01-gm-ecm-special32",
+    "4.20.90-alpha-v100.02-gm-ecm-special4096",
 ))
 
 # The optimized path must use the fused engine primitives and a real

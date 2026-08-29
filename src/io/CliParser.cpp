@@ -118,6 +118,7 @@ void printUsage(const char* progName) {
     std::cout << "  -gm-replay-block <N> : Override safe replay block length" << std::endl;
     std::cout << "  -gm-pm1 -b1 <B1> [-b2 <B2>] : P-1 factor G_p through the exact 2^(4p)-1 lift" << std::endl;
     std::cout << "  -gm-ecm -b1 <B1> [-b2 <B2>] -K <curves> : ECM factor G_p with lifted Montgomery arithmetic" << std::endl;
+    std::cout << "  -gm-ecm-special4096 -b1 <B1> [-b2 <B2>] [-K <profiles>] : experimental GM high-2 portfolio targeting v2(#E)>=12" << std::endl;
     std::cout << "  -gm-ecm-special32 -b1 <B1> [-b2 <B2>] : GM-only deterministic 3-profile ECM prepass (A/B/C); -K is ignored" << std::endl;
     std::cout << "  -gm-factor-chunk-bits <N> : Stage 2 product-exponent chunk target (P-1 default 262144, ECM 131072)" << std::endl;
     std::cout << "  Native Gaussian worktodo: every type accepts an optional final GM|GQ|BOTH family" << std::endl;
@@ -592,18 +593,27 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             // divert it through the legacy sieve/Suyama dispatcher.
             opts.gm_sieve_limit = 0;
         }
+        else if (std::strcmp(argv[i], "-gm-ecm-special4096") == 0 ||
+                 std::strcmp(argv[i], "--gm-ecm-special4096") == 0) {
+            opts.gaussian_mersenne = true;
+            opts.gm_prp_only = false;
+            opts.mode = "gm-ecm-special4096";
+            opts.proof = false;
+            opts.compute_edwards = false;
+            opts.gm_sieve_limit = 0;
+        }
         else if (std::strcmp(argv[i], "-gm-cpu") == 0 ||
                  std::strcmp(argv[i], "--gm-cpu") == 0) {
             opts.gaussian_mersenne = true;
             opts.gm_cpu = true;
-            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32") opts.mode = "gm-proth";
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32" && opts.mode != "gm-ecm-special4096") opts.mode = "gm-proth";
             opts.proof = false;
         }
         else if (std::strcmp(argv[i], "-gm-safe") == 0 ||
                  std::strcmp(argv[i], "--gm-safe") == 0) {
             opts.gaussian_mersenne = true;
             opts.gm_safe_replay = true;
-            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32") opts.mode = "gm-proth";
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32" && opts.mode != "gm-ecm-special4096") opts.mode = "gm-proth";
             opts.proof = false;
         }
         else if ((std::strcmp(argv[i], "-gm-family") == 0 ||
@@ -635,7 +645,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.gaussian_mersenne = true;
             opts.gm_replay_block = to_u64(argv[++i]);
             opts.gm_safe_replay = true;
-            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32") opts.mode = "gm-proth";
+            if (opts.mode != "gm-prp" && opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32" && opts.mode != "gm-ecm-special4096") opts.mode = "gm-proth";
             opts.proof = false;
         }
         else if ((std::strcmp(argv[i], "-gm-factor-chunk-bits") == 0 ||
@@ -909,7 +919,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
     }
     if (opts.gaussian_mersenne) {
-        if (opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32") {
+        if (opts.mode != "gm-pm1" && opts.mode != "gm-ecm" && opts.mode != "gm-ecm-special32" && opts.mode != "gm-ecm-special4096") {
             opts.mode = opts.gm_prp_only ? "gm-prp" : "gm-proth";
         }
         opts.proof = false;

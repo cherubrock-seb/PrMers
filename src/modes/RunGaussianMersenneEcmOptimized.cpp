@@ -40,13 +40,14 @@ using Clock = std::chrono::steady_clock;
 using core::algo::buildE;
 using core::algo::interrupted;
 
-constexpr const char* GM_ECM_OPT_RELEASE = "v100.01";
+constexpr const char* GM_ECM_OPT_RELEASE = "v100.02";
 constexpr std::array<char, 8> GM_OPT_MAGIC{{'P','R','G','M','O','P','T','1'}};
 constexpr std::uint32_t GM_OPT_CHECKPOINT_VERSION = 1;
 
 struct OptTarget {
     std::string family = "GM";
     bool special32 = false;
+    bool special4096 = false;
     std::uint32_t p = 0;
     std::uint32_t lift = 0;
     std::uint64_t middle = 0;
@@ -241,9 +242,11 @@ void write_opt_result(const std::filesystem::path& dir,
                       double elapsed) {
     std::filesystem::create_directories(dir);
     const std::string prefix = t.family == "GQ" ? "gq" : "gm";
+    const std::string result_stem =
+        t.special4096 ? "_ecm_special4096_p" :
+        (t.special32 ? "_ecm_special32_p" : "_ecm_p");
     const std::filesystem::path result =
-        dir / (prefix + (t.special32 ? "_ecm_special32_p" : "_ecm_p") +
-               std::to_string(t.p) + "_result.json");
+        dir / (prefix + result_stem + std::to_string(t.p) + "_result.json");
 
     std::ostringstream j;
     j << std::fixed << std::setprecision(3);
@@ -262,7 +265,7 @@ void write_opt_result(const std::filesystem::path& dir,
       << "  \"B2\": " << (B2 > B1 ? ("\"" + std::to_string(B2) + "\"") : "null") << ",\n"
       << "  \"curves\": " << curves << ",\n"
       << "  \"curve\": " << (curve ? std::to_string(*curve) : "null") << ",\n"
-      << "  \"sigma\": " << (t.special32 ? "null" : (sigma ? ("\"" + std::to_string(*sigma) + "\"") : "null")) << ",\n"
+      << "  \"sigma\": " << ((t.special32 || t.special4096) ? "null" : (sigma ? ("\"" + std::to_string(*sigma) + "\"") : "null")) << ",\n"
       << "  \"factor\": " << (factor ? ("\"" + factor->get_str() + "\"") : "null") << ",\n"
       << "  \"backend\": \"" << json_escape_opt(backend) << "\",\n"
       << "  \"device\": \"device " << device << "\",\n"
@@ -386,6 +389,98 @@ SuyamaSetupOpt make_special32_opt(const OptTarget& t, std::uint64_t profile) {
         return out;
     }
     if (singular == t.n) return out;
+
+    out.ok = true;
+    return out;
+}
+
+
+/*
+ * Gaussian-Mersenne Special4096 experimental portfolio.
+ *
+ * 4096 is a TARGET, not a universal coverage theorem.
+ *
+ * Positive-rank twisted-Edwards parametrization:
+ *   e = 3(t^2-1)/(8t), d=-e^4,
+ *   -x^2+y^2 = 1+d*x^2*y^2.
+ *
+ * Specialize t=(1+I)^r with the GM oriented I.
+ *
+ * Conversion to Montgomery gives:
+ *   A24 = 1/(1-e^4)
+ *   x0  = t^2(9t^2-1)/(t^2-9).
+ *
+ * This x0 is the image of the explicit non-torsion Edwards point, therefore
+ * it lies on the intended curve rather than an uncontrolled quadratic twist.
+ */
+constexpr std::array<std::uint32_t, 37> GM_SPECIAL4096_R{{
+    41,48,38,46,29,56,16,58,55,32,63,4,51,7,1,20,31,53,21,
+    18,11,14,17,34,42,49,67,137,139,146,161,162,204,208,209,226,250
+}};
+
+std::uint32_t special4096_r_opt(const OptTarget& t, std::uint64_t profile) {
+    if (profile < GM_SPECIAL4096_R.size())
+        return GM_SPECIAL4096_R[static_cast<std::size_t>(profile)] % t.p;
+
+    const std::uint64_t h =
+        splitmix64_opt(0x5334303936000000ULL + profile);
+    return static_cast<std::uint32_t>(
+        1ULL + (h % (static_cast<std::uint64_t>(t.p) - 1ULL)));
+}
+
+SuyamaSetupOpt make_special4096_opt(const OptTarget& t, std::uint64_t profile) {
+    SuyamaSetupOpt out;
+    if (t.family != "GM")
+        throw std::runtime_error("GM ECM Special4096 is defined only for the GM family");
+
+    const mpz_class& n = t.n;
+
+    auto inverse_or_factor = [&](const mpz_class& a, mpz_class& inv) -> bool {
+        const mpz_class aa = mod_pos_opt(a, n);
+        const mpz_class g = gcd_opt(aa, n);
+        if (proper_factor_opt(g, n)) {
+            out.factor = g;
+            return false;
+        }
+        if (g != 1) return false;
+        return mpz_invert(inv.get_mpz_t(), aa.get_mpz_t(), n.get_mpz_t()) != 0;
+    };
+
+    mpz_class I = mod_pos_opt(mpz_class(1) << t.p, n);
+    const std::uint64_t half =
+        (static_cast<std::uint64_t>(t.p) + 1ULL) / 2ULL;
+    if ((half & 1ULL) != 0ULL) I = mod_pos_opt(-I, n);
+
+    const mpz_class z = mod_pos_opt(1 + I, n);
+    mpz_class tp;
+    const std::uint32_t rr = special4096_r_opt(t, profile);
+    mpz_powm_ui(tp.get_mpz_t(), z.get_mpz_t(), rr, n.get_mpz_t());
+
+    mpz_class invt, inv8;
+    if (!inverse_or_factor(tp, invt)) return out;
+    if (!inverse_or_factor(mpz_class(8), inv8)) return out;
+
+    const mpz_class t2 = mod_pos_opt(tp * tp, n);
+    const mpz_class e =
+        mod_pos_opt(3 * (t2 - 1) * invt * inv8, n);
+    const mpz_class e2 = mod_pos_opt(e * e, n);
+    const mpz_class e4 = mod_pos_opt(e2 * e2, n);
+
+    mpz_class inv_a24_den;
+    if (!inverse_or_factor(1 - e4, inv_a24_den)) return out;
+    out.a24 = inv_a24_den;
+
+    mpz_class inv_x_den;
+    if (!inverse_or_factor(t2 - 9, inv_x_den)) return out;
+    out.x = mod_pos_opt(t2 * (9 * t2 - 1) * inv_x_den, n);
+
+    const mpz_class singular =
+        gcd_opt(mod_pos_opt(out.a24 * (out.a24 - 1), n), n);
+    if (proper_factor_opt(singular, n)) {
+        out.factor = singular;
+        return out;
+    }
+    if (singular == n) return out;
 
     out.ok = true;
     return out;
@@ -918,6 +1013,7 @@ namespace core {
 
 int App::runGaussianMersenneECMOptimized() {
     const bool special32 = options.mode == "gm-ecm-special32";
+    const bool special4096 = options.mode == "gm-ecm-special4096";
 
     if (special32) {
         std::string requested = options.gm_family;
@@ -950,18 +1046,43 @@ int App::runGaussianMersenneECMOptimized() {
         }
     }
 
+    if (special4096) {
+        std::string requested = options.gm_family;
+        std::transform(requested.begin(), requested.end(), requested.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+        if (requested != "GM") {
+            std::cerr << "GM ECM Special4096 v1 is GM-only; use -gm-family GM.\n";
+            return 2;
+        }
+        if (options.gm_safe_replay) {
+            std::cerr << "GM ECM Special4096 v1 does not yet implement -gm-safe replay.\n";
+            return 2;
+        }
+        if (!options.notorsion || options.torsion16) {
+            std::cerr << "GM ECM Special4096 owns its experimental curve portfolio; "
+                         "legacy torsion-family flags are not applicable.\n";
+            return 2;
+        }
+        if (options.gm_sieve_limit != 0) {
+            std::cout << "[GM ECM Special4096] ignoring -gm-sieve; portfolio setup only.\n";
+        }
+        if (!options.sigma.empty() || options.curve_seed != 0) {
+            std::cout << "[GM ECM Special4096] -sigma/-seed ignored; r stream is deterministic.\n";
+        }
+    }
+
     // Keep every unusual/safety mode on the already-proven implementation.
     // The optimized path is deliberately narrow until it has production hours.
-    if (!special32 && options.gm_safe_replay) {
+    if (!special32 && !special4096 && options.gm_safe_replay) {
         std::cout << "[GM ECM v99.98] -gm-safe requested; using legacy replay path.\n";
         return runGaussianMersenneECMLegacy();
     }
-    if (!special32 && (!options.notorsion || options.torsion16)) {
+    if (!special32 && !special4096 && (!options.notorsion || options.torsion16)) {
         std::cout << "[GM ECM v99.98] explicit torsion family requested; "
                      "using legacy path.\n";
         return runGaussianMersenneECMLegacy();
     }
-    if (!special32 && options.gm_sieve_limit != 0) {
+    if (!special32 && !special4096 && options.gm_sieve_limit != 0) {
         std::cout << "[GM ECM v99.98] non-zero -gm-sieve keeps the legacy "
                      "sieve+ECM path. Use -gm-sieve 0 for fused/BSGS mode.\n";
         return runGaussianMersenneECMLegacy();
@@ -989,12 +1110,15 @@ int App::runGaussianMersenneECMOptimized() {
         return 2;
     }
     t.special32 = special32;
+    t.special4096 = special4096;
 
     const std::uint64_t B1 = options.B1 != 0 ? options.B1 : 50000ULL;
     const std::uint64_t B2 = options.B2;
     const std::uint64_t curves = special32
         ? 3ULL
-        : (options.K != 0 ? options.K : (options.nmax != 0 ? options.nmax : 20ULL));
+        : (special4096
+            ? (options.K != 0 ? options.K : (options.nmax != 0 ? options.nmax : 12ULL))
+            : (options.K != 0 ? options.K : (options.nmax != 0 ? options.nmax : 20ULL)));
     const std::filesystem::path save_dir =
         options.save_path.empty() ? "." : options.save_path;
     std::filesystem::create_directories(save_dir);
@@ -1026,7 +1150,8 @@ int App::runGaussianMersenneECMOptimized() {
               << "  Stage1 bits    : " << kbits << "\n"
               << "  curve stream   : "
               << (special32 ? "deterministic Special32 profiles A/B/C"
-                            : "exact legacy Suyama sigma sequence")
+                  : (special4096 ? "deterministic Special4096 t=(1+I)^r portfolio"
+                                 : "exact legacy Suyama sigma sequence"))
               << "\n";
 
     if (B2 > B1) {
@@ -1064,6 +1189,9 @@ int App::runGaussianMersenneECMOptimized() {
         if (special32) {
             // Stable checkpoint discriminator; it is not a Suyama sigma.
             sigma = 0x5333320000000000ULL + curve + 1ULL;
+        } else if (special4096) {
+            // Stable checkpoint discriminator; it is not a Suyama sigma.
+            sigma = 0x5334309600000000ULL + curve + 1ULL;
         } else if (!options.sigma.empty() && curve == 0) {
             try { sigma = std::stoull(options.sigma); }
             catch (...) {
@@ -1079,6 +1207,11 @@ int App::runGaussianMersenneECMOptimized() {
             const char profile = static_cast<char>('A' + curve);
             std::cout << "\n[GM ECM Special32] profile " << profile
                       << " (fixed curve/point)\n";
+        } else if (special4096) {
+            std::cout << "\n[GM ECM Special4096] profile " << (curve + 1)
+                      << "/" << curves
+                      << " r=" << special4096_r_opt(t, curve)
+                      << " (4096-target; proven point, experimental v2>=12 coverage)\n";
         } else {
             std::cout << "\n[GM ECM] curve " << (curve + 1) << "/" << curves
                       << " sigma=" << sigma << "\n";
@@ -1086,7 +1219,8 @@ int App::runGaussianMersenneECMOptimized() {
 
         SuyamaSetupOpt setup = special32
             ? make_special32_opt(t, curve)
-            : make_suyama_opt(t.n, sigma);
+            : (special4096 ? make_special4096_opt(t, curve)
+                           : make_suyama_opt(t.n, sigma));
         if (proper_factor_opt(setup.factor, t.n)) {
             std::cout << ">>> Gaussian pair ECM setup factor: "
                       << setup.factor << "\n";
@@ -1102,7 +1236,7 @@ int App::runGaussianMersenneECMOptimized() {
 
         const std::filesystem::path s1ck =
             save_dir / ((t.family == "GQ" ? "gq" : "gm") +
-                        (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p")) + std::to_string(t.p) +
+                        (t.special4096 ? std::string("_ecm_special4096_p") : (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p"))) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage1_fused.ckpt");
 
         std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
@@ -1180,7 +1314,7 @@ int App::runGaussianMersenneECMOptimized() {
 
         const std::filesystem::path s2ck =
             save_dir / ((t.family == "GQ" ? "gq" : "gm") +
-                        (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p")) + std::to_string(t.p) +
+                        (t.special4096 ? std::string("_ecm_special4096_p") : (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p"))) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage2_bsgs.ckpt");
 
         std::uint64_t current_k = s2plan.k_min;

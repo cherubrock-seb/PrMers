@@ -1126,7 +1126,7 @@ int App::run() {
         rc = runGaussianMersennePM1();
         ran = true;
     }
-    if (options.mode == "gm-ecm" || options.mode == "gm-ecm-special32") {
+    if (options.mode == "gm-ecm" || options.mode == "gm-ecm-special32" || options.mode == "gm-ecm-special4096") {
         rc = runGaussianMersenneECM();
         ran = true;
     }
