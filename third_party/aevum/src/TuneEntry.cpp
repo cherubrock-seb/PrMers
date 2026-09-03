@@ -60,8 +60,27 @@ vector<TuneEntry> TuneEntry::readTuneFile(const Args& args) {
     double cost{};
     if (sscanf(line.c_str(), "%lf %31s", &cost, specBuf) < 2) {
       log("tune.txt line '%s' ignored\n", line.c_str());
+      continue;
     }
-    FFTConfig fft{specBuf};
+
+    // Legacy GPUOwl tune files omitted the FFT type prefix.  Do not parse
+    // those records in Aevum: besides representing FP64 timings, some use
+    // historical variant digits that are no longer valid in the current
+    // Aevum variant space.  Current Aevum TuneEntry::writeTuneFile() emits
+    // FFT3161 with an explicit "1:" prefix, so prefixed records are the safe
+    // boundary between legacy GPUOwl data and native Aevum tuning data.
+    string fftSpec = specBuf;
+    // Native Aevum FFT3161 tune records serialize with an exact "1:" type
+    // prefix. Historical GPUOwl records are unprefixed and may start with
+    // "256:", "512:", "1K:" or "4K:". Do not use numeric-prefix parsing
+    // here: std::stoi("1K") returns 1 and would misclassify a legacy record.
+    if (fftSpec.rfind("1:", 0) != 0) {
+      if (args.verbose) {
+        log("Ignoring non-Aevum-FFT3161 tune entry '%s'\n", specBuf);
+      }
+      continue;
+    }
+    FFTConfig fft{fftSpec};
     assert(cost >= prevCost && fft.maxExp() > prevMaxExp);
     prevCost = cost;
     prevMaxExp = fft.maxExp();
