@@ -1,6 +1,8 @@
 #include "FFTConfig.h"
 #include "Args.h"
 #include <cstdarg>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -134,6 +136,42 @@ int main() {
     throw std::runtime_error(
         "power-of-two selector did not choose the measured FFT323161 plan");
 #endif
+
+  // Issue #36: tune.txt produced by Aevum must be reused automatically.
+  // Explicit -fft remains higher priority.  An unprefixed legacy GPUOwl entry
+  // is legacy GPUOwl data and must not leak into the stock Aevum NTT selector.
+  namespace fs = std::filesystem;
+  const fs::path savedCwd = fs::current_path();
+  const fs::path tuneDir = fs::temp_directory_path() / "aevum-issue36-tune-selection";
+  fs::remove_all(tuneDir);
+  fs::create_directories(tuneDir);
+  fs::current_path(tuneDir);
+
+  {
+    std::ofstream f("tune.txt");
+    f << "203.0 1:512:8:512:202 # RTX5090 issue36 measured plan\n";
+  }
+  FFTConfig tuned = FFTConfig::bestFit(args, 147000001, "");
+  if (tuned.spec() != "1:512:8:512:202") {
+    std::cerr << "tune.txt selected " << tuned.spec() << std::endl;
+    throw std::runtime_error("Aevum did not reuse compatible FFT3161 tune.txt entry");
+  }
+
+  FFTConfig forced = FFTConfig::bestFit(args, 147000001, "1:512:8:512:101");
+  if (forced.spec() != "1:512:8:512:101")
+    throw std::runtime_error("explicit -fft did not override tune.txt");
+
+  {
+    std::ofstream f("tune.txt", std::ios::trunc);
+    f << "100.0 512:8:512:3:0 # legacy GPUOwl entry with historical H=3 variant\n";
+    f << "101.0 1K:9:512:1:1 # legacy GPUOwl 1K entry must not look like type 1\n";
+  }
+  FFTConfig filtered = FFTConfig::bestFit(args, 147000001, "");
+  if (filtered.shape.fft_type != FFT3161)
+    throw std::runtime_error("legacy unprefixed GPUOwl tune entry leaked into Aevum NTT selection");
+
+  fs::current_path(savedCwd);
+  fs::remove_all(tuneDir);
 
   std::cout << "Aevum workload-aware throughput selectors, Apple stock safety and PFA9 plan test passed" << std::endl;
   return 0;
