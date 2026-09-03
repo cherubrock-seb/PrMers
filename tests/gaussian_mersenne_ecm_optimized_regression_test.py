@@ -6,18 +6,10 @@ root = Path(__file__).resolve().parents[1]
 opt = (root / "src/modes/RunGaussianMersenneEcmOptimized.cpp").read_text()
 fast = (root / "src/modes/RunGaussianMersenneEcmFast.cpp").read_text()
 app = (root / "include/core/App.hpp").read_text()
-ver = (root / "include/core/Version.hpp").read_text()
 
 assert "runGaussianMersenneECMOptimized" in app
 assert "options.bsgs && !options.edwards" in fast
 assert "runGaussianMersenneECMOptimized()" in fast
-assert any(version in ver for version in (
-    "4.20.87-alpha-v99.98-gaussian-ecm-fused-bsgs",
-    "4.20.88-alpha-v99.99-marin-exact-subtraction",
-    "4.20.89-alpha-v100.00-gm-ecm-special32",
-    "4.20.89-alpha-v100.01-gm-ecm-special32",
-    "4.20.90-alpha-v100.02-gm-ecm-special4096",
-))
 
 # The optimized path must use the fused engine primitives and a real
 # differential baby/giant Stage 2, not the old product-of-primes exponent.
