@@ -176,17 +176,29 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // In the example:  lds[0..63] = 0, 64, ...448, 1, 65..., 16, 80...   lds[64..127] = +2
     // Read from LDS in the desired output order.  In the example:  output[0..63] = 0, 64, ... 448, 1, 65...   output[64..127] = +8
     // Pad one value after every row to eliminate bank conflicts.
+    // AEVUM_GWOLT_1K_FIRST_SHUFL_LDSPAD
+    // gpuowl 6cf0dc first radix-8 padded shuffle.
     if (!force_default && f == 1 && RADIX == 8) {
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 2) & 7) * (WG + 1) + (lowMe / 16) * 16 + (lowMe & 1) * 8 + i] = u[i].x; }
+      for (u32 i = 0; i < RADIX; ++i)
+        lds[i * (WG + 2) + lowMe] = u[i].x;
+
       bar(WG);
-      if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { u[i].x = lds[(i / 2) * 16 + (i & 1) * (4 * (WG + 1)) + ((lowMe / 16) & 3) * (WG + 1) + (lowMe & 15)]; }
-      else          for (u32 i = 0; i < RADIX; ++i) { u[i].x = lds[i * 64 + (lowMe / 128) * 16             + ((lowMe / 16) & 7) * (WG + 1) + (lowMe & 15)]; }
+      for (u32 i = 0; i < RADIX; ++i)
+        u[i].x = lds[i * WG / 8
+                   + (lowMe / 8)
+                   + (lowMe & 7) * (WG + 2)];
+
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 2) & 7) * (WG + 1) + (lowMe / 16) * 16 + (lowMe & 1) * 8 + i] = u[i].y; }
+      for (u32 i = 0; i < RADIX; ++i)
+        lds[i * (WG + 2) + lowMe] = u[i].y;
+
       bar(WG);
-      if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { u[i].y = lds[(i / 2) * 16 + (i & 1) * (4 * (WG + 1)) + ((lowMe / 16) & 3) * (WG + 1) + (lowMe & 15)]; }
-      else          for (u32 i = 0; i < RADIX; ++i) { u[i].y = lds[i * 64 + (lowMe / 128) * 16             + ((lowMe / 16) & 7) * (WG + 1) + (lowMe & 15)]; }
+      for (u32 i = 0; i < RADIX; ++i)
+        u[i].y = lds[i * WG / 8
+                   + (lowMe / 8)
+                   + (lowMe & 7) * (WG + 2)];
+
       return;
     }
 
@@ -397,12 +409,20 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     // In the example:  lds[0..63] = 0, 64, ...448, 1, 65..., 16, 80...   lds[64..127] = +2
     // Read from LDS in the desired output order.  In the example:  output[0..63] = 0, 64, ... 448, 1, 65...   output[64..127] = +8
     // Pad one value after every row to eliminate bank conflicts.
+    // gpuowl 6cf0dc first radix-8 padded shuffle.
     if (!force_default && f == 1 && RADIX == 8) {
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 2) & 7) * (WG + 1) + (lowMe / 16) * 16 + (lowMe & 1) * 8 + i] = u[i]; }
+
+      for (u32 i = 0; i < RADIX; ++i)
+        lds[i * (WG + 2) + lowMe] = u[i];
+
       bar(WG);
-      if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[(i / 2) * 16 + (i & 1) * (4 * (WG + 1)) + ((lowMe / 16) & 3) * (WG + 1) + (lowMe & 15)]; }
-      else          for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * 64 + (lowMe / 128) * 16             + ((lowMe / 16) & 7) * (WG + 1) + (lowMe & 15)]; }
+
+      for (u32 i = 0; i < RADIX; ++i)
+        u[i] = lds[i * WG / 8
+                 + (lowMe / 8)
+                 + (lowMe & 7) * (WG + 2)];
+
       return;
     }
 
