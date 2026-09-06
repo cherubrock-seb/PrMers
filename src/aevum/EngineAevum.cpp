@@ -264,9 +264,12 @@ public:
             handle_ = nullptr;
             throw std::runtime_error("Aevum plugin returned an invalid transform");
         }
+        const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
+        const bool radix1k_8 = radix1k_env && std::string(radix1k_env) == "8";
         std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT323161"
                   << " | transform=" << transform_size_
                   << " | requested-plan=" << (fft_spec.empty() ? "plugin-auto" : fft_spec)
+                  << " | radix1k=" << (radix1k_8 ? "8(explicit-override)" : "4(safe-default)")
                   << " | regs=" << register_count_
                   << " | plugin=" << api_.path
                   << " | tune=" << api_.tune_dir().string()

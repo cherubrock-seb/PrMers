@@ -21,6 +21,13 @@ std::mutex backend_mutex;
 engine::gpu_backend backend = engine::gpu_backend::marin;
 engine::gpu_workload workload = engine::gpu_workload::generic;
 std::string aevum_fft_spec;
+
+std::string aevum_radix1k_policy_detail() {
+    const char* value = std::getenv("AEVUM_RADIX1K");
+    if (value && std::string(value) == "8")
+        return "radix1k=8 explicit-override";
+    return "radix1k=4 safe-default";
+}
 }
 
 void engine::configure_gpu_backend(const gpu_backend selected,
@@ -77,11 +84,14 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
     AevumAutoDecision decision;
     if (selected == gpu_backend::auto_select) {
         decision = aevum_auto_decide(p, reg_count, selected_workload, fft_spec);
+        const std::string auto_detail = decision.use_aevum
+            ? decision.detail + " | " + aevum_radix1k_policy_detail()
+            : decision.detail;
         std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload) << ": "
                   << (decision.use_aevum ? "Aevum" : "Marin")
-                  << " selected (" << decision.detail << ")." << std::endl;
+                  << " selected (" << auto_detail << ")." << std::endl;
         selected = decision.use_aevum ? gpu_backend::aevum : gpu_backend::marin;
-        publish("Auto", decision.use_aevum ? "Aevum" : "Marin", decision.detail,
+        publish("Auto", decision.use_aevum ? "Aevum" : "Marin", auto_detail,
                 decision.aevum_transform, decision.fft_spec);
     }
 
@@ -136,7 +146,9 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
         engine* created = create_aevum_engine(p, reg_count, device, verbose, fft_spec);
         if (configured != gpu_backend::auto_select) {
             if (resolved_transform == 0) resolved_transform = created->get_size();
-            publish("Forced Aevum", "Aevum", "selected by -aevum", resolved_transform, resolved_fft);
+            publish("Forced Aevum", "Aevum",
+                    "selected by -aevum | " + aevum_radix1k_policy_detail(),
+                    resolved_transform, resolved_fft);
         }
         return created;
     }

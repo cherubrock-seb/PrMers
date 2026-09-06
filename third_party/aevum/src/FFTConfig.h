@@ -9,6 +9,7 @@
 #include <vector>
 #include <array>
 #include <algorithm>
+#include <cstdlib>
 
 // We pre-calculate the maximum BPW for a number of fft specs.  From these entries we can either look up or interpolate to get the
 // maximum BPW for all variants of an FFT spec.  The variants for which maximum bpw are precomputed are 000, 101, 202, 010, 111, 212.
@@ -22,6 +23,15 @@ string numberK(u64 n);
 using KeyVal = std::pair<std::string, std::string>;
 
 enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53};
+
+// Safety policy for the gpuowl 6cf0dc 1K radix-8 path.
+// The path remains compiled in but is never enabled implicitly.
+// AEVUM_RADIX1K=8 is an explicit diagnostic/tune override.
+// Missing, empty, or AEVUM_RADIX1K=4 preserves historical radix-4.
+inline bool aevumRadix8For1K() {
+  const char* value = std::getenv("AEVUM_RADIX1K");
+  return value && value[0] == '8' && value[1] == '\0';
+}
 
 class FFTShape {
 public:
@@ -40,8 +50,12 @@ public:
   explicit FFTShape(const string& spec);
 
   u32 size() const { return width * height * middle * 2; }
-  u32 nW() const { return width == 256 ? 4 : 8; }
-  u32 nH() const { return height == 256 ? 4 : 8; }
+  u32 nW() const {
+    return (width == 256 || (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+  }
+  u32 nH() const {
+    return (height == 256 || (height == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+  }
 
   float minBpw() const { return fft_type != FFT32 ? 3.0f : 1.0f; }
   float maxBpw() const { return *max_element(bpw.begin(), bpw.end()); }

@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.93-alpha-v100.07-aevum-native-auto-policy-fix";
+    const std::string PRMERS_VERSION = "4.20.94-alpha-v100.08-aevum-radix1k-optin";
 } // namespace core
 
 #endif // VERSION_HPP

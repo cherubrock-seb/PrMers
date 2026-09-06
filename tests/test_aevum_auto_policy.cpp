@@ -27,6 +27,30 @@ int main() {
         return 36;
     }
 
+#if defined(__APPLE__)
+    // Apple OpenCL 1.2 deliberately disables native PFA and Type4.
+    // Verify platform rejection/fallback rather than Linux/Windows plans.
+    auto pfa3 = aevum_auto_decide(100000019u, 8, engine::gpu_workload::prp, "pfa:auto");
+    expect(pfa3.use_aevum, false, "Apple PFA-3 disabled");
+    if (!pfa3.fft_spec.empty()) return 40;
+
+    auto pfa9 = aevum_auto_decide(175000001u, 8, engine::gpu_workload::prp, "pfa:auto");
+    expect(pfa9.use_aevum, false, "Apple PFA-9 disabled");
+    if (!pfa9.fft_spec.empty()) return 50;
+
+    auto require_type1 = [](const AevumAutoDecision& d, int code) {
+        if (d.fft_spec.rfind("1:", 0) != 0) {
+            std::cerr << "Apple selector did not resolve Type1: " << d.fft_spec << std::endl;
+            std::exit(code);
+        }
+    };
+
+    require_type1(aevum_auto_decide(175000039u, 8, engine::gpu_workload::prp, "throughput:auto"), 60);
+    require_type1(aevum_auto_decide(175000039u, 8, engine::gpu_workload::prp, "throughput:prp"), 61);
+    require_type1(aevum_auto_decide(175000039u, 18, engine::gpu_workload::ll, "throughput:ll"), 62);
+    require_type1(aevum_auto_decide(55050557u, 11, engine::gpu_workload::pm1, "throughput:pm1"), 63);
+    require_type1(aevum_auto_decide(55050557u, 51, engine::gpu_workload::ecm, "throughput:ecm"), 64);
+#else
     auto pfa3 = aevum_auto_decide(100000019u, 8, engine::gpu_workload::prp, "pfa:auto");
     expect(pfa3.use_aevum, true, "PFA-3 PRP");
     if (pfa3.aevum_transform != 3145728 || pfa3.fft_spec.rfind("pfa3:", 0) != 0) return 4;
@@ -52,6 +76,7 @@ int main() {
 
     auto ecm_workload = aevum_auto_decide(55050557u, 51, engine::gpu_workload::ecm, "throughput:ecm");
     if (!ecm_workload.use_aevum || ecm_workload.fft_spec != "1:1K:4:256:101") return 64;
+#endif
 
     auto small_stage1 = aevum_auto_decide(1362763u, 11, engine::gpu_workload::pm1);
     expect(small_stage1.use_aevum, false, "small P-1 Stage 1");

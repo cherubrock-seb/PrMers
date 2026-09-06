@@ -62,6 +62,13 @@ public:
     if (tune_dir && *tune_dir) args_.masterDir = std::filesystem::absolute(tune_dir);
     args_.setDefaults();
 
+    const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
+    if (radix1k_env && *radix1k_env &&
+        std::strcmp(radix1k_env, "4") != 0 &&
+        std::strcmp(radix1k_env, "8") != 0) {
+      throw std::runtime_error("AEVUM_RADIX1K must be exactly 4 or 8");
+    }
+
     context_ = std::make_unique<Context>(getDevice(device));
     cache_ = std::make_unique<TrigBufCache>(context_.get());
 
@@ -72,6 +79,19 @@ public:
 
     const std::string spec = fft_spec ? fft_spec : "";
     FFTConfig fft = FFTConfig::bestFit(args_, exponent_, spec);
+
+    if (verbose) {
+      const bool uses_1k = fft.shape.width == 1024 || fft.shape.height == 1024;
+      if (uses_1k) {
+        log("Aevum 1K radix policy: radix-%u (%s).\n",
+            aevumRadix8For1K() ? 8u : 4u,
+            aevumRadix8For1K()
+              ? "explicit AEVUM_RADIX1K=8 override"
+              : "safe default; set AEVUM_RADIX1K=8 only for a measured tune");
+      } else {
+        log("Aevum 1K radix policy: not used by selected shape; default remains radix-4.\n");
+      }
+    }
 
     // Full FFT323161 has three independent residue planes.  Overlap the
     // GF61 queue with the FP32+GF31 queue by default; the planes touch
