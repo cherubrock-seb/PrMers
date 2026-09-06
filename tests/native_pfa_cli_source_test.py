@@ -15,7 +15,7 @@ assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
 assert 'Aevum FFT323161 requires explicit pfa9' not in adapter
 assert '4:512:8:512:202' in (root/'README_POW2_TYPE4_LEAD_CACHE.md').read_text()
 for p in root.rglob('*'):
-    if p.is_file() and p.name != 'MANIFEST_NATIVE_PFA.json' and 'third_party' not in p.parts and 'docs' not in p.parts and '__pycache__' not in p.parts and p.stat().st_size<8_000_000:
+    if p.is_file() and p.name != 'MANIFEST_NATIVE_PFA.json' and '.git' not in p.parts and 'third_party' not in p.parts and 'docs' not in p.parts and '__pycache__' not in p.parts and p.stat().st_size<8_000_000:
         forbidden='prmers_'+'opencl_'+'prp'
         assert forbidden not in p.read_text(errors='ignore'), f'old standalone runner reference: {p}'
 print('PrMers native PFA CLI source test passed')
@@ -23,8 +23,10 @@ print('PrMers native PFA CLI source test passed')
 app=(root/'src/core/App.cpp').read_text()
 assert '-pfa-off' in cpp
 assert 'aevum_pfa_off' in hpp
-assert '"throughput:prp"' in app
-assert '"throughput:ll"' in app
+assert 'fallback = ""' in app
+assert app.count('? plan_override : "";') >= 2
+assert '"throughput:prp"' not in app
+assert '"throughput:ll"' not in app
 assert '"throughput:pm1"' in app
 assert '"throughput:ecm"' in app
 

@@ -17,7 +17,9 @@ assert 'o.mode == "gm-pm1" || o.mode == "gm-chain"' in app
 assert 'workload = engine::gpu_workload::pm1' in app
 assert 'o.mode == "gm-ecm"' in app
 assert 'workload = engine::gpu_workload::ecm' in app
-for selector in ('throughput:prp', 'throughput:pm1', 'throughput:ecm'):
+assert 'fallback = ""' in app
+assert 'throughput:prp' not in app
+for selector in ('throughput:pm1', 'throughput:ecm'):
     assert selector in app
 
 # PRP/Proth, P-1 and ECM all instantiate the common engine abstraction.

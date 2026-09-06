@@ -45,7 +45,11 @@ assert 'GM|GQ|BOTH' in work
 
 # Backend policy remains centralized. Pair PRP/Proth, P-1, and ECM still use
 # the same engine workloads and engine::create_gpu dispatch as before.
-for needle in ('throughput:prp', 'throughput:pm1', 'throughput:ecm'):
+# PRP delegates to native Aevum auto selection; factoring keeps its
+# workload-specific selectors.
+assert 'fallback = ""' in app
+assert 'throughput:prp' not in app
+for needle in ('throughput:pm1', 'throughput:ecm'):
     assert needle in app
 assert prp.count('engine::create_gpu(lift_exponent') == 1
 assert factor.count('engine::create_gpu(t.lift') == 2

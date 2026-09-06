@@ -66,8 +66,10 @@ assert "Type4 FFT323161" in auto_policy
 assert "requested-plan=" in engine_aevum
 assert "PRP/LL uses staged stock Type1 FFT3161" in app
 assert 'o.aevum_fft_spec = "pow2:auto"' in app
-assert '"throughput:prp"' in app
-assert '"throughput:ll"' in app
+assert 'fallback = ""' in app
+assert app.count('? plan_override : "";') >= 2
+assert '"throughput:prp"' not in app
+assert '"throughput:ll"' not in app
 assert '"throughput:pm1"' in app
 assert '"throughput:ecm"' in app
 assert "PRMERS_AEVUM_PM1_FFT" in app

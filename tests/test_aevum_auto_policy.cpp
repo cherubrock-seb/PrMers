@@ -17,6 +17,16 @@ int main() {
     expect(large.use_aevum, true, "large PRP");
     if (large.aevum_transform != 4194304 || large.marin_transform != 8388608) return 3;
 
+    // Issue #36 regression: the device-neutral default must use Aevum's native
+    // automatic selector rather than PrMers' optional throughput:prp policy.
+    // At the reporter's 147.8M exponent, native Aevum selects Type1 FFT3161.
+    auto issue36_default = aevum_auto_decide(147800003u, 8, engine::gpu_workload::prp);
+    expect(issue36_default.use_aevum, true, "issue36 native-auto PRP");
+    if (issue36_default.fft_spec.rfind("1:", 0) != 0) {
+        std::cerr << "issue36 default selected " << issue36_default.fft_spec << std::endl;
+        return 36;
+    }
+
     auto pfa3 = aevum_auto_decide(100000019u, 8, engine::gpu_workload::prp, "pfa:auto");
     expect(pfa3.use_aevum, true, "PFA-3 PRP");
     if (pfa3.aevum_transform != 3145728 || pfa3.fft_spec.rfind("pfa3:", 0) != 0) return 4;

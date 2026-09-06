@@ -182,7 +182,10 @@ static std::string gaussian_workload_fft_spec(const io::CliOptions& options,
     switch (workload) {
         case engine::gpu_workload::prp:
             override_value = std::getenv("PRMERS_AEVUM_PRP_FFT");
-            fallback = "throughput:prp";
+            // Device-neutral default: delegate to the native Aevum auto selector.
+            // The old PRP workload fallback was calibrated on RTX 3080 and can
+            // choose a much slower Type4 plan on other GPUs (issue #36 / RTX 5090).
+            fallback = "";
             break;
         case engine::gpu_workload::pm1:
         case engine::gpu_workload::pm1_lowmem:
@@ -451,13 +454,15 @@ App::App(int argc, char** argv)
         switch (workload) {
             case engine::gpu_workload::prp:
                 plan_override = std::getenv("PRMERS_AEVUM_PRP_FFT");
+                // Empty spec means plugin-native auto selection, identical to
+                // standalone Aevum unless the user supplies an explicit override.
                 o.aevum_fft_spec = plan_override && *plan_override
-                    ? plan_override : "throughput:prp";
+                    ? plan_override : "";
                 break;
             case engine::gpu_workload::ll:
                 plan_override = std::getenv("PRMERS_AEVUM_LL_FFT");
                 o.aevum_fft_spec = plan_override && *plan_override
-                    ? plan_override : "throughput:ll";
+                    ? plan_override : "";
                 break;
             case engine::gpu_workload::pm1:
             case engine::gpu_workload::pm1_lowmem:
