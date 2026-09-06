@@ -535,6 +535,194 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 #endif
 
 
+
+
+// AEVUM_GWOLT_SHUFL_FFT2_TYPED
+// Typed Aevum backport of gpuowl 6cf0dc fused shuffle + fft2.
+// Used only by SIZE=1K / RADIX=8 / f=8.
+
+#if FFT_FP64
+
+void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
+                             u32 f, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(f == 8);
+
+  const u32 mask = f - 1;
+
+#if SHUFL_BYTES == 16
+  local T2 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T2);
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i)
+    lds[i*f + (lowMe & ~mask)*RADIX + (lowMe & mask)] = u[i];
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    T2 a = lds[i*(WG/2) + lowMe%(WG/2)];
+    T2 b = lds[4*WG + i*(WG/2) + lowMe%(WG/2)];
+    u[i] = lowMe < WG/2 ? a+b : a-b;
+  }
+
+#elif SHUFL_BYTES == 8
+  local T *lds = (local T *)lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T);
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].x;
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    T a=lds[i*(WG/2)+lowMe%(WG/2)];
+    T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i].x = lowMe < WG/2 ? a+b : a-b;
+  }
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].y;
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    T a=lds[i*(WG/2)+lowMe%(WG/2)];
+    T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i].y = lowMe < WG/2 ? a+b : a-b;
+  }
+#else
+#error Unsupported FP64 SHUFL_BYTES
+#endif
+}
+
+#endif
+
+
+#if FFT_FP32
+
+void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
+                             u32 f, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(f == 8);
+
+  const u32 mask = f - 1;
+
+#if SHUFL_BYTES >= 8
+  local F2 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F2);
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    F2 a=lds[i*(WG/2)+lowMe%(WG/2)];
+    F2 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i] = lowMe < WG/2 ? a+b : a-b;
+  }
+#else
+#error Unsupported FP32 SHUFL_BYTES
+#endif
+}
+
+#endif
+
+
+#if NTT_GF31
+
+void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
+                             u32 f, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(f == 8);
+
+  const u32 mask = f - 1;
+
+#if SHUFL_BYTES >= 8
+  local GF31 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF31);
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    GF31 a=lds[i*(WG/2)+lowMe%(WG/2)];
+    GF31 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  }
+#else
+#error Unsupported GF31 SHUFL_BYTES
+#endif
+}
+
+#endif
+
+
+#if NTT_GF61
+
+void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
+                             u32 f, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(f == 8);
+
+  const u32 mask = f - 1;
+
+#if SHUFL_BYTES == 16
+  local GF61 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF61);
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    GF61 a=lds[i*(WG/2)+lowMe%(WG/2)];
+    GF61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  }
+
+#elif SHUFL_BYTES == 8
+  local Z61 *lds = (local Z61 *)lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(Z61);
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].x;
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    Z61 a=lds[i*(WG/2)+lowMe%(WG/2)];
+    Z61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i].x = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  }
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i)
+    lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].y;
+
+  bar(WG);
+  for (u32 i=0; i<RADIX; ++i) {
+    Z61 a=lds[i*(WG/2)+lowMe%(WG/2)];
+    Z61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+    u[i].y = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  }
+#else
+#error Unsupported GF61 SHUFL_BYTES
+#endif
+}
+
+#endif
+
+
 #if FFT_FP64
 
 void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 numWG, u32 lowMe) {
@@ -699,17 +887,127 @@ void OVERLOAD tabMul(Trig trig, T2 *u, u32 f, u32 me) {
   }
 }
 
+// Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4a(Trig trig, T2 *u, u32 f, u32 me) {
+
+  if (f == 1) {                      // fft8_4 is performed first
+    u32 p = me;
+
+// This code uses chained complex multiplies which could be faster on GPUs with great DP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Perform two length=4 chain muls.
+
+    if (TABMUL_CHAIN) {
+      T2 w  = TFLOAD(&trig[p]);
+      T2 w2 = TFLOAD(&trig[WG + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      T2 base  = csqTrig(w);
+      T2 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+// Radeon VII loves this case, it is faster than the chainmul case.  nVidia Titan V hates this case.
+
+    if (!TABMUL_CHAIN) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG + p]));
+      }
+    }
+  }
+
+  else {                      // fft8_4 is performed after an initial fft8
+
+// This code uses chained complex multiplies which could be faster on GPUs with great DP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Perform two length=4 chain muls.
+
+    u32 p = me / 8;                 // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 7 * WG;                 // Skip over the trig values used in the first tabmul
+    if (TABMUL_CHAIN) {
+      T2 w  = TFLOAD(&trig[p]);
+      T2 w2 = TFLOAD(&trig[WG/8 + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      T2 base  = csqTrig(w);
+      T2 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+// Radeon VII loves this case, it is faster than the chainmul case.  nVidia Titan V hates this case.
+
+    if (!TABMUL_CHAIN) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG/8 + p]));
+      }
+    }
+  }
+}
+
+// Later tabmuls after starting with an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4b(Trig trig, T2 *u, u32 f, u32 me) {
+
+// This code uses chained complex multiplies which could be faster on GPUs with great DP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Apparently, chained Fancy muls at n=8 lengths are very accurate.
+
+  if (TABMUL_CHAIN) {
+    u32 p = me & ~(f - 1);
+    T2 w = TFLOAD(&trig[p]);
+
+//    u[1] = cmulFancy(u[1], w);				// GW: - this should use Fancy, but tabmul8_4a does not and it could for half of the data
+//    T2 w2 = csqTrigFancy(w);
+//    u[2] = cmulFancy(u[2], w2);
+//    T2 w3 = ccubeTrigFancy(w2, w);
+//    u[3] = cmulFancy(u[3], w3);
+//    w3.x += 1;
+//    T2 base = cmulFancy(w3, w);
+//    for (int i = 4; i < 8; ++i) {
+//      u[i] = cmul(u[i], base);
+//      base = cmulFancy(base, w);
+//    }
+
+    u[1] = cmul(u[1], w);				// GW: - this should use Fancy, but tabmul8_4a does not and it could for half of the data
+    T2 w2 = csqTrig(w);
+    u[2] = cmul(u[2], w2);
+    T2 w3 = ccubeTrig(w2, w);
+    u[3] = cmul(u[3], w3);
+    T2 base = cmul(w3, w);
+    for (int i = 4; i < 8; ++i) {
+      u[i] = cmul(u[i], base);
+      base = cmul(base, w);
+    }
+  }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+// Radeon VII loves this case, it is faster than the chainmul case.  nVidia Titan V hates this case.
+
+  if (!TABMUL_CHAIN) {
+    u32 p = (me/4) & ~(f/4 - 1);     // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 6 * WG;                  // Skip over the trig values used in tabmul8_4a
+
+//GW:  Can any of these be Fancy? Yes, u[1] and u[2]
+    for (u32 i = 1; i < RADIX; ++i) {
+      u[i] = cmul(u[i], TFLOAD(&trig[(i-1)*(WG/4) + p]));
+    }
+  }
+}
+
 //************************************************************************************
 // New fft WIDTH and HEIGHT macros to support radix-4 FFTs with more FMA instructions
 //************************************************************************************
-
-// Partial complex-multiply that delays the mul-by-cosine so it can be part of an FMA.
-// We're trying to calculate u * U2(cosine,sine).
-// real = (u.x - u.y*sine_over_cosine) * cosine
-// imag = (u.x*sine_over_cosine + u.y) * cosine
-T2 partial_cmul(T2 u, T sine_over_cosine) {
-  return U2(fma(-u.y, sine_over_cosine, u.x), fma(u.x, sine_over_cosine, u.y));
-}
 
 // Copy of macro from fft4 and fft8 with FMAs added
 #define X2_via_FMA(a, c, b) { T2 t = a; a = fma(c, b, t); b = fma(-c, b, t); }
@@ -927,8 +1225,8 @@ void finish_tabMul8_fft8(Trig trig, T *preloads, T2 *u, u32 f, u32 numWG, u32 me
     // Do last level of fft8
     X2(u[0], u[1]);
     X2(u[2], u[3]);
-    X2_apply_delay(u[4], u[5]);
-    X2_apply_delay(u[6], u[7]);
+    X2ad(u[4], u[5], M_SQRT1_2);
+    X2ad(u[6], u[7], M_SQRT1_2);
   }
 
   // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
@@ -1085,6 +1383,128 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   // Finish third tabMul and perform final fft8.
   finish_tabMul8_fft8(trig, preloads, u, 64, numWG, lowMe, 0);  // We'd rather set save_one_more_mul to 1
 
+
+// Custom code for SIZE=256, RADIX=8, threads=32.  Performed as 4 * 8 * 8.  Radix-8 allows fewer
+// shufls and tabmuls than radix-4.  Fewer instructions, but more registers.
+// Uses only 32 threads which is fine on nVidia, lousy on radeon VII (use WMUL=2, TAIL_KERNELS=2).
+//
+// Details for memory layout, trig data, and shufls:
+// Mem:   0     1...  31
+//        32
+//        ...
+//        196
+//        224   ...  255
+// Only do a radix-4 fft.  Non-standard TABMUL:    (64 3/4 cmuls in blocks of 1 duplicated trig values)
+// trig powers are: 0*0 0*1 .. 0*31
+//                  0*32    .. 0*63
+//                  1*0 1*1 .. 1*31
+//                  1*32    .. 1*63
+//                  2*0 2*1 .. 2*31
+//                  2*32    .. 2*63
+//                  3*0 3*1 .. 3*31
+//                  3*32    .. 3*63           total trig data (6*32*16=3KB)
+// non-standard shufl out:
+//        0  64 .. 192   1... 7...
+//        8
+//        16
+//        ...
+//        48
+//        56
+// standard TABMUL:   (8 7/8 cmuls in blocks of 4 duplicated trig values)
+// trig powers are: 0000 0000 .. 0000*7
+//                  0000 4444 .. 4444*7
+//                  0000 8888 .. 8888*7
+//                  0000 12 ...
+//                  0000 16 ...
+//                  0000 20 ...
+//                  0000 24 ...
+//                  0000 28 ...           total trig data (7*8*16=896B)
+// standard shufl out:
+//        0  64 .. 192   8...  56...
+//        1
+//        2
+//        ...
+//        6
+//        7
+//
+// FP64 and FP32 could benefit by starting the next fft8 after the radix-4 tabmul (easy FMA opportunities).
+
+// Code for SIZE=256, RADIX=8
+#elif WG == 32 && NW == 8
+
+  fft8_4(u);
+  tabMul8_4a(trig, u, 1, lowMe);
+  shufl(lds, u, 1, 4, numWG, lowMe);
+
+  fft8(u);
+  tabMul8_4b(trig, u, 4, lowMe);
+  shufl(lds, u, 4, numWG, lowMe);
+
+  fft8(u);
+
+// Custom code for SIZE=1024, RADIX=8, threads=128.  Performed as 8 * 8 * 2 * 8.  Radix-8 allows fewer
+// shufls and tabmuls than radix-4.  Fewer instructions, but more registers.  If we process 4 (or 8)
+// independent width lines then we should be able to avoid the mul by w^0 in the next to last radix-8 step.
+//
+// Details for memory layout, trig data, and shufls:
+// Mem:   0     1 ...  127
+//        128
+//        256
+//        384
+//        512
+//        640
+//        768
+//        896   ...  1023
+// standard TABMUL:    (128 7/8 cmuls in blocks of 1 duplicated trig values)
+// trig powers are: 0 0 0  .. 0*127
+//                  0 1 2  .. 1*127
+//                  0 2 4  .. 2*127
+//                  0 3 6  .. 3*127
+//                  0 4 8  .. 4*127
+//                  0 5 10 .. 5*127
+//                  0 6 12 .. 6*127
+//                  0 7 14 .. 7*127           total trig data (7*128*16=14KB)
+// standard shufl out:
+//        0   128 .. 896   1... 15...
+//        16
+//        32
+//        48
+//        64
+//        80
+//        96
+//        112
+// standard TABMUL:   (16 7/8 cmuls in blocks of 8 duplicated trig values)
+// trig powers are: 00000000 00000000 .. 00000000*15
+//                  00000000 11111111 .. 11111111*15
+//                  00000000 22222222 .. 22222222*15
+//                  00000000 33333333 .. 33333333*15
+//                  00000000 44444444 .. 44444444*15
+//                  00000000 55555555 .. 55555555*15
+//                  00000000 66666666 .. 66666666*15
+//                  00000000 77777777 .. 77777777*15           total trig data (7*16*16=1.75KB)
+// shufl out with an fft2:
+//        0  128 .. 896  16 .. 112...  8...
+//        1
+//        2
+//        3
+//        4
+//        5
+//        6
+//        7
+
+// Code for SIZE=1024, RADIX=8
+#elif WG == 128 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  shufl(lds, u, 1, numWG, lowMe);
+
+  fft8(u);
+  tabMul(trig, u, 8, lowMe);
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+
+  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+
 #else
 
   // Old / original version
@@ -1185,6 +1605,121 @@ void OVERLOAD tabMul(TrigFP32 trig, F2 *u, u32 f, u32 me) {
   }
 }
 
+// Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4a(TrigFP32 trig, F2 *u, u32 f, u32 me) {
+
+  if (f == 1) {                      // fft8_4 is performed first
+    u32 p = me;
+
+// This code uses chained complex multiplies which could be faster on GPUs with great SP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Perform two length=4 chain muls.
+
+    if (TABMUL_CHAIN32) {
+      F2 w  = TFLOAD(&trig[p]);
+      F2 w2 = TFLOAD(&trig[WG + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      F2 base  = csqTrig(w);
+      F2 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN32) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG + p]));
+      }
+    }
+  }
+
+  else {                      // fft8_4 is performed after an initial fft8
+
+// This code uses chained complex multiplies which could be faster on GPUs with great SP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Perform two length=4 chain muls.
+
+    u32 p = me / 8;                 // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 7 * WG;                 // Skip over the trig values used in the first tabmul
+    if (TABMUL_CHAIN32) {
+      F2 w  = TFLOAD(&trig[p]);
+      F2 w2 = TFLOAD(&trig[WG/8 + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      F2 base  = csqTrig(w);
+      F2 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN32) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG/8 + p]));
+      }
+    }
+  }
+}
+
+// Later tabmuls after starting with an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4b(TrigFP32 trig, F2 *u, u32 f, u32 me) {
+
+// This code uses chained complex multiplies which could be faster on GPUs with great SP throughput or poor memory bandwidth or caching.
+// This ought to be the least accurate version of Tabmul.  In practice, this is just as accurate as reading precomputed values from memory.
+// Apparently, chained Fancy muls at n=8 lengths are very accurate.
+
+  if (TABMUL_CHAIN32) {
+    u32 p = me & ~(f - 1);
+    F2 w = TFLOAD(&trig[p]);
+
+//    u[1] = cmulFancy(u[1], w);				// GW: - this should use Fancy, but tabmul8_4a does not and it could for half of the data
+//    T2 w2 = csqTrigFancy(w);
+//    u[2] = cmulFancy(u[2], w2);
+//    T2 w3 = ccubeTrigFancy(w2, w);
+//    u[3] = cmulFancy(u[3], w3);
+//    w3.x += 1;
+//    T2 base = cmulFancy(w3, w);
+//    for (int i = 4; i < 8; ++i) {
+//      u[i] = cmul(u[i], base);
+//      base = cmulFancy(base, w);
+//    }
+
+    u[1] = cmul(u[1], w);				// GW: - this should use Fancy, but tabmul8_4a does not and it could for half of the data
+    F2 w2 = csqTrig(w);
+    u[2] = cmul(u[2], w2);
+    F2 w3 = ccubeTrig(w2, w);
+    u[3] = cmul(u[3], w3);
+    F2 base = cmul(w3, w);
+    for (int i = 4; i < 8; ++i) {
+      u[i] = cmul(u[i], base);
+      base = cmul(base, w);
+    }
+  }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+  if (!TABMUL_CHAIN32) {
+    u32 p = (me/4) & ~(f/4 - 1);     // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 6 * WG;                  // Skip over the trig values used in tabmul8_4a
+
+//GW:  Can any of these be Fancy? Yes, u[1] and u[2]
+    for (u32 i = 1; i < RADIX; ++i) {
+      u[i] = cmul(u[i], TFLOAD(&trig[(i-1)*(WG/4) + p]));
+    }
+  }
+}
+
 //************************************************************************************
 // New fft WIDTH and HEIGHT macros to support radix-4 FFTs with more FMA instructions
 //************************************************************************************
@@ -1193,14 +1728,6 @@ void OVERLOAD tabMul(TrigFP32 trig, F2 *u, u32 f, u32 me) {
 // Since we're not enabling FP32 variant 2 by default, don't include these "more FMA" routines.
 
 #if ENABLE_FP32_VARIANT_2
-
-// Partial complex-multiply that delays the mul-by-cosine so it can be part of an FMA.
-// We're trying to calculate u * U2(cosine,sine).
-// real = (u.x - u.y*sine_over_cosine) * cosine
-// imag = (u.x*sine_over_cosine + u.y) * cosine
-F2 partial_cmul(F2 u, F sine_over_cosine) {
-  return U2(fma(-u.y, sine_over_cosine, u.x), fma(u.x, sine_over_cosine, u.y));
-}
 
 // Copy of macro from fft4 and fft8 with FMAs added
 #define X2_via_FMA(a, c, b) { F2 t = a; a = fma(c, b, t); b = fma(-c, b, t); }
@@ -1418,8 +1945,8 @@ void finish_tabMul8_fft8(TrigFP32 trig, F *preloads, F2 *u, u32 f, u32 numWG, u3
     // Do last level of fft8
     X2(u[0], u[1]);
     X2(u[2], u[3]);
-    X2_apply_delay(u[4], u[5]);
-    X2_apply_delay(u[6], u[7]);
+    X2ad(u[4], u[5], M_SQRT1_2);
+    X2ad(u[6], u[7], M_SQRT1_2);
   }
 
   // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
@@ -1548,6 +2075,32 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   // Finish third tabMul and perform final fft8.
   finish_tabMul8_fft8(trig, preloads, u, 64, numWG, lowMe, 0);  // We'd rather set save_one_more_mul to 1
 
+// Code for SIZE=256, RADIX=8
+#elif WG == 32 && NW == 8
+
+  fft8_4(u);
+  tabMul8_4a(trig, u, 1, lowMe);
+  shufl(lds, u, 1, 4, numWG, lowMe);
+
+  fft8(u);
+  tabMul8_4b(trig, u, 4, lowMe);
+  shufl(lds, u, 4, numWG, lowMe);
+
+  fft8(u);
+
+// Code for SIZE=1024, RADIX=8
+#elif WG == 128 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  shufl(lds, u, 1, numWG, lowMe);
+
+  fft8(u);
+  tabMul(trig, u, 8, lowMe);
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+
+  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+
 #else
 
   // Old / original version
@@ -1638,7 +2191,133 @@ void OVERLOAD tabMul(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
   }
 }
 
+// Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4a(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
+
+  if (f == 1) {                      // fft8_4 is performed first
+    u32 p = me;
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+// Perform two length=4 chain muls.
+
+    if (TABMUL_CHAIN31) {
+      GF31 w  = TFLOAD(&trig[p]);
+      GF31 w2 = TFLOAD(&trig[WG + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      GF31 base  = csqTrig(w);
+      GF31 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN31) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG + p]));
+      }
+    }
+  }
+
+  else {                      // fft8_4 is performed after an initial fft8
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+// Perform two length=4 chain muls.
+
+    u32 p = me / 8;                 // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 7 * WG;                 // Skip over the trig values used in the first tabmul
+    if (TABMUL_CHAIN31) {
+      GF31 w  = TFLOAD(&trig[p]);
+      GF31 w2 = TFLOAD(&trig[WG/8 + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      GF31 base  = csqTrig(w);
+      GF31 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN31) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG/8 + p]));
+      }
+    }
+  }
+}
+
+// Later tabmuls after starting with an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4b(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+
+  if (TABMUL_CHAIN31) {
+    u32 p = me & ~(f - 1);
+    GF31 w = TFLOAD(&trig[p]);
+
+    u[1] = cmul(u[1], w);
+    GF31 w2 = csqTrig(w);
+    u[2] = cmul(u[2], w2);
+    GF31 w3 = ccubeTrig(w2, w);
+    u[3] = cmul(u[3], w3);
+    GF31 base = cmul(w3, w);
+    for (int i = 4; i < 8; ++i) {
+      u[i] = cmul(u[i], base);
+      base = cmul(base, w);
+    }
+  }
+
+// Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+  if (!TABMUL_CHAIN31) {
+    u32 p = (me/4) & ~(f/4 - 1);     // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 6 * WG;                  // Skip over the trig values used in tabmul8_4a
+
+    for (u32 i = 1; i < RADIX; ++i) {
+      u[i] = cmul(u[i], TFLOAD(&trig[(i-1)*(WG/4) + p]));
+    }
+  }
+}
+
 void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) {
+
+// Code for SIZE=256, RADIX=8
+#if WG == 32 && NW == 8
+
+  fft8_4(u);
+  tabMul8_4a(trig, u, 1, lowMe);
+  shufl(lds, u, 1, 4, numWG, lowMe);
+
+  fft8(u);
+  tabMul8_4b(trig, u, 4, lowMe);
+  shufl(lds, u, 4, numWG, lowMe);
+
+  fft8(u);
+
+// Code for SIZE=1024, RADIX=8
+#elif WG == 128 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  shufl(lds, u, 1, numWG, lowMe);
+
+  fft8(u);
+  tabMul(trig, u, 8, lowMe);
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+
+  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+
+#else
 
 #if !UNROLL
   __attribute__((opencl_unroll_hint(1)))
@@ -1649,6 +2328,9 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
     shufl(lds, u, s, numWG, lowMe);
   }
   fft_RADIX(u);
+
+#endif
+
 }
 
 #endif
@@ -1724,7 +2406,134 @@ void OVERLOAD tabMul(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
   }
 }
 
+// Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4a(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
+
+  if (f == 1) {                      // fft8_4 is performed first
+    u32 p = me;
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+// Perform two length=4 chain muls.
+
+    if (TABMUL_CHAIN61) {
+      GF61 w  = TFLOAD(&trig[p]);
+      GF61 w2 = TFLOAD(&trig[WG + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      GF61 base  = csqTrig(w);
+      GF61 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN61) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG + p]));
+      }
+    }
+  }
+
+  else {                      // fft8_4 is performed after an initial fft8
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+// Perform two length=4 chain muls.
+
+    u32 p = me / 8;                 // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 7 * WG;                 // Skip over the trig values used in the first tabmul
+    if (TABMUL_CHAIN61) {
+      GF61 w  = TFLOAD(&trig[p]);
+      GF61 w2 = TFLOAD(&trig[WG/8 + p]);
+      u[2] = cmul(u[2], w);
+      u[3] = cmul(u[3], w2);
+      GF61 base  = csqTrig(w);
+      GF61 base2 = csqTrig(w2);
+      u[4] = cmul(u[4], base);
+      u[5] = cmul(u[5], base2);
+      base  = ccubeTrig(base, w);
+      base2 = ccubeTrig(base2, w2);
+      u[6] = cmul(u[6], base);
+      u[7] = cmul(u[7], base2);
+    }
+
+// Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+
+    if (!TABMUL_CHAIN61) {
+      for (u32 i = 2; i < RADIX; ++i) {
+        u[i] = cmul(u[i], TFLOAD(&trig[(i-2)*WG/8 + p]));
+      }
+    }
+  }
+}
+
+// Later tabmuls after starting with an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+void OVERLOAD tabMul8_4b(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
+
+// This code uses chained complex multiplies which could be faster on GPUs with great throughput or poor memory bandwidth or caching.
+
+  if (TABMUL_CHAIN61) {
+    u32 p = me & ~(f - 1);
+    GF61 w = TFLOAD(&trig[p]);
+
+    u[1] = cmul(u[1], w);
+    GF61 w2 = csqTrig(w);
+    u[2] = cmul(u[2], w2);
+    GF61 w3 = ccubeTrig(w2, w);
+    u[3] = cmul(u[3], w3);
+    GF61 base = cmul(w3, w);
+    for (int i = 4; i < 8; ++i) {
+      u[i] = cmul(u[i], base);
+      base = cmul(base, w);
+    }
+  }
+
+// Theoretically, maximum accuracy.  Use memory accesses (probably cached) to reduce complex muls.  Beneficial when memory bandwidth is not the bottleneck.
+// Radeon VII loves this case, it is faster than the chainmul case.  nVidia Titan V hates this case.
+
+  if (!TABMUL_CHAIN61) {
+    u32 p = (me/4) & ~(f/4 - 1);     // Generate index into condensed trig table that does not have duplicated trig values
+    trig += 6 * WG;                  // Skip over the trig values used in tabmul8_4a
+
+    for (u32 i = 1; i < RADIX; ++i) {
+      u[i] = cmul(u[i], TFLOAD(&trig[(i-1)*(WG/4) + p]));
+    }
+  }
+}
+
 void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 lowMe) {
+
+// Code for SIZE=256, RADIX=8
+#if WG == 32 && NW == 8
+
+  fft8_4(u);
+  tabMul8_4a(trig, u, 1, lowMe);
+  shufl(lds, u, 1, 4, numWG, lowMe);
+
+  fft8(u);
+  tabMul8_4b(trig, u, 4, lowMe);
+  shufl(lds, u, 4, numWG, lowMe);
+
+  fft8(u);
+
+// Code for SIZE=1024, RADIX=8
+#elif WG == 128 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  shufl(lds, u, 1, numWG, lowMe);
+
+  fft8(u);
+  tabMul(trig, u, 8, lowMe);
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+
+  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+
+#else
 
 #if !UNROLL
   __attribute__((opencl_unroll_hint(1)))
@@ -1735,6 +2544,9 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
     shufl(lds, u, s, numWG, lowMe);
   }
   fft_RADIX(u);
+
+#endif
+
 }
 
 #endif

@@ -40,8 +40,8 @@ public:
   explicit FFTShape(const string& spec);
 
   u32 size() const { return width * height * middle * 2; }
-  u32 nW() const { return (width == 1024 || width == 256 /*|| width == 4096*/) ? 4 : 8; }
-  u32 nH() const { return (height == 1024 || height == 256 /*|| height == 4096*/) ? 4 : 8; }
+  u32 nW() const { return width == 256 ? 4 : 8; }
+  u32 nH() const { return height == 256 ? 4 : 8; }
 
   float minBpw() const { return fft_type != FFT32 ? 3.0f : 1.0f; }
   float maxBpw() const { return *max_element(bpw.begin(), bpw.end()); }

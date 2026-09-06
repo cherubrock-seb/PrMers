@@ -6,7 +6,7 @@
 
 void OVERLOAD fft4Core(T2 *u) {
   X2(u[0], u[2]);
-  X2(u[1], u[3]); u[3] = mul_t4(u[3]);
+  X2_mul_t4(u[1], u[3]);
 
   X2(u[0], u[1]);
   X2(u[2], u[3]);
@@ -26,7 +26,7 @@ void OVERLOAD fft4by(T2 *u, u32 base, u32 step, u32 M) {
   double x1 = A(1).x + A(3).x;
   double y3 = A(1).x - A(3).x;
   double y1 = A(1).y + A(3).y;
-  double x3 = -(A(1).y - A(3).y);
+  double x3 = A(3).y - A(1).y;
 
   double a0 = x0 + x1;
   double a1 = x0 - x1;
@@ -48,10 +48,9 @@ void OVERLOAD fft4by(T2 *u, u32 base, u32 step, u32 M) {
 #else
 
   X2(A(0), A(2));
-  X2(A(1), A(3));
+  X2_mul_t4(A(1), A(3));
   X2(A(0), A(1));
 
-  A(3) = mul_t4(A(3));
   X2(A(2), A(3));
   SWAP(A(1), A(2));
 
@@ -74,7 +73,7 @@ void OVERLOAD fft4(T2 *u) { fft4by(u, 0, 1, 4); }
 
 void OVERLOAD fft4Core(F2 *u) {
   X2(u[0], u[2]);
-  X2(u[1], u[3]); u[3] = mul_t4(u[3]);
+  X2_mul_t4(u[1], u[3]);
 
   X2(u[0], u[1]);
   X2(u[2], u[3]);
@@ -94,7 +93,7 @@ void OVERLOAD fft4by(F2 *u, u32 base, u32 step, u32 M) {
   float x1 = A(1).x + A(3).x;
   float y3 = A(1).x - A(3).x;
   float y1 = A(1).y + A(3).y;
-  float x3 = -(A(1).y - A(3).y);
+  float x3 = A(3).y - A(1).y;
 
   float a0 = x0 + x1;
   float a1 = x0 - x1;
@@ -116,10 +115,9 @@ void OVERLOAD fft4by(F2 *u, u32 base, u32 step, u32 M) {
 #else
 
   X2(A(0), A(2));
-  X2(A(1), A(3));
+  X2_mul_t4(A(1), A(3));
   X2(A(0), A(1));
 
-  A(3) = mul_t4(A(3));
   X2(A(2), A(3));
   SWAP(A(1), A(2));
 
@@ -193,6 +191,15 @@ void OVERLOAD fft4(GF31 *u) { fft4by(u, 0, 1, 4); }
 /**************************************************************************/
 
 #if NTT_GF61
+
+void OVERLOAD fft4Core(GF61 *u) {
+  X2q(&u[0], &u[2]);           // u[0] = 0..2+, u[2] = -1-..1+
+  X2q_mul_t4(&u[1], &u[3]);    // u[1] = 0..2+, u[3] = -1-..1+
+  X2q(&u[0], &u[1]);           // u[0] = 0..4+, u[1] = -2-..2+
+  X2q(&u[2], &u[3]);           // u[2] = -2..2+, u[0] = -2-..2+
+  u[0] = modM61q(u[0], 0);
+  for (u32 i = 1; i <= 3; ++i) u[i] = modM61q(u[i], 3);
+}
 
 // 16 ADD
 void OVERLOAD fft4by(GF61 *u, u32 base, u32 step, u32 M) {
