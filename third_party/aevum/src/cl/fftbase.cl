@@ -646,6 +646,39 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
   if (numWG > 1)
     lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF31);
 
+#if LDSPAD
+  // AEVUM_GWOLT_1K_LDSPAD_FIX
+  // gpuowl 6cf0dc: padded second radix-8 shuffle fused with fft2.
+  if (f == 8 && RADIX == 8) {
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i * (WG + 8) + lowMe] = u[i];
+
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i) {
+      GF31 a =
+        lds[(i / 2) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      GF31 b =
+        lds[(i / 2 + 4) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      u[i] = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+    }
+
+    return;
+  }
+#endif
+
   bar(WG);
   for (u32 i=0; i<RADIX; ++i)
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
@@ -693,6 +726,63 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
   local Z61 *lds = (local Z61 *)lds2;
   if (numWG > 1)
     lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(Z61);
+
+#if LDSPAD
+  // gpuowl 6cf0dc: padded second radix-8 shuffle fused with fft2.
+  if (f == 8 && RADIX == 8) {
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i * (WG + 8) + lowMe] = u[i].x;
+
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i) {
+      Z61 a =
+        lds[(i / 2) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      Z61 b =
+        lds[(i / 2 + 4) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      u[i].x = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+    }
+
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i * (WG + 8) + lowMe] = u[i].y;
+
+    bar(WG);
+
+    for (u32 i = 0; i < RADIX; ++i) {
+      Z61 a =
+        lds[(i / 2) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      Z61 b =
+        lds[(i / 2 + 4) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8)
+          + (lowMe & 7)];
+
+      u[i].y = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+    }
+
+    return;
+  }
+#endif
 
   bar(WG);
   for (u32 i=0; i<RADIX; ++i)
