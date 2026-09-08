@@ -559,7 +559,9 @@ int aevum_engine_resolve_fft(uint32_t exponent, const char* fft_spec, char* outp
     if (const char* tune = std::getenv("AEVUM_TUNE_DIR")) {
       if (*tune) args.masterDir = std::filesystem::absolute(tune);
     }
-    args.setDefaults();
+    // Keep this resolver strictly device-neutral: TuneEntry only needs
+    // masterDir/fftOverdrive here. Args::setDefaults() queries OpenCL device
+    // metadata and would make host-only policy tests require an installed ICD.
     FFTConfig fft = FFTConfig::bestFit(args, exponent, fft_spec ? fft_spec : "");
     const std::string resolved = fft.spec();
     if (resolved.size() + 1 > output_size) throw std::runtime_error("Aevum FFT output buffer is too small");
