@@ -39,6 +39,27 @@ void set_error(const std::exception& e) {
   g_last_error = e.what();
 }
 
+std::string openclDeviceName(cl_device_id device) {
+  size_t bytes = 0;
+  if (clGetDeviceInfo(device, CL_DEVICE_NAME, 0, nullptr, &bytes) != CL_SUCCESS || bytes == 0)
+    return {};
+  std::string name(bytes, '\0');
+  if (clGetDeviceInfo(device, CL_DEVICE_NAME, bytes, name.data(), nullptr) != CL_SUCCESS)
+    return {};
+  while (!name.empty() && name.back() == '\0') name.pop_back();
+  return name;
+}
+
+bool gb202DeviceName(const std::string& name) {
+  return name.find("RTX 5090") != std::string::npos ||
+         name.find("GB202") != std::string::npos;
+}
+
+bool envExactly(const char* name, const char* expected) {
+  const char* value = std::getenv(name);
+  return value && std::strcmp(value, expected) == 0;
+}
+
 class Runtime {
 public:
   Runtime(uint32_t exponent, size_t register_count, uint32_t device, bool verbose, const char* fft_spec, const char* tune_dir)
@@ -62,6 +83,10 @@ public:
     if (tune_dir && *tune_dir) args_.masterDir = std::filesystem::absolute(tune_dir);
     args_.setDefaults();
 
+    // Device-scoped tuning must use the actual OpenCL device selected by -d.
+    cl_device_id selected_device = getDevice(device);
+    const std::string device_name = openclDeviceName(selected_device);
+
     const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
     if (radix1k_env && *radix1k_env &&
         std::strcmp(radix1k_env, "4") != 0 &&
@@ -69,7 +94,7 @@ public:
       throw std::runtime_error("AEVUM_RADIX1K must be exactly 4 or 8");
     }
 
-    context_ = std::make_unique<Context>(getDevice(device));
+    context_ = std::make_unique<Context>(selected_device);
     cache_ = std::make_unique<TrigBufCache>(context_.get());
 
     shared_.context = context_.get();
@@ -77,7 +102,39 @@ public:
     shared_.bufCache = cache_.get();
     shared_.background = &background_;
 
-    const std::string spec = fft_spec ? fft_spec : "";
+    std::string spec = fft_spec ? fft_spec : "";
+
+    // Issue #36 / GB202 measured FFT-shape profile.
+    //
+    // The reporter measured and bit-validated 1:512:8:512:202 around
+    // 146M-150M.  The bundled 150-line tune.txt is a historical FP64 table,
+    // so it cannot safely provide this NTT choice.  Apply the measured shape
+    // only to the matching device/range and only for an automatic request.
+    //
+    // The old v0.3.4 report also listed -use LOADS/STORES/TABMUL_CHAIN32/
+    // MODM31/ZEROHACK_W knobs. Those controls are not present in this current
+    // Aevum engine tree, so v100.10 deliberately does not pretend to restore
+    // them. This patch fixes tune reuse and the measured FFT shape; any kernel
+    // micro-tune restoration must be measured separately.
+    const bool gb202_forced = envExactly("AEVUM_GB202_TUNE", "force");
+    const bool gb202_disabled = envExactly("AEVUM_GB202_TUNE", "0");
+    const char* tune_env = std::getenv("AEVUM_TUNE_DIR");
+    const bool user_tune_dir = tune_env && *tune_env;
+    const bool gb202_range = exponent_ >= 146000000u && exponent_ <= 150000000u;
+    const bool gb202_profile =
+        spec.empty() && !gb202_disabled && !user_tune_dir && gb202_range &&
+        (gb202_forced || gb202DeviceName(device_name));
+
+    if (gb202_profile) {
+      spec = "1:512:8:512:202";
+      if (verbose) {
+        log("Aevum GB202 native tune: device='%s', exponent=%u, "
+            "FFT=1:512:8:512:202%s.\n",
+            device_name.c_str(), exponent_,
+            gb202_forced ? " (forced validation)" : "");
+      }
+    }
+
     FFTConfig fft = FFTConfig::bestFit(args_, exponent_, spec);
 
     if (verbose) {
@@ -499,6 +556,10 @@ int aevum_engine_resolve_fft(uint32_t exponent, const char* fft_spec, char* outp
     g_last_error.clear();
     if (!output || output_size == 0) throw std::runtime_error("invalid Aevum FFT output buffer");
     Args args(true);
+    if (const char* tune = std::getenv("AEVUM_TUNE_DIR")) {
+      if (*tune) args.masterDir = std::filesystem::absolute(tune);
+    }
+    args.setDefaults();
     FFTConfig fft = FFTConfig::bestFit(args, exponent, fft_spec ? fft_spec : "");
     const std::string resolved = fft.spec();
     if (resolved.size() + 1 > output_size) throw std::runtime_error("Aevum FFT output buffer is too small");

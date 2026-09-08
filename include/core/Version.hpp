@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.95-alpha-v100.09-aevum-type4-boundary-bridge";
+    const std::string PRMERS_VERSION = "4.20.96-alpha-v100.10-aevum-native-tune-compat";
 } // namespace core
 
 #endif // VERSION_HPP

@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.79-tune-reuse
+AEVUM_VERSION ?= v0.3.81-native-tune-compat
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -223,6 +223,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
 	python3 tests/engine_lead_cache_test.py
+	python3 tests/native_tune_compat_source_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)

@@ -611,8 +611,9 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   }
 
   // No explicit FFT spec: first reuse compatible Aevum tuning data.
-  // TuneEntry::readTuneFile preserves unprefixed legacy GPUOwl entries as
-  // FFT64, so only explicit/current FFT3161 measurements are eligible here.
+  // TuneEntry::readTuneFile rejects historical single-digit GPUOwl/PRPLL FP64
+  // records, accepts explicit Type1 records, and safely normalizes modern
+  // unprefixed three-digit WMH NTT records (for example 512:8:512:202).
   // Entries are sorted by measured cost; the first safe entry is therefore
   // the fastest measured compatible plan.
   for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
