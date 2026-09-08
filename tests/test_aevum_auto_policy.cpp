@@ -26,6 +26,34 @@ int main() {
         std::cerr << "issue36 default selected " << issue36_default.fft_spec << std::endl;
         return 36;
     }
+    if (issue36_default.force_fft_spec) {
+        std::cerr << "issue36 default unexpectedly forced " << issue36_default.fft_spec << std::endl;
+        return 37;
+    }
+
+#if !defined(__APPLE__)
+    // v100.09 boundary regression: native Type1 is 8M here, while the
+    // upstream-style Type4 plan remains 4M at about 46.97 bpw.
+    auto boundary197 = aevum_auto_decide(196999969u, 8, engine::gpu_workload::prp);
+    expect(boundary197.use_aevum, true, "197M Type4 boundary bridge");
+    if (!boundary197.force_fft_spec ||
+        boundary197.aevum_transform != 4194304u ||
+        boundary197.fft_spec != "4:1K:8:256:101" ||
+        boundary197.detail.find("boundary-bridge=1") == std::string::npos) {
+        std::cerr << "197M bridge selected " << boundary197.fft_spec
+                  << " transform=" << boundary197.aevum_transform
+                  << " detail=" << boundary197.detail << std::endl;
+        return 38;
+    }
+
+    // At 220M the same 4M plan is beyond the measured 46.97 bpw gate.
+    auto beyond_bridge = aevum_auto_decide(220000001u, 8, engine::gpu_workload::prp);
+    expect(beyond_bridge.use_aevum, true, "220M native auto after bridge");
+    if (beyond_bridge.force_fft_spec || beyond_bridge.fft_spec.rfind("1:", 0) != 0) {
+        std::cerr << "220M unexpectedly bridged to " << beyond_bridge.fft_spec << std::endl;
+        return 39;
+    }
+#endif
 
 #if defined(__APPLE__)
     // Apple OpenCL 1.2 deliberately disables native PFA and Type4.

@@ -95,6 +95,16 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                 decision.aevum_transform, decision.fft_spec);
     }
 
+    // Keep ordinary issue-#36 plugin-auto requests empty all the way into
+    // Aevum. Only an explicit boundary-bridge decision is materialized as a
+    // runtime FFT specification.
+    std::string runtime_fft_spec = fft_spec;
+    if (configured == gpu_backend::auto_select &&
+        fft_spec.empty() &&
+        decision.force_fft_spec) {
+        runtime_fft_spec = decision.fft_spec;
+    }
+
 #if defined(__APPLE__)
     if (selected == gpu_backend::aevum &&
         selected_workload != gpu_workload::prp &&
@@ -123,9 +133,9 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
             throw std::runtime_error(
                 "Aevum is incompatible with the one-register P-1 ultra-low-memory fast3 algorithm");
         }
-        std::string resolved_fft = fft_spec;
+        std::string resolved_fft = runtime_fft_spec;
         std::size_t resolved_transform = decision.aevum_transform;
-        if (fft_spec.empty()) {
+        if (runtime_fft_spec.empty()) {
             std::string reason;
             if (resolved_transform == 0 &&
                 !aevum_engine_resolve_auto_fft(p, &resolved_transform, &resolved_fft, &reason)) {
@@ -143,7 +153,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                     std::to_string(p) + ": " + reason);
             }
         }
-        engine* created = create_aevum_engine(p, reg_count, device, verbose, fft_spec);
+        engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec);
         if (configured != gpu_backend::auto_select) {
             if (resolved_transform == 0) resolved_transform = created->get_size();
             publish("Forced Aevum", "Aevum",

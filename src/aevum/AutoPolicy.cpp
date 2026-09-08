@@ -101,13 +101,60 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
     }
 
     std::string reason;
-    const bool resolved = fft_spec.empty()
+    const bool native_request = fft_spec.empty();
+    const bool resolved = native_request
         ? aevum_engine_resolve_auto_fft(exponent, &result.aevum_transform, &result.fft_spec, &reason)
         : aevum_engine_resolve_fft(exponent, fft_spec, &result.aevum_transform, &result.fft_spec, &reason);
     if (!resolved) {
         result.detail = reason;
         return result;
     }
+
+    // v100.09 PRP boundary bridge.
+    //
+    // Issue #36 proved that choosing Type4 merely because it has the same
+    // transform length as native Type1 is wrong on some GPUs (notably GB202).
+    // Conversely, RTX 5090 and Radeon VII measurements around 197M show that
+    // upstream-style Type4 4M 4:1K:8:256:101 remains usable at ~46.97 bpw
+    // while native Type1 has already stepped to 8M.
+    //
+    // Promote Type4 only when it is a genuine size bridge, never merely a
+    // same-size alternative to native Type1.
+    bool type4_boundary_bridge = false;
+    double type4_boundary_bpw = 0.0;
+    double type4_boundary_reduction = 1.0;
+#if !defined(__APPLE__)
+    if (native_request &&
+        workload == engine::gpu_workload::prp &&
+        result.fft_spec.rfind("1:", 0) == 0) {
+        constexpr const char* kType4BoundaryPlan = "4:1K:8:256:101";
+        constexpr double kType4BoundaryMaxBpw = 46.97;
+        constexpr double kType4BoundaryMinReduction = 1.50;
+
+        std::size_t bridge_transform = 0;
+        std::string bridge_spec;
+        std::string bridge_reason;
+        if (aevum_engine_resolve_fft(exponent, kType4BoundaryPlan,
+                                     &bridge_transform, &bridge_spec, &bridge_reason) &&
+            bridge_transform != 0) {
+            type4_boundary_bpw =
+                static_cast<double>(exponent) / static_cast<double>(bridge_transform);
+            type4_boundary_reduction =
+                static_cast<double>(result.aevum_transform) /
+                static_cast<double>(bridge_transform);
+
+            if (bridge_spec == kType4BoundaryPlan &&
+                bridge_transform < result.aevum_transform &&
+                type4_boundary_reduction >= kType4BoundaryMinReduction &&
+                type4_boundary_bpw <= kType4BoundaryMaxBpw) {
+                result.aevum_transform = bridge_transform;
+                result.fft_spec = bridge_spec;
+                result.force_fft_spec = true;
+                type4_boundary_bridge = true;
+            }
+        }
+    }
+#endif
 
     const double ratio = result.marin_transform == 0
         ? 1000.0
@@ -127,6 +174,12 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
         << ", limit=" << std::fixed << std::setprecision(2) << limit
         << ", family=" << plan_family(result.fft_spec)
         << ", FFT=" << result.fft_spec;
+    if (type4_boundary_bridge) {
+        out << ", boundary-bridge=1"
+            << ", type4-bpw=" << std::fixed << std::setprecision(2) << type4_boundary_bpw
+            << ", size-reduction=" << std::fixed << std::setprecision(2)
+            << type4_boundary_reduction << "x";
+    }
     result.detail = out.str();
     result.use_aevum = ratio <= limit;
     return result;

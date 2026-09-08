@@ -8,6 +8,10 @@
 
 struct AevumAutoDecision {
     bool use_aevum = false;
+    // True only when PrMers auto policy intentionally promotes a resolved
+    // explicit plan over plugin-native auto. Ordinary native-auto decisions
+    // keep this false so issue #36 still reaches Aevum as plugin-auto.
+    bool force_fft_spec = false;
     std::size_t aevum_transform = 0;
     std::size_t marin_transform = 0;
     std::string fft_spec;

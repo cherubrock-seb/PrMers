@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.94-alpha-v100.08-aevum-radix1k-optin";
+    const std::string PRMERS_VERSION = "4.20.95-alpha-v100.09-aevum-type4-boundary-bridge";
 } // namespace core
 
 #endif // VERSION_HPP

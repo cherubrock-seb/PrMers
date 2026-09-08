@@ -34,3 +34,7 @@ policy=(root/'src/aevum/AutoPolicy.cpp').read_text()
 gpu=(root/'src/marin/gpu.cpp').read_text()
 assert 'aevum_engine_resolve_fft(exponent, fft_spec' in policy
 assert 'aevum_auto_decide(p, reg_count, selected_workload, fft_spec)' in gpu
+assert '4:1K:8:256:101' in policy
+assert 'boundary-bridge=1' in policy
+assert 'decision.force_fft_spec' in gpu
+assert 'runtime_fft_spec' in gpu
