@@ -131,22 +131,27 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
         constexpr double kType4BoundaryMaxBpw = 46.97;
         constexpr double kType4BoundaryMinReduction = 1.50;
 
-        std::size_t bridge_transform = 0;
-        std::string bridge_spec;
-        std::string bridge_reason;
-        if (aevum_engine_resolve_fft(exponent, kType4BoundaryPlan,
-                                     &bridge_transform, &bridge_spec, &bridge_reason) &&
-            bridge_transform != 0) {
-            type4_boundary_bpw =
-                static_cast<double>(exponent) / static_cast<double>(bridge_transform);
-            type4_boundary_reduction =
-                static_cast<double>(result.aevum_transform) /
-                static_cast<double>(bridge_transform);
+        // The bridge plan is a fixed 4M transform.  Check the cheap policy
+        // gates before asking the plugin to resolve it; this avoids emitting
+        // a misleading "may be too small" warning for exponents above the
+        // measured bridge boundary when that candidate will not be selected.
+        constexpr std::size_t kType4BoundaryWords = 4194304u;
+        type4_boundary_bpw =
+            static_cast<double>(exponent) / static_cast<double>(kType4BoundaryWords);
+        type4_boundary_reduction =
+            static_cast<double>(result.aevum_transform) /
+            static_cast<double>(kType4BoundaryWords);
 
-            if (bridge_spec == kType4BoundaryPlan &&
-                bridge_transform < result.aevum_transform &&
-                type4_boundary_reduction >= kType4BoundaryMinReduction &&
-                type4_boundary_bpw <= kType4BoundaryMaxBpw) {
+        if (kType4BoundaryWords < result.aevum_transform &&
+            type4_boundary_reduction >= kType4BoundaryMinReduction &&
+            type4_boundary_bpw <= kType4BoundaryMaxBpw) {
+            std::size_t bridge_transform = 0;
+            std::string bridge_spec;
+            std::string bridge_reason;
+            if (aevum_engine_resolve_fft(exponent, kType4BoundaryPlan,
+                                         &bridge_transform, &bridge_spec, &bridge_reason) &&
+                bridge_transform == kType4BoundaryWords &&
+                bridge_spec == kType4BoundaryPlan) {
                 result.aevum_transform = bridge_transform;
                 result.fft_spec = bridge_spec;
                 result.force_fft_spec = true;
