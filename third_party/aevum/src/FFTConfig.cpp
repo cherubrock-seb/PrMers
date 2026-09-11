@@ -265,7 +265,8 @@ FFTConfig::FFTConfig(const string& input_spec) {
       log("Width must be 256, 512, 1024, or 4096.\n");
       throw "Invalid FFT spec";
     }
-    if (m < 2 || m > 16) {
+    // Explicit PRP experimental MIDDLE=1 plans; auto shape enumeration is unchanged.
+    if (m < 1 || m > 16) {
       log("Middle must be between 1 and 16.\n");
       throw "Invalid FFT spec";
     }

@@ -670,9 +670,7 @@ vector<uint2> genSmallTrigComboGF31(Args *args, u32 width, u32 middle, u32 size,
 
 vector<uint2> genMiddleTrigGF31(u32 smallH, u32 middle, u32 width) {
   vector<uint2> tab;
-  if (middle == 1) {
-    tab.resize(1);
-  } else {
+  { // MIDDLE=1 still needs width and width*height roots for middleMul2.
     GF31 root1hm = GF31::root_one(smallH * middle);
     for (u32 m = 1; m < middle; ++m) {
       for (u32 k = 0; k < smallH; ++k) { tab.push_back(root1GF31(root1hm, k * m)); }
@@ -832,9 +830,7 @@ vector<ulong2> genSmallTrigComboGF61(Args *args, u32 width, u32 middle, u32 size
 
 vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width) {
   vector<ulong2> tab;
-  if (middle == 1) {
-    tab.resize(1);
-  } else {
+  { // MIDDLE=1 still needs width and width*height roots for middleMul2.
     GF61 root1hm = GF61::root_one(smallH * middle);
     for (u32 m = 1; m < middle; ++m) {
       for (u32 k = 0; k < smallH; ++k) { tab.push_back(root1GF61(root1hm, k * m)); }

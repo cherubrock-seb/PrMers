@@ -320,7 +320,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
                               "PAD",
                               "MIDDLE_IN_LDS_TRANSPOSE",
                               "MIDDLE_OUT_LDS_TRANSPOSE",
-                              "MULTI_Q",
+                              "MULTI_Q", "PRP_MIDDLE1",
                               "TAIL_KERNELS",
                               "TAIL_TRIGS",
                               "TAIL_TRIGS31",
@@ -333,7 +333,8 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
                               "MODM31",
                               "LOADS","STORES",
                               "NOREG",                  // CUDA - experimental
-                              "WMUL"
+                              "WMUL",
+                              "AEVUM_GF61_LIMB32"
                             });
     if (!isValid) {
       log("Warning: unrecognized -use key '%s'\n", k.c_str());
@@ -874,6 +875,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
+  K(kprpMiddle1, "tailsquare.cl", "tailSquare", hN / nH, (kernelDefines(KFP) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
+  K(kprpMiddle1GF31, "tailsquare.cl", "tailSquareGF31", hN / nH, (kernelDefines(K31) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
+  K(kprpMiddle1GF61, "tailsquare.cl", "tailSquareGF61", hN / nH, (kernelDefines(K61) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kfftMidIn,             "fftmiddlein.cl",  "fftMiddleIn",  hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDIN)).c_str()),
   K(kfftHin,               "ffthin.cl",  "fftHin",  hN / nH, kernelDefines(KFP).c_str()),
   K(ktailSquareZero,       "tailsquare.cl", "tailSquareZero", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(KFP).c_str()),
@@ -1508,6 +1512,12 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     queue.setSquareKernels(5 + ((fft.FFT_FP64 + fft.FFT_FP32 + fft.NTT_GF31 + fft.NTT_GF61) - 1));
   else
     queue.setSquareKernels(1 + 3 * (fft.FFT_FP64 + fft.FFT_FP32 + fft.NTT_GF31 + fft.NTT_GF61));
+  prpMiddle1 = args.value("PRP_MIDDLE1", 0) && fft.shape.middle == 1 &&
+      !fft.isPfa() && !in_place && !useLongCarry && !tail_single_wide && tail_single_kernel;
+#if defined(__APPLE__) || defined(CUDA_BACKEND)
+  prpMiddle1 = false;
+#endif
+  if (prpMiddle1) log("AEVUM_PRP_PATH middle1 fused input+tail+output; LL unchanged\n");
   queue.finish();
 }
 
@@ -1570,6 +1580,7 @@ void Gpu::splitQueue(void) {
 #endif
       ktailSquareZeroGF61.setQueue(&auxQueues[which_queue]);
       ktailSquareGF61.setQueue(&auxQueues[which_queue]);
+      kprpMiddle1GF61.setQueue(&auxQueues[which_queue]);
       ktailMulGF61.setQueue(&auxQueues[which_queue]);
 #if defined(__APPLE__)
       ktailMulGF61LoadScalarApple.setQueue(&auxQueues[which_queue]);
@@ -1620,6 +1631,7 @@ void Gpu::splitQueue(void) {
       kfftHin.setQueue(&auxQueues[which_queue]);
       ktailSquareZero.setQueue(&auxQueues[which_queue]);
       ktailSquare.setQueue(&auxQueues[which_queue]);
+      kprpMiddle1.setQueue(&auxQueues[which_queue]);
       ktailMul.setQueue(&auxQueues[which_queue]);
       ktailMulLow.setQueue(&auxQueues[which_queue]);
       kfftMidOut.setQueue(&auxQueues[which_queue]);
@@ -1637,6 +1649,7 @@ void Gpu::splitQueue(void) {
       kfftHinGF31.setQueue(&auxQueues[which_queue]);
       ktailSquareZeroGF31.setQueue(&auxQueues[which_queue]);
       ktailSquareGF31.setQueue(&auxQueues[which_queue]);
+      kprpMiddle1GF31.setQueue(&auxQueues[which_queue]);
       ktailMulGF31.setQueue(&auxQueues[which_queue]);
       ktailMulLowGF31.setQueue(&auxQueues[which_queue]);
       kfftMidOutGF31.setQueue(&auxQueues[which_queue]);
@@ -1691,6 +1704,7 @@ void Gpu::mergeQueue(void) {
 #endif
     ktailSquareZeroGF61.setQueue(&queue);
     ktailSquareGF61.setQueue(&queue);
+    kprpMiddle1GF61.setQueue(&queue);
     ktailMulGF61.setQueue(&queue);
 #if defined(__APPLE__)
     ktailMulGF61LoadScalarApple.setQueue(&queue);
@@ -1737,6 +1751,7 @@ void Gpu::mergeQueue(void) {
     kfftHin.setQueue(&queue);
     ktailSquareZero.setQueue(&queue);
     ktailSquare.setQueue(&queue);
+    kprpMiddle1.setQueue(&queue);
     ktailMul.setQueue(&queue);
     ktailMulLow.setQueue(&queue);
     kfftMidOut.setQueue(&queue);
@@ -1747,6 +1762,7 @@ void Gpu::mergeQueue(void) {
     kfftHinGF31.setQueue(&queue);
     ktailSquareZeroGF31.setQueue(&queue);
     ktailSquareGF31.setQueue(&queue);
+    kprpMiddle1GF31.setQueue(&queue);
     ktailMulGF31.setQueue(&queue);
     ktailMulLowGF31.setQueue(&queue);
     kfftMidOutGF31.setQueue(&queue);
@@ -1774,6 +1790,12 @@ void Gpu::replay(void) {
     for (auto kern : recorded_kernels) {
 
       // Call the appropriate kernel
+      if (kern == KPRPMIDDLE1) {
+        Buffer<double>* out = recorded_kernel_args[arg++];
+        if (cache_group == 1) kprpMiddle1(*out, buf3, bufTrigH, bufTrigM);
+        if (cache_group == 2) kprpMiddle1GF31(*out, buf3, bufTrigH, bufTrigM);
+        if (cache_group == 3) kprpMiddle1GF61(*out, buf3, bufTrigH, bufTrigM);
+      }
       if (kern == KMIDIN) {
         Buffer<double> *buf = recorded_kernel_args[arg++];
         // If not in place, the input is from the scratch buffer
@@ -2541,13 +2563,56 @@ bool Gpu::regSupportsLeadCache() const {
 #endif
 }
 
-void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out) {
+bool Gpu::regSupportsFusedLL() const {
+  return regSupportsLeadCache() && !fft.isPfa();
+}
+
+bool Gpu::regSupportsPreparedMulLead() const {
+#if defined(__APPLE__)
+  return false;
+#else
+  // The prepared-multiply bridge reuses the same short-carry LEAD_WIDTH
+  // representation as the validated square chain.  PFA has a different
+  // carry/gather bridge and is intentionally excluded until independently
+  // validated.
+  return !useLongCarry && !fft.isPfa();
+#endif
+}
+
+void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll) {
   if ((lead_in || lead_out) && !regSupportsLeadCache())
     throw std::runtime_error("Aevum register lead cache requires a supported short-carry plan");
   square(io, io,
          lead_in ? LEAD_WIDTH : LEAD_NONE,
          lead_out ? LEAD_WIDTH : LEAD_NONE,
-         false, false);
+         false, ll, true);
+}
+
+void Gpu::regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool lead_in, bool lead_out) {
+  if ((lead_in || lead_out) && !regSupportsPreparedMulLead())
+    throw std::runtime_error("Aevum prepared-multiply lead bridge requires a non-PFA short-carry plan");
+
+  // Canonical prepared multiplication is:
+  //   fftP -> fftMidIn -> tailMul -> fftMidOut -> fftW -> carryA -> carryB.
+  // When adjacent arithmetic already owns a LEAD_WIDTH transform, skip the
+  // input fftP.  When another arithmetic operation follows, replace the
+  // canonical fftW/carryA/carryB boundary by carryFused and retain WIDTH.
+  // This removes a complete global-memory round trip without changing the
+  // residue representation visible at API boundaries.
+  if (!lead_in) fftP(buf1, dst);
+  fftMidIn(buf1);
+  tailMul(buf1, prepared);
+  fftMidOut(buf1);
+
+  if (mulRoePos.empty() || mulRoePos.back() < roePos) mulRoePos.push_back(roePos);
+
+  if (lead_out) {
+    carryFused(buf1);
+  } else {
+    fftW(buf3, buf1);
+    carryA(dst, buf3);
+    carryB(dst);
+  }
 }
 
 void Gpu::regCopy(Buffer<Word>& dst, const Buffer<Word>& src) { dst << src; }
@@ -2984,7 +3049,7 @@ void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
 }
 
 // Use buf1 (and buf23 if not in place) to do a single squaring.
-void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL) {
+void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL, bool prp) {
   // leadOut = LEAD_MIDDLE is not supported (slower than LEAD_WIDTH)
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
@@ -2996,9 +3061,16 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   // If leadIn is LEAD_MIDDLE, buf1 contains the input data, squaring starts at tailSquare
   // If leadOut is LEAD_WIDTH, then buf1 (or buf3 if not in place) will contain the output of carryFused -- to be used as input to the next squaring.
   if (leadIn == LEAD_NONE) fftP(buf1, in);
-  if (leadIn != LEAD_MIDDLE) fftMidIn(buf1);
-  tailSquare(buf1);
-  fftMidOut(buf1);
+  if (prp && prpMiddle1 && !doLL && !doMul3 && leadIn != LEAD_MIDDLE) {
+    // Input is the existing retained width transform in buf3.  The tail writes
+    // directly to carry's input layout in buf1; neither middle is materialized.
+    recorded_kernels.push_back(KPRPMIDDLE1);
+    recorded_kernel_args.push_back(&buf1);
+  } else {
+    if (leadIn != LEAD_MIDDLE) fftMidIn(buf1);
+    tailSquare(buf1);
+    fftMidOut(buf1);
+  }
 
   // If leadOut is not allowed then we cannot use the faster carryFused kernel
   if (leadOut == LEAD_NONE) {
@@ -3871,4 +3943,17 @@ void Gpu::clear(bool isPRP) {
 Saver<PRPState> *Gpu::getSaver() {
   if (!saver) { saver = make_unique<Saver<PRPState>>(E, args.blockSize, args.nSavefiles); }
   return saver.get();
+}
+
+void Gpu::regProfileReport(bool emit) {
+  // Profile-only drain: auxiliary events otherwise remain uncollected until destruction.
+  if (args.profile) for (auto& q : auxQueues) {
+    ::finish(q.get());
+    q.collectProfileEvents();
+  }
+  if (emit) for (const TimeInfo* p : profile.get()) {
+    log("AEVUM_PROFILE name=%s calls=%u exec_ns=%lld\n", p->name.c_str(), p->n,
+        static_cast<long long>(p->times[2]));
+  }
+  profile.reset();
 }

@@ -14,8 +14,8 @@ assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
 assert 'requires explicit pfa9' not in adapter
 assert 'pending_reg_ = index;' in engine
 assert 'AEVUM_REG_LEAD_CACHE' in engine
-assert 'gpu_->regSquareStep(reg(index), pending_lead_width_, true);' in engine
-assert 'gpu_->regSquareStep(reg(index), lead_in, false);' in engine
+assert 'execute_pending(true);' in engine
+assert 'gpu_->regSquareStep(reg(index), lead_in, lead_out, ll);' in engine
 assert 'return !useLongCarry' in gpu
 assert 'fft.pfa_radix == 9' in gpu
 assert 'throughput:auto' in fft
@@ -38,8 +38,8 @@ assert 'radix1k=4 safe-default' in backend
 # Issue #36 regression barrier.
 assert '"throughput:prp"' not in app
 assert '"throughput:ll"' not in app
-assert '"throughput:pm1"' in app
-assert '"throughput:ecm"' in app
+assert '"throughput:pm1"' not in app
+assert '"throughput:ecm"' not in app
 assert '? plan_override : ""' in app
 
-print('PrMers Aevum throughput-auto, radix1k opt-in and PFA9 bridge source test passed')
+print('PrMers Aevum runtime-auto, radix1k opt-in and PFA9 bridge source test passed')

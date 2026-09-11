@@ -190,11 +190,12 @@ static std::string gaussian_workload_fft_spec(const io::CliOptions& options,
         case engine::gpu_workload::pm1:
         case engine::gpu_workload::pm1_lowmem:
             override_value = std::getenv("PRMERS_AEVUM_PM1_FFT");
-            fallback = "throughput:pm1";
+            // Empty delegates to the Pass-4 workload-aware runtime tuner.
+            fallback = "";
             break;
         case engine::gpu_workload::ecm:
             override_value = std::getenv("PRMERS_AEVUM_ECM_FFT");
-            fallback = "throughput:ecm";
+            fallback = "";
             break;
         default:
             return options.aevum_fft_spec;
@@ -468,12 +469,12 @@ App::App(int argc, char** argv)
             case engine::gpu_workload::pm1_lowmem:
                 plan_override = std::getenv("PRMERS_AEVUM_PM1_FFT");
                 o.aevum_fft_spec = plan_override && *plan_override
-                    ? plan_override : "throughput:pm1";
+                    ? plan_override : "";
                 break;
             case engine::gpu_workload::ecm:
                 plan_override = std::getenv("PRMERS_AEVUM_ECM_FFT");
                 o.aevum_fft_spec = plan_override && *plan_override
-                    ? plan_override : "throughput:ecm";
+                    ? plan_override : "";
                 break;
             default:
                 break;

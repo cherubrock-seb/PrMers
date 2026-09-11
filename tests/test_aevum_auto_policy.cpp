@@ -32,19 +32,25 @@ int main() {
     }
 
 #if !defined(__APPLE__)
-    // v100.09 boundary regression: native Type1 is 8M here, while the
-    // upstream-style Type4 plan remains 4M at about 46.97 bpw.
+    // Pass 4: default runtime autotune owns this boundary, so host policy must
+    // not force the older v100.09 seed before the device-specific measurement.
     auto boundary197 = aevum_auto_decide(196999969u, 8, engine::gpu_workload::prp);
-    expect(boundary197.use_aevum, true, "197M Type4 boundary bridge");
-    if (!boundary197.force_fft_spec ||
-        boundary197.aevum_transform != 4194304u ||
-        boundary197.fft_spec != "4:1K:8:256:101" ||
-        boundary197.detail.find("boundary-bridge=1") == std::string::npos) {
-        std::cerr << "197M bridge selected " << boundary197.fft_spec
-                  << " transform=" << boundary197.aevum_transform
-                  << " detail=" << boundary197.detail << std::endl;
+    expect(boundary197.use_aevum, true, "197M runtime-autotune admission");
+    if (boundary197.force_fft_spec || boundary197.fft_spec.rfind("1:", 0) != 0) {
+        std::cerr << "197M runtime auto unexpectedly forced " << boundary197.fft_spec << std::endl;
         return 38;
     }
+#if !defined(_WIN32)
+    // OFF restores the exact v100.09 host-side bridge for reproducibility and
+    // strict manual-control precedence.
+    setenv("AEVUM_AUTOTUNE", "off", 1);
+    auto legacy_boundary197 = aevum_auto_decide(196999969u, 8, engine::gpu_workload::prp);
+    unsetenv("AEVUM_AUTOTUNE");
+    if (!legacy_boundary197.force_fft_spec ||
+        legacy_boundary197.aevum_transform != 4194304u ||
+        legacy_boundary197.fft_spec != "4:1K:8:256:101" ||
+        legacy_boundary197.detail.find("boundary-bridge=1") == std::string::npos) return 138;
+#endif
 
     // At 220M the same 4M plan is beyond the measured 46.97 bpw gate.
     auto beyond_bridge = aevum_auto_decide(220000001u, 8, engine::gpu_workload::prp);

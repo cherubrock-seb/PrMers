@@ -21,4 +21,5 @@ engine* create_aevum_engine(uint32_t exponent,
                             std::size_t register_count,
                             std::size_t device,
                             bool verbose,
-                            const std::string& fft_spec);
+                            const std::string& fft_spec,
+                            std::uint32_t workload);

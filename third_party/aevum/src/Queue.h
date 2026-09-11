@@ -50,6 +50,7 @@ public:
   void readAsync(cl_mem buf, u32 size, void* out, TimeInfo* tInfo);
   void copyBuf(cl_mem src, cl_mem dst, u32 size, TimeInfo* tInfo);
   void finish();
+  void collectProfileEvents() { events.synced(); }
 
   EventHolder createSyncEvent(void) { return enqueueMarker(get()); }                     // Enqueue a synchronization event.  Used to sync work among multiple queues.
   void waitForSyncEvent(EventHolder* e) { enqueueMarkerWithWaits(get(), {e->get()}); }   // Wait for a synchronization event to complete.

@@ -9,6 +9,12 @@
 
 namespace {
 
+bool runtime_autotune_enabled() {
+    const char* value = std::getenv("AEVUM_AUTOTUNE");
+    if (!value || !*value) return true;
+    return std::string(value) != "0" && std::string(value) != "off" && std::string(value) != "OFF";
+}
+
 double parse_env_ratio(const char* name, const double fallback) {
     const char* value = std::getenv(name);
     if (!value || !*value) return fallback;
@@ -125,6 +131,7 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
     double type4_boundary_reduction = 1.0;
 #if !defined(__APPLE__)
     if (native_request &&
+        !runtime_autotune_enabled() &&
         workload == engine::gpu_workload::prp &&
         result.fft_spec.rfind("1:", 0) == 0) {
         constexpr const char* kType4BoundaryPlan = "4:1K:8:256:101";

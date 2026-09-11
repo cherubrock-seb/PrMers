@@ -20,7 +20,9 @@ assert 'workload = engine::gpu_workload::ecm' in app
 assert 'fallback = ""' in app
 assert 'throughput:prp' not in app
 for selector in ('throughput:pm1', 'throughput:ecm'):
-    assert selector in app
+    assert selector not in app
+assert 'PRMERS_AEVUM_PM1_FFT' in app
+assert 'PRMERS_AEVUM_ECM_FFT' in app
 
 # PRP/Proth, P-1 and ECM all instantiate the common engine abstraction.
 assert 'engine::create_gpu' in prime

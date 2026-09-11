@@ -91,6 +91,7 @@ struct Api {
     using error_fn = const char* (*)();
     using resolve_fn = int (*)(uint32_t, const char*, char*, std::size_t);
     using create_fn = Handle (*)(uint32_t, std::size_t, uint32_t, int, const char*, const char*);
+    using create_ex_fn = Handle (*)(uint32_t, std::size_t, uint32_t, int, const char*, const char*, uint32_t);
     using destroy_fn = void (*)(Handle);
     using size_fn = std::size_t (*)(Handle);
     using sync_fn = int (*)(Handle);
@@ -111,6 +112,7 @@ struct Api {
     error_fn last_error = nullptr;
     resolve_fn resolve_fft = nullptr;
     create_fn create = nullptr;
+    create_ex_fn create_ex = nullptr;
     destroy_fn destroy = nullptr;
     size_fn transform_size = nullptr;
     size_fn word_count = nullptr;
@@ -148,6 +150,18 @@ struct Api {
             throw std::runtime_error(std::string("Aevum plugin missing symbol ") + name +
                                      (error ? std::string(": ") + error : std::string()));
         }
+        return reinterpret_cast<T>(symbol);
+#endif
+    }
+
+    template <class T>
+    T load_optional_symbol(const char* name) {
+#if defined(_WIN32)
+        return reinterpret_cast<T>(GetProcAddress(library, name));
+#else
+        dlerror();
+        void* symbol = dlsym(library, name);
+        (void)dlerror();
         return reinterpret_cast<T>(symbol);
 #endif
     }
@@ -226,6 +240,7 @@ struct Api {
         last_error = load_symbol<error_fn>("aevum_engine_last_error");
         resolve_fft = load_symbol<resolve_fn>("aevum_engine_resolve_fft");
         create = load_symbol<create_fn>("aevum_engine_create");
+        create_ex = load_optional_symbol<create_ex_fn>("aevum_engine_create_ex");
         destroy = load_symbol<destroy_fn>("aevum_engine_destroy");
         transform_size = load_symbol<size_fn>("aevum_engine_transform_size");
         word_count = load_symbol<size_fn>("aevum_engine_word_count");
@@ -251,11 +266,16 @@ Api& api() {
 
 class engine_aevum final : public engine {
 public:
-    engine_aevum(uint32_t exponent, std::size_t register_count, std::size_t device, bool verbose, const std::string& fft_spec)
+    engine_aevum(uint32_t exponent, std::size_t register_count, std::size_t device, bool verbose, const std::string& fft_spec, uint32_t workload)
         : exponent_(exponent), register_count_(register_count), api_(api()) {
         const std::string tune_dir = api_.tune_dir().string();
-        handle_ = api_.create(exponent, register_count, static_cast<uint32_t>(device), verbose ? 1 : 0,
-                              fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str());
+        if (api_.create_ex) {
+            handle_ = api_.create_ex(exponent, register_count, static_cast<uint32_t>(device), verbose ? 1 : 0,
+                                    fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str(), workload);
+        } else {
+            handle_ = api_.create(exponent, register_count, static_cast<uint32_t>(device), verbose ? 1 : 0,
+                                  fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str());
+        }
         if (!handle_) fail("create");
         transform_size_ = api_.transform_size(handle_);
         word_count_ = api_.word_count(handle_);
@@ -600,6 +620,7 @@ engine* create_aevum_engine(uint32_t exponent,
                             std::size_t register_count,
                             std::size_t device,
                             bool verbose,
-                            const std::string& fft_spec) {
-    return new engine_aevum(exponent, register_count, device, verbose, fft_spec);
+                            const std::string& fft_spec,
+                            std::uint32_t workload) {
+    return new engine_aevum(exponent, register_count, device, verbose, fft_spec, workload);
 }

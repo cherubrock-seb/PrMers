@@ -122,6 +122,8 @@ private:
   KernelCompiler compiler;
 
   /* Kernels for FFT_FP64 or FFT_FP32 */
+  bool prpMiddle1 = false;
+  Kernel kprpMiddle1, kprpMiddle1GF31, kprpMiddle1GF61;
   Kernel kfftMidIn;
   Kernel kfftHin;
   Kernel ktailSquareZero;
@@ -339,7 +341,7 @@ private:
   TimeInfo* timeBufVect;
   ZAvg zAvg;
 
-  enum BOTTOM_HALF_KERNELS {KMIDIN, KFFTHIN, KTAILSQUARE, KTAILMUL, KTAILMULLOW, KMIDOUT, KFFTW};
+  enum BOTTOM_HALF_KERNELS {KPRPMIDDLE1, KMIDIN, KFFTHIN, KTAILSQUARE, KTAILMUL, KTAILMULLOW, KMIDOUT, KFFTW};
   vector<enum BOTTOM_HALF_KERNELS> recorded_kernels;
   vector<Buffer<double> *> recorded_kernel_args;
 
@@ -374,7 +376,7 @@ private:
 
   enum LEAD_TYPE {LEAD_NONE = 0, LEAD_WIDTH = 1, LEAD_MIDDLE = 2};
 
-  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false);
+  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false, bool prp = false);
   void square(Buffer<Word>& io) { square(io, io, LEAD_NONE, LEAD_NONE, false, false); }
   void squareCERT(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, false); }
   void squareLL(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, true); }
@@ -462,8 +464,12 @@ public:
   vector<Buffer<double>> makeTransformBufVector(u32 size);
 
   void regSync();
+  void regProfileReport(bool emit);
   bool regSupportsLeadCache() const;
-  void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out);
+  bool regSupportsFusedLL() const;
+  bool regSupportsPreparedMulLead() const;
+  void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll = false);
+  void regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool lead_in, bool lead_out);
   void regCopy(Buffer<Word>& dst, const Buffer<Word>& src);
   void regWrite(Buffer<Word>& dst, const Words& words);
   Words regRead(Buffer<Word>& src);

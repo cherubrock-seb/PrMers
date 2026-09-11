@@ -9,8 +9,8 @@ fft = (root / "src/FFTConfig.cpp").read_text()
 
 required = [
     "pending_reg_ = index;",
-    "gpu_->regSquareStep(reg(index), pending_lead_width_, true);",
-    "gpu_->regSquareStep(reg(index), lead_in, false);",
+    "execute_pending(true);",
+    "gpu_->regSquareStep(reg(index), lead_in, lead_out, ll);",
     "flush_pending_square();",
     "AEVUM_REG_LEAD_CACHE",
 ]

@@ -5,6 +5,9 @@
 #include "Queue.h"
 #include "Buffer.h"
 #include "common.h"
+#ifndef CUDA_BACKEND
+#include "KernelBufferBindings.h"
+#endif
 
 #include <future>
 #include <string>
@@ -31,6 +34,11 @@ class Kernel {
   std::future<KernelHolder> pendingKernel;
   cl_device_id deviceId;
   std::vector<std::pair<u32, cl_mem>> pendingArgs;
+#ifndef CUDA_BACKEND
+  // Retain cached objects so temporary-buffer handle reuse cannot alias a stale binding.
+  KernelBufferBindings boundBuffers;
+  bool cacheBufferArgs = false;
+#endif
 
 public:
   Kernel(string_view name, KernelCompiler* compiler,
@@ -65,6 +73,12 @@ private:
 
   void setArgs(int pos, cl_mem arg) {
     if (kernel) {
+#ifndef CUDA_BACKEND
+      if (cacheBufferArgs) {
+        boundBuffers.bind(kernel.get(), pos, arg, name);
+        return;
+      }
+#endif
       ::setArg(kernel.get(), pos, arg, name);
     } else {
       pendingArgs.push_back({pos, arg});

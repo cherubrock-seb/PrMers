@@ -1,9 +1,24 @@
 // Copyright (C) Mihai Preda and George Woltman
 
+// The separate PRP specialization uses the existing double-wide, one-kernel tail.
+#if AEVUM_PRP_MIDDLE1
+#undef TAIL_KERNELS
+#define TAIL_KERNELS 2
+#endif
+
 #include "base.cl"
 #include "fftheight.cl"
 #include "tailutil.cl"
 #include "middle.cl"
+
+#if AEVUM_PRP_MIDDLE1
+#include "prp_middle1.cl"
+#define AEVUM_PRP_TRIG_ARG , Trig middleTrig
+#define readTailFusedLine(in,u,line,me) prpReadMiddle1(in,u,line,me,middleTrig)
+#define writeTailFusedLine(u,out,line,me) prpWriteMiddle1(u,out,line,me,middleTrig)
+#else
+#define AEVUM_PRP_TRIG_ARG
+#endif
 
 #if FFT_FP64
 
@@ -55,7 +70,7 @@ void OVERLOAD pairSq(u32 N, T2 *u, T2 *v, T2 base_squared, bool special) {
 #if !SINGLE_KERNEL
 // The kernel tailSquareZero handles the special cases in tailSquare, i.e. the lines 0 and H/2
 // This kernel is launched with 2 workgroups (handling line 0, resp. H/2)
-KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local T2 lds[LDS_BYTES / sizeof(T2)];
   T2 u[NH];
   u32 H = ND / SMALL_HEIGHT;
@@ -94,7 +109,7 @@ KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig) {
 
 #if SINGLE_WIDE
 
-KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local T2 lds[LDS_BYTES / sizeof(T2)];
 
   T2 u[NH], v[NH];
@@ -207,7 +222,7 @@ void OVERLOAD pairSq2_special(T2 *u, T2 base_squared) {
   }
 }
 
-KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local T2 lds[2 * LDS_BYTES / sizeof(T2)];
 
   T2 u[NH];
@@ -345,7 +360,7 @@ void OVERLOAD pairSq(u32 N, F2 *u, F2 *v, F2 base_squared, bool special) {
 #if !SINGLE_KERNEL
 // The kernel tailSquareZero handles the special cases in tailSquare, i.e. the lines 0 and H/2
 // This kernel is launched with 2 workgroups (handling line 0, resp. H/2)
-KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local F2 lds[LDS_BYTES / sizeof(F2)];
   F2 u[NH];
   u32 H = ND / SMALL_HEIGHT;
@@ -395,7 +410,7 @@ KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig) {
 
 #if SINGLE_WIDE
 
-KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local F2 lds[LDS_BYTES / sizeof(F2)];
 
   CP(F2) inF2 = (CP(F2)) in;
@@ -518,7 +533,7 @@ void OVERLOAD pairSq2_special(F2 *u, F2 base_squared) {
   }
 }
 
-KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local F2 lds[2 * LDS_BYTES / sizeof(F2)];
 
   CP(F2) inF2 = (CP(F2)) in;
@@ -656,7 +671,7 @@ void OVERLOAD pairSq(u32 N, GF31 *u, GF31 *v, GF31 base_squared, bool special) {
 #if !SINGLE_KERNEL
 // The kernel tailSquareZero handles the special cases in tailSquare, i.e. the lines 0 and H/2
 // This kernel is launched with 2 workgroups (handling line 0, resp. H/2)
-KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF31 lds[LDS_BYTES / sizeof(GF31)];
 
   CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
@@ -719,7 +734,7 @@ KERNEL(G_H) tailSquareZeroGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 
 #if SINGLE_WIDE
 
-KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF31 lds[LDS_BYTES / sizeof(GF31)];
 
   CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
@@ -832,7 +847,7 @@ void OVERLOAD pairSq2_special(GF31 *u, GF31 base_squared) {
   }
 }
 
-KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF31 lds[2 * LDS_BYTES / sizeof(GF31)];
 
   CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
@@ -1024,7 +1039,7 @@ void OVERLOAD pairSq(u32 N, GF61 *u, GF61 *v, GF61 base_squared, bool special) {
 #if !SINGLE_KERNEL
 // The kernel tailSquareZero handles the special cases in tailSquare, i.e. the lines 0 and H/2
 // This kernel is launched with 2 workgroups (handling line 0, resp. H/2)
-KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF61 lds[LDS_BYTES / sizeof(GF61)];
 
   CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
@@ -1614,7 +1629,7 @@ KERNEL(G_H) tailSquareGF61ApplePlaceholder(P(T2) out, CP(T2) in, Trig smallTrig)
 
 #if SINGLE_WIDE
 
-KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF61 lds[LDS_BYTES / sizeof(GF61)];
 
   CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
@@ -1727,7 +1742,7 @@ void OVERLOAD pairSq2_special(GF61 *u, GF61 base_squared) {
   }
 }
 
-KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
+KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
   local GF61 lds[2 * LDS_BYTES / sizeof(GF61)];
 
   CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);

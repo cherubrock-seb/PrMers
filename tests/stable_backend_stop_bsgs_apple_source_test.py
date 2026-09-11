@@ -70,8 +70,8 @@ assert 'fallback = ""' in app
 assert app.count('? plan_override : "";') >= 2
 assert '"throughput:prp"' not in app
 assert '"throughput:ll"' not in app
-assert '"throughput:pm1"' in app
-assert '"throughput:ecm"' in app
+assert '"throughput:pm1"' not in app
+assert '"throughput:ecm"' not in app
 assert "PRMERS_AEVUM_PM1_FFT" in app
 assert 'spec == "throughput:pm1"' in fftconfig
 assert 'spec == "throughput:ecm"' in fftconfig

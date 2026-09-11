@@ -65,6 +65,7 @@ int clGetCommandQueueInfo(cl_command_queue, cl_command_queue_info, size_t, void*
 cl_kernel clCreateKernel(cl_program, const char *, int *);
 int clReleaseKernel(cl_kernel);
 cl_mem clCreateBuffer(cl_context, cl_mem_flags, size_t, void *, int *);
+int clRetainMemObject(cl_mem);
 int clReleaseMemObject(cl_mem);
 #ifdef __APPLE__
 cl_command_queue clCreateCommandQueueWithPropertiesAPPLE(cl_context, cl_device_id, const cl_queue_properties *, int *);

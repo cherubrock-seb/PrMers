@@ -12,7 +12,7 @@ src/main.o: src/main.cpp include/core/App.hpp include/io/CliParser.hpp \
   include/core/ProofSetMarin.hpp include/core/ProofMarin.hpp \
   include/marin/engine.h include/marin/arith.h include/core/Logger.hpp \
   include/util/Timer.hpp include/io/JsonBuilder.hpp \
-  include/aevum/EngineAevum.hpp
+  include/aevum/EngineAevum.hpp include/modes/GaussianTrialFactor.hpp
 
 include/core/App.hpp:
 
@@ -71,3 +71,5 @@ include/util/Timer.hpp:
 include/io/JsonBuilder.hpp:
 
 include/aevum/EngineAevum.hpp:
+
+include/modes/GaussianTrialFactor.hpp:

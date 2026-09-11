@@ -153,7 +153,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                     std::to_string(p) + ": " + reason);
             }
         }
-        engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec);
+        engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec, static_cast<std::uint32_t>(selected_workload));
         if (configured != gpu_backend::auto_select) {
             if (resolved_transform == 0) resolved_transform = created->get_size();
             publish("Forced Aevum", "Aevum",

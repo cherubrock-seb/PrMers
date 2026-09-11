@@ -116,7 +116,7 @@ test-aevum-reg:
 test-aevum-pfa9-bridge: aevum-engine
 	bash third_party/aevum/scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}
 
-test-aevum-auto: aevum-engine
+test-aevum-auto:
 	bash tests/test_aevum_auto_policy.sh
 
 test-aevum-default:
@@ -127,6 +127,7 @@ test-gui-state:
 
 test-aevum-source:
 	python3 tests/aevum_pow2_type4_source_test.py
+	python3 tests/aevum_pass4_source_test.py
 	python3 tests/stable_backend_stop_bsgs_apple_source_test.py
 	python3 tests/workload_plan_audit_parser_test.py
 	bash tests/source_aevum_engine_audit.sh

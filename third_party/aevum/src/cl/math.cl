@@ -1183,7 +1183,12 @@ Z61 OVERLOAD weakMulAdd(Z61 a, Z61 b, u128 c, const u32 a_m61_count, const u32 b
   }
 }
 
+#if AEVUM_GF61_LIMB32
+#include "gf61limb.cl"
+Z61 OVERLOAD mul(Z61 a, Z61 b) { return aevumMul61(a,b); }
+#else
 Z61 OVERLOAD mul(Z61 a, Z61 b) { return modM61(weakMul(a, b, 2, 2)); }
+#endif
 
 Z61 fma61(Z61 a, Z61 b, Z61 c) { return modM61(weakMulAdd(a, b, c, 2, 2)); }
 
@@ -1221,7 +1226,15 @@ GF61 OVERLOAD csqa(GF61 a, GF61 c, const u32 m61_count) { return csqa(a, c, m61_
 GF61 OVERLOAD csqa(GF61 a, GF61 c) { return csqa(a, c, 2); }
 
 // Complex mul
-#if 1
+#if AEVUM_GF61_LIMB32
+GF61 OVERLOAD cmul(GF61 a, GF61 b) {
+  const u64 ax=aevumCanonical61(a.x), ay=aevumCanonical61(a.y);
+  const u64 bx=aevumCanonical61(b.x), by=aevumCanonical61(b.y);
+  const u64 p=aevumMul61Canonical(ax,bx);
+  const u64 q=aevumMul61Canonical(ay,by);
+  const u64 r=aevumMul61Canonical(aevumCanonical61(ax+ay),aevumCanonical61(bx+by));
+  return U2(aevumCmul61Real(p,q),aevumCmul61Imag(p,q,r));
+#elif 1
 GF61 OVERLOAD cmul(GF61 a, GF61 b) {
   u128 k1 = mul64(b.x, a.x + a.y);                            // max value is 2*M61^2+epsilon
   Z61 k1k2 = weakMulAdd(a.x, b.y + neg(b.x, 2), k1, 2, 4);    // max value is 6*M61+epsilon

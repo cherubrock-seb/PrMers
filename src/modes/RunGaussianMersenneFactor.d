@@ -1,5 +1,6 @@
 src/modes/RunGaussianMersenneFactor.o: \
-  src/modes/RunGaussianMersenneFactor.cpp include/core/App.hpp \
+  src/modes/RunGaussianMersenneFactor.cpp \
+  include/core/GmEcmLegacyRename.hpp include/core/App.hpp \
   include/io/CliParser.hpp include/io/WorktodoParser.hpp \
   include/opencl/Context.hpp include/opencl/Program.hpp \
   include/math/Precompute.hpp include/opencl/Buffers.hpp \
@@ -16,6 +17,8 @@ src/modes/RunGaussianMersenneFactor.o: \
   include/core/AlgoUtils.hpp include/util/GmpUtils.hpp \
   include/io/WorktodoManager.hpp include/marin/file.h \
   include/ui/WebGuiServer.hpp include/core/Version.hpp
+
+include/core/GmEcmLegacyRename.hpp:
 
 include/core/App.hpp:
 

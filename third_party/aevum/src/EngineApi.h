@@ -25,6 +25,18 @@ extern "C" {
 
 typedef void* aevum_engine_handle;
 
+// Keep numeric values aligned with PrMers engine::gpu_workload.  The old
+// create symbol remains ABI-compatible; create_ex is optional for older hosts.
+enum aevum_engine_workload {
+  AEVUM_WORKLOAD_GENERIC = 0,
+  AEVUM_WORKLOAD_PRP = 1,
+  AEVUM_WORKLOAD_LL = 2,
+  AEVUM_WORKLOAD_PM1 = 3,
+  AEVUM_WORKLOAD_PM1_LOWMEM = 4,
+  AEVUM_WORKLOAD_PM1_ULTRALOWMEM = 5,
+  AEVUM_WORKLOAD_ECM = 6
+};
+
 AEVUM_ENGINE_API const char* aevum_engine_version(void);
 AEVUM_ENGINE_API const char* aevum_engine_last_error(void);
 AEVUM_ENGINE_API int aevum_engine_resolve_fft(
@@ -41,10 +53,21 @@ AEVUM_ENGINE_API aevum_engine_handle aevum_engine_create(
     const char* fft_spec,
     const char* tune_dir);
 
+AEVUM_ENGINE_API aevum_engine_handle aevum_engine_create_ex(
+    uint32_t exponent,
+    size_t register_count,
+    uint32_t device,
+    int verbose,
+    const char* fft_spec,
+    const char* tune_dir,
+    uint32_t workload);
+
 AEVUM_ENGINE_API void aevum_engine_destroy(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_transform_size(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_word_count(aevum_engine_handle handle);
 AEVUM_ENGINE_API int aevum_engine_sync(aevum_engine_handle handle);
+// Diagnostic: synchronize, optionally emit kernel event counters, then reset them.
+AEVUM_ENGINE_API int aevum_engine_profile_report(aevum_engine_handle handle, int emit);
 
 AEVUM_ENGINE_API int aevum_engine_set_u32(aevum_engine_handle handle, size_t dst, uint32_t value);
 AEVUM_ENGINE_API int aevum_engine_set_words(aevum_engine_handle handle, size_t dst, const uint32_t* words, size_t count);
