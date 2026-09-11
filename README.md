@@ -981,36 +981,6 @@ Mersenne Forum discussion:
 
 https://www.mersenneforum.org/node/1086124/page3
 
-### Quick PRP overview, Marin backend
-
-PRP throughput for `p` near `136279841`.
-
-| GPU | User or system | PRMERS_SCORE | Iter/s | Approx PRP ETA | Notes |
-|---|---:|---:|---:|---:|---|
-| NVIDIA GeForce RTX 5090 | Resolver, vast.ai | n/a | about 2230 | about 17 h | High-end NVIDIA |
-| NVIDIA GeForce RTX 4090 | Resolver | 100.00/100 | about 1225 | about 31 h | Reference score |
-| NVIDIA GeForce RTX 5070 Laptop | beepthebee | 62.69/100 | about 356 | about 4.5 d | OC reported |
-| NVIDIA GeForce RTX 4060 Ti | Lorenzo | 69.14/100 | about 318 | about 5 d | Desktop midrange |
-| NVIDIA GeForce RTX 4070 Laptop | Phantomas | 52.24/100 | about 255 | about 6 d | Laptop GPU |
-| NVIDIA GeForce RTX 2060 | hwt, Artoria2e5 | 45.76/100 | about 240-259 | about 6 d | Some undervolt or power cap runs |
-| NVIDIA GeForce GTX 1660 Ti | Phantomas | n/a | about 234 | about 6.8 d | Older Turing GPU |
-| AMD Radeon VII | cherubrock | 50.57/100 | about 350 | about 4.5 d | Development card |
-| Apple M4 Pro | wigglefruit | 30.29/100 | about 164 | about 9.6 d | Apple silicon |
-| Apple M2 | cherubrock | n/a | about 25 | about 62 d | MacBook Air 8 GB |
-
-### Detailed examples
-
-| GPU | p = 57885161 | p = 74207281 | p = 82589933 | p = 136279841 |
-|---|---:|---:|---:|---:|
-| RTX 5090 | about 2350 iter/s | about 2230 iter/s | about 1970 iter/s | about 2230 iter/s |
-| Radeon VII | about 510 iter/s | about 436 iter/s | about 402 iter/s | about 350 iter/s |
-| RTX 4090 | about 1030 iter/s | about 910 iter/s | about 840 iter/s | about 1225 iter/s |
-| RTX 4060 Ti | about 420 iter/s | about 366 iter/s | about 337 iter/s | about 318 iter/s |
-| RTX 4070 Laptop | about 370 iter/s | about 320 iter/s | about 283 iter/s | about 255 iter/s |
-| GTX 1660 Ti | about 330 iter/s | about 288 iter/s | about 262 iter/s | about 234 iter/s |
-| RTX 5070 Laptop | about 858 iter/s | about 882 iter/s | about 875 iter/s | about 356 iter/s |
-| Apple M4 Pro | about 264 iter/s | about 231 iter/s | about 213 iter/s | about 164 iter/s |
-| Apple M2 | about 42 iter/s | about 38 iter/s | about 32 iter/s | about 25 iter/s |
 
 ## Backend and code
 
