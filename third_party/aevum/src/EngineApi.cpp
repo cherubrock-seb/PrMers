@@ -1268,6 +1268,6 @@ int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint
 
 } // extern "C"
 
-extern "C" AEVUM_ENGINE_API int aevum_engine_profile_report(aevum_engine_handle handle, int emit) {
+extern "C" int aevum_engine_profile_report(aevum_engine_handle handle, int emit) {
   return invoke([&] { runtime(handle).profile_report(emit != 0); });
 }
