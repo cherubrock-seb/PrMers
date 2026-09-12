@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.83-pass5-prp-max
+AEVUM_VERSION ?= v0.3.82-pass4-autotune-engine
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -71,7 +71,7 @@ STRIP=-s
 
 endif
 
-SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp OpenCLSourceBuilder.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp RuntimeAutotune.cpp PrpUseTune.cpp EngineApi.cpp
+SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp OpenCLSourceBuilder.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp RuntimeAutotune.cpp EngineApi.cpp
 
 SRCS2 = test.cpp
 
@@ -238,7 +238,7 @@ $(AUTOTUNE_CACHE_TEST): tests/runtime_autotune_cache_test.cpp src/RuntimeAutotun
 $(TYPE4_PLAN_TEST): tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
-		tests/type4_pfa9_plan_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
 $(HOST_TEST): tests/host_gf_test.cpp
@@ -292,8 +292,3 @@ native-pfa-gpu-test: native-pfa-build native-pfa-host-test
 
 test-pfa9-lead-bridge-gpu: engine-lib
 	bash scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}
-
-.PHONY: test-prp-use
-test-prp-use: $(ENGINE_LIB)
-	$(CXX) -O2 -std=c++20 -Isrc tests/prp_use_test.cpp $(ENGINE_OBJS) $(OPENCL_LIBS) $(DL_LIBS) -o $(ENGINE_BIN)/prp-use-test
-	$(ENGINE_BIN)/prp-use-test

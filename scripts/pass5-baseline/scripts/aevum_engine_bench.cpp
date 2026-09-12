@@ -13,7 +13,6 @@ struct Api {
   void* lib;
   using H = void*;
   H h{};
-  double create_seconds{};
   const char* (*error)();
   H (*create)(uint32_t,size_t,uint32_t,int,const char*,const char*);
   H (*create_ex)(uint32_t,size_t,uint32_t,int,const char*,const char*,uint32_t){};
@@ -49,9 +48,7 @@ struct Api {
     SYM(prepare,"prepare"); SYM(mul,"mul"); SYM(add,"add");
     SYM(subreg,"sub_reg"); SYM(equal,"equal"); SYM(profile,"profile_report");
 #undef SYM
-    const auto create_start=std::chrono::steady_clock::now();
     h=create_ex ? create_ex(p,4,d,1,plan,tune,workload) : create(p,4,d,1,plan,tune);
-    create_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-create_start).count();
     if(!h) throw std::runtime_error(error());
   }
   ~Api(){ if(h) destroy(h); if(lib) dlclose(lib); }
@@ -113,7 +110,6 @@ int main(int argc,char**argv) {
     snap(0);
     std::cout.precision(12);
     std::cout<<"AEVUM_BENCH {\"seconds\":"<<seconds<<",\"iterations\":"<<iters
-      <<",\"create_seconds\":"<<a.create_seconds
       <<",\"transform\":"<<a.transform(a.h)<<",\"words\":"<<seed.size()<<"}\n";
   } catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;}
 }

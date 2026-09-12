@@ -1,7 +1,6 @@
 // Copyright (C) Mihai Preda and George Woltman.
 
 #include "Gpu.h"
-#include "UseOptions.h"
 #include "Proof.h"
 #include "TimeInfo.h"
 #include "Trig.h"
@@ -301,7 +300,42 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
 
   // Validate -use options
   for (const auto& [k, v] : config) {
-    bool isValid = aevumUseKey(k);
+    bool isValid = isInList(k, {
+                              "FAST_BARRIER",
+                              "STATS",
+                              "IN_SIZEX",
+                              "IN_WG",
+                              "OUT_SIZEX",
+                              "OUT_WG",
+                              "UNROLL_H",
+                              "UNROLL_W",
+                              "ZEROHACK_H",
+                              "ZEROHACK_W",
+                              "NO_ASM",
+                              "DEBUG",
+                              "CARRY64",
+                              "BIGLIT",                 // Deprecated
+                              "NONTEMPORAL",            // Deprecated
+                              "INPLACE",
+                              "PAD",
+                              "MIDDLE_IN_LDS_TRANSPOSE",
+                              "MIDDLE_OUT_LDS_TRANSPOSE",
+                              "MULTI_Q", "PRP_MIDDLE1",
+                              "TAIL_KERNELS",
+                              "TAIL_TRIGS",
+                              "TAIL_TRIGS31",
+                              "TAIL_TRIGS32",
+                              "TAIL_TRIGS61",
+                              "TABMUL_CHAIN",
+                              "TABMUL_CHAIN31",
+                              "TABMUL_CHAIN32",
+                              "TABMUL_CHAIN61",
+                              "MODM31",
+                              "LOADS","STORES",
+                              "NOREG",                  // CUDA - experimental
+                              "WMUL",
+                              "AEVUM_GF61_LIMB32"
+                            });
     if (!isValid) {
       log("Warning: unrecognized -use key '%s'\n", k.c_str());
     }
@@ -2518,12 +2552,6 @@ void Gpu::regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count) 
 }
 
 void Gpu::regSync() { queue.finish(); }
-
-double Gpu::regPrpRoe(bool begin) {
-  regSync();auto [a,b]=readROE();wantROE=begin?256:0;
-  if (!std::isfinite(a.max) || !std::isfinite(b.max)) return 1.0;
-  return std::max(a.max,b.max);
-}
 
 bool Gpu::regSupportsLeadCache() const {
 #if defined(__APPLE__)

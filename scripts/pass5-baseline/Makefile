@@ -9,7 +9,7 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.12-aevum-pass5-prp-max)
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo v99.21-aevum-apple-opencl12-conservative-lds)
 PACKAGE := prmers-$(VERSION)
 
 WARN        := -Wall -Wextra -Wsign-conversion
