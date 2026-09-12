@@ -48,27 +48,32 @@ jobs:
           cp third_party/aevum/tune.txt prmers_package/third_party/aevum/
           tar -czvf prmers-linux.tar.gz -C prmers_package .
 
+      - name: Calculate SHA256 checksum
+        run: sha256sum prmers-linux.tar.gz > prmers-linux.tar.gz.sha256
+
+      - name: Upload Linux package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prmers-linux
+          path: |
+            prmers-linux.tar.gz
+            prmers-linux.tar.gz.sha256
+          if-no-files-found: error
+
       - name: Upload release to GitHub
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          files: prmers-linux.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Calculate SHA256 checksum
-        run: sha256sum prmers-linux.tar.gz > prmers-linux.tar.gz.sha256
-
-      - name: Upload checksum to release
-        uses: softprops/action-gh-release@v2
-        with:
           body: |
             ✅ This release was built automatically via GitHub Actions from the source code in this repository.
             🔒 Each binary is accompanied by a `.sha256` checksum file for verification.
-            💡 You can verify the integrity of the downloaded files using:
+            💡 Verify with:
                 sha256sum -c <filename>.sha256
-            💡 You can view the build logs under the Actions tab.
-          files: prmers-linux.tar.gz.sha256
+          files: |
+            prmers-linux.tar.gz
+            prmers-linux.tar.gz.sha256
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
