@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 
 def chi2(p: int) -> int:
@@ -50,7 +51,10 @@ assert 'GM|GQ|BOTH' in work
 assert 'fallback = ""' in app
 for needle in ('throughput:prp', 'throughput:pm1', 'throughput:ecm'):
     assert needle not in app
-assert prp.count('engine::create_gpu(lift_exponent') == 1
+assert len(re.findall(
+    r'engine::create_gpu\s*\(\s*lift_exponent\b',
+    prp
+)) == 1
 assert factor.count('engine::create_gpu(t.lift') == 2
 
 # TF deliberately remains its own 64-bit direct OpenCL kernel rather than a
