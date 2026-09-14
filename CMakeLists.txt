@@ -26,12 +26,12 @@ add_executable(prmers ${SOURCES})
 if(MSVC)
   set_source_files_properties(
     src/modes/RunGaussianMersenneFactor.cpp
-    PROPERTIES COMPILE_OPTIONS "/FI${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp"
+    PROPERTIES COMPILE_OPTIONS "/FI${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp;/FI${PROJECT_SOURCE_DIR}/include/core/GmPm1LegacyRename.hpp"
   )
 else()
   set_source_files_properties(
     src/modes/RunGaussianMersenneFactor.cpp
-    PROPERTIES COMPILE_OPTIONS "-include;${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp"
+    PROPERTIES COMPILE_OPTIONS "-include;${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp;-include;${PROJECT_SOURCE_DIR}/include/core/GmPm1LegacyRename.hpp"
   )
 endif()
 

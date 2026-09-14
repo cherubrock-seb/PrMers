@@ -5,6 +5,7 @@ root = Path(__file__).resolve().parents[1]
 cmake = (root / "CMakeLists.txt").read_text()
 makefile = (root / "Makefile").read_text()
 rename = (root / "include/core/GmEcmLegacyRename.hpp").read_text()
+pm1_rename = (root / "include/core/GmPm1LegacyRename.hpp").read_text()
 factor = (root / "src/modes/RunGaussianMersenneFactor.cpp").read_text()
 fast = (root / "src/modes/RunGaussianMersenneEcmFast.cpp").read_text()
 opt = (root / "src/modes/RunGaussianMersenneEcmOptimized.cpp").read_text()
@@ -19,11 +20,19 @@ assert "GmEcmLegacyRename.hpp" in cmake
 assert "if(MSVC)" in cmake
 assert "/FI${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp" in cmake
 assert "-include;${PROJECT_SOURCE_DIR}/include/core/GmEcmLegacyRename.hpp" in cmake
+assert "/FI${PROJECT_SOURCE_DIR}/include/core/GmPm1LegacyRename.hpp" in cmake
+assert "-include;${PROJECT_SOURCE_DIR}/include/core/GmPm1LegacyRename.hpp" in cmake
 
 # Header order matters: App.hpp must be parsed before the method-token remap.
 inc = rename.index('#include "core/App.hpp"')
 define = rename.index('#define runGaussianMersenneECM runGaussianMersenneECMLegacy')
 assert inc < define
+
+pm1_inc = pm1_rename.index('#include "core/App.hpp"')
+pm1_define = pm1_rename.index(
+    '#define runGaussianMersennePM1 runGaussianMersennePM1Legacy'
+)
+assert pm1_inc < pm1_define
 
 # Linkage contract: one source owns the historical implementation token and
 # one source owns the public wrapper. The forced include changes only the old

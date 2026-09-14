@@ -9,7 +9,7 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.13-gm-vtrace-aevum-rc2)
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.13-gm-vtrace-aevum-r1)
 PACKAGE := prmers-$(VERSION)
 
 WARN        := -Wall -Wextra -Wsign-conversion
