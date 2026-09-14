@@ -47,16 +47,16 @@ PolicyProfile profile_for(const engine::gpu_workload workload, const std::size_t
             return {1.00, "PRP/LL throughput", "AEVUM_AUTO_LL_MAX_RATIO"};
         case engine::gpu_workload::pm1:
             if (register_count <= 16) {
-                // Normal Stage 1 uses the generic engine API. Aevum is worthwhile
-                // only with a clear transform-size advantage.
-                return {0.75, "P-1 Stage 1", "AEVUM_AUTO_PM1_STAGE1_MAX_RATIO"};
+                // RC2: admit Aevum up to equal transform size, then let the real-GPU
+                // differential gate decide whether this becomes the tagged default.
+                return {1.00, "P-1 Stage 1", "AEVUM_AUTO_PM1_STAGE1_MAX_RATIO"};
             }
             return {1.00, "P-1 multi-register/Stage 2", "AEVUM_AUTO_PM1_STAGE2_MAX_RATIO"};
         case engine::gpu_workload::pm1_lowmem:
             // The 3-register low-memory implementation uses generic set/pow/mul
-            // operations and is valid on both engines. Keep the same conservative
-            // transform advantage as normal Stage 1.
-            return {0.75, "P-1 low-memory (3-register)", "AEVUM_AUTO_PM1_LOWMEM_MAX_RATIO"};
+            // operations and is valid on both engines. RC2 uses the same equal-size
+            // admission gate as normal P-1.
+            return {1.00, "P-1 low-memory (3-register)", "AEVUM_AUTO_PM1_LOWMEM_MAX_RATIO"};
         case engine::gpu_workload::pm1_ultralowmem:
             // The one-register implementation encodes multiply-by-3 in Marin's
             // fast3 square operation. It is an algorithmic incompatibility, not a
@@ -64,9 +64,9 @@ PolicyProfile profile_for(const engine::gpu_workload workload, const std::size_t
             return {0.0, "P-1 ultra-low-memory (1-register)", nullptr, false,
                     "Marin fast3-only one-register algorithm"};
         case engine::gpu_workload::ecm:
-            // ECM has 51 long-lived registers and many mixed operations. Stay
-            // conservative unless Aevum saves at least 25% of transform length.
-            return {0.75, "ECM conservative", "AEVUM_AUTO_ECM_MAX_RATIO"};
+            // RC2 validates mixed-operation Aevum directly on RTX 3080/Radeon VII;
+            // admit equal-size plans here and retain Marin fallback when unsupported.
+            return {1.00, "ECM mixed-operation", "AEVUM_AUTO_ECM_MAX_RATIO"};
         default:
             return {0.75, "generic conservative", "AEVUM_AUTO_GENERIC_MAX_RATIO"};
     }

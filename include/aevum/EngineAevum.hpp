@@ -11,6 +11,11 @@ bool aevum_engine_resolve_auto_fft(uint32_t exponent,
                                     std::size_t* transform_size,
                                     std::string* resolved_spec = nullptr,
                                     std::string* reason = nullptr);
+bool aevum_engine_resolve_factor_safe_fft(uint32_t exponent,
+                                           uint32_t factor,
+                                           std::size_t* transform_size,
+                                           std::string* resolved_spec = nullptr,
+                                           std::string* reason = nullptr);
 bool aevum_engine_resolve_fft(uint32_t exponent,
                                const std::string& requested_spec,
                                std::size_t* transform_size,

@@ -26,6 +26,8 @@ assert 'PRMERS_AEVUM_ECM_FFT' in app
 
 # PRP/Proth, P-1 and ECM all instantiate the common engine abstraction.
 assert 'engine::create_gpu' in prime
+assert 'aevum_engine_resolve_factor_safe_fft' in prime
+assert '[GM factor-capacity guard]' in prime
 assert factor.count('engine::create_gpu') >= 2
 assert 'selected Aevum backend' in factor or 'Aevum' in factor
 assert 'selected Marin backend' in factor or 'Marin' in factor

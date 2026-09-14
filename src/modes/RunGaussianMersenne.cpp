@@ -1,6 +1,7 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/Version.hpp"
+#include "aevum/EngineAevum.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
@@ -544,6 +545,54 @@ int App::runGaussianMersenne() {
         return pass ? 0 : 1;
     }
 
+    // Gaussian PRP/Proth performs square_mul(reg, base), unlike ordinary
+    // Mersenne PRP which is square-only.  If the Aevum plan is automatic,
+    // materialize enough transform headroom for the selected base.
+    const engine::gpu_backend backend_before_factor_guard =
+        engine::configured_gpu_backend();
+    const std::string fft_before_factor_guard =
+        engine::configured_aevum_fft_spec();
+    bool factor_guard_reconfigured = false;
+
+    if (backend_before_factor_guard != engine::gpu_backend::marin &&
+        fft_before_factor_guard.empty() &&
+        selected.base > 1U) {
+        std::size_t safe_transform = 0;
+        std::string safe_fft;
+        std::string safe_reason;
+
+        if (aevum_engine_resolve_factor_safe_fft(
+                lift_exponent, selected.base,
+                &safe_transform, &safe_fft, &safe_reason)) {
+            engine::configure_gpu_backend(
+                backend_before_factor_guard,
+                safe_fft,
+                engine::gpu_workload::prp);
+            factor_guard_reconfigured = true;
+
+            std::cout
+                << "[GM factor-capacity guard] base=" << selected.base
+                << " | FFT=" << safe_fft
+                << " | transform=" << safe_transform
+                << " words\n";
+        } else if (backend_before_factor_guard ==
+                   engine::gpu_backend::aevum) {
+            throw std::runtime_error(
+                "Forced Aevum Gaussian PRP/Proth has no factor-safe FFT: " +
+                safe_reason);
+        } else {
+            engine::configure_gpu_backend(
+                engine::gpu_backend::marin,
+                "",
+                engine::gpu_workload::prp);
+            factor_guard_reconfigured = true;
+
+            std::cout
+                << "[GM factor-capacity guard] Aevum unavailable: "
+                << safe_reason << "; temporary Marin fallback\n";
+        }
+    }
+
     // Register layout is local to this mode. Existing Mersenne modes and kernels
     // are not changed. Arithmetic occurs modulo M_(4p), then the final residue is
     // projected modulo the exact factor G_p.
@@ -552,8 +601,27 @@ int App::runGaussianMersenne() {
     constexpr engine::Reg RVERIFY = 2;
     const std::size_t register_count = options.gm_safe_replay ? 3U : 1U;
 
-    std::unique_ptr<engine> eng(engine::create_gpu(lift_exponent, register_count,
-                                                    static_cast<std::size_t>(options.device_id), true));
+    std::unique_ptr<engine> eng;
+    try {
+        eng.reset(engine::create_gpu(
+            lift_exponent, register_count,
+            static_cast<std::size_t>(options.device_id), true));
+    } catch (...) {
+        if (factor_guard_reconfigured) {
+            engine::configure_gpu_backend(
+                backend_before_factor_guard,
+                fft_before_factor_guard,
+                engine::gpu_workload::prp);
+        }
+        throw;
+    }
+
+    if (factor_guard_reconfigured) {
+        engine::configure_gpu_backend(
+            backend_before_factor_guard,
+            fft_before_factor_guard,
+            engine::gpu_workload::prp);
+    }
     std::cout << "  backend       : " << (eng->is_aevum_backend() ? "Aevum" : "Marin") << "\n"
               << "  transform     : " << eng->get_size() << " words\n"
               << "  registers     : " << register_count << "\n";

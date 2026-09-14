@@ -2,6 +2,7 @@
 #include "marin/engine.h"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -583,6 +584,83 @@ bool aevum_engine_resolve_auto_fft(uint32_t exponent,
         if (reason) *reason = std::string("Aevum engine plugin unavailable: ") + e.what();
         return false;
     }
+}
+
+bool aevum_engine_resolve_factor_safe_fft(uint32_t exponent,
+                                           uint32_t factor,
+                                           std::size_t* transform_size,
+                                           std::string* resolved_spec,
+                                           std::string* reason) {
+    if (factor == 0) {
+        if (reason) *reason = "small multiplication factor must be positive";
+        return false;
+    }
+
+    std::size_t current_size = 0;
+    std::string current_spec;
+    std::string current_reason;
+
+    if (!aevum_engine_resolve_auto_fft(
+            exponent, &current_size, &current_spec, &current_reason)) {
+        if (reason) *reason = current_reason;
+        return false;
+    }
+
+    if (factor == 1) {
+        if (transform_size) *transform_size = current_size;
+        if (resolved_spec) *resolved_spec = current_spec;
+        return true;
+    }
+
+    const long double extra_bits =
+        std::log2(static_cast<long double>(factor));
+
+    for (unsigned attempt = 0; attempt < 8; ++attempt) {
+        const long double effective =
+            static_cast<long double>(exponent) +
+            extra_bits * static_cast<long double>(current_size);
+
+        if (effective >
+            static_cast<long double>(
+                std::numeric_limits<uint32_t>::max())) {
+            if (reason) *reason =
+                "factor-safe Aevum effective exponent exceeds uint32 range";
+            return false;
+        }
+
+        const uint32_t effective_exponent =
+            static_cast<uint32_t>(std::ceil(effective));
+
+        std::size_t next_size = 0;
+        std::string next_spec;
+        std::string next_reason;
+
+        if (!aevum_engine_resolve_auto_fft(
+                effective_exponent,
+                &next_size, &next_spec, &next_reason)) {
+            if (reason) *reason = next_reason;
+            return false;
+        }
+
+        if (next_size < current_size) {
+            if (reason) *reason =
+                "factor-safe Aevum resolver moved to a smaller transform";
+            return false;
+        }
+
+        if (next_size == current_size) {
+            if (transform_size) *transform_size = next_size;
+            if (resolved_spec) *resolved_spec = next_spec;
+            return true;
+        }
+
+        current_size = next_size;
+        current_spec = next_spec;
+    }
+
+    if (reason) *reason =
+        "factor-safe Aevum FFT promotion did not converge";
+    return false;
 }
 
 bool aevum_engine_resolve_fft(uint32_t exponent,

@@ -9,7 +9,7 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.12-aevum-pass5-prp-max)
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.13-gm-vtrace-aevum-rc2)
 PACKAGE := prmers-$(VERSION)
 
 WARN        := -Wall -Wextra -Wsign-conversion
@@ -57,7 +57,7 @@ CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 # v99.97: keep the v99.96 Gaussian factoring source untouched and compile its
 # runGaussianMersenneECM method under the legacy symbol.  The new source file
 # owns the public method and can fall back to this exact implementation.
-$(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp
+$(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp -include $(INC_DIR)/core/GmPm1LegacyRename.hpp
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
         install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
@@ -136,6 +136,8 @@ test-gm:
 	python3 tests/gaussian_mersenne_math_test.py
 	python3 tests/gaussian_mersenne_isolation_test.py
 	python3 tests/gaussian_mersenne_factor_math_test.py
+	python3 tests/gaussian_pm1_vtrace_math_test.py
+	python3 tests/gaussian_pm1_vtrace_source_test.py
 	python3 tests/gaussian_mersenne_factor_isolation_test.py
 	python3 tests/gaussian_mersenne_ecm_seed_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_naf_regression_test.py
