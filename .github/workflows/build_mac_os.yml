@@ -9,6 +9,8 @@ on:
         default: ""
         type: string
   push:
+    branches:
+      - 'cherub-preflight/**'
     tags:
       - 'v*'
 
