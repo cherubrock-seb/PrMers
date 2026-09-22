@@ -120,7 +120,107 @@ jobs:
             echo "Unexpected dynamic GCC runtime dependency"
             exit 1
           fi
-          make -C "$AEVUM_DIR" test-engine-api
+          cat > aevum-dll-smoke.cpp <<'CPP'
+          #ifndef NOMINMAX
+          #define NOMINMAX
+          #endif
+
+          #include <windows.h>
+
+          #include <cstddef>
+          #include <cstdint>
+          #include <iostream>
+          #include <stdexcept>
+          #include <string>
+
+          int main(int argc, char** argv) {
+            if (argc != 2) {
+              std::cerr << "Usage: aevum-dll-smoke <dll>\n";
+              return 2;
+            }
+
+            HMODULE library = LoadLibraryA(argv[1]);
+            if (!library) {
+              std::cerr << "LoadLibrary failed: " << GetLastError() << '\n';
+              return 3;
+            }
+
+            const char* symbols[] = {
+              "aevum_engine_version",
+              "aevum_engine_last_error",
+              "aevum_engine_resolve_fft",
+              "aevum_engine_create",
+              "aevum_engine_destroy",
+              "aevum_engine_transform_size",
+              "aevum_engine_word_count",
+              "aevum_engine_sync",
+              "aevum_engine_set_u32",
+              "aevum_engine_set_words",
+              "aevum_engine_get_words",
+              "aevum_engine_copy",
+              "aevum_engine_prepare",
+              "aevum_engine_square_mul",
+              "aevum_engine_mul",
+              "aevum_engine_add",
+              "aevum_engine_sub_reg",
+              "aevum_engine_sub_u32",
+              "aevum_engine_equal"
+            };
+
+            for (const char* symbol : symbols) {
+              if (!GetProcAddress(library, symbol)) {
+                std::cerr << "Missing export: " << symbol << '\n';
+                FreeLibrary(library);
+                return 4;
+              }
+            }
+
+            using version_fn = const char* (*)();
+            using error_fn = const char* (*)();
+            using resolve_fn =
+              int (*)(std::uint32_t, const char*, char*, std::size_t);
+
+            const auto version = reinterpret_cast<version_fn>(
+              GetProcAddress(library, "aevum_engine_version"));
+            const auto error = reinterpret_cast<error_fn>(
+              GetProcAddress(library, "aevum_engine_last_error"));
+            const auto resolve = reinterpret_cast<resolve_fn>(
+              GetProcAddress(library, "aevum_engine_resolve_fft"));
+
+            char spec[64]{};
+
+            if (!resolve(136279841u, nullptr, spec, sizeof(spec))) {
+              std::cerr << "FFT resolution failed: " << error() << '\n';
+              FreeLibrary(library);
+              return 5;
+            }
+
+            std::cout << "Aevum DLL loaded, version=" << version()
+                      << ", FFT=" << spec << '\n';
+
+            FreeLibrary(library);
+            return 0;
+          }
+          CPP
+
+          g++ -std=c++20 -O2 \
+            -static-libstdc++ -static-libgcc \
+            aevum-dll-smoke.cpp \
+            -o aevum-dll-smoke.exe
+
+          ./aevum-dll-smoke.exe "$DLL"
+
+          file "$DLL"
+
+          objdump -p "$DLL" > aevum-dll-objdump.txt
+
+          if ! grep -q 'aevum_engine_version' aevum-dll-objdump.txt; then
+            echo "::error::aevum_engine_version is absent from the DLL export table"
+            sed -n '/Export Table/,$p' aevum-dll-objdump.txt
+            exit 1
+          fi
+
+          echo "Aevum DLL export table validation passed."
           make -C "$AEVUM_DIR" -j"$(nproc)"
           "$AEVUM_DIR/build-release/aevum.exe" -h
 
