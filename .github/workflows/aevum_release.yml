@@ -48,7 +48,7 @@ jobs:
       - name: Package Linux standalone Aevum
         run: |
           set -eux
-          VERSION="$(tr -d '"\r\n' < "$AEVUM_DIR/src/version.inc")"
+          VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' "$AEVUM_DIR/Makefile")"
           NAME="Aevum-${VERSION}-linux-x86_64"
           STAGE="dist/$NAME"
           mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
@@ -227,7 +227,9 @@ jobs:
       - name: Package Windows standalone Aevum
         shell: pwsh
         run: |
-          $version = (Get-Content "$env:AEVUM_DIR/src/version.inc" -Raw).Trim().Trim('"')
+          $versionLine = Select-String -Path "$env:AEVUM_DIR/Makefile" -Pattern '^AEVUM_VERSION\s*\?=\s*(\S+)' | Select-Object -First 1
+          if (-not $versionLine) { throw "AEVUM_VERSION not found in Makefile" }
+          $version = $versionLine.Matches[0].Groups[1].Value
           $name = "Aevum-$version-windows-x86_64"
           $stage = "dist/$name"
           New-Item -ItemType Directory -Force "$stage/bin", "$stage/lib", "$stage/include" | Out-Null
@@ -300,7 +302,7 @@ jobs:
       - name: Package macOS standalone Aevum
         run: |
           set -eux
-          VERSION="$(tr -d '"\r\n' < "$AEVUM_DIR/src/version.inc")"
+          VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' "$AEVUM_DIR/Makefile")"
           NAME="Aevum-${VERSION}-macos-${{ matrix.arch }}"
           STAGE="dist/$NAME"
           mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
@@ -367,7 +369,7 @@ jobs:
           cd ..
           SOURCE_SHA="$(git rev-parse HEAD)"
           AEVUM_TREE="$(git rev-parse HEAD:third_party/aevum)"
-          AEVUM_VERSION="$(tr -d '"\r\n' < third_party/aevum/src/version.inc)"
+          AEVUM_VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' third_party/aevum/Makefile)"
           CHANGE="$(git log -1 --format=%s -- third_party/aevum)"
           {
             echo "# Standalone Aevum ${AEVUM_VERSION}"
