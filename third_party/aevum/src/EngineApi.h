@@ -66,6 +66,25 @@ AEVUM_ENGINE_API void aevum_engine_destroy(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_transform_size(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_word_count(aevum_engine_handle handle);
 AEVUM_ENGINE_API int aevum_engine_sync(aevum_engine_handle handle);
+
+// Opt-in production timing decomposition. Counters are inactive unless
+// AEVUM_TIMING_DECOMP=1, so normal production runs pay no clock-sampling cost.
+typedef struct aevum_engine_timing_stats {
+  uint64_t square_calls;
+  uint64_t pending_flush_calls;
+  uint64_t pending_flush_ns;
+  uint64_t queue_sync_calls;
+  uint64_t queue_sync_ns;
+  uint64_t copy_calls;
+  uint64_t copy_ns;
+  uint64_t equal_calls;
+  uint64_t equal_ns;
+  uint64_t readback_calls;
+  uint64_t readback_ns;
+} aevum_engine_timing_stats;
+AEVUM_ENGINE_API int aevum_engine_timing_reset(aevum_engine_handle handle);
+AEVUM_ENGINE_API int aevum_engine_timing_get(aevum_engine_handle handle, aevum_engine_timing_stats* stats);
+
 // Diagnostic: synchronize, optionally emit kernel event counters, then reset them.
 AEVUM_ENGINE_API int aevum_engine_profile_report(aevum_engine_handle handle, int emit);
 

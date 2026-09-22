@@ -8,6 +8,16 @@ DEVICE=sys.argv[4] if len(sys.argv)>4 else '0'
 EXPS=[21000029,70000001,100000007,147800003,150000007,180000007,196999969,197000003,210000017]
 REPORTER='INPLACE=1,LOADS=10040,STORES=22,TABMUL_CHAIN32=1,MODM31=2,ZEROHACK_W=0'
 count=0;records=[]
+
+def cache_path():
+ # Default remains campaign-local/isolated.  An explicit harness-only override
+ # lets an external reporter reuse a validated shape/use cache across invocations
+ # without reintroducing AEVUM_TUNE_DIR or any manual engine override.
+ root=os.environ.get('AEVUM_PASS5_CACHE_ROOT','').strip()
+ if not root:return OUT/'cache-shape.tsv'
+ base=Path(root).expanduser().resolve();base.mkdir(parents=True,exist_ok=True)
+ return base/'cache-shape.tsv'
+
 def prepare():
  shutil.copytree(ROOT/'third_party/aevum',OUT/'baseline',ignore=shutil.ignore_patterns('build-*','__pycache__','*.o','*.d'),dirs_exist_ok=True)
  for f in (ROOT/'scripts/pass5-baseline/third_party/aevum').rglob('*'):
@@ -16,7 +26,7 @@ def prepare():
 def environment():
  # No inherited manual plan/kernel override may contaminate runtime tuning.
  env={k:v for k,v in os.environ.items() if not k.startswith(('AEVUM_','PRMERS_AEVUM_'))}
- env.update(AEVUM_AUTOTUNE_CACHE=str(OUT/'cache-shape.tsv'),AEVUM_AUTOTUNE='off',AEVUM_PRP_USE_TUNE='off')
+ env.update(AEVUM_AUTOTUNE_CACHE=str(cache_path()),AEVUM_AUTOTUNE='off',AEVUM_PRP_USE_TUNE='off')
  return env
 def engine(p,plan='',profile=None,variant='new',runtime=None,epoch=False,mode='prp',n=256,profiling=False,use_runtime=None):
  global count
@@ -59,7 +69,7 @@ def engine(p,plan='',profile=None,variant='new',runtime=None,epoch=False,mode='p
  budget=re.findall(r'AEVUM_PRP_USE search .*?budget=(\d+)ms',txt)
  if budget:row['use_budget_ms']=int(budget[-1])
  row['use_cache_records']=[]
- for cache in Path(str(OUT/'cache-shape.tsv')+'.prp-use-v4').glob('*.tsv'):
+ for cache in Path(str(cache_path())+'.prp-use-v4').glob('*.tsv'):
   for line in cache.read_text(errors='replace').splitlines():
    fields=line.split('\t')
    if len(fields)==8 and f'|p={p}|' in fields[1] and f'|shape={row["shape"]}|' in fields[1]:
@@ -76,7 +86,7 @@ def same(a,b,keep_left=False):
  right.unlink()
 def reject_cached_use(p):
  # Evict only this exponent; preserve every other validated band/shape record.
- for f in Path(str(OUT/'cache-shape.tsv')+'.prp-use-v4').glob('*.tsv'):
+ for f in Path(str(cache_path())+'.prp-use-v4').glob('*.tsv'):
   if f'|p={p}|' in f.read_text(errors='replace'):f.unlink()
 def _pair_core(p,shape,profile,baseline_variant='new',epoch=False):
  aa=[];bb=[];ids=[]
@@ -132,6 +142,27 @@ def cold_auto(p,shape='',warm=False):
  elif b['searches'] or b.get('source')!='cache-hit':
   raise RuntimeError('completed implementation decision did not cache-hit')
  return a,b
+def complete_deferred_auto(p,first,shape='',max_resumes=20):
+ # The native tuner deliberately bounds each process invocation.  DEFERRED is
+ # therefore resumable state, not a failure.  Continue AUTO on the same cache
+ # until a conclusive decision, then require a clean cache-hit reproduction.
+ choice=first
+ for _ in range(max_resumes):
+  if choice.get('source')!='deferred':break
+  choice=engine(p,shape,runtime='auto')
+  if not shape and not choice.get('shape_cache_hit'):
+   raise RuntimeError('AUTO lost the shape-cache hit during deferred resume')
+ if choice.get('source')=='deferred':
+  raise RuntimeError(f'implementation still DEFERRED after {max_resumes} bounded resumes')
+ hit=engine(p,shape,runtime='auto')
+ if not shape and not hit.get('shape_cache_hit'):
+  raise RuntimeError('final AUTO reproduction lost the shape-cache hit')
+ if hit.get('source')!='cache-hit' or hit.get('searches'):
+  raise RuntimeError('completed implementation decision did not reproduce a clean cache hit')
+ if hit.get('shape')!=choice.get('shape') or hit.get('profile','')!=choice.get('profile',''):
+  raise RuntimeError('completed implementation cache hit changed shape/use decision')
+ return choice,hit
+
 def validate_final(summary,p,shape,choice,stage):
  profile=choice.get('profile','');result=None;error=None
  try:result=pair(p,shape,profile)
@@ -178,6 +209,11 @@ def run():
  for p in exps:
   def cold_hit(warm=False,shape=''):
    a,b=cold_auto(p,shape,warm)
+   if reporter and b.get('source')=='deferred':
+    # Reporter used to stop after only retune + one AUTO round.  RTX 5090
+    # evidence shows a valid 12-screen + finalist search can need ~13 runs.
+    # Resume the same bounded native search; do not expand or redesign it.
+    completed,b=complete_deferred_auto(p,b,shape,max_resumes=20)
    if b.get('source')=='deferred':raise RuntimeError('implementation still DEFERRED; no final cache written')
    if reporter:
     expected='1:512:8:512:202' if p==147800003 else '4:512:8:512:202'

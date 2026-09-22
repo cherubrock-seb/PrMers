@@ -23,9 +23,12 @@ python3 "$ROOT/tests/pass5_source_test.py" >> "$OUT/host-tests.log"
 python3 "$ROOT/tests/pass5_campaign_test.py" >> "$OUT/host-tests.log"
 make -C "$ROOT" test-aevum-auto test-aevum-default >> "$OUT/host-tests.log" 2>&1
 make -C "$ROOT" -j"${JOBS:-4}" prmers KERNEL_PATH="$ROOT/kernels/" > "$OUT/build-prmers.log" 2>&1
-if ! bash "$ROOT/scripts/test_pass5_kernel_syntax.sh" > "$OUT/epoch-syntax.log" 2>&1; then
+if ! command -v clang >/dev/null 2>&1; then
   export AEVUM_PASS5_SKIP_EPOCH=1
-  echo 'Structural candidate rejected by syntax gate; implementation campaign continues.'
+  echo 'WARNING: clang not found; optional structural epoch syntax gate skipped. R5 -use tuning remains enabled.' | tee "$OUT/epoch-syntax.log"
+elif ! bash "$ROOT/scripts/test_pass5_kernel_syntax.sh" > "$OUT/epoch-syntax.log" 2>&1; then
+  export AEVUM_PASS5_SKIP_EPOCH=1
+  echo 'Optional structural candidate rejected by syntax gate; R5 -use campaign continues.'
 fi
 c++ -O3 -std=c++20 "$ROOT/scripts/aevum_engine_bench.cpp" -ldl -o "$OUT/bench"
 python3 "$ROOT/scripts/pass5_validate.py" run "$ROOT" "$OUT" "$DEVICE" "${1:-full}"

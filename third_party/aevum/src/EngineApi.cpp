@@ -811,6 +811,7 @@ public:
     if (tune_dir && *tune_dir) args_.masterDir = std::filesystem::absolute(tune_dir);
     args_.setDefaults();
     args_.profile = std::getenv("AEVUM_PROFILE_KERNELS") && std::strcmp(std::getenv("AEVUM_PROFILE_KERNELS"), "1") == 0;
+    timing_enabled_ = envExactly("AEVUM_TIMING_DECOMP", "1");
 
     // Device-scoped tuning must use the actual OpenCL device selected by -d.
     cl_device_id selected_device = getDevice(device);
@@ -1282,7 +1283,22 @@ public:
 
   void sync() {
     flush_pending_square();
+    if (!timing_enabled_) {
+      gpu_->regSync();
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
     gpu_->regSync();
+    timing_.queue_sync_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.queue_sync_calls;
+  }
+
+  void timing_reset() { timing_ = {}; }
+
+  void timing_get(aevum_engine_timing_stats* stats) const {
+    if (!stats) throw std::runtime_error("null Aevum timing output");
+    *stats = timing_;
   }
 
   void profile_report(bool emit) {
@@ -1311,7 +1327,13 @@ public:
     check_reg(src);
     flush_pending_square();
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum output word buffer");
+    const auto t0 = timing_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     Words v = gpu_->regRead(reg(src));
+    if (timing_enabled_) {
+      timing_.readback_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - t0).count());
+      ++timing_.readback_calls;
+    }
     if (v.empty()) v.assign(word_count_, 0);
     if (v.size() != word_count_) throw std::runtime_error("unexpected Aevum residue size");
     std::copy(v.begin(), v.end(), words);
@@ -1323,7 +1345,15 @@ public:
     flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
-      gpu_->regCopy(reg(dst), reg(src));
+      if (!timing_enabled_) {
+        gpu_->regCopy(reg(dst), reg(src));
+      } else {
+        const auto t0 = std::chrono::steady_clock::now();
+        gpu_->regCopy(reg(dst), reg(src));
+        timing_.copy_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+        ++timing_.copy_calls;
+      }
     }
   }
 
@@ -1343,6 +1373,7 @@ public:
   void square_mul(size_t index, uint32_t factor) {
     check_reg(index);
     if (factor == 0) throw std::runtime_error("Aevum square factor must be positive");
+    if (timing_enabled_) ++timing_.square_calls;
 
     // Keep one logical arithmetic operation pending.  The next compatible
     // operation executes the previous one with leadOut=WIDTH, so the hot
@@ -1450,7 +1481,13 @@ public:
     check_reg(lhs);
     check_reg(rhs);
     flush_pending_square();
-    return gpu_->regEqual(reg(lhs), reg(rhs));
+    if (!timing_enabled_) return gpu_->regEqual(reg(lhs), reg(rhs));
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool result = gpu_->regEqual(reg(lhs), reg(rhs));
+    timing_.equal_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.equal_calls;
+    return result;
   }
 
   void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
@@ -1495,7 +1532,17 @@ private:
     gpu_->regMulPreparedStep(reg(index), prepared_buffers_[prepared_slot], lead_in, lead_out);
   }
 
-  void flush_pending_square() { execute_pending(false); }
+  void flush_pending_square() {
+    if (!timing_enabled_ || pending_kind_ == PendingKind::None) {
+      execute_pending(false);
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    execute_pending(false);
+    timing_.pending_flush_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.pending_flush_calls;
+  }
 
   size_t find_prepared(size_t index, bool touch) {
     for (size_t i = 0; i < prepared_slots_.size(); ++i) {
@@ -1597,6 +1644,8 @@ private:
   size_t pending_prepared_slot_ = no_prepared;
   bool pending_lead_width_ = false;
   double small_factor_headroom_bits_ = 0.0;
+  bool timing_enabled_ = false;
+  aevum_engine_timing_stats timing_{};
 };
 
 template <class F>
@@ -1690,6 +1739,10 @@ size_t aevum_engine_word_count(aevum_engine_handle handle) {
 }
 
 int aevum_engine_sync(aevum_engine_handle handle) { return invoke([&] { runtime(handle).sync(); }); }
+int aevum_engine_timing_reset(aevum_engine_handle handle) { return invoke([&] { runtime(handle).timing_reset(); }); }
+int aevum_engine_timing_get(aevum_engine_handle handle, aevum_engine_timing_stats* stats) {
+  return invoke([&] { runtime(handle).timing_get(stats); });
+}
 int aevum_engine_set_u32(aevum_engine_handle handle, size_t dst, uint32_t value) { return invoke([&] { runtime(handle).set_u32(dst, value); }); }
 int aevum_engine_set_words(aevum_engine_handle handle, size_t dst, const uint32_t* words, size_t count) { return invoke([&] { runtime(handle).set_words(dst, words, count); }); }
 int aevum_engine_get_words(aevum_engine_handle handle, size_t src, uint32_t* words, size_t count) { return invoke([&] { runtime(handle).get_words(src, words, count); }); }
