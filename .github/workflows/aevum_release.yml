@@ -1,0 +1,285 @@
+name: Aevum standalone release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact commit SHA or tag to preflight; empty uses the workflow ref
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - 'cherub-preflight/aevum-release-pipeline-v1'
+    tags:
+      - 'v/aevum/*'
+
+permissions:
+  contents: read
+
+env:
+  AEVUM_DIR: third_party/aevum
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Install OpenCL build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ocl-icd-opencl-dev pocl-opencl-icd
+
+      - name: Build and test standalone Aevum
+        run: |
+          set -eux
+          make -C "$AEVUM_DIR" test-host
+          make -C "$AEVUM_DIR" -j "$(nproc)" engine-lib
+          make -C "$AEVUM_DIR" test-engine-api
+          make -C "$AEVUM_DIR" -j "$(nproc)"
+          "$AEVUM_DIR/build-release/aevum" -h
+
+      - name: Package Linux standalone Aevum
+        run: |
+          set -eux
+          VERSION="$(tr -d '"\r\n' < "$AEVUM_DIR/src/version.inc")"
+          NAME="Aevum-${VERSION}-linux-x86_64"
+          STAGE="dist/$NAME"
+          mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
+          cp "$AEVUM_DIR/build-release/aevum" "$STAGE/bin/"
+          cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$STAGE/lib/"
+          cp "$AEVUM_DIR/src/EngineApi.h" "$STAGE/include/"
+          cp "$AEVUM_DIR/README.md" "$STAGE/"
+          cp "$AEVUM_DIR/LICENSE" "$STAGE/"
+          cp "$AEVUM_DIR/UPSTREAM.md" "$STAGE/"
+          cp "$AEVUM_DIR/MODIFICATIONS.md" "$STAGE/"
+          cp "$AEVUM_DIR/tune.txt" "$STAGE/"
+          {
+            echo "repository=${GITHUB_REPOSITORY}"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "aevum_tree=$(git rev-parse HEAD:third_party/aevum)"
+            echo "aevum_version=${VERSION}"
+          } > "$STAGE/SOURCE_INFO.txt"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "$NAME"
+          (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-linux-x86_64
+          path: |
+            dist/Aevum-*.tar.gz
+            dist/Aevum-*.tar.gz.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Configure MSYS2 toolchain
+        shell: pwsh
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CPPFLAGS=-IC:\msys64\mingw64\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LIBPATH=-LC:\msys64\mingw64\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install OpenCL build dependency
+        shell: pwsh
+        run: pacman -S --noconfirm mingw-w64-x86_64-opencl-icd
+
+      - name: Build and test standalone Aevum
+        shell: pwsh
+        run: |
+          make -C $env:AEVUM_DIR test-host
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          make -C $env:AEVUM_DIR -j $env:NUMBER_OF_PROCESSORS engine-lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          make -C $env:AEVUM_DIR test-engine-api
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          make -C $env:AEVUM_DIR -j $env:NUMBER_OF_PROCESSORS
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:AEVUM_DIR/build-release/aevum.exe" -h
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package Windows standalone Aevum
+        shell: pwsh
+        run: |
+          $version = (Get-Content "$env:AEVUM_DIR/src/version.inc" -Raw).Trim().Trim('"')
+          $name = "Aevum-$version-windows-x86_64"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force "$stage/bin", "$stage/lib", "$stage/include" | Out-Null
+          Copy-Item "$env:AEVUM_DIR/build-release/aevum.exe" "$stage/bin/"
+          $libs = Get-ChildItem "$env:AEVUM_DIR/build-engine" -File | Where-Object {
+            $_.Extension -in ".dll", ".so", ".dylib", ".lib", ".a"
+          }
+          if (-not $libs) { throw "No standalone Aevum engine library was produced" }
+          $libs | Copy-Item -Destination "$stage/lib/"
+          Copy-Item "$env:AEVUM_DIR/src/EngineApi.h" "$stage/include/"
+          Copy-Item "$env:AEVUM_DIR/README.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/LICENSE" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/UPSTREAM.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/MODIFICATIONS.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/tune.txt" "$stage/"
+          $sourceSha = (git rev-parse HEAD).Trim()
+          $aevumTree = (git rev-parse HEAD:third_party/aevum).Trim()
+          @(
+            "repository=$env:GITHUB_REPOSITORY"
+            "source_sha=$sourceSha"
+            "aevum_tree=$aevumTree"
+            "aevum_version=$version"
+          ) | Set-Content "$stage/SOURCE_INFO.txt"
+          Compress-Archive -Path "$stage" -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Set-Content "dist/$name.zip.sha256"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-windows-x86_64
+          path: |
+            dist/Aevum-*.zip
+            dist/Aevum-*.zip.sha256
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Build and test standalone Aevum
+        run: |
+          set -eux
+          make -C "$AEVUM_DIR" test-host
+          make -C "$AEVUM_DIR" -j "$(sysctl -n hw.ncpu)" engine-lib
+          make -C "$AEVUM_DIR" test-engine-api
+          bash "$AEVUM_DIR/tests/check_macos_minos.sh" \
+            "$MACOSX_DEPLOYMENT_TARGET" \
+            "$AEVUM_DIR/build-engine/libaevum_engine.so" \
+            "$AEVUM_DIR/build-tests/aevum-engine-api-load-test"
+          make -C "$AEVUM_DIR" -j "$(sysctl -n hw.ncpu)"
+          "$AEVUM_DIR/build-release/aevum" -h
+
+      - name: Package macOS standalone Aevum
+        run: |
+          set -eux
+          VERSION="$(tr -d '"\r\n' < "$AEVUM_DIR/src/version.inc")"
+          NAME="Aevum-${VERSION}-macos-${{ matrix.arch }}"
+          STAGE="dist/$NAME"
+          mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
+          cp "$AEVUM_DIR/build-release/aevum" "$STAGE/bin/"
+          cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$STAGE/lib/"
+          cp "$AEVUM_DIR/src/EngineApi.h" "$STAGE/include/"
+          cp "$AEVUM_DIR/README.md" "$STAGE/"
+          cp "$AEVUM_DIR/LICENSE" "$STAGE/"
+          cp "$AEVUM_DIR/UPSTREAM.md" "$STAGE/"
+          cp "$AEVUM_DIR/MODIFICATIONS.md" "$STAGE/"
+          cp "$AEVUM_DIR/tune.txt" "$STAGE/"
+          {
+            echo "repository=${GITHUB_REPOSITORY}"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "aevum_tree=$(git rev-parse HEAD:third_party/aevum)"
+            echo "aevum_version=${VERSION}"
+          } > "$STAGE/SOURCE_INFO.txt"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "$NAME"
+          (cd dist && shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-macos-${{ matrix.arch }}
+          path: |
+            dist/Aevum-*.tar.gz
+            dist/Aevum-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish standalone Aevum release
+    if: startsWith(github.ref, 'refs/tags/v/aevum/')
+    needs:
+      - linux
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Require immutable annotated tag
+        run: |
+          set -eux
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
+
+      - name: Download all platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aevum-*
+          path: release-dist
+          merge-multiple: true
+
+      - name: Build release checksum manifest and notes
+        run: |
+          set -eux
+          cd release-dist
+          sha256sum Aevum-*.tar.gz Aevum-*.zip > SHA256SUMS
+          cd ..
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          AEVUM_TREE="$(git rev-parse HEAD:third_party/aevum)"
+          AEVUM_VERSION="$(tr -d '"\r\n' < third_party/aevum/src/version.inc)"
+          CHANGE="$(git log -1 --format=%s -- third_party/aevum)"
+          {
+            echo "# Standalone Aevum ${AEVUM_VERSION}"
+            echo
+            echo "- Release tag: \`${GITHUB_REF_NAME}\`"
+            echo "- PrMers repository source SHA: \`${SOURCE_SHA}\`"
+            echo "- Vendored Aevum tree SHA: \`${AEVUM_TREE}\`"
+            echo "- Workflow run: \`${GITHUB_RUN_ID}\`"
+            echo "- Architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64"
+            echo "- Repository topology: Aevum is versioned as a vendored standalone engine under \`third_party/aevum\` in PrMers."
+            echo "- Tagged Aevum change: ${CHANGE}"
+            echo
+            echo "Correctness gates include the Aevum host tests and standalone engine API loader test on every release platform."
+            echo "Performance behavior is the behavior of the exact tagged vendored Aevum tree; no release-time tuning override is applied."
+          } > RELEASE_NOTES.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-dist/Aevum-*.tar.gz
+            release-dist/Aevum-*.zip
+            release-dist/Aevum-*.sha256
+            release-dist/SHA256SUMS
