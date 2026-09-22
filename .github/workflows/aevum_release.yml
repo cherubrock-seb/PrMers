@@ -88,31 +88,42 @@ jobs:
           ref: ${{ inputs.source_ref || github.ref }}
           fetch-depth: 0
 
-      - name: Configure MSYS2 toolchain
-        shell: pwsh
-        run: |
-          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "CPPFLAGS=-IC:\msys64\mingw64\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "LIBPATH=-LC:\msys64\mingw64\lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+- name: Set up MSYS2 UCRT64 for standalone Aevum
+uses: msys2/setup-msys2@v2
+with:
+msystem: UCRT64
+update: true
+install: >-
+make
+diffutils
+mingw-w64-ucrt-x86_64-gcc
+mingw-w64-ucrt-x86_64-opencl-headers
+mingw-w64-ucrt-x86_64-opencl-icd
 
-      - name: Install OpenCL build dependency
-        shell: pwsh
-        run: pacman -S --noconfirm mingw-w64-x86_64-opencl-icd
+  - name: Build and test standalone Aevum
+    shell: msys2 {0}
+    run: |
+      set -euo pipefail
+      make -C "$AEVUM_DIR" test-host
+      make -C "$AEVUM_DIR" clean
+      make -C "$AEVUM_DIR" engine-lib -j"$(nproc)" \
+        CXX=g++ \
+        DL_LIBS= \
+        ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
+      DLL="$AEVUM_DIR/build-engine/aevum_engine.dll"
+      cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$DLL"
+      test -s "$DLL"
+      DEPS="$(objdump -p "$DLL" | sed -n 's/^[[:space:]]*DLL Name: //p')"
+      echo "Aevum DLL dependencies:"
+      printf '%s\n' "$DEPS"
+      if printf '%s\n' "$DEPS" | grep -Eqi '^libstdc\+\+-6\.dll$|^libgcc_s_.*\.dll$'; then
+        echo "Unexpected dynamic GCC runtime dependency"
+        exit 1
+      fi
+      make -C "$AEVUM_DIR" test-engine-api
+      make -C "$AEVUM_DIR" -j"$(nproc)"
+      "$AEVUM_DIR/build-release/aevum.exe" -h
 
-      - name: Build and test standalone Aevum
-        shell: pwsh
-        run: |
-          make -C $env:AEVUM_DIR test-host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          make -C $env:AEVUM_DIR -j $env:NUMBER_OF_PROCESSORS engine-lib
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          make -C $env:AEVUM_DIR test-engine-api
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          make -C $env:AEVUM_DIR -j $env:NUMBER_OF_PROCESSORS
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & "$env:AEVUM_DIR/build-release/aevum.exe" -h
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package Windows standalone Aevum
         shell: pwsh
