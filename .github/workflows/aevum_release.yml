@@ -101,16 +101,256 @@ jobs:
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
 
-      - name: Build and test standalone Aevum
+      - name: Build and run type4 PFA9 host test
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          make -C "$AEVUM_DIR" test-host
+          cd "$AEVUM_DIR"
+          mkdir -p build-tests
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc tests/type4_pfa9_plan_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp tests/type4_args_splituses_stub.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/CycleFile.cpp src/timeutil.cpp -o build-tests/aevum-type4-pfa9-plan-test
+          build-tests/aevum-type4-pfa9-plan-test
+
+      - name: Build host test binary - monolithic source
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test
+
+      - name: Build host test binary - GF arithmetic
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-host-gf-test
+
+      - name: Build host test binary - compact state
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-state-compact-test
+
+      - name: Build host test binary - OpenCL standard
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
+
+      - name: Build host test binary - runtime autotune cache
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-runtime-autotune-cache-test
+
+      - name: "Host test: monolithic source"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-opencl-monolithic-source-test
+
+      - name: "Host test: OpenCL 1.2 syntax"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/opencl12_syntax_test.sh
+
+      - name: "Host test: pow2 type4 OpenCL syntax"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/pow2_type4_opencl_syntax.sh
+
+      - name: "Host test: PFA9 lead bridge source"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/pfa9_lead_bridge_source_test.py
+
+      - name: "Host test: Apple OpenCL 1.2 kernel matrix"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/apple_opencl12_kernel_matrix_syntax.sh
+
+      - name: "Host test: Apple GF61 ffthin staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_ffthin_staging_test.py
+
+      - name: "Host test: Apple GF31 width staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf31_width_staging_test.py
+
+      - name: "Host test: Apple fused FFTP"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_fused_fftp_test.py
+
+      - name: "Host test: Apple GF61 scalar mapping"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_scalar_mapping_test.py
+
+      - name: "Host test: Apple GF61 width staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_width_staging_test.py
+
+      - name: "Host test: Apple GF61 middlein staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middlein_staging_test.py
+
+      - name: "Host test: Apple GF61 restrict alias"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middlein_restrict_alias_test.py
+
+      - name: "Host test: Apple GF61 tail two-kernel policy"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tail_two_kernel_policy_test.py
+
+      - name: "Host test: Apple GF61 tailzero staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tailzero_staging_test.py
+
+      - name: "Host test: Apple GF61 maintail staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_maintail_staging_test.py
+
+      - name: "Host test: Apple GF61 FFTW staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_fftw_staging_test.py
+
+      - name: "Host test: Apple GF61 tailmul staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tailmul_staging_test.py
+
+      - name: "Host test: Apple prepared tailmullow staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_prepared_tailmullow_staging_test.py
+
+      - name: "Host test: Apple GF61 middleout staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middleout_staging_test.py
+
+      - name: "Host test: Apple readchecked double sync"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_readchecked_double_sync_test.py
+
+      - name: "Host test: Apple queue marker flush"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_queue_marker_flush_test.py
+
+      - name: "Host test: Apple generic mul safety"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_generic_mul_safety_test.py
+
+      - name: "Host test: Apple global transpose"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_global_transpose_test.py
+
+      - name: "Host test: Apple canonical set u32"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_canonical_set_u32_test.py
+
+      - name: "Host test: source audit"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/source_audit.sh
+
+      - name: "Host test: GPU init order"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/gpu_init_order_test.py
+
+      - name: "Host test: engine lead cache"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/engine_lead_cache_test.py
+
+      - name: "Host test: native tune compatibility"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/native_tune_compat_source_test.py
+
+      - name: "Host test binary: GF arithmetic"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-host-gf-test
+
+      - name: "Host test binary: compact state"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-state-compact-test
+
+      - name: "Host test binary: OpenCL standard"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-opencl-standard-test
+
+      - name: "Host test binary: type4 PFA9 plan"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-type4-pfa9-plan-test
+
+      - name: "Host test binary: runtime autotune cache"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-runtime-autotune-cache-test
+
+      - name: Build standalone Aevum DLL
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           make -C "$AEVUM_DIR" clean
           make -C "$AEVUM_DIR" engine-lib -j"$(nproc)" \
             CXX=g++ \
             DL_LIBS= \
             ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
+      - name: Test standalone Aevum DLL exports
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           DLL="$AEVUM_DIR/build-engine/aevum_engine.dll"
           cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$DLL"
           test -s "$DLL"
@@ -222,6 +462,10 @@ jobs:
           fi
 
           echo "Aevum DLL export table validation passed."
+      - name: Build and test standalone Aevum CLI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           make -C "$AEVUM_DIR" -j"$(nproc)"
           "$AEVUM_DIR/build-release/aevum.exe" -h
 
