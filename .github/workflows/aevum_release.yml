@@ -96,6 +96,7 @@ jobs:
           install: >-
             make
             diffutils
+ python
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
