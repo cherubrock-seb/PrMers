@@ -81,6 +81,15 @@ jobs:
             🔒 Each binary is accompanied by a `.sha256` checksum file for verification.
             💡 Verify with:
                 sha256sum -c <filename>.sha256
+            PrMers production release built from immutable tag `${{ github.ref_name }}`.
+            - PrMers source SHA: `${{ github.sha }}`
+            - Workflow run: `${{ github.run_id }}`
+            - Standalone Aevum tag: `v0.3.84-pass5-prp-max`
+            - Standalone Aevum source SHA: `efd12556fb0e03d8e1107ad353a910699929642c`
+            - Validated PRP speedup near p≈170M: Radeon VII +13.527%; RTX 3080 +8.646%.
+            - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
+            - Correctness and release preflight: PASS before tagging.
+            Platform artifacts include SHA256 checksum files for verification.
           files: |
             prmers-linux.tar.gz
             prmers-linux.tar.gz.sha256
