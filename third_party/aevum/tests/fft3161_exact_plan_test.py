@@ -23,4 +23,20 @@ for exponent, plan in expected.items():
     if got != plan:
         raise SystemExit(f"FAIL M{exponent}: expected {plan}, got {got}")
     print(f"M{exponent}: {got}")
-print("PASS: exact GitHub FFT3161 plans retained")
+
+# The PRP-native pseudo-selector must not alter the generic empty-spec API.
+# It is deliberately bounded to the measured 130M-160M 4M interval.
+for exponent, plan in {
+    130000001: "1:512:8:512:202",
+    150000001: "1:512:8:512:202",
+    160000003: "1:512:8:512:202",
+}.items():
+    out = ctypes.create_string_buffer(128)
+    if not lib.aevum_engine_resolve_fft(exponent, b"native-prp:auto", out, len(out)):
+        raise SystemExit(f"FAIL native PRP M{exponent}: {lib.aevum_engine_last_error().decode()}")
+    got = out.value.decode()
+    if got != plan:
+        raise SystemExit(f"FAIL native PRP M{exponent}: expected {plan}, got {got}")
+    print(f"native PRP M{exponent}: {got}")
+
+print("PASS: exact GitHub FFT3161 plans retained; native PRP 4M specialization verified")

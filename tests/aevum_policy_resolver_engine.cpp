@@ -9,7 +9,7 @@ thread_local std::string g_error;
 
 std::string resolve(std::uint32_t exponent, const char* requested) {
     const std::string req = requested ? requested : "";
-    if (!req.empty()) {
+    if (!req.empty() && req != "native-prp:auto") {
         if (req == "pfa:auto") {
             return exponent >= 170000000u
                 ? "pfa9:4:512:9:512:202"

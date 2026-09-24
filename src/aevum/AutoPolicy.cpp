@@ -108,9 +108,24 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
 
     std::string reason;
     const bool native_request = fft_spec.empty();
-    const bool resolved = native_request
-        ? aevum_engine_resolve_auto_fft(exponent, &result.aevum_transform, &result.fft_spec, &reason)
-        : aevum_engine_resolve_fft(exponent, fft_spec, &result.aevum_transform, &result.fft_spec, &reason);
+#if defined(__APPLE__)
+    const bool native_prp_geometry = false;
+#else
+    const bool native_prp_geometry =
+        native_request &&
+        !runtime_autotune_enabled() &&
+        workload == engine::gpu_workload::prp;
+#endif
+    const bool resolved = native_prp_geometry
+        ? aevum_engine_resolve_fft(
+              exponent, "native-prp:auto",
+              &result.aevum_transform, &result.fft_spec, &reason)
+        : native_request
+          ? aevum_engine_resolve_auto_fft(
+                exponent, &result.aevum_transform, &result.fft_spec, &reason)
+          : aevum_engine_resolve_fft(
+                exponent, fft_spec,
+                &result.aevum_transform, &result.fft_spec, &reason);
     if (!resolved) {
         result.detail = reason;
         return result;

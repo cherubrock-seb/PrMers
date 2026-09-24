@@ -368,6 +368,43 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     throw runtime_error("Apple OpenCL 1.2 supports only stock FFT3161 Aevum plans; Type4/PFA is disabled");
   }
 #endif
+  // PRP-native AUTO specialization for the measured 4M window.
+  //
+  // This pseudo-selector is used only by PrMers' native PRP policy. It keeps
+  // tune.txt authoritative: compatible measured entries are replayed before
+  // the built-in geometry is considered. Explicit user FFT specs never enter
+  // this branch, and runtime autotuning remains on its existing path.
+  if (spec == "native-prp:auto") {
+    for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
+      if (tuned.fft.shape.fft_type != FFT3161) continue;
+      const double bits_per_word = E / double(tuned.fft.size());
+      if (bits_per_word < tuned.fft.minBpw()) continue;
+      if (tuned.fft.maxExp() * args.fftOverdrive >= E) {
+        log("Aevum tuned PRP FFT: %s for exponent %" PRIu64 "\n",
+            tuned.fft.spec().c_str(), E);
+        return tuned.fft;
+      }
+    }
+
+    // Word-exact paired A/B on Radeon VII and RTX 3080 shows this geometry
+    // materially faster than the stock 4M 1:1K:8:256:101 plan throughout the
+    // validated 130M-160M interval. Keep the gate to the measured interval;
+    // the 8M transition is handled by the existing native selector.
+    constexpr u64 kPrpFast4MMinExponent = 130000000u;
+    constexpr u64 kPrpFast4MMaxExponent = 160000003u;
+    if (E >= kPrpFast4MMinExponent && E <= kPrpFast4MMaxExponent) {
+      FFTConfig prp4m{FFTShape{FFT3161, 512u, 8u, 512u}, 202u, CARRY_AUTO};
+      const double bits_per_word = E / double(prp4m.size());
+      if (bits_per_word >= prp4m.minBpw() &&
+          prp4m.maxExp() * args.fftOverdrive >= E) {
+        log("Aevum native PRP FFT: %s for exponent %" PRIu64 "\n",
+            prp4m.spec().c_str(), E);
+        return prp4m;
+      }
+    }
+    return bestFit(args, E, "");
+  }
+
   // Workload-aware throughput selectors. Transform length alone is not a
   // sufficient proxy: the fastest geometry depends on the operation mix.
   //
