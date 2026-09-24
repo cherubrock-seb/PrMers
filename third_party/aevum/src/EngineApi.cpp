@@ -841,9 +841,16 @@ public:
     shared_.background = &background_;
 
     std::string spec = fft_spec ? fft_spec : "";
-    // OpenCL vendor 0x1002 (4098) is AMD. Keep native PRP AUTO unchanged on
-    // NVIDIA and other vendors.
-    if (spec == "native-prp:auto" && device_vendor == "4098")
+    // OpenCL vendor 0x1002 (4098) is AMD. Real PrMers native PRP normally
+    // enters the plugin with an empty spec; route only the validated AMD
+    // 210M..220M window through the device-aware pseudo-selector. Explicit
+    // native-prp:auto requests retain the same AMD alias behavior.
+    const bool amd_native_prp_8m =
+        spec.empty() &&
+        workload_ == aevum_autotune::Workload::Prp &&
+        exponent_ >= 210000000u && exponent_ <= 220000003u;
+    if (device_vendor == "4098" &&
+        (spec == "native-prp:auto" || amd_native_prp_8m))
       spec = "native-prp:auto-amd";
     const bool explicit_fft_spec = !spec.empty();
     const auto autotune_mode = aevum_autotune::modeFromEnvironment();
