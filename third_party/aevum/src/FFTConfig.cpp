@@ -374,7 +374,9 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // tune.txt authoritative: compatible measured entries are replayed before
   // the built-in geometry is considered. Explicit user FFT specs never enter
   // this branch, and runtime autotuning remains on its existing path.
-  if (spec == "native-prp:auto") {
+  const bool native_prp_auto =
+      spec == "native-prp:auto" || spec == "native-prp:auto-amd";
+  if (native_prp_auto) {
     for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
       if (tuned.fft.shape.fft_type != FFT3161) continue;
       const double bits_per_word = E / double(tuned.fft.size());
@@ -383,6 +385,31 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
         log("Aevum tuned PRP FFT: %s for exponent %" PRIu64 "\n",
             tuned.fft.spec().c_str(), E);
         return tuned.fft;
+      }
+    }
+
+    // Radeon VII high-range PRP measurements show the 8M 1K/radix-8 shape
+    // materially faster than generic AUTO. Runtime enters this internal alias
+    // only for AMD OpenCL devices. Preserve generic AUTO's variant/capacity.
+    constexpr u64 kPrpAmd8MMinExponent = 210000000u;
+    constexpr u64 kPrpAmd8MMaxExponent = 220000003u;
+    if (spec == "native-prp:auto-amd" &&
+        E >= kPrpAmd8MMinExponent && E <= kPrpAmd8MMaxExponent) {
+      FFTConfig stock = bestFit(args, E, "");
+      const string stock_spec = stock.spec();
+      const size_t variant_pos = stock_spec.rfind(':');
+      if (variant_pos != string::npos) {
+        const u32 variant =
+            static_cast<u32>(stoul(stock_spec.substr(variant_pos + 1)));
+        FFTConfig prp8m{
+            FFTShape{FFT3161, 1024u, 8u, 512u}, variant, CARRY_AUTO};
+        const double bits_per_word = E / double(prp8m.size());
+        if (bits_per_word >= prp8m.minBpw() &&
+            prp8m.maxExp() * args.fftOverdrive >= E) {
+          log("Aevum native AMD PRP FFT: %s for exponent %" PRIu64 "\n",
+              prp8m.spec().c_str(), E);
+          return prp8m;
+        }
       }
     }
 

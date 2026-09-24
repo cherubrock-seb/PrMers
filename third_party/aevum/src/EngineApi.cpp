@@ -841,6 +841,10 @@ public:
     shared_.background = &background_;
 
     std::string spec = fft_spec ? fft_spec : "";
+    // OpenCL vendor 0x1002 (4098) is AMD. Keep native PRP AUTO unchanged on
+    // NVIDIA and other vendors.
+    if (spec == "native-prp:auto" && device_vendor == "4098")
+      spec = "native-prp:auto-amd";
     const bool explicit_fft_spec = !spec.empty();
     const auto autotune_mode = aevum_autotune::modeFromEnvironment();
     const auto autotune_cache_path = aevum_autotune::cachePath();
