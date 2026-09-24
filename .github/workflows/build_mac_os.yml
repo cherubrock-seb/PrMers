@@ -390,8 +390,8 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.84-pass5-prp-max`
-            - Standalone Aevum source SHA: `efd12556fb0e03d8e1107ad353a910699929642c`
+            - Standalone Aevum tag: `v0.3.85-pass5-prp-max`
+            - Standalone Aevum source SHA: `74715da3ac6a0aac2fdcc2f845377570122335cb`
             - Validated PRP speedup near p≈170M: Radeon VII +13.527%; RTX 3080 +8.646%.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
             - Correctness and release preflight: PASS before tagging.
