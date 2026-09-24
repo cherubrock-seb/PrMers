@@ -402,6 +402,17 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
         return prp4m;
       }
     }
+#if !defined(__APPLE__)
+    // Word-exact paired A/B on Radeon VII and RTX 3080 shows this Type4
+    // geometry faster than generic AUTO at 170M, 180M, 190M and 197M.
+    // Keep the gate to the measured bridge: below it RTX prefers the 4M
+    // Type1 path, while above it this Type4 plan exceeds its safe capacity.
+    constexpr u64 kPrpFastType4MinExponent = 170000000u;
+    constexpr u64 kPrpFastType4MaxExponent = 197000003u;
+    if (E >= kPrpFastType4MinExponent && E <= kPrpFastType4MaxExponent) {
+      return bestFit(args, E, "4:512:8:512:202");
+    }
+#endif
     return bestFit(args, E, "");
   }
 

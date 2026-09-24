@@ -39,4 +39,45 @@ for exponent, plan in {
         raise SystemExit(f"FAIL native PRP M{exponent}: expected {plan}, got {got}")
     print(f"native PRP M{exponent}: {got}")
 
-print("PASS: exact GitHub FFT3161 plans retained; native PRP 4M specialization verified")
+# Native PRP AUTO must preserve generic selection outside the measured Type4
+# bridge. On non-Apple platforms it must select the validated Type4 geometry
+# at the measured bridge endpoints.
+for exponent in (165000007, 210000017):
+    native = ctypes.create_string_buffer(128)
+    generic = ctypes.create_string_buffer(128)
+    if not lib.aevum_engine_resolve_fft(exponent, b"native-prp:auto", native, len(native)):
+        raise SystemExit(
+            f"FAIL native PRP boundary M{exponent}: "
+            f"{lib.aevum_engine_last_error().decode()}"
+        )
+    if not lib.aevum_engine_resolve_fft(exponent, b"", generic, len(generic)):
+        raise SystemExit(
+            f"FAIL generic boundary M{exponent}: "
+            f"{lib.aevum_engine_last_error().decode()}"
+        )
+    if native.value != generic.value:
+        raise SystemExit(
+            f"FAIL native PRP boundary M{exponent}: "
+            f"native={native.value.decode()} generic={generic.value.decode()}"
+        )
+    print(f"native PRP boundary M{exponent}: {native.value.decode()}")
+
+if sys.platform != "darwin":
+    for exponent in (170000009, 197000003):
+        out = ctypes.create_string_buffer(128)
+        if not lib.aevum_engine_resolve_fft(
+            exponent, b"native-prp:auto", out, len(out)
+        ):
+            raise SystemExit(
+                f"FAIL native PRP Type4 M{exponent}: "
+                f"{lib.aevum_engine_last_error().decode()}"
+            )
+        got = out.value.decode()
+        if got != "4:512:8:512:202":
+            raise SystemExit(
+                f"FAIL native PRP Type4 M{exponent}: "
+                f"expected 4:512:8:512:202, got {got}"
+            )
+        print(f"native PRP Type4 M{exponent}: {got}")
+
+print("PASS: exact GitHub FFT3161 plans retained; native PRP 4M/Type4 specializations verified")
