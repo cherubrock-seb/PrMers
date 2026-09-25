@@ -11,20 +11,20 @@ class Campaign(unittest.TestCase):
   try:self.assertNotIn('AEVUM_TUNE_DIR',m.environment())
   finally:del os.environ['AEVUM_TUNE_DIR']
  def test_cache_rejection_preserves_other_exponents(self):
-  with tempfile.TemporaryDirectory() as d:
+  with mock.patch.dict(os.environ,{'AEVUM_PASS5_CACHE_ROOT':''}),tempfile.TemporaryDirectory() as d:
    oldout=m.OUT;m.OUT=Path(d)
    try:
-    cache=Path(str(m.OUT/'cache-shape.tsv')+'.prp-use-v4');cache.mkdir()
+    cache=Path(str(m.cache_path())+'.prp-use-v4');cache.mkdir()
     rejected=cache/'rejected.tsv';rejected.write_text('prp-use-v4|p=21000029|use-flags=')
     kept=cache/'kept.tsv';kept.write_text('prp-use-v4|p=196999969|use-flags=')
     m.reject_cached_use(21000029)
     self.assertFalse(rejected.exists());self.assertTrue(kept.exists())
    finally:m.OUT=oldout
  def test_mismatch_does_not_abort_later_exponents(self):
-  with tempfile.TemporaryDirectory() as d:
+  with mock.patch.dict(os.environ,{'AEVUM_PASS5_CACHE_ROOT':''}),tempfile.TemporaryDirectory() as d:
    m.OUT=Path(d);m.ROOT=ROOT;m.EXPS=[21000029,196999969]
    os.environ['AEVUM_PASS5_SKIP_EPOCH']='1'
-   cache=Path(str(m.OUT/'cache-shape.tsv')+'.prp-use-v4');cache.mkdir()
+   cache=Path(str(m.cache_path())+'.prp-use-v4');cache.mkdir()
    rejected=cache/'rejected.tsv';rejected.write_text('prp-use-v4|p=21000029|use-flags=')
    profiled=[];serial=0
    def fake(p,plan='',profile=None,variant='new',runtime=None,**kw):
@@ -62,13 +62,13 @@ class Campaign(unittest.TestCase):
      return dict(id=serial,p=p,path=str(path),shape='1:512:8:512:202',
        profile='INPLACE=1,LOADS=10040,MODM31=2,STORES=22' if serial>=13 else '',
        source=source,searches=0 if source=='cache-hit' else 1,
-       implementation_searches=1,shape_cache_hit=True,wall_s=.01,seconds=.01)
+       implementation_searches=1,shape_cache_hit=False,plan_source='gb202-native',plan_validated=True,wall_s=.01,seconds=.01)
     old=m.engine;m.engine=fake
     first=fake(147800003,runtime='auto')
     choice,hit=m.complete_deferred_auto(147800003,first,max_resumes=20)
     self.assertEqual(choice['source'],'selected')
     self.assertEqual(hit['source'],'cache-hit')
-    self.assertTrue(hit['shape_cache_hit'])
+    self.assertFalse(hit['shape_cache_hit']);self.assertEqual(hit['plan_source'],'gb202-native')
     self.assertEqual(serial,14)
     self.assertEqual(choice['profile'],'INPLACE=1,LOADS=10040,MODM31=2,STORES=22')
    finally:

@@ -884,6 +884,7 @@ public:
             "FFT=1:512:8:512:202%s.\n",
             device_name.c_str(), exponent_,
             gb202_forced ? " (forced validation)" : "");
+        log("AEVUM_PLAN source=gb202-native validated=1 shape=%s\n", spec.c_str());
       }
     }
 

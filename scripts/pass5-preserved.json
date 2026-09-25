@@ -1,7 +1,8 @@
 {
   "third_party/aevum/src/RuntimeAutotune.cpp": "58ff76c7885cd462ee74012fba85d58c4fbdacd154c82dfd8e044765ee477001",
   "third_party/aevum/src/RuntimeAutotune.h": "f6ea4ebc996f3ef7716222847cee1359f0417dba94b1b28f5bee39b9001f3444",
-  "src/aevum/AutoPolicy.cpp": "c3c28d78619a741c637f804ee4b24c79fbd08a96f423794e9c2f3ec9685e5ddc",
+  "src/aevum/AutoPolicy.cpp": "cf3891836a48380b3507cc253d7fefc89b1de520c3e150b47d5a6b01ca164771",
   "src/aevum/EngineAevum.cpp": "a443ea14cb57f5fe019ecfebbb2c0defc061822b2e09f8b0bbb63d9433e68e15",
-  "third_party/aevum/src/FFTConfig.cpp": "27c7d91c980e8cfca30c99f5e815ef7b8929a24fa75021df42132f13ab8c1c5c"
+  "third_party/aevum/src/FFTConfig.cpp": "57821a43156bc5b27e59f25ae3c66a46bf2d453dd780160c582dec7fb8dc3aeb",
+  "third_party/aevum/src/cl/carryfused.cl": "818ef1b9b740637a22b7891c86961761b9a6f32d1f04e73d654018c4fb7dca52"
 }

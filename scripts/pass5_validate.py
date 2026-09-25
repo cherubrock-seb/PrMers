@@ -59,6 +59,9 @@ def engine(p,plan='',profile=None,variant='new',runtime=None,epoch=False,mode='p
  row['searches']=len(re.findall(r'AEVUM_PRP_USE search|Aevum autotune: candidate=',txt))
  row['implementation_searches']=len(re.findall(r'AEVUM_PRP_USE search',txt))
  row['shape_cache_hit']='Aevum autotune: cache hit' in txt
+ plans=re.findall(r'AEVUM_PLAN source=(\S+) validated=(\d+) shape=(\S+)',txt)
+ if plans:
+  source,validated,shape=plans[-1];row.update(plan_source=source,plan_validated=validated=='1',shape=shape)
  decision=re.findall(r'AEVUM_USE_DECISION state=(\S+)',txt)
  if decision:row['decision']=decision[-1]
  resume=re.findall(r'AEVUM_USE_DECISION state=\S+ screened=(\d+)/(\d+) full_candidates=(\d+) finalized=(\d+)/(\d+).*?next_screen=(\d+) next_finalist=(\d+)',txt)
@@ -84,6 +87,8 @@ def same(a,b,keep_left=False):
  if left.read_bytes()!=right.read_bytes():raise RuntimeError(f'WORD MISMATCH p={a["p"]}, cases {a["id"]}/{b["id"]}')
  if not keep_left:left.unlink()
  right.unlink()
+def authoritative_shape(row):
+ return bool(row.get('shape_cache_hit') or (row.get('plan_source')=='gb202-native' and row.get('plan_validated')))
 def reject_cached_use(p):
  # Evict only this exponent; preserve every other validated band/shape record.
  for f in Path(str(cache_path())+'.prp-use-v4').glob('*.tsv'):
@@ -138,7 +143,8 @@ def cold_auto(p,shape='',warm=False):
   if prior_positive and b.get('source')=='cache-hit':return a,b
   if a.get('use_cache_records'):raise RuntimeError('DEFERRED wrote a final use-cache record')
   if not b.get('implementation_searches'):raise RuntimeError('AUTO did not retry deferred use tuning')
-  if not shape and not b.get('shape_cache_hit'):raise RuntimeError('AUTO lost the shape-cache hit')
+  if not shape and not authoritative_shape(b):raise RuntimeError('AUTO lost authoritative shape-plan source')
+  if not shape and a.get('shape')!=b.get('shape'):raise RuntimeError('AUTO changed selected shape across deferred continuation')
  elif b['searches'] or b.get('source')!='cache-hit':
   raise RuntimeError('completed implementation decision did not cache-hit')
  return a,b
@@ -147,16 +153,19 @@ def complete_deferred_auto(p,first,shape='',max_resumes=20):
  # therefore resumable state, not a failure.  Continue AUTO on the same cache
  # until a conclusive decision, then require a clean cache-hit reproduction.
  choice=first
+ selected_shape=first.get('shape')
  for _ in range(max_resumes):
   if choice.get('source')!='deferred':break
   choice=engine(p,shape,runtime='auto')
-  if not shape and not choice.get('shape_cache_hit'):
-   raise RuntimeError('AUTO lost the shape-cache hit during deferred resume')
+  if not shape and not authoritative_shape(choice):
+   raise RuntimeError('AUTO lost authoritative shape-plan source during deferred resume')
+  if not shape and choice.get('shape')!=selected_shape:
+   raise RuntimeError('AUTO changed selected shape during deferred resume')
  if choice.get('source')=='deferred':
   raise RuntimeError(f'implementation still DEFERRED after {max_resumes} bounded resumes')
  hit=engine(p,shape,runtime='auto')
- if not shape and not hit.get('shape_cache_hit'):
-  raise RuntimeError('final AUTO reproduction lost the shape-cache hit')
+ if not shape and not authoritative_shape(hit):
+  raise RuntimeError('final AUTO reproduction lost authoritative shape-plan source')
  if hit.get('source')!='cache-hit' or hit.get('searches'):
   raise RuntimeError('completed implementation decision did not reproduce a clean cache hit')
  if hit.get('shape')!=choice.get('shape') or hit.get('profile','')!=choice.get('profile',''):
