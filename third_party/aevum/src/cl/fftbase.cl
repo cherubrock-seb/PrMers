@@ -950,6 +950,18 @@ void OVERLOAD fft_RADIX(T2 *u) {
 #endif
 }
 
+// For FUSE_WEIGHT_BUTTERFLY.  fft_RADIX, but for the very first radix transform of a WIDTH-transform invocation whose caller (carryFused) has
+// already performed that transform's first butterfly's adds/subs, fusing a forward weight multiply via FMA (see carryfused.cl).
+void OVERLOAD fft_RADIX_skip1(T2 *u) {
+#if RADIX == 4
+  fft4_skip1(u);
+#elif RADIX == 8
+  fft8_skip1(u);
+#else
+#error FUSE_WEIGHT_BUTTERFLY not implemented for this RADIX
+#endif
+}
+
 void OVERLOAD tabMul(Trig trig, T2 *u, u32 f, u32 me) {
 #if 0
   u32 p = me / f * f;
@@ -1373,7 +1385,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 #endif
 
   for (u32 s = 1; s < WG; s *= RADIX) {
-    fft_RADIX(u);
+    if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2 && s == 1) fft_RADIX_skip1(u); else fft_RADIX(u);
     w = bcast(w, s);
     chainMul(u, w);
     shufl(lds, u, s, numWG, lowMe);
@@ -1395,7 +1407,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   preload_tabMul4_trig(trig, preloads, 1, numWG, lowMe);
 
   // Do first fft4, partial tabMul, and shufl.
-  fft4(u);
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft4_skip1(u); else fft4(u);
   partial_tabMul4(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -1422,7 +1434,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   preload_tabMul8_trig(trig, preloads, 1, numWG, lowMe);
 
   // Do first fft8, partial tabMul, and shufl.
-  fft8(u);
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft8_skip1(u); else fft8(u);
   partial_tabMul8(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -1444,7 +1456,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   preload_tabMul4_trig(trig, preloads, 1, numWG, lowMe);
 
   // Do first fft4, partial tabMul, and shufl.
-  fft4(u);
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft4_skip1(u); else fft4(u);
   partial_tabMul4(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -1476,7 +1488,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   preload_tabMul8_trig(trig, preloads, 1, numWG, lowMe);
 
   // Do first fft8, partial tabMul, and shufl.
-  fft8(u);
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft8_skip1(u); else fft8(u);
   partial_tabMul8(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -1542,6 +1554,10 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 // Code for SIZE=256, RADIX=8
 #elif WG == 32 && NW == 8
 
+#if FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH
+#error FUSE_WEIGHT_BUTTERFLY not implemented for this fft8_4-based 32-thread path (carryfused.cl's default excludes it; this only fires on an explicit override)
+#endif
+
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
   shufl(lds, u, 1, 4, numWG, lowMe);
@@ -1605,7 +1621,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 // Code for SIZE=1024, RADIX=8
 #elif WG == 128 && RADIX == 8
 
-  fft8(u);
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft8_skip1(u); else fft8(u);
   tabMul(trig, u, 1, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -1623,7 +1639,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   __attribute__((opencl_unroll_hint(1)))
 #endif
   for (u32 s = 1; s < WG; s *= RADIX) {
-    fft_RADIX(u);
+    if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2 && s == 1) fft_RADIX_skip1(u); else fft_RADIX(u);
     tabMul(trig, u, s, lowMe);
     shufl(lds, u, s, numWG, lowMe);
   }

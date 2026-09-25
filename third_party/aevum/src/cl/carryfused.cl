@@ -313,18 +313,27 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     }
   }
 
-  // Apply each 32 or 64 bit carry to the 2 words
+  // Apply each 32 or 64 bit carry to the 2 words.  Then apply the weights -- or if FUSE_WEIGHT_BUTTERFLY apply weights only for the "low" i indices.
   for (i32 i = 0; i < NW; ++i) {
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
-    u[i] = U2(u[i].x * wu[i].x, u[i].y * wu[i].y);
-
+    if (!FUSE_WEIGHT_BUTTERFLY || i < NW/2) u[i] = U2(u[i].x * wu[i].x, u[i].y * wu[i].y);
     // Generate frac_bits for next pair
     frac_bits += frac_bits_bigstep;
   }
 
+  // To save a few F64 ops we do the first butterfly of the radix-4 or radix-8 step here using FMA to apply half of the weights.
+  if (FUSE_WEIGHT_BUTTERFLY) {
+    for (i32 i = 0; i < NW/2; ++i) {
+      T2 weights = u[i + NW/2];                                     // The weights are still in the high half of u
+      u[i + NW/2] = U2((T) wu[i + NW/2].x, (T) wu[i + NW/2].y);     // The FFT values to apply the weights to are in wu.
+      X2ad(u[i], u[i + NW/2], weights);                             // Compute u[i] +/- weights * u[i+NW/2]
+    }
+   }
+
   dependentLaunch();   // Next kernel will be fftMiddleInFP64
 
+  // fft_WIDTH2 itself knows (via its callnum) to skip the first radix butterfly when FUSE_WEIGHT_BUTTERFLY is set.
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
   writeCarryFusedLine(u, out, line, lowMe);
 }
