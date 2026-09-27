@@ -575,6 +575,45 @@ int App::runPrpOrLlMarin()
     }		
     logger.logEnd(elapsed_time);
 
+    // Persist a completed PRP/cofactor result before optional proof
+    // generation. Proof metadata is intentionally disabled here.
+    // The normal final path overwrites this JSON after proof success.
+    if (options.mode == "prp") {
+        auto provisionalOptions = options;
+        provisionalOptions.proof = false;
+        provisionalOptions.proofFile.clear();
+
+        std::string provisionalJson;
+
+        if (!provisionalOptions.knownFactors.empty()) {
+            auto [provisionalPrime,
+                  provisionalRes64,
+                  provisionalRes2048] =
+                io::JsonBuilder::computeResultMarin(
+                    d, provisionalOptions);
+
+            provisionalJson = io::JsonBuilder::generate(
+                provisionalOptions,
+                static_cast<int>(eng->get_size()),
+                provisionalPrime,
+                provisionalRes64,
+                provisionalRes2048);
+        } else {
+            provisionalJson = io::JsonBuilder::generate(
+                provisionalOptions,
+                static_cast<int>(eng->get_size()),
+                is_prp_prime,
+                res64_hex,
+                res2048_hex);
+        }
+
+        io::WorktodoManager provisionalWm(provisionalOptions);
+        provisionalWm.saveIndividualJson(
+            provisionalOptions.exponent,
+            provisionalOptions.mode,
+            provisionalJson);
+    }
+
     if (options.mode == "prp" && options.proof && (options.aevum || options.aevum_auto)) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;

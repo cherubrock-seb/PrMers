@@ -41,6 +41,11 @@ jobs:
         with:
           ref: ${{ inputs.source_ref || github.ref }}
 
+      - name: Test PRP ProofMarin host regression
+        run: |
+          bash tests/test_proof_marin_padding.sh
+          python3 tests/proof_marin_source_regression_test.py
+
       - name: Build GMP for the portable deployment target
         shell: bash
         run: |
@@ -390,8 +395,8 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.85-pass5-prp-max`
-            - Standalone Aevum source SHA: `74715da3ac6a0aac2fdcc2f845377570122335cb`
+            - Standalone Aevum tag: `v0.3.86-pass5-prp-max`
+            - Standalone Aevum source SHA: `affba4d777275df4d5670ad59e5e5c5f024e4379`
             - Validated PRP speedup near p≈170M: Radeon VII +13.527%; RTX 3080 +8.646%.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
             - Correctness and release preflight: PASS before tagging.

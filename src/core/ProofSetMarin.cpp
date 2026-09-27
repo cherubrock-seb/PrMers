@@ -282,12 +282,24 @@ ProofMarin ProofSetMarin::computeProof() const {
       std::cerr << "Warning: expected bufIndex=1, got " << bufIndex << std::endl;
     }
     
-    // Convert the final result to words format
-    auto levelResult = util::convertFromGMP(bufferPool[0]);
-    
-    if (levelResult.empty()) {
-      throw std::runtime_error("Read ZERO during proof generation at level " + std::to_string(p));
+    if (bufferPool[0] == 0) {
+      throw std::runtime_error(
+          "Read ZERO during proof generation at level " +
+          std::to_string(p));
     }
+
+    // Canonical proof residue: exactly ceil(E/32) little-endian words.
+    auto levelResult = util::convertFromGMP(bufferPool[0]);
+    const size_t expectedWords =
+        (static_cast<size_t>(E) + 31u) / 32u;
+
+    if (levelResult.size() > expectedWords) {
+      throw std::runtime_error(
+          "Proof residue exceeds exponent width at level " +
+          std::to_string(p));
+    }
+
+    levelResult.resize(expectedWords, 0u);
     
     // Store the result as middle for this level
     middles.push_back(levelResult);
