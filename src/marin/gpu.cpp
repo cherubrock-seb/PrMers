@@ -14,6 +14,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -153,7 +154,29 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
                     std::to_string(p) + ": " + reason);
             }
         }
+
         engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec, static_cast<std::uint32_t>(selected_workload));
+
+        // v100.17 safety quarantine for forced ordinary PRP as well as AUTO.
+        // AUTO is rejected earlier by AutoPolicy; this guard prevents an
+        // explicit -aevum / <=512K plan from accidentally producing a result
+        // in the externally reproduced unsafe family. A deliberately larger
+        // -aevum-fft plan remains available for diagnostic comparison.
+        constexpr std::size_t kOrdinaryPrpQuarantineWords = 524288u;
+        if (configured != gpu_backend::auto_select &&
+            selected_workload == gpu_workload::prp &&
+            reg_count == 8u &&
+            created->get_size() <= kOrdinaryPrpQuarantineWords) {
+            const std::size_t unsafe_transform = created->get_size();
+            const std::string reason =
+                "Aevum ordinary PRP <=512K is temporarily quarantined after an externally reproduced v100.16 residue mismatch; "
+                "use -engine-marin, or a larger explicit -aevum-fft plan for diagnostic testing";
+            delete created;
+            publish("Forced Aevum rejected", "Unavailable", reason,
+                    unsafe_transform, resolved_fft.empty() ? runtime_fft_spec : resolved_fft);
+            throw std::runtime_error(reason);
+        }
+
         if (configured != gpu_backend::auto_select) {
             if (resolved_transform == 0) resolved_transform = created->get_size();
             publish("Forced Aevum", "Aevum",

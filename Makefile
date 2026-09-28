@@ -130,6 +130,7 @@ test-proof-marin:
 	python3 tests/proof_marin_source_regression_test.py
 
 test-aevum-source:
+	python3 tests/aevum_lowrange_prp_safety_source_test.py
 	python3 tests/aevum_pow2_type4_source_test.py
 	python3 tests/aevum_pass4_source_test.py
 	python3 tests/stable_backend_stop_bsgs_apple_source_test.py

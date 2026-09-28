@@ -131,6 +131,35 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
         return result;
     }
 
+    // v100.17 safety quarantine.
+    //
+    // An external Windows/RTX 4070 Ti SUPER report reproduced a deterministic
+    // wrong ordinary-Mersenne PRP residue at p=19121591 with the native
+    // 512K Aevum plan (1:256:4:256:101), including a clean rerun from scratch.
+    // Until that arithmetic defect is isolated, AUTO must not select the
+    // implicated <=512K family for the ordinary 8-register PRP path.
+    //
+    // Keep Gaussian PRP/Proth untouched: those modes use their own 1/3-register
+    // layouts and factor-capacity guard. Larger explicit diagnostic plans are
+    // also intentionally outside this AUTO quarantine.
+    constexpr std::size_t kOrdinaryPrpQuarantineWords = 524288u;
+    if (workload == engine::gpu_workload::prp &&
+        register_count == 8u &&
+        result.aevum_transform > 0 &&
+        result.aevum_transform <= kOrdinaryPrpQuarantineWords) {
+        std::ostringstream out;
+        out << "profile=" << profile.name
+            << ", regs=" << register_count
+            << ", Aevum=" << result.aevum_transform
+            << ", Marin=" << result.marin_transform
+            << ", family=" << plan_family(result.fft_spec)
+            << ", FFT=" << result.fft_spec
+            << ", safety=Marin-only (ordinary PRP Aevum <=512K temporarily quarantined after externally reproduced v100.16 residue mismatch)";
+        result.detail = out.str();
+        result.use_aevum = false;
+        return result;
+    }
+
     // v100.09 PRP boundary bridge.
     //
     // Issue #36 proved that choosing Type4 merely because it has the same
