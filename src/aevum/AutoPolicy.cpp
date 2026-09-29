@@ -131,22 +131,39 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
         return result;
     }
 
-    // v100.17 safety quarantine.
+    // v100.17 low-range correctness gate.
     //
-    // An external Windows/RTX 4070 Ti SUPER report reproduced a deterministic
-    // wrong ordinary-Mersenne PRP residue at p=19121591 with the native
-    // 512K Aevum plan (1:256:4:256:101), including a clean rerun from scratch.
-    // Until that arithmetic defect is isolated, AUTO must not select the
-    // implicated <=512K family for the ordinary 8-register PRP path.
+    // The native ordinary-Mersenne 512K Aevum plan is known-bad on an external
+    // Windows/RTX 4070 Ti SUPER reproduction. Never run that plan in AUTO.
+    // On Linux/Windows, however, a *larger* Aevum plan may still be correct and
+    // faster than Marin. Defer that decision to create_gpu(), which performs a
+    // deterministic word-exact differential probe and a measured throughput
+    // comparison, then caches the result for this exact exponent/GPU/version.
     //
-    // Keep Gaussian PRP/Proth untouched: those modes use their own 1/3-register
-    // layouts and factor-capacity guard. Larger explicit diagnostic plans are
-    // also intentionally outside this AUTO quarantine.
+    // Smaller native plans stay Marin-only. Gaussian PRP/Proth is untouched
+    // because it uses a different 1/3-register path.
     constexpr std::size_t kOrdinaryPrpQuarantineWords = 524288u;
     if (workload == engine::gpu_workload::prp &&
         register_count == 8u &&
         result.aevum_transform > 0 &&
         result.aevum_transform <= kOrdinaryPrpQuarantineWords) {
+#if !defined(__APPLE__)
+        if (native_request &&
+            result.aevum_transform == kOrdinaryPrpQuarantineWords) {
+            std::ostringstream out;
+            out << "profile=" << profile.name
+                << ", regs=" << register_count
+                << ", native-Aevum=" << result.aevum_transform
+                << ", Marin=" << result.marin_transform
+                << ", native-family=" << plan_family(result.fft_spec)
+                << ", native-FFT=" << result.fft_spec
+                << ", safety=runtime-compare (native 512K forbidden; larger Aevum candidates require exact differential + measured speed win)";
+            result.detail = out.str();
+            result.use_aevum = false;
+            result.runtime_compare = true;
+            return result;
+        }
+#endif
         std::ostringstream out;
         out << "profile=" << profile.name
             << ", regs=" << register_count
@@ -154,7 +171,7 @@ AevumAutoDecision aevum_auto_decide(const std::uint32_t exponent,
             << ", Marin=" << result.marin_transform
             << ", family=" << plan_family(result.fft_spec)
             << ", FFT=" << result.fft_spec
-            << ", safety=Marin-only (ordinary PRP Aevum <=512K temporarily quarantined after externally reproduced v100.16 residue mismatch)";
+            << ", safety=Marin-only (ordinary PRP native Aevum <=512K quarantined)";
         result.detail = out.str();
         result.use_aevum = false;
         return result;

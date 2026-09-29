@@ -14,14 +14,14 @@ int main() {
     if (small.aevum_transform != 262144 || small.marin_transform != 65536) return 2;
 
 #if !defined(__APPLE__)
-    // v100.17 safety regression: the externally failing ordinary-Mersenne
-    // 512K PRP family must not be selected automatically. Gaussian PRP uses
-    // a different register layout and remains covered separately below.
+    // v100.17 measured safety regression: native 512K must never be selected
+    // directly, but AUTO may benchmark larger exact Aevum plans against Marin.
     auto quarantined_prp = aevum_auto_decide(
         19121591u, 8, engine::gpu_workload::prp);
-    expect(quarantined_prp.use_aevum, false, "ordinary 512K PRP quarantine");
+    expect(quarantined_prp.use_aevum, false, "ordinary 512K PRP pre-probe");
     if (quarantined_prp.aevum_transform != 524288u) return 12;
-    if (quarantined_prp.detail.find("safety=Marin-only") == std::string::npos) return 13;
+    if (!quarantined_prp.runtime_compare) return 13;
+    if (quarantined_prp.detail.find("safety=runtime-compare") == std::string::npos) return 14;
 #endif
 
     auto large = aevum_auto_decide(136279841u, 8, engine::gpu_workload::prp);

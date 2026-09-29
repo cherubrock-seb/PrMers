@@ -118,4 +118,8 @@ public:
 
   float minBpw() const { return shape.minBpw(); }
   float maxBpw() const;
+
+  bool knownUnsafeOrdinaryPrp(u64 exponent) const;
+  FFTConfig promoteKnownUnsafeOrdinaryPrp(
+      const Args& args, u64 exponent) const;
 };

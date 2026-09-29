@@ -358,6 +358,63 @@ float FFTConfig::maxBpw() const {
   return (carry == CARRY_32 && (shape.fft_type == FFT64 || shape.fft_type == FFT3231)) ? std::min(shape.carry32BPW(), b) : b;
 }
 
+bool FFTConfig::knownUnsafeOrdinaryPrp(u64 exponent) const {
+  constexpr u64 kFirstReproducedBadExponent = 19121591u;
+
+  return exponent >= kFirstReproducedBadExponent &&
+         shape.fft_type == FFT3161 &&
+         shape.width == 256u &&
+         shape.middle == 4u &&
+         shape.height == 256u;
+}
+
+FFTConfig FFTConfig::promoteKnownUnsafeOrdinaryPrp(
+    const Args& args, u64 exponent) const {
+  if (!knownUnsafeOrdinaryPrp(exponent)) return *this;
+
+  // Both 1M variants were word-exact against Marin at p=19121591
+  // on RTX 3080 and Radeon VII. 101 is the deterministic baseline;
+  // the normal Aevum tuner can still benchmark 202 afterwards.
+  for (const char* spec : {
+           "1:512:4:256:101",
+           "1:512:4:256:202"
+       }) {
+    FFTConfig candidate{spec};
+
+    const double bpw =
+        double(exponent) / double(candidate.size());
+
+    if (bpw >= candidate.minBpw() &&
+        candidate.maxExp() * args.fftOverdrive >= exponent) {
+      return candidate;
+    }
+  }
+
+  // Defensive fallback for a manually forced 512K plan far outside
+  // the reproduced low-range case.
+  for (const FFTShape& shape2 : FFTShape::allShapes()) {
+    if (shape2.fft_type != FFT3161) continue;
+    if (shape2.size() <= shape.size()) continue;
+
+    for (u32 variant : {101u, 202u}) {
+      FFTConfig candidate{
+          shape2, variant, CARRY_AUTO};
+
+      const double bpw =
+          double(exponent) / double(candidate.size());
+
+      if (bpw < candidate.minBpw()) continue;
+
+      if (candidate.maxExp() * args.fftOverdrive >= exponent)
+        return candidate;
+    }
+  }
+
+  throw std::runtime_error(
+      "Aevum cannot promote unsafe ordinary-PRP "
+      "FFT3161 256x4x256 plan");
+}
+
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
 #if defined(__APPLE__)
   // Apple exposes OpenCL 1.2 through a legacy compiler.  The staged FFT3161

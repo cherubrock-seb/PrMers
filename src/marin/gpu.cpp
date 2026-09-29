@@ -10,12 +10,23 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include "aevum/EngineAevum.hpp"
 #include "marin/ibdwt.h"
 #include "ui/WebGuiServer.hpp"
+#include "core/Version.hpp"
 
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cctype>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 std::mutex backend_mutex;
@@ -28,6 +39,443 @@ std::string aevum_radix1k_policy_detail() {
     if (value && std::string(value) == "8")
         return "radix1k=8 explicit-override";
     return "radix1k=4 safe-default";
+}
+
+enum class BackendProbeMode { off, automatic, retune };
+
+BackendProbeMode backend_probe_mode() {
+    const char* raw = std::getenv("PRMERS_BACKEND_AUTO");
+    if (!raw || !*raw) return BackendProbeMode::automatic;
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (value == "0" || value == "off") return BackendProbeMode::off;
+    if (value == "retune" || value == "force-retune" || value == "force")
+        return BackendProbeMode::retune;
+    return BackendProbeMode::automatic;
+}
+
+double backend_probe_min_speedup() {
+    constexpr double fallback = 1.03;
+    const char* raw = std::getenv("PRMERS_BACKEND_AUTO_MIN_SPEEDUP");
+    if (!raw || !*raw) return fallback;
+    char* end = nullptr;
+    const double value = std::strtod(raw, &end);
+    if (end == raw || *end != '\0' || value < 1.0 || value > 2.0) return fallback;
+    return value;
+}
+
+std::string cl_string(cl_device_id device, cl_device_info what) {
+    std::size_t bytes = 0;
+    if (clGetDeviceInfo(device, what, 0, nullptr, &bytes) != CL_SUCCESS || bytes == 0)
+        return "unknown";
+    std::string value(bytes, '\0');
+    if (clGetDeviceInfo(device, what, bytes, value.data(), nullptr) != CL_SUCCESS)
+        return "unknown";
+    while (!value.empty() && value.back() == '\0') value.pop_back();
+    for (char& c : value) if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+    return value;
+}
+
+std::string backend_probe_key(const std::uint32_t exponent,
+                              const std::size_t device) {
+    try {
+        ocl::platform platform;
+        if (device >= platform.get_device_count()) return {};
+        const cl_device_id d = platform.get_device(device);
+        std::ostringstream out;
+        out << "schema=2"
+            << "|prmers=" << core::PRMERS_VERSION
+            << "|p=" << exponent
+            << "|device-index=" << device
+            << "|vendor=" << cl_string(d, CL_DEVICE_VENDOR)
+            << "|name=" << cl_string(d, CL_DEVICE_NAME)
+            << "|driver=" << cl_string(d, CL_DRIVER_VERSION)
+            << "|runtime=" << cl_string(d, CL_DEVICE_VERSION);
+        static const char* flags[] = {
+            "AEVUM_RADIX1K", "AEVUM_TYPE4_MULTI_Q", "AEVUM_PRP_MIDDLE1",
+            "AEVUM_REG_LEAD_CACHE", "AEVUM_TUNE_DIR"
+        };
+        for (const char* name : flags) {
+            if (const char* value = std::getenv(name); value && *value)
+                out << '|' << name << '=' << value;
+        }
+        return out.str();
+    } catch (...) {
+        return {};
+    }
+}
+
+std::uint64_t fnv1a64(const std::string& text) {
+    std::uint64_t h = 1469598103934665603ull;
+    for (char raw : text) {
+        const auto c = static_cast<unsigned char>(raw);
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+std::filesystem::path backend_probe_cache_path(const std::string& key) {
+    std::filesystem::path dir;
+    if (const char* explicit_dir = std::getenv("PRMERS_BACKEND_AUTO_CACHE_DIR");
+        explicit_dir && *explicit_dir) {
+        dir = explicit_dir;
+    } else if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg) {
+        dir = std::filesystem::path(xdg) / "prmers" / "backend-auto-v1";
+    } else if (const char* home = std::getenv("HOME"); home && *home) {
+        dir = std::filesystem::path(home) / ".cache" / "prmers" / "backend-auto-v1";
+    } else {
+        dir = ".prmers-backend-auto-v1";
+    }
+    std::ostringstream name;
+    name << std::hex << std::setw(16) << std::setfill('0') << fnv1a64(key);
+    return dir / (name.str() + ".txt");
+}
+
+struct BackendProbeRecord {
+    bool valid = false;
+    bool exact = false;
+    bool use_aevum = false;
+    std::string plan;
+    std::size_t transform = 0;
+    double marin_ns = 0.0;
+    double aevum_ns = 0.0;
+};
+
+BackendProbeRecord load_backend_probe_record(const std::string& key) {
+    BackendProbeRecord record;
+    if (key.empty()) return record;
+    try {
+        std::ifstream in(backend_probe_cache_path(key));
+        std::string schema, stored_key, exact, winner, transform, marin_ns, aevum_ns;
+        if (!std::getline(in, schema) || schema != "2") return record;
+        if (!std::getline(in, stored_key) || stored_key != key) return record;
+        if (!std::getline(in, exact)) return record;
+        if (!std::getline(in, winner)) return record;
+        if (!std::getline(in, record.plan)) return record;
+        if (!std::getline(in, transform)) return record;
+        if (!std::getline(in, marin_ns)) return record;
+        if (!std::getline(in, aevum_ns)) return record;
+        record.exact = exact == "1";
+        record.use_aevum = winner == "Aevum";
+        record.transform = static_cast<std::size_t>(std::stoull(transform));
+        record.marin_ns = std::stod(marin_ns);
+        record.aevum_ns = std::stod(aevum_ns);
+        record.valid = record.marin_ns > 0.0 &&
+                       (!record.exact || record.aevum_ns > 0.0);
+    } catch (...) {
+        return {};
+    }
+    return record;
+}
+
+void store_backend_probe_record(const std::string& key,
+                                const BackendProbeRecord& record) {
+    if (key.empty()) return;
+    try {
+        const auto path = backend_probe_cache_path(key);
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+        if (ec) return;
+        auto temp = path;
+        temp += ".tmp";
+        {
+            std::ofstream out(temp, std::ios::trunc);
+            if (!out) return;
+            out << "2\n"
+                << key << '\n'
+                << (record.exact ? "1" : "0") << '\n'
+                << (record.use_aevum ? "Aevum" : "Marin") << '\n'
+                << record.plan << '\n'
+                << record.transform << '\n'
+                << std::setprecision(17) << record.marin_ns << '\n'
+                << std::setprecision(17) << record.aevum_ns << '\n';
+            out.flush();
+            if (!out) return;
+        }
+        std::filesystem::remove(path, ec);
+        ec.clear();
+        std::filesystem::rename(temp, path, ec);
+        if (ec) std::filesystem::remove(temp);
+    } catch (...) {
+    }
+}
+
+void prp_operation_probe_state(engine& eng, const std::uint32_t seed) {
+    const engine::Reg R0 = 0, R1 = 1, R2 = 2, R3 = 3;
+    const engine::Reg R4 = 4, R5 = 5, RBASE = 6, RTMP = 7;
+
+    // Mirror the ordinary PRP register layout and the important Gerbicz
+    // operation mix from RunPrpOrLlMarin, but in a short deterministic probe.
+    eng.set(R1, 1u);
+    eng.set(R0, seed);
+    eng.copy(R4, R0);
+    eng.copy(R5, R1);
+    eng.set(RBASE, 3u);
+    eng.set_multiplicand(RTMP, RBASE);
+
+    for (unsigned block = 0; block < 8; ++block) {
+        for (unsigned i = 0; i < 256; ++i) eng.square_mul(R0);
+
+        eng.copy(R3, R1);
+        eng.set_multiplicand(R2, R0);
+        eng.mul(R1, R2);
+
+        // Exercise both Gerbicz replay tails used by production PRP:
+        // prepared multiply-by-base and fused square_mul(...,3).
+        for (unsigned i = 0; i < 31; ++i) eng.square_mul(R3);
+        if ((block & 1u) != 0u) eng.mul(R3, RTMP);
+        else eng.square_mul(R3, 3u);
+        for (unsigned i = 0; i < 17; ++i) eng.square_mul(R3);
+
+        eng.copy(R4, R0);
+        eng.copy(R5, R1);
+    }
+    eng.sync();
+}
+
+bool equal_register(engine& lhs, engine& rhs, const engine::Reg reg) {
+    mpz_t a, b;
+    mpz_inits(a, b, nullptr);
+    lhs.get_mpz(a, reg);
+    rhs.get_mpz(b, reg);
+    const bool equal = mpz_cmp(a, b) == 0;
+    mpz_clears(a, b, nullptr);
+    return equal;
+}
+
+bool exact_prp_operation_probe(engine& marin, engine& aevum) {
+    for (const std::uint32_t seed : {3u, 5u}) {
+        prp_operation_probe_state(marin, seed);
+        prp_operation_probe_state(aevum, seed);
+        for (const engine::Reg reg : {engine::Reg(0), engine::Reg(1),
+                                      engine::Reg(3), engine::Reg(4),
+                                      engine::Reg(5)}) {
+            if (!equal_register(marin, aevum, reg)) return false;
+        }
+    }
+    return true;
+}
+
+double timed_square_sample(engine& eng) {
+    constexpr unsigned warmup = 64;
+    constexpr unsigned iterations = 512;
+    eng.set(0, 3u);
+    for (unsigned i = 0; i < warmup; ++i) eng.square_mul(0);
+    eng.sync();
+    const auto begin = std::chrono::steady_clock::now();
+    for (unsigned i = 0; i < iterations; ++i) eng.square_mul(0);
+    eng.sync();
+    const auto end = std::chrono::steady_clock::now();
+    return std::chrono::duration<double, std::nano>(end - begin).count() /
+           static_cast<double>(iterations);
+}
+
+double median3(std::array<double, 3> values) {
+    std::sort(values.begin(), values.end());
+    return values[1];
+}
+
+double measured_square_ns(engine& eng) {
+    std::array<double, 3> samples{};
+    for (double& value : samples) value = timed_square_sample(eng);
+    return median3(samples);
+}
+
+struct MeasuredBackendResult {
+    std::unique_ptr<engine> selected;
+    bool use_aevum = false;
+    bool exact = false;
+    std::string plan;
+    std::size_t transform = 0;
+    double marin_ns = 0.0;
+    double aevum_ns = 0.0;
+    std::string detail;
+};
+
+MeasuredBackendResult measured_lowrange_prp_backend(
+    const std::uint32_t exponent,
+    const std::size_t register_count,
+    const std::size_t device,
+    const bool verbose) {
+
+    constexpr std::size_t quarantine_words = 524288u;
+    const BackendProbeMode mode = backend_probe_mode();
+    const double min_speedup = backend_probe_min_speedup();
+    const std::string key = backend_probe_key(exponent, device);
+
+    if (mode == BackendProbeMode::off) {
+        MeasuredBackendResult out;
+        out.selected = std::make_unique<engine_gpu>(
+            exponent, register_count, device, verbose);
+        out.detail = "runtime-compare=off => Marin";
+        return out;
+    }
+
+    if (mode != BackendProbeMode::retune) {
+        const BackendProbeRecord cached = load_backend_probe_record(key);
+        if (cached.valid) {
+            if (cached.use_aevum && cached.exact &&
+                cached.transform > quarantine_words && !cached.plan.empty()) {
+                std::size_t resolved_size = 0;
+                std::string resolved_plan, reason;
+                if (aevum_engine_resolve_fft(
+                        exponent, cached.plan, &resolved_size, &resolved_plan, &reason) &&
+                    resolved_size == cached.transform &&
+                    resolved_size > quarantine_words) {
+                    try {
+                        MeasuredBackendResult out;
+                        out.selected.reset(create_aevum_engine(
+                            exponent, register_count, device, verbose,
+                            cached.plan,
+                            static_cast<std::uint32_t>(engine::gpu_workload::prp)));
+                        out.use_aevum = true;
+                        out.exact = true;
+                        out.plan = cached.plan;
+                        out.transform = cached.transform;
+                        out.marin_ns = cached.marin_ns;
+                        out.aevum_ns = cached.aevum_ns;
+                        std::ostringstream detail;
+                        detail << "cache=hit, exact=yes, winner=Aevum"
+                               << ", plan=" << cached.plan
+                               << ", Marin=" << std::fixed << std::setprecision(1)
+                               << cached.marin_ns << " ns/it"
+                               << ", Aevum=" << cached.aevum_ns << " ns/it";
+                        out.detail = detail.str();
+                        return out;
+                    } catch (...) {
+                    }
+                }
+            } else {
+                MeasuredBackendResult out;
+                out.selected = std::make_unique<engine_gpu>(
+                    exponent, register_count, device, verbose);
+                out.exact = cached.exact;
+                out.plan = cached.plan;
+                out.transform = cached.transform;
+                out.marin_ns = cached.marin_ns;
+                out.aevum_ns = cached.aevum_ns;
+                std::ostringstream detail;
+                detail << "cache=hit, winner=Marin"
+                       << ", exact=" << (cached.exact ? "yes" : "no");
+                if (!cached.plan.empty()) detail << ", best-Aevum-plan=" << cached.plan;
+                if (cached.marin_ns > 0.0)
+                    detail << ", Marin=" << std::fixed << std::setprecision(1)
+                           << cached.marin_ns << " ns/it";
+                if (cached.aevum_ns > 0.0)
+                    detail << ", Aevum=" << cached.aevum_ns << " ns/it";
+                out.detail = detail.str();
+                return out;
+            }
+        }
+    }
+
+    static const std::array<const char*, 2> requested_plans = {
+        "1:512:4:256:101",
+        "1:512:4:256:202"
+    };
+
+    auto marin = std::make_unique<engine_gpu>(
+        exponent, register_count, device, false);
+    const double marin_ns = measured_square_ns(*marin);
+
+    bool any_exact = false;
+    double best_aevum_ns = 0.0;
+    std::string best_plan;
+    std::size_t best_transform = 0;
+
+    for (const char* requested : requested_plans) {
+        std::size_t transform = 0;
+        std::string plan, reason;
+        if (!aevum_engine_resolve_fft(
+                exponent, requested, &transform, &plan, &reason) ||
+            transform <= quarantine_words)
+            continue;
+
+        try {
+            std::unique_ptr<engine> candidate(create_aevum_engine(
+                exponent, register_count, device, false, plan,
+                static_cast<std::uint32_t>(engine::gpu_workload::prp)));
+
+            if (!exact_prp_operation_probe(*marin, *candidate)) {
+                std::cout << "[Backend Auto Probe] PRP: rejected Aevum plan "
+                          << plan << " (word-exact differential mismatch)." << std::endl;
+                continue;
+            }
+
+            any_exact = true;
+            const double aevum_ns = measured_square_ns(*candidate);
+            std::cout << "[Backend Auto Probe] PRP: plan " << plan
+                      << " exact, Marin=" << std::fixed << std::setprecision(1)
+                      << marin_ns << " ns/it, Aevum=" << aevum_ns << " ns/it."
+                      << std::endl;
+            if (best_aevum_ns == 0.0 || aevum_ns < best_aevum_ns) {
+                best_aevum_ns = aevum_ns;
+                best_plan = plan;
+                best_transform = transform;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "[Backend Auto Probe] PRP: rejected Aevum plan "
+                      << requested << " (" << e.what() << ")." << std::endl;
+        }
+    }
+
+    BackendProbeRecord record;
+    record.exact = any_exact;
+    record.plan = best_plan;
+    record.transform = best_transform;
+    record.marin_ns = marin_ns;
+    record.aevum_ns = best_aevum_ns;
+
+    const double speedup =
+        (any_exact && best_aevum_ns > 0.0) ? marin_ns / best_aevum_ns : 0.0;
+    record.use_aevum = any_exact && speedup >= min_speedup;
+    record.valid = true;
+    store_backend_probe_record(key, record);
+
+    marin.reset();
+
+    MeasuredBackendResult out;
+    out.use_aevum = record.use_aevum;
+    out.exact = record.exact;
+    out.plan = record.plan;
+    out.transform = record.transform;
+    out.marin_ns = record.marin_ns;
+    out.aevum_ns = record.aevum_ns;
+
+    if (record.use_aevum) {
+        try {
+            out.selected.reset(create_aevum_engine(
+                exponent, register_count, device, verbose, record.plan,
+                static_cast<std::uint32_t>(engine::gpu_workload::prp)));
+        } catch (const std::exception& e) {
+            out.use_aevum = false;
+            out.selected = std::make_unique<engine_gpu>(
+                exponent, register_count, device, verbose);
+            out.detail = std::string("probe winner Aevum became unavailable; Marin fallback: ") +
+                         e.what();
+            return out;
+        }
+    } else {
+        out.selected = std::make_unique<engine_gpu>(
+            exponent, register_count, device, verbose);
+    }
+
+    std::ostringstream detail;
+    detail << "cache=miss"
+           << ", exact=" << (record.exact ? "yes" : "no")
+           << ", winner=" << (record.use_aevum ? "Aevum" : "Marin");
+    if (!record.plan.empty()) detail << ", best-Aevum-plan=" << record.plan;
+    detail << ", Marin=" << std::fixed << std::setprecision(1)
+           << record.marin_ns << " ns/it";
+    if (record.aevum_ns > 0.0) {
+        detail << ", Aevum=" << record.aevum_ns << " ns/it"
+               << ", speedup=" << std::setprecision(3) << speedup << "x"
+               << ", threshold=" << min_speedup << "x";
+    }
+    out.detail = detail.str();
+    return out;
 }
 }
 
@@ -85,6 +533,21 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
     AevumAutoDecision decision;
     if (selected == gpu_backend::auto_select) {
         decision = aevum_auto_decide(p, reg_count, selected_workload, fft_spec);
+
+        if (decision.runtime_compare) {
+            MeasuredBackendResult measured =
+                measured_lowrange_prp_backend(p, reg_count, device, verbose);
+            const std::string auto_detail =
+                decision.detail + " | " + measured.detail +
+                (measured.use_aevum ? " | " + aevum_radix1k_policy_detail() : "");
+            std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
+                      << ": " << (measured.use_aevum ? "Aevum" : "Marin")
+                      << " selected (" << auto_detail << ")." << std::endl;
+            publish("Auto", measured.use_aevum ? "Aevum" : "Marin", auto_detail,
+                    measured.transform, measured.plan);
+            return measured.selected.release();
+        }
+
         const std::string auto_detail = decision.use_aevum
             ? decision.detail + " | " + aevum_radix1k_policy_detail()
             : decision.detail;

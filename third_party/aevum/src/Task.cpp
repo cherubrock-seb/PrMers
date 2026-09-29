@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <cassert>
+#include <stdexcept>
 
 namespace {
 
@@ -230,7 +231,30 @@ void Task::execute(GpuCommon shared, u32 instance) {
 
   LogContext pushContext(std::to_string(exponent));
 
-  FFTConfig fft = FFTConfig::bestFit(*shared.args, exponent, shared.args->fftSpec);
+  FFTConfig fft = FFTConfig::bestFit(
+      *shared.args, exponent, shared.args->fftSpec);
+
+  if (kind == PRP &&
+      fft.knownUnsafeOrdinaryPrp(exponent)) {
+    const std::string unsafe_spec = fft.spec();
+
+    if (!shared.args->fftSpec.empty()) {
+      throw std::runtime_error(
+          "Aevum ordinary PRP FFT3161 256x4x256 is unsafe "
+          "at this exponent; use AUTO or a >=1M plan such as "
+          "1:512:4:256:101");
+    }
+
+    fft = fft.promoteKnownUnsafeOrdinaryPrp(
+        *shared.args, exponent);
+
+    log("Aevum ordinary PRP safety: %s rejected for "
+        "exponent %" PRIu64
+        "; promoted to validated %s.\n",
+        unsafe_spec.c_str(),
+        exponent,
+        fft.spec().c_str());
+  }
 
   auto gpu = Gpu::make(exponent, shared, fft);
 

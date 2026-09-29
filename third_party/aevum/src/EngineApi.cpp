@@ -173,6 +173,11 @@ bool usableTuneEntry(const Args& args,
     const double bpw = exponent / double(tuned.fft.size());
     if (bpw < tuned.fft.minBpw()) continue;
     if (tuned.fft.maxExp() * args.fftOverdrive < exponent) continue;
+
+    if (workload == aevum_autotune::Workload::Prp &&
+        tuned.fft.knownUnsafeOrdinaryPrp(exponent))
+      continue;
+
     if (pm1Factor3Workload(workload) &&
         !factor3CapacitySafe(args, exponent, tuned.fft)) continue;
     return true;
@@ -205,6 +210,11 @@ std::vector<std::string> autotuneCandidates(const Args& args,
     if (candidates.size() >= cap || seen.count(spec)) return;
     const auto fft = admissiblePlan(args, exponent, spec);
     if (!fft) return;
+
+    if (workload == aevum_autotune::Workload::Prp &&
+        fft->knownUnsafeOrdinaryPrp(exponent))
+      return;
+
     if (pm1Factor3Workload(workload) &&
         !factor3CapacitySafe(args, exponent, *fft)) return;
     const std::string normalized = fft->spec();
@@ -905,6 +915,37 @@ public:
 
     FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, spec);
 
+    const bool pseudo_auto_spec =
+        spec == "native-prp:auto" ||
+        spec == "native-prp:auto-amd";
+
+    if (workload_ == aevum_autotune::Workload::Prp &&
+        native_fft.knownUnsafeOrdinaryPrp(exponent_)) {
+      const std::string unsafe_spec =
+          native_fft.spec();
+
+      // An explicit request for the reproduced-dangerous shape
+      // must fail loudly rather than emit a plausible wrong result.
+      if (explicit_fft_spec && !pseudo_auto_spec) {
+        throw std::runtime_error(
+            "Aevum ordinary PRP FFT3161 256x4x256 is unsafe "
+            "at this exponent; use AUTO or a >=1M plan such as "
+            "1:512:4:256:101");
+      }
+
+      native_fft =
+          native_fft.promoteKnownUnsafeOrdinaryPrp(
+              args_, exponent_);
+
+      if (verbose) {
+        log("Aevum ordinary PRP safety: %s rejected for "
+            "exponent %u; promoted to validated %s.\n",
+            unsafe_spec.c_str(),
+            exponent_,
+            native_fft.spec().c_str());
+      }
+    }
+
     if (!explicit_fft_spec &&
         !manual_plan_env &&
         !gb202_profile &&
@@ -947,6 +988,8 @@ public:
         if (cached_record) {
           const auto cached_fft = admissiblePlan(args_, exponent_, cached_record->plan);
           if (cached_fft &&
+              !(workload_ == aevum_autotune::Workload::Prp &&
+                cached_fft->knownUnsafeOrdinaryPrp(exponent_)) &&
               (!pm1Factor3Workload(workload_) ||
                factor3CapacitySafe(args_, exponent_, *cached_fft))) {
             selected_spec = cached_fft->spec();
