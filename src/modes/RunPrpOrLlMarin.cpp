@@ -632,6 +632,7 @@ int App::runPrpOrLlMarin()
 
             std::filesystem::path proofFilePath;
             bool gpuProofReady = false;
+            bool gpuProofSucceeded = false;
             std::string gpuProofError;
 
             try {
@@ -675,15 +676,18 @@ int App::runPrpOrLlMarin()
                             proofPower,
                             options.verify
                         );
+                        gpuProofSucceeded = true;
                         break;
                     }
                     catch (const std::exception& e) {
-                        if (proofPower == 0)
-                            throw;
+                        gpuProofError = e.what();
 
                         std::cerr
                             << "Warning: GPU proof generation failed: "
                             << e.what() << std::endl;
+
+                        if (proofPower == 0)
+                            break;
 
                         --proofPower;
 
@@ -693,7 +697,7 @@ int App::runPrpOrLlMarin()
                     }
                 }
             }
-            else {
+            if (!gpuProofReady || !gpuProofSucceeded) {
                 std::cerr
                     << "[Proof backend] GPU NTT unavailable, "
                     << "falling back to CPU GMP: "
