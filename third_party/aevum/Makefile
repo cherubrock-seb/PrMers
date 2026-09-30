@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.87-pass5-prp-max
+AEVUM_VERSION ?= v0.3.88-pass5-prp-max
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -19,6 +19,13 @@ MACOSX_DEPLOYMENT_TARGET ?= 12.0
 CXX ?= c++
 
 DL_LIBS = -ldl
+LOADER_LIBS = $(DL_LIBS)
+
+ifneq ($(findstring _NT,$(HOST_OS)),)
+DL_LIBS =
+LOADER_LIBS =
+endif
+
 ENGINE_LINK_FLAGS = -shared -Wl,-Bsymbolic
 EXAMPLE_RPATH = -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)'
 TEST_SECTION_FLAGS = -ffunction-sections -fdata-sections
@@ -95,7 +102,7 @@ ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
 engine-lib: $(ENGINE_LIB)
 
 $(ENGINE_LIB): $(ENGINE_OBJS)
-	$(CXX) $(ENGINE_LINK_FLAGS) -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) $(DL_LIBS)
+	$(CXX) $(ENGINE_LINK_FLAGS) -o $@ $^ $(LIBPATH) $(OPENCL_LIBS)
 
 $(ENGINE_BIN)/%.o: src/%.cpp
 	@mkdir -p $(dir $@) $(ENGINE_DEPDIR)

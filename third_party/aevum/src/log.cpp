@@ -11,8 +11,6 @@ thread_local vector<string> contextParts;
 
 thread_local File logFile;
 
-File stdoutFile{stdout, "stdout"};
-
 string logContext() { return context; }
 
 void initLog(const char *logName) {
@@ -41,7 +39,10 @@ void log(const char *fmt, ...) {
   string_view s{logBuf};
 
   if (logFile) { logFile.write(s); }
-  stdoutFile.write(s);
+  if (!s.empty()) {
+    fwrite(s.data(), 1, s.size(), stdout);
+    fflush(stdout);
+  }
 }
 
 LogContext::LogContext(const string& s) : part{s} {

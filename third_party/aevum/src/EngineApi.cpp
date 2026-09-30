@@ -10,6 +10,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "Background.h"
 #include "Context.h"
 #include "FFTConfig.h"
+#include "File.h"
 #include "Gpu.h"
 #include "GpuCommon.h"
 #include "TrigBufCache.h"
@@ -50,6 +51,10 @@ void set_error(const char* text) {
 
 void set_error(const std::exception& e) {
   g_last_error = e.what();
+}
+
+void set_error(const char* what, const std::string& file) {
+  g_last_error = std::string(what) + ": " + file;
 }
 
 std::string openclDeviceInfoString(cl_device_id device, cl_device_info param) {
@@ -1715,6 +1720,12 @@ int invoke(F&& f) {
     set_error(e.c_str());
   } catch (const char* e) {
     set_error(e);
+  } catch (const ReadError& e) {
+    set_error("Aevum file read error", e.name);
+  } catch (const WriteError& e) {
+    set_error("Aevum file write error", e.name);
+  } catch (const CRCError& e) {
+    set_error("Aevum file CRC error", e.name);
   } catch (...) {
     set_error("unknown Aevum engine exception");
   }
@@ -1771,6 +1782,12 @@ aevum_engine_handle aevum_engine_create_ex(uint32_t exponent, size_t register_co
     set_error(e.c_str());
   } catch (const char* e) {
     set_error(e);
+  } catch (const ReadError& e) {
+    set_error("Aevum file read error", e.name);
+  } catch (const WriteError& e) {
+    set_error("Aevum file write error", e.name);
+  } catch (const CRCError& e) {
+    set_error("Aevum file CRC error", e.name);
   } catch (...) {
     set_error("unknown Aevum engine exception");
   }

@@ -250,11 +250,15 @@ int App::runPrpOrLlMarin()
         totalIters /= 2;
     }
 
-    uint64_t itersave =  backupManager.loadGerbiczIterSave();
-    uint64_t jsave = backupManager.loadGerbiczJSave();
-    if(jsave==0){
-        jsave = totalIters - 1;
-    }
+    // R4/R5 hold the last verified state.  Immediately after resume
+    // that is exactly the checkpoint state at iteration ri.
+    uint64_t goodIter = ri;
+
+    // Random corruption should disappear after restoring R4/R5.
+    // Repeating the same failure three times indicates a deterministic
+    // bad transform/plan, so do not loop forever.
+    uint32_t gl_failure_streak = 0;
+    constexpr uint32_t gl_failure_limit = 3;
 
     uint64_t L = options.exponent;
     uint64_t B = (uint64_t)(std::sqrt((double)L));
@@ -374,26 +378,48 @@ int App::runPrpOrLlMarin()
                         //throw std::runtime_error("Gerbicz-Li error checking failed!"); 
                         std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << (iter + 1) << "\n"
-                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                            << "[Gerbicz Li] Restore iter=" << goodIter
+                            << " (j=" << (totalIters > goodIter ? totalIters - goodIter - 1 : 0) << ")\n";
                         if (guiServer_) {
                             std::ostringstream oss;
                             oss << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << (iter + 1) << "\n"
-                            << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
+                            << "[Gerbicz Li] Restore iter=" << goodIter
+                            << " (j=" << (totalIters > goodIter ? totalIters - goodIter - 1 : 0) << ")\n";
                             guiServer_->appendLog(oss.str());
-                        }
-                        j = jsave;
-                        iter = itersave;
-                        lastIter = itersave;
-                        lastIter = iter;
-                        if (iter == 0) {
-                            iter = iter - 1;
-                            j = j + 1;
                         }
                         checkpass = 0;
                         options.gerbicz_error_count += 1;
+                        ++gl_failure_streak;
+
+                        if (gl_failure_streak >= gl_failure_limit) {
+                            const std::string reason =
+                                "Gerbicz-Li check failed " +
+                                std::to_string(gl_failure_streak) +
+                                " times in a row from verified iteration " +
+                                std::to_string(goodIter) +
+                                "; retrying the same state will not help. "
+                                "Try -engine-marin or another -aevum-fft plan.";
+
+                            std::cout << "[Gerbicz Li] " << reason << "\n";
+                            if (guiServer_) guiServer_->appendLog(
+                                std::string("[Gerbicz Li] ") + reason
+                            );
+
+                            delete eng;
+                            throw std::runtime_error(reason);
+                        }
+
                         eng->copy(R0, R4);
                         eng->copy(R1, R5);
+
+                        // Original loop executes ++iter and --j after this body.
+                        // Position it one step before goodIter so the next
+                        // arithmetic iteration is exactly the verified state.
+                        iter = (goodIter == 0)
+                            ? ~uint64_t{0}
+                            : goodIter - 1;
+                        j = totalIters - goodIter;
                     }
                     else{
                         std::cout << "[Gerbicz Li] Check passed! iter=" << (iter + 1) << "\n";
@@ -404,8 +430,8 @@ int App::runPrpOrLlMarin()
                         }
                         eng->copy(R4, R0);//Last correct state
                         eng->copy(R5, R1);//Last correct bufd
-                        itersave = iter;
-                        jsave = j;
+                        goodIter = iter + 1;
+                        gl_failure_streak = 0;
                         //cl_event postEvt;
                     }
             }

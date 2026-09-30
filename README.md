@@ -152,7 +152,7 @@ make -j"$(nproc)"
 Build with the optional Aevum shared engine when its source is present under `third_party/aevum`:
 
 ```bash
-./build_with_aevum_engine.sh
+make
 ```
 
 For the public repositories, the recommended layout is to keep Aevum in its own GPLv3 repository and attach it to PrMers as a Git submodule or external shared-library dependency:
@@ -160,7 +160,7 @@ For the public repositories, the recommended layout is to keep Aevum in its own 
 ```bash
 git submodule add https://github.com/cherubrock-seb/aevum-engine third_party/aevum
 git submodule update --init --recursive
-./build_with_aevum_engine.sh
+make
 ```
 
 Install system-wide:
@@ -1065,7 +1065,7 @@ The paper describes a proof scheme for left-to-right modular exponentiation, gen
 PrMers can load Aevum as an in-process arithmetic plugin for PRP, LL, P-1 and ECM:
 
 ```bash
-./build_with_aevum_engine.sh
+make
 ./prmers 136279841 -prp -proof 0 -d 0 --noask
 ```
 

@@ -41,7 +41,11 @@ ifeq ($(UNAME_S),Darwin)
   PLATFORM_CXXFLAGS += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
   PLATFORM_LDFLAGS  += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET) -framework OpenCL
 else
-  LDFLAGS  += -lOpenCL -ldl
+  LDFLAGS  += -lOpenCL
+  # dlopen on Unix; Windows EngineAevum uses LoadLibrary.
+  ifneq ($(shell case $(UNAME_S) in (*_NT*) echo 1;; esac),1)
+    LDFLAGS += -ldl
+  endif
 endif
 
 ifeq ($(shell case $(UNAME_S) in (*_NT*) echo 1;; esac),1)

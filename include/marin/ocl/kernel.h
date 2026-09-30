@@ -776,10 +776,11 @@ static const char * const src_ocl_kernel = \
 "	storel2(5, X, ml, xl);\n" \
 "}\n" \
 "\n" \
+"// The caller executes barrier(CLK_LOCAL_MEM_FENCE) first: only 4/5 of the work-items run\n" \
+"// this radix-5 stage and a barrier must be reached by every work-item of the group.\n" \
 "INLINE void backward_5o_0(const sz_t mg, __global uint64_2 * restrict const x,\n" \
 "	const sz_t ml, __local const uint64_2 * restrict const X)\n" \
 "{\n" \
-"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "	uint64_2 xl[5]; loadl2(5, xl, X, ml);\n" \
 "	bck5_0(xl);\n" \
 "	storeg2(5, x, mg, xl);\n" \
@@ -942,6 +943,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_VAR(20 / 4, CHUNK20);\n" \
 "\n" \
 "	backward_4i(1 * CHUNK20, &Xi[CHUNK20 * 4 * thread_idx], 1u << lm, &x[ko], r2i[sj], r4i[sj]);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "	if (i < 4 * (20 / 4 * CHUNK20) / 5) backward_5o_0(4u << lm, &x[ki], 4 * CHUNK20, &X[i]);\n" \
 "}\n" \
 "\n" \
@@ -1038,6 +1040,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_VAR(80 / 4, CHUNK80);\n" \
 "\n" \
 "	BACKWARD_64_80(CHUNK80);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "	if (i < 4 * (80 / 4 * CHUNK80) / 5) backward_5o_0(16u << lm, &x[ki], 16 * CHUNK80, &X[i]);\n" \
 "}\n" \
 "\n" \
@@ -1138,6 +1141,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_VAR(320 / 4, CHUNK320);\n" \
 "\n" \
 "	BACKWARD_256_320(CHUNK320);\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "	if (i < 4 * (320 / 4 * CHUNK320) / 5) backward_5o_0(64u << lm, &x[ki], 64 * CHUNK320, &X[i]);\n" \
 "}\n" \
 "\n" \
@@ -1239,6 +1243,7 @@ static const char * const src_ocl_kernel = \
 "	DECLARE_VAR(1280 / 4, 1);\n" \
 "\n" \
 "	BACKWARD_1024_1280();\n" \
+"	barrier(CLK_LOCAL_MEM_FENCE);\n" \
 "	if (i < 4 * (1280 / 4) / 5) backward_5o_0(256u << lm, &x[ki], 256, &X[i]);\n" \
 "}*/\n" \
 "\n" \

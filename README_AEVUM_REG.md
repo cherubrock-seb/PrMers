@@ -10,7 +10,7 @@ Automatic Marin/Aevum selection is the default. Use `-aevum` to force Aevum, `-e
 sudo apt update
 sudo apt install -y build-essential g++ make ocl-icd-opencl-dev opencl-headers libgmp-dev
 
-./build_with_aevum_engine.sh
+make
 make test-aevum-host
 make test-aevum-reg
 ```

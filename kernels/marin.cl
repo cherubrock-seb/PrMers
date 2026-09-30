@@ -771,10 +771,11 @@ INLINE void forward_5i_0(const sz_t ml, __local uint64_2 * restrict const X,
 	storel2(5, X, ml, xl);
 }
 
+// The caller executes barrier(CLK_LOCAL_MEM_FENCE) first: only 4/5 of the work-items run
+// this radix-5 stage and a barrier must be reached by every work-item of the group.
 INLINE void backward_5o_0(const sz_t mg, __global uint64_2 * restrict const x,
 	const sz_t ml, __local const uint64_2 * restrict const X)
 {
-	barrier(CLK_LOCAL_MEM_FENCE);
 	uint64_2 xl[5]; loadl2(5, xl, X, ml);
 	bck5_0(xl);
 	storeg2(5, x, mg, xl);
@@ -937,6 +938,7 @@ void backward20_0(__global uint64 * restrict const reg, __global const uint64 * 
 	DECLARE_VAR(20 / 4, CHUNK20);
 
 	backward_4i(1 * CHUNK20, &Xi[CHUNK20 * 4 * thread_idx], 1u << lm, &x[ko], r2i[sj], r4i[sj]);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	if (i < 4 * (20 / 4 * CHUNK20) / 5) backward_5o_0(4u << lm, &x[ki], 4 * CHUNK20, &X[i]);
 }
 
@@ -1033,6 +1035,7 @@ void backward80_0(__global uint64 * restrict const reg, __global const uint64 * 
 	DECLARE_VAR(80 / 4, CHUNK80);
 
 	BACKWARD_64_80(CHUNK80);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	if (i < 4 * (80 / 4 * CHUNK80) / 5) backward_5o_0(16u << lm, &x[ki], 16 * CHUNK80, &X[i]);
 }
 
@@ -1133,6 +1136,7 @@ void backward320_0(__global uint64 * restrict const reg, __global const uint64 *
 	DECLARE_VAR(320 / 4, CHUNK320);
 
 	BACKWARD_256_320(CHUNK320);
+	barrier(CLK_LOCAL_MEM_FENCE);
 	if (i < 4 * (320 / 4 * CHUNK320) / 5) backward_5o_0(64u << lm, &x[ki], 64 * CHUNK320, &X[i]);
 }
 
@@ -1234,6 +1238,7 @@ void backward1280_0(__global uint64 * restrict const reg, __global const uint64 
 	DECLARE_VAR(1280 / 4, 1);
 
 	BACKWARD_1024_1280();
+	barrier(CLK_LOCAL_MEM_FENCE);
 	if (i < 4 * (1280 / 4) / 5) backward_5o_0(256u << lm, &x[ki], 256, &X[i]);
 }*/
 

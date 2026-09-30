@@ -12,6 +12,8 @@
 #include <memory>
 #include <vector>
 #include <array>
+#include <random>
+#include <system_error>
 
 using namespace std;
 
@@ -280,7 +282,18 @@ string getBuildLog(cl_program program, cl_device_id deviceId) {
 Program loadBinary(cl_context context, cl_device_id id, string_view fileName) {
   File f = File::openRead(fileName);
   if (!f) { return {}; }
-  string bytes = f.readAll();
+  string bytes;
+  try {
+    bytes = f.readAll();
+  } catch (const ReadError&) {
+    bytes.clear();
+  }
+
+  if (bytes.empty()) {
+    log("Ignoring unreadable kernel cache entry %s\n", string(fileName).c_str());
+    return {};
+  }
+
   size_t size = bytes.size();
   const unsigned char *ptr = reinterpret_cast<const unsigned char *>(bytes.c_str());
   int err = 0;
@@ -306,7 +319,29 @@ string getBinary(cl_program program) {
 }
 
 void saveBinary(cl_program program, string_view fileName) {
-  File::openWrite(fileName).write(getBinary(program));
+  // Build the complete cache entry under a temporary name first.
+  // An interrupted run therefore cannot create a new empty target.
+  const string binary = getBinary(program);
+  const fs::path target{string(fileName)};
+  const fs::path tmp{
+      string(fileName) + ".tmp" + to_string(random_device{}())
+  };
+
+  File::openWrite(tmp).write(binary);
+
+  std::error_code ec;
+
+  // Windows rename() cannot reliably replace an existing destination.
+  // The complete replacement already exists in tmp at this point.
+  fs::remove(target, ec);
+  ec.clear();
+
+  fs::rename(tmp, target, ec);
+  if (ec) {
+    std::error_code cleanup_ec;
+    fs::remove(tmp, cleanup_ec);
+    throw WriteError{target.string()};
+  }
 }
 
 cl_kernel loadKernel(cl_program program, const char *name) {

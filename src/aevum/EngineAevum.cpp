@@ -234,7 +234,7 @@ struct Api {
         }
         if (!library) {
             throw std::runtime_error("Cannot load the Aevum engine plugin. Build it with "
-                                     "./build_with_aevum_engine.sh or set AEVUM_ENGINE_LIB.\n" + errors);
+                                     "make or set AEVUM_ENGINE_LIB.\n" + errors);
         }
 
         version = load_symbol<version_fn>("aevum_engine_version");
