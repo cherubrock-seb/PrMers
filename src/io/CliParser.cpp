@@ -107,6 +107,7 @@ void printUsage(const char* progName) {
     std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
     std::cout << "  -pm1-continue-stage2-after-factor : Continue requested Stage 2 even when Stage 1 finds a new factor (default: stop)" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
+    std::cout << "  -glblock <B>         : (Optional) Gerbicz-Li block size B for a new PRP test (default 1000, at most sqrt(p))" << std::endl;
     std::cout << "  -wagstaff            : (Optional) will check PRP if (2^p + 1)/3 is probably prime" << std::endl;
     std::cout << "  -gm | -gm-proth      : Deterministic Gaussian-Mersenne Proth test for G_p = Norm((1+i)^p-1)" << std::endl;
     std::cout << "  -gm-prp              : Base-a Fermat PRP for G_p (fast screening, not a proof)" << std::endl;
@@ -276,6 +277,9 @@ static bool parse_cli_tail_option(CliOptions& opts,
     else if (std::strcmp(argv[i], "-checklevel") == 0 && i + 1 < argc) {
         opts.checklevel = to_u64(argv[++i]);
     }
+        else if (std::strcmp(argv[i], "-glblock") == 0 && i + 1 < argc) {
+            opts.gl_block = to_u64(argv[++i]);
+        }
     else if (std::strcmp(argv[i], "-chunk256") == 0 && i + 1 < argc) {
         opts.chunk256 = to_u64(argv[++i]);
     }

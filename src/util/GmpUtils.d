@@ -1,9 +1,2 @@
-src/util/GmpUtils.o: src/util/GmpUtils.cpp include/util/GmpUtils.hpp \
-  /opt/homebrew/opt/gmp/include/gmpxx.h \
-  /opt/homebrew/opt/gmp/include/gmp.h
-
+src/util/GmpUtils.o: src/util/GmpUtils.cpp include/util/GmpUtils.hpp
 include/util/GmpUtils.hpp:
-
-/opt/homebrew/opt/gmp/include/gmpxx.h:
-
-/opt/homebrew/opt/gmp/include/gmp.h:

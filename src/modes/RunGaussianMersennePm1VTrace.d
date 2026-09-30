@@ -1,4 +1,5 @@
-src/core/App.o: src/core/App.cpp include/core/App.hpp \
+src/modes/RunGaussianMersennePm1VTrace.o: \
+ src/modes/RunGaussianMersennePm1VTrace.cpp include/core/App.hpp \
  include/io/CliParser.hpp include/io/WorktodoParser.hpp \
  include/opencl/Context.hpp include/opencl/Program.hpp \
  include/math/Precompute.hpp include/opencl/Buffers.hpp \
@@ -13,8 +14,7 @@ src/core/App.o: src/core/App.cpp include/core/App.hpp \
  include/util/Timer.hpp include/io/JsonBuilder.hpp \
  include/core/AlgoUtils.hpp include/util/GmpUtils.hpp \
  include/io/WorktodoManager.hpp include/marin/file.h \
- include/ui/WebGuiServer.hpp include/core/Version.hpp \
- include/aevum/AutoPolicy.hpp
+ include/ui/WebGuiServer.hpp include/core/Version.hpp
 include/core/App.hpp:
 include/io/CliParser.hpp:
 include/io/WorktodoParser.hpp:
@@ -47,4 +47,3 @@ include/io/WorktodoManager.hpp:
 include/marin/file.h:
 include/ui/WebGuiServer.hpp:
 include/core/Version.hpp:
-include/aevum/AutoPolicy.hpp:

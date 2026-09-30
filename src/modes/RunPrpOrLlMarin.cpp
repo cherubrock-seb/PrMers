@@ -155,12 +155,16 @@ int App::runPrpOrLlMarin()
     const uint32_t checkpoint_mode = options.mode == "prp" ? 1u : 2u;
     const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+    // Version 3 adds the Gerbicz-Li block size after the elapsed time; it is written only when
+    // the block size differs from sqrt(p), the size of earlier versions, which version 2 implies.
+    uint32_t ckpt_block = 0;
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint32_t& block)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
+        if (version > 3) return -2;
         if (version >= 2) {
             uint32_t saved_mode = 0, saved_backend = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_mode), sizeof(saved_mode))) return -2;
@@ -181,6 +185,8 @@ int App::runPrpOrLlMarin()
         } else return -2;
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        block = 0;
+        if (version >= 3 && (!f.read(reinterpret_cast<char*>(&block), sizeof(block)) || block < 2)) return -2;
         const size_t cksz = eng->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
@@ -193,13 +199,14 @@ int App::runPrpOrLlMarin()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 2;
+            int version = ckpt_block ? 3 : 2;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
             if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return;
             if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
             if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            if (ckpt_block && !f.write(reinterpret_cast<const char*>(&ckpt_block), sizeof(ckpt_block))) return;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!eng->get_checkpoint(data)) return;
@@ -213,9 +220,10 @@ int App::runPrpOrLlMarin()
     };
 
     const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5, RBASE = 6, RTMP=7;
-    uint32_t ri = 0; double restored_time = 0;
-    int r = read_ckpt(ckpt_file, ri, restored_time);
-    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
+    uint32_t ri = 0; double restored_time = 0; uint32_t saved_block = 0;
+    int r = read_ckpt(ckpt_file, ri, restored_time, saved_block);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time, saved_block);
+    if (r != 0) saved_block = 0;
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
         if (guiServer_) {
@@ -261,7 +269,17 @@ int App::runPrpOrLlMarin()
     constexpr uint32_t gl_failure_limit = 3;
 
     uint64_t L = options.exponent;
-    uint64_t B = (uint64_t)(std::sqrt((double)L));
+    // Gerbicz-Li block size B. A full check costs B squarings and each block one multiplication,
+    // so with a check about every 600000 iterations B = 1000 costs ~0.3%, where sqrt(p), the size
+    // of earlier versions, costs ~2% at the wavefront. A resumed test keeps its block size.
+    const uint64_t legacy_B = (uint64_t)(std::sqrt((double)L));
+    uint64_t B = legacy_B;
+    if (saved_block != 0) {
+        B = saved_block;
+    } else if (r != 0 && options.mode == "prp" && options.gerbiczli && !options.wagstaff) {
+        B = std::min<uint64_t>(options.gl_block >= 2 ? options.gl_block : 1000, legacy_B);
+    }
+    ckpt_block = (B == legacy_B) ? 0 : static_cast<uint32_t>(B);
     double desiredIntervalSeconds = 600.0;
     uint64_t checkpass = 0;
 
@@ -272,6 +290,12 @@ int App::runPrpOrLlMarin()
         : checkpasslevel_auto;
     if(checkpasslevel==0)
         checkpasslevel=1;
+    if (options.mode == "prp" && options.gerbiczli) {
+        std::ostringstream oss;
+        oss << "[Gerbicz Li] block size " << B << ", full check every " << B * checkpasslevel << " iterations";
+        std::cout << oss.str() << std::endl;
+        if (guiServer_) guiServer_->appendLog(oss.str());
+    }
     uint64_t resumeIter = ri;
     uint64_t startIter  = ri;
     uint64_t lastIter   = ri ? ri - 1 : 0;
