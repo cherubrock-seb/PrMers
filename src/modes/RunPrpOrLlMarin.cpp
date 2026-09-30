@@ -109,7 +109,9 @@ int App::runPrpOrLlMarin()
     const bool verbose = true;//options.debug;
 
     engine* eng = engine::create_gpu(p, static_cast<size_t>(8), static_cast<size_t>(options.device_id), verbose  /*,options.chunk256*/);
-    const char* active_backend_name = eng->is_aevum_backend() ? "Aevum" : "Marin";
+    const bool active_backend_aevum = eng->is_aevum_backend();
+    const int active_transform_words = static_cast<int>(eng->get_size());
+    const char* active_backend_name = active_backend_aevum ? "Aevum" : "Marin";
 
     //auto to_hex16 = [](uint64_t u){ std::stringstream ss; ss << std::uppercase << std::hex << std::setfill('0') << std::setw(16) << u; return ss.str(); };
 
@@ -594,14 +596,14 @@ int App::runPrpOrLlMarin()
 
             provisionalJson = io::JsonBuilder::generate(
                 provisionalOptions,
-                static_cast<int>(eng->get_size()),
+                active_transform_words,
                 provisionalPrime,
                 provisionalRes64,
                 provisionalRes2048);
         } else {
             provisionalJson = io::JsonBuilder::generate(
                 provisionalOptions,
-                static_cast<int>(eng->get_size()),
+                active_transform_words,
                 is_prp_prime,
                 res64_hex,
                 res2048_hex);
@@ -614,66 +616,112 @@ int App::runPrpOrLlMarin()
             provisionalJson);
     }
 
-    if (options.mode == "prp" && options.proof && (options.aevum || options.aevum_auto)) {
+    if (options.mode == "prp" && options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
-            if (guiServer_) guiServer_->appendLog("\nGenerating PRP proof file...");
-            const auto proofFilePath = proofManagerMarin.proof();
-            options.proofFile = proofFilePath.string();
-            std::cout << "Proof file saved: " << proofFilePath << std::endl;
-            if (guiServer_) guiServer_->appendLog("Proof file saved: " + proofFilePath.string());
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
-            if (guiServer_) guiServer_->appendLog(std::string("Warning: Proof generation failed: ") + e.what());
-        }
-    }
-    else if (options.mode == "prp" && options.proof) {
-        cl_command_queue queue = context.getQueue();
-        math::Carry carry(
-            context,
-            queue,
-            program->getProgram(),
-            precompute.getN(),
-            precompute.getDigitWidth(),
-            buffers->digitWidthMaskBuf
-        );
-        uint32_t proofPower = (options.proofPower);
-        for (uint32_t k = proofPower; /*no-cond*/; ) {
+            if (guiServer_)
+                guiServer_->appendLog("\nGenerating PRP proof file...");
+
+            // PRP arithmetic is complete and all canonical proof checkpoints
+            // are already on disk. Release the arithmetic backend before
+            // initializing the proof GPU stack to avoid overlapping VRAM use.
+            if (eng) {
+                delete eng;
+                eng = nullptr;
+            }
+
+            std::filesystem::path proofFilePath;
+            bool gpuProofReady = false;
+            std::string gpuProofError;
+
             try {
-                std::cout << "\nGenerating PRP proof file..." << std::endl;
-                if (guiServer_) {
-                    std::ostringstream oss;
-                    oss << "\nGenerating PRP proof file...";
-                    guiServer_->appendLog(oss.str());
-                }
-                options.proofPower = proofPower;
-                auto proofFilePath = proofManager.proof(context, *nttEngine, carry, proofPower, options.verify);
-                options.proofFile = proofFilePath.string();
-                std::cout << "Proof file saved: " << proofFilePath << std::endl;
-                if (guiServer_) {
-                    std::ostringstream oss;
-                    oss << "Proof file saved: " << proofFilePath;
-                    guiServer_->appendLog(oss.str());
-                }
-                break;
-            } catch (const std::exception& e) {
-                std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
-                if (guiServer_) {
-                    std::ostringstream oss;
-                    oss << "Warning: Proof generation failed: " << e.what();
-                    guiServer_->appendLog(oss.str());
-                }
-                if (proofPower == 0) break;
-                --proofPower;
-                std::cout << "Retrying proof generation with reduced power: " << proofPower << std::endl;
-                if (guiServer_) {
-                    std::ostringstream oss;
-                    oss << "Retrying proof generation with reduced power: " << proofPower;
-                    guiServer_->appendLog(oss.str());
+                ensureProofGpuBackend();
+
+                if (!buffers || !program || !kernels || !nttEngine)
+                    throw std::runtime_error(
+                        "PrMers GPU proof backend initialization incomplete");
+
+                gpuProofReady = true;
+            }
+            catch (const std::exception& e) {
+                gpuProofError = e.what();
+            }
+
+            if (gpuProofReady) {
+                std::cout << "[Proof backend] GPU NTT"
+                          << " (PRP backend was "
+                          << active_backend_name << ")"
+                          << std::endl;
+
+                math::Carry carry(
+                    context,
+                    context.getQueue(),
+                    program->getProgram(),
+                    precompute.getN(),
+                    precompute.getDigitWidth(),
+                    buffers->digitWidthMaskBuf
+                );
+
+                uint32_t proofPower = options.proofPower;
+
+                for (;;) {
+                    try {
+                        options.proofPower = proofPower;
+
+                        proofFilePath = proofManager.proof(
+                            context,
+                            *nttEngine,
+                            carry,
+                            proofPower,
+                            options.verify
+                        );
+                        break;
+                    }
+                    catch (const std::exception& e) {
+                        if (proofPower == 0)
+                            throw;
+
+                        std::cerr
+                            << "Warning: GPU proof generation failed: "
+                            << e.what() << std::endl;
+
+                        --proofPower;
+
+                        std::cout
+                            << "Retrying proof generation with reduced power: "
+                            << proofPower << std::endl;
+                    }
                 }
             }
-            if (k == 0) break;
-            --k;
+            else {
+                std::cerr
+                    << "[Proof backend] GPU NTT unavailable, "
+                    << "falling back to CPU GMP: "
+                    << gpuProofError << std::endl;
+
+                proofFilePath = proofManagerMarin.proof();
+            }
+
+            options.proofFile = proofFilePath.string();
+
+            std::cout
+                << "Proof file saved: "
+                << proofFilePath << std::endl;
+
+            if (guiServer_)
+                guiServer_->appendLog(
+                    "Proof file saved: " +
+                    proofFilePath.string());
+        }
+        catch (const std::exception& e) {
+            std::cerr
+                << "Warning: Proof generation failed: "
+                << e.what() << std::endl;
+
+            if (guiServer_)
+                guiServer_->appendLog(
+                    std::string("Warning: Proof generation failed: ") +
+                    e.what());
         }
     }
 
@@ -684,7 +732,7 @@ int App::runPrpOrLlMarin()
         is_prp_prime = isPrime;
         json = io::JsonBuilder::generate(
             options,
-            static_cast<int>(eng->get_size()),
+            active_transform_words,
             isPrime,
             res64,
             res2048
@@ -700,7 +748,7 @@ int App::runPrpOrLlMarin()
     else{
         json = io::JsonBuilder::generate(
             options,
-            static_cast<int>(eng->get_size()),
+            active_transform_words,
             is_prp_prime,
             res64_hex,
             res2048_hex
@@ -812,6 +860,6 @@ int App::runPrpOrLlMarin()
         }
     }
 
-    delete eng;
+    if (eng) delete eng;
     return is_prp_prime ? 0 : 1;
 }

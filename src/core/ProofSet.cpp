@@ -294,7 +294,9 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
     auto B = load2(E, power);
     auto hash = Proof::hashWords(E, B);
 
-    const uint32_t maxBuffers = (1u << power);
+    // Online binary-tree reduction requires only stack depth O(power).
+    // A newly pushed residue may temporarily occupy one extra slot.
+    const uint32_t maxBuffers = power + 1u;
     std::vector<cl_mem> bufferPool(maxBuffers);
 
     cl_context cl_ctx = gpu.ctx.getContext();
@@ -329,6 +331,13 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
             if (!shouldCheckpoint2(iteration, power)) {
                 for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
                 throw std::runtime_error("Missing checkpoint file");
+            }
+
+            if (bufIndex >= maxBuffers) {
+                for (uint32_t t = 0; t < maxBuffers; ++t)
+                    clReleaseMemObject(bufferPool[t]);
+                throw std::runtime_error(
+                    "Proof reduction stack exceeded O(power) buffer bound");
             }
 
             auto w = load2(iteration, power);
