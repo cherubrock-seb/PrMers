@@ -446,8 +446,25 @@ public:
     }
 
 protected:
+    // engine::digit (res64, the final PRP/LL residue, proof checkpoints) reads registers through here.  The
+    // transform digits are exponent / transform_size bits wide, which exceeds 32 on FFT3161 plans run near
+    // their limit (e.g. 36.47 bpw for p = 19121591 on 512K), and the encoding holds only 32 bits of value per
+    // digit.  So describe the register as 32-bit digits taken from the exact readback words instead.
+    void get_digits(std::vector<uint64>& d, const std::size_t src) const override {
+        check_reg(src);
+        std::vector<uint32_t> words(word_count_, 0);
+        require(api_.get_words(handle_, src, words.data(), words.size()), "get_words");
+        d.resize(words.size());
+        for (std::size_t i = 0; i < words.size(); ++i) {
+            const uint32_t width = (i + 1 == words.size() && exponent_ % 32 != 0) ? exponent_ % 32 : 32u;
+            const uint32_t value = width == 32 ? words[i] : (words[i] & ((uint32_t(1) << width) - 1));
+            d[i] = uint64_t(value) | (uint64_t(width) << 32);
+        }
+    }
+
     void get(uint64* const encoded, const std::size_t src) const override {
         check_reg(src);
+        require_narrow_digits("get");
         std::vector<uint32_t> words(word_count_, 0);
         require(api_.get_words(handle_, src, words.data(), words.size()), "get_words");
         std::size_t bit_pos = 0;
@@ -466,6 +483,7 @@ protected:
 
     void set(const std::size_t dst, uint64* const encoded) const override {
         check_reg(dst);
+        require_narrow_digits("set");
         std::vector<uint32_t> words(word_count_, 0);
         std::size_t bit_pos = 0;
         for (std::size_t k = 0; k < transform_size_; ++k) {
@@ -491,6 +509,17 @@ private:
         const uint64_t step = n - (uint64_t(exponent_) % n);
         const uint64_t extra = (step * static_cast<uint64_t>(k)) % n;
         return static_cast<uint32_t>(uint64_t(exponent_) / n + (extra + step < n ? 1 : 0));
+    }
+
+    // The encoded digit format holds at most 32 bits of value, so the transform-digit get()/set() would
+    // silently drop the high bits of wider digits.  Fail instead; callers needing the value use
+    // get_digits() or get_mpz()/set_mpz(), which go through the exact words.
+    void require_narrow_digits(const char* operation) const {
+        if (exponent_ / transform_size_ >= 32u) {
+            throw std::runtime_error(std::string("Aevum ") + operation + ": transform digits of " +
+                                     std::to_string(exponent_ / transform_size_ + 1) +
+                                     " bits do not fit the 32-bit encoded digit format");
+        }
     }
 
     void check_reg(std::size_t reg) const {
