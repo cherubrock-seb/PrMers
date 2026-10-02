@@ -97,9 +97,48 @@ int main() {
         return 1;
     }
 
+    // Pfactor=[AID,]k,b,n,c,how_far_factored,tests_saved: fields 4 and 5 are the TF depth and the tests saved,
+    // not B1/B2. Malformed lines are skipped; tests_saved = 0 still gives bounds.
+    const auto pf = std::filesystem::temp_directory_path() / "prmers_pfactor_worktodo_test.txt";
+    {
+        std::ofstream out(pf);
+        out << "Pfactor=0123456789ABCDEF0123456789ABCDEF,1,2,1277,-1,76,2\n";
+        out << "Pfactor=N/A,1,2,130000001,-1,77,1\n";
+        out << "Pfactor=N/A,1,2,130000001,-1,77,2\n";
+        out << "Pfactor=N/A,1,2,130000001,-1,77,0\n";
+        out << "Pfactor=N/A,1,2,130000001,-1,abc,1\n";
+        out << "Pfactor=N/A,1,2,130000001,-1,77,nan\n";
+    }
+    struct PfCase { uint32_t exponent; double tf; uint64_t B1, B2; std::string aid; };
+    const PfCase pfCases[] = {
+        {1277u, 76, 1000, 20000, "0123456789ABCDEF0123456789ABCDEF"},
+        {130000001u, 77, 590000, 11800000, ""},
+        {130000001u, 77, 1200000, 24000000, ""},
+        {130000001u, 77, 590000, 11800000, ""},
+    };
+    io::WorktodoParser pfParser(pf.string());
+    for (const auto& c : pfCases) {
+        auto e = pfParser.parse();
+        if (!e || !e->pm1Test || e->exponent != c.exponent || e->sieveDepth != c.tf ||
+            e->B1 != c.B1 || e->B2 != c.B2 || e->aid != c.aid) {
+            std::cerr << "Pfactor parse mismatch for exponent " << c.exponent << ": got B1="
+                      << (e ? e->B1 : 0) << " B2=" << (e ? e->B2 : 0) << "\n";
+            return 1;
+        }
+        if (!pfParser.removeProcessedLine(e->rawLine)) {
+            std::cerr << "failed to remove Pfactor entry\n";
+            return 1;
+        }
+    }
+    if (pfParser.parse()) {
+        std::cerr << "malformed Pfactor lines were not skipped\n";
+        return 1;
+    }
+
     std::error_code ec;
     std::filesystem::remove(path, ec);
     std::filesystem::remove(mixed, ec);
+    std::filesystem::remove(pf, ec);
     std::cout << "Gaussian worktodo parser test passed\n";
     return 0;
 }
