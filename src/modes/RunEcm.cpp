@@ -829,9 +829,11 @@ int App::runECMMarin()
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
             if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
+            // Load into the engine only after every check passed: a rejected file must
+            // leave the registers untouched so the fresh start is not corrupted.
+            if (!eng->set_checkpoint(data)) return -2;
             return 0;
         };
 
@@ -988,8 +990,9 @@ int App::runECMMarin()
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
+            // Load into the engine only after every check passed (see read_ckpt).
+            if (!eng->set_checkpoint(data)) return -2;
             if (version == kCkptTorsionS2) {
                 // Stage 2 resumes without rebuilding the curve; k is determined by
                 // (curve_seed, construction tag), both checked above.
