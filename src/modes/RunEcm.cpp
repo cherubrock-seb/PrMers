@@ -7,6 +7,7 @@
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
+#include "math/EcmTorsionCurves.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -247,6 +248,14 @@ int App::runECMMarin()
     else torsion_name = "8";
 
     const bool ckpt_expect_te_stage1 = (pm_effective == 0);
+    // Montgomery torsion-8/torsion-16 curves (modes 1, 2, 4, 5) write their own
+    // checkpoint versions (stage 1: 10, stage 2: 11) carrying a construction
+    // tag and the curve scalar k, so a checkpoint from an older construction
+    // (same seed, different curve) is never resumed onto the new curve.
+    const bool ckpt_torsion_family = (pm_effective == 1 || pm_effective == 2 || pm_effective == 4 || pm_effective == 5);
+    constexpr uint8_t kTorsionCurveConstruction = 1;
+    constexpr int kCkptTorsionS1 = 10;
+    constexpr int kCkptTorsionS2 = 11;
 
     bool wrote_result = false;
     string result_status = "not_found";
@@ -557,7 +566,7 @@ int App::runECMMarin()
         int version = 0;
         if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
 
-        if (version == 1 || version == 5) {
+        if (version == 1 || version == 5 || version == kCkptTorsionS1) {
             uint32_t rp = 0, i = 0, nbb = 0;
             uint64_t rB1 = 0;
             double et = 0.0;
@@ -582,7 +591,7 @@ int App::runECMMarin()
             return true;
         }
 
-        if (version == 2 || version == 3 || version == 4 || version == 5 || version == 7 || version == 8 || version == 9) {
+        if (version == 2 || version == 3 || version == 4 || version == 5 || version == 7 || version == 8 || version == 9 || version == kCkptTorsionS2) {
             uint32_t rp = 0, idx = 0, cnt_bits = 0;
             uint64_t b1s = 0, b2s = 0;
             double et = 0.0;
@@ -596,7 +605,7 @@ int App::runECMMarin()
             if (version >= 3) {
                 uint64_t saved_seed = 0;
                 uint8_t  saved_tor  = 0;
-                if (version == 4 || version == 7 || version == 8 || version == 9) {
+                if (version == 4 || version == 7 || version == 8 || version == 9 || version == kCkptTorsionS2) {
                     if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
                     if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor))) return false;
                     if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
@@ -695,6 +704,10 @@ int App::runECMMarin()
 
         const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        uint64_t torsion_curve_k = 0;   // scalar k of the torsion-family curve (modes 1, 2, 4, 5)
+        auto ckpt_stale_notice = [&](const std::string& file, const char* why) {
+            std::cout << "[ECM] Ignoring checkpoint " << file << ": " << why << "; restarting this curve" << std::endl;
+        };
 
         engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
         if (!eng) { std::cout<<"[ECM] GPU engine unavailable\n"; write_result(); publish_json(); return 1; }
@@ -737,7 +750,7 @@ int App::runECMMarin()
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
                 File f(newf, "wb");
-                int version = ckpt_expect_te_stage1 ? 5 : 1;
+                int version = ckpt_expect_te_stage1 ? 5 : (ckpt_torsion_family ? kCkptTorsionS1 : 1);
                 if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
                 if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
@@ -751,6 +764,11 @@ int App::runECMMarin()
                 if (version == 5) {
                     uint8_t te_stage1_flag = 1u;
                     if (!f.write(reinterpret_cast<const char*>(&te_stage1_flag), sizeof(te_stage1_flag))) return;
+                }
+                if (version == kCkptTorsionS1) {
+                    uint8_t tag = kTorsionCurveConstruction;
+                    if (!f.write(reinterpret_cast<const char*>(&tag), sizeof(tag))) return;
+                    if (!f.write(reinterpret_cast<const char*>(&torsion_curve_k), sizeof(torsion_curve_k))) return;
                 }
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
@@ -770,9 +788,14 @@ int App::runECMMarin()
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 1 && version != 5) return -2;
+            if (version != 1 && version != 5 && version != kCkptTorsionS1) return -2;
             if (ckpt_expect_te_stage1) {
                 if (version != 5) return -2;
+            } else if (ckpt_torsion_family) {
+                if (version != kCkptTorsionS1) {
+                    if (version == 1) ckpt_stale_notice(file, "not written for this torsion-curve construction (older build or different curve family)");
+                    return -2;
+                }
             } else {
                 if (version != 1) return -2;
             }
@@ -792,6 +815,14 @@ int App::runECMMarin()
                 uint8_t saved_te_stage1 = 0;
                 if (!f.read(reinterpret_cast<char*>(&saved_te_stage1), sizeof(saved_te_stage1))) return -2;
                 if (saved_te_stage1 != 1u) return -2;
+            }
+            if (version == kCkptTorsionS1) {
+                uint8_t saved_tag = 0;
+                uint64_t saved_k = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_tag), sizeof(saved_tag))) return -2;
+                if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
+                if (saved_tag != kTorsionCurveConstruction) { ckpt_stale_notice(file, "unknown torsion-curve construction"); return -2; }
+                if (saved_curve_seed == curve_seed && saved_k != torsion_curve_k) { ckpt_stale_notice(file, "curve parameter k does not match"); return -2; }
             }
             uint8_t current_torsion16 = (!options.notorsion && options.torsion16) ? 1 : 0;
             if (saved_curve_seed != curve_seed || saved_torsion16 != current_torsion16) return -2;
@@ -819,7 +850,7 @@ int App::runECMMarin()
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
             {
                 File f(newf, "wb");
-                int version = (pm_effective == 0) ? 9 : 6;
+                int version = (pm_effective == 0) ? 9 : (ckpt_torsion_family ? kCkptTorsionS2 : 6);
                 if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return -1;
                 if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return -1;
                 if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return -1;
@@ -836,6 +867,11 @@ int App::runECMMarin()
                 if (!f.write(reinterpret_cast<const char*>(&chunk_end_idx), sizeof(chunk_end_idx))) return -1;
                 if (!f.write(reinterpret_cast<const char*>(&chunk_bits_saved), sizeof(chunk_bits_saved))) return -1;
                 if (!f.write(reinterpret_cast<const char*>(&chunk_steps_done_saved), sizeof(chunk_steps_done_saved))) return -1;
+                if (version == kCkptTorsionS2) {
+                    uint8_t tag = kTorsionCurveConstruction;
+                    if (!f.write(reinterpret_cast<const char*>(&tag), sizeof(tag))) return -1;
+                    if (!f.write(reinterpret_cast<const char*>(&torsion_curve_k), sizeof(torsion_curve_k))) return -1;
+                }
                 if (pm_effective == 0) {
                     uint8_t has_stage2_base = have_s2_base_cache ? 1u : 0u;
                     if (!f.write(reinterpret_cast<const char*>(&has_stage2_base), sizeof(has_stage2_base))) return -1;
@@ -871,10 +907,15 @@ int App::runECMMarin()
             if (!f.exists()) return -1;
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2 && version != 3 && version != 4 && version != 6 && version != 7 && version != 8 && version != 9) return -2;
+            if (version != 2 && version != 3 && version != 4 && version != 6 && version != 7 && version != 8 && version != 9 && version != kCkptTorsionS2) return -2;
             if (pm_effective == 0) {
                 if (version != 9) return -2;
-            } else if (version == 7 || version == 8) {
+            } else if (ckpt_torsion_family) {
+                if (version != kCkptTorsionS2) {
+                    if (version != 7 && version != 8 && version != 9) ckpt_stale_notice(file, "not written for this torsion-curve construction (older build or different curve family)");
+                    return -2;
+                }
+            } else if (version == 7 || version == 8 || version == kCkptTorsionS2) {
                 return -2;
             }
             uint32_t rp = 0;
@@ -895,7 +936,8 @@ int App::runECMMarin()
             uint64_t saved_seed = 0;
             uint8_t  saved_tor  = 0;
             have_s2_base_cache = false;
-            if (version == 6 || version == 7 || version == 8) {
+            uint64_t saved_k = 0;
+            if (version == 6 || version == 7 || version == 8 || version == kCkptTorsionS2) {
                 uint8_t in_chunk = 0;
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
@@ -906,6 +948,12 @@ int App::runECMMarin()
                 if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_bits), sizeof(resume_s2_chunk_bits))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&resume_s2_steps_done), sizeof(resume_s2_steps_done))) return -2;
                 resume_stage2_in_chunk = (in_chunk != 0);
+                if (version == kCkptTorsionS2) {
+                    uint8_t saved_tag = 0;
+                    if (!f.read(reinterpret_cast<char*>(&saved_tag), sizeof(saved_tag))) return -2;
+                    if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
+                    if (saved_tag != kTorsionCurveConstruction) { ckpt_stale_notice(file, "unknown torsion-curve construction"); return -2; }
+                }
                 if (version == 8 || version == 9) {
                     uint8_t has_stage2_base = 0;
                     if (!f.read(reinterpret_cast<char*>(&has_stage2_base), sizeof(has_stage2_base))) return -2;
@@ -942,44 +990,15 @@ int App::runECMMarin()
             if (!f.read(data.data(), cksz)) return -2;
             if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32()) return -2;
-            return 0;
-        };
-
-        auto write_gp = [&](const std::string& mode, const std::string& tors, const mpz_class& Nref, uint32_t pe, uint64_t b1e, uint64_t b2e, uint64_t seed_base, uint64_t seed_curve, const mpz_class* sigma_opt, const mpz_class* r_opt, const mpz_class* v_opt, const mpz_class* aE_opt, const mpz_class* dE_opt, const mpz_class& A24_ref, const mpz_class& x0_ref)->void{
-            (void) A24_ref;
-            (void) Nref;
-            std::ofstream gp("lastcurve.gp");
-            gp<<"p="<<pe<<"; N=2^p-1;\n";
-            gp<<"B1="<<b1e<<"; B2="<<b2e<<";\n";
-            gp<<"seed_base="<<seed_base<<"; seed_curve="<<seed_curve<<";\n";
-            gp<<"default(parisize, 64*10^6);\n";
-            gp<<"modN(x)=Mod(x,N);\n";
-            if (mode=="montgomery" && tors=="none") {
-                gp<<"sigma="<<(sigma_opt? sigma_opt->get_str() : "0")<<";\n";
-                gp<<"u=modN(sigma^2-5); v=modN(4*sigma);\n";
-                gp<<"u3=modN(u^3); v3=modN(v^3); t0=modN(4*u3*v);\n";
-                gp<<"A=lift(modN(((v-u)^2*(v-u)*(3*u+v))/t0 - 2));\n";
-                gp<<"A24=lift(modN((A+2)/4));\n";
-                gp<<"x0=lift(modN(u3/v3));\n";
-            } else if (mode=="montgomery" && tors=="16") {
-                gp<<"r="<<(r_opt? r_opt->get_str() : "0")<<";\n";
-                gp<<"A=lift(modN((8*r^4-16*r^3+16*r^2-8*r+1)/(4*r^2)));\n";
-                gp<<"A24=lift(modN((A+2)/4));\n";
-                gp<<"x0=lift(modN(modN(1)/2 - r^2));\n";
-            } else if (mode=="montgomery" && tors=="8") {
-                gp<<"v="<<(v_opt? v_opt->get_str() : "0")<<";\n";
-                gp<<"A=lift(modN(-((4*v+1)^2+16*v)));\n";
-                gp<<"A24=lift(modN((A+2)/4));\n";
-                gp<<"x0=lift(modN(4*v+1));\n";
-            } else if (mode=="edwards--conv-->montgomery") {
-                gp<<"aE="<<(aE_opt? aE_opt->get_str() : "0")<<"; dE="<<(dE_opt? dE_opt->get_str() : "0")<<";\n";
-                gp<<"A=lift(modN(2*(aE+dE)/(aE-dE)));\n";
-                gp<<"A24=lift(modN((A+2)/4));\n";
-                gp<<"x0="<<x0_ref.get_str()<<";\n";
+            if (version == kCkptTorsionS2) {
+                // Stage 2 resumes without rebuilding the curve; k is determined by
+                // (curve_seed, construction tag), both checked above.
+                torsion_curve_k = saved_k;
+                std::stringstream ks;
+                ks << std::hex << std::setw(16) << std::setfill('0') << saved_k;
+                options.sigma_hex = ks.str();
             }
-            gp<<"\\print(\"A24=\",A24);\n";
-            gp<<"\\print(\"x0=\",x0);\n";
-            gp.close();
+            return 0;
         };
 
         const std::string ecm_stage1_resume_save_file =
@@ -1433,125 +1452,57 @@ int App::runECMMarin()
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
             }
-            else if (picked_mode == 1)
+            else if (picked_mode == 1 || picked_mode == 2 || picked_mode == 4 || picked_mode == 5)
             {
-                mode_name="montgomery"; torsion_name="16";
-                auto ec_add = [&](const mpz_class& x1, const mpz_class& y1, const mpz_class& x2, const mpz_class& y2, mpz_class& xr, mpz_class& yr)->int{
-                    if (x1==x2 && (y1+ y2)%N==0) return -1;
-                    mpz_class num = subm(y2, y1);
-                    mpz_class den = subm(x2, x1);
-                    mpz_class inv; int r = invm(den, inv);
-                    if (r==1) return 1;
-                    if (r<0) return -1;
-                    mpz_class lam = mulm(num, inv);
-                    xr = subm(subm(sqrm(lam), x1), x2);
-                    yr = subm(mulm(lam, subm(x1, xr)), y1);
-                    return 0;
-                };
-                auto ec_dbl = [&](const mpz_class& x1, const mpz_class& y1, mpz_class& xr, mpz_class& yr)->int{
-                    mpz_class num = addm(mulm(mpz_class(3), sqrm(x1)), mpz_class(4));
-                    mpz_class den = mulm(mpz_class(2), y1);
-                    mpz_class inv; int r = invm(den, inv);
-                    if (r==1) return 1;
-                    if (r<0) return -1;
-                    mpz_class lam = mulm(num, inv);
-                    xr = subm(sqrm(lam), mulm(mpz_class(2), x1));
-                    yr = subm(mulm(lam, subm(x1, xr)), y1);
-                    return 0;
-                };
-                auto ec_mul = [&](uint64_t k, mpz_class x, mpz_class y, mpz_class& xr, mpz_class& yr)->int{
-                    bool init=false; mpz_class X=x, Y=y, RX=0, RY=0;
-                    for (int i=(int)u64_bits(k)-1;i>=0;--i){
-                        if (init){ int r = ec_dbl(RX, RY, RX, RY); if (r) return r; }
-                        if ((k>>i)&1ULL){
-                            if (!init){ RX=X; RY=Y; init=true; }
-                            else { int r = ec_add(RX, RY, X, Y, RX, RY); if (r) return r; }
-                        }
-                    }
-                    xr = RX; yr=RY; return 0;
-                };
-
-                if (forceCurveSeed && !forcedSeedSeries){
-                    base_seed = forcedCurveSeedValue;
-                }
-                curve_seed = base_seed;
-                uint64_t k = 2 + (mix64(base_seed, c ^ 0xA5A5A5A5ULL) % 64ULL);
-                std::stringstream ss;
-                ss << std::hex << std::setw(16) << std::setfill('0') << k;
-                options.sigma_hex = ss.str();
-                mpz_class s = mpz_class(4), t = mpz_class(8);
-                int rmul = ec_mul(k, s, t, s, t);
-                if (rmul==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                if (rmul<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-
-                mpz_class den = subm(s, mpz_class(4));
-                mpz_class inv; { int r = invm(den, inv);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                mpz_class alpha = mulm(addm(t, mpz_class(8)), inv);
-
-                mpz_class numr = addm(mpz_class(8), mulm(mpz_class(2), alpha));
-                mpz_class denr = subm(mpz_class(8), sqrm(alpha));
-                mpz_class invdenr; { int r = invm(denr, invdenr);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                mpz_class rpar = mulm(numr, invdenr);
-
-                mpz_class r2 = sqrm(rpar);
-                mpz_class r3 = mulm(r2, rpar);
-                mpz_class r4 = sqrm(r2);
-                mpz_class A_num = addm(subm(addm(subm(mulm(mpz_class(8), r4), mulm(mpz_class(16), r3)), mulm(mpz_class(16), r2)), mulm(mpz_class(8), rpar)), mpz_class(1));
-                mpz_class A_den = mulm(mpz_class(4), r2);
-                mpz_class invAden; { int r = invm(A_den, invAden);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                mpz_class A = mulm(A_num, invAden);
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                A24 = mulm(addm(A, mpz_class(2)), inv4);
-
-                mpz_class inv2; { int r = invm(mpz_class(2), inv2);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                x0 = subm(inv2, r2);
-
-                std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=16 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
-                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-            }
-            else if (picked_mode == 2)
-            {
+                // Torsion families: twisted Edwards curves with rational Z/2 x Z/8
+                // (torsion 16) or Z/8 (torsion 8) torsion and a known non-torsion
+                // point, mapped to Montgomery form.  See math/EcmTorsionCurves.hpp
+                // for the constructions and references.
+                const bool want16 = (picked_mode == 1 || picked_mode == 4);
+                const bool via_edwards = (picked_mode == 4 || picked_mode == 5);
+                mode_name = via_edwards ? "edwards--conv-->montgomery" : "montgomery";
+                torsion_name = want16 ? "16" : "8";
                 if (forceCurveSeed && !forcedSeedSeries){
                     curve_seed = forcedCurveSeedValue;
                 }
-                mode_name="montgomery"; torsion_name="8";
-                mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
-                options.sigma_hex = a.get_str(16);
-                mpz_class a2 = sqrm(a);
-                mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                // One full 64-bit scalar per curve, derived from this curve's seed
+                // (itself mix64(base_seed, c), or the forced/resumed seed), so the
+                // curve is reproducible from the seed and distinct across curves.
+                // A k that degenerates modulo N is replaced by the next draw.
+                const uint64_t k_tag = want16 ? 0x4D4F4E5431360000ULL : 0x4D4F4E5438000000ULL;
+                ecm_torsion::MontgomeryCurve tc;
+                ecm_torsion::BuildStatus bst = ecm_torsion::BuildStatus::Degenerate;
+                mpz_class tfactor = 0;
+                uint64_t k = 0;
+                constexpr uint32_t torsion_init_tries = 64;
+                for (uint32_t tries = 0; tries < torsion_init_tries; ++tries) {
+                    k = mix64(curve_seed, k_tag + tries);
+                    if (want16) k |= 1ULL;
+                    bst = want16 ? ecm_torsion::build_montgomery_torsion16(N, k, tc, tfactor)
+                                 : ecm_torsion::build_montgomery_torsion8(N, k, tc, tfactor);
+                    if (bst != ecm_torsion::BuildStatus::Degenerate) break;
                 }
-                mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
-                mpz_class fourv = mulm(mpz_class(4), v);
-                mpz_class one = mpz_class(1);
-                mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
+                std::stringstream ss;
+                ss << std::hex << std::setw(16) << std::setfill('0') << k;
+                options.sigma_hex = ss.str();
+                if (bst == ecm_torsion::BuildStatus::Factor) {
+                    bool known = is_known(tfactor);
+                    std::cout<<"[ECM] "<<(known?"known factor=":"factor=")<<tfactor.get_str()<<" (torsion-"<<torsion_name<<" curve construction, k=0x"<<options.sigma_hex<<")"<<std::endl;
+                    if (!known) { options.knownFactors.push_back(tfactor.get_str()); result_factor=tfactor; result_status="found"; }
+                    else { result_factor=0; result_status="NF"; }
+                    curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
+                    write_result(); publish_json(); delete eng; continue;
                 }
-                A24 = mulm(addm(A, mpz_class(2)), inv4);
-                x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
+                if (bst != ecm_torsion::BuildStatus::Ok) {
+                    std::cout<<"[ECM] torsion-"<<torsion_name<<" curve construction degenerate for "<<torsion_init_tries<<" draws, skipping curve"<<std::endl;
+                    result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue;
+                }
+                A24 = tc.A24;
+                x0 = tc.x0;
+                torsion_curve_k = k;
 
                 std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | montgomery | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
+                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | "<<(via_edwards ? "edwards --conv-->montgomery" : "montgomery")<<" | torsion="<<torsion_name<<" | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<curve_seed<<" | k=0x"<<options.sigma_hex;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
             }
             else if (picked_mode == 3)
@@ -1613,36 +1564,6 @@ int App::runECMMarin()
                 mpz_class dE = subm(A, mpz_class(2));
                 std::ostringstream head;
                 head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=none | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
-                std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
-            }
-            else
-            {
-                mode_name="edwards--conv-->montgomery"; torsion_name="8";
-                if (forceCurveSeed && !forcedSeedSeries){
-                    curve_seed = forcedCurveSeedValue;
-                }
-                mpz_class a = rnd_mpz_bits(N, curve_seed ^ 0xD1E2C3B4A5968775ULL, 128);
-                options.sigma_hex = a.get_str(16);
-                mpz_class a2 = sqrm(a);
-                mpz_class denv = subm(mulm(mpz_class(48), a2), mpz_class(1));
-                mpz_class invdenv; { int r = invm(denv, invdenv);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                mpz_class v = mulm(mulm(mpz_class(4), a2), invdenv);
-                mpz_class fourv = mulm(mpz_class(4), v);
-                mpz_class one = mpz_class(1);
-                mpz_class A = subm(mpz_class(0), addm(sqrm(addm(fourv, one)), mulm(mpz_class(16), v)));
-                mpz_class inv4; { int r = invm(mpz_class(4), inv4);
-                    if (r==1){ curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                    if (r<0){ result_factor=0; result_status="NF"; curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1); write_result(); publish_json(); delete eng; continue; }
-                }
-                A24 = mulm(addm(A, mpz_class(2)), inv4);
-                x0 = addm(mulm(mpz_class(4), v), mpz_class(1));
-                mpz_class aE = addm(A, mpz_class(2));
-                mpz_class dE = subm(A, mpz_class(2));
-                std::ostringstream head;
-                head<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | edwards --conv-->montgomery  | torsion=8 | K_bits="<<mpz_sizeinbase(K.get_mpz_t(),2)<<" | seed="<<base_seed;
                 std::cout<<head.str()<<std::endl; if (guiServer_) guiServer_->appendLog(head.str());
             }
 
