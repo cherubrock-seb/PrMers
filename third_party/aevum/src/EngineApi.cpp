@@ -906,9 +906,22 @@ public:
     // Type4 plan candidates need the same production queue policy as the final
     // engine.  Manual AEVUM_TYPE4_MULTI_Q is a higher-precedence override and
     // causes the runtime tuner to be bypassed below.
+#if defined(CUDA_BACKEND)
+// Capture explicit -use choices before the internal Type4 queue default
+// mutates args_.flags. Explicit choices outrank the built-in CUDA profile.
+const bool explicit_multi_q_use = args_.uses("MULTI_Q");
+const bool explicit_zerohack_w_use = args_.uses("ZEROHACK_W");
+#endif
+
     int multi_q_default = 1;
     if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q")) multi_q_default = std::atoi(value) != 0;
-    if (multi_q_default) args_.flags["MULTI_Q"] = "1";
+#if defined(CUDA_BACKEND)
+if (multi_q_default && !explicit_multi_q_use)
+args_.flags["MULTI_Q"] = "1";
+#else
+if (multi_q_default)
+args_.flags["MULTI_Q"] = "1";
+#endif
 
     const bool manual_plan_env = aevum_autotune::hasManualPlanOverrideEnvironment();
     const bool compatible_tune_entry =
@@ -1179,6 +1192,43 @@ public:
         throw std::runtime_error("AEVUM_PRP_MIDDLE1 must be 0 or 1");
       args_.flags["PRP_MIDDLE1"] = value;
     }
+#if defined(CUDA_BACKEND)
+// Production integration of the measured RTX3080 high-range PRP policy.
+// The validation-only AEVUM_PRP_USE CUDA bridge is intentionally not part
+// of production. Scope W0 to the exact measured device/plan/range.
+if (workload_ == aevum_autotune::Workload::Prp &&
+!fft.isPfa() &&
+device_name.find("RTX 3080") != std::string::npos &&
+exponent_ >= 210000000u &&
+exponent_ <= 220000020u &&
+fft.spec() == "1:1K:8:512:202") {
+bool multi_q_zero = false;
+
+  if (explicit_multi_q_use) {
+    multi_q_zero = args_.value("MULTI_Q", 1) == 0;
+  } else if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q")) {
+    if (std::atoi(value) == 0) {
+      pfa_use.emplace_back("MULTI_Q", "0");
+      multi_q_zero = true;
+    }
+  } else {
+    pfa_use.emplace_back("MULTI_Q", "0");
+    multi_q_zero = true;
+  }
+
+  if (multi_q_zero && !explicit_zerohack_w_use)
+    pfa_use.emplace_back("ZEROHACK_W", "0");
+
+  if (verbose) {
+    const auto effective = aevum_prp_use::normalize(pfa_use);
+    log("AEVUM_CUDA_PRP_PROFILE source=rtx3080-p210-p220 shape=%s profile=%s\n",
+        fft.spec().c_str(),
+        effective.empty() ? "defaults" : effective.c_str());
+  }
+}
+
+#endif
+
 #if !defined(__APPLE__) && !defined(CUDA_BACKEND)
     if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
       const auto identity = aevum_autotune::makeKey(VERSION, device_vendor, device_name, device_driver, device_runtime,

@@ -267,7 +267,8 @@ __device__ __forceinline__ uint mad_hi(uint a, uint b, uint c) {
 
 // ---- Atomic operations ----
 #define atomic_max(p, v) atomicMax((unsigned int*)(p), (unsigned int)(v))
-#define atomic_add(p, v) atomicAdd(p, v)
+#define atomic_add(p, v) atomicAdd((unsigned int*)(p), (unsigned int)(v))
+#define atomic_xchg(p, v) atomicExch((unsigned int*)(p), (unsigned int)(v))
 
 // OpenCL 2.0 C11-style atomics — optimized for CUDA carry stairway pattern.
 // The carryFused kernel uses: producer writes data, threadfence, bar, atomic_store(flag, 1)
