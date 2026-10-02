@@ -362,7 +362,9 @@ KERNEL(OUT_WG) fftMiddleOutGF61Mul2ScalarApple(P(GF61) tmp,
   TrigGF61 trig1 = trig61 + SMALL_HEIGHT * (MIDDLE - 1);
   TrigGF61 trig2 = trig1 + WIDTH;
   if (WIDTH == SMALL_HEIGHT) trig1 = trig61;
-  GF61 w = TFLOAD(&trig1[x]);
+  // The stock kernel calls middleMul2(u, y, x, trig61): the step root is indexed by the WIDTH line y, not by
+  // the SMALL_HEIGHT column x (fftMiddleIn, where x is the WIDTH index, uses trig1[x]).
+  GF61 w = TFLOAD(&trig1[y]);
   const u32 desiredRoot = x * y;
   GF61 factor = cmul(TFLOAD(&trig2[desiredRoot % SMALL_HEIGHT]),
                      TFLOAD(&trig1[desiredRoot / SMALL_HEIGHT]));

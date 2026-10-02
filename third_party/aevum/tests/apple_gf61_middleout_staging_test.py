@@ -132,4 +132,13 @@ positions = [block.index(x) for x in ordered]
 assert positions == sorted(positions)
 assert "Buffer<double> bufAppleMiddleOut" not in hdr
 
+# Mul2 must use the same twiddles as the stock kernel, which calls middleMul2(u, y, x, trig61): the per-k step root
+# is indexed by the WIDTH line y. Indexing it by the SMALL_HEIGHT column x leaves only the k = 0 factor right
+# (desiredRoot = x * y is symmetric) and silently breaks the NTT for every MIDDLE >= 2 plan.
+stock_end = cl.index("#if defined(AEVUM_APPLE_OPENCL12)")
+stock_gf61 = cl[cl.rindex("fftMiddleOutGF61(", 0, stock_end):stock_end]
+assert "middleMul2(u, y, x, trig61);" in stock_gf61
+assert "TFLOAD(&trig1[y])" in mul2, "Apple Mul2 step root must be trig1[y]"
+assert "TFLOAD(&trig1[x])" not in mul2, "Apple Mul2 step root must not be trig1[x]"
+
 print("Aevum Apple GF61 middle-out scalar five-stage all-middle test passed")
