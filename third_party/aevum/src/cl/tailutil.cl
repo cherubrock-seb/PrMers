@@ -342,6 +342,38 @@ void OVERLOAD reverseLine(local F2 *lds, F2 *u) {
   }
 }
 
+// Full-line reversal "with bump": element h moves to (SMALL_HEIGHT - h) % SMALL_HEIGHT
+// instead of SMALL_HEIGHT - 1 - h.  This is the whole-line analogue of reverse(..., bump=true)
+// and is needed when a line whose bins are l = SMALL_HEIGHT-multiples (binary line 0) is paired
+// with a *different* line rather than with itself: bin h of one line meets bin -h of the other,
+// so h=0 pairs with h=0 and h=SMALL_HEIGHT/2 pairs with h=SMALL_HEIGHT/2.  The map is an
+// involution, so calling it twice restores the original order.
+void OVERLOAD reverseLineBump(local F2 *lds, F2 *u) {
+  u32 me = get_local_id(0);
+  u32 revMe = WG - me;
+
+  if (SHUFL_BYTES_H >= 8) {
+    local F2 *ldsIn = lds + me;
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { lds[(WG * (NH - 1 - i) + revMe) % (NH * WG)] = u[i]; }
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { u[i] = ldsIn[WG * i]; }
+  }
+
+  else if (SHUFL_BYTES_H == 4) {
+    local F *ldsOut = (local F *) lds;
+    local F *ldsIn = (local F *) lds + me;
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { ldsOut[(WG * (NH - 1 - i) + revMe) % (NH * WG)] = u[i].x; }
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { u[i].x = ldsIn[WG * i]; }
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { ldsOut[(WG * (NH - 1 - i) + revMe) % (NH * WG)] = u[i].y; }
+    bar(WG);
+    for (u32 i = 0; i < NH; ++i) { u[i].y = ldsIn[WG * i]; }
+  }
+}
+
 //
 // These versions are for the kernel(s) that use a double-wide workgroup (u in half the workgroup, v in the other half)
 //

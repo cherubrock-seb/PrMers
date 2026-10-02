@@ -846,7 +846,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kprpMiddle1GF61, "tailsquare.cl", "tailSquareGF61", hN / nH, (kernelDefines(K61) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kfftMidIn,             "fftmiddlein.cl",  "fftMiddleIn",  hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDIN)).c_str()),
   K(kfftHin,               "ffthin.cl",  "fftHin",  hN / nH, kernelDefines(KFP).c_str()),
-  K(ktailSquareZero,       "tailsquare.cl", "tailSquareZero", SMALL_H / nH * 2 * (fft.isPfa() ? fft.pfa_radix : 1), kernelDefines(KFP).c_str()),
+  // FP32 PFA: row 0's two self-paired lines plus the (PFA_RADIX-1)/2 conjugate
+  // row pairs, each with lines 0 and WIDTH/2, i.e. PFA_RADIX + 1 workgroups.
+  K(ktailSquareZero,       "tailsquare.cl", "tailSquareZero", SMALL_H / nH * (fft.isPfa() ? fft.pfa_radix + 1 : 2), kernelDefines(KFP).c_str()),
   K(ktailSquare,           "tailsquare.cl", "tailSquare",
                                                !tail_single_wide && !tail_single_kernel ? hN / nH - SMALL_H / nH * 2 : // Double-wide tailSquare with two kernels
                                                !tail_single_wide ? hN / nH :                                           // Double-wide tailSquare with one kernel

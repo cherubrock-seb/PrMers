@@ -372,6 +372,26 @@ void OVERLOAD middleShuffle(local T2 *lds, T2 *u) {
 
 #if FFT_FP32
 
+#if PFA_RADIX
+// FP32 analogue of pfaMiddleTwiddle(GF31/GF61) below: the WIDTH x SMALL_HEIGHT
+// Cooley-Tukey twiddle w_(W*SH)^(x*y) that the binary axis of a Good-Thomas
+// plan still needs between its width pass and its height pass.  The scalar is
+// the same for every odd-row register, so it commutes with the radix-R
+// transform, and the inverse direction reuses the forward table because the
+// inverse binary passes run on component-swapped data (stock middleMul2 does
+// the same).
+// PFA FP32 middle trig layout (TrigBufCache genMiddleTrigFP32Pfa(smallH, width)):
+//   trig[0 .. WIDTH)                   : w_WIDTH^k
+//   trig[WIDTH .. WIDTH + SMALL_HEIGHT) : w_(WIDTH*SMALL_HEIGHT)^k
+void OVERLOAD pfaMiddleTwiddle(F2 *u, u32 x, u32 y, TrigFP32 trig) {
+  assert(x < WIDTH);
+  assert(y < SMALL_HEIGHT);
+  const u32 desired_root = x * y;
+  const F2 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+  for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
+}
+#endif
+
 void OVERLOAD fft2(F2* u) { X2(u[0], u[1]); }
 
 void OVERLOAD fft_MIDDLE(F2 *u) {
@@ -394,11 +414,18 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
 
 void OVERLOAD ifft_MIDDLE(F2 *u) {
 #if PFA_RADIX == 9
-#pragma unroll
-  for (u32 i = 0; i < 9; ++i) u[i].y = -u[i].y;
+  // The tail hands back SWAP_XY(result) = i*conj(result), so, exactly as in the
+  // stock power-of-two path, the FORWARD transform applied to the swapped data
+  // is the inverse transform of the unswapped data.  An explicit inverse DFT
+  // (conjugate, fft9, conjugate) here would apply a second forward 9-point DFT
+  // to the real data and negate the odd-axis index (row k lands in row 9-k).
+  // Only the 1/9 normalisation of the odd axis is needed; width and height are
+  // scaled by fftMiddleOut's factor.  (The GF31/GF61 planes legitimately use
+  // explicit inverse roots because their 9th roots lie in the base field and
+  // commute with conjugation.)
   fft9(u);
 #pragma unroll
-  for (u32 i = 0; i < 9; ++i) u[i] = U2(u[i].x * (1.0f / 9.0f), -u[i].y * (1.0f / 9.0f));
+  for (u32 i = 0; i < 9; ++i) u[i] *= (1.0f / 9.0f);
 #else
   fft_MIDDLE(u);
 #endif

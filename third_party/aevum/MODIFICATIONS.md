@@ -1,3 +1,19 @@
+## Word-exact three-plane FFT323161 PFA9
+
+- The FP32 plane of the `pfa9full:4:...` / non-elided `pfa9:4:...` plan now
+  computes the convolution on the radix-9 Good-Thomas axis.  Its complex 9th
+  root makes rows k and 9-k conjugate partners, so `tailSquare`, `tailMul` and
+  `tailSquareZero` pair bin l of row k with bin -l of row 9-k (the GF31/GF61
+  planes keep in-row pairing: their odd roots lie in the base field).  The
+  odd-axis inverse is the forward `fft9` on the component-swapped tail output
+  plus 1/9, the pair twiddle is indexed by `PFA_RADIX * binary_line`, and the
+  middle kernels apply the WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle
+  (`pfaMiddleTwiddle(F2)`, table from `genMiddleTrigFP32Pfa`) that the binary
+  axis still needs.
+- Validated word-for-word against GMP and against power-of-two FFT323161 /
+  FFT3161 plans with dense random residues at 42.4 bits/word (256:9:256 and
+  512:9:512).
+
 ## v0.3.68 throughput-cost auto selection + experimental PFA9 lead bridge
 
 - adds `throughput:auto` and `pow2:auto` candidate scoring;

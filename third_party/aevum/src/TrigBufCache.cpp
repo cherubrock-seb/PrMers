@@ -505,6 +505,17 @@ vector<float2> genSmallTrigComboFP32(Args *args, u32 width, u32 middle, u32 size
   return tab;
 }
 
+// Good-Thomas plans: the FP32 middle kernels apply only the binary
+// WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle (pfaMiddleTwiddle in fft-middle.cl),
+// which reads w_WIDTH^k for k < WIDTH followed by w_(WIDTH*SMALL_HEIGHT)^k for
+// k < SMALL_HEIGHT.
+vector<float2> genMiddleTrigFP32Pfa(u32 smallH, u32 width) {
+  vector<float2> tab;
+  for (u32 k = 0; k < width; ++k)  { tab.push_back(root1FP32(width, k)); }
+  for (u32 k = 0; k < smallH; ++k) { tab.push_back(root1FP32(width * smallH, k)); }
+  return tab;
+}
+
 vector<float2> genMiddleTrigFP32(u32 smallH, u32 middle, u32 width) {
   vector<float2> tab;
   if (middle == 1) {
@@ -936,7 +947,8 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.FFT_FP32) {
-    vector<float2> tab1 = genMiddleTrigFP32(smallH, middle, width);
+    vector<float2> tab1 = fft.isPfa() ? genMiddleTrigFP32Pfa(smallH, width)
+                                      : genMiddleTrigFP32(smallH, middle, width);
     tab1.resize(MIDDLETRIG_FP32_SIZE(width, middle, smallH));
     // Append tab1 to tab
     tabsize = tab.size();
