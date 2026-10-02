@@ -289,6 +289,7 @@ native-pfa-build: engine-lib
 	python3 tools/native_pfa_plan_test.py build-engine/libaevum_engine.so
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 -Wall -Wextra tests/native_pfa_engine_compare.cpp $(DL_LIBS) -o build-tests/native-pfa-engine-compare
+	$(CXX) -O2 -std=c++20 -Wall -Wextra tests/native_pfa_dense_compare.cpp $(DL_LIBS) -o build-tests/native-pfa-dense-compare
 
 native-pfa-gpu-test: native-pfa-build native-pfa-host-test
 	bash scripts/test_native_pfa_gpu.sh $${AEVUM_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}
