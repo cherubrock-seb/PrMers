@@ -799,6 +799,134 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   return decision==Decision::Positive?parse(winner):std::vector<KeyVal>{};
 }
 
+#if defined(CUDA_BACKEND)
+// CUDA-only post-plan ZEROHACK_W selector. FFT geometry and all unrelated
+// implementation flags are fixed before this runs. Explicit/manual/tune-entry
+// choices outrank both cache and measurement.
+std::vector<KeyVal> selectCudaZeroHack(uint32_t exponent, size_t regs, GpuCommon shared,
+    const FFTConfig& fft, const std::string& identity, const std::vector<KeyVal>& existing,
+    bool explicit_zerohack_w_use, bool verbose) {
+  using namespace aevum_prp_use;
+  auto report=[&](const char* source,const std::string& profile,double gain=1) {
+    if(verbose)log("AEVUM_CUDA_ZEROHACK source=%s shape=%s profile=%s gain=%.5f\n",
+        source,fft.spec().c_str(),profile.empty()?"ZEROHACK_W=1":profile.c_str(),gain);
+  };
+  if(explicit_zerohack_w_use) {
+    report("explicit-use","args");
+    return {};
+  }
+  if(const char* manual=std::getenv("AEVUM_PRP_USE")) {
+    auto use=parse(manual);
+    report("manual",normalize(use));
+    return use;
+  }
+  for(const auto& entry:TuneEntry::readTuneFile(*shared.args)) {
+    if(entry.fft.spec()==fft.spec() && !entry.use.empty() && entry.fft.maxExp()>=exponent) {
+      report("tune-entry",normalize(entry.use));
+      return entry.use;
+    }
+  }
+  const auto control=mode();
+  if(control==aevum_autotune::Mode::Off || fft.isPfa()) {
+    report("defaults/bypass","");
+    return {};
+  }
+
+  std::string flags="selector=cuda-zerohack-v1;base="+normalize(existing);
+  for(const auto& [k,v]:shared.args->flags)flags+=';'+k+'='+v;
+  const auto cache_key=key(identity,fft.spec(),exponent,flags);
+  if(control==aevum_autotune::Mode::Auto) {
+    if(auto r=load(cache_key)) {
+      if(r->plan=="defaults") {
+        report("cache-hit-w1","",r->implementation_speedup);
+        return {};
+      }
+      auto use=parse(r->plan);
+      report("cache-hit-w0",normalize(use),r->implementation_speedup);
+      return use;
+    }
+  }
+
+  auto with_w=[&](const char* value) {
+    auto use=existing;
+    use.erase(std::remove_if(use.begin(),use.end(),
+        [](const KeyVal& x){return x.first=="ZEROHACK_W";}),use.end());
+    use.emplace_back("ZEROHACK_W",value);
+    return use;
+  };
+  const auto w1=with_w("1");
+  const auto w0=with_w("0");
+  const Words seed=deterministicResidue(exponent,0x12345678u);
+  const auto start=std::chrono::steady_clock::now();
+
+  try {
+    PrpUseProbe base(exponent,regs,shared,fft,w1);
+    PrpUseProbe candidate(exponent,regs,shared,fft,w0);
+    base.reset(seed);
+    candidate.reset(seed);
+    base.sequence(64);
+    candidate.sequence(64);
+    if(base.read()!=candidate.read())throw std::runtime_error("WORD MISMATCH warmup");
+
+    auto timed=[&](PrpUseProbe& probe) {
+      probe.reset(seed);
+      const auto begin=std::chrono::steady_clock::now();
+      probe.sequence(256);
+      const double secs=std::chrono::duration<double>(
+          std::chrono::steady_clock::now()-begin).count();
+      if(!std::isfinite(secs) || secs<=0.0)
+        throw std::runtime_error("invalid CUDA ZEROHACK timing");
+      return std::make_pair(secs,probe.read());
+    };
+
+    std::array<double,3>a{},b{};
+    unsigned wins=0;
+    double worst=100;
+    for(unsigned repeat=0;repeat<3;++repeat) {
+      std::pair<double,Words> aa,bb;
+      if(repeat&1u) {
+        bb=timed(candidate);
+        aa=timed(base);
+      } else {
+        aa=timed(base);
+        bb=timed(candidate);
+      }
+      if(aa.second!=bb.second)throw std::runtime_error("WORD MISMATCH timed pair");
+      a[repeat]=aa.first;
+      b[repeat]=bb.first;
+      const double pair_gain=a[repeat]/b[repeat];
+      wins+=pair_gain>=1.02;
+      worst=std::min(worst,pair_gain);
+    }
+
+    const double gain=median3(a)/median3(b);
+    const bool keep=gain>=1.03 && wins>=2 && worst>=0.985;
+    const auto elapsed=static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now()-start).count());
+
+    if(verbose)log("AEVUM_CUDA_ZEROHACK_CONFIRM exact=1 median_gain=%.5f worst=%.5f wins=%u/3 keep=%d w1_s=%.6f,%.6f,%.6f w0_s=%.6f,%.6f,%.6f\n",
+        gain,worst,wins,keep,a[0],a[1],a[2],b[0],b[1],b[2]);
+
+    try {
+      persistDecision(cache_key,keep?Decision::Positive:Decision::Negative,
+          keep?"ZEROHACK_W=0":"",keep?gain:1.0,elapsed);
+    } catch(...) {
+      if(verbose)log("AEVUM_CUDA_ZEROHACK cache-write-failed; using measured decision\n");
+    }
+
+    report(keep?"measured-w0":"measured-w1",keep?"ZEROHACK_W=0":"",keep?gain:1.0);
+    return keep?parse("ZEROHACK_W=0"):std::vector<KeyVal>{};
+  } catch(const std::exception& e) {
+    if(verbose)log("AEVUM_CUDA_ZEROHACK fallback=W1 reason=%s\n",e.what());
+  } catch(...) {
+    if(verbose)log("AEVUM_CUDA_ZEROHACK fallback=W1 reason=engine-exception\n");
+  }
+  report("safe-fallback-w1","");
+  return {};
+}
+#endif
+
 class Runtime {
 public:
   Runtime(uint32_t exponent, size_t register_count, uint32_t device, bool verbose, const char* fft_spec, const char* tune_dir, uint32_t workload)
@@ -1194,36 +1322,44 @@ args_.flags["MULTI_Q"] = "1";
     }
 #if defined(CUDA_BACKEND)
 // Production integration of the measured RTX3080 high-range PRP policy.
-// The validation-only AEVUM_PRP_USE CUDA bridge is intentionally not part
-// of production. Scope W0 to the exact measured device/plan/range.
+// MULTI_Q=0 remains scoped to the exact measured device/plan/range.
+// ZEROHACK_W is selected independently below by a cached exact mini-benchmark.
 if (workload_ == aevum_autotune::Workload::Prp &&
 !fft.isPfa() &&
 device_name.find("RTX 3080") != std::string::npos &&
 exponent_ >= 210000000u &&
 exponent_ <= 220000020u &&
 fft.spec() == "1:1K:8:512:202") {
-bool multi_q_zero = false;
-
   if (explicit_multi_q_use) {
-    multi_q_zero = args_.value("MULTI_Q", 1) == 0;
+    // Explicit Args -use MULTI_Q is already in args_.flags and wins.
   } else if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q")) {
-    if (std::atoi(value) == 0) {
+    if (std::atoi(value) == 0)
       pfa_use.emplace_back("MULTI_Q", "0");
-      multi_q_zero = true;
-    }
   } else {
     pfa_use.emplace_back("MULTI_Q", "0");
-    multi_q_zero = true;
   }
-
-  if (multi_q_zero && !explicit_zerohack_w_use)
-    pfa_use.emplace_back("ZEROHACK_W", "0");
 
   if (verbose) {
     const auto effective = aevum_prp_use::normalize(pfa_use);
     log("AEVUM_CUDA_PRP_PROFILE source=rtx3080-p210-p220 shape=%s profile=%s\n",
         fft.spec().c_str(),
         effective.empty() ? "defaults" : effective.c_str());
+  }
+}
+
+if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
+  const auto identity = aevum_autotune::makeKey(
+      VERSION, device_vendor, device_name, device_driver, device_runtime,
+      workload_, register_count_, exponent_,
+      "safe=1;clean=1;ordinal="+std::to_string(device)+";backend=cuda");
+  auto profile = selectCudaZeroHack(
+      exponent_, register_count_, shared_, fft, identity, pfa_use,
+      explicit_zerohack_w_use, verbose);
+  for (const auto& kv : profile) {
+    pfa_use.erase(std::remove_if(
+        pfa_use.begin(), pfa_use.end(),
+        [&](const KeyVal& x){return x.first==kv.first;}), pfa_use.end());
+    pfa_use.push_back(kv);
   }
 }
 
