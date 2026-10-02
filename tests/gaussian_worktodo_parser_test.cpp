@@ -28,7 +28,7 @@ int main() {
         return 1;
     }
 
-    if (!parser.removeFirstProcessed()) {
+    if (!parser.removeProcessedLine(entry->rawLine)) {
         std::cerr << "failed to remove completed entry\n";
         return 1;
     }
@@ -52,7 +52,7 @@ int main() {
         return 1;
     }
 
-    if (!parser.removeFirstProcessed()) {
+    if (!parser.removeProcessedLine(factor_only->rawLine)) {
         std::cerr << "failed to remove factor-only entry\n";
         return 1;
     }
@@ -64,8 +64,42 @@ int main() {
         return 1;
     }
 
+    // parse() skips lines it cannot run; completing the entry it returned must remove that entry, not
+    // the first actionable line of the file.
+    const auto mixed = std::filesystem::temp_directory_path() / "prmers_mixed_worktodo_test.txt";
+    {
+        std::ofstream out(mixed);
+        out << "Factor=N/A,1279,60,61\n";
+        out << "PRP=1,2,127,-1\n";
+        out << "PRP=1,2,521,-1\n";
+    }
+    io::WorktodoParser mixedParser(mixed.string());
+    auto prp = mixedParser.parse();
+    if (!prp || !prp->prpTest || prp->exponent != 127U) {
+        std::cerr << "mixed worktodo parse mismatch\n";
+        return 1;
+    }
+    if (!mixedParser.removeProcessedLine(prp->rawLine)) {
+        std::cerr << "failed to remove the PRP entry that ran\n";
+        return 1;
+    }
+    {
+        std::ifstream in(mixed);
+        const std::string text((std::istreambuf_iterator<char>(in)), {});
+        if (text != "Factor=N/A,1279,60,61\nPRP=1,2,521,-1\n") {
+            std::cerr << "mixed worktodo removal removed the wrong line:\n" << text;
+            return 1;
+        }
+    }
+    auto prp2 = mixedParser.parse();
+    if (!prp2 || prp2->exponent != 521U) {
+        std::cerr << "mixed worktodo did not advance to the next entry\n";
+        return 1;
+    }
+
     std::error_code ec;
     std::filesystem::remove(path, ec);
+    std::filesystem::remove(mixed, ec);
     std::cout << "Gaussian worktodo parser test passed\n";
     return 0;
 }

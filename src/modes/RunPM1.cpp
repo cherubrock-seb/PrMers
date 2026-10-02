@@ -1211,7 +1211,7 @@ int App::runPM1() {
     wm.appendToResultsTxt(json);
     
      if (hasWorktodoEntry_) {
-        if (worktodoParser_->removeFirstProcessed()) {
+        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
@@ -6992,7 +6992,7 @@ int App::runPM1Marin() {
         { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
         delete eng;
         if (hasWorktodoEntry_) {
-                if (worktodoParser_->removeFirstProcessed()) {
+                if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
                     std::ifstream f(options.worktodo_path);
@@ -7429,7 +7429,7 @@ int App::runPM1Marin() {
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_) {
-        if (worktodoParser_->removeFirstProcessed()) {
+        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
             std::ifstream f(options.worktodo_path);
@@ -7965,7 +7965,7 @@ int App::runPM1Stage3Marin() {
 
     delete eng;
     if (hasWorktodoEntry_) {
-            if (worktodoParser_->removeFirstProcessed()) {
+            if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
                 std::ifstream f(options.worktodo_path);
@@ -8557,7 +8557,7 @@ int App::runPM1Stage4Marin() {
 
     // ---- worktodo handling: same as Stage 3
     if (hasWorktodoEntry_) {
-        if (worktodoParser_->removeFirstProcessed()) {
+        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
                 std::ostringstream oss;

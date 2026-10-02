@@ -551,34 +551,4 @@ bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
     return true;
 }
 
-bool WorktodoParser::removeFirstProcessed() {
-    std::ifstream inFile(filename_);
-    std::ofstream tempFile(filename_ + ".tmp");
-    std::ofstream saveFile("worktodo_save.txt", std::ios::app);
-    if (!inFile || !tempFile || !saveFile) return false;
-
-    std::string line;
-    bool skipped = false;
-    while (std::getline(inFile, line)) {
-        std::string trimmed = line;
-        trim_inplace(trimmed);
-        const bool actionable = !trimmed.empty() && trimmed[0] != '#' && trimmed[0] != ';';
-        if (!skipped && actionable) {
-            skipped = true;
-            saveFile << line << "\n";
-            continue;
-        }
-        tempFile << line << "\n";
-    }
-
-    inFile.close();
-    tempFile.close();
-    saveFile.close();
-
-    std::remove(filename_.c_str());
-    std::rename((filename_ + ".tmp").c_str(), filename_.c_str());
-
-    return skipped;
-}
-
 } // namespace io
