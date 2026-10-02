@@ -339,7 +339,7 @@ jobs:
             - Standalone Aevum tag: `v0.3.90-pass5-prp-max`
             - Standalone Aevum source SHA: `64ee1b72561a66695e35ae409657c0ae8f5862e8`
             - CUDA ZEROHACK_W is selected empirically after plan selection using exact cached mini-benchmarking; RTX 3080 validated W0 while AMD/OpenCL behavior remains unchanged.
- - PrMers wide-digit Aevum adapter correctness validated on Radeon VII at p=19121591 with fixed plan 1:256:4:256:101.
+            - PrMers wide-digit Aevum adapter correctness validated on Radeon VII at p=19121591 with fixed plan 1:256:4:256:101.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
             - Correctness and release preflight: PASS before tagging.
             Platform artifacts include SHA256 checksum files for verification.
