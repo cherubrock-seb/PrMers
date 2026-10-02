@@ -1,4 +1,5 @@
 #include "io/WorktodoParser.hpp"
+#include "math/Pm1Bounds.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -110,11 +111,12 @@ int main() {
         out << "Pfactor=N/A,1,2,130000001,-1,77,nan\n";
     }
     struct PfCase { uint32_t exponent; double tf; uint64_t B1, B2; std::string aid; };
+    auto chosen = [](uint32_t p, double tf, double saved) { return math::choosePm1Bounds(p, tf, saved); };
     const PfCase pfCases[] = {
-        {1277u, 76, 1000, 20000, "0123456789ABCDEF0123456789ABCDEF"},
-        {130000001u, 77, 590000, 11800000, ""},
-        {130000001u, 77, 1200000, 24000000, ""},
-        {130000001u, 77, 590000, 11800000, ""},
+        {1277u, 76, chosen(1277u, 76, 2).B1, chosen(1277u, 76, 2).B2, "0123456789ABCDEF0123456789ABCDEF"},
+        {130000001u, 77, chosen(130000001u, 77, 1).B1, chosen(130000001u, 77, 1).B2, ""},
+        {130000001u, 77, chosen(130000001u, 77, 2).B1, chosen(130000001u, 77, 2).B2, ""},
+        {130000001u, 77, chosen(130000001u, 77, 0).B1, chosen(130000001u, 77, 0).B2, ""},
     };
     io::WorktodoParser pfParser(pf.string());
     for (const auto& c : pfCases) {

@@ -1,6 +1,7 @@
 // io/WorktodoParser.cpp
 #include "io/WorktodoParser.hpp"
 #include "math/Cofactor.hpp"
+#include "math/Pm1Bounds.hpp"
 #include "util/StringUtils.hpp"
 #include <fstream>
 #include <sstream>
@@ -12,6 +13,8 @@
 #include <cctype>
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <cstdlib>
 
 namespace io {
 
@@ -75,15 +78,6 @@ static uint64_t mul_sat_u64(uint64_t a, uint64_t b){
     if (a > std::numeric_limits<uint64_t>::max() / b) return std::numeric_limits<uint64_t>::max();
     return a * b;
 }*/
-
-// B1 for a Pfactor= line: 0.0045 * p * tests_saved (tests_saved clamped to [1, 10]), two significant digits,
-// at least 1000.
-static uint64_t pfactorB1(uint32_t exponent, double testsSaved) {
-    const double saved = std::min(std::max(testsSaved, 1.0), 10.0);
-    const double b1 = std::max(1000.0, 0.0045 * static_cast<double>(exponent) * saved);
-    const double scale = std::pow(10.0, std::floor(std::log10(b1)) - 1.0);
-    return static_cast<uint64_t>(std::llround(b1 / scale) * scale);
-}
 
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
@@ -302,11 +296,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 entry.aid       = aid;
 
                 // Pfactor=[AID,]k,b,n,c,how_far_factored,tests_saved: the line carries the trial-factoring depth
-                // and the number of primality tests a factor would save, not B1/B2. Choose the bounds with a
-                // simple rule that tracks Prime95's choices at the GIMPS wavefront (Prime95 picks B1 of about
-                // 0.004-0.006 p per test saved): B1 = 0.0045 * p * tests_saved, rounded to two significant
-                // digits, at least 1000, and B2 = 20 * B1. tests_saved is clamped to [1, 10], so a line asking
-                // for P-1 where a primality test would be cheaper still runs.
+                // and the number of primality tests a factor would save, not B1/B2. The bounds are chosen to
+                // maximise the expected saving, as Prime95 does (math::choosePm1Bounds).
                 double tfBits = 0.0, testsSaved = 0.0;
                 try {
                     tfBits = std::stod(parts[4]);
@@ -321,11 +312,28 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                               << line << "\n";
                     continue;
                 }
+                double stage2Cost = math::kPm1Stage2CostPerPrime;   // squarings per stage-2 prime
+                if (const char* env = std::getenv("PRMERS_PM1_STAGE2_COST")) {
+                    const double v = std::atof(env);
+                    if (std::isfinite(v) && v > 0.0) stage2Cost = v;
+                }
+                const math::Pm1Bounds bounds = math::choosePm1Bounds(exp, tfBits, testsSaved, stage2Cost);
+                if (bounds.B1 == 0) continue;
                 entry.sieveDepth = tfBits;
-                entry.B1 = pfactorB1(exp, testsSaved);
-                entry.B2 = 20 * entry.B1;
+                entry.B1 = bounds.B1;
+                entry.B2 = bounds.B2;
+                // Format with snprintf so std::cout's precision and float flags are left untouched.
+                char pct[32], target[32];
+                std::snprintf(pct, sizeof(pct), "%.2f", bounds.probability.total() * 100.0);
+                std::snprintf(target, sizeof(target), "%.0f", math::kPm1FallbackSuccess * 100.0);
                 std::cout << "Pfactor: trial factored to 2^" << tfBits << ", " << testsSaved
-                          << " test(s) saved -> B1=" << entry.B1 << " B2=" << entry.B2 << "\n";
+                          << " test(s) saved -> chose B1=" << bounds.B1 << " B2=" << bounds.B2
+                          << " (estimated success " << pct << "%)\n";
+                if (bounds.gain <= 0.0) {
+                    std::cout << "Pfactor: no P-1 bounds pay for themselves here (a primality test of 2^" << exp
+                              << "-1 is cheaper), so these are the cheapest bounds with an estimated "
+                              << target << "% chance of finding a factor.\n";
+                }
 
                 if (parts.size() >= 7) {
                     std::vector<std::string> kf;
