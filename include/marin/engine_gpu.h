@@ -279,7 +279,10 @@ public:
 		if (n != 0)
 		{
 			const size_t reg_bytes = _reg_count * n * sizeof(uint64);
-			const size_t carry_bytes = n / 4 * sizeof(uint64);
+			// n / 4 carries for the carry_weight kernels; subtract_reg_group_* keeps three words per
+			// digit group (borrow out, result value, borrow in), which is more when CWM_WG_SZ < 4.
+			const size_t carry_groups = (n / 4) >> _lcwm_wg_size;
+			const size_t carry_bytes = std::max(n / 4, 3 * carry_groups) * sizeof(uint64);
 			const size_t root_bytes = 3 * n * sizeof(uint64);
 			const size_t full_weight_bytes = 2 * n * sizeof(uint64);
 			const size_t width_bytes = n * sizeof(uint8);
@@ -1382,11 +1385,28 @@ public:
 
 		if (!_gpu->read_OpenCL("ocl/kernel.cl", "src/ocl/kernel.h", "src_ocl_kernel", src)) src << src_ocl_kernel;
 
-		// v99.99: exact, parallel Marin subtraction.
-		// Historical fast weighted subtraction can lose a high mixed-radix
-		// borrow. The serial subtract_reg kernel is exact but too slow for
-		// multi-million-word transforms. These kernels split the exact standard
-		// subtraction into independent groups and resolve the cyclic borrow.
+		// Exact, parallel register subtraction y -= x (mod 2^q - 1), used by sub_reg/addsub.
+		// Historical fast weighted subtraction can lose a high mixed-radix borrow and the serial
+		// subtract_reg kernel is far too slow for multi-million-word transforms, so the standard
+		// subtraction is split into independent groups of 4*CWM_WG_SZ digits:
+		//
+		//  p1    each group subtracts with borrow in 0 (multi-unit borrows, see sbc_reg) and
+		//        records gen = its borrow out and R0 = the value of its result digits, saturated
+		//        to 2^64-1. For a borrow in b (b < 2^W, W = group width) the group's borrow out is
+		//        gen + (b > R0): per-digit borrow chains compose, so applying b afterwards to the
+		//        result digits runs through the whole group exactly when b exceeds their value.
+		//  scan  serial cyclic propagation of the group borrows, iterated until the borrow that
+		//        wraps from the top group into group 0 is stable (2^q = 1 mod 2^q - 1).
+		//  apply groups with a non-zero incoming borrow subtract it from their digits.
+		//
+		// Digit invariant relied upon (see sbc_reg): the unweighted digits are non-negative integers
+		// far below 2^63 whose weighted sum is the exact register value; they are NOT all below
+		// their base. The carry kernels leave lane s3 of each block as d + c with c the carry out
+		// of lane s2 (adc4), so digits equal to 2^w occur after every square_mul/mul/add. For this
+		// reason p1 must not derive "propagates a borrow" from the digit representation (y == x):
+		// equal values can have different digits, and a one-unit borrow table is not enough.
+		// The bound on the digits only limits the number of scan passes: with every digit below
+		// 2^(w+1) a group's gen is at most 2 and the scan settles within a few passes.
 		src << R"PRMERS_V999_CLC(
 
 __kernel
@@ -1407,22 +1427,38 @@ void subtract_reg_group_p1(__global uint64 * restrict const reg,
     const sz_t begin = grp * (sz_t)(4u * CWM_WG_SZ);
     const sz_t end = begin + (sz_t)(4u * CWM_WG_SZ);
 
-    uint32 borrow = 0u;
-    uint32 equal = 1u;
+    // R0 = value of the result digits, saturated to 2^64 - 1 (exact while it fits in 64 bits).
+    uint64 borrow = 0ul;
+    uint64 r0 = 0ul;
+    uint32 r0_shift = 0u;   // bit position of the current digit inside the group, capped at 64
+    uint64 r0_high = 0ul;   // non-zero when the value does not fit in 64 bits
 
     for (sz_t k = begin; k < end; ++k)
     {
         const sz_t wi_idx = k / 4u + (k % 4u) * (N_SZ / 4u);
         const uint64_2 w = W2_AT(wi_idx);
+        const uint_8 wk = width[k];
 
         const uint64 yv = mod_mul(y[k], w.s1);
         const uint64 xv = mod_mul(x[k], w.s1);
+        const uint64 r = sbc_reg(yv, xv, wk, &borrow);
+        y[k] = mod_mul(r, w.s0);
 
-        if (yv != xv) equal = 0u;
-        y[k] = mod_mul(sbc_reg(yv, xv, width[k], &borrow), w.s0);
+        if (r0_shift < 64u)
+        {
+            const uint64 lo = r << r0_shift;
+            const uint64 hi = (r0_shift == 0u) ? 0ul : (r >> (64u - r0_shift));
+            const uint64 s = r0 + lo;
+            r0_high |= hi | ((s < lo) ? 1ul : 0ul);
+            r0 = s;
+        }
+        else r0_high |= r;
+        r0_shift += (uint32)wk;
+        if (r0_shift > 64u) r0_shift = 64u;
     }
 
-    carry[grp] = (uint64)(borrow | (equal << 1));
+    carry[grp] = borrow;
+    carry[ngr + grp] = (r0_high != 0ul) ? ~0ul : r0;
 }
 
 __kernel
@@ -1431,28 +1467,23 @@ void subtract_reg_group_scan(__global uint64 * restrict const carry)
     if ((sz_t)get_global_id(0) != 0u) return;
 
     const sz_t ngr = (sz_t)((N_SZ / 4u) / CWM_WG_SZ);
-    uint32 b = 0u;
+    __global const uint64 * restrict const gen = carry;
+    __global const uint64 * restrict const r0 = &carry[ngr];
+    __global uint64 * restrict const in = &carry[2u * ngr];
 
-    for (sz_t g = 0; g < ngr; ++g)
+    // Borrow wrapping from the top group into group 0. Starting from 0 the wrapped borrow is
+    // non-decreasing and bounded, so the loop reaches its fixed point after a few passes.
+    uint64 wrap = 0ul;
+    for (uint pass = 0u; pass < 64u; ++pass)
     {
-        const uint64 m = carry[g];
-        const uint32 gen = (uint32)(m & 1ul);
-        const uint32 eq  = (uint32)((m >> 1) & 1ul);
-        carry[ngr + g] = (uint64)b;
-        b = gen | (eq & b);
-    }
-
-    if (b != 0u)
-    {
-        b = 1u;
+        uint64 b = wrap;
         for (sz_t g = 0; g < ngr; ++g)
         {
-            const uint64 m = carry[g];
-            const uint32 gen = (uint32)(m & 1ul);
-            const uint32 eq  = (uint32)((m >> 1) & 1ul);
-            carry[ngr + g] = (uint64)b;
-            b = gen | (eq & b);
+            in[g] = b;
+            b = gen[g] + ((b > r0[g]) ? 1ul : 0ul);
         }
+        if (b == wrap) break;
+        wrap = b;
     }
 }
 
@@ -1469,20 +1500,22 @@ void subtract_reg_group_apply(__global uint64 * restrict const reg,
     const sz_t grp = (sz_t)get_global_id(0);
     const sz_t ngr = (sz_t)((N_SZ / 4u) / CWM_WG_SZ);
     if (grp >= ngr) return;
-    if ((carry[ngr + grp] & 1ul) == 0ul) return;
+
+    uint64 borrow = carry[2u * ngr + grp];
+    if (borrow == 0ul) return;
 
     const sz_t begin = grp * (sz_t)(4u * CWM_WG_SZ);
     const sz_t end = begin + (sz_t)(4u * CWM_WG_SZ);
 
-    uint32 borrow = 1u;
     for (sz_t k = begin; k < end; ++k)
     {
         const sz_t wi_idx = k / 4u + (k % 4u) * (N_SZ / 4u);
         const uint64_2 w = W2_AT(wi_idx);
         const uint64 yv = mod_mul(y[k], w.s1);
-        y[k] = mod_mul(sbc(yv, width[k], &borrow), w.s0);
-        if (borrow == 0u) break;
+        y[k] = mod_mul(sbc_reg(yv, 0ul, width[k], &borrow), w.s0);
+        if (borrow == 0ul) break;
     }
+    // A borrow still pending here was accounted for by the scan (gen + 1 to the next group).
 }
 
 )PRMERS_V999_CLC";
