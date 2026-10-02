@@ -1047,6 +1047,13 @@ int App::run() {
         }
         guiServer_->start();
         std::cout << "GUI " << guiServer_->url() << std::endl;
+        const bool gui_loopback = !options.ipv4 &&
+            (options.http_host.empty() || options.http_host == "localhost" ||
+             options.http_host.rfind("127.", 0) == 0);
+        if (!gui_loopback) {
+            std::cout << "Warning: the GUI is reachable from other machines on your network. "
+                         "Anyone who can connect to it can control this PrMers instance." << std::endl;
+        }
         if (!file_non_empty(cfg.worktodo_path)) {
             guiServer_->setStatus("Idle");
             while (!g_stop && gui_alive) std::this_thread::sleep_for(std::chrono::milliseconds(200));
