@@ -161,6 +161,9 @@ test-gm:
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
 
+test-pm1-stage2-record-factor: all
+	bash tests/pm1_stage2_record_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 
