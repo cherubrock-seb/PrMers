@@ -12,7 +12,8 @@
   axis still needs.
 - Validated word-for-word against GMP and against power-of-two FFT323161 /
   FFT3161 plans with dense random residues at 42.4 bits/word (256:9:256 and
-  512:9:512).
+  512:9:512).  `tests/type4_pfa9_engine_compare.cpp` now feeds seeded dense
+  residues instead of squaring 3, which never let the FP32 plane reach the CRT.
 
 ## v0.3.68 throughput-cost auto selection + experimental PFA9 lead bridge
 
