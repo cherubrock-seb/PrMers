@@ -305,9 +305,12 @@ int App::runECMMarin()
         cout << "[ECM] json for manual submit to primenet:\n" << json_out << endl;
         options.knownFactors = saved;
         io::WorktodoManager wm(options);
-        wm.appendToResultsTxt(json_out);
+        const bool resultSaved = wm.appendToResultsTxt(json_out);
 
-        if (hasWorktodoEntry_) {
+        if (hasWorktodoEntry_ && !resultSaved) {
+            std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+        }
+        if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path
                         << " and saved to worktodo_save.txt\n";

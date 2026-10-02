@@ -1207,10 +1207,13 @@ int App::runPM1() {
                       guiServer_->appendLog(oss.str());
             }*/
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     
-     if (hasWorktodoEntry_) {
+     if (hasWorktodoEntry_ && !resultSaved) {
+         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+     }
+     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
@@ -6919,8 +6922,8 @@ int App::runPM1Marin() {
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
         
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
-        wm.appendToResultsTxt(json);
+        bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
+        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
         options.B2 = B2save;
         const bool runRequestedStage2 = options.B2 > 0 &&
             (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
@@ -6991,7 +6994,10 @@ int App::runPM1Marin() {
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
         { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
         delete eng;
-        if (hasWorktodoEntry_) {
+        if (hasWorktodoEntry_ && !resultSaved) {
+            std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+        }
+        if (hasWorktodoEntry_ && resultSaved) {
                 if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -7326,8 +7332,8 @@ int App::runPM1Marin() {
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     options.B2 = 0;
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     options.B2 = B2save;
 
     const bool runRequestedStage2 = options.B2 > 0 &&
@@ -7428,7 +7434,10 @@ int App::runPM1Marin() {
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -7960,11 +7969,14 @@ int App::runPM1Stage3Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
     delete eng;
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -8550,13 +8562,16 @@ int App::runPM1Stage4Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage4", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage4", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
     delete eng;
 
     // ---- worktodo handling: same as Stage 3
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
