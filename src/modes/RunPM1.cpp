@@ -926,6 +926,10 @@ int App::runPM1() {
                       guiServer_->appendLog(oss.str());
         }
         E = buildE(B1);
+        if (interrupted) {
+            std::cout << "\nInterrupted by user while building E.\n";
+            return 0;
+        }
         E *= mpz_class(2) * mpz_from_u64(options.exponent);
 
 
@@ -1807,6 +1811,11 @@ int App::runPM1Stage2MarinLowMem() {
 
         std::cout << "[PM1] Building Stage 2 product exponent E2 = E(B1)*2*p*Q..." << std::flush;
         mpz_class E2 = buildE(B1u);
+        if (interrupted) {
+            std::cout << "\nInterrupted by user while building E2.\n";
+            interrupted = false;
+            return 0;
+        }
         E2 *= mpz_class(2) * mpz_from_u64(options.exponent);
         for (uint64_t q : primes) mpz_mul_u64(E2, q);
         const mp_bitcnt_t bits = mpz_sizeinbase(E2.get_mpz_t(), 2);
@@ -7020,6 +7029,14 @@ int App::runPM1Marin() {
                 else { Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk); }
             } else {
                 Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
+            }
+            if (interrupted) {
+                // E is incomplete.  Do not run (or checkpoint) with it: the last
+                // periodic checkpoint, if any, is still valid for a later resume.
+                std::cout << "\nInterrupted by user while building E; no checkpoint written." << std::endl;
+                if (guiServer_) guiServer_->appendLog("\nInterrupted while building E; no checkpoint written.\n");
+                delete eng;
+                return 0;
             }
             if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
             bool useFast3 = useFast3Candidate && (nextStart == 0) && !aevum_backend;

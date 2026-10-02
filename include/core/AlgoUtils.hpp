@@ -314,18 +314,14 @@ inline mpz_class buildE(uint64_t B1) {
     }
 
     for (auto &w : workers) w.join();
-    for (auto &p : part) E *= p;
     if (interrupted) {
-        std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
-        for (auto &w : workers)
-            if (w.joinable()) w.join();
-
-        for (auto &p : part) E *= p;
-        mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
-        std::cout << "\nlog2(E) ~ " << bits << " bits" << std::endl;
-        interrupted = false; 
+        // The exponent is incomplete.  Leave `interrupted` set so the caller
+        // stops instead of running with a partial E and reporting the full B1;
+        // callers must check it before using the returned value.
+        std::cout << "\n\nInterrupted signal received while building E.\n\n";
         return E;
     }
+    for (auto &p : part) E *= p;
 
     std::cout << "\rBuilding E: 100%  ETA  00:00:00\n";
     return E;
@@ -1025,10 +1021,9 @@ inline mpz_class buildE2(uint64_t B1, uint64_t startPrime, uint64_t maxBits, uin
 done:
     if (!batch.empty() && nextStart == 0) flush_batch(true);
     if (interrupted) {
-        std::cout << "\n\nInterrupted signal received — using partial E computed so far.\n\n";
-        mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
-        std::cout << "\nlog2(E) ~ " << bits << " bits" << std::endl;
-        interrupted = false;
+        // Partial chunk: leave `interrupted` set; callers must check it before
+        // using the returned value or `nextStart`.
+        std::cout << "\n\nInterrupted signal received while building E.\n\n";
         return E;
     }
     if (nextStart == 0) std::cout << "\rBuilding E-chunk: 100%  ETA  00:00:00\n";
