@@ -308,7 +308,7 @@ int App::runECMMarin()
         wm.appendToResultsTxt(json_out);
 
         if (hasWorktodoEntry_) {
-            if (worktodoParser_->removeFirstProcessed()) {
+            if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path
                         << " and saved to worktodo_save.txt\n";
                 if (guiServer_) {
