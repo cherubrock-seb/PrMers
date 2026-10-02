@@ -77,8 +77,48 @@ int main() {
     expect(value(*eng, 6), expected, "pow");
 
     engine::digit digits(eng.get(), 3);
-    if (digits.get_size() != 8 || digits.res64() != 123) return 8;
+    if (digits.get_size() != 1 || digits.width(0) != 31 || digits.res64() != 123) return 8;
+    eng.reset();
 
+    // Transform digits wider than 32 bits (FFT3161 near its limit, e.g. 36.47 bpw for p = 19121591 on 512K).
+    // The fake reports one 61-bit transform digit for p = 61.  engine::digit feeds res64, the final PRP/LL
+    // residue words and proof checkpoints, so it must still describe the exact register value.
+    {
+        constexpr std::uint32_t wide_exponent = 61;
+        constexpr std::uint64_t wide_modulus = (std::uint64_t(1) << wide_exponent) - 1;
+        constexpr std::uint64_t wide_value = 0x1234567890ABCDEFull & wide_modulus;
+
+        std::unique_ptr<engine> wide(engine::create_gpu(wide_exponent, 8, 0, false));
+        if (wide->get_size() != 1) return 12;
+
+        mpz_t w;
+        mpz_init(w);
+        mpz_set_ui(w, wide_value);
+        wide->set_mpz(0, w);
+        mpz_clear(w);
+        expect(value(*wide, 0), wide_value, "wide set_mpz");
+
+        engine::digit wd(wide.get(), 0);
+        expect(wd.res64(), wide_value, "wide digit res64");
+        if (!wd.equal_to(wide_value)) return 13;
+        if (wd.equal_to(wide_value & 0xFFFFFFFFull)) return 14;
+
+        // Same packing as pack_words_from_eng_digits(), which builds the reported res64/res2048.
+        std::uint64_t packed = 0;
+        std::uint32_t bits = 0;
+        for (std::size_t i = 0; i < wd.get_size(); ++i) {
+            if (wd.width(i) > 32) return 15;
+            packed |= std::uint64_t(wd.val(i)) << bits;
+            bits += wd.width(i);
+        }
+        if (bits != wide_exponent) return 16;
+        expect(packed, wide_value, "wide packed words");
+
+        wide->set(1, 9);
+        if (!engine::digit(wide.get(), 1).equal_to(9)) return 17;
+    }
+
+    eng.reset(engine::create_gpu(exponent, 8, 0, false));
     eng->sync();
     engine::configure_gpu_backend(engine::gpu_backend::marin);
     if (engine::configured_gpu_backend() != engine::gpu_backend::marin) return 9;

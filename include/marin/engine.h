@@ -23,6 +23,14 @@ protected:
 	// d is encoded: low 32-bit word is the value and high 32-bit word is the width of the base
 	virtual void get(uint64 * const d, const size_t src) const = 0;
 	virtual void set(const size_t dst, uint64 * const d) const = 0;
+	// Fill d with an encoded little-endian digit representation of src, as get() does.  The digits need not
+	// match the transform: an engine whose transform digits can be wider than 32 bits (Aevum FFT3161 runs up
+	// to ~47 bits/word) must override this, since the encoding holds at most 32 bits of value per digit.
+	virtual void get_digits(std::vector<uint64> & d, const size_t src) const
+	{
+		d.resize(get_size());
+		get(d.data(), src);
+	}
 
 public:
 	engine() {}
@@ -240,8 +248,7 @@ public:
 		// unsigned digit representation of src using IBDWT base
 		digit(engine * const eng, const Reg src)
 		{
-			_data.resize(eng->get_size());
-			eng->get(_data.data(), src);
+			eng->get_digits(_data, src);
 		}
 
 		virtual ~digit() {}

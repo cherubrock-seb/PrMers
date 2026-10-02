@@ -47,8 +47,16 @@ void* aevum_engine_create(std::uint32_t exponent, std::size_t register_count,
 }
 
 void aevum_engine_destroy(void* handle) { delete static_cast<FakeRuntime*>(handle); }
-std::size_t aevum_engine_transform_size(void*) { return 8; }
-std::size_t aevum_engine_word_count(void*) { return 1; }
+// Up to 32 bits the fake reports 8 narrow transform digits.  Above 32 bits it reports a single transform
+// digit as wide as the exponent, modelling an FFT3161 plan run at more than 32 bits/word.
+std::size_t aevum_engine_transform_size(void* handle) {
+    auto* rt = static_cast<FakeRuntime*>(handle);
+    return rt && rt->exponent > 32 ? 1 : 8;
+}
+std::size_t aevum_engine_word_count(void* handle) {
+    auto* rt = static_cast<FakeRuntime*>(handle);
+    return rt ? (rt->exponent + 31) / 32 : 0;
+}
 int aevum_engine_sync(void*) { return 1; }
 
 int aevum_engine_set_u32(void* handle, std::size_t dst, std::uint32_t value) {
@@ -56,12 +64,16 @@ int aevum_engine_set_u32(void* handle, std::size_t dst, std::uint32_t value) {
     rt->regs[dst] = value % rt->modulus; return 1;
 }
 int aevum_engine_set_words(void* handle, std::size_t dst, const std::uint32_t* words, std::size_t count) {
-    auto* rt = checked(handle, dst); if (!rt || !words || count != 1) return 0;
-    rt->regs[dst] = words[0] % rt->modulus; return 1;
+    auto* rt = checked(handle, dst); if (!rt || !words || count != (rt->exponent + 31) / 32) return 0;
+    std::uint64_t v = words[0];
+    if (count > 1) v |= std::uint64_t(words[1]) << 32;
+    rt->regs[dst] = v % rt->modulus; return 1;
 }
 int aevum_engine_get_words(void* handle, std::size_t src, std::uint32_t* words, std::size_t count) {
-    auto* rt = checked(handle, src); if (!rt || !words || count != 1) return 0;
-    words[0] = static_cast<std::uint32_t>(rt->regs[src]); return 1;
+    auto* rt = checked(handle, src); if (!rt || !words || count != (rt->exponent + 31) / 32) return 0;
+    words[0] = static_cast<std::uint32_t>(rt->regs[src]);
+    if (count > 1) words[1] = static_cast<std::uint32_t>(rt->regs[src] >> 32);
+    return 1;
 }
 int aevum_engine_copy(void* handle, std::size_t dst, std::size_t src) {
     auto* a = checked(handle, dst); auto* b = checked(handle, src); if (!a || !b) return 0;
