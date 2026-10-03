@@ -924,8 +924,8 @@ public:
 	{
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
-		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
+		const uint64 offset = uint64(l.local * _n);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint64), &offset);
 		_set_kernel_arg(kernel, xform_arg_base() + 1, sizeof(uint32), &s);
 		_set_kernel_arg(kernel, xform_arg_base() + 2, sizeof(uint32), &lm);
 		_execute_kernel(kernel, _n / 8, local_size);
@@ -935,8 +935,8 @@ public:
 	{
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
-		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
+		const uint64 offset = uint64(l.local * _n);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint64), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
@@ -944,8 +944,8 @@ public:
 	{
 		const segloc l = seg_loc(src);
 		bind_reg_segment(kernel, l.seg);
-		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
+		const uint64 offset = uint64(l.local * _n);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint64), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
@@ -954,10 +954,10 @@ public:
 		const segloc d = seg_loc(dst);
 		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
 		bind_reg_segment(kernel, d.seg);
-		const uint32 offset_y = uint32(srcLocal * _n);
-		_set_kernel_arg(kernel, xform_arg_base() + 1, sizeof(uint32), &offset_y);
-		const uint32 offset = uint32(d.local * _n);
-		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint32), &offset);
+		const uint64 offset_y = uint64(srcLocal * _n);
+		_set_kernel_arg(kernel, xform_arg_base() + 1, sizeof(uint64), &offset_y);
+		const uint64 offset = uint64(d.local * _n);
+		_set_kernel_arg(kernel, xform_arg_base(), sizeof(uint64), &offset);
 		_execute_kernel(kernel, _n / step, local_size);
 	}
 
@@ -968,10 +968,10 @@ public:
 		bind_reg_segment(_mul512_xbuf, d.seg);
 		cl_mem src_mem = _reg_segmented ? _reg_segments[s.seg] : _reg;
 		_set_kernel_arg(_mul512_xbuf, 4, sizeof(cl_mem), &src_mem);
-		const uint32 offset = uint32(d.local * _n);
-		const uint32 offset_y = uint32(s.local * _n);
-		_set_kernel_arg(_mul512_xbuf, 5, sizeof(uint32), &offset);
-		_set_kernel_arg(_mul512_xbuf, 6, sizeof(uint32), &offset_y);
+		const uint64 offset = uint64(d.local * _n);
+		const uint64 offset_y = uint64(s.local * _n);
+		_set_kernel_arg(_mul512_xbuf, 5, sizeof(uint64), &offset);
+		_set_kernel_arg(_mul512_xbuf, 6, sizeof(uint64), &offset_y);
 		_execute_kernel(_mul512_xbuf, _n / 8, local_size);
 	}
 
@@ -1063,11 +1063,11 @@ public:
 		const segloc l = seg_loc(src);
 		bind_reg_segment(_carry_weight_mul_p1, l.seg);
 		bind_reg_segment(_carry_weight_p2, l.seg);
-		const uint32 offset = uint32(l.local * _n);
+		const uint64 offset = uint64(l.local * _n);
 		_set_kernel_arg(_carry_weight_mul_p1, carry_arg_base(), sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_mul_p1, carry_arg_base() + 1, sizeof(uint32), &offset);
+		_set_kernel_arg(_carry_weight_mul_p1, carry_arg_base() + 1, sizeof(uint64), &offset);
 		_execute_kernel(_carry_weight_mul_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint64), &offset);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -1082,15 +1082,15 @@ public:
 		const segloc sl = seg_loc(src), dl = seg_loc(dst);
 		bind_reg_segment(_carry_weight_mul_p1_copy, sl.seg);
 		bind_reg_segment(_carry_weight_p2_copy, sl.seg);
-		uint32 offS = (uint32)(sl.local * _n);
-		uint32 offD = (uint32)(dl.local * _n);
+		uint64 offS = uint64(sl.local * _n);
+		uint64 offD = uint64(dl.local * _n);
 		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base(), sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 1, sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 2, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 1, sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_mul_p1_copy, carry_arg_base() + 2, sizeof(uint64), &offD);
 		_execute_kernel(_carry_weight_mul_p1_copy, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base(), sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base(), sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_p2_copy, carry_arg_base() + 1, sizeof(uint64), &offD);
 		_execute_kernel(_carry_weight_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -1100,15 +1100,15 @@ public:
 		const size_t addLocal = materialize_src_in_segment(add_src, d.seg, 0);
 		bind_reg_segment(_carry_weight_muladd_p1, d.seg);
 		bind_reg_segment(_carry_weight_muladd_p2, d.seg);
-		const uint32 offY = uint32(d.local * _n);
-		const uint32 offX = uint32(addLocal * _n);
+		const uint64 offY = uint64(d.local * _n);
+		const uint64 offX = uint64(addLocal * _n);
 
 		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base(), sizeof(uint32), &a);
-		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 1, sizeof(uint32), &offY);
-		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 2, sizeof(uint32), &offX);
+		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 1, sizeof(uint64), &offY);
+		_set_kernel_arg(_carry_weight_muladd_p1, carry_arg_base() + 2, sizeof(uint64), &offX);
 		_execute_kernel(_carry_weight_muladd_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_muladd_p2, carry_arg_base(), sizeof(uint32), &offY);
+		_set_kernel_arg(_carry_weight_muladd_p2, carry_arg_base(), sizeof(uint64), &offY);
 		_execute_kernel(_carry_weight_muladd_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 	
@@ -1120,11 +1120,11 @@ public:
 		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
 		bind_reg_segment(_carry_weight_add_p1, d.seg);
 		bind_reg_segment(_carry_weight_p2, d.seg);
-		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
-		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base(), sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base() + 1, sizeof(uint32), &offset_x);
+		const uint64 offset_y = uint64(d.local * _n), offset_x = uint64(srcLocal * _n);
+		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base(), sizeof(uint64), &offset_y);
+		_set_kernel_arg(_carry_weight_add_p1, carry_arg_base() + 1, sizeof(uint64), &offset_x);
 		_execute_kernel(_carry_weight_add_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint64), &offset_y);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
@@ -1137,11 +1137,11 @@ public:
 		const size_t srcLocal = materialize_src_in_segment(src, d.seg, 0);
 		bind_reg_segment(_carry_weight_add_neg_p1, d.seg);
 		bind_reg_segment(_carry_weight_p2, d.seg);
-		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(srcLocal * _n);
-		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base(), sizeof(uint32), &offset_y);
-		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base() + 1, sizeof(uint32), &offset_x);
+		const uint64 offset_y = uint64(d.local * _n), offset_x = uint64(srcLocal * _n);
+		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base(), sizeof(uint64), &offset_y);
+		_set_kernel_arg(_carry_weight_add_neg_p1, carry_arg_base() + 1, sizeof(uint64), &offset_x);
 		_execute_kernel(_carry_weight_add_neg_p1, _n / 4, 1u << _lcwm_wg_size);
-		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint32), &offset_y);
+		_set_kernel_arg(_carry_weight_p2, carry_arg_base(), sizeof(uint64), &offset_y);
 		_execute_kernel(_carry_weight_p2, (_n / 4) >> _lcwm_wg_size);
 
 	}
@@ -1158,17 +1158,17 @@ public:
 
 		const bool extraWeight = _aux_split || _weight_compact;
 		const uint32 argBase = extraWeight ? 5u : 4u;
-		const uint32 offY = uint32(d.local * _n);
-		const uint32 offX = uint32(srcLocal * _n);
+		const uint64 offY = uint64(d.local * _n);
+		const uint64 offX = uint64(srcLocal * _n);
 
-		_set_kernel_arg(_subtract_reg_group_p1, argBase, sizeof(uint32), &offY);
-		_set_kernel_arg(_subtract_reg_group_p1, argBase + 1, sizeof(uint32), &offX);
+		_set_kernel_arg(_subtract_reg_group_p1, argBase, sizeof(uint64), &offY);
+		_set_kernel_arg(_subtract_reg_group_p1, argBase + 1, sizeof(uint64), &offX);
 
 		const size_t groups = (_n / 4) >> _lcwm_wg_size;
 		_execute_kernel(_subtract_reg_group_p1, groups);
 		_execute_kernel(_subtract_reg_group_scan, 1);
 
-		_set_kernel_arg(_subtract_reg_group_apply, argBase, sizeof(uint32), &offY);
+		_set_kernel_arg(_subtract_reg_group_apply, argBase, sizeof(uint64), &offY);
 		_execute_kernel(_subtract_reg_group_apply, groups);
 	}
 
@@ -1191,19 +1191,19 @@ public:
 		const segloc sl = seg_loc(sum), dl = seg_loc(diff), al = seg_loc(a), bl = seg_loc(b);
 		bind_reg_segment(_carry_weight_addsub_p1, sl.seg);
 		bind_reg_segment(_carry_weight_addsub_p2, sl.seg);
-		uint32 offS = (uint32)(sl.local * _n);
-		uint32 offD = (uint32)(dl.local * _n);
-		uint32 offA = (uint32)(al.local * _n);
-		uint32 offB = (uint32)(bl.local * _n);
+		uint64 offS = uint64(sl.local * _n);
+		uint64 offD = uint64(dl.local * _n);
+		uint64 offA = uint64(al.local * _n);
+		uint64 offB = uint64(bl.local * _n);
 
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base(), sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 1, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 2, sizeof(uint32), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 3, sizeof(uint32), &offB);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base(), sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 1, sizeof(uint64), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 2, sizeof(uint64), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 3, sizeof(uint64), &offB);
 		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base(), sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base() + 1, sizeof(uint32), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base(), sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base() + 1, sizeof(uint64), &offD);
 		_execute_kernel(_carry_weight_addsub_p2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -1219,15 +1219,15 @@ public:
 		const segloc d0 = seg_loc(dst0), d1 = seg_loc(dst1);
 		bind_reg_segment(_carry_weight_mul2_unit_p1, d0.seg);
 		bind_reg_segment(_carry_weight_p2x2, d0.seg);
-		uint32 off0 = (uint32)(d0.local * _n);
-		uint32 off1 = (uint32)(d1.local * _n);
+		uint64 off0 = uint64(d0.local * _n);
+		uint64 off1 = uint64(d1.local * _n);
 
-		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base(), sizeof(uint32), &off0);
-		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base() + 1, sizeof(uint32), &off1);
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base(), sizeof(uint64), &off0);
+		_set_kernel_arg(_carry_weight_mul2_unit_p1, carry_arg_base() + 1, sizeof(uint64), &off1);
 		_execute_kernel(_carry_weight_mul2_unit_p1, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base(), sizeof(uint32), &off0);
-		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base() + 1, sizeof(uint32), &off1);
+		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base(), sizeof(uint64), &off0);
+		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base() + 1, sizeof(uint64), &off1);
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -1245,25 +1245,25 @@ public:
 		const segloc sl = seg_loc(sum), dl = seg_loc(diff), scl = seg_loc(sum_copy), dcl = seg_loc(diff_copy), al = seg_loc(a), bl = seg_loc(b);
 		bind_reg_segment(_carry_weight_addsub_p1_copy, sl.seg);
 		bind_reg_segment(_carry_weight_addsub_p2_copy, sl.seg);
-		const uint32 offS = (uint32)(sl.local * _n);
-		const uint32 offD = (uint32)(dl.local * _n);
-		const uint32 offSc = (uint32)(scl.local * _n);
-		const uint32 offDc = (uint32)(dcl.local * _n);
-		const uint32 offA = (uint32)(al.local * _n);
-		const uint32 offB = (uint32)(bl.local * _n);
+		const uint64 offS = uint64(sl.local * _n);
+		const uint64 offD = uint64(dl.local * _n);
+		const uint64 offSc = uint64(scl.local * _n);
+		const uint64 offDc = uint64(dcl.local * _n);
+		const uint64 offA = uint64(al.local * _n);
+		const uint64 offB = uint64(bl.local * _n);
 
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base(), sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 2, sizeof(uint32), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 3, sizeof(uint32), &offDc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 4, sizeof(uint32), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 5, sizeof(uint32), &offB);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base(), sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 1, sizeof(uint64), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 2, sizeof(uint64), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 3, sizeof(uint64), &offDc);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 4, sizeof(uint64), &offA);
+		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 5, sizeof(uint64), &offB);
 		_execute_kernel(_carry_weight_addsub_p1_copy, _n / 4, 1u << _lcwm_wg_size);
 
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base(), sizeof(uint32), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 1, sizeof(uint32), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 2, sizeof(uint32), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 3, sizeof(uint32), &offDc);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base(), sizeof(uint64), &offS);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 1, sizeof(uint64), &offD);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 2, sizeof(uint64), &offSc);
+		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 3, sizeof(uint64), &offDc);
 		_execute_kernel(_carry_weight_addsub_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
@@ -1277,9 +1277,9 @@ public:
 		}
 		const segloc d = seg_loc(dst), s = seg_loc(src);
 		bind_reg_segment(_copy, d.seg);
-		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(s.local * _n);
-		_set_kernel_arg(_copy, 1, sizeof(uint32), &offset_y);
-		_set_kernel_arg(_copy, 2, sizeof(uint32), &offset_x);
+		const uint64 offset_y = uint64(d.local * _n), offset_x = uint64(s.local * _n);
+		_set_kernel_arg(_copy, 1, sizeof(uint64), &offset_y);
+		_set_kernel_arg(_copy, 2, sizeof(uint64), &offset_x);
 		_execute_kernel(_copy, _n);
 	}
 
@@ -1287,8 +1287,8 @@ public:
 	{
 		const segloc l = seg_loc(src);
 		bind_reg_segment(_subtract, l.seg);
-		const uint32 offset = uint32(l.local * _n);
-		_set_kernel_arg(_subtract, subtract_arg_base(), sizeof(uint32), &offset);
+		const uint64 offset = uint64(l.local * _n);
+		_set_kernel_arg(_subtract, subtract_arg_base(), sizeof(uint64), &offset);
 		_set_kernel_arg(_subtract, subtract_arg_base() + 1, sizeof(uint32), &a);
 		_execute_kernel(_subtract, 1);
 	}
@@ -1302,9 +1302,9 @@ public:
 		}
 		const segloc d = seg_loc(dst), s = seg_loc(src);
 		bind_reg_segment(_subtract_reg, d.seg);
-		const uint32 offset_y = uint32(d.local * _n), offset_x = uint32(s.local * _n);
-		_set_kernel_arg(_subtract_reg, subtract_arg_base(), sizeof(uint32), &offset_y);
-		_set_kernel_arg(_subtract_reg, subtract_arg_base() + 1, sizeof(uint32), &offset_x);
+		const uint64 offset_y = uint64(d.local * _n), offset_x = uint64(s.local * _n);
+		_set_kernel_arg(_subtract_reg, subtract_arg_base(), sizeof(uint64), &offset_y);
+		_set_kernel_arg(_subtract_reg, subtract_arg_base() + 1, sizeof(uint64), &offset_x);
 		_execute_kernel(_subtract_reg, 1);
 	}
 };
@@ -1414,7 +1414,7 @@ void subtract_reg_group_p1(__global uint64 * restrict const reg,
     __global uint64 * restrict const carry,
     __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,
     __global const uint_8 * restrict const width,
-    const sz_t offset_y, const sz_t offset_x)
+    const reg_off_t offset_y, const reg_off_t offset_x)
 {
     __global uint64 * restrict const y = &reg[offset_y];
     __global const uint64 * restrict const x = &reg[offset_x];
@@ -1492,7 +1492,7 @@ void subtract_reg_group_apply(__global uint64 * restrict const reg,
     __global uint64 * restrict const carry,
     __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,
     __global const uint_8 * restrict const width,
-    const sz_t offset_y)
+    const reg_off_t offset_y)
 {
     __global uint64 * restrict const y = &reg[offset_y];
     DECLARE_WEIGHT2();

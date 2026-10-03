@@ -278,3 +278,8 @@ test-wagstaff-decode:
 
 test-pm1-extend-ckpt: all
 	bash tests/test_pm1_extend_stale_ckpt.sh
+
+.PHONY: test-marin-reg-offset-wrap
+
+test-marin-reg-offset-wrap:
+	bash tests/test_marin_reg_offset_wrap.sh
