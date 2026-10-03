@@ -41,6 +41,11 @@ int main() {
       pow2.size() != 4194304 || pow2.spec() != "4:512:8:512:202") {
     throw std::runtime_error("power-of-two FFT323161 plan resolution mismatch");
   }
+  // 4M-word type-4 limits were measured at 46.99 bpw; the old 47.29 does not run.
+  FFTConfig bpw4m("4:1K:8:256:101");
+  if (pow2.maxExp() >= 4194304ull * 47.0 || bpw4m.maxExp() >= 4194304ull * 47.0 ||
+      pow2.maxExp() <= 4194304ull * 46.9)
+    throw std::runtime_error("4M FFT323161 bpw limit is not the measured 46.99");
 #endif
 
   bool rejected = false;
