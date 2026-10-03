@@ -76,6 +76,24 @@ static uint64_t mul_sat_u64(uint64_t a, uint64_t b){
     return a * b;
 }*/
 
+static bool parsePfactorNonnegativeFinite(const std::string& raw, double& value) {
+std::string token = raw;
+trim_inplace(token);
+if (token.empty()) return false;
+
+size_t consumed = 0;
+try {
+    value = std::stod(token, &consumed);
+} catch (const std::exception&) {
+    return false;
+}
+
+return consumed == token.size() &&
+       std::isfinite(value) &&
+       value >= 0.0;
+
+}
+
 // B1 for a Pfactor= line: 0.0045 * p * tests_saved (tests_saved clamped to [1, 10]), two significant digits,
 // at least 1000.
 static uint64_t pfactorB1(uint32_t exponent, double testsSaved) {
@@ -307,20 +325,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 // 0.004-0.006 p per test saved): B1 = 0.0045 * p * tests_saved, rounded to two significant
                 // digits, at least 1000, and B2 = 20 * B1. tests_saved is clamped to [1, 10], so a line asking
                 // for P-1 where a primality test would be cheaper still runs.
-                double tfBits = 0.0, testsSaved = 0.0;
-                try {
-                    tfBits = std::stod(parts[4]);
-                    testsSaved = std::stod(parts[5]);
-                } catch (const std::exception&) {
-                    std::cerr << "Skipping malformed Pfactor line (how_far_factored and tests_saved must be numbers): "
-                              << line << "\n";
-                    continue;
-                }
-                if (!std::isfinite(tfBits) || !std::isfinite(testsSaved)) {
-                    std::cerr << "Skipping malformed Pfactor line (non-finite how_far_factored or tests_saved): "
-                              << line << "\n";
-                    continue;
-                }
+double tfBits = 0.0, testsSaved = 0.0;
+if (!parsePfactorNonnegativeFinite(parts[4], tfBits) ||
+!parsePfactorNonnegativeFinite(parts[5], testsSaved)) {
+std::cerr << "Skipping malformed Pfactor line "
+<< "(how_far_factored and tests_saved must be complete finite non-negative numbers): "
+<< line << "\n";
+continue;
+}
                 entry.sieveDepth = tfBits;
                 entry.B1 = pfactorB1(exp, testsSaved);
                 entry.B2 = 20 * entry.B1;
