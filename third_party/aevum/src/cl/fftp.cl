@@ -898,6 +898,14 @@ inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32
   for (u32 i = 0; i < CARRY_LEN; ++i) {
     const bool biglit0 = baseFrac + (2u * i) * FRAC_BPW_HI <= FRAC_BPW_HI;
     const bool biglit1 = baseFrac + (2u * i) * FRAC_BPW_HI >= -FRAC_BPW_HI;
+    if (i == CARRY_LEN - 1) {
+      // Last pair of the group: as in carryB, add the carry into the high word
+      // without normalizing it so that nothing can escape the group.
+      value = in[(baseLine + i) * WIDTH + x];
+      value.x = carryStep(value.x + carry, &carry, biglit0);
+      value.y += carry;
+      break;
+    }
     value = carryWord(in[(baseLine + i) * WIDTH + x], &carry, biglit0, biglit1);
     if (i == within) break;
     // carryB stops as soon as the incoming carry becomes zero; all remaining
