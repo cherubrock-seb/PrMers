@@ -190,6 +190,9 @@ test-pm1-bsgs-resume: all
 test-pm1-interrupt-building-e: all
 	bash tests/pm1_interrupt_building_e_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-stage2-record-factor: all
+	bash tests/pm1_stage2_record_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 

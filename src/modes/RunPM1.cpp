@@ -1433,6 +1433,54 @@ static bool load_pm1_s1_from_save(const std::string& path, uint64_t& B1_out, uin
 static bool load_pm1_s1_from_p95(const std::string& path, uint64_t& B1_out, uint32_t& p_out, mpz_class& X_out);
 static inline void mpz_mul_u64(mpz_class& a, uint64_t x);
 
+// Common ending of the stage-2 variants that finish with a single GCD: drop the
+// part of the GCD that is already a known factor, record a new factor in
+// options.knownFactors, and write the stage-2 result file, the JSON result and
+// the results.txt line (also for "no factor", like the classic BSGS ending).
+// Returns true when a new factor was found.
+static bool pm1_record_stage2_result(io::CliOptions& options,
+                                     const mpz_class& g,
+                                     const mpz_class& Mp,
+                                     int fftSize,
+                                     const std::string& method)
+{
+    mpz_class gNew = g;
+    for (const std::string& fs : options.knownFactors) {
+        if (gNew == 1) break;
+        mpz_class f;
+        try { f = mpz_class(fs); } catch (...) { continue; }
+        if (f <= 1) continue;
+        mpz_class d;
+        mpz_gcd(d.get_mpz_t(), gNew.get_mpz_t(), f.get_mpz_t());
+        while (d != 1) {
+            gNew /= d;
+            mpz_gcd(d.get_mpz_t(), gNew.get_mpz_t(), f.get_mpz_t());
+        }
+    }
+    const bool found = (gNew != 1 && gNew != Mp);
+    const std::string B2s = std::to_string(options.B2);
+    const std::string filename = "stage2_result_B2_" + B2s + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (found) {
+        const std::string f = gNew.get_str(10);
+        if (std::find(options.knownFactors.begin(), options.knownFactors.end(), f) == options.knownFactors.end())
+            options.knownFactors.push_back(f);
+        writeStageResult(filename, "B2=" + B2s + "  factor=" + f);
+        std::cout << "\n>>>  Factor P-1 (stage 2 " << method << ") found : " << f << "\n";
+        std::cout << "P-1 factor stage 2 found: " << f << "\n";
+    } else {
+        // The n^K variant has no B2 of its own.
+        const std::string upTo = (options.B2 > 0) ? " until B2 = " + B2s : std::string();
+        writeStageResult(filename, "No factor P-1 (stage 2 " + method + ")" + upTo);
+        std::cout << "\nNo factor P-1 (stage 2 " << method << ")" << upTo << "\n";
+    }
+    const std::string json = io::JsonBuilder::generate(options, fftSize, false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
+    wm.appendToResultsTxt(json);
+    return found;
+}
+
 int App::runPM1Stage2MarinLowMem() {
     using namespace std::chrono;
 
@@ -1894,18 +1942,10 @@ int App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
-        const bool found = (g != 1 && g != Mp);
-        if (found) {
-            std::string f = g.get_str(10);
-            std::cout << "\n>>>  Factor P-1 (stage 2 ultralowmem GPU one-register product exponent) found : " << f << "\n";
-            std::cout << "P-1 factor stage 2 found: " << f << "\n";
-            options.knownFactors.push_back(f);
-            delete eng;
-            return 0;
-        }
-        std::cout << "\nNo factor P-1 (stage 2 ultralowmem GPU one-register product exponent) until B2 = " << B2u << "\n";
+        const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+                                                    "ultralowmem GPU one-register product exponent");
         delete eng;
-        return 1;
+        return found ? 0 : 1;
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -1946,16 +1986,8 @@ int App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
-    bool found = (g != 1 && g != Mp);
-    if (found) {
-        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
-        std::cout << "\n>>>  Factor P-1 (stage 2 lowmem streamed product) found : " << fstr << "\n";
-        std::cout << "P-1 factor stage 2 found: " << fstr << "\n";
-        options.knownFactors.push_back(std::string(fstr));
-        std::free(fstr);
-    } else {
-        std::cout << "\nNo factor P-1 (stage 2 lowmem streamed product) until B2 = " << B2u << "\n";
-    }
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+                                                "lowmem streamed product");
     delete eng;
     return found ? 0 : 1;
 }
@@ -5616,12 +5648,10 @@ int App::runPM1Stage2MarinNKVersion() {
     mpz_t Xz; mpz_init(Xz); eng->get_mpz(Xz, (engine::Reg)RACC); mpz_class Mp = (mpz_class(1) << pexp) - 1; mpz_class X; mpz_set(X.get_mpz_t(), Xz); mpz_clear(Xz);
     mpz_class g; mpz_gcd(g.get_mpz_t(), X.get_mpz_t(), Mp.get_mpz_t());
 
-    bool found = (g > 1 && g < Mp);
-    if (found) { std::cout << "Stage 2 n^K Factor found : " << g.get_str() << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 n^K Factor found : " << g.get_str(); guiServer_->appendLog(oss.str()); } }
-    else { std::cout << "No factor" << std::endl; if (guiServer_) { std::ostringstream oss; oss << "No factor"; guiServer_->appendLog(oss.str()); } }
-
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
     delete eng;
     return found ? 0 : 1;
 }
