@@ -404,16 +404,21 @@ int App::runLlSafeMarinDoubling()
         }
     }*/
 
-    io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, "llsafe2", json);
-    wm.appendToResultsTxt(json);
+io::WorktodoManager wm(options);
+const bool individual_saved = wm.saveIndividualJson(options.exponent, "llsafe2", json);
+const bool results_saved = wm.appendToResultsTxt(json);
 
-    // This mode checkpoints to llsafe2_m_<p>.ckpt, which delete_checkpoints()
-    // does not know about; remove it (and its .old/.new) here so a rerun
-    // does not resume from the finished test.
+// Delete recovery state only after both result outputs are durable.
+// On any persistence failure keep the checkpoint so the completed work
+// can be recovered and saved again rather than silently lost.
+if (individual_saved && results_saved) {
     std::remove(ckpt_file.c_str());
     std::remove((ckpt_file + ".old").c_str());
     std::remove((ckpt_file + ".new").c_str());
+} else {
+    std::cerr << "[LL-SAFE2] Result persistence failed; keeping checkpoint for recovery.\n";
+}
+
     delete eng;
     return is_prime ? 0 : 1;
 }
