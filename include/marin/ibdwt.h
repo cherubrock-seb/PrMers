@@ -25,16 +25,21 @@ public:
 			++log2_n;
 			// digit-width is w or w + 1
 			w = exponent >> log2_n;
-		// The condition is n * (2^{w + 1} - 1)^2 < 2^64 - 2^32 + 1.
-		// If (w + 1) * 2 + log2(n) = 63 then n * (2^{w + 1} - 1)^2 < n * (2^{w + 1})^2 = 2^63 < 2^64 - 2^32 + 1.
+		// Digits are non-negative and less than 2^{w + 1}. The weighted convolution coefficient is a sum of n products
+		// a_i b_j 2^e, where the IBDWT weight contributes e = 0 or 1 (ceil(qi/n) + ceil(qj/n) - ceil(qk/n) is 0 or 1,
+		// and the wrap-around is exact modulo 2^q - 1). Hence the coefficient is at most n * 2 * (2^{w + 1} - 1)^2
+		// and must be < 2^64 - 2^32 + 1.
+		// If (w + 1) * 2 + log2(n) = 63 then 2 * n * (2^{w + 1} - 1)^2 < 2^64 * (1 - 2^{-w}) < 2^64 - 2^32 + 1
+		// (w < 32), so the power-of-two condition below is sufficient.
 		} while ((w + 1) * 2 + log2_n >= 64);
 
 		do
 		{
 			++log2_n5;
 			w = exponent / (5u << log2_n5);
-		// log2(5) ~ 2.3219 < 2.4
-		} while ((w + 1) * 2 + (log2_n5 + 2.4) >= 64);
+		// n = 5 * 2^k: the coefficient is at most 5 * 2^k * 2 * (2^{w + 1} - 1)^2 < 2^{2 * (w + 1) + k + 1 + log2(5)}.
+		// log2(5) ~ 2.3219 < 2.4, hence the condition 2 * (w + 1) + k + 1 + 2.4 < 64 (that is 2 * (w + 1) + k <= 60).
+		} while ((w + 1) * 2 + (log2_n5 + 3.4) >= 64);
 
 		const size_t invalid = size_t(-1);
 		const size_t n2 = (log2_n <= 26) ? (size_t(1) << log2_n) : invalid;
