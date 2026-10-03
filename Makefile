@@ -252,3 +252,7 @@ native-pfa-host-test:
 
 native-pfa-gpu-test: native-pfa-build
 	bash scripts/test_native_pfa_gpu.sh $${PRMERS_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}
+
+.PHONY: test-llsafe2-resume
+test-llsafe2-resume: all
+	bash tests/run_llsafe2_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
