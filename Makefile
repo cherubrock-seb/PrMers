@@ -268,3 +268,8 @@ test-llsafe2-result: all
 
 test-marin-exact-sub:
 	bash tests/test_marin_exact_subtraction_device.sh
+
+.PHONY: test-wagstaff-decode
+
+test-wagstaff-decode:
+	python3 tests/wagstaff_decode_source_test.py

@@ -582,9 +582,17 @@ int App::runPrpOrLlMarin()
     if (options.wagstaff) {
             mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
             mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
-            mpz_class rM = util::vectToMpz(d,
-                                        precompute.getDigitWidth(),
-                                        Mp);
+            // Read the exact residue from the engine: the digit widths of the
+            // active backend (Marin or Aevum) can differ from Precompute's.
+            mpz_class rM;
+            {
+                mpz_t z0;
+                mpz_init(z0);
+                eng->get_mpz(z0, R0);
+                mpz_set(rM.get_mpz_t(), z0);
+                mpz_clear(z0);
+            }
+            rM %= Mp;
             mpz_class rF = rM % Fp;
             bool isWagstaffPRP = (rF == 9);
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
