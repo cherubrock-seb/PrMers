@@ -334,17 +334,19 @@ if (std::isfinite(v) && v > 0.0) stage2Cost = v;
 
             const math::Pm1Bounds bounds =
                 math::choosePm1Bounds(exp, tfBits, testsSaved, stage2Cost);
-            if (bounds.B1 == 0) continue;
+if (bounds.B1 == 0) {
+std::cout << "Pfactor: no economically bounded P-1 work fits this assignment; "
+<< "leaving it pending.\n";
+continue;
+}
 
             entry.sieveDepth = tfBits;
             entry.B1 = bounds.B1;
             entry.B2 = bounds.B2;
 
-            char pct[32], target[32];
+            char pct[32];
             std::snprintf(pct, sizeof(pct), "%.2f",
                           bounds.probability.total() * 100.0);
-            std::snprintf(target, sizeof(target), "%.0f",
-                          math::kPm1FallbackSuccess * 100.0);
 
             std::cout << "Pfactor: trial factored to 2^" << tfBits
                       << ", " << testsSaved
@@ -353,10 +355,9 @@ if (std::isfinite(v) && v > 0.0) stage2Cost = v;
                       << " (estimated success " << pct << "%)\n";
 
             if (bounds.gain <= 0.0) {
-                std::cout << "Pfactor: no P-1 bounds pay for themselves here "
-                          << "(a primality test of 2^" << exp
-                          << "-1 is cheaper), so these are the cheapest bounds with an estimated "
-                          << target << "% chance of finding a factor.\n";
+                std::cout << "Pfactor: no P-1 bounds pay for themselves here; "
+                          << "using a fallback bounded by the maximum work the requested "
+                          << "primality tests could save.\n";
             }
 
                 if (parts.size() >= 7) {

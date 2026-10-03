@@ -64,6 +64,15 @@ uint64_t roundBound(double x) {
     return static_cast<uint64_t>(std::llround(x / scale) * scale);
 }
 
+// Round downward to two significant digits. Fallback bounds use this so
+// presentation rounding can never increase modeled work past its hard budget.
+uint64_t roundBoundDown(double x) {
+if (x <= 0.0) return 0;
+if (x < 100.0) return static_cast<uint64_t>(std::floor(x));
+const double scale = std::pow(10.0, std::floor(std::log10(x)) - 1.0);
+return static_cast<uint64_t>(std::floor(x / scale) * scale);
+}
+
 struct Evaluated {
     double gain;
     Pm1Probability prob;
@@ -162,46 +171,149 @@ Pm1Bounds choosePm1Bounds(uint32_t p, double tfBits, double testsSaved, double s
     const double coarse = std::log10(bestB1);
     for (double l1 = std::max(3.0, coarse - 0.2); l1 <= std::min(maxLog10B1, coarse + 0.2) + 1e-9; l1 += 0.05) tryB1(l1);
 
-    if (bestGain <= 0.0) {
-        // Nothing pays off: take the cheapest bounds that reach the fallback success probability. Success
-        // grows with both bounds, so for each B1 bisect for the smallest B2 / B1 ratio that reaches it.
-        double bestCost = HUGE_VAL, bestP = -1.0;
-        for (double l1 = 3.0; l1 <= 10.0 + 1e-9; l1 += 0.05) {
-            const double B1 = std::pow(10.0, l1);
-            auto probAt = [&](double logRatio) {
-                return pm1Probability(p, tfBits, B1, B1 * std::pow(10.0, logRatio)).total();
-            };
-            const double pMax = probAt(3.0);
-            if (pMax < kPm1FallbackSuccess) {
-                // Unreachable at this B1; remember the most likely bounds in case it is unreachable everywhere.
-                if (bestCost == HUGE_VAL && pMax > bestP) { bestP = pMax; bestB1 = B1; bestB2 = B1 * 1000.0; }
-                continue;
+const bool usedFallback = bestGain <= 0.0;
+double fallbackBudget = 0.0;
+
+if (usedFallback) {
+    // No positive expected-value candidate exists. Preserve the explicit
+    // Pfactor fallback intent, but never spend more work than even a
+    // hypothetical 100% factor-finding success could save.
+    fallbackBudget = testsSaved * static_cast<double>(p);
+
+    bool reachedTarget = false;
+    double targetBestCost = HUGE_VAL;
+    double targetBestB1 = 0.0;
+    double targetBestB2 = 0.0;
+
+    double probabilityBest = -1.0;
+    double probabilityBestCost = HUGE_VAL;
+    double probabilityBestB1 = 0.0;
+    double probabilityBestB2 = 0.0;
+
+    for (double l1 = 3.0; l1 <= 10.0 + 1e-9; l1 += 0.05) {
+        const double B1 = std::pow(10.0, l1);
+
+        const Evaluated stage1Only =
+            evaluate(p, tfBits, testsSaved, stage2CostPerPrime, B1, B1);
+
+        // Larger B1 values only increase the unavoidable stage-1 cost.
+        if (stage1Only.cost > fallbackBudget) break;
+
+        double budgetRatio = 3.0;
+        const Evaluated maxStage2 =
+            evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+                     B1, B1 * 1000.0);
+
+        if (maxStage2.cost > fallbackBudget) {
+            double lo = 0.0;
+            double hi = 3.0;
+
+            for (int it = 0; it < 24; ++it) {
+                const double mid = 0.5 * (lo + hi);
+                const double B2 = B1 * std::pow(10.0, mid);
+                const Evaluated e =
+                    evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+                             B1, B2);
+
+                if (e.cost <= fallbackBudget) lo = mid;
+                else hi = mid;
             }
-            double lo = 0.0, hi = 3.0;
-            if (probAt(lo) < kPm1FallbackSuccess) {
-                for (int it = 0; it < 20; ++it) {
+
+            budgetRatio = lo;
+        }
+
+        const double budgetB2 = B1 * std::pow(10.0, budgetRatio);
+        const Evaluated budgetEval =
+            evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+                     B1, budgetB2);
+
+        const double budgetProbability = budgetEval.prob.total();
+
+        if (budgetProbability > probabilityBest ||
+            (budgetProbability == probabilityBest &&
+             budgetEval.cost < probabilityBestCost)) {
+            probabilityBest = budgetProbability;
+            probabilityBestCost = budgetEval.cost;
+            probabilityBestB1 = B1;
+            probabilityBestB2 = budgetB2;
+        }
+
+        if (budgetProbability >= kPm1FallbackSuccess) {
+            double targetRatio = 0.0;
+
+            if (stage1Only.prob.total() < kPm1FallbackSuccess) {
+                double lo = 0.0;
+                double hi = budgetRatio;
+
+                for (int it = 0; it < 24; ++it) {
                     const double mid = 0.5 * (lo + hi);
-                    (probAt(mid) >= kPm1FallbackSuccess ? hi : lo) = mid;
+                    const double B2 = B1 * std::pow(10.0, mid);
+                    const double probability =
+                        pm1Probability(p, tfBits, B1, B2).total();
+
+                    if (probability >= kPm1FallbackSuccess) hi = mid;
+                    else lo = mid;
                 }
-            } else {
-                hi = 0.0;
+
+                targetRatio = hi;
             }
-            const double B2 = B1 * std::pow(10.0, hi);
-            const double cost = evaluate(p, tfBits, testsSaved, stage2CostPerPrime, B1, B2).cost;
-            if (cost < bestCost) { bestCost = cost; bestB1 = B1; bestB2 = B2; }
+
+            const double targetB2 =
+                B1 * std::pow(10.0, targetRatio);
+
+            const Evaluated targetEval =
+                evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+                         B1, targetB2);
+
+            if (targetEval.cost <= fallbackBudget &&
+                targetEval.cost < targetBestCost) {
+                reachedTarget = true;
+                targetBestCost = targetEval.cost;
+                targetBestB1 = B1;
+                targetBestB2 = targetB2;
+            }
         }
     }
 
-    best.B1 = roundBound(bestB1);
-    best.B2 = roundBound(bestB2);
-    if (best.B2 <= best.B1) best.B2 = 0;              // stage 1 only
-    const Evaluated e = evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
-                                 static_cast<double>(best.B1),
-                                 static_cast<double>(best.B2 ? best.B2 : best.B1));
-    best.probability = e.prob;
-    best.cost = e.cost;
-    best.gain = e.gain;
-    return best;
+    if (reachedTarget) {
+        bestB1 = targetBestB1;
+        bestB2 = targetBestB2;
+    } else {
+        bestB1 = probabilityBestB1;
+        bestB2 = probabilityBestB2;
+    }
+}
+
+best.B1 = usedFallback ? roundBoundDown(bestB1) : roundBound(bestB1);
+best.B2 = usedFallback ? roundBoundDown(bestB2) : roundBound(bestB2);
+
+if (best.B2 <= best.B1) best.B2 = 0;
+
+Evaluated e =
+    evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+             static_cast<double>(best.B1),
+             static_cast<double>(best.B2 ? best.B2 : best.B1));
+
+// Defensive post-rounding guard. A fallback may never exceed the absolute
+// maximum amount of primality-test work it could possibly save.
+if (usedFallback && best.B1 != 0 &&
+    e.cost > fallbackBudget + 1e-9) {
+    best.B2 = 0;
+
+    e = evaluate(p, tfBits, testsSaved, stage2CostPerPrime,
+                 static_cast<double>(best.B1),
+                 static_cast<double>(best.B1));
+
+    if (e.cost > fallbackBudget + 1e-9) {
+        return Pm1Bounds{};
+    }
+}
+
+best.probability = e.prob;
+best.cost = e.cost;
+best.gain = e.gain;
+return best;
+
 }
 
 } // namespace math

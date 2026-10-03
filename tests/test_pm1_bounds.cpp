@@ -55,15 +55,39 @@ int main() {
     const auto b3 = math::choosePm1Bounds(130000003u, 82, 1.0);
     expect(b3.probability.total() <= b.probability.total(), "deeper TF lowers the success probability");
 
-    // Never skip: tests_saved=0 is optimised as one test saved, and a tiny exponent where nothing pays
-    // off still gets bounds (reported with a negative expected gain).
-    const auto zero = math::choosePm1Bounds(130000003u, 77, 0.0);
-    expect(zero.B1 == b.B1 && zero.B2 == b.B2, "tests_saved=0 gets the same bounds as tests_saved=1");
-    const auto tiny = math::choosePm1Bounds(1277u, 76, 2.0);
-    std::printf("p=1277 tf=76 tests_saved=2: B1=%llu B2=%llu P=%.2f%% cost=%.0f\n",
-                (unsigned long long)tiny.B1, (unsigned long long)tiny.B2, tiny.probability.total() * 100, tiny.cost);
-    expect(tiny.gain <= 0, "tiny exponent: no bounds pay off");
-    expect(tiny.probability.total() >= 0.9 * math::kPm1FallbackSuccess, "tiny exponent: fallback reaches the target success");
+// tests_saved=0 is optimised exactly like one saved test.
+const auto zero = math::choosePm1Bounds(130000003u, 77, 0.0);
+expect(zero.B1 == b.B1 && zero.B2 == b.B2,
+"tests_saved=0 gets the same bounds as tests_saved=1");
+
+// No-regret fallback: no negative-gain fallback may cost more than all
+// requested primality-test work combined.
+const auto tinyOne = math::choosePm1Bounds(1277u, 76, 1.0);
+expect(tinyOne.B1 == 0 && tinyOne.B2 == 0,
+       "p=1277 saved=1: B1=1000 cannot fit the absolute saved-work budget");
+
+const auto tiny = math::choosePm1Bounds(1277u, 76, 2.0);
+std::printf("p=1277 tf=76 tests_saved=2: B1=%llu B2=%llu P=%.6f%% cost=%.0f gain=%.0f\n",
+            (unsigned long long)tiny.B1,
+            (unsigned long long)tiny.B2,
+            tiny.probability.total() * 100,
+            tiny.cost,
+            tiny.gain);
+
+expect(tiny.gain <= 0.0,
+       "p=1277 saved=2: normal optimizer has no positive-gain bounds");
+expect(tiny.B1 >= 1000,
+       "p=1277 saved=2: a bounded fallback fits");
+expect(tiny.cost <= 2.0 * 1277.0,
+       "p=1277 saved=2: fallback stays inside absolute saved-work budget");
+
+const auto small = math::choosePm1Bounds(2000003u, 65, 1.0);
+if (small.gain <= 0.0) {
+    expect(small.cost <= 2000003.0,
+           "p=2M fallback stays inside absolute saved-work budget");
+    expect(small.probability.total() >= 0.9 * math::kPm1FallbackSuccess,
+           "p=2M still reaches approximately the historical fallback target");
+}
 
     // Extreme and invalid input never crashes and gives sane bounds.
     const double inf = HUGE_VAL, nan = std::nan("");

@@ -30,19 +30,19 @@ struct Pm1Bounds {
 // primes so that about 0.7 terms are needed per prime, each costing about 2.2 squarings.
 constexpr double kPm1Stage2CostPerPrime = 1.5;
 
-// Success probability targeted when no bounds pay for themselves; roughly what a wavefront PRP
-// assignment's optimal bounds give.
+// Preferred fallback success target when no positive-gain bounds exist.
 constexpr double kPm1FallbackSuccess = 0.03;
 
-// Bounds maximising the expected saving of a P-1 run before a primality test, as Prime95 does for
-// Pfactor= assignments: probability * testsSaved * p, minus the expected P-1 cost
-// (1.4427 * B1 squarings for stage 1, plus stage2CostPerPrime per prime in (B1, B2] when stage 1 finds
-// nothing). Always returns bounds, since some users run P-1 to find factors even when a primality test
-// would be cheaper: tests_saved below 1 is treated as 1, and when no bounds give a positive expected
-// saving (small exponents, where a primality test is very cheap) it returns the cheapest bounds whose
-// estimated success reaches kPm1FallbackSuccess instead. gain <= 0 tells the caller which case applied.
-// Input is sanitised: p < 3 gives B1 = B2 = 0; tfBits is raised to log2(2p + 1) (the smallest possible factor)
-// and capped at 128; testsSaved is clamped to [1, 10]; a non-positive stage-2 cost uses the default.
+// Bounds maximising expected P-1 saving before a primality test:
+// probability * testsSaved * p minus expected P-1 cost.
+// testsSaved is clamped to [1, 10]. If no positive-gain candidate exists,
+// fallback first seeks the cheapest bounds reaching kPm1FallbackSuccess, but
+// only inside the hard budget testsSaved * p squarings: the most work even
+// hypothetical 100% factor-finding success could save. If that target is not
+// reachable inside the budget, it chooses the highest success probability
+// available inside the budget. If even B1=1000 does not fit, zero bounds are
+// returned. tfBits is raised to log2(2p + 1) and capped at 128; a non-positive
+// or non-finite stage-2 cost uses the default.
 Pm1Bounds choosePm1Bounds(uint32_t p, double tfBits, double testsSaved,
                           double stage2CostPerPrime = kPm1Stage2CostPerPrime);
 
