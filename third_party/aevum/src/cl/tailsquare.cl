@@ -370,18 +370,36 @@ KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
   TrigFP32 smallTrigF2 = (TrigFP32) smallTrig;
 
 #if PFA_RADIX
+  // The FP32 plane runs the Good-Thomas odd axis with the complex root
+  // e^(-2*pi*i/PFA_RADIX), so after fft_MIDDLE only row 0 is still a packed
+  // real sequence.  Row k is the conjugate partner of row PFA_RADIX-k, and
+  // the half-real untangle must pair bin l of row k with bin -l of row
+  // PFA_RADIX-k.  (The GF31/GF61 planes use odd roots in the base field,
+  // which commute with conjugation, so their rows stay self-paired.)
+  //
+  // Groups 0 and 1 handle row 0's lines 0 and WIDTH/2, which pair with
+  // themselves exactly like the power-of-two layout.  Groups 2 .. PFA_RADIX
+  // handle the cross-row pairs (row, bl) <-> (PFA_RADIX - row, bl) for
+  // row = 1 .. (PFA_RADIX-1)/2 and bl in {0, WIDTH/2}.
   const u32 which = get_group_id(0);
-  const u32 row = which >> 1;
+  assert(which < PFA_RADIX + 1u);
+  const u32 row = which < 2u ? 0u : ((which - 2u) >> 1) + 1u;
   const bool upper = (which & 1u) != 0;
-  assert(row < PFA_RADIX);
   const u32 binary_line = upper ? (WIDTH / 2u) : 0u;
+  // Stock tail twiddle tables/slowTrig_N are built for the full ND = PFA_RADIX*WIDTH*SMALL_HEIGHT
+  // transform.  The PFA half-real untangle works on one binary row of WIDTH*SMALL_HEIGHT
+  // complex values, so bin l of that row is bin PFA_RADIX*l of the stock tables.
+  const u32 trig_line = PFA_RADIX * binary_line;
   const u32 line = row * WIDTH + binary_line;
   const bool bump = !upper;
+  const u32 conj_row = row ? PFA_RADIX - row : 0u;
+  const u32 line2 = conj_row * WIDTH + binary_line;
 #else
   const u32 which = get_group_id(0);
   assert(which < 2);
   const u32 line = which ? (H/2) : 0;
   const u32 binary_line = line;
+  const u32 trig_line = binary_line;
   const bool bump = !which;
 #endif
   u32 me = get_local_id(0);
@@ -391,17 +409,31 @@ KERNEL(G_H) tailSquareZero(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 
   readTailFusedLine(inF2, u, line, me);
 
-#if PFA_RADIX
-  F2 trig = slowTrig_N(binary_line + me * WIDTH,
-                        (WIDTH * SMALL_HEIGHT) / NH);
-#else
-  F2 trig = slowTrig_N(line + me * H, ND / NH);
-#endif
+  F2 trig = slowTrig_N(trig_line + me * H, ND / NH);
 
   fft_HEIGHT1(lds, u, smallTrigF2, 1, me);
-  reverse(lds, u + NH/2, bump);
-  pairSq(NH/2, u,   u + NH/2, trig, bump);
-  reverse(lds, u + NH/2, bump);
+
+#if PFA_RADIX
+  if (row) {
+    // Cross-row pair: bin h of line (row, bl) meets bin -h of line (PFA_RADIX-row, bl).
+    // For bl == 0 that is the "bump" reversal (h <-> SMALL_HEIGHT-h), for bl == WIDTH/2
+    // the plain reversal (h <-> SMALL_HEIGHT-1-h).  No self-paired DC/Nyquist special
+    // case exists here: those bins of row k pair with the same bins of row PFA_RADIX-k.
+    F2 v[NH];
+    readTailFusedLine(inF2, v, line2, me);
+    fft_HEIGHT1(lds, v, smallTrigF2, 1, me);
+    if (bump) reverseLineBump(lds, v); else reverseLine(lds, v);
+    pairSq(NH, u, v, trig, false);
+    if (bump) reverseLineBump(lds, v); else reverseLine(lds, v);
+    fft_HEIGHT1(lds, v, smallTrigF2, 1, me);
+    writeTailFusedLine(v, outF2, transPos(line2, MIDDLE, WIDTH), me);
+  } else
+#endif
+  {
+    reverse(lds, u + NH/2, bump);
+    pairSq(NH/2, u,   u + NH/2, trig, bump);
+    reverse(lds, u + NH/2, bump);
+  }
 
   fft_HEIGHT1(lds, u, smallTrigF2, 1, me);
   writeTailFusedLine(u, outF2, transPos(line, MIDDLE, WIDTH), me);
@@ -422,20 +454,30 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
   u32 H = ND / SMALL_HEIGHT;
 
 #if PFA_RADIX
+  // Complex odd-axis root: row k is the conjugate partner of row PFA_RADIX-k
+  // (see tailSquareZero above), so bin l of row k pairs with bin -l of row
+  // PFA_RADIX-k.  The pair twiddle depends on binary_line only (trig_line).
   const u32 per_row = WIDTH / 2u - 1u;
   const u32 group = get_group_id(0);
   const u32 row = group / per_row;
   const u32 binary_line = group - row * per_row + 1u;
+  // Stock tail twiddle tables/slowTrig_N are built for the full ND = PFA_RADIX*WIDTH*SMALL_HEIGHT
+  // transform.  The PFA half-real untangle works on one binary row of WIDTH*SMALL_HEIGHT
+  // complex values, so bin l of that row is bin PFA_RADIX*l of the stock tables.
+  const u32 trig_line = PFA_RADIX * binary_line;
+  const u32 conj_row = row ? PFA_RADIX - row : 0u;
   const u32 line1 = row * WIDTH + binary_line;
-  const u32 line2 = row * WIDTH + (WIDTH - binary_line);
+  const u32 line2 = conj_row * WIDTH + (WIDTH - binary_line);
 #elif SINGLE_KERNEL
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
   const u32 binary_line = line1;
+  const u32 trig_line = binary_line;
 #else
   u32 line1 = get_group_id(0) + 1;
   u32 line2 = H - line1;
   const u32 binary_line = line1;
+  const u32 trig_line = binary_line;
 #endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
   u32 memline2 = transPos(line2, MIDDLE, WIDTH);
@@ -453,12 +495,7 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
 
   // Compute trig values from scratch.  Good on GPUs with high FP throughput.
 #if TAIL_TRIGS32 == 2
-#if PFA_RADIX
-  F2 trig = slowTrig_N(binary_line + me * WIDTH,
-                        (WIDTH * SMALL_HEIGHT) / NH);
-#else
-  F2 trig = slowTrig_N(line1 + me * H, ND / NH);
-#endif
+  F2 trig = slowTrig_N(trig_line + me * H, ND / NH);
 
   // Do a little bit of memory access and a little bit of FP math.
 #elif TAIL_TRIGS32 == 1
@@ -467,7 +504,7 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
   u32 height_trigs = SMALL_HEIGHT*5;
   // Read a hopefully cached line of data and one non-cached F2 per line
   F2 trig = TFLOAD(&smallTrigF2[height_trigs + me]);                    // Trig values for line zero, should be cached
-  F2 mult = TSLOAD(&smallTrigF2[height_trigs + G_H + binary_line]);           // Line multiplier
+  F2 mult = TSLOAD(&smallTrigF2[height_trigs + G_H + trig_line]);           // Line multiplier
   trig = cmulFancy(trig, mult);
 
   // On consumer-grade GPUs, it is likely beneficial to read all trig values.
@@ -476,7 +513,7 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
   // The trig values used here are pre-computed and stored after the fft_HEIGHT trig values.
   u32 height_trigs = SMALL_HEIGHT*5;
   // Read pre-computed trig values
-  F2 trig = TOLOAD(&smallTrigF2[height_trigs + binary_line*G_H + me]);
+  F2 trig = TOLOAD(&smallTrigF2[height_trigs + trig_line*G_H + me]);
 #endif
 
 #if SINGLE_KERNEL

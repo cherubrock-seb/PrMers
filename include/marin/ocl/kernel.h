@@ -285,21 +285,41 @@ static const char * const src_ocl_kernel = \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"// Subtract a carry and return the carry if borrowing\n" \
-"INLINE uint64 sbc(const uint64 lhs, const uint_8 width, uint32 * const carry)\n" \
+"// Exact digit subtraction: r = lhs - rhs - *borrow in base 2^width, *borrow <- borrow out.\n" \
+"//\n" \
+"// Digits are not always normalised. The carry kernels (adc4 in carry_weight_*_p1/_p2) leave\n" \
+"// lane s3 of every block as d + c, where c is the carry arriving from lane s2, so a digit equal\n" \
+"// to 2^width (or slightly above) is a normal occurrence; the register value is exact nonetheless.\n" \
+"// Only the following is assumed: digits are non-negative integers far below 2^63 and the borrow\n" \
+"// in is below 2^32, so none of the sums below wrap. When lhs < rhs + borrow the borrow out is\n" \
+"// ceil((rhs + borrow - lhs) / 2^width), which can exceed one unit, and r is in [0, 2^width).\n" \
+"// Otherwise r = lhs - rhs - borrow <= lhs. A result digit is therefore never larger than the\n" \
+"// corresponding input digit of lhs.\n" \
+"INLINE uint64 sbc_reg(const uint64 lhs, const uint64 rhs, const uint_8 width, uint64 * const borrow)\n" \
 "{\n" \
-"	const bool borrow = (lhs < *carry);\n" \
-"	const uint64 r = lhs - *carry + (borrow ? (1u << width) : 0);\n" \
-"	*carry = borrow ? 1 : 0;\n" \
+"	const uint64 sub = rhs + *borrow;\n" \
+"	const uint64 base = ((uint64)1) << width;\n" \
+"	const bool neg = (lhs < sub);\n" \
+"	const uint64 r = lhs - sub + (neg ? base : 0);	// exact when the borrow is at most one unit\n" \
+"	if (neg && (r >= base))\n" \
+"	{\n" \
+"		// sub - lhs > 2^width: the borrow is more than one unit (r wrapped around). Rare path,\n" \
+"		// kept out of the common dependency chain.\n" \
+"		const uint64 t = sub - lhs;\n" \
+"		const uint64 b = (t >> width) + (((t & (base - 1)) != 0) ? 1 : 0);	// ceil(t / 2^width)\n" \
+"		*borrow = b;\n" \
+"		return (b << width) - t;\n" \
+"	}\n" \
+"	*borrow = neg ? 1 : 0;\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
-"INLINE uint64 sbc_reg(const uint64 lhs, const uint64 rhs, const uint_8 width, uint32 * const carry)\n" \
+"// Subtract a carry and return the carry if borrowing\n" \
+"INLINE uint64 sbc(const uint64 lhs, const uint_8 width, uint32 * const carry)\n" \
 "{\n" \
-"	const uint64 sub = rhs + (uint64)(*carry);\n" \
-"	const bool borrow = (lhs < sub);\n" \
-"	const uint64 r = lhs - sub + (borrow ? (((uint64)1) << width) : 0);\n" \
-"	*carry = borrow ? 1u : 0u;\n" \
+"	uint64 b = *carry;\n" \
+"	const uint64 r = sbc_reg(lhs, 0, width, &b);\n" \
+"	*carry = (uint32)b;\n" \
 "	return r;\n" \
 "}\n" \
 "\n" \
@@ -2409,16 +2429,23 @@ static const char * const src_ocl_kernel = \
 "	__global const uint64 * restrict const x = &reg[offset_x];\n" \
 "	DECLARE_WEIGHT2();\n" \
 "\n" \
-"	uint32 c = 0;\n" \
-"	while (1)\n" \
+"	uint64 c = 0;\n" \
+"	for (size_t k = 0; k < N_SZ; ++k)\n" \
+"	{\n" \
+"		const uint64_2 w = W2_AT(k / 4 + (k % 4) * (N_SZ / 4));\n" \
+"		const uint64 yv = mod_mul(y[k], w.s1);\n" \
+"		const uint64 xv = mod_mul(x[k], w.s1);\n" \
+"		y[k] = mod_mul(sbc_reg(yv, xv, width[k], &c), w.s0);\n" \
+"	}\n" \
+"\n" \
+"	// 2^N = 1 (mod 2^q - 1): a borrow out of the top digit is subtracted again from digit 0.\n" \
+"	while (c != 0)\n" \
 "	{\n" \
 "		for (size_t k = 0; k < N_SZ; ++k)\n" \
 "		{\n" \
 "			const uint64_2 w = W2_AT(k / 4 + (k % 4) * (N_SZ / 4));\n" \
-"			const uint64 yv = mod_mul(y[k], w.s1);\n" \
-"			const uint64 xv = mod_mul(x[k], w.s1);\n" \
-"			y[k] = mod_mul(sbc_reg(yv, xv, width[k], &c), w.s0);\n" \
+"			y[k] = mod_mul(sbc_reg(mod_mul(y[k], w.s1), 0, width[k], &c), w.s0);\n" \
+"			if (c == 0) break;\n" \
 "		}\n" \
-"		if (c == 0) return;\n" \
 "	}\n" \
 "}\n";

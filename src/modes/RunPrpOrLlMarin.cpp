@@ -737,6 +737,11 @@ int App::runPrpOrLlMarin()
                         gpuProofSucceeded = true;
                         break;
                     }
+                    catch (const core::ProofVerificationError&) {
+                        // Not retried and not replaced by the unverified CPU
+                        // proof: handled by the outer catch.
+                        throw;
+                    }
                     catch (const std::exception& e) {
                         gpuProofError = e.what();
 
@@ -775,6 +780,16 @@ int App::runPrpOrLlMarin()
                     "Proof file saved: " +
                     proofFilePath.string());
         }
+        catch (const core::ProofVerificationError& e) {
+            const std::string msg = std::string("Error: ") + e.what() +
+                ". No proof will be reported for this test; "
+                "the PRP result is still valid.";
+            std::cerr << msg << std::endl;
+            if (guiServer_)
+                guiServer_->appendLog(msg);
+            options.proof = false;
+            options.proofFile.clear();
+        }
         catch (const std::exception& e) {
             std::cerr
                 << "Warning: Proof generation failed: "
@@ -784,6 +799,10 @@ int App::runPrpOrLlMarin()
                 guiServer_->appendLog(
                     std::string("Warning: Proof generation failed: ") +
                     e.what());
+
+            // No proof file exists: do not report proof metadata.
+            options.proof = false;
+            options.proofFile.clear();
         }
     }
 
@@ -869,11 +888,14 @@ int App::runPrpOrLlMarin()
 
     backupManager.clearState();
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     delete_checkpoints(p, options.wagstaff, false, false); 
     backupManager.clearState();
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";

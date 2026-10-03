@@ -6,6 +6,11 @@
 #include <algorithm>
 #include <fstream>
 #include <csignal>
+#include <cctype>
+#include <filesystem>
+#include <iomanip>
+#include <random>
+#include "util/Redact.hpp"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -32,8 +37,86 @@ namespace ui {
 
 static std::shared_ptr<WebGuiServer> g_instance;
 
+static constexpr size_t kMaxHeaderBytes = 16 * 1024;
+static constexpr size_t kMaxBodyBytes = 1024 * 1024;
+static constexpr int kMaxConnections = 32;
+static constexpr int kSocketTimeoutSeconds = 10;
+
+static bool validToken(const std::string& t) {
+    if (t.size() < 16 || t.size() > 128) return false;
+    for (char c : t) if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') return false;
+    return true;
+}
+
+static std::string makeToken() {
+    std::random_device rd;
+    std::ostringstream oss;
+    oss << std::hex << std::setfill('0');
+    for (int i = 0; i < 4; ++i) oss << std::setw(8) << static_cast<uint32_t>(rd());
+    return oss.str();
+}
+
+static std::string toLower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+static std::string percentDecode(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '+') out += ' ';
+        else if (s[i] == '%' && i + 2 < s.size() && std::isxdigit((unsigned char)s[i+1]) && std::isxdigit((unsigned char)s[i+2])) {
+            out += static_cast<char>(std::stoi(s.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else out += s[i];
+    }
+    return out;
+}
+
+static std::string queryParam(const std::string& query, const std::string& key) {
+    std::istringstream iss(query);
+    std::string kv;
+    while (std::getline(iss, kv, '&')) {
+        auto eq = kv.find('=');
+        if (eq != std::string::npos && kv.substr(0, eq) == key) return percentDecode(kv.substr(eq + 1));
+    }
+    return {};
+}
+
+// Host part of a Host header or authority: "127.0.0.1:3131" -> "127.0.0.1", "[::1]:3131" -> "[::1]".
+static std::string hostPart(const std::string& authority) {
+    if (!authority.empty() && authority[0] == '[') {
+        auto e = authority.find(']');
+        return e == std::string::npos ? authority : authority.substr(0, e + 1);
+    }
+    return authority.substr(0, authority.find(':'));
+}
+
+static void setSocketTimeouts(int fd) {
+#ifdef _WIN32
+    u_long nb = 0; ioctlsocket((SOCKET)fd, FIONBIO, &nb);   // accepted sockets inherit FIONBIO from the listener
+    DWORD ms = kSocketTimeoutSeconds * 1000;
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof(ms));
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&ms, sizeof(ms));
+#else
+    timeval tv{}; tv.tv_sec = kSocketTimeoutSeconds;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+}
+
 WebGuiServer::WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit, StopFn onStop)
-: cfg_(cfg), onSubmit_(std::move(onSubmit)), onStop_(std::move(onStop)) {}
+: cfg_(cfg), onSubmit_(std::move(onSubmit)), onStop_(std::move(onStop)) {
+    // Reuse the token of the process we were restarted from (restart_self after "Append & Run"),
+    // so an open browser tab keeps working; otherwise make a new one.
+    const char* inherited = std::getenv("PRMERS_GUI_TOKEN");
+    token_ = (inherited && validToken(inherited)) ? std::string(inherited) : makeToken();
+#ifdef _WIN32
+    _putenv_s("PRMERS_GUI_TOKEN", token_.c_str());
+#else
+    setenv("PRMERS_GUI_TOKEN", token_.c_str(), 1);
+#endif
+}
 WebGuiServer::~WebGuiServer() { stop(); }
 
 std::shared_ptr<WebGuiServer> WebGuiServer::instance() { return g_instance; }
@@ -99,7 +182,7 @@ void WebGuiServer::start() {
     url_ = "http://" + host + ":" + std::to_string(cfg_.port) + "/";
     //std::string host = firstLanIPv4();
     if (host.empty()) host = "127.0.0.1";    // fallback
-    url_ = std::string("http://") + host + ":" + std::to_string(cfg_.port) + "/";
+    url_ = std::string("http://") + host + ":" + std::to_string(cfg_.port) + "/?token=" + token_;
 
     running_ = true;
     thr_ = std::thread([this]{ run(); });
@@ -183,7 +266,10 @@ void WebGuiServer::run() {
                 if (e == WSAEWOULDBLOCK || e == WSAEINTR) break;
                 break;
             }
-            std::thread([this, cfd]{ serveOne((int)cfd); closesocket(cfd); }).detach();
+            if (active_connections_.load() >= kMaxConnections) { closesocket(cfd); continue; }
+            setSocketTimeouts((int)cfd);
+            ++active_connections_;
+            std::thread([this, cfd]{ serveOne((int)cfd); closesocket(cfd); --active_connections_; }).detach();
         }
     }
 #else
@@ -198,7 +284,10 @@ void WebGuiServer::run() {
                 if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) break;
                 break;
             }
-            std::thread([this, cfd]{ serveOne(cfd); ::close(cfd); }).detach();
+            if (active_connections_.load() >= kMaxConnections) { ::close(cfd); continue; }
+            setSocketTimeouts(cfd);
+            ++active_connections_;
+            std::thread([this, cfd]{ serveOne(cfd); ::close(cfd); --active_connections_; }).detach();
         }
     }
 #endif
@@ -267,9 +356,30 @@ int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int
 
 
 
-bool WebGuiServer::readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers) {
+std::string WebGuiServer::headerValue(const std::string& headers, const std::string& name) {
+    const std::string want = toLower(name);
+    size_t pos = 0;
+    while (pos < headers.size()) {
+        size_t eol = headers.find("\r\n", pos);
+        if (eol == std::string::npos) eol = headers.size();
+        if (eol == pos) break;                                  // blank line: end of headers
+        const std::string line = headers.substr(pos, eol - pos);
+        const size_t colon = line.find(':');
+        if (colon != std::string::npos && toLower(line.substr(0, colon)) == want) {
+            std::string v = line.substr(colon + 1);
+            const size_t a = v.find_first_not_of(" \t");
+            const size_t b = v.find_last_not_of(" \t");
+            return a == std::string::npos ? std::string() : v.substr(a, b - a + 1);
+        }
+        pos = eol + 2;
+    }
+    return {};
+}
+
+int WebGuiServer::readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers) {
     std::string req;
     char buf[4096];
+    size_t hend = std::string::npos;
     for (;;) {
 #ifdef _WIN32
         int n = recv(fd, buf, sizeof(buf), 0);
@@ -278,52 +388,90 @@ bool WebGuiServer::readRequest(int fd, std::string& method, std::string& path, s
 #endif
         if (n <= 0) break;
         req.append(buf, buf + n);
-        if (req.find("\r\n\r\n") != std::string::npos) break;
+        hend = req.find("\r\n\r\n");
+        if (hend != std::string::npos) break;
+        if (req.size() > kMaxHeaderBytes) return 431;
     }
+    if (hend == std::string::npos) return req.empty() ? -1 : 400;
+    if (hend > kMaxHeaderBytes) return 431;
     size_t pos = req.find("\r\n");
-    if (pos == std::string::npos) return false;
     std::string start = req.substr(0, pos);
-    headers = req.substr(pos + 2);
+    headers = req.substr(pos + 2, hend + 4 - (pos + 2));
     size_t p2 = start.find(' ');
-    if (p2 == std::string::npos) return false;
+    if (p2 == std::string::npos) return 400;
     size_t p3 = start.find(' ', p2 + 1);
-    if (p3 == std::string::npos) return false;
+    if (p3 == std::string::npos) return 400;
     method = start.substr(0, p2);
     path = start.substr(p2 + 1, p3 - p2 - 1);
-    size_t hend = headers.find("\r\n\r\n");
-    if (hend == std::string::npos) return false;
-    std::string hs = headers.substr(0, hend);
-    size_t clpos = hs.find("Content-Length:");
-    size_t contentLength = 0;
-    if (clpos != std::string::npos) {
-        size_t eol = hs.find("\r\n", clpos);
-        std::string v = hs.substr(clpos + 15, eol - (clpos + 15));
-        size_t a = v.find_first_not_of(" \t");
-        if (a != std::string::npos) v = v.substr(a);
-        contentLength = (size_t)atoll(v.c_str());
-    }
-    std::string tail = headers.substr(hend + 4);
-    if (contentLength > tail.size()) {
-        size_t need = contentLength - tail.size();
-        std::string more;
-        while (need > 0) {
-#ifdef _WIN32
-            const std::size_t need_sz = (need > 0) ? static_cast<std::size_t>(need) : 0u;
-            const int to_read = static_cast<int>(std::min(need_sz, sizeof(buf)));
-            int n = ::recv(fd, reinterpret_cast<char*>(buf), to_read, 0);
-#else
-            const std::size_t need_sz = (need > 0) ? static_cast<std::size_t>(need) : 0u;
-            const std::size_t to_read = std::min(need_sz, sizeof(buf));
-            ssize_t n = ::recv(fd, buf, to_read, 0);
-#endif
 
-            if (n <= 0) break;
-            more.append(buf, buf + n);
-            need -= (size_t)n;
-        }
-        tail += more;
+    size_t contentLength = 0;
+    const std::string cl = headerValue(headers, "Content-Length");
+    if (!cl.empty()) {
+        if (cl.size() > 9 || cl.find_first_not_of("0123456789") != std::string::npos) return 400;
+        contentLength = (size_t)std::stoul(cl);
+        if (contentLength > kMaxBodyBytes) return 413;
+    }
+    std::string tail = req.substr(hend + 4);
+    if (tail.size() > contentLength) tail.resize(contentLength);
+    while (tail.size() < contentLength) {
+        const size_t to_read = std::min(contentLength - tail.size(), sizeof(buf));
+#ifdef _WIN32
+        int n = ::recv(fd, buf, (int)to_read, 0);
+#else
+        ssize_t n = ::recv(fd, buf, to_read, 0);
+#endif
+        if (n <= 0) return -1;
+        tail.append(buf, buf + n);
     }
     body = tail;
+    return 0;
+}
+
+bool WebGuiServer::hostAllowed(const std::string& hostHeader) const {
+    // Reject DNS names other than localhost and the configured host, so a rebinding attack (an attacker's
+    // name that resolves to 127.0.0.1) cannot reach the API. Numeric IPv4 addresses are always fine.
+    const std::string h = toLower(hostPart(hostHeader));
+    if (h.empty()) return false;
+    if (h == "localhost" || h == "[::1]") return true;
+    in_addr a{};
+#ifdef _WIN32
+    if (InetPtonA(AF_INET, h.c_str(), &a) == 1) return true;
+#else
+    if (inet_pton(AF_INET, h.c_str(), &a) == 1) return true;
+#endif
+    return (!cfg_.bind_host.empty() && h == toLower(cfg_.bind_host)) ||
+           (!cfg_.advertise_host.empty() && h == toLower(cfg_.advertise_host));
+}
+
+bool WebGuiServer::originAllowed(const std::string& origin) const {
+    for (const char* scheme : {"http://", "https://"}) {
+        const std::string sc = scheme;
+        if (origin.rfind(sc, 0) == 0) return hostAllowed(origin.substr(sc.size()));
+    }
+    return false;                                               // includes "null"
+}
+
+bool WebGuiServer::tokenMatches(const std::string& candidate) const {
+    if (candidate.size() != token_.size()) return false;
+    unsigned char diff = 0;
+    for (size_t i = 0; i < candidate.size(); ++i) diff |= (unsigned char)(candidate[i] ^ token_[i]);
+    return diff == 0;
+}
+
+bool WebGuiServer::resolveResultsPath(const std::string& requested, std::string& resolved) const {
+    // The results view may show other .txt/.json files next to the configured results file, nothing else.
+    namespace fs = std::filesystem;
+    if (requested.empty()) { resolved = cfg_.results_path; return true; }
+    std::error_code ec;
+    const fs::path base = fs::weakly_canonical(fs::absolute(cfg_.results_path, ec), ec).parent_path();
+    if (ec) return false;
+    fs::path cand = requested;
+    if (cand.is_relative()) cand = base / cand;
+    cand = fs::weakly_canonical(cand, ec);
+    if (ec || cand.parent_path() != base) return false;
+    const std::string ext = toLower(cand.extension().string());
+    if (ext != ".txt" && ext != ".json") return false;
+    resolved = cand.string();
     return true;
 }
 
@@ -348,43 +496,52 @@ bool WebGuiServer::sendAll(int fd, const char* data, size_t len) {
 
 void WebGuiServer::serveOne(int fd) {
     std::string method, path, body, headers;
-    if (!readRequest(fd, method, path, body, headers)) return;
+    const int rc = readRequest(fd, method, path, body, headers);
+    if (rc < 0) return;
     std::string resp;
-    if (method == "GET" && (path == "/" || path == "/index.html")) {
-        resp = httpOk("text/html; charset=utf-8", htmlPage());
-    } else if (method == "GET" && path == "/api/state") {
-        resp = httpOk("application/json", handleStateJson());
-    } else if (method == "GET" && path.rfind("/api/results", 0) == 0) {
-        size_t limit = 100;
-        std::string overridePath;
-        auto qpos = path.find('?');
-        if (qpos != std::string::npos) {
-            auto qs = path.substr(qpos + 1);
-            std::istringstream iss(qs);
-            std::string kv;
-            while (std::getline(iss, kv, '&')) {
-                auto eq = kv.find('=');
-                if (eq == std::string::npos) continue;
-                auto k = kv.substr(0, eq);
-                auto v = kv.substr(eq + 1);
-                if (k == "limit") {
-                    size_t n = (size_t)std::strtoul(v.c_str(), nullptr, 10);
-                    if (n > 0) limit = n;
-                } else if (k == "path") {
-                    for (auto& c : v) if (c == '+') c = ' ';
-                    overridePath = v;
-                }
-            }
+    if (rc != 0) {
+        resp = httpError(rc, "bad-request");
+        sendAll(fd, resp.data(), resp.size());
+        return;
+    }
+    const auto qpos = path.find('?');
+    const std::string route = path.substr(0, qpos);
+    const std::string query = qpos == std::string::npos ? std::string() : path.substr(qpos + 1);
+    const std::string origin = headerValue(headers, "Origin");
+
+    if (!hostAllowed(headerValue(headers, "Host")) || (!origin.empty() && !originAllowed(origin))) {
+        resp = httpError(403, "forbidden-host");
+    } else if (route.rfind("/api/", 0) == 0 && !tokenMatches(headerValue(headers, "X-PrMers-Token"))) {
+        resp = httpError(401, "missing-or-invalid-token");
+    } else if (method == "GET" && (route == "/" || route == "/index.html")) {
+        if (tokenMatches(queryParam(query, "token"))) {
+            resp = httpOk("text/html; charset=utf-8", htmlPage());
+        } else {
+            resp = httpError(401, "Open the GUI with the URL PrMers prints at startup; it includes ?token=...");
         }
-        resp = httpOk("application/json", handleResultsJson(limit, overridePath));
-    } else if (method == "GET" && path == "/api/load-settings") {
+    } else if (method == "GET" && route == "/api/state") {
+        resp = httpOk("application/json", handleStateJson());
+    } else if (method == "GET" && route == "/api/results") {
+        size_t limit = 100;
+        const std::string lim = queryParam(query, "limit");
+        if (!lim.empty()) {
+            size_t n = (size_t)std::strtoul(lim.c_str(), nullptr, 10);
+            if (n > 0) limit = n;
+        }
+        std::string resultsPath;
+        if (resolveResultsPath(queryParam(query, "path"), resultsPath)) {
+            resp = httpOk("application/json", handleResultsJson(limit, resultsPath));
+        } else {
+            resp = httpError(400, "path-not-allowed");
+        }
+    } else if (method == "GET" && route == "/api/load-settings") {
         resp = httpOk("text/plain; charset=utf-8", handleLoadSettings());
-    } else if (method == "GET" && path == "/api/load-worktodo") {
+    } else if (method == "GET" && route == "/api/load-worktodo") {
         resp = httpOk("text/plain; charset=utf-8", handleLoadWorktodo());
-    } else if (method == "POST" && path == "/api/save-settings") {
+    } else if (method == "POST" && route == "/api/save-settings") {
         bool ok = handleSaveSettings(body);
         resp = ok ? httpOk("application/json", "{\"ok\":true}") : httpBadRequest("write-failed");
-    } else if (method == "POST" && path == "/api/append-worktodo") {
+    } else if (method == "POST" && route == "/api/append-worktodo") {
         std::string line = body;
         size_t p = line.find_first_not_of("\r\n ");
         if (p != std::string::npos) line = line.substr(p);
@@ -395,7 +552,7 @@ void WebGuiServer::serveOne(int fd) {
             if (onSubmit_) onSubmit_(line);
             resp = httpOk("application/json", "{\"ok\":true}");
         }
-        } else if (method == "POST" && path == "/api/stop") {
+    } else if (method == "POST" && route == "/api/stop") {
         bool ok = handleStop();
         resp = ok ? httpOk("application/json", "{\"ok\":true}") : httpBadRequest("stop-failed");
     } else {
@@ -488,11 +645,12 @@ bool WebGuiServer::writeFile(const std::string& path, const std::string& data) {
 }
 
 std::string WebGuiServer::handleLoadSettings() {
-    return readFile(cfg_.config_path);
+    return util::redactSecretText(readFile(cfg_.config_path));
 }
 
 bool WebGuiServer::handleSaveSettings(const std::string& body) {
-    return writeFile(cfg_.config_path, body);
+    // Never persist a PrimeNet password from the browser (submission is not wired up anyway).
+    return writeFile(cfg_.config_path, util::stripSecretText(body));
 }
 
 std::string WebGuiServer::handleLoadWorktodo() {
@@ -517,6 +675,7 @@ bool WebGuiServer::handleStop() {
 std::string WebGuiServer::htmlPage() {
     return
 "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+"<meta name=\"referrer\" content=\"no-referrer\">"
 "<title>PrMers</title>"
 "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;margin:0;padding:0;background:#0b0b0e;color:#e6e6ea}"
 ".bar{background:#16161d;padding:12px 16px;display:flex;gap:16px;align-items:center;position:sticky;top:0;border-bottom:1px solid #242433;z-index:30}"
@@ -610,7 +769,6 @@ std::string WebGuiServer::htmlPage() {
 "<div><label>Worktodo path</label><input id=opt_wt type=text value='./worktodo.txt'></div>"
 "<div><label>Output dir</label><input id=opt_out type=text value='.'></div>"
 "<div><label>User</label><input id=opt_user type=text></div>"
-"<div><label>Password</label><input id=opt_pass type=password></div>"
 "<div><label>Computer</label><input id=opt_comp type=text></div>"
 "<div><label>Submit</label><select id=opt_submit><option value=0>No</option><option value=1>Yes</option></select></div>"
 "<div><label>NoAsk</label><select id=opt_noask><option value=0>No</option><option value=1>Yes</option></select></div>"
@@ -626,8 +784,10 @@ std::string WebGuiServer::htmlPage() {
 "</div>"
 "</div>"
 "<script>"
+"const TOKEN='" + token_ + "';"
+"function api(u,o){o=o||{};o.headers=Object.assign({},o.headers||{},{'X-PrMers-Token':TOKEN});return fetch(u,o);}"
 "const $=q=>document.querySelector(q);"
-"$('#url').textContent=window.location.href;"
+"$('#url').textContent=window.location.origin+'/';"
 "const statEl=$('#stat');const resEl=$('#res64');const progEl=$('#prog');const fill=$('#fill');const logs=$('#logs');const backendBadge=$('#backendBadge');"
 "let disconnected=false, tries=0;"
 "function setDisconnected(on){"
@@ -636,7 +796,7 @@ std::string WebGuiServer::htmlPage() {
 "}"
 "async function pull(){"
 "  try{"
-"    const r=await fetch('/api/state',{cache:'no-store'});"
+"    const r=await api('/api/state',{cache:'no-store'});"
 "    if(!r.ok) throw new Error('http');"
 "    const j=await r.json();"
 "    resEl.textContent=j.res64||'';"
@@ -655,20 +815,20 @@ std::string WebGuiServer::htmlPage() {
 "  }"
 "}"
 "setInterval(pull,1000); pull();"
-"$('#stop').onclick=async()=>{try{await fetch('/api/stop',{method:'POST'});}catch(e){}};"
+"$('#stop').onclick=async()=>{try{await api('/api/stop',{method:'POST'});}catch(e){}};"
 "function buildWorktodo(){const m=$('#mode').value;const p=parseInt($('#exp').value||'0');const b1=$('#b1').value.trim();const b2=$('#b2').value.trim();const curves=Math.max(1,parseInt($('#curves').value||'1'));const factors=($('#factors').value||'').split(',').map(s=>s.trim()).filter(Boolean);const basert=($('#basert').value||'').split(',').map(s=>s.trim()).filter(Boolean);let line='';if(m==='prp'){line=`PRP=1,2,${p},-1`;if(basert.length===2)line+=`,`+basert[0]+`,`+basert[1];if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}else if(m==='ll'){line=`Test=1,2,${p},-1`;}else if(m==='llsafe2'){line=`DoubleCheck=1,2,${p},-1`;}else if(m==='pm1'){let B1=(b1||'0');let B2=(b2||'0');line=`Pminus1=1,2,${p},-1,${B1},${B2}`;if(factors.length)line+=`,`+factors.map(s=>`\"${s}\"`).join(',');}else if(m==='ecm'){let B1=(b1||'0');let B2=(b2||'0');line=`ECM2=1,2,${p},-1,${B1},${B2},${curves}`;if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}return line;}"
 "$('#buildwt').onclick=()=>{$('#wt').value=buildWorktodo();};"
-"$('#appendrun').onclick=async()=>{const t=$('#wt').value;try{await fetch('/api/append-worktodo',{method:'POST',headers:{'Content-Type':'text/plain'},body:t});}catch(e){}};"
-"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe2'?'-llsafe2':m==='ecm'?'-ecm':'-pm1');const be=$('#opt_backend').value;const afft=($('#opt_afft').value||'').trim();if(be==='aevum'){parts.push('-aevum');if(afft)parts.push('-aevum-fft',afft);}else if(be==='marin')parts.push('-engine-marin');else if(be==='internal')parts.push('-marin');else parts.push('-aevum-auto');if(m==='pm1'||m==='ecm'){const b1=($('#b1').value||'').trim();const b2=($('#b2').value||'').trim();if(b1)parts.push('-b1',b1);if(b2)parts.push('-b2',b2);}if(m==='ecm'){const cv=Math.max(1,parseInt($('#curves').value||'1'));parts.push('-K',String(cv));}const t=$('#opt_t').value;if(t)parts.push('-t',t);const f=$('#opt_f').value;if(f)parts.push('-f',f);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const kp=$('#opt_kpath').value;if(kp)parts.push('-kernel_path',kp);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wt=$('#opt_wt').value;if(wt)parts.push('-worktodo',wt);const out=$('#opt_out').value;if(out)parts.push('-output',out);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const pass=$('#opt_pass').value;if(pass)parts.push('-password',pass);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
+"$('#appendrun').onclick=async()=>{const t=$('#wt').value;try{await api('/api/append-worktodo',{method:'POST',headers:{'Content-Type':'text/plain'},body:t});}catch(e){}};"
+"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe2'?'-llsafe2':m==='ecm'?'-ecm':'-pm1');const be=$('#opt_backend').value;const afft=($('#opt_afft').value||'').trim();if(be==='aevum'){parts.push('-aevum');if(afft)parts.push('-aevum-fft',afft);}else if(be==='marin')parts.push('-engine-marin');else if(be==='internal')parts.push('-marin');else parts.push('-aevum-auto');if(m==='pm1'||m==='ecm'){const b1=($('#b1').value||'').trim();const b2=($('#b2').value||'').trim();if(b1)parts.push('-b1',b1);if(b2)parts.push('-b2',b2);}if(m==='ecm'){const cv=Math.max(1,parseInt($('#curves').value||'1'));parts.push('-K',String(cv));}const t=$('#opt_t').value;if(t)parts.push('-t',t);const f=$('#opt_f').value;if(f)parts.push('-f',f);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const kp=$('#opt_kpath').value;if(kp)parts.push('-kernel_path',kp);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wt=$('#opt_wt').value;if(wt)parts.push('-worktodo',wt);const out=$('#opt_out').value;if(out)parts.push('-output',out);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
 "$('#gensettings').onclick=()=>{$('#settingstxt').value=genSettings();};"
-"$('#savesettings').onclick=async()=>{const txt=$('#settingstxt').value;await fetch('/api/save-settings',{method:'POST',headers:{'Content-Type':'text/plain'},body:txt});};"
-"$('#loadsettings').onclick=async()=>{const r=await fetch('/api/load-settings');const t=await r.text();$('#settingstxt').value=t;};"
-"async function refreshResults(){const n=parseInt($('#reslimit').value||'50');const p=$('#respath').value||'';const r=await fetch('/api/results?limit='+n+(p?('&path='+encodeURIComponent(p)):''));const j=await r.json();const html=(j.lines||[]).map(x=>{let o=null;try{o=JSON.parse(x);}catch(e){}if(!o)return x;const ts=o.timestamp||'';const st=o.status||'';const wt=o.worktype||o.program?.name||'';const e=o.exponent||'';const r64=o.res64||'';return `[${ts}] ${st} e=${e} ${wt} res64=${r64}`;}).join('\\n');$('#reslist').textContent=html;}"
+"$('#savesettings').onclick=async()=>{const txt=$('#settingstxt').value;await api('/api/save-settings',{method:'POST',headers:{'Content-Type':'text/plain'},body:txt});};"
+"$('#loadsettings').onclick=async()=>{const r=await api('/api/load-settings');const t=await r.text();$('#settingstxt').value=t;};"
+"async function refreshResults(){const n=parseInt($('#reslimit').value||'50');const p=$('#respath').value||'';const r=await api('/api/results?limit='+n+(p?('&path='+encodeURIComponent(p)):''));const j=await r.json();const html=(j.lines||[]).map(x=>{let o=null;try{o=JSON.parse(x);}catch(e){}if(!o)return x;const ts=o.timestamp||'';const st=o.status||'';const wt=o.worktype||o.program?.name||'';const e=o.exponent||'';const r64=o.res64||'';return `[${ts}] ${st} e=${e} ${wt} res64=${r64}`;}).join('\\n');$('#reslist').textContent=html;}"
 "$('#refreshres').onclick=refreshResults;"
 "function updateExpLink(){const e=$('#exp').value||'';const u=e?('https://www.mersenne.ca/exponent/'+e):'https://www.mersenne.ca';$('#expopen').href=u;}"
 "$('#exp').addEventListener('input',updateExpLink);updateExpLink();"
-"async function loadWorktodo(){try{const r=await fetch('/api/load-worktodo');const t=await r.text();if(t)$('#wt').value=t;}catch(e){}}"
-"(async()=>{try{const r=await fetch('/api/load-settings');const t=await r.text();if(t)$('#settingstxt').value=t;}catch(e){};refreshResults();loadWorktodo();})();"
+"async function loadWorktodo(){try{const r=await api('/api/load-worktodo');const t=await r.text();if(t)$('#wt').value=t;}catch(e){}}"
+"(async()=>{try{const r=await api('/api/load-settings');const t=await r.text();if(t)$('#settingstxt').value=t;}catch(e){};refreshResults();loadWorktodo();})();"
 "</script>"
 "</body></html>";
 }
@@ -688,6 +848,20 @@ std::string WebGuiServer::httpBadRequest(const std::string& msg) {
     std::string body = "{\"error\":\"" + jsonEscape(msg) + "\"}";
     std::ostringstream oss;
     oss << "HTTP/1.1 400 Bad Request\r\n";
+    oss << "Content-Type: application/json\r\n";
+    oss << "Content-Length: " << body.size() << "\r\n";
+    oss << "Connection: close\r\n\r\n";
+    oss << body;
+    return oss.str();
+}
+
+std::string WebGuiServer::httpError(int code, const std::string& msg) {
+    const char* reason = code == 400 ? "Bad Request" : code == 401 ? "Unauthorized" : code == 403 ? "Forbidden"
+                       : code == 413 ? "Payload Too Large" : code == 431 ? "Request Header Fields Too Large"
+                       : "Error";
+    std::string body = "{\"error\":\"" + jsonEscape(msg) + "\"}";
+    std::ostringstream oss;
+    oss << "HTTP/1.1 " << code << " " << reason << "\r\n";
     oss << "Content-Type: application/json\r\n";
     oss << "Content-Length: " << body.size() << "\r\n";
     oss << "Connection: close\r\n\r\n";

@@ -164,8 +164,12 @@ std::filesystem::path ProofManager::proof(const prmers::ocl::Context& ctx, openc
         proof.save(tmpPath);
 
         auto loadedProof = Proof::load(tmpPath);
-        if (verify) {
-            loadedProof.verify(gpu, proofPower);
+        if (verify && !loadedProof.verify(gpu, proofPower)) {
+            std::error_code ec;
+            fs::remove(tmpPath, ec);
+            throw ProofVerificationError(
+                "proof for M" + std::to_string(exponent_) + " (power " +
+                std::to_string(proofPower) + ") failed verification; the proof file was discarded");
         }
 
         fancyRename(tmpPath, finalPath);

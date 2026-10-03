@@ -113,15 +113,16 @@ radix-9 middle transform, tail pairing and canonical scatter.  Type 4 PFA is
 currently restricted to radix 9, non-in-place transforms and single-wide
 two-kernel tails.
 
-Build and run the exact GPU differential check against type-1 PFA9:
+Build and run the dense-random GPU differential check of the three-plane plan:
 
 ```bash
-./scripts/test_type4_pfa9_ubuntu.sh 0 175000039 2
+./scripts/test_type4_pfa9_ubuntu.sh 0 200000033 4
 ```
 
-The test performs square/small-multiply and prepared multiplication through both
-`pfa9:1:512:9:512:202` and `pfa9full:4:512:9:512:202`, then compares every exported
-32-bit residue word.
+The test feeds seeded dense random residues through `pfa9full:4:512:9:512:202`
+(42.4 bits/word, above the exact FFT3161 limit so the FP32 plane participates)
+and through the exact `1:512:16:512:202` plan: squarings, a generic multiply and
+a prepared multiply, comparing every exported 32-bit residue word.
 
 Background and development notes:
 
