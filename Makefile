@@ -63,8 +63,10 @@ CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 # owns the public method and can fall back to this exact implementation.
 $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp -include $(INC_DIR)/core/GmPm1LegacyRename.hpp
 
+MARIN_TEST_DEVICE ?= 0
+
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -129,9 +131,41 @@ test-aevum-default:
 test-gui-state:
 	bash tests/test_web_gui_backend_state.sh
 
+test-gui-http:
+	bash tests/test_web_gui_http.sh
+
+test-pm1-vtrace-small-b1:
+	python3 tests/pm1_vtrace_small_b1_test.py
+
 test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py
+
+test-ecm-torsion:
+	bash tests/test_ecm_torsion_curves.sh
+
+# Marin transform-size bound: exact 128-bit check and OpenCL/GMP device check.
+test-marin-ibdwt-bound:
+	bash tests/test_marin_ibdwt_size_bound.sh
+	bash tests/test_marin_ibdwt_wrap_device.sh $(MARIN_TEST_DEVICE)
+
+test-worktodo-manager:
+	bash tests/test_worktodo_manager.sh
+
+test-marin-ll-radix5: all
+	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+test-proof-power:
+	python3 tests/legacy_proof_power_source_test.py
+
+test-proof-verify:
+	python3 tests/proof_verify_result_source_test.py
+
+test-marin-invalid-device:
+	mkdir -p tests/build-marin-invalid-device
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
+	tests/build-marin-invalid-device/marin-invalid-device-test
+	rm -rf tests/build-marin-invalid-device
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
@@ -140,6 +174,9 @@ test-aevum-source:
 	python3 tests/stable_backend_stop_bsgs_apple_source_test.py
 	python3 tests/workload_plan_audit_parser_test.py
 	bash tests/source_aevum_engine_audit.sh
+
+test-ecm-interrupt-no-result:
+	python3 tests/ecm_interrupt_no_result_test.py
 
 test-gm:
 	python3 tests/gaussian_mersenne_math_test.py
@@ -158,8 +195,21 @@ test-gm:
 	python3 tests/gaussian_pair_full_pipeline_test.py
 	python3 tests/gaussian_pair_backend_policy_test.py
 	python3 tests/gaussian_pair_tf_math_test.py
+	python3 tests/gaussian_tf_checkpoint_factors_test.py
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
+
+test-pm1-stage1-ckpt: all
+	bash tests/pm1_stage1_ckpt_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+test-pm1-bsgs-resume: all
+	bash tests/pm1_bsgs_resume_boundary_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+test-pm1-interrupt-building-e: all
+	bash tests/pm1_interrupt_building_e_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+test-pm1-stage2-record-factor: all
+	bash tests/pm1_stage2_record_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
 
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
@@ -202,3 +252,11 @@ native-pfa-host-test:
 
 native-pfa-gpu-test: native-pfa-build
 	bash scripts/test_native_pfa_gpu.sh $${PRMERS_TEST_DEVICE:-0} $${AEVUM_PFA_TEST_ITERS:-1}
+
+.PHONY: test-llsafe2-resume
+test-llsafe2-resume: all
+	bash tests/run_llsafe2_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-llsafe2-result
+test-llsafe2-result: all
+	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}

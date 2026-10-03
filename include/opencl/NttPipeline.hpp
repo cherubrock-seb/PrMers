@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include <functional>
+#include <stdexcept>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -50,6 +51,14 @@ struct NttStage {
     int                      outputInverse = 0;
 };
 
+inline void setStageArg(const NttStage& s, cl_uint i, const NttStage::Arg& A) {
+    const cl_int err = clSetKernelArg(s.kernel, i, A.size, A.data.data());
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("NTT stage " + s.name + ": clSetKernelArg(" + std::to_string(i) +
+                                 ") failed with error " + std::to_string(err));
+    }
+}
+
 inline void setStageArgs2(NttStage& s, cl_mem buf_x) {
     for (cl_uint i = 0; i < s.args.size(); ++i) {
         auto& A = s.args[i];
@@ -57,7 +66,7 @@ inline void setStageArgs2(NttStage& s, cl_mem buf_x) {
             if (A.isBufX && A.size == sizeof(cl_mem)) {
                 std::memcpy(A.data.data(), &buf_x, sizeof(cl_mem));
             }
-            clSetKernelArg(s.kernel, i, A.size, A.data.data());
+            setStageArg(s, i, A);
         }
     }
 }
@@ -73,7 +82,7 @@ inline void setStageArgs(NttStage& s, cl_mem buf_x) {
                     std::memcpy(A.data.data(), &buf_x, sizeof(cl_mem));
                 }
             }
-            clSetKernelArg(s.kernel, i, A.size, A.data.data());
+            setStageArg(s, i, A);
         }
     }
 }
@@ -166,7 +175,7 @@ inline std::vector<NttStage> buildForwardPipeline(
       { RadixOp::First,   4, 8,
         k_first,        ls0, "kernel_ntt_radix4_mm_first",
         /*cond*/ [](auto m0, auto){ return m0>=2; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 0},
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW } , 0},
         
       { RadixOp::Any,     16, 16,
         k_mm_2,         ls2, "kernel_ntt_radix4_mm_2steps",
@@ -210,7 +219,7 @@ inline std::vector<NttStage> buildForwardPipeline(
       { RadixOp::Last,    4, 4,
         k_last_m1,      ls0, "kernel_ntt_radix4_last_m1",
         [](auto m0, auto){ return m0==4; },
-        { ArgKind::BufX, ArgKind::BufW } ,1},
+        { ArgKind::BufX } ,1},
 
       { RadixOp::Last,    4, 4,
         k_last_m1_n4,   ls0, "kernel_ntt_radix4_last_m1_n4",
@@ -334,7 +343,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
       { RadixOp::First,   4, 8,
         k_first,        ls0, "kernel_ntt_radix4_mm_first",
         /*cond*/ [](auto m0, auto){ return m0>=2; },
-        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW, ArgKind::ParamM } , 1},
+        { ArgKind::BufX, ArgKind::BufW, ArgKind::BufDW } , 1},
         
       { RadixOp::Any,     16, 16,
         k_mm_2,         ls2, "kernel_ntt_radix4_mm_2steps",
@@ -367,7 +376,7 @@ inline std::vector<NttStage> buildForwardSimplePipeline(
       { RadixOp::Last,    4, 4,
         k_last_m1,      ls0, "kernel_ntt_radix4_last_m1_nosquare",
         [](auto m0, auto){ return m0==4; },
-        { ArgKind::BufX, ArgKind::BufW } ,1},
+        { ArgKind::BufX } ,1},
       { RadixOp::Last,    2, 2,
         k_radix2, ls0, "kernel_ntt_radix2",
         [](auto m0, auto){ return m0==2;},
