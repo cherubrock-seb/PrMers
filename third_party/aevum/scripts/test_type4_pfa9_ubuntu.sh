@@ -2,8 +2,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE="${1:-0}"
-EXPONENT="${2:-175000039}"
-ITERATIONS="${3:-2}"
+# 42.4 bits/word for the 4.5M-word PFA9 shape: above the exact FFT3161 limit,
+# so the three-plane FP32+GF31+GF61 transform really runs.
+EXPONENT="${2:-200000033}"
+ITERATIONS="${3:-4}"
 cd "$ROOT"
 
 make -j"$(nproc)" engine-lib
@@ -11,10 +13,12 @@ mkdir -p build-tests
 ${CXX:-c++} -O2 -std=c++20 tests/type4_pfa9_engine_compare.cpp -ldl \
   -o build-tests/aevum-type4-pfa9-engine-compare
 
+# Dense random residues: compares the three-plane pfa9full:4 plan word-for-word
+# against an exact FFT3161 plan (squarings, generic and prepared multiply).
 build-tests/aevum-type4-pfa9-engine-compare \
   build-engine/libaevum_engine.so "$DEVICE" "$EXPONENT" "$ITERATIONS"
 
-echo "Force-adaptive resolution:"
+echo "Type-4 PFA9 plan resolution:"
 cat > build-tests/resolve-type4.cpp <<'CPP'
 #include "FFTConfig.h"
 #include "Args.h"
@@ -30,12 +34,16 @@ int main(int argc, char** argv) {
   Args args(true); const auto e = static_cast<u64>(std::stoull(argv[1]));
   auto fast = FFTConfig::bestFit(args, e, "pfa9:4:512:9:512:202");
   auto full = FFTConfig::bestFit(args, e, "pfa9full:4:512:9:512:202");
-  std::cout << "forced-type4=" << fast.spec() << " arithmetic-type=" << int(fast.shape.fft_type) << "\n";
+  std::cout << "adaptive-type4=" << fast.spec() << " arithmetic-type=" << int(fast.shape.fft_type) << "\n";
   std::cout << "full-type4=" << full.spec() << " arithmetic-type=" << int(full.shape.fft_type) << "\n";
 }
 CPP
+# Same host-only link set as the type4_pfa9_plan_test Makefile target: the stub
+# log() above replaces src/log.cpp, and FFTConfig.cpp needs PrpUseTune.cpp and
+# RuntimeAutotune.cpp.
 ${CXX:-c++} -O2 -std=c++20 -ffunction-sections -fdata-sections -Isrc \
   build-tests/resolve-type4.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp \
-  src/common.cpp src/fs.cpp src/File.cpp src/log.cpp src/timeutil.cpp \
+  src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+  src/PrpUseTune.cpp src/RuntimeAutotune.cpp \
   -Wl,--gc-sections -o build-tests/resolve-type4
 build-tests/resolve-type4 "$EXPONENT"

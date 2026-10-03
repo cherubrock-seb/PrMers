@@ -963,7 +963,9 @@ queues by default:
 ./prmers 175000039 -d 1 -pfa9-type4-full -proof 0
 ```
 
-The true three-plane plan is spelled `pfa9full:4:512:9:512:202`. Use `AEVUM_TYPE4_MULTI_Q=0` to reproduce the old single-queue baseline.
+The true three-plane plan is spelled `pfa9full:4:512:9:512:202`; it is validated
+word-for-word against GMP on dense random residues at 42.4 bits/word
+(`third_party/aevum/scripts/test_type4_pfa9_ubuntu.sh`). Use `AEVUM_TYPE4_MULTI_Q=0` to reproduce the old single-queue baseline.
 Run all four comparisons with:
 
 ```bash
