@@ -342,7 +342,7 @@ static std::string generatePrimeNetJson(
 {
     std::string canonWT;
     if (worktype == "prp") canonWT = "PRP-3";
-    else if (worktype == "ll" || worktype == "llsafe") canonWT = "LL";
+    else if (worktype == "ll" || worktype == "llsafe" || worktype == "llsafe2") canonWT = "LL";
     else canonWT = toUpper(worktype);
     bool isEdw = opts.compute_edwards;
     int torsion = opts.notorsion ? 0 : (opts.torsion16 ? 16 : 8);
@@ -409,7 +409,7 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
     oss << ",\"worktype\":"                        << jsonEscape(canonWT);
     if (!knownFactors.empty()) {
         // *** TODO: this is totally wrong, "known-factors" and "factors" are two ENTIRELY separate things, and should be better stored in the PrMers data structure
-        if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
+        if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "llsafe2") || (worktype == "prp")) {
             oss << ",\"known-factors\":[" << startFactorStrQuoted << "]";
         } else {
             if (!newFactors.empty()) {
@@ -429,7 +429,7 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
             oss << ",\"b2\":" << opts.B2;
         }
     }
-    if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "prp")) {
+    if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "llsafe2") || (worktype == "prp")) {
         oss << ",\"res64\":"                       << jsonEscape(res64);
         if (worktype == "prp") {
             oss << ",\"res2048\":"                 << jsonEscape(res2048);
@@ -590,7 +590,7 @@ std::string JsonBuilder::generate(const CliOptions& opts,
     std::strftime(timestampBuf, sizeof(timestampBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
 
     std::string status;
-    if ((opts.mode == "ll") || (opts.mode == "llsafe") || (opts.mode == "prp")) {
+    if ((opts.mode == "ll") || (opts.mode == "llsafe") || (opts.mode == "llsafe2") || (opts.mode == "prp")) {
         status = (isPrime ? "P" : "C");
     } else {
         status = (!opts.knownFactors.empty() ? "F" : "NF");

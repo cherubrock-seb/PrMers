@@ -1132,6 +1132,7 @@ int App::runGaussianMersenneECMOptimized() {
 
     const OptLayout layout(s2plan.baby_d.size());
     const mpz_class K = buildE(B1);
+    if (interrupted) return 0;  // E is incomplete after a Ctrl-C while it was built
     const std::uint64_t kbits =
         static_cast<std::uint64_t>(mpz_sizeinbase(K.get_mpz_t(), 2));
 

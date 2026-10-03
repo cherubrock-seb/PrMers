@@ -67,10 +67,20 @@ private:
     int listen_fd_ = -1;
     int bound_port_ = 3131;
     std::string url_;
+    // Per-run access token. Every /api/* request must carry it in X-PrMers-Token, and the page itself is
+    // only served for /?token=<token>. Inherited through PRMERS_GUI_TOKEN so a restart keeps it.
+    std::string token_;
+    std::atomic<int> active_connections_{0};
     void run();
     void closeListen();
     void serveOne(int fd);
-    static bool readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers);
+    // Returns 0 on success, an HTTP status code for a request to reject, or -1 to drop the connection.
+    static int readRequest(int fd, std::string& method, std::string& path, std::string& body, std::string& headers);
+    static std::string headerValue(const std::string& headers, const std::string& name);
+    bool hostAllowed(const std::string& hostHeader) const;
+    bool originAllowed(const std::string& origin) const;
+    bool tokenMatches(const std::string& candidate) const;
+    bool resolveResultsPath(const std::string& requested, std::string& resolved) const;
     static bool sendAll(int fd, const char* data, size_t len);
     static int createListenSocket(const std::string& bind_host, int port, int& out_port);
     std::string handleStateJson();
@@ -83,6 +93,7 @@ private:
     std::string httpOk(const std::string& contentType, const std::string& body);
     std::string httpBadRequest(const std::string& msg);
     std::string httpNotFound();
+    std::string httpError(int code, const std::string& msg);
     static std::string jsonEscape(const std::string& s);
     static std::string readFile(const std::string& path);
     static bool writeFile(const std::string& path, const std::string& data);

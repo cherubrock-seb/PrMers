@@ -582,9 +582,17 @@ int App::runPrpOrLlMarin()
     if (options.wagstaff) {
             mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
             mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
-            mpz_class rM = util::vectToMpz(d,
-                                        precompute.getDigitWidth(),
-                                        Mp);
+            // Read the exact residue from the engine: the digit widths of the
+            // active backend (Marin or Aevum) can differ from Precompute's.
+            mpz_class rM;
+            {
+                mpz_t z0;
+                mpz_init(z0);
+                eng->get_mpz(z0, R0);
+                mpz_set(rM.get_mpz_t(), z0);
+                mpz_clear(z0);
+            }
+            rM %= Mp;
             mpz_class rF = rM % Fp;
             bool isWagstaffPRP = (rF == 9);
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
@@ -729,6 +737,11 @@ int App::runPrpOrLlMarin()
                         gpuProofSucceeded = true;
                         break;
                     }
+                    catch (const core::ProofVerificationError&) {
+                        // Not retried and not replaced by the unverified CPU
+                        // proof: handled by the outer catch.
+                        throw;
+                    }
                     catch (const std::exception& e) {
                         gpuProofError = e.what();
 
@@ -767,6 +780,16 @@ int App::runPrpOrLlMarin()
                     "Proof file saved: " +
                     proofFilePath.string());
         }
+        catch (const core::ProofVerificationError& e) {
+            const std::string msg = std::string("Error: ") + e.what() +
+                ". No proof will be reported for this test; "
+                "the PRP result is still valid.";
+            std::cerr << msg << std::endl;
+            if (guiServer_)
+                guiServer_->appendLog(msg);
+            options.proof = false;
+            options.proofFile.clear();
+        }
         catch (const std::exception& e) {
             std::cerr
                 << "Warning: Proof generation failed: "
@@ -776,6 +799,10 @@ int App::runPrpOrLlMarin()
                 guiServer_->appendLog(
                     std::string("Warning: Proof generation failed: ") +
                     e.what());
+
+            // No proof file exists: do not report proof metadata.
+            options.proof = false;
+            options.proofFile.clear();
         }
     }
 
@@ -861,11 +888,14 @@ int App::runPrpOrLlMarin()
 
     backupManager.clearState();
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     delete_checkpoints(p, options.wagstaff, false, false); 
     backupManager.clearState();
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
