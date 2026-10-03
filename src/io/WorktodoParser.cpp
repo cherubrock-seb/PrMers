@@ -11,6 +11,7 @@
 #include <limits>
 #include <cctype>
 #include <algorithm>
+#include <cmath>
 
 namespace io {
 
@@ -74,6 +75,33 @@ static uint64_t mul_sat_u64(uint64_t a, uint64_t b){
     if (a > std::numeric_limits<uint64_t>::max() / b) return std::numeric_limits<uint64_t>::max();
     return a * b;
 }*/
+
+static bool parsePfactorNonnegativeFinite(const std::string& raw, double& value) {
+std::string token = raw;
+trim_inplace(token);
+if (token.empty()) return false;
+
+size_t consumed = 0;
+try {
+    value = std::stod(token, &consumed);
+} catch (const std::exception&) {
+    return false;
+}
+
+return consumed == token.size() &&
+       std::isfinite(value) &&
+       value >= 0.0;
+
+}
+
+// B1 for a Pfactor= line: 0.0045 * p * tests_saved (tests_saved clamped to [1, 10]), two significant digits,
+// at least 1000.
+static uint64_t pfactorB1(uint32_t exponent, double testsSaved) {
+    const double saved = std::min(std::max(testsSaved, 1.0), 10.0);
+    const double b1 = std::max(1000.0, 0.0045 * static_cast<double>(exponent) * saved);
+    const double scale = std::pow(10.0, std::floor(std::log10(b1)) - 1.0);
+    return static_cast<uint64_t>(std::llround(b1 / scale) * scale);
+}
 
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
@@ -291,8 +319,25 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 entry.rawLine   = line;
                 entry.aid       = aid;
 
-                entry.B1 = static_cast<uint64_t>(std::stoull(parts[4]));
-                entry.B2 = static_cast<uint64_t>(std::stod(parts[5]));
+                // Pfactor=[AID,]k,b,n,c,how_far_factored,tests_saved: the line carries the trial-factoring depth
+                // and the number of primality tests a factor would save, not B1/B2. Choose the bounds with a
+                // simple rule that tracks Prime95's choices at the GIMPS wavefront (Prime95 picks B1 of about
+                // 0.004-0.006 p per test saved): B1 = 0.0045 * p * tests_saved, rounded to two significant
+                // digits, at least 1000, and B2 = 20 * B1. tests_saved is clamped to [1, 10], so a line asking
+                // for P-1 where a primality test would be cheaper still runs.
+double tfBits = 0.0, testsSaved = 0.0;
+if (!parsePfactorNonnegativeFinite(parts[4], tfBits) ||
+!parsePfactorNonnegativeFinite(parts[5], testsSaved)) {
+std::cerr << "Skipping malformed Pfactor line "
+<< "(how_far_factored and tests_saved must be complete finite non-negative numbers): "
+<< line << "\n";
+continue;
+}
+                entry.sieveDepth = tfBits;
+                entry.B1 = pfactorB1(exp, testsSaved);
+                entry.B2 = 20 * entry.B1;
+                std::cout << "Pfactor: trial factored to 2^" << tfBits << ", " << testsSaved
+                          << " test(s) saved -> B1=" << entry.B1 << " B2=" << entry.B2 << "\n";
 
                 if (parts.size() >= 7) {
                     std::vector<std::string> kf;
