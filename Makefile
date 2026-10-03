@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -154,6 +154,9 @@ test-marin-ll-radix5: all
 
 test-proof-power:
 	python3 tests/legacy_proof_power_source_test.py
+
+test-proof-verify:
+	python3 tests/proof_verify_result_source_test.py
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py

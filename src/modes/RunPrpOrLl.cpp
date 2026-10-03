@@ -891,6 +891,7 @@ int App::runPrpOrLl() {
     // Generate proof file after successful completion
     if (options.mode == "prp" && options.proof) {
         int proofPower = static_cast<int>(options.proofPower);
+        bool proofSaved = false;
         while (proofPower >= 0) {
             try {
                 std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -910,6 +911,17 @@ int App::runPrpOrLl() {
                     oss << "Proof file saved: " << proofFilePath << std::endl;
                     guiServer_->appendLog(oss.str());
                 }
+                proofSaved = true;
+                break;
+            } catch (const core::ProofVerificationError& e) {
+                // A proof that does not verify is never kept or reported, and
+                // is not retried: the PRP result itself is unaffected.
+                std::cerr << "Error: " << e.what() << ". No proof will be reported for this test; the PRP result is still valid." << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Error: " << e.what() << ". No proof will be reported for this test; the PRP result is still valid." << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
                 break;
             } catch (const std::exception& e) {
                 std::cerr << "Warning: Proof generation failed: " << e.what() << std::endl;
@@ -927,6 +939,12 @@ int App::runPrpOrLl() {
                     guiServer_->appendLog(oss.str());
                 }
             }
+        }
+        if (!proofSaved) {
+            // Do not report proof metadata (power, md5) for a proof that
+            // does not exist.
+            options.proof = false;
+            options.proofFile.clear();
         }
     }
 
