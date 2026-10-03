@@ -891,6 +891,7 @@ int App::runPrpOrLl() {
     // Generate proof file after successful completion
     if (options.mode == "prp" && options.proof) {
         int proofPower = static_cast<int>(options.proofPower);
+        bool proofSaved = false;
         while (proofPower >= 0) {
             try {
                 std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -899,7 +900,7 @@ int App::runPrpOrLl() {
                     oss << "\nGenerating PRP proof file..." << std::endl;
                     guiServer_->appendLog(oss.str());
                 }
-                options.proofPower = static_cast<decltype(options.proof)>(proofPower);
+                options.proofPower = static_cast<decltype(options.proofPower)>(proofPower);
                 auto proofFilePath = proofManager.proof(context, *nttEngine, carry,
                                         static_cast<uint32_t>(proofPower),
                                         options.verify);
@@ -908,6 +909,17 @@ int App::runPrpOrLl() {
                 if (guiServer_) {
                     std::ostringstream oss;
                     oss << "Proof file saved: " << proofFilePath << std::endl;
+                    guiServer_->appendLog(oss.str());
+                }
+                proofSaved = true;
+                break;
+            } catch (const core::ProofVerificationError& e) {
+                // A proof that does not verify is never kept or reported, and
+                // is not retried: the PRP result itself is unaffected.
+                std::cerr << "Error: " << e.what() << ". No proof will be reported for this test; the PRP result is still valid." << std::endl;
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "Error: " << e.what() << ". No proof will be reported for this test; the PRP result is still valid." << std::endl;
                     guiServer_->appendLog(oss.str());
                 }
                 break;
@@ -927,6 +939,12 @@ int App::runPrpOrLl() {
                     guiServer_->appendLog(oss.str());
                 }
             }
+        }
+        if (!proofSaved) {
+            // Do not report proof metadata (power, md5) for a proof that
+            // does not exist.
+            options.proof = false;
+            options.proofFile.clear();
         }
     }
 
@@ -1009,10 +1027,13 @@ int App::runPrpOrLl() {
 
     backupManager.clearState();
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";

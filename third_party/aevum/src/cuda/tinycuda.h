@@ -216,6 +216,7 @@ using cl_queue = cl_command_queue;
 #define CL_DEVICE_TOPOLOGY_AMD          0x4037
 #define CL_DEVICE_BOARD_NAME_AMD        0x4038
 #define CL_DEVICE_GLOBAL_FREE_MEMORY_AMD 0x4039
+#define CL_DEVICE_WAVEFRONT_WIDTH_AMD   0x4043
 
 typedef union {
   struct { u32 type; u32 data[5]; } raw;
