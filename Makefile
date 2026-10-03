@@ -64,7 +64,7 @@ CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp -include $(INC_DIR)/core/GmPm1LegacyRename.hpp
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -132,6 +132,12 @@ test-gui-state:
 test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py
+
+test-marin-invalid-device:
+	mkdir -p tests/build-marin-invalid-device
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
+	tests/build-marin-invalid-device/marin-invalid-device-test
+	rm -rf tests/build-marin-invalid-device
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
