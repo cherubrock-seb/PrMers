@@ -1,4 +1,5 @@
 #include "io/WorktodoParser.hpp"
+#include "math/Pm1Bounds.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -110,13 +111,28 @@ int main() {
         out << "Pfactor=N/A,1,2,130000001,-1,abc,1\n";
         out << "Pfactor=N/A,1,2,130000001,-1,77,nan\n";
     }
-    struct PfCase { uint32_t exponent; double tf; uint64_t B1, B2; std::string aid; };
-    const PfCase pfCases[] = {
-        {1277u, 76, 1000, 20000, "0123456789ABCDEF0123456789ABCDEF"},
-        {130000001u, 77, 590000, 11800000, ""},
-        {130000001u, 77, 1200000, 24000000, ""},
-        {130000001u, 77, 590000, 11800000, ""},
-    };
+struct PfCase { uint32_t exponent; double tf; uint64_t B1, B2; std::string aid; };
+
+auto chosen = [](uint32_t p, double tf, double saved) {
+    return math::choosePm1Bounds(p, tf, saved);
+};
+
+const PfCase pfCases[] = {
+    {1277u, 76,
+     chosen(1277u, 76, 2).B1,
+     chosen(1277u, 76, 2).B2,
+     "0123456789ABCDEF0123456789ABCDEF"},
+    {130000001u, 77,
+     chosen(130000001u, 77, 1).B1,
+     chosen(130000001u, 77, 1).B2, ""},
+    {130000001u, 77,
+     chosen(130000001u, 77, 2).B1,
+     chosen(130000001u, 77, 2).B2, ""},
+    {130000001u, 77,
+     chosen(130000001u, 77, 0).B1,
+     chosen(130000001u, 77, 0).B2, ""},
+};
+
     io::WorktodoParser pfParser(pf.string());
     for (const auto& c : pfCases) {
         auto e = pfParser.parse();
@@ -184,27 +200,42 @@ for (const auto& c : rejectCases) {
 }
 
 auto whitespace = parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1, 77 , 2 ");
+const auto whitespaceExpected =
+math::choosePm1Bounds(130000001u, 77.0, 2.0);
+
 if (!whitespace || whitespace->sieveDepth != 77.0 ||
-    whitespace->B1 != 1200000ULL || whitespace->B2 != 24000000ULL) {
-    std::cerr << "WHITESPACE_NUMERIC=FAIL\n";
-    return 43;
+whitespace->B1 != whitespaceExpected.B1 ||
+whitespace->B2 != whitespaceExpected.B2) {
+std::cerr << "WHITESPACE_NUMERIC=FAIL\n";
+return 43;
 }
 std::cout << "WHITESPACE_NUMERIC=PASS\n";
 
-auto zeroSaved = parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1,77,0");
+auto zeroSaved =
+parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1,77,0");
+const auto zeroExpected =
+math::choosePm1Bounds(130000001u, 77.0, 0.0);
+
 if (!zeroSaved || zeroSaved->sieveDepth != 77.0 ||
-    zeroSaved->B1 != 590000ULL || zeroSaved->B2 != 11800000ULL) {
-    std::cerr << "ZERO_TESTS_SAVED=FAIL\n";
-    return 44;
+zeroSaved->B1 != zeroExpected.B1 ||
+zeroSaved->B2 != zeroExpected.B2) {
+std::cerr << "ZERO_TESTS_SAVED=FAIL\n";
+return 44;
 }
 std::cout << "ZERO_TESTS_SAVED=PASS\n";
 
-auto hugeFinite = parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1,1e300,1e300");
-if (!hugeFinite || !std::isfinite(hugeFinite->sieveDepth) ||
-    hugeFinite->sieveDepth != 1e300 ||
-    hugeFinite->B1 != 5900000ULL || hugeFinite->B2 != 118000000ULL) {
-    std::cerr << "HUGE_FINITE=FAIL\n";
-    return 45;
+auto hugeFinite =
+parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1,1e300,1e300");
+const auto hugeExpected =
+math::choosePm1Bounds(130000001u, 1e300, 1e300);
+
+if (!hugeFinite ||
+!std::isfinite(hugeFinite->sieveDepth) ||
+hugeFinite->sieveDepth != 1e300 ||
+hugeFinite->B1 != hugeExpected.B1 ||
+hugeFinite->B2 != hugeExpected.B2) {
+std::cerr << "HUGE_FINITE=FAIL\n";
+return 45;
 }
 std::cout << "HUGE_FINITE=PASS\n";
 

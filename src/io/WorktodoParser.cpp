@@ -1,6 +1,7 @@
 // io/WorktodoParser.cpp
 #include "io/WorktodoParser.hpp"
 #include "math/Cofactor.hpp"
+#include "math/Pm1Bounds.hpp"
 #include "util/StringUtils.hpp"
 #include <fstream>
 #include <sstream>
@@ -11,6 +12,7 @@
 #include <limits>
 #include <cctype>
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 
 namespace io {
@@ -92,15 +94,6 @@ return consumed == token.size() &&
        std::isfinite(value) &&
        value >= 0.0;
 
-}
-
-// B1 for a Pfactor= line: 0.0045 * p * tests_saved (tests_saved clamped to [1, 10]), two significant digits,
-// at least 1000.
-static uint64_t pfactorB1(uint32_t exponent, double testsSaved) {
-    const double saved = std::min(std::max(testsSaved, 1.0), 10.0);
-    const double b1 = std::max(1000.0, 0.0045 * static_cast<double>(exponent) * saved);
-    const double scale = std::pow(10.0, std::floor(std::log10(b1)) - 1.0);
-    return static_cast<uint64_t>(std::llround(b1 / scale) * scale);
 }
 
 std::optional<WorktodoEntry> WorktodoParser::parse() {
@@ -333,11 +326,39 @@ std::cerr << "Skipping malformed Pfactor line "
 << line << "\n";
 continue;
 }
-                entry.sieveDepth = tfBits;
-                entry.B1 = pfactorB1(exp, testsSaved);
-                entry.B2 = 20 * entry.B1;
-                std::cout << "Pfactor: trial factored to 2^" << tfBits << ", " << testsSaved
-                          << " test(s) saved -> B1=" << entry.B1 << " B2=" << entry.B2 << "\n";
+double stage2Cost = math::kPm1Stage2CostPerPrime;
+if (const char* env = std::getenv("PRMERS_PM1_STAGE2_COST")) {
+const double v = std::atof(env);
+if (std::isfinite(v) && v > 0.0) stage2Cost = v;
+}
+
+            const math::Pm1Bounds bounds =
+                math::choosePm1Bounds(exp, tfBits, testsSaved, stage2Cost);
+if (bounds.B1 == 0) {
+std::cout << "Pfactor: no economically bounded P-1 work fits this assignment; "
+<< "leaving it pending.\n";
+continue;
+}
+
+            entry.sieveDepth = tfBits;
+            entry.B1 = bounds.B1;
+            entry.B2 = bounds.B2;
+
+            char pct[32];
+            std::snprintf(pct, sizeof(pct), "%.2f",
+                          bounds.probability.total() * 100.0);
+
+            std::cout << "Pfactor: trial factored to 2^" << tfBits
+                      << ", " << testsSaved
+                      << " test(s) saved -> chose B1=" << bounds.B1
+                      << " B2=" << bounds.B2
+                      << " (estimated success " << pct << "%)\n";
+
+            if (bounds.gain <= 0.0) {
+                std::cout << "Pfactor: no P-1 bounds pay for themselves here; "
+                          << "using a fallback bounded by the maximum work the requested "
+                          << "primality tests could save.\n";
+            }
 
                 if (parts.size() >= 7) {
                     std::vector<std::string> kf;
