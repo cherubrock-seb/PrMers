@@ -181,6 +181,9 @@ test-gm:
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
 
+test-pm1-stage1-ckpt: all
+	bash tests/pm1_stage1_ckpt_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 

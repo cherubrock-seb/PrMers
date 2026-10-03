@@ -163,13 +163,20 @@ static const char* pm1_checkpoint_backend_name(const engine* eng) {
     return eng && eng->is_aevum_backend() ? "aevum" : "marin";
 }
 
-static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng) {
+// The sidecar records the backend on its first line.  Stage-1 checkpoints
+// also record the bounds they were built for ("b1=" and "maxe=" lines), so a
+// run with a different B1 or -maxe never resumes a state computed for another
+// exponent E.  Older sidecars have only the backend line.
+static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng,
+                                         uint64_t b1 = 0, uint64_t max_e_bits = 0) {
     const std::string path = pm1_checkpoint_backend_sidecar(checkpoint_file);
     const std::string temp = path + ".new";
     {
         std::ofstream out(temp, std::ios::trunc);
         if (!out) return;
         out << pm1_checkpoint_backend_name(eng) << '\n';
+        if (b1) out << "b1=" << b1 << '\n';
+        if (max_e_bits) out << "maxe=" << max_e_bits << '\n';
     }
     std::error_code ec;
     fs::rename(temp, path, ec);
@@ -178,6 +185,20 @@ static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, con
         ec.clear();
         fs::rename(temp, path, ec);
     }
+}
+
+// Reads the stage-1 parameters recorded next to a checkpoint.  Returns false
+// when the sidecar does not record them (legacy checkpoint).
+static bool pm1_checkpoint_read_params(const std::string& checkpoint_file, uint64_t& b1, uint64_t& max_e_bits) {
+    std::ifstream in(pm1_checkpoint_backend_sidecar(checkpoint_file));
+    if (!in) return false;
+    std::string line;
+    bool have_b1 = false, have_maxe = false;
+    while (std::getline(in, line)) {
+        if (line.rfind("b1=", 0) == 0) { b1 = std::strtoull(line.c_str() + 3, nullptr, 10); have_b1 = true; }
+        else if (line.rfind("maxe=", 0) == 0) { max_e_bits = std::strtoull(line.c_str() + 5, nullptr, 10); have_maxe = true; }
+    }
+    return have_b1 && have_maxe;
 }
 
 static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
@@ -6223,7 +6244,7 @@ int App::runPM1Marin() {
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
-        write_pm1_checkpoint_backend(ckpt_file, eng);
+        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
     };
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
@@ -6232,6 +6253,15 @@ int App::runPM1Marin() {
         if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
             std::cerr << "[PM1] Ignoring incompatible checkpoint " << file << ": " << backend_reason << "\n";
             return -3;
+        }
+        {
+            uint64_t ck_b1 = 0, ck_maxe = 0;
+            if (pm1_checkpoint_read_params(file, ck_b1, ck_maxe) && (ck_b1 != B1 || ck_maxe != MAX_E_BITS)) {
+                std::cerr << "[PM1] Ignoring checkpoint " << file << ": it was written for B1=" << ck_b1
+                          << " -maxe " << ck_maxe << ", this run uses B1=" << B1 << " -maxe " << MAX_E_BITS
+                          << "; starting stage 1 from scratch\n";
+                return -3;
+            }
         }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != 3) return -2;
@@ -7034,7 +7064,30 @@ int App::runPM1Marin() {
             }
             mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
             if (bits == 0) break;
-            if (restored && bits_in_chunk_ck) bits = (mp_bitcnt_t)bits_in_chunk_ck;
+            if (restored && bits_in_chunk_ck && bits_in_chunk_ck != (uint64_t)bits) {
+                // A checkpoint without recorded B1/-maxe (written by an older
+                // version) that belongs to a different exponent E: its state
+                // is meaningless here.  Drop it and start stage 1 over.
+                std::cerr << "[PM1] Ignoring checkpoint " << ckpt_file << ": it covers a chunk of "
+                          << bits_in_chunk_ck << " bits but this run's chunk has " << bits
+                          << " bits (different B1 or -maxe); starting stage 1 from scratch\n";
+                restored = false;
+                chunkIndex = 0;
+                startPrime = 3;
+                firstChunk = true;
+                processed_total_bits = 0;
+                restored_time = 0.0;
+                eng->set(RSTATE, 1);
+                if (options.gerbiczli) {
+                    eng->set(RACC_L, 1);
+                    eng->set(RACC_R, 1);
+                    eng->copy(RSTART, RSTATE);
+                    eng->copy(RSAVE_S, RSTATE);
+                    eng->copy(RSAVE_L, RACC_L);
+                    eng->copy(RSAVE_R, RACC_R);
+                }
+                continue;
+            }
             chunkIndex = std::max<uint64_t>(chunkIndex, 1);
             std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : "") << std::endl;
             if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
