@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmEcmProgress.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
@@ -692,7 +693,25 @@ int App::runGaussianMersenneECM() {
     const std::uint64_t base_seed = options.curve_seed != 0
         ? options.curve_seed : 0x474d45434d763938ULL;
 
-    for (std::uint64_t curve = 0; curve < curves; ++curve) {
+    // Completed-curve counter: a restart continues after the last finished curve
+    // instead of redoing curve 0 onwards.
+    const std::filesystem::path progress_file = save_dir /
+        ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_naf_p") +
+         std::to_string(t.p) + "_curves.done");
+    const std::string progress_key = std::string("naf|") + t.family +
+        "|p=" + std::to_string(t.p) + "|B1=" + std::to_string(B1) +
+        "|seed=" + std::to_string(base_seed) + "|sigma=" + options.sigma;
+    core::gm_ecm_progress::Guard progress_guard(progress_file, interrupted);
+    std::uint64_t first_curve = options.resume
+        ? core::gm_ecm_progress::load(progress_file, progress_key) : 0;
+    if (first_curve > curves) first_curve = curves;
+    if (first_curve != 0) {
+        std::cout << "[GM ECM NAF] resuming after " << first_curve
+                  << " completed curve(s).\n";
+    }
+
+    for (std::uint64_t curve = first_curve; curve < curves; ++curve) {
+        if (curve != 0) core::gm_ecm_progress::save(progress_file, progress_key, curve);
         std::uint64_t sigma = 0;
         if (!options.sigma.empty() && curve == 0) {
             try { sigma = std::stoull(options.sigma); }

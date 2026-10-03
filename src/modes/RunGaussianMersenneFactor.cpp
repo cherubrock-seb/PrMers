@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmEcmProgress.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
@@ -1067,68 +1068,94 @@ int App::runGaussianMersennePM1() {
               << "  Stage 2 power  : width-4 sliding window with 8 prepared odd powers\n";
 
     const std::filesystem::path s1_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_pm1_p") + std::to_string(t.p) + "_stage1.ckpt");
-    std::uint64_t remaining = exponent_bits;
-    double restored = 0.0;
-    if (options.resume) {
-        if (!load_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
-                                    base, 0, 0, remaining, restored)) {
-            load_factor_checkpoint(s1_ckpt.string() + ".old", eng.get(), 1, 1, t, B1, B2,
-                                   exponent_bits, base, 0, 0, remaining, restored);
+    const std::filesystem::path s2_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_pm1_p") + std::to_string(t.p) + "_stage2.ckpt");
+    std::vector<std::uint32_t> s2primes;
+    if (B2 > B1) {
+        s2primes = primes_in_range(B1, B2);
+        s2primes.erase(std::remove(s2primes.begin(), s2primes.end(), t.p), s2primes.end());
+    }
+    // A Stage 2 checkpoint holds the finished Stage 1 residue, so a run that
+    // was interrupted in Stage 2 resumes there without redoing Stage 1.
+    std::size_t prime_index = 0;
+    double s2_restored = 0.0;
+    std::uint64_t token = 0;
+    const bool resumed_s2 = options.resume && !s2primes.empty() &&
+        load_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(), base, 0, 0,
+                               token, s2_restored);
+    mpz_class h, g;
+    if (resumed_s2) {
+        std::cout << "Stage 2 checkpoint found; skipping Stage 1.\n";
+    } else {
+        std::uint64_t remaining = exponent_bits;
+        double restored = 0.0;
+        if (options.resume) {
+            if (!load_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
+                                        base, 0, 0, remaining, restored)) {
+                load_factor_checkpoint(s1_ckpt.string() + ".old", eng.get(), 1, 1, t, B1, B2,
+                                       exponent_bits, base, 0, 0, remaining, restored);
+            }
+        }
+        // Only RSTATE is semantically live at a P-1 checkpoint boundary. Reset
+        // legacy v2 scratch registers so their former zero values cannot trigger
+        // Aevum Read ZERO diagnostics on the next checkpoint export.
+        for (std::size_t reg = 1; reg < Pm1WindowRegs::count; ++reg) eng->set(reg, 1);
+
+        const auto start = Clock::now();
+        auto elapsed = [&]() { return restored + std::chrono::duration<double>(Clock::now() - start).count(); };
+        auto save_s1 = [&](std::uint64_t rem) {
+            save_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
+                                   base, 0, 0, rem, elapsed());
+        };
+
+        if (remaining == exponent_bits) eng->set(RSTATE, 1);
+        const std::uint64_t replay = options.gm_replay_block != 0
+            ? options.gm_replay_block : std::max<std::uint64_t>(64, static_cast<std::uint64_t>(std::sqrt(exponent_bits)));
+        if (!pow_small_base(eng.get(), RSTATE, exponent, base, options.gm_safe_replay,
+                            RSTART, RVERIFY, replay, remaining, save_s1, elapsed, "GM P-1 Stage 1")) {
+            return 0;
+        }
+        eng->sync();
+        // Save the finished Stage 1 residue as a Stage 2 checkpoint before dropping
+        // the Stage 1 one, so an interrupt before the first Stage 2 chunk keeps it.
+        if (!s2primes.empty()) {
+            save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                   base, 0, 0, 0, elapsed());
+        }
+        clear_checkpoint(s1_ckpt);
+
+        h = project_reg(eng.get(), RSTATE, t.n);
+        g = proper_gcd(mod_positive(h - 1, t.n), t.n);
+        std::cout << "Stage 1 residue low64: 0x" << low_hex(h, 64) << "\n";
+        if (is_proper_factor(g, t.n)) {
+            std::cout << ">>> Gaussian pair P-1 Stage 1 factor: " << g << "\n";
+            write_json_result(
+                save_dir, factor_result_filename("pm1", t),
+                gm_result_json("gm-pm1", "factor", 1, t, B1, std::nullopt,
+                               std::nullopt, std::nullopt, std::nullopt, g.get_str(),
+                               backend, device_name, job_elapsed()));
+            if (B2 <= B1 || !options.pm1_continue_stage2_after_factor) {
+                clear_checkpoint(s2_ckpt);
+                return 0;
+            }
+            std::cout << "Continuing Stage 2 by explicit -pm1-continue-stage2-after-factor.\n";
+        } else if (g == t.n) {
+            std::cout << "Stage 1 gcd=target (all remaining factors were killed); retry with a smaller B1 or another base to isolate one.\n";
+            if (B2 <= B1) return 1;
+        } else {
+            std::cout << "No Gaussian pair P-1 Stage 1 factor.\n";
+        }
+
+        if (B2 <= B1) {
+            std::cout << "Stage 2 disabled (B2 <= B1).\n";
+            write_json_result(
+                save_dir, factor_result_filename("pm1", t),
+                gm_result_json("gm-pm1", "no-factor", 1, t, B1, std::nullopt,
+                               std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                               backend, device_name, job_elapsed()));
+            return 1;
         }
     }
-    // Only RSTATE is semantically live at a P-1 checkpoint boundary. Reset
-    // legacy v2 scratch registers so their former zero values cannot trigger
-    // Aevum Read ZERO diagnostics on the next checkpoint export.
-    for (std::size_t reg = 1; reg < Pm1WindowRegs::count; ++reg) eng->set(reg, 1);
 
-    const auto start = Clock::now();
-    auto elapsed = [&]() { return restored + std::chrono::duration<double>(Clock::now() - start).count(); };
-    auto save_s1 = [&](std::uint64_t rem) {
-        save_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
-                               base, 0, 0, rem, elapsed());
-    };
-
-    if (remaining == exponent_bits) eng->set(RSTATE, 1);
-    const std::uint64_t replay = options.gm_replay_block != 0
-        ? options.gm_replay_block : std::max<std::uint64_t>(64, static_cast<std::uint64_t>(std::sqrt(exponent_bits)));
-    if (!pow_small_base(eng.get(), RSTATE, exponent, base, options.gm_safe_replay,
-                        RSTART, RVERIFY, replay, remaining, save_s1, elapsed, "GM P-1 Stage 1")) {
-        return 0;
-    }
-    clear_checkpoint(s1_ckpt);
-    eng->sync();
-
-    mpz_class h = project_reg(eng.get(), RSTATE, t.n);
-    mpz_class g = proper_gcd(mod_positive(h - 1, t.n), t.n);
-    std::cout << "Stage 1 residue low64: 0x" << low_hex(h, 64) << "\n";
-    if (is_proper_factor(g, t.n)) {
-        std::cout << ">>> Gaussian pair P-1 Stage 1 factor: " << g << "\n";
-        write_json_result(
-            save_dir, factor_result_filename("pm1", t),
-            gm_result_json("gm-pm1", "factor", 1, t, B1, std::nullopt,
-                           std::nullopt, std::nullopt, std::nullopt, g.get_str(),
-                           backend, device_name, job_elapsed()));
-        if (B2 <= B1 || !options.pm1_continue_stage2_after_factor) return 0;
-        std::cout << "Continuing Stage 2 by explicit -pm1-continue-stage2-after-factor.\n";
-    } else if (g == t.n) {
-        std::cout << "Stage 1 gcd=target (all remaining factors were killed); retry with a smaller B1 or another base to isolate one.\n";
-        if (B2 <= B1) return 1;
-    } else {
-        std::cout << "No Gaussian pair P-1 Stage 1 factor.\n";
-    }
-
-    if (B2 <= B1) {
-        std::cout << "Stage 2 disabled (B2 <= B1).\n";
-        write_json_result(
-            save_dir, factor_result_filename("pm1", t),
-            gm_result_json("gm-pm1", "no-factor", 1, t, B1, std::nullopt,
-                           std::nullopt, std::nullopt, std::nullopt, std::nullopt,
-                           backend, device_name, job_elapsed()));
-        return 1;
-    }
-
-    std::vector<std::uint32_t> s2primes = primes_in_range(B1, B2);
-    s2primes.erase(std::remove(s2primes.begin(), s2primes.end(), t.p), s2primes.end());
     std::cout << "Stage 2 product-exponent primes: " << s2primes.size()
               << " | chunk target " << chunk_bits << " bits\n";
     if (s2primes.empty()) {
@@ -1140,13 +1167,7 @@ int App::runGaussianMersennePM1() {
         return 1;
     }
 
-    const std::filesystem::path s2_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_pm1_p") + std::to_string(t.p) + "_stage2.ckpt");
-    std::size_t prime_index = 0;
-    double s2_restored = 0.0;
-    std::uint64_t token = 0;
-    if (options.resume && load_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2,
-                                                  s2primes.size(), base, 0, 0,
-                                                  token, s2_restored)) {
+    if (resumed_s2) {
         prime_index = static_cast<std::size_t>(std::min<std::uint64_t>(token, s2primes.size()));
         std::cout << "Resuming Stage 2 at prime index " << prime_index << "/" << s2primes.size() << "\n";
     }
@@ -1322,7 +1343,21 @@ int App::runGaussianMersenneECM() {
               << "  safe replay    : " << (options.gm_safe_replay ? "full Stage 1 + every Stage 2 chunk" : "disabled") << "\n";
 
     const std::uint64_t base_seed = options.curve_seed != 0 ? options.curve_seed : 0x474d45434d763938ULL;
-    for (std::uint64_t curve = 0; curve < curves; ++curve) {
+    // Completed-curve counter: a restart continues after the last finished curve
+    // instead of redoing curve 0 onwards.
+    const std::filesystem::path progress_file = save_dir /
+        ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_legacy_p") + std::to_string(t.p) + "_curves.done");
+    const std::string progress_key = std::string("legacy|") + t.family + "|p=" + std::to_string(t.p) +
+        "|B1=" + std::to_string(B1) + "|B2=" + std::to_string(B2) +
+        "|seed=" + std::to_string(base_seed) + "|sigma=" + options.sigma;
+    core::gm_ecm_progress::Guard progress_guard(progress_file, interrupted);
+    std::uint64_t first_curve = options.resume ? core::gm_ecm_progress::load(progress_file, progress_key) : 0;
+    if (first_curve > curves) first_curve = curves;
+    if (first_curve != 0) {
+        std::cout << "[GM ECM] resuming after " << first_curve << " completed curve(s).\n";
+    }
+    for (std::uint64_t curve = first_curve; curve < curves; ++curve) {
+        if (curve != 0) core::gm_ecm_progress::save(progress_file, progress_key, curve);
         std::uint64_t sigma = 0;
         if (!options.sigma.empty() && curve == 0) {
             try { sigma = std::stoull(options.sigma); }
@@ -1347,84 +1382,100 @@ int App::runGaussianMersenneECM() {
             continue;
         }
 
-        montgomery_init_ladder(eng.get(), r, setup.x_affine, setup.a24, t.n);
         const std::filesystem::path ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_p") + std::to_string(t.p) + "_c" +
                                                          std::to_string(curve) + "_stage1.ckpt");
-        std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
-        double restored = 0.0;
-        if (options.resume) {
-            load_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
-                                   0, static_cast<std::uint32_t>(curve), sigma, remaining, restored);
-        }
-        const auto curve_start = Clock::now();
-        auto elapsed = [&]() { return restored + std::chrono::duration<double>(Clock::now() - curve_start).count(); };
-        auto save_curve = [&](std::uint64_t rem) {
-            save_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
-                                   0, static_cast<std::uint32_t>(curve), sigma, rem, elapsed());
-        };
-        std::vector<char> safe_stage1_start;
-        std::uint64_t safe_stage1_remaining = remaining;
-        if (options.gm_safe_replay) {
-            eng->sync();
-            safe_stage1_start.resize(eng->get_checkpoint_size());
-            if (!eng->get_checkpoint(safe_stage1_start)) {
-                throw std::runtime_error("cannot capture Gaussian ECM Stage 1 replay checkpoint");
-            }
-        }
-        if (!montgomery_ladder(eng.get(), r, K, remaining, save_curve, elapsed,
-                               "GM ECM Stage 1 curve " + std::to_string(curve + 1))) {
-            return 0;
-        }
-        if (options.gm_safe_replay) {
-            eng->sync();
-            std::vector<char> first_x, first_z;
-            if (!eng->get_data(first_x, r.xa) || !eng->get_data(first_z, r.za) ||
-                !eng->set_checkpoint(safe_stage1_start)) {
-                throw std::runtime_error("cannot prepare Gaussian ECM Stage 1 replay");
-            }
-            std::uint64_t replay_remaining = safe_stage1_remaining;
-            auto no_checkpoint = [&](std::uint64_t) {};
-            if (!montgomery_ladder(eng.get(), r, K, replay_remaining, no_checkpoint, elapsed,
-                                   "GM ECM Stage 1 replay curve " + std::to_string(curve + 1))) {
-                return 0;
-            }
-            eng->sync();
-            std::vector<char> second_x, second_z;
-            if (!eng->get_data(second_x, r.xa) || !eng->get_data(second_z, r.za) ||
-                first_x != second_x || first_z != second_z) {
-                throw std::runtime_error("Gaussian ECM Stage 1 safe replay mismatch");
-            }
-            std::cout << "[GM ECM safe replay] Stage 1 coordinates verified.\n";
-        }
-        clear_checkpoint(ckpt);
-        eng->sync();
-        PointProjection point = project_point(eng.get(), r, t.n);
-        if (is_proper_factor(point.factor, t.n)) {
-            std::cout << ">>> Gaussian pair ECM Stage 1 factor: " << point.factor << "\n";
-            write_json_result(
-                save_dir, factor_result_filename("ecm", t),
-                gm_result_json("gm-ecm", "factor", 1, t, B1, std::nullopt,
-                               curves, curve + 1, std::to_string(sigma), point.factor.get_str(),
-                               backend, device_name, job_elapsed()));
-            return 0;
-        }
-        if (!point.normalized) {
-            std::cout << "[GM ECM] Stage 1 produced a singular/trivial point; next curve.\n";
-            continue;
-        }
-        std::cout << "[GM ECM] Stage 1 no factor | x low64=0x" << low_hex(point.x, 64)
-                  << " | elapsed=" << std::fixed << std::setprecision(2) << elapsed() << " s\n";
-
-        if (s2primes.empty()) continue;
         const std::filesystem::path s2_ckpt = save_dir / ((t.family == "GQ" ? "gq" : "gm") + std::string("_ecm_p") + std::to_string(t.p) + "_c" +
                                                             std::to_string(curve) + "_stage2.ckpt");
+        double restored = 0.0;
+        const auto curve_start = Clock::now();
+        auto elapsed = [&]() { return restored + std::chrono::duration<double>(Clock::now() - curve_start).count(); };
+
+        // A Stage 2 checkpoint holds the finished Stage 1 point, so a curve that
+        // was interrupted in Stage 2 resumes there without redoing Stage 1.
         std::size_t index = 0;
         double s2_restored = 0.0;
         std::uint64_t s2_token = 0;
-        if (options.resume && load_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2,
-                                                      s2primes.size(), 0,
-                                                      static_cast<std::uint32_t>(curve), sigma,
-                                                      s2_token, s2_restored)) {
+        PointProjection point;
+        const bool resumed_s2 = options.resume && !s2primes.empty() &&
+            load_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(), 0,
+                                   static_cast<std::uint32_t>(curve), sigma, s2_token, s2_restored);
+        if (resumed_s2) {
+            std::cout << "[GM ECM] curve " << (curve + 1) << ": Stage 2 checkpoint found; skipping Stage 1.\n";
+        } else {
+            montgomery_init_ladder(eng.get(), r, setup.x_affine, setup.a24, t.n);
+            std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
+            if (options.resume) {
+                load_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
+                                       0, static_cast<std::uint32_t>(curve), sigma, remaining, restored);
+            }
+            auto save_curve = [&](std::uint64_t rem) {
+                save_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
+                                       0, static_cast<std::uint32_t>(curve), sigma, rem, elapsed());
+            };
+            std::vector<char> safe_stage1_start;
+            std::uint64_t safe_stage1_remaining = remaining;
+            if (options.gm_safe_replay) {
+                eng->sync();
+                safe_stage1_start.resize(eng->get_checkpoint_size());
+                if (!eng->get_checkpoint(safe_stage1_start)) {
+                    throw std::runtime_error("cannot capture Gaussian ECM Stage 1 replay checkpoint");
+                }
+            }
+            if (!montgomery_ladder(eng.get(), r, K, remaining, save_curve, elapsed,
+                                   "GM ECM Stage 1 curve " + std::to_string(curve + 1))) {
+                return 0;
+            }
+            if (options.gm_safe_replay) {
+                eng->sync();
+                std::vector<char> first_x, first_z;
+                if (!eng->get_data(first_x, r.xa) || !eng->get_data(first_z, r.za) ||
+                    !eng->set_checkpoint(safe_stage1_start)) {
+                    throw std::runtime_error("cannot prepare Gaussian ECM Stage 1 replay");
+                }
+                std::uint64_t replay_remaining = safe_stage1_remaining;
+                auto no_checkpoint = [&](std::uint64_t) {};
+                if (!montgomery_ladder(eng.get(), r, K, replay_remaining, no_checkpoint, elapsed,
+                                       "GM ECM Stage 1 replay curve " + std::to_string(curve + 1))) {
+                    return 0;
+                }
+                eng->sync();
+                std::vector<char> second_x, second_z;
+                if (!eng->get_data(second_x, r.xa) || !eng->get_data(second_z, r.za) ||
+                    first_x != second_x || first_z != second_z) {
+                    throw std::runtime_error("Gaussian ECM Stage 1 safe replay mismatch");
+                }
+                std::cout << "[GM ECM safe replay] Stage 1 coordinates verified.\n";
+            }
+            eng->sync();
+            // Save the finished Stage 1 point as a Stage 2 checkpoint before dropping
+            // the Stage 1 one, so an interrupt before the first Stage 2 chunk keeps it.
+            if (!s2primes.empty()) {
+                save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
+                                       0, static_cast<std::uint32_t>(curve), sigma, 0, elapsed());
+            }
+            clear_checkpoint(ckpt);
+            point = project_point(eng.get(), r, t.n);
+            if (is_proper_factor(point.factor, t.n)) {
+                clear_checkpoint(s2_ckpt);
+                std::cout << ">>> Gaussian pair ECM Stage 1 factor: " << point.factor << "\n";
+                write_json_result(
+                    save_dir, factor_result_filename("ecm", t),
+                    gm_result_json("gm-ecm", "factor", 1, t, B1, std::nullopt,
+                                   curves, curve + 1, std::to_string(sigma), point.factor.get_str(),
+                                   backend, device_name, job_elapsed()));
+                return 0;
+            }
+            if (!point.normalized) {
+                clear_checkpoint(s2_ckpt);
+                std::cout << "[GM ECM] Stage 1 produced a singular/trivial point; next curve.\n";
+                continue;
+            }
+            std::cout << "[GM ECM] Stage 1 no factor | x low64=0x" << low_hex(point.x, 64)
+                      << " | elapsed=" << std::fixed << std::setprecision(2) << elapsed() << " s\n";
+        }
+
+        if (s2primes.empty()) continue;
+        if (resumed_s2) {
             index = static_cast<std::size_t>(std::min<std::uint64_t>(s2_token, s2primes.size()));
             eng->sync();
             point = project_point(eng.get(), r, t.n);

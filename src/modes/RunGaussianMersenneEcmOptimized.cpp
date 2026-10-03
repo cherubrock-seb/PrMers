@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmEcmProgress.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
@@ -1185,7 +1186,27 @@ int App::runGaussianMersenneECMOptimized() {
     const std::uint64_t base_seed =
         options.curve_seed != 0 ? options.curve_seed : 0x474d45434d763938ULL;
 
-    for (std::uint64_t curve = 0; curve < curves; ++curve) {
+    // Completed-curve counter: a restart continues after the last finished curve
+    // instead of redoing curve 0 onwards.
+    const std::string progress_tag = t.special4096 ? "_ecm_special4096_p"
+        : (t.special32 ? "_ecm_special32_p" : "_ecm_p");
+    const std::filesystem::path progress_file = save_dir /
+        ((t.family == "GQ" ? "gq" : "gm") + progress_tag + std::to_string(t.p) +
+         "_curves.done");
+    const std::string progress_key = std::string("opt|") + t.family + progress_tag +
+        std::to_string(t.p) + "|B1=" + std::to_string(B1) + "|B2=" + std::to_string(B2) +
+        "|seed=" + std::to_string(base_seed) + "|sigma=" + options.sigma;
+    core::gm_ecm_progress::Guard progress_guard(progress_file, interrupted);
+    std::uint64_t first_curve = options.resume
+        ? core::gm_ecm_progress::load(progress_file, progress_key) : 0;
+    if (first_curve > curves) first_curve = curves;
+    if (first_curve != 0) {
+        std::cout << "[GM ECM] resuming after " << first_curve
+                  << " completed curve(s).\n";
+    }
+
+    for (std::uint64_t curve = first_curve; curve < curves; ++curve) {
+        if (curve != 0) core::gm_ecm_progress::save(progress_file, progress_key, curve);
         std::uint64_t sigma = 0;
         if (special32) {
             // Stable checkpoint discriminator; it is not a Suyama sigma.
@@ -1240,90 +1261,21 @@ int App::runGaussianMersenneECMOptimized() {
                         (t.special4096 ? std::string("_ecm_special4096_p") : (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p"))) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage1_fused.ckpt");
 
-        std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
-        std::uint64_t unused_aux = 0;
-        double restored = 0.0;
-        bool resumed_s1 = false;
-
-        if (options.resume) {
-            resumed_s1 = load_opt_checkpoint(
-                s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
-                B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
-                remaining, unused_aux, restored);
-            if (!resumed_s1) {
-                resumed_s1 = load_opt_checkpoint(
-                    s1ck.string() + ".old", eng.get(), t, 1,
-                    static_cast<std::uint32_t>(curve), B1, B2, sigma,
-                    s2plan.D, s2plan.baby_d.size(),
-                    remaining, unused_aux, restored);
-            }
-        }
-
-        if (!resumed_s1) {
-            mont_init_opt(eng.get(), r, setup.x, setup.a24, t.n);
-            remaining = kbits > 0 ? kbits - 1 : 0;
-        } else {
-            std::cout << "[GM ECM v99.98] resuming fused Stage1 with "
-                      << remaining << " bits remaining.\n";
-        }
-
-        const auto curve_start = Clock::now();
-        auto elapsed = [&]() {
-            return restored +
-                std::chrono::duration<double>(Clock::now() - curve_start).count();
-        };
-        auto save_s1 = [&](std::uint64_t rem) {
-            save_opt_checkpoint(
-                s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
-                B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
-                rem, 0, elapsed());
-        };
-
-        if (!mont_ladder_fused_opt(
-                eng.get(), r, K, remaining, save_s1, elapsed,
-                "GM ECM Stage 1 fused curve " + std::to_string(curve + 1))) {
-            return 0;
-        }
-
-        clear_opt_checkpoint(s1ck);
-        eng->sync();
-
-        PointOpt Q = project_point_opt(eng.get(), r, t.n);
-        if (proper_factor_opt(Q.factor, t.n)) {
-            std::cout << ">>> Gaussian pair ECM Stage 1 factor: "
-                      << Q.factor << "\n";
-            write_opt_result(save_dir, t, B1, B2, curves, curve + 1, sigma,
-                             1, Q.factor, backend, options.device_id,
-                             job_elapsed());
-            return 0;
-        }
-        if (!Q.normalized) {
-            std::cout << "[GM ECM v99.98] Stage1 singular/trivial point; next curve.\n";
-            continue;
-        }
-
-        std::cout << "[GM ECM] Stage 1 no factor | x low64=0x"
-                  << low_hex_opt(Q.x)
-                  << " | elapsed=" << std::fixed << std::setprecision(2)
-                  << elapsed() << " s\n";
-
-        if (B2 <= B1 || s2plan.entries.empty()) {
-            if (B2 > B1)
-                std::cout << "[GM ECM Stage 2 BSGS] no usable Stage2 primes.\n";
-            continue;
-        }
-
         const std::filesystem::path s2ck =
             save_dir / ((t.family == "GQ" ? "gq" : "gm") +
                         (t.special4096 ? std::string("_ecm_special4096_p") : (t.special32 ? std::string("_ecm_special32_p") : std::string("_ecm_p"))) + std::to_string(t.p) +
                         "_c" + std::to_string(curve) + "_stage2_bsgs.ckpt");
 
+        const bool stage2_enabled = B2 > B1 && !s2plan.entries.empty();
         std::uint64_t current_k = s2plan.k_min;
         std::uint64_t terms_since_gcd = 0;
         double s2_restored = 0.0;
         bool resumed_s2 = false;
+        PointOpt Q;
 
-        if (options.resume) {
+        // A Stage 2 checkpoint holds the finished Stage 1 point, so a curve that
+        // was interrupted in Stage 2 resumes there without redoing Stage 1.
+        if (options.resume && stage2_enabled) {
             resumed_s2 = load_opt_checkpoint(
                 s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
                 B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
@@ -1334,6 +1286,100 @@ int App::runGaussianMersenneECMOptimized() {
                     static_cast<std::uint32_t>(curve), B1, B2, sigma,
                     s2plan.D, s2plan.baby_d.size(),
                     current_k, terms_since_gcd, s2_restored);
+            }
+        }
+
+        if (resumed_s2) {
+            std::cout << "[GM ECM] curve " << (curve + 1)
+                      << ": Stage 2 checkpoint found; skipping Stage 1.\n";
+            clear_opt_checkpoint(s1ck);
+        } else {
+            std::uint64_t remaining = kbits > 0 ? kbits - 1 : 0;
+            std::uint64_t unused_aux = 0;
+            double restored = 0.0;
+            bool resumed_s1 = false;
+
+            if (options.resume) {
+                resumed_s1 = load_opt_checkpoint(
+                    s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
+                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    remaining, unused_aux, restored);
+                if (!resumed_s1) {
+                    resumed_s1 = load_opt_checkpoint(
+                        s1ck.string() + ".old", eng.get(), t, 1,
+                        static_cast<std::uint32_t>(curve), B1, B2, sigma,
+                        s2plan.D, s2plan.baby_d.size(),
+                        remaining, unused_aux, restored);
+                }
+            }
+
+ const bool stage1_complete_from_checkpoint =
+ resumed_s1 && remaining == 0;
+
+ if (!resumed_s1) {
+ mont_init_opt(eng.get(), r, setup.x, setup.a24, t.n);
+ remaining = kbits > 0 ? kbits - 1 : 0;
+ } else if (stage1_complete_from_checkpoint) {
+ std::cout << "[GM ECM v99.98] completed Stage1 checkpoint found; "
+ "skipping fused Stage1.\n";
+ } else {
+ std::cout << "[GM ECM v99.98] resuming fused Stage1 with "
+ << remaining << " bits remaining.\n";
+ }
+
+            const auto curve_start = Clock::now();
+            auto elapsed = [&]() {
+                return restored +
+                    std::chrono::duration<double>(Clock::now() - curve_start).count();
+            };
+            auto save_s1 = [&](std::uint64_t rem) {
+                save_opt_checkpoint(
+                    s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
+                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    rem, 0, elapsed());
+            };
+
+ if (!stage1_complete_from_checkpoint) {
+ if (!mont_ladder_fused_opt(
+ eng.get(), r, K, remaining, save_s1, elapsed,
+ "GM ECM Stage 1 fused curve " + std::to_string(curve + 1))) {
+ return 0;
+ }
+ }
+
+ if (stage2_enabled) save_s1(0);
+
+            // With Stage 2 pending, keep the Stage 1 checkpoint until the Stage 2
+            // checkpoint exists (below), so an interrupt during the baby-point
+            // precompute does not lose Stage 1.
+            if (!stage2_enabled) clear_opt_checkpoint(s1ck);
+            eng->sync();
+
+            Q = project_point_opt(eng.get(), r, t.n);
+            if (proper_factor_opt(Q.factor, t.n)) {
+                clear_opt_checkpoint(s1ck);
+                std::cout << ">>> Gaussian pair ECM Stage 1 factor: "
+                          << Q.factor << "\n";
+                write_opt_result(save_dir, t, B1, B2, curves, curve + 1, sigma,
+                                 1, Q.factor, backend, options.device_id,
+                                 job_elapsed());
+                return 0;
+            }
+            if (!Q.normalized) {
+                clear_opt_checkpoint(s1ck);
+                std::cout << "[GM ECM v99.98] Stage1 singular/trivial point; next curve.\n";
+                continue;
+            }
+
+            std::cout << "[GM ECM] Stage 1 no factor | x low64=0x"
+                      << low_hex_opt(Q.x)
+                      << " | elapsed=" << std::fixed << std::setprecision(2)
+                      << elapsed() << " s\n";
+
+            if (!stage2_enabled) {
+                if (B2 > B1)
+                    std::cout << "[GM ECM Stage 2 BSGS] no usable Stage2 primes.\n";
+                continue;
             }
         }
 
@@ -1392,6 +1438,13 @@ int App::runGaussianMersenneECMOptimized() {
             eng->set(ACC, 1u);
             current_k = s2plan.k_min;
             terms_since_gcd = 0;
+
+            // Stage 2 now has a complete state: checkpoint it, then drop Stage 1.
+            save_opt_checkpoint(
+                s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
+                B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                current_k, terms_since_gcd, 0.0);
+            clear_opt_checkpoint(s1ck);
         } else {
             std::cout << "[GM ECM Stage 2 BSGS] resuming at giant k="
                       << current_k << ", pending product terms="
