@@ -129,6 +129,9 @@ test-aevum-default:
 test-gui-state:
 	bash tests/test_web_gui_backend_state.sh
 
+test-pm1-vtrace-small-b1:
+	python3 tests/pm1_vtrace_small_b1_test.py
+
 test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py
