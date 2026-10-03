@@ -144,6 +144,9 @@ test-aevum-source:
 	python3 tests/workload_plan_audit_parser_test.py
 	bash tests/source_aevum_engine_audit.sh
 
+test-ecm-interrupt-no-result:
+	python3 tests/ecm_interrupt_no_result_test.py
+
 test-gm:
 	python3 tests/gaussian_mersenne_math_test.py
 	python3 tests/gaussian_mersenne_isolation_test.py
