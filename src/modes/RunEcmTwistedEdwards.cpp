@@ -1926,10 +1926,12 @@ int App::runECMMarinTwistedEdwards()
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data))  return -2;
             if (!f.check_crc32())            return -2;
 
             if (rnb != mpz_sizeinbase(K.get_mpz_t(),2) || rB1 != B1) return -2;
+            // Load into the engine only after every check passed: a rejected file must
+            // leave the registers untouched so the fresh start is not corrupted.
+            if (!eng->set_checkpoint(data))  return -2;
             return 0;
         };
         auto read_ckpt = [&](uint32_t& ri, uint32_t& rnb, double& et)->int{
@@ -2063,10 +2065,11 @@ int App::runECMMarinTwistedEdwards()
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
-            if (!eng->set_checkpoint(data)) return -2;
             if (!f.check_crc32())           return -2;
 
             if (b1s != B1 || b2s != B2) return -2;
+            // Load into the engine only after every check passed (see read_ckpt_one).
+            if (!eng->set_checkpoint(data)) return -2;
             return 0;
         };
         auto read_ckpt2 = [&](uint32_t& idx, uint32_t& cnt_bits, double& et)->int{
@@ -3099,6 +3102,7 @@ int App::runECMMarinTwistedEdwards()
 
         bool resumed = (rr == 0 && start_i > 0);
         if (!resumed) {
+            start_i = 0;
             saved_et = 0.0;
             nb_ck = 0;
         } else {
