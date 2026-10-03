@@ -273,3 +273,8 @@ test-marin-exact-sub:
 
 test-wagstaff-decode:
 	python3 tests/wagstaff_decode_source_test.py
+
+.PHONY: test-pm1-extend-ckpt
+
+test-pm1-extend-ckpt: all
+	bash tests/test_pm1_extend_stale_ckpt.sh
