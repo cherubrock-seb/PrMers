@@ -217,6 +217,7 @@ int clSetKernelArgSVMPointer(cl_kernel, unsigned, const void *);
 #define CL_DEVICE_TOPOLOGY_AMD    0x4037
 #define CL_DEVICE_BOARD_NAME_AMD  0x4038
 #define CL_DEVICE_GLOBAL_FREE_MEMORY_AMD 0x4039
+#define CL_DEVICE_WAVEFRONT_WIDTH_AMD     0x4043
 
 // Error codes
 #define CL_MEM_OBJECT_ALLOCATION_FAILURE -4

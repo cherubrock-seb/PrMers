@@ -357,7 +357,8 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     local int* lds = (local int*) lds2;
     if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(int);
 
-    bar(WG);
+    // Radeon VII needs a local memory fence at the start of a 4-byte shufl, even with FAST_BARRIER (the one known case).
+    barFence(WG);
     for (u32 i = 0; i < RADIX; ++i) { lds[i * f + (lowMe & ~mask) * RADIX + (lowMe & mask)] = as_int4(u[i]).x; }
     bar(WG);
     for (u32 i = 0; i < RADIX; ++i) { int4 tmp = as_int4(u[i]); tmp.x = lds[i * WG + lowMe]; u[i] = as_double2(tmp); }
