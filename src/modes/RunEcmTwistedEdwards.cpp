@@ -3102,6 +3102,7 @@ int App::runECMMarinTwistedEdwards()
 
         bool resumed = (rr == 0 && start_i > 0);
         if (!resumed) {
+            start_i = 0;
             saved_et = 0.0;
             nb_ck = 0;
         } else {
