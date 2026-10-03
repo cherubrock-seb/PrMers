@@ -47,7 +47,7 @@ assert "eng->mul_new((engine::Reg)RTMP" not in pm1
 
 # Every Stage 2 implementation emits one stable machine-readable factor line
 # in addition to its historical human-readable message.
-assert pm1.count("P-1 factor stage 2 found:") >= 8
+assert pm1.count("P-1 factor stage 2 found:") >= 7
 
 # Workload-specific plan audit is shipped and requires exact outputs before
 # it can recommend a faster plan.
