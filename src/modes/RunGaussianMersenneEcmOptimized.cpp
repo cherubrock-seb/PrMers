@@ -1313,13 +1313,19 @@ int App::runGaussianMersenneECMOptimized() {
                 }
             }
 
-            if (!resumed_s1) {
-                mont_init_opt(eng.get(), r, setup.x, setup.a24, t.n);
-                remaining = kbits > 0 ? kbits - 1 : 0;
-            } else {
-                std::cout << "[GM ECM v99.98] resuming fused Stage1 with "
-                          << remaining << " bits remaining.\n";
-            }
+ const bool stage1_complete_from_checkpoint =
+ resumed_s1 && remaining == 0;
+
+ if (!resumed_s1) {
+ mont_init_opt(eng.get(), r, setup.x, setup.a24, t.n);
+ remaining = kbits > 0 ? kbits - 1 : 0;
+ } else if (stage1_complete_from_checkpoint) {
+ std::cout << "[GM ECM v99.98] completed Stage1 checkpoint found; "
+ "skipping fused Stage1.\n";
+ } else {
+ std::cout << "[GM ECM v99.98] resuming fused Stage1 with "
+ << remaining << " bits remaining.\n";
+ }
 
             const auto curve_start = Clock::now();
             auto elapsed = [&]() {
@@ -1333,11 +1339,15 @@ int App::runGaussianMersenneECMOptimized() {
                     rem, 0, elapsed());
             };
 
-            if (!mont_ladder_fused_opt(
-                    eng.get(), r, K, remaining, save_s1, elapsed,
-                    "GM ECM Stage 1 fused curve " + std::to_string(curve + 1))) {
-                return 0;
-            }
+ if (!stage1_complete_from_checkpoint) {
+ if (!mont_ladder_fused_opt(
+ eng.get(), r, K, remaining, save_s1, elapsed,
+ "GM ECM Stage 1 fused curve " + std::to_string(curve + 1))) {
+ return 0;
+ }
+ }
+
+ if (stage2_enabled) save_s1(0);
 
             // With Stage 2 pending, keep the Stage 1 checkpoint until the Stage 2
             // checkpoint exists (below), so an interrupt during the baby-point

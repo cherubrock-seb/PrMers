@@ -286,7 +286,7 @@ test-marin-reg-offset-wrap:
 
 .PHONY: test-gm-ecm-resume
 test-gm-ecm-resume:
-python3 tests/gm_ecm_resume_source_test.py
-mkdir -p /tmp/prmers-gm-ecm-resume-test
-g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_ecm_progress_test.cpp -o /tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
-/tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
+	python3 tests/gm_ecm_resume_source_test.py
+	mkdir -p /tmp/prmers-gm-ecm-resume-test
+	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_ecm_progress_test.cpp -o /tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
+	/tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test

@@ -22,4 +22,10 @@ assert 'const bool resumed_s2 = options.resume && !s2primes.empty() &&' in legac
 
 opt = (modes / 'RunGaussianMersenneEcmOptimized.cpp').read_text()
 assert 'Stage 2 checkpoint found; skipping Stage 1' in opt
+assert 'stage1_complete_from_checkpoint' in opt
+assert 'resumed_s1 && remaining == 0' in opt
+assert 'completed Stage1 checkpoint found; ' in opt
+assert 'skipping fused Stage1.' in opt
+assert 'if (!stage1_complete_from_checkpoint)' in opt
+assert 'if (stage2_enabled) save_s1(0);' in opt
 print('GM ECM resume source test passed')
