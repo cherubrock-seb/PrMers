@@ -263,3 +263,8 @@ test-llsafe2-resume: all
 .PHONY: test-llsafe2-result
 test-llsafe2-result: all
 	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-marin-exact-sub
+
+test-marin-exact-sub:
+	bash tests/test_marin_exact_subtraction_device.sh
