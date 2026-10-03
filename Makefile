@@ -133,6 +133,12 @@ test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py
 
+test-gm-ecm-resume:
+	python3 tests/gm_ecm_resume_source_test.py
+	mkdir -p /tmp/prmers-gm-ecm-resume-test
+	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_ecm_progress_test.cpp -o /tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
+	/tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
+
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
 	python3 tests/aevum_pow2_type4_source_test.py
