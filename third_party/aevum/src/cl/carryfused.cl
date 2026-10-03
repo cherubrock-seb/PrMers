@@ -46,6 +46,31 @@ void spin() {
 #define CarryShuttleAccess(me,i)        ((me) + (i) * G_W)                      // nVidia likes this unit stride better
 #endif
 
+// In place, the last workgroup (gr == H / WMUL) redoes group 0's lines and overwrites them.  Carries only pass from one group to the
+// next, so nothing orders that write after group 0's read of the same lines: the last group waits on group H / WMUL - 1 only, and every
+// group publishes its carries before waiting for its own.  If group 0 starts late it reads lines that are already overwritten and hands
+// bad carries to group 1.  So group 0 raises a flag once it has read its lines, and the last group waits for that flag (and clears it)
+// before writing.  The flag uses the first ready[] slot past those of the carry hand-off.  Both helpers are no-ops when INPLACE=0.
+#if INPLACE
+#define LINES_READ_FLAG (BIG_HEIGHT / WMUL * (G_W / WAVEFRONT))
+
+void signalLinesRead(P(u32) ready) {
+  bar();     // every work-item of group 0 is done reading
+  if (get_local_id(0) == 0) { AEVUM_READY_STORE(&ready[LINES_READ_FLAG]); }
+}
+
+void waitLinesRead(P(u32) ready) {
+  if (get_local_id(0) == 0) {
+    do { spin(); } while(!AEVUM_READY_LOAD(&ready[LINES_READ_FLAG]));
+    ready[LINES_READ_FLAG] = 0;
+  }
+  bar();
+}
+#else
+void signalLinesRead(P(u32) ready) {}
+void waitLinesRead(P(u32) ready) {}
+#endif
+
 // The last WMUL workgroup's carries have been written to global memory.  Now we shuffle WMUL-1 workgroups carries up using local memory.
 void OVERLOAD shufl_carries_up(local void *lds2, i64 *carry, u32 me, u32 lowMe) {
   // If WMUL is one, there is no shuffling of carries
@@ -236,8 +261,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) {
@@ -247,8 +270,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -266,12 +309,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -287,6 +333,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -295,11 +351,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -335,6 +386,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // fft_WIDTH2 itself knows (via its callnum) to skip the first radix butterfly when FUSE_WEIGHT_BUTTERFLY is set.
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -457,8 +509,6 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -468,8 +518,28 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -479,12 +549,15 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -500,6 +573,16 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -508,11 +591,6 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -545,6 +623,7 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -675,8 +754,6 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -686,8 +763,28 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -697,12 +794,15 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -718,6 +818,16 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     if (gr < H / WMUL) {
@@ -725,11 +835,6 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -762,6 +867,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
   dependentLaunch();   // Next kernel will be fftMiddleInGF31
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -897,8 +1003,6 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -908,8 +1012,28 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -919,12 +1043,15 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -940,6 +1067,16 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -948,11 +1085,6 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -985,6 +1117,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
   dependentLaunch();   // Next kernel will be fftMiddleInGF61
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -1134,8 +1267,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -1145,8 +1276,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1164,12 +1315,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -1185,6 +1339,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -1193,11 +1357,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -1230,6 +1389,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -1398,8 +1558,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -1409,8 +1567,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1420,12 +1598,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(ldsF2, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -1441,6 +1622,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -1449,11 +1640,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -1489,6 +1675,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -1658,8 +1845,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -1669,8 +1854,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1680,12 +1885,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds61, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -1701,6 +1909,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -1709,11 +1927,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -1750,6 +1963,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -1913,8 +2127,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) {
@@ -1924,8 +2136,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1935,12 +2167,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds61, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -1956,6 +2191,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -1964,11 +2209,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -2007,6 +2247,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(lds31, u31, smallTrig31, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u31, out31, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInGF31
@@ -2200,8 +2441,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if OLD_FENCE
     // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
-    bar(G_W);
-    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     if (lowMe % WAVEFRONT == 0) { 
@@ -2211,8 +2450,28 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if OLD_FENCE
+  // Order the carry stores ahead of the ready flag.  This barrier must be reached by every work-item of the
+  // workgroup: gr is uniform, but "me >= (WMUL-1) * G_W" is not, and a barrier under divergent control flow
+  // is undefined.  As in bar(G_W), no barrier is needed when a sub-workgroup is a single wavefront.
+#if WMUL == 1
+  if (gr < H) {
+#else
+  if (gr < H / WMUL) {
+#endif
+#if G_W > WAVEFRONT
+    bar();
+#endif
+#if WMUL == 1
+    if (lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#else
+    if (me >= (WMUL-1) * G_W && lowMe == 0) { AEVUM_READY_STORE(&ready[gr]); }
+#endif
+  }
+#endif
+
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -2222,12 +2481,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   // Shuffle carries up
   shufl_carries_up(lds61, carry, me, lowMe);
 
-  // Wait until our carries are ready
+  // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
+  // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
+#if OLD_FENCE
+  if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
+  // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
+  bar();
+#endif
   if (me < G_W) {
 #if OLD_FENCE
-    if (me == 0) { do { spin(); } while(!AEVUM_READY_LOAD(&ready[gr - 1])); }
-    // work_group_barrier(CLK_GLOBAL_MEM_FENCE, memory_scope_device);
-    bar();
     read_mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
@@ -2243,6 +2505,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #if HAS_ASM
     __asm("s_setprio 1");
 #endif
+  }
+
+#if !OLD_FENCE
+  // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
+  // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
+  // the shuttle reads resume in a second "me < G_W" block.
+  if (gr >= H / WMUL) { bar(); }
+#endif
+
+  if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
     // The new carry layout lets the AMD compiler generate global_load_dwordx4 instructions.
@@ -2251,11 +2523,6 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(me, i)]);
       }
     } else {
-
-#if !OLD_FENCE
-      // For gr==H/WMUL we need the barrier since the carry reading is shifted, thus the per-wavefront trick does not apply.
-      bar();
-#endif
 
       for (i32 i = 0; i < NW; ++i) {
         carry[i] = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess((me + G_W - 1) % G_W, i) /* ((me!=0) + NW - 1 + i) % NW*/]);
@@ -2299,6 +2566,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32

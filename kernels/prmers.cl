@@ -332,6 +332,9 @@ inline int get_digit_width(uint i) {
     ulong pj1 = (ulong)(MODULUS_P) * i;
 
     ulong ceil1 = (pj - 1U) / (ulong)(TRANSFORM_SIZE_N);
+    // ceil(0 / N) is 0: for i == 0 the width is ceil1 + 1. (pj1 - 1U) would
+    // wrap around, which only gives the right answer when N is a power of two.
+    if (i == 0U) return (int)(ceil1 + 1UL);
     ulong ceil2 = (pj1 - 1U) / (ulong)(TRANSFORM_SIZE_N);
 
     return (int)(ceil1 - ceil2);
@@ -340,10 +343,18 @@ inline int get_digit_width(uint i) {
 
 inline int4 get_digit_width4(uint i){
     ulong P = (ulong)MODULUS_P, N = (ulong)TRANSFORM_SIZE_N;
-    ulong u = (ulong)i * P - 1, v;
+    ulong u, v;
     int4 r;
-    v = u + P;    r.s0 = (int)(v/N - u/N);
-    u = v;        v = u + P;    r.s1 = (int)(v/N - u/N);
+    if (i == 0U) {
+        // i * P - 1 would wrap around for i == 0 (wrong unless N is a power of two).
+        u = P - 1UL;
+        r.s0 = (int)(u/N + 1UL);
+    } else {
+        u = (ulong)i * P - 1UL;
+        v = u + P;    r.s0 = (int)(v/N - u/N);
+        u = v;
+    }
+    v = u + P;    r.s1 = (int)(v/N - u/N);
     u = v;        v = u + P;    r.s2 = (int)(v/N - u/N);
     u = v;        v = u + P;    r.s3 = (int)(v/N - u/N);
     return r;

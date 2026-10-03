@@ -1043,6 +1043,7 @@ int App::runGaussianMersennePM1() {
     }
 
     const mpz_class smooth = buildE(B1);
+    if (interrupted) return 0;  // E is incomplete after a Ctrl-C while it was built
     const mpz_class structural = mpz_class(4) * t.p;
     mpz_class exponent;
     mpz_lcm(exponent.get_mpz_t(), smooth.get_mpz_t(), structural.get_mpz_t());
@@ -1305,6 +1306,7 @@ int App::runGaussianMersenneECM() {
               << "  inversions     : only modulo selected norm on CPU; never modulo the lifted cofactor ring\n";
 
     const mpz_class K = buildE(B1);
+    if (interrupted) return 0;  // E is incomplete after a Ctrl-C while it was built
     const std::uint64_t kbits = static_cast<std::uint64_t>(mpz_sizeinbase(K.get_mpz_t(), 2));
     std::cout << "  Stage 1 bits   : " << kbits << "\n";
     std::vector<std::uint32_t> s2primes;

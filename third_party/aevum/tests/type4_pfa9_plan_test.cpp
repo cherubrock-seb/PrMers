@@ -41,6 +41,11 @@ int main() {
       pow2.size() != 4194304 || pow2.spec() != "4:512:8:512:202") {
     throw std::runtime_error("power-of-two FFT323161 plan resolution mismatch");
   }
+  // 4M-word type-4 limits were measured at 46.99 bpw; the old 47.29 does not run.
+  FFTConfig bpw4m("4:1K:8:256:101");
+  if (pow2.maxExp() >= 4194304ull * 47.0 || bpw4m.maxExp() >= 4194304ull * 47.0 ||
+      pow2.maxExp() <= 4194304ull * 46.9)
+    throw std::runtime_error("4M FFT323161 bpw limit is not the measured 46.99");
 #endif
 
   bool rejected = false;
@@ -54,13 +59,27 @@ int main() {
   if (!applePfaRejected)
     throw std::runtime_error("Apple native PFA plan must be rejected before kernel creation");
 #else
+  // Below the exact FFT3161 limit (37.09 bpw at 175M) the capacity-adaptive
+  // pfa9:4 request elides the FP32 plane and runs the GF31+GF61 pair.
   FFTConfig adaptive = FFTConfig::bestFit(args, 175000039, "pfa9:4:512:9:512:202");
   if (adaptive.shape.fft_type != FFT3161 || adaptive.pfa_radix != 9 ||
       adaptive.variant != 202 || adaptive.size() != 4718592 || !adaptive.adaptive_type4_elided)
     throw std::runtime_error("adaptive type-4 PFA9 did not select exact paired-NTT fast path");
 
+  // Above that limit (42.4 bpw at 200M) the same request keeps all three
+  // planes: the FP32 plane is what lifts the coefficient range past the
+  // 92-bit GF31*GF61 CRT.
+  FFTConfig retained = FFTConfig::bestFit(args, 200000033, "pfa9:4:512:9:512:202");
+  if (retained.shape.fft_type != FFT323161 || retained.pfa_radix != 9 ||
+      retained.variant != 202 || retained.size() != 4718592 ||
+      retained.adaptive_type4_elided || retained.spec() != "pfa9:4:512:9:512:202")
+    throw std::runtime_error("non-elidable type-4 PFA9 request did not retain the three-plane plan");
+
+  // The explicit pfa9full: spelling always runs the three-plane transform.
   FFTConfig full = FFTConfig::bestFit(args, 175000039, "pfa9full:4:512:9:512:202");
-  if (full.shape.fft_type != FFT323161 || full.adaptive_type4_elided)
+  if (full.shape.fft_type != FFT323161 || full.pfa_radix != 9 ||
+      full.adaptive_type4_request || full.adaptive_type4_elided ||
+      full.spec() != "pfa9:4:512:9:512:202")
     throw std::runtime_error("full type-4 PFA9 plan was unexpectedly elided");
 
   FFTConfig auto9 = FFTConfig::bestFit(args, 175000039, "pfa:9");
