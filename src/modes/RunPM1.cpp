@@ -163,13 +163,20 @@ static const char* pm1_checkpoint_backend_name(const engine* eng) {
     return eng && eng->is_aevum_backend() ? "aevum" : "marin";
 }
 
-static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng) {
+// The sidecar records the backend on its first line.  Stage-1 checkpoints
+// also record the bounds they were built for ("b1=" and "maxe=" lines), so a
+// run with a different B1 or -maxe never resumes a state computed for another
+// exponent E.  Older sidecars have only the backend line.
+static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng,
+                                         uint64_t b1 = 0, uint64_t max_e_bits = 0) {
     const std::string path = pm1_checkpoint_backend_sidecar(checkpoint_file);
     const std::string temp = path + ".new";
     {
         std::ofstream out(temp, std::ios::trunc);
         if (!out) return;
         out << pm1_checkpoint_backend_name(eng) << '\n';
+        if (b1) out << "b1=" << b1 << '\n';
+        if (max_e_bits) out << "maxe=" << max_e_bits << '\n';
     }
     std::error_code ec;
     fs::rename(temp, path, ec);
@@ -178,6 +185,20 @@ static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, con
         ec.clear();
         fs::rename(temp, path, ec);
     }
+}
+
+// Reads the stage-1 parameters recorded next to a checkpoint.  Returns false
+// when the sidecar does not record them (legacy checkpoint).
+static bool pm1_checkpoint_read_params(const std::string& checkpoint_file, uint64_t& b1, uint64_t& max_e_bits) {
+    std::ifstream in(pm1_checkpoint_backend_sidecar(checkpoint_file));
+    if (!in) return false;
+    std::string line;
+    bool have_b1 = false, have_maxe = false;
+    while (std::getline(in, line)) {
+        if (line.rfind("b1=", 0) == 0) { b1 = std::strtoull(line.c_str() + 3, nullptr, 10); have_b1 = true; }
+        else if (line.rfind("maxe=", 0) == 0) { max_e_bits = std::strtoull(line.c_str() + 5, nullptr, 10); have_maxe = true; }
+    }
+    return have_b1 && have_maxe;
 }
 
 static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
@@ -926,6 +947,10 @@ int App::runPM1() {
                       guiServer_->appendLog(oss.str());
         }
         E = buildE(B1);
+        if (interrupted) {
+            std::cout << "\nInterrupted by user while building E.\n";
+            return 0;
+        }
         E *= mpz_class(2) * mpz_from_u64(options.exponent);
 
 
@@ -1207,10 +1232,13 @@ int App::runPM1() {
                       guiServer_->appendLog(oss.str());
             }*/
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     
-     if (hasWorktodoEntry_) {
+     if (hasWorktodoEntry_ && !resultSaved) {
+         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+     }
+     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
@@ -1404,6 +1432,54 @@ static bool read_pm1_resume_x_hex(const std::string& path,
 static bool load_pm1_s1_from_save(const std::string& path, uint64_t& B1_out, uint32_t& p_out, mpz_class& X_out);
 static bool load_pm1_s1_from_p95(const std::string& path, uint64_t& B1_out, uint32_t& p_out, mpz_class& X_out);
 static inline void mpz_mul_u64(mpz_class& a, uint64_t x);
+
+// Common ending of the stage-2 variants that finish with a single GCD: drop the
+// part of the GCD that is already a known factor, record a new factor in
+// options.knownFactors, and write the stage-2 result file, the JSON result and
+// the results.txt line (also for "no factor", like the classic BSGS ending).
+// Returns true when a new factor was found.
+static bool pm1_record_stage2_result(io::CliOptions& options,
+                                     const mpz_class& g,
+                                     const mpz_class& Mp,
+                                     int fftSize,
+                                     const std::string& method)
+{
+    mpz_class gNew = g;
+    for (const std::string& fs : options.knownFactors) {
+        if (gNew == 1) break;
+        mpz_class f;
+        try { f = mpz_class(fs); } catch (...) { continue; }
+        if (f <= 1) continue;
+        mpz_class d;
+        mpz_gcd(d.get_mpz_t(), gNew.get_mpz_t(), f.get_mpz_t());
+        while (d != 1) {
+            gNew /= d;
+            mpz_gcd(d.get_mpz_t(), gNew.get_mpz_t(), f.get_mpz_t());
+        }
+    }
+    const bool found = (gNew != 1 && gNew != Mp);
+    const std::string B2s = std::to_string(options.B2);
+    const std::string filename = "stage2_result_B2_" + B2s + "_p_" + std::to_string(options.exponent) + ".txt";
+    if (found) {
+        const std::string f = gNew.get_str(10);
+        if (std::find(options.knownFactors.begin(), options.knownFactors.end(), f) == options.knownFactors.end())
+            options.knownFactors.push_back(f);
+        writeStageResult(filename, "B2=" + B2s + "  factor=" + f);
+        std::cout << "\n>>>  Factor P-1 (stage 2 " << method << ") found : " << f << "\n";
+        std::cout << "P-1 factor stage 2 found: " << f << "\n";
+    } else {
+        // The n^K variant has no B2 of its own.
+        const std::string upTo = (options.B2 > 0) ? " until B2 = " + B2s : std::string();
+        writeStageResult(filename, "No factor P-1 (stage 2 " + method + ")" + upTo);
+        std::cout << "\nNo factor P-1 (stage 2 " << method << ")" << upTo << "\n";
+    }
+    const std::string json = io::JsonBuilder::generate(options, fftSize, false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
+    wm.appendToResultsTxt(json);
+    return found;
+}
 
 int App::runPM1Stage2MarinLowMem() {
     using namespace std::chrono;
@@ -1807,6 +1883,11 @@ int App::runPM1Stage2MarinLowMem() {
 
         std::cout << "[PM1] Building Stage 2 product exponent E2 = E(B1)*2*p*Q..." << std::flush;
         mpz_class E2 = buildE(B1u);
+        if (interrupted) {
+            std::cout << "\nInterrupted by user while building E2.\n";
+            interrupted = false;
+            return 0;
+        }
         E2 *= mpz_class(2) * mpz_from_u64(options.exponent);
         for (uint64_t q : primes) mpz_mul_u64(E2, q);
         const mp_bitcnt_t bits = mpz_sizeinbase(E2.get_mpz_t(), 2);
@@ -1861,18 +1942,10 @@ int App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
-        const bool found = (g != 1 && g != Mp);
-        if (found) {
-            std::string f = g.get_str(10);
-            std::cout << "\n>>>  Factor P-1 (stage 2 ultralowmem GPU one-register product exponent) found : " << f << "\n";
-            std::cout << "P-1 factor stage 2 found: " << f << "\n";
-            options.knownFactors.push_back(f);
-            delete eng;
-            return 0;
-        }
-        std::cout << "\nNo factor P-1 (stage 2 ultralowmem GPU one-register product exponent) until B2 = " << B2u << "\n";
+        const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+                                                    "ultralowmem GPU one-register product exponent");
         delete eng;
-        return 1;
+        return found ? 0 : 1;
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -1913,16 +1986,8 @@ int App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
-    bool found = (g != 1 && g != Mp);
-    if (found) {
-        char* fstr = mpz_get_str(nullptr, 10, g.get_mpz_t());
-        std::cout << "\n>>>  Factor P-1 (stage 2 lowmem streamed product) found : " << fstr << "\n";
-        std::cout << "P-1 factor stage 2 found: " << fstr << "\n";
-        options.knownFactors.push_back(std::string(fstr));
-        std::free(fstr);
-    } else {
-        std::cout << "\nNo factor P-1 (stage 2 lowmem streamed product) until B2 = " << B2u << "\n";
-    }
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+                                                "lowmem streamed product");
     delete eng;
     return found ? 0 : 1;
 }
@@ -2200,9 +2265,17 @@ int App::runPM1Stage2MarinVTrace() {
         return is_prime_trial(n);
     };
 
+    // Baby offsets are the odd j <= D/2 coprime to D.  A prime that divides D
+    // and lies in (B1, B2] (possible when B1 is smaller than the largest prime
+    // factor of D) has no coprime representation, so its own j is stored too.
+    auto vtrace_needs_baby_j = [&](uint64_t j, uint64_t d)->bool{
+        if (gcd_u64(j, d) == 1) return true;
+        return j > B1u && (d % j) == 0 && is_prime_fast(j);
+    };
+
     auto baby_count_for_D = [&](uint64_t d)->size_t{
         size_t c = 0;
-        for (uint64_t j = 1; j <= d / 2; j += 2) if (gcd_u64(j, d) == 1) ++c;
+        for (uint64_t j = 1; j <= d / 2; j += 2) if (vtrace_needs_baby_j(j, d)) ++c;
         return c;
     };
 
@@ -2992,7 +3065,7 @@ int App::runPM1Stage2MarinVTrace() {
     std::vector<uint64_t> babyOffset;
     babyOffset.reserve((size_t)std::max<uint64_t>(1, D / 4));
     for (uint64_t j = 1; j <= D / 2; j += 2) {
-        if (gcd_u64(j, D) == 1) {
+        if (vtrace_needs_baby_j(j, D)) {
             j2i[(size_t)j] = (int32_t)babyOffset.size();
             babyOffset.push_back(j);
         }
@@ -4825,8 +4898,26 @@ int App::runPM1Stage2Marin() {
         }
     };
 
-    // current k for giant
+    // current k for giant: RGIANT holds (H^D)^cur_k.  A checkpoint is saved
+    // after the loop has already advanced p_ui to the next prime, but the
+    // giant register still belongs to the prime that was processed last, which
+    // may lie in an earlier block.  Recover that block on resume instead of
+    // assuming the giant sits at p_ui / D.
     uint64_t cur_k = p_ui / D;
+    if (resumed_s2 && idx > 0) {
+        auto is_prime_u64 = [&](uint64_t n)->bool{
+            if (n < 2) return false;
+            if ((n & 1ull) == 0) return n == 2;
+            for (uint32_t bp : basePrimes) {
+                if ((uint64_t)bp * bp > n) break;
+                if (n % bp == 0) return n == bp;
+            }
+            return true;
+        };
+        uint64_t prev = p_ui - 1;
+        while (prev > 2 && !is_prime_u64(prev)) --prev;
+        cur_k = prev / D;
+    }
 
     // ---- main loop ----
     for (;;) {
@@ -5565,12 +5656,10 @@ int App::runPM1Stage2MarinNKVersion() {
     mpz_t Xz; mpz_init(Xz); eng->get_mpz(Xz, (engine::Reg)RACC); mpz_class Mp = (mpz_class(1) << pexp) - 1; mpz_class X; mpz_set(X.get_mpz_t(), Xz); mpz_clear(Xz);
     mpz_class g; mpz_gcd(g.get_mpz_t(), X.get_mpz_t(), Mp.get_mpz_t());
 
-    bool found = (g > 1 && g < Mp);
-    if (found) { std::cout << "Stage 2 n^K Factor found : " << g.get_str() << std::endl; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 n^K Factor found : " << g.get_str(); guiServer_->appendLog(oss.str()); } }
-    else { std::cout << "No factor" << std::endl; if (guiServer_) { std::ostringstream oss; oss << "No factor"; guiServer_->appendLog(oss.str()); } }
-
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
     delete eng;
     return found ? 0 : 1;
 }
@@ -6221,7 +6310,7 @@ int App::runPM1Marin() {
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
-        write_pm1_checkpoint_backend(ckpt_file, eng);
+        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
     };
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
@@ -6230,6 +6319,15 @@ int App::runPM1Marin() {
         if (!pm1_checkpoint_backend_matches(file, eng, &backend_reason)) {
             std::cerr << "[PM1] Ignoring incompatible checkpoint " << file << ": " << backend_reason << "\n";
             return -3;
+        }
+        {
+            uint64_t ck_b1 = 0, ck_maxe = 0;
+            if (pm1_checkpoint_read_params(file, ck_b1, ck_maxe) && (ck_b1 != B1 || ck_maxe != MAX_E_BITS)) {
+                std::cerr << "[PM1] Ignoring checkpoint " << file << ": it was written for B1=" << ck_b1
+                          << " -maxe " << ck_maxe << ", this run uses B1=" << B1 << " -maxe " << MAX_E_BITS
+                          << "; starting stage 1 from scratch\n";
+                return -3;
+            }
         }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != 3) return -2;
@@ -6947,8 +7045,8 @@ int App::runPM1Marin() {
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
         
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
-        wm.appendToResultsTxt(json);
+        bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
+        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
         options.B2 = B2save;
         const bool runRequestedStage2 = options.B2 > 0 &&
             (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
@@ -7029,7 +7127,10 @@ int App::runPM1Marin() {
             fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_ext), ec);
         }
         delete eng;
-        if (hasWorktodoEntry_) {
+        if (hasWorktodoEntry_ && !resultSaved) {
+            std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+        }
+        if (hasWorktodoEntry_ && resultSaved) {
                 if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -7059,6 +7160,14 @@ int App::runPM1Marin() {
             } else {
                 Echunk = buildE2(B1, startPrime, MAX_E_BITS, nextStart, firstChunk);
             }
+            if (interrupted) {
+                // E is incomplete.  Do not run (or checkpoint) with it: the last
+                // periodic checkpoint, if any, is still valid for a later resume.
+                std::cout << "\nInterrupted by user while building E; no checkpoint written." << std::endl;
+                if (guiServer_) guiServer_->appendLog("\nInterrupted while building E; no checkpoint written.\n");
+                delete eng;
+                return 0;
+            }
             if (firstChunk) Echunk *= mpz_class(2) * mpz_from_u64(options.exponent);
             bool useFast3 = useFast3Candidate && (nextStart == 0) && !aevum_backend;
             if (pm1_ultralowmem_stage1 && !useFast3) {
@@ -7066,7 +7175,30 @@ int App::runPM1Marin() {
             }
             mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
             if (bits == 0) break;
-            if (restored && bits_in_chunk_ck) bits = (mp_bitcnt_t)bits_in_chunk_ck;
+            if (restored && bits_in_chunk_ck && bits_in_chunk_ck != (uint64_t)bits) {
+                // A checkpoint without recorded B1/-maxe (written by an older
+                // version) that belongs to a different exponent E: its state
+                // is meaningless here.  Drop it and start stage 1 over.
+                std::cerr << "[PM1] Ignoring checkpoint " << ckpt_file << ": it covers a chunk of "
+                          << bits_in_chunk_ck << " bits but this run's chunk has " << bits
+                          << " bits (different B1 or -maxe); starting stage 1 from scratch\n";
+                restored = false;
+                chunkIndex = 0;
+                startPrime = 3;
+                firstChunk = true;
+                processed_total_bits = 0;
+                restored_time = 0.0;
+                eng->set(RSTATE, 1);
+                if (options.gerbiczli) {
+                    eng->set(RACC_L, 1);
+                    eng->set(RACC_R, 1);
+                    eng->copy(RSTART, RSTATE);
+                    eng->copy(RSAVE_S, RSTATE);
+                    eng->copy(RSAVE_L, RACC_L);
+                    eng->copy(RSAVE_R, RACC_R);
+                }
+                continue;
+            }
             chunkIndex = std::max<uint64_t>(chunkIndex, 1);
             std::cout << "\nChunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : "") << std::endl;
             if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
@@ -7364,8 +7496,8 @@ int App::runPM1Marin() {
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     options.B2 = 0;
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     options.B2 = B2save;
 
     const bool runRequestedStage2 = options.B2 > 0 &&
@@ -7466,7 +7598,10 @@ int App::runPM1Marin() {
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -7998,11 +8133,14 @@ int App::runPM1Stage3Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage3", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
     delete eng;
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -8588,13 +8726,16 @@ int App::runPM1Stage4Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage4", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage4", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
     delete eng;
 
     // ---- worktodo handling: same as Stage 3
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
