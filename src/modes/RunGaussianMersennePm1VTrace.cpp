@@ -549,6 +549,7 @@ int App::runGaussianMersennePM1() {
         std::cerr << "[GM-PM1] buildE failed: " << ex.what() << "\n";
         return 2;
     }
+    if (interrupted) return 0;  // E is incomplete after a Ctrl-C while it was built
     const mpz_class structural = mpz_class(4) * t.p;
     mpz_class exponent;
     mpz_lcm(exponent.get_mpz_t(), smooth.get_mpz_t(), structural.get_mpz_t());

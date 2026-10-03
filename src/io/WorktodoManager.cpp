@@ -32,7 +32,7 @@ WorktodoManager::WorktodoManager(const io::CliOptions& opts)
   : options_(opts)
 {}
 
-void WorktodoManager::saveIndividualJson(uint32_t p,
+bool WorktodoManager::saveIndividualJson(uint32_t p,
                                          const std::string& mode,
                                          const std::string& jsonResult) const
 {
@@ -42,23 +42,35 @@ void WorktodoManager::saveIndividualJson(uint32_t p,
     std::ofstream out(file);
     if (!out) {
         std::cerr << "Cannot open " << file << " for writing JSON\n";
-        return;
+        return false;
     }
     out << jsonResult;
+    out.flush();
+    if (!out) {
+        std::cerr << "Failed writing JSON to " << file << "\n";
+        return false;
+    }
     std::cout << "JSON result written to: " << file << "\n";
+    return true;
 }
 
-void WorktodoManager::appendToResultsTxt(const std::string& jsonResult) const
+bool WorktodoManager::appendToResultsTxt(const std::string& jsonResult) const
 {
     // ex: ./save/results.txt
     std::string resultPath = options_.save_path + "/results.txt";
     std::ofstream resOut(resultPath, std::ios::app);
-    if (resOut) {
-        resOut << jsonResult << "\n";
-        std::cout << "Result appended to: " << resultPath << "\n";
-    } else {
+    if (!resOut) {
         std::cerr << "Cannot open " << resultPath << " for appending\n";
+        return false;
     }
+    resOut << jsonResult << "\n";
+    resOut.flush();
+    if (!resOut) {
+        std::cerr << "Failed writing to " << resultPath << "\n";
+        return false;
+    }
+    std::cout << "Result appended to: " << resultPath << "\n";
+    return true;
 }
 
 } // namespace core
