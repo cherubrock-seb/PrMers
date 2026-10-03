@@ -108,6 +108,7 @@ KERNEL(OUT_WG) fftMiddleOut(P(T2) out, CP(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trigF2);
   // The odd-axis inverse above is normalized.  Width/height still contribute
   // the binary transform length, so exclude PFA_RADIX from the final scale.
   const float factor = (float) PFA_RADIX / (NWORDS * 2);
@@ -510,6 +511,7 @@ KERNEL(256) fftMiddleOut(P(T2) out, P(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trigF2);
   // The odd-axis inverse above is normalized.  Width/height still contribute
   // the binary transform length, so exclude PFA_RADIX from the final scale.
   const float factor = (float) PFA_RADIX / (NWORDS * 2);
