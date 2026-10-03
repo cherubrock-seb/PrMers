@@ -729,6 +729,11 @@ int App::runPrpOrLlMarin()
                         gpuProofSucceeded = true;
                         break;
                     }
+                    catch (const core::ProofVerificationError&) {
+                        // Not retried and not replaced by the unverified CPU
+                        // proof: handled by the outer catch.
+                        throw;
+                    }
                     catch (const std::exception& e) {
                         gpuProofError = e.what();
 
@@ -767,6 +772,16 @@ int App::runPrpOrLlMarin()
                     "Proof file saved: " +
                     proofFilePath.string());
         }
+        catch (const core::ProofVerificationError& e) {
+            const std::string msg = std::string("Error: ") + e.what() +
+                ". No proof will be reported for this test; "
+                "the PRP result is still valid.";
+            std::cerr << msg << std::endl;
+            if (guiServer_)
+                guiServer_->appendLog(msg);
+            options.proof = false;
+            options.proofFile.clear();
+        }
         catch (const std::exception& e) {
             std::cerr
                 << "Warning: Proof generation failed: "
@@ -776,6 +791,10 @@ int App::runPrpOrLlMarin()
                 guiServer_->appendLog(
                     std::string("Warning: Proof generation failed: ") +
                     e.what());
+
+            // No proof file exists: do not report proof metadata.
+            options.proof = false;
+            options.proofFile.clear();
         }
     }
 
