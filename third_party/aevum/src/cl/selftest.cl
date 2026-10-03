@@ -22,7 +22,7 @@
 // The clock is read with __builtin_readcyclecounter(), which is s_memtime up to gfx10 and s_getreg SHADER_CYCLES on
 // gfx11+ (where s_memtime no longer exists). The waits keep an s_memtime read from overlapping the timed loop.
 // gfx10+ renamed v_add_i32 to v_add_nc_i32, and in wave32 the carry-out of v_mad_u64_u32 can't be the 64-bit vcc.
-#if __GFX10__ || __GFX11__ || __GFX12__
+#if AMDGPU && WAVEFRONT != 64
 #define ADD_I32 "v_add_nc_i32"
 #define MAD_CARRY "null"
 #else

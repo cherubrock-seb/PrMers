@@ -97,6 +97,7 @@ KERNEL(IN_WG) fftMiddleIn(P(T2) out, CP(T2) in, Trig trig) {
   readMiddleInLine(u, inF2, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trigF2);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, 1, trigF2);
@@ -160,6 +161,7 @@ KERNEL(IN_WG) fftMiddleInGF31(P(T2) out, CP(T2) in, Trig trig) {
   readMiddleInLine(u, in31, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trig31);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, trig31);
@@ -223,6 +225,7 @@ KERNEL(IN_WG) fftMiddleInGF61(P(T2) out, CP(T2) in, Trig trig) {
   readMiddleInLine(u, in61, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trig61);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, trig61);
@@ -541,6 +544,7 @@ KERNEL(256) fftMiddleIn(P(T2) out, P(T2) in, Trig trig) {
   readMiddleInLine(u, inF2, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trigF2);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, 1, trigF2);
@@ -598,6 +602,7 @@ KERNEL(256) fftMiddleInGF31(P(T2) out, P(T2) in, Trig trig) {
   readMiddleInLine(u, in31, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trig31);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, trig31);
@@ -655,6 +660,7 @@ KERNEL(256) fftMiddleInGF61(P(T2) out, P(T2) in, Trig trig) {
   readMiddleInLine(u, in61, y, x);
 
 #if PFA_RADIX
+  pfaMiddleTwiddle(u, x, y, trig61);
   fft_MIDDLE(u);
 #else
   middleMul2(u, x, y, trig61);

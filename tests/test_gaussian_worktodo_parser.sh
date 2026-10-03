@@ -63,6 +63,7 @@ fi
   src/io/WorktodoParser.cpp \
   src/util/StringUtils.cpp \
   src/math/Cofactor.cpp \
+  src/math/Pm1Bounds.cpp \
   "${GMP_LIBS[@]}" \
   -o "$BIN"
 
