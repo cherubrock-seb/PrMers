@@ -665,6 +665,7 @@ int App::runGaussianMersenneECM() {
               << "  legacy fallback: omit -edwards\n";
 
     const mpz_class K = buildE(B1);
+    if (interrupted) return 0;  // E is incomplete after a Ctrl-C while it was built
     const std::vector<short> naf = naf_digits(K);
     if (naf.empty()) {
         std::cerr << "Invalid empty Stage1 exponent.\n";

@@ -410,6 +410,10 @@ App::App(int argc, char** argv)
         c_argv.push_back(const_cast<char*>(s.c_str()));
     c_argv.push_back(nullptr);
     auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
+    if (o.submit || !o.password.empty()) {
+        std::cerr << "Warning: PrimeNet submission is not available in this build; "
+                     "-submit and -password are ignored. Submit results manually." << std::endl;
+    }
 
     io::WorktodoParser wp{o.worktodo_path};
     // An explicit Gaussian-Mersenne command is self-contained and must not be
