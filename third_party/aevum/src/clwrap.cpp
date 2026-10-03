@@ -208,6 +208,27 @@ u32 getNvidiaComputeCapability(cl_device_id id) {
   return major * 100 + minor;
 }
 
+u32 getAmdWavefrontWidth(cl_device_id id) {
+  try {
+    u32 n = 0;
+    GET_INFO(id, CL_DEVICE_WAVEFRONT_WIDTH_AMD, n);
+    return n;
+  } catch (const gpu_error& err) {
+    return 0;
+  }
+}
+
+bool isAmdCdna2Plus(cl_device_id id) {
+  string const name = getDeviceName(id);
+  return name.find("gfx90a") != string::npos || name.find("gfx94") != string::npos || name.find("gfx95") != string::npos;
+}
+
+bool amdFastBarrierUnsafe(cl_device_id id) {
+  if (!isAmdGpu(id)) { return false; }
+  if (getAmdWavefrontWidth(id) != 64) { return true; }
+  return isAmdCdna2Plus(id);
+}
+
 /*
 static string getFreq(cl_device_id device) {
   unsigned computeUnits, frequency;

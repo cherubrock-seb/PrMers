@@ -72,6 +72,15 @@ bool hasFreeMemInfo(cl_device_id id);
 bool isAmdGpu(cl_device_id id);
 bool isNvidiaGpu(cl_device_id id);
 u32 getNvidiaComputeCapability(cl_device_id id);
+// AMD only (cl_amd_device_attribute_query); 0 when not available (not AMD, or an older driver).
+u32 getAmdWavefrontWidth(cl_device_id id);
+// CDNA2/CDNA3 (gfx90a, gfx94x/gfx95x): natively wave64 like gfx906, but with a "back-off" barrier that
+// does not wait for outstanding LDS traffic -- see amdFastBarrierUnsafe.
+bool isAmdCdna2Plus(cl_device_id id);
+// True if a bare s_barrier (what -use FAST_BARRIER turns bar() into) cannot be trusted to wait for LDS on
+// this device: false for non-AMD, true when the reported wavefront isn't 64 (RDNA under ROCm's OpenCL
+// compiler picks 32, even though the hardware supports 64 too) or the device is CDNA2/CDNA3.
+bool amdFastBarrierUnsafe(cl_device_id id);
 string getDriverVersion(cl_device_id id);
 string getOpenCLDeviceVersion(cl_device_id id);
 string getOpenCLCVersion(cl_device_id id);

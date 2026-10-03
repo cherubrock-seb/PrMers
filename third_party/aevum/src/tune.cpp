@@ -707,8 +707,10 @@ void Tune::tune() {
       args->flags["STORES"] = to_string(stores);
     }
 
-    // Find best FAST_BARRIER setting
-    if (1 /*AMDGPU*/) {                 // FAST_BARRIER now works for nVidia GPUs too (from what I've seen)
+    // Find best FAST_BARRIER setting.  Skip it where it provably can't do anything: base.cl forces it off
+    // whenever the reported wavefront isn't 64 (RDNA) or the device is CDNA2/CDNA3, so testing FAST_BARRIER=1
+    // there would just repeat the FAST_BARRIER=0 timing.
+    if (!amdFastBarrierUnsafe(shared.context->deviceId())) {   // FAST_BARRIER now works for nVidia GPUs too (from what I've seen)
       FFTConfig fft{*defaultShape, variant, CARRY_AUTO};
       u64 exponent = primes.prevPrime(fft.maxExp());
       u32 best_fast_barrier = 0;
