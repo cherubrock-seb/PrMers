@@ -4849,8 +4849,26 @@ int App::runPM1Stage2Marin() {
         }
     };
 
-    // current k for giant
+    // current k for giant: RGIANT holds (H^D)^cur_k.  A checkpoint is saved
+    // after the loop has already advanced p_ui to the next prime, but the
+    // giant register still belongs to the prime that was processed last, which
+    // may lie in an earlier block.  Recover that block on resume instead of
+    // assuming the giant sits at p_ui / D.
     uint64_t cur_k = p_ui / D;
+    if (resumed_s2 && idx > 0) {
+        auto is_prime_u64 = [&](uint64_t n)->bool{
+            if (n < 2) return false;
+            if ((n & 1ull) == 0) return n == 2;
+            for (uint32_t bp : basePrimes) {
+                if ((uint64_t)bp * bp > n) break;
+                if (n % bp == 0) return n == bp;
+            }
+            return true;
+        };
+        uint64_t prev = p_ui - 1;
+        while (prev > 2 && !is_prime_u64(prev)) --prev;
+        cur_k = prev / D;
+    }
 
     // ---- main loop ----
     for (;;) {
