@@ -945,7 +945,11 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.NTT_GF31) {
-    vector<uint2> tab2 = fft.isPfa() ? vector<uint2>(MIDDLETRIG_GF31_SIZE(width, middle, smallH), uint2{1u, 0u}) : genMiddleTrigGF31(smallH, middle, width);
+    // Good-Thomas plans have no middle-vs-width/height twiddles, but the binary
+    // WIDTH x SMALL_HEIGHT axis still needs its own Cooley-Tukey twiddle.  A
+    // MIDDLE=1 table holds exactly the WIDTH and WIDTH*SMALL_HEIGHT roots that
+    // pfaMiddleTwiddle reads (see fft-middle.cl).
+    vector<uint2> tab2 = genMiddleTrigGF31(smallH, fft.isPfa() ? 1u : middle, width);
     tab2.resize(MIDDLETRIG_GF31_SIZE(width, middle, smallH));
     // Append tab2 to tab
     tabsize = tab.size();
@@ -954,7 +958,7 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.NTT_GF61) {
-    vector<ulong2> tab3 = fft.isPfa() ? vector<ulong2>(MIDDLETRIG_GF61_SIZE(width, middle, smallH), ulong2{1u, 0u}) : genMiddleTrigGF61(smallH, middle, width);
+    vector<ulong2> tab3 = genMiddleTrigGF61(smallH, fft.isPfa() ? 1u : middle, width);
     tab3.resize(MIDDLETRIG_GF61_SIZE(width, middle, smallH));
     // Append tab3 to tab
     tabsize = tab.size();

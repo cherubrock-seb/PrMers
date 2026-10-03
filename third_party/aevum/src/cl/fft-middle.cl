@@ -734,6 +734,28 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
 }
 #endif
 
+#if PFA_RADIX
+// WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle for the binary axis of a
+// Good-Thomas plan.  The odd radix-R axis is coprime to the binary axis and
+// needs no twiddles against it, but WIDTH and SMALL_HEIGHT are both powers of
+// two, so the W*SH binary transform still needs w_(W*SH)^(x*y) between its
+// width pass (fftP / fftW) and its height pass (tail).  The scalar depends only
+// on (x, y), so it is identical for every odd-row register and commutes with
+// the radix-R transform.  The inverse direction reuses the same forward table
+// because the inverse binary passes run on component-swapped (conjugated)
+// data, exactly as stock middleMul2 does.
+// PFA middle trig layout (TrigBufCache genMiddleTrigGF31(smallH, 1, width)):
+//   trig[0 .. WIDTH)                   : w_WIDTH^k
+//   trig[WIDTH .. WIDTH + SMALL_HEIGHT) : w_(WIDTH*SMALL_HEIGHT)^k
+void OVERLOAD pfaMiddleTwiddle(GF31 *u, u32 x, u32 y, TrigGF31 trig) {
+  assert(x < WIDTH);
+  assert(y < SMALL_HEIGHT);
+  const u32 desired_root = x * y;
+  const GF31 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+  for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
+}
+#endif
+
 void OVERLOAD fft2(GF31* u) { X2(u[0], u[1]); }
 
 void OVERLOAD fft_MIDDLE(GF31 *u) {
@@ -936,6 +958,18 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
 #endif
+}
+#endif
+
+#if PFA_RADIX
+// WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle of the binary axis; see the GF31
+// pfaMiddleTwiddle above for the rationale and the PFA middle trig layout.
+void OVERLOAD pfaMiddleTwiddle(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
+  assert(x < WIDTH);
+  assert(y < SMALL_HEIGHT);
+  const u32 desired_root = x * y;
+  const GF61 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+  for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
 }
 #endif
 

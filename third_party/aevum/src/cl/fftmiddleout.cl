@@ -179,6 +179,7 @@ KERNEL(OUT_WG) fftMiddleOutGF31(P(T2) out, CP(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trig31);
 #else
   middleMul(u, x, trig31);
   fft_MIDDLE(u);
@@ -244,6 +245,7 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trig61);
 #else
   middleMul(u, x, trig61);
   fft_MIDDLE(u);
@@ -567,6 +569,7 @@ KERNEL(256) fftMiddleOutGF31(P(T2) out, P(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trig31);
 #else
   middleMul(u, x, trig31);
   fft_MIDDLE(u);
@@ -620,6 +623,7 @@ KERNEL(256) fftMiddleOutGF61(P(T2) out, P(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trig61);
 #else
   middleMul(u, x, trig61);
   fft_MIDDLE(u);
