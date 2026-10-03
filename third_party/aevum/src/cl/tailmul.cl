@@ -177,17 +177,36 @@ KERNEL(G_H) tailMul(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
   u32 H = ND / SMALL_HEIGHT;
 
 #if PFA_RADIX
+  // The FP32 plane's odd axis uses the complex root e^(-2*pi*i/PFA_RADIX), so
+  // row k is the conjugate partner of row PFA_RADIX-k and bin l of row k must
+  // be paired with bin -l of row PFA_RADIX-k (see tailSquare).  Row 0 keeps
+  // the stock layout: its binary line 0 pairs with itself (bump) together
+  // with its self-paired line WIDTH/2.  For row k != 0 the binary-line-0
+  // group handles (k,0) <-> (R-k,0) when k < R-k and (k,W/2) <-> (R-k,W/2)
+  // when k > R-k, so each special line pair appears exactly once.
   const u32 group = get_group_id(0);
   const u32 per_row = WIDTH / 2u;
   const u32 row = group / per_row;
-  const u32 binary_line = group - row * per_row;
+  const u32 conj_row = row ? PFA_RADIX - row : 0u;
+  u32 binary_line = group - row * per_row;
+  const bool special_line = binary_line == 0u && row == 0u;
+  const bool cross_zero = binary_line == 0u && row != 0u && row < conj_row;
+  const bool cross_half = binary_line == 0u && row != 0u && row > conj_row;
+  if (cross_half) binary_line = WIDTH / 2u;
+  // Stock tail twiddle tables/slowTrig_N are built for the full ND = PFA_RADIX*WIDTH*SMALL_HEIGHT
+  // transform.  The PFA half-real untangle works on one binary row of WIDTH*SMALL_HEIGHT
+  // complex values, so bin l of that row is bin PFA_RADIX*l of the stock tables.
+  const u32 trig_line = PFA_RADIX * binary_line;
   const u32 line1 = row * WIDTH + binary_line;
-  const u32 line2 = row * WIDTH + (binary_line ? WIDTH - binary_line : WIDTH / 2u);
-  const bool special_line = binary_line == 0u;
+  const u32 line2 = special_line ? WIDTH / 2u
+                  : cross_zero   ? conj_row * WIDTH
+                  : cross_half   ? conj_row * WIDTH + WIDTH / 2u
+                                 : conj_row * WIDTH + (WIDTH - binary_line);
 #else
   u32 line1 = get_group_id(0);
   u32 line2 = line1 ? H - line1 : (H / 2);
   const u32 binary_line = line1;
+  const u32 trig_line = binary_line;
   const bool special_line = line1 == 0u;
 #endif
   u32 memline1 = transPos(line1, MIDDLE, WIDTH);
@@ -213,12 +232,7 @@ KERNEL(G_H) tailMul(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
   fft_HEIGHT1(lds, q, smallTrigF2, 1, me);
 #endif
 
-#if PFA_RADIX
-  F2 trig = slowTrig_N(binary_line + me * WIDTH,
-                        (WIDTH * SMALL_HEIGHT) / NH);
-#else
-  F2 trig = slowTrig_N(line1 + me * H, ND / NH);
-#endif
+  F2 trig = slowTrig_N(trig_line + me * H, ND / NH);
 
   if (special_line) {
     reverse(lds, u + NH/2, true);
@@ -231,7 +245,17 @@ KERNEL(G_H) tailMul(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
     reverse(lds, q + NH/2, false);
     pairMul(NH/2, v,  v + NH/2, q, q + NH/2, trig2, false);
     reverse(lds, v + NH/2, false);
-  } else {
+  }
+#if PFA_RADIX
+  else if (cross_zero) {
+    // (row,0) <-> (PFA_RADIX-row,0): bin h meets bin -h, i.e. the "bump" reversal.
+    reverseLineBump(lds, v);
+    reverseLineBump(lds, q);
+    pairMul(NH, u, v, p, q, trig, false);
+    reverseLineBump(lds, v);
+  }
+#endif
+  else {
     reverseLine(lds, v);
     reverseLine(lds, q);
     pairMul(NH, u, v, p, q, trig, false);
