@@ -64,7 +64,7 @@ CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp -include $(INC_DIR)/core/GmPm1LegacyRename.hpp
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-pm1-extend-ckpt clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -172,6 +172,9 @@ test-backend-matrix: all
 
 test-aevum-apple-port-source:
 	bash tests/source_v9942_apple_port_audit.sh
+
+test-pm1-extend-ckpt: all
+	bash tests/test_pm1_extend_stale_ckpt.sh
 
 install-aevum-engine: aevum-engine
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
