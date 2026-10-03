@@ -404,7 +404,16 @@ int App::runLlSafeMarinDoubling()
         }
     }*/
 
-    delete_checkpoints(options.exponent, options.wagstaff, true, true);
+    io::WorktodoManager wm(options);
+    wm.saveIndividualJson(options.exponent, "llsafe2", json);
+    wm.appendToResultsTxt(json);
+
+    // This mode checkpoints to llsafe2_m_<p>.ckpt, which delete_checkpoints()
+    // does not know about; remove it (and its .old/.new) here so a rerun
+    // does not resume from the finished test.
+    std::remove(ckpt_file.c_str());
+    std::remove((ckpt_file + ".old").c_str());
+    std::remove((ckpt_file + ".new").c_str());
     delete eng;
     return is_prime ? 0 : 1;
 }

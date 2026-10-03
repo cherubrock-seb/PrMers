@@ -64,7 +64,7 @@ CPPFLAGS += -DKERNEL_PATH=\"$(KERNEL_PATH)\"
 $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/core/GmEcmLegacyRename.hpp -include $(INC_DIR)/core/GmPm1LegacyRename.hpp
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-llsafe2-resume test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-proof-marin test-llsafe2-resume test-llsafe2-result test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -135,6 +135,9 @@ test-proof-marin:
 
 test-llsafe2-resume: all
 	bash tests/run_llsafe2_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+test-llsafe2-result: all
+	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
