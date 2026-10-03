@@ -2265,9 +2265,17 @@ int App::runPM1Stage2MarinVTrace() {
         return is_prime_trial(n);
     };
 
+    // Baby offsets are the odd j <= D/2 coprime to D.  A prime that divides D
+    // and lies in (B1, B2] (possible when B1 is smaller than the largest prime
+    // factor of D) has no coprime representation, so its own j is stored too.
+    auto vtrace_needs_baby_j = [&](uint64_t j, uint64_t d)->bool{
+        if (gcd_u64(j, d) == 1) return true;
+        return j > B1u && (d % j) == 0 && is_prime_fast(j);
+    };
+
     auto baby_count_for_D = [&](uint64_t d)->size_t{
         size_t c = 0;
-        for (uint64_t j = 1; j <= d / 2; j += 2) if (gcd_u64(j, d) == 1) ++c;
+        for (uint64_t j = 1; j <= d / 2; j += 2) if (vtrace_needs_baby_j(j, d)) ++c;
         return c;
     };
 
@@ -3057,7 +3065,7 @@ int App::runPM1Stage2MarinVTrace() {
     std::vector<uint64_t> babyOffset;
     babyOffset.reserve((size_t)std::max<uint64_t>(1, D / 4));
     for (uint64_t j = 1; j <= D / 2; j += 2) {
-        if (gcd_u64(j, D) == 1) {
+        if (vtrace_needs_baby_j(j, D)) {
             j2i[(size_t)j] = (int32_t)babyOffset.size();
             babyOffset.push_back(j);
         }
