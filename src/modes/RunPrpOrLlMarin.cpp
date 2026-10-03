@@ -861,11 +861,14 @@ int App::runPrpOrLlMarin()
 
     backupManager.clearState();
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, options.mode, json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     delete_checkpoints(p, options.wagstaff, false, false); 
     backupManager.clearState();
-    if (hasWorktodoEntry_) {
+    if (hasWorktodoEntry_ && !resultSaved) {
+        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    }
+    if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
