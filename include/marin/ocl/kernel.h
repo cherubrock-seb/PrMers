@@ -46,6 +46,8 @@ static const char * const src_ocl_kernel = \
 "#endif\n" \
 "\n" \
 "#define sz_t		uint\n" \
+"// Register word offsets: a register slab can hold 2^32 words or more.\n" \
+"#define reg_off_t	ulong\n" \
 "#define uint_8		uchar\n" \
 "#ifndef uint32\n" \
 "#define uint32		uint\n" \
@@ -449,7 +451,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-4\n" \
 "/*__kernel\n" \
-"void forward4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t s, const uint32 lm)\n" \
+"void forward4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_DECL;\n" \
@@ -464,7 +466,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Inverse radix-4\n" \
 "__kernel\n" \
-"void backward4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t s, const uint32 lm)\n" \
+"void backward4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2I_DECL;\n" \
@@ -481,7 +483,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-4, first stage\n" \
 "__kernel\n" \
-"void forward4_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward4_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "\n" \
@@ -494,7 +496,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Inverse radix-4, first stage\n" \
 "__kernel\n" \
-"void backward4_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward4_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "\n" \
@@ -510,7 +512,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-5, first stage\n" \
 "__kernel\n" \
-"void forward5_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward5_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "\n" \
@@ -526,7 +528,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Inverse radix-5, first stage\n" \
 "__kernel\n" \
-"void backward5_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward5_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "\n" \
@@ -545,7 +547,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-4\n" \
 "__kernel\n" \
-"void forward_mul4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_DECL;\n" \
@@ -559,7 +561,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-4, square, inverse radix-4\n" \
 "__kernel\n" \
-"void sqr4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_DECL;\n" \
@@ -574,7 +576,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-4, mul, inverse radix-4\n" \
 "__kernel\n" \
-"void mul4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset_x, const sz_t offset_y)\n" \
+"void mul4x1(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset_x, const reg_off_t offset_y)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset_x]);\n" \
 "	__global const uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -594,7 +596,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// 2 x Radix-4\n" \
 "__kernel\n" \
-"void forward_mul4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_2_DECL;\n" \
@@ -609,7 +611,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// 2 x Radix-4, square, inverse radix-4\n" \
 "__kernel\n" \
-"void sqr4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_2_DECL;\n" \
@@ -624,7 +626,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// 2 x Radix-4, mul, inverse radix-4\n" \
 "__kernel\n" \
-"void mul4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset_x, const sz_t offset_y)\n" \
+"void mul4(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset_x, const reg_off_t offset_y)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset_x]);\n" \
 "	__global const uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -644,7 +646,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-8\n" \
 "__kernel\n" \
-"void forward_mul8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_DECL;\n" \
@@ -659,7 +661,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-8, square, inverse radix-8\n" \
 "__kernel\n" \
-"void sqr8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset]);\n" \
 "	ROOT_R2_DECL;\n" \
@@ -678,7 +680,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "// Radix-8, mul, inverse radix-8\n" \
 "__kernel\n" \
-"void mul8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset_x, const sz_t offset_y)\n" \
+"void mul8(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset_x, const reg_off_t offset_y)\n" \
 "{\n" \
 "	__global uint64_2 * restrict const x = (__global uint64_2 *)(&reg[offset_x]);\n" \
 "	__global const uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -871,7 +873,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "/*__kernel\n" \
 "ATTR_FB_16()\n" \
-"void forward16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void forward16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(16 / 4, CHUNK16);\n" \
@@ -882,7 +884,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_16()\n" \
-"void backward16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void backward16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(16 / 4, CHUNK16);\n" \
@@ -895,7 +897,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_16()\n" \
-"void forward16_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward16_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 16 / 4; const uint32 lm = LN_SZ_S5 - 1 - 2;\n" \
 "	DECLARE_VAR(16 / 4, CHUNK16);\n" \
@@ -906,7 +908,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_16()\n" \
-"void backward16_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward16_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 16 / 4; const uint32 lm = LN_SZ_S5 - 1 - 2;\n" \
 "	DECLARE_VAR(16 / 4, CHUNK16);\n" \
@@ -926,7 +928,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_20()\n" \
-"void forward20_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward20_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 20 / 4; const uint32 lm = LN_SZ_S5 - 1 - 2;\n" \
 "	DECLARE_VAR(20 / 4, CHUNK20);\n" \
@@ -937,7 +939,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_20()\n" \
-"void backward20_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward20_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 20 / 4; const uint32 lm = LN_SZ_S5 - 1 - 2;\n" \
 "	DECLARE_VAR(20 / 4, CHUNK20);\n" \
@@ -968,7 +970,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64()\n" \
-"void forward64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void forward64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(64 / 4, CHUNK64);\n" \
@@ -979,7 +981,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64()\n" \
-"void backward64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void backward64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(64 / 4, CHUNK64);\n" \
@@ -993,7 +995,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64()\n" \
-"void forward64_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward64_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 64 / 4; const uint32 lm = LN_SZ_S5 - 1 - 4;\n" \
 "	DECLARE_VAR(64 / 4, CHUNK64);\n" \
@@ -1004,7 +1006,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_64()\n" \
-"void backward64_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward64_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 64 / 4; const uint32 lm = LN_SZ_S5 - 1 - 4;\n" \
 "	DECLARE_VAR(64 / 4, CHUNK64);\n" \
@@ -1023,7 +1025,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_80()\n" \
-"void forward80_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward80_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 80 / 4; const uint32 lm = LN_SZ_S5 - 1 - 4;\n" \
 "	DECLARE_VAR(80 / 4, CHUNK80);\n" \
@@ -1034,7 +1036,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_80()\n" \
-"void backward80_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward80_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 80 / 4; const uint32 lm = LN_SZ_S5 - 1 - 4;\n" \
 "	DECLARE_VAR(80 / 4, CHUNK80);\n" \
@@ -1069,7 +1071,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256()\n" \
-"void forward256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void forward256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(256 / 4, CHUNK256);\n" \
@@ -1080,7 +1082,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256()\n" \
-"void backward256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void backward256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(256 / 4, CHUNK256);\n" \
@@ -1094,7 +1096,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256()\n" \
-"void forward256_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward256_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 256 / 4; const uint32 lm = LN_SZ_S5 - 1 - 6;\n" \
 "	DECLARE_VAR(256 / 4, CHUNK256);\n" \
@@ -1105,7 +1107,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_256()\n" \
-"void backward256_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward256_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 256 / 4; const uint32 lm = LN_SZ_S5 - 1 - 6;\n" \
 "	DECLARE_VAR(256 / 4, CHUNK256);\n" \
@@ -1124,7 +1126,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_320()\n" \
-"void forward320_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward320_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 320 / 4; const uint32 lm = LN_SZ_S5 - 1 - 6;\n" \
 "	DECLARE_VAR(320 / 4, CHUNK320);\n" \
@@ -1135,7 +1137,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_320()\n" \
-"void backward320_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward320_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 320 / 4; const uint32 lm = LN_SZ_S5 - 1 - 6;\n" \
 "	DECLARE_VAR(320 / 4, CHUNK320);\n" \
@@ -1172,7 +1174,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1024()\n" \
-"void forward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void forward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(1024 / 4, 1);\n" \
@@ -1183,7 +1185,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1024()\n" \
-"void backward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset,\n" \
+"void backward1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset,\n" \
 "	const sz_t s, const uint32 lm)\n" \
 "{\n" \
 "	DECLARE_VAR(1024 / 4, 1);\n" \
@@ -1196,7 +1198,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1024()\n" \
-"void forward1024_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward1024_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 1024 / 4; const uint32 lm = LN_SZ_S5 - 1 - 8;\n" \
 "	DECLARE_VAR(1024 / 4, 1);\n" \
@@ -1207,7 +1209,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1024()\n" \
-"void backward1024_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward1024_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 1024 / 4; const uint32 lm = LN_SZ_S5 - 1 - 8;\n" \
 "	DECLARE_VAR(1024 / 4, 1);\n" \
@@ -1226,7 +1228,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "/*__kernel\n" \
 "ATTR_FB_1280()\n" \
-"void forward1280_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward1280_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 1280 / 4; const uint32 lm = LN_SZ_S5 - 1 - 8;\n" \
 "	DECLARE_VAR(1280 / 4, 1);\n" \
@@ -1237,7 +1239,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_FB_1280()\n" \
-"void backward1280_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void backward1280_0(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	const sz_t s = 1280 / 4; const uint32 lm = LN_SZ_S5 - 1 - 8;\n" \
 "	DECLARE_VAR(1280 / 4, 1);\n" \
@@ -1265,7 +1267,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_16()\n" \
-"void forward_mul16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_16();\n" \
 "\n" \
@@ -1275,7 +1277,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_16()\n" \
-"void sqr16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_16();\n" \
 "\n" \
@@ -1286,7 +1288,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_16()\n" \
-"void mul16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul16(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_16();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1310,7 +1312,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_32()\n" \
-"void forward_mul32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_32();\n" \
 "\n" \
@@ -1320,7 +1322,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_32()\n" \
-"void sqr32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_32();\n" \
 "\n" \
@@ -1331,7 +1333,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_32()\n" \
-"void mul32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul32(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_32();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1356,7 +1358,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_64()\n" \
-"void forward_mul64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_64();\n" \
 "	forward_4i(8, &X[i8], 8, &x[k8], r2[sj8], r4[sj8]);\n" \
@@ -1366,7 +1368,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_64()\n" \
-"void sqr64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_64();\n" \
 "\n" \
@@ -1379,7 +1381,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_64()\n" \
-"void mul64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul64(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_64();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1406,7 +1408,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_128()\n" \
-"void forward_mul128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_128();\n" \
 "	forward_4i(16, &X[i16], 16, &x[k16], r2[sj16], r4[sj16]);\n" \
@@ -1416,7 +1418,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_128()\n" \
-"void sqr128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_128();\n" \
 "\n" \
@@ -1429,7 +1431,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_128()\n" \
-"void mul128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul128(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_128();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1457,7 +1459,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_256()\n" \
-"void forward_mul256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_256();\n" \
 "	forward_4i(32, &X[i32], 32, &x[k32], r2[sj32], r4[sj32]);\n" \
@@ -1468,7 +1470,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_256()\n" \
-"void sqr256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_256();\n" \
 "\n" \
@@ -1483,7 +1485,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_256()\n" \
-"void mul256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul256(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_256();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1513,7 +1515,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_512()\n" \
-"void forward_mul512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_512();\n" \
 "	forward_4i(64, &X[i64], 64, &x[k64], r2[sj64], r4[sj64]);\n" \
@@ -1524,7 +1526,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_512()\n" \
-"void sqr512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_512();\n" \
 "\n" \
@@ -1539,7 +1541,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_512()\n" \
-"void mul512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul512(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_512();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1557,7 +1559,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "ATTR_512()\n" \
 "void mul512_xbuf(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS,\n" \
-"	__global const uint64 * restrict const reg_y, const sz_t offset, const sz_t offset_y)\n" \
+"	__global const uint64 * restrict const reg_y, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_512();\n" \
 "	__global const uint64_2 * restrict const y = (__global const uint64_2 *)(&reg_y[offset_y]);\n" \
@@ -1589,7 +1591,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_1024()\n" \
-"void forward_mul1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_1024();\n" \
 "	forward_4i(128, &X[i128], 128, &x[k128], r2[sj128], r4[sj128]);\n" \
@@ -1601,7 +1603,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_1024()\n" \
-"void sqr1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_1024();\n" \
 "\n" \
@@ -1618,7 +1620,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_1024()\n" \
-"void mul1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul1024(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_1024();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1651,7 +1653,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_2048()\n" \
-"void forward_mul2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void forward_mul2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_2048();\n" \
 "	forward_4i(256, &X[i256], 256, &x[k256], r2[sj256], r4[sj256]);\n" \
@@ -1663,7 +1665,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_2048()\n" \
-"void sqr2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset)\n" \
+"void sqr2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset)\n" \
 "{\n" \
 "	DECLARE_VAR_2048();\n" \
 "\n" \
@@ -1680,7 +1682,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "ATTR_2048()\n" \
-"void mul2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const sz_t offset, const sz_t offset_y)\n" \
+"void mul2048(__global uint64 * restrict const reg, __global const uint64 * restrict const root ROOT_EXTRA_ARGS, const reg_off_t offset, const reg_off_t offset_y)\n" \
 "{\n" \
 "	DECLARE_VAR_2048();\n" \
 "	__global uint64_2 * restrict const y = (__global uint64_2 *)(&reg[offset_y]);\n" \
@@ -1704,7 +1706,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_mul_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
-"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const uint32 a, const sz_t offset)\n" \
+"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const uint32 a, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
 "	DECLARE_WEIGHT2();\n" \
@@ -1742,7 +1744,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_mul_p1_copy(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const uint32 a, const sz_t off_src, const sz_t off_dst)\n" \
+"	const uint32 a, const reg_off_t off_src, const reg_off_t off_dst)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const xs = (__global uint64_4 *)(&reg[off_src]);\n" \
 "	__global uint64_4 * restrict const xc = (__global uint64_4 *)(&reg[off_dst]);\n" \
@@ -1782,7 +1784,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_mul2_unit_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off0, const sz_t off1)\n" \
+"	const reg_off_t off0, const reg_off_t off1)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x0 = (__global uint64_4 *)(&reg[off0]);\n" \
 "	__global uint64_4 * restrict const x1 = (__global uint64_4 *)(&reg[off1]);\n" \
@@ -1834,7 +1836,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "void carry_weight_p2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_src, const sz_t off_dst)\n" \
+"	const reg_off_t off_src, const reg_off_t off_dst)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const xs = (__global uint64_4 *)(&reg[off_src]);\n" \
 "	__global uint64_4 * restrict const xc = (__global uint64_4 *)(&reg[off_dst]);\n" \
@@ -1865,7 +1867,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_add_neg_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t offset_y, const sz_t offset_x)\n" \
+"	const reg_off_t offset_y, const reg_off_t offset_x)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);\n" \
 "	__global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
@@ -1902,7 +1904,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_addsub_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_sum, const sz_t off_diff, const sz_t off_a, const sz_t off_b)\n" \
+"	const reg_off_t off_sum, const reg_off_t off_diff, const reg_off_t off_a, const reg_off_t off_b)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const yS = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const yD = (__global uint64_4 *)(&reg[off_diff]);\n" \
@@ -1956,7 +1958,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "void carry_weight_addsub_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_sum, const sz_t off_diff)\n" \
+"	const reg_off_t off_sum, const reg_off_t off_diff)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const xs = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const xd = (__global uint64_4 *)(&reg[off_diff]);\n" \
@@ -2006,7 +2008,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "void carry_weight_p2x2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_sum, const sz_t off_diff)\n" \
+"	const reg_off_t off_sum, const reg_off_t off_diff)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const xs = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const xd = (__global uint64_4 *)(&reg[off_diff]);\n" \
@@ -2046,8 +2048,8 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_addsub_p1_copy(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_sum, const sz_t off_diff, const sz_t off_sum_copy, const sz_t off_diff_copy,\n" \
-"	const sz_t off_a, const sz_t off_b)\n" \
+"	const reg_off_t off_sum, const reg_off_t off_diff, const reg_off_t off_sum_copy, const reg_off_t off_diff_copy,\n" \
+"	const reg_off_t off_a, const reg_off_t off_b)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const yS = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const yD = (__global uint64_4 *)(&reg[off_diff]);\n" \
@@ -2108,7 +2110,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "void carry_weight_addsub_p2_copy(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t off_sum, const sz_t off_diff, const sz_t off_sum_copy, const sz_t off_diff_copy)\n" \
+"	const reg_off_t off_sum, const reg_off_t off_diff, const reg_off_t off_sum_copy, const reg_off_t off_diff_copy)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const xs = (__global uint64_4 *)(&reg[off_sum]);\n" \
 "	__global uint64_4 * restrict const xd = (__global uint64_4 *)(&reg[off_diff]);\n" \
@@ -2169,7 +2171,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_add_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t offset_y, const sz_t offset_x)\n" \
+"	const reg_off_t offset_y, const reg_off_t offset_x)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);\n" \
 "	__global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
@@ -2206,7 +2208,7 @@ static const char * const src_ocl_kernel = \
 "// Carry, weight (pass 2)\n" \
 "__kernel\n" \
 "void carry_weight_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
-"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const sz_t offset)\n" \
+"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
 "	DECLARE_WEIGHT2();\n" \
@@ -2227,7 +2229,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "void carry_weight_sub_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
-"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const sz_t offset)\n" \
+"	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const reg_off_t offset)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
 "	DECLARE_WEIGHT2();\n" \
@@ -2259,7 +2261,7 @@ static const char * const src_ocl_kernel = \
 "__kernel\n" \
 "void carry_weight_sub_p2_phase(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "	__global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"	const sz_t offset, const uint phase)\n" \
+"	const reg_off_t offset, const uint phase)\n" \
 "{\n" \
 "	__global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
 "	DECLARE_WEIGHT2();\n" \
@@ -2309,7 +2311,7 @@ static const char * const src_ocl_kernel = \
 "__attribute__((reqd_work_group_size(CWM_WG_SZ, 1, 1)))\n" \
 "void carry_weight_muladd_p1(__global uint64 * restrict const reg, __global uint64 * restrict const carry,\n" \
 "    __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width,\n" \
-"    const uint32 a, const sz_t offset_y, const sz_t offset_x)\n" \
+"    const uint32 a, const reg_off_t offset_y, const reg_off_t offset_x)\n" \
 "{\n" \
 "    __global uint64_4 * restrict const y = (__global uint64_4 *)(&reg[offset_y]);\n" \
 "    __global const uint64_4 * restrict const x = (__global const uint64_4 *)(&reg[offset_x]);\n" \
@@ -2354,7 +2356,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "void carry_weight_muladd_p2(__global uint64 * restrict const reg, __global const uint64 * restrict const carry,\n" \
-"    __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const sz_t offset)\n" \
+"    __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS, __global const uint_8 * restrict const width, const reg_off_t offset)\n" \
 "{\n" \
 "    __global uint64_4 * restrict const x = (__global uint64_4 *)(&reg[offset]);\n" \
 "    DECLARE_WEIGHT2();\n" \
@@ -2376,7 +2378,7 @@ static const char * const src_ocl_kernel = \
 "// --- misc ---\n" \
 "\n" \
 "__kernel\n" \
-"void copy(__global uint64 * restrict const reg, const sz_t offset_y, const sz_t offset_x)\n" \
+"void copy(__global uint64 * restrict const reg, const reg_off_t offset_y, const reg_off_t offset_x)\n" \
 "{\n" \
 "	const sz_t gid = (sz_t)get_global_id(0);\n" \
 "	reg[offset_y + gid] = reg[offset_x + gid];\n" \
@@ -2384,7 +2386,7 @@ static const char * const src_ocl_kernel = \
 "\n" \
 "__kernel\n" \
 "void subtract(__global uint64 * restrict const reg, __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,\n" \
-"	__global const uint_8 * restrict const width, const sz_t offset, const uint32 a)\n" \
+"	__global const uint_8 * restrict const width, const reg_off_t offset, const uint32 a)\n" \
 "{\n" \
 "	__global uint64 * restrict const x = &reg[offset];\n" \
 "	DECLARE_WEIGHT2();\n" \
@@ -2403,7 +2405,7 @@ static const char * const src_ocl_kernel = \
 "}\n" \
 "__kernel\n" \
 "void subtract_reg(__global uint64 * restrict const reg, __global const uint64 * restrict const weight WEIGHT_EXTRA_ARGS,\n" \
-"	__global const uint_8 * restrict const width, const sz_t offset_y, const sz_t offset_x)\n" \
+"	__global const uint_8 * restrict const width, const reg_off_t offset_y, const reg_off_t offset_x)\n" \
 "{\n" \
 "	__global uint64 * restrict const y = &reg[offset_y];\n" \
 "	__global const uint64 * restrict const x = &reg[offset_x];\n" \
