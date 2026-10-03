@@ -899,7 +899,7 @@ int App::runPrpOrLl() {
                     oss << "\nGenerating PRP proof file..." << std::endl;
                     guiServer_->appendLog(oss.str());
                 }
-                options.proofPower = static_cast<decltype(options.proof)>(proofPower);
+                options.proofPower = static_cast<decltype(options.proofPower)>(proofPower);
                 auto proofFilePath = proofManager.proof(context, *nttEngine, carry,
                                         static_cast<uint32_t>(proofPower),
                                         options.verify);
