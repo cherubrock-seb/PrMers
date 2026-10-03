@@ -46,6 +46,31 @@ void spin() {
 #define CarryShuttleAccess(me,i)        ((me) + (i) * G_W)                      // nVidia likes this unit stride better
 #endif
 
+// In place, the last workgroup (gr == H / WMUL) redoes group 0's lines and overwrites them.  Carries only pass from one group to the
+// next, so nothing orders that write after group 0's read of the same lines: the last group waits on group H / WMUL - 1 only, and every
+// group publishes its carries before waiting for its own.  If group 0 starts late it reads lines that are already overwritten and hands
+// bad carries to group 1.  So group 0 raises a flag once it has read its lines, and the last group waits for that flag (and clears it)
+// before writing.  The flag uses the first ready[] slot past those of the carry hand-off.  Both helpers are no-ops when INPLACE=0.
+#if INPLACE
+#define LINES_READ_FLAG (BIG_HEIGHT / WMUL * (G_W / WAVEFRONT))
+
+void signalLinesRead(P(u32) ready) {
+  bar();     // every work-item of group 0 is done reading
+  if (get_local_id(0) == 0) { AEVUM_READY_STORE(&ready[LINES_READ_FLAG]); }
+}
+
+void waitLinesRead(P(u32) ready) {
+  if (get_local_id(0) == 0) {
+    do { spin(); } while(!AEVUM_READY_LOAD(&ready[LINES_READ_FLAG]));
+    ready[LINES_READ_FLAG] = 0;
+  }
+  bar();
+}
+#else
+void signalLinesRead(P(u32) ready) {}
+void waitLinesRead(P(u32) ready) {}
+#endif
+
 // The last WMUL workgroup's carries have been written to global memory.  Now we shuffle WMUL-1 workgroups carries up using local memory.
 void OVERLOAD shufl_carries_up(local void *lds2, i64 *carry, u32 me, u32 lowMe) {
   // If WMUL is one, there is no shuffling of carries
@@ -266,7 +291,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -361,6 +386,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // fft_WIDTH2 itself knows (via its callnum) to skip the first radix butterfly when FUSE_WEIGHT_BUTTERFLY is set.
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -513,7 +539,7 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -597,6 +623,7 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -757,7 +784,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -840,6 +867,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
   dependentLaunch();   // Next kernel will be fftMiddleInGF31
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -1005,7 +1033,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1089,6 +1117,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
   dependentLaunch();   // Next kernel will be fftMiddleInGF61
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 }
 
@@ -1268,7 +1297,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1360,6 +1389,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(lds, u, smallTrig, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u, out, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -1558,7 +1588,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1645,6 +1675,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -1844,7 +1875,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -1932,6 +1963,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
@@ -2125,7 +2157,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -2215,6 +2247,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(lds31, u31, smallTrig31, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(u31, out31, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInGF31
@@ -2438,7 +2471,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Group zero will be redone when gr == H / WMUL
-  if (gr == 0) { return; }
+  if (gr == 0) { signalLinesRead(ready); return; }
 
   // Do some work while our carries may not be ready
 #if HAS_ASM
@@ -2533,6 +2566,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
+  if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
