@@ -11,6 +11,7 @@
 #endif
 #include <cstdint>
 #include <filesystem>
+#include <stdexcept>
 #include "core/ProofSet.hpp"
 
 // Forward declarations
@@ -24,6 +25,14 @@ namespace math {
 }
 
 namespace core {
+
+// Thrown when a generated proof fails its own verification. The proof file is
+// not kept: callers must not retry at a lower power or fall back to an
+// unverified CPU proof, and must not report a proof for the test.
+class ProofVerificationError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
 
 class ProofManager {
 public:
