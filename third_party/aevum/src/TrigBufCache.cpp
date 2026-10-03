@@ -505,6 +505,17 @@ vector<float2> genSmallTrigComboFP32(Args *args, u32 width, u32 middle, u32 size
   return tab;
 }
 
+// Good-Thomas plans: the FP32 middle kernels apply only the binary
+// WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle (pfaMiddleTwiddle in fft-middle.cl),
+// which reads w_WIDTH^k for k < WIDTH followed by w_(WIDTH*SMALL_HEIGHT)^k for
+// k < SMALL_HEIGHT.
+vector<float2> genMiddleTrigFP32Pfa(u32 smallH, u32 width) {
+  vector<float2> tab;
+  for (u32 k = 0; k < width; ++k)  { tab.push_back(root1FP32(width, k)); }
+  for (u32 k = 0; k < smallH; ++k) { tab.push_back(root1FP32(width * smallH, k)); }
+  return tab;
+}
+
 vector<float2> genMiddleTrigFP32(u32 smallH, u32 middle, u32 width) {
   vector<float2> tab;
   if (middle == 1) {
@@ -936,7 +947,8 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.FFT_FP32) {
-    vector<float2> tab1 = genMiddleTrigFP32(smallH, middle, width);
+    vector<float2> tab1 = fft.isPfa() ? genMiddleTrigFP32Pfa(smallH, width)
+                                      : genMiddleTrigFP32(smallH, middle, width);
     tab1.resize(MIDDLETRIG_FP32_SIZE(width, middle, smallH));
     // Append tab1 to tab
     tabsize = tab.size();
@@ -945,7 +957,11 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.NTT_GF31) {
-    vector<uint2> tab2 = fft.isPfa() ? vector<uint2>(MIDDLETRIG_GF31_SIZE(width, middle, smallH), uint2{1u, 0u}) : genMiddleTrigGF31(smallH, middle, width);
+    // Good-Thomas plans have no middle-vs-width/height twiddles, but the binary
+    // WIDTH x SMALL_HEIGHT axis still needs its own Cooley-Tukey twiddle.  A
+    // MIDDLE=1 table holds exactly the WIDTH and WIDTH*SMALL_HEIGHT roots that
+    // pfaMiddleTwiddle reads (see fft-middle.cl).
+    vector<uint2> tab2 = genMiddleTrigGF31(smallH, fft.isPfa() ? 1u : middle, width);
     tab2.resize(MIDDLETRIG_GF31_SIZE(width, middle, smallH));
     // Append tab2 to tab
     tabsize = tab.size();
@@ -954,7 +970,7 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.NTT_GF61) {
-    vector<ulong2> tab3 = fft.isPfa() ? vector<ulong2>(MIDDLETRIG_GF61_SIZE(width, middle, smallH), ulong2{1u, 0u}) : genMiddleTrigGF61(smallH, middle, width);
+    vector<ulong2> tab3 = genMiddleTrigGF61(smallH, fft.isPfa() ? 1u : middle, width);
     tab3.resize(MIDDLETRIG_GF61_SIZE(width, middle, smallH));
     // Append tab3 to tab
     tabsize = tab.size();
