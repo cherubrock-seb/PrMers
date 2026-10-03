@@ -42,8 +42,9 @@ class WorktodoParser {
 public:
     explicit WorktodoParser(const std::string& filename);
     std::optional<WorktodoEntry> parse();
-    bool removeFirstProcessed();  // legacy: removes the first actionable entry and archives it
-    bool removeProcessedLine(const std::string& rawLine); // exact-line removal for native queues
+    // Remove the line that was actually run (WorktodoEntry::rawLine) and archive it to worktodo_save.txt.
+    // parse() skips lines it cannot run, so "the first actionable line" is not necessarily that line.
+    bool removeProcessedLine(const std::string& rawLine);
 
 private:
     std::string filename_;

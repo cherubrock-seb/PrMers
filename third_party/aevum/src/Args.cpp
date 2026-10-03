@@ -171,8 +171,8 @@ named "config.txt" in the Aevum run directory.
 
 -use <define>      : comma separated list of defines for configuring the Aevum kernels, such as:
   -use FAST_BARRIER: on AMD Radeon VII and older AMD GPUs, use a faster barrier().  This option
-                     may not work on Nvidia GPUs or on RDNA AMD GPUs where it produces errors
-                     (which are nevertheless detected).
+                     may not work on Nvidia GPUs.  It is ignored on RDNA and on MI200 and later
+                     AMD GPUs, where the faster barrier gives wrong results.
   -use NO_ASM      : do not use __asm() blocks (inline assembly)
   -use STATS=<val> : enable carry statistics collection & logging, for the kernel according to <val>:
                      1 = CarryFused

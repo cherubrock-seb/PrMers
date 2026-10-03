@@ -22,6 +22,7 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <iomanip>
 #include <iostream>
 #include <fstream>
+#include <stdexcept>
 #include <vector>
 #include <map>
 #include <algorithm>
@@ -203,8 +204,24 @@ public:
 	}
 
 public:
-	cl_platform_id get_platform(const size_t d) const { return _devices[d].platform_id; }
-	cl_device_id get_device(const size_t d) const { return _devices[d].device_id; }
+	// An out-of-range index (for example "-d 7" on a machine with one device)
+	// used to read past the end of the vector and crash inside the OpenCL
+	// driver. Report it instead.
+	const device_desc & checked(const size_t d) const
+	{
+		if (d >= _devices.size())
+		{
+			std::ostringstream ss;
+			ss << "Invalid OpenCL device index " << d << ": ";
+			if (_devices.empty()) ss << "no OpenCL devices found.";
+			else ss << _devices.size() << " device(s) available, valid indices are 0.." << (_devices.size() - 1) << ".";
+			throw std::runtime_error(ss.str());
+		}
+		return _devices[d];
+	}
+
+	cl_platform_id get_platform(const size_t d) const { return checked(d).platform_id; }
+	cl_device_id get_device(const size_t d) const { return checked(d).device_id; }
 };
 
 class device : ocl_object

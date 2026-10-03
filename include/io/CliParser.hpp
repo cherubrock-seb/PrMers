@@ -156,7 +156,7 @@ struct CliOptions {
     bool gui = false;
     int http_port = 3131;
     std::string http_host = "localhost";
-    bool ipv4 = true;
+    bool ipv4 = false;
     uint64_t max_e_bits = 268'435'456ULL;
     uint64_t curves_tested_for_found = 0;
     int invarianterror = 0;

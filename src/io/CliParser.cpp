@@ -131,12 +131,12 @@ void printUsage(const char* progName) {
     std::cout << "  -montgomery          : (Optional) compute in Montgomery and use Montgomery (compute done in montgomery)" << std::endl;
     std::cout << "  -edwards             : (Optional) compute in Montgomery and use (twisted) Edwards curve converted to Montgomery (compute done in Montgomery)" << std::endl;
     std::cout << "  -ced                 : (Optional) compute in Twisted Edwards (by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
-    std::cout << "  -cmont               : (Optional) compute in Montgomery (Twisted Edwards by default) and use (twisted) Edwards curves (notorsion twisted or torsion 2x8 possible no twist a=1) " << std::endl;
+    std::cout << "  -cmont               : (Optional) use the Montgomery-curve ECM path instead of the Twisted Edwards one; curves: Suyama (default, -notorsion; stage 1 in twisted Edwards coordinates, stage 2 x-only Montgomery), or -torsion8 / -torsion16 families mapped from twisted Edwards (x-only Montgomery ladder in both stages, as for -edwards -notorsion)" << std::endl;
     std::cout << "  -seed                : (Optional) force a curve seed" << std::endl;
     std::cout << "  -sigma               : (Optional) force a curve sigma in Montgomery (notorsion mode)" << std::endl;
-    std::cout << "  -torsion8            : (Optional) use torsion-8" << std::endl;
-    std::cout << "  -torsion16           : (Optional) use torsion-16" << std::endl;
-    std::cout << "  -notorsion           : (Optional) use no torsion instead of default torsion-16" << std::endl;
+    std::cout << "  -torsion8            : (Optional, -cmont) Z/8 torsion: a=-1 twisted Edwards family of Bernstein-Birkner-Lange (Starfish on strike, Thm 4.4) mapped to Montgomery; with -ced no torsion family is used" << std::endl;
+    std::cout << "  -torsion16           : (Optional) Z/2xZ/8 torsion: a=1 Edwards family (Bernstein-Birkner-Lange-Peters, Thms 6.6/6.9) with an elliptic-curve non-torsion point; with -cmont mapped to Montgomery" << std::endl;
+    std::cout << "  -notorsion           : (Optional) no torsion family (default): Suyama sigma curves (Montgomery with -cmont, twisted Edwards form with -ced)" << std::endl;
     std::cout << "  -iv163               : (Optional) use family_iv_163 curves (Gélin-Kleinjung-Lenstra) gives 16/3 average v2 (around order 32 point)" << std::endl;
 
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
@@ -168,7 +168,7 @@ void printUsage(const char* progName) {
     std::cout << "  -gui                  : (Optional) Enable the embedded web GUI accessible via your browser" << std::endl;
     std::cout << "  -http <port>          : (Optional) Specify the HTTP port for the GUI server (default: 3131)" << std::endl;
     std::cout << "  -host <ip|0.0.0.0|localhost> : (Optional) Specify the HTTP host for the GUI server (default: 127.0.0.1)" << std::endl;
-    //std::cout << "  -ipv4                 : (Optional) Set the HTTP host to the first IPv4 interface" << std::endl;
+    std::cout << "  -ipv4                 : (Optional) Bind the GUI server to the first non-loopback IPv4 interface (reachable from your network)" << std::endl;
 
     std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 -> 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
     std::cout << "  -memtest              : GPU Memory & Stability test (OpenCL)" << std::endl;
