@@ -764,29 +764,59 @@ void OVERLOAD write(u32 WG, u32 N, GF61 *u, global GF61 *out, u32 base) {
 }
 #endif
 
-// On "classic" AMD GCN GPUs such as Radeon VII, the wavefront size was always 64. On RDNA GPUs the wavefront can
-// be configured to be either 64 or 32. We use the FAST_BARRIER define as an indicator for GCN GPUs.
-// On Nvidia GPUs the wavefront size is 32.
+// On "classic" AMD GCN GPUs such as Radeon VII, the wavefront size is always 64. On RDNA GPUs the wavefront can
+// be configured to be either 64 or 32 (ROCm OpenCL uses 32). On AMD this comes from the host's query of
+// CL_DEVICE_WAVEFRONT_WIDTH_AMD (Gpu.cpp) rather than being guessed here -- see the FAST_BARRIER comment below
+// for why a guess based on compiler-predefined macros is not used. On Nvidia GPUs the wavefront size is 32.
+// This is a fallback for whenever the host did not provide a value.
 #if !WAVEFRONT
-#if FAST_BARRIER && AMDGPU
+#if AMDGPU
 #define WAVEFRONT 64
 #else
 #define WAVEFRONT 32
 #endif
 #endif
 
-void OVERLOAD bar(void) {
-  // barrier(CLK_LOCAL_MEM_FENCE) is correct, but it turns out that on some GPUs
-  // (in particular on Radeon VII and Radeon PRO VII) barrier(0) works as well and is faster.
-  // So allow selecting the faster path when it works with -use FAST_BARRIER
-#if FAST_BARRIER
-  barrier(0);
-#else
-  barrier(CLK_LOCAL_MEM_FENCE);
+#ifndef AMD_BARRIER_NO_WAIT
+#define AMD_BARRIER_NO_WAIT 0
 #endif
+
+// FAST_BARRIER replaces barrier(CLK_LOCAL_MEM_FENCE) with barrier(0), a bare s_barrier on AMD.  That is only safe where the
+// compiler puts an "s_waitcnt lgkmcnt(0)" (wait for outstanding LDS accesses) in front of every s_barrier by itself: GCN up
+// to gfx908/gfx90c, running in their native 64-wide wavefront.  RDNA parts run wave32 under ROCm's OpenCL compiler (even
+// though the hardware supports wave64 too) -- caught here by WAVEFRONT != 64.  gfx90a and gfx94x/gfx95x (CDNA2/CDNA3) are
+// *also* natively wave64 but have the same "back-off" barrier that does not wait as RDNA, so WAVEFRONT alone cannot tell
+// them apart from gfx906 -- the host passes AMD_BARRIER_NO_WAIT=1 there instead, from a device-name check (Gpu.cpp).
+// Do not use compiler-predefined per-chip macros (defined(__gfx906__) and friends) for this: they are not defined on at
+// least one ROCm version's actual OpenCL compile path (comgr's JIT), which silently forced FAST_BARRIER off on every
+// AMD GPU including gfx906.
+#ifndef FAST_BARRIER
+#define FAST_BARRIER 0      // Default to the safe case, FAST_BARRIER is risky!
+#endif
+#if FAST_BARRIER && AMDGPU && (WAVEFRONT != 64 || AMD_BARRIER_NO_WAIT)
+#undef FAST_BARRIER
+#define FAST_BARRIER 0
+#endif
+
+// Create a barrier across all threads.  Primarily used to coordinate access to local memory.
+// A local memory fence is optional.  This is a DANGEROUS practice!!
+// On Radeon VII and Radeon PRO VII barrier with no local memory fence works (in most cases -- see barFence routine) and is much faster.
+// On nVidia hardware, a barrier instruction automatically creates a local memory fence.
+// Hardware from other vendors and other AMD GPUs has not been thoroughly researched.  The FAST_BARRIER option allows selecting the faster path when it works.
+void OVERLOAD bar(void) {
+  barrier(FAST_BARRIER ? 0 : CLK_LOCAL_MEM_FENCE);
 }
 
+// Create a barrier across a subset of threads OR across all threads if that is faster.
+// Again, the local memory fence is optional controlled by the FAST_BARRIER setting.
 void OVERLOAD bar(const u32 WG) {
+#if AMDGPU
+  // A group no larger than a wavefront skips the barrier, but unless FAST_BARRIER was asked for, keep the LDS fence.
+  if (WG <= WAVEFRONT) {
+    if (!FAST_BARRIER) mem_fence(CLK_LOCAL_MEM_FENCE);
+    return;
+  }
+#endif
   if (WG > WAVEFRONT) {
 #if ENABLE_BARSYNC && HAS_PTX >= 200         // bar.sync with thread count requires sm_20 support or higher.  Slower on TitanV, need to try on later nVidia GPUs.
     __asm("bar.sync %0, %1;" : : "r"(get_local_id(0) / WG + 1), "n"(WG));
@@ -794,6 +824,25 @@ void OVERLOAD bar(const u32 WG) {
     bar();
 #endif
   }
+}
+
+// Create a barrier across all threads.  Like bar(), primarily used to coordinate access to local memory.
+// However a local memory fence is NOT optional, guaranteeing safe behavior.
+// On Radeon VII and Radeon PRO VII it was discovered that 4 byte shufls required a local memory fence.
+void OVERLOAD barFence(void) {
+  barrier(CLK_LOCAL_MEM_FENCE);
+}
+
+// Like bar(WG), except a local memory fence is NOT optional, guaranteeing safe behavior.
+void OVERLOAD barFence(const u32 WG) {
+#if AMDGPU
+  // Catch the one case where regular bar(WG) can skip the local memory fence
+  if (WG <= WAVEFRONT) {
+    mem_fence(CLK_LOCAL_MEM_FENCE);
+    return;
+  }
+#endif
+  bar(WG);
 }
 
 // A half-barrier is only needed when half-a-workgroup needs a barrier.

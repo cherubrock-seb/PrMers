@@ -125,11 +125,14 @@ int App::runLlSafeMarinDoubling()
     const std::string ckpt_file = ck.str();
     const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et)->int{
+    // Checkpoint v3 stores the iteration of the last verified block boundary
+    // (itersave); v2 did not, so it is derived from the block size later.
+    constexpr uint32_t kItersaveUnknown = 0xFFFFFFFFu;
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& isv, double& et)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 2) return -2;
+        if (version != 2 && version != 3) return -2;
         uint32_t rp = 0, saved_backend = 0;
         if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
@@ -140,6 +143,11 @@ int App::runLlSafeMarinDoubling()
             return -3;
         }
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
+        isv = kItersaveUnknown;
+        if (version >= 3) {
+            if (!f.read(reinterpret_cast<char*>(&isv), sizeof(isv))) return -2;
+            if (isv > ri) return -2;
+        }
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
         const size_t cksz = eng->get_checkpoint_size();
         std::vector<char> data(cksz);
@@ -149,15 +157,16 @@ int App::runLlSafeMarinDoubling()
         return 0;
     };
 
-    auto save_ckpt = [&](uint32_t i, double et){
+    auto save_ckpt = [&](uint32_t i, uint32_t isv, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = 2;
+            int version = 3;
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
             if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
             if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
+            if (!f.write(reinterpret_cast<const char*>(&isv), sizeof(isv))) return;
             if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -173,9 +182,9 @@ int App::runLlSafeMarinDoubling()
 
     const size_t RV = 0, RU = 1, RVC = 2, RUC = 3, RTMP = 4, RVCHK = 5, RUCHK = 6, RSCR [[maybe_unused]] = 7;
 
-    uint32_t ri = 0; double restored_time = 0.0;
-    int r = read_ckpt(ckpt_file, ri, restored_time);
-    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time);
+    uint32_t ri = 0, ri_itersave = kItersaveUnknown; double restored_time = 0.0;
+    int r = read_ckpt(ckpt_file, ri, ri_itersave, restored_time);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, ri_itersave, restored_time);
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
         if (guiServer_) {
@@ -190,8 +199,13 @@ int App::runLlSafeMarinDoubling()
         eng->set(RU, 2);
     }
 
-    eng->copy(RVC, RV);
-    eng->copy(RUC, RU);
+    // On a fresh start RVC/RUC (the last verified state) are the initial values.
+    // On resume they were restored from the checkpoint together with RV/RU and
+    // must be kept: they hold the state at the last verified block boundary.
+    if (r != 0) {
+        eng->copy(RVC, RV);
+        eng->copy(RUC, RU);
+    }
     eng->copy(RVCHK, RVC);
     eng->copy(RUCHK, RUC);
 
@@ -218,12 +232,16 @@ int App::runLlSafeMarinDoubling()
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, "", guiServer_ ? guiServer_.get() : nullptr);
 
     bool errordone = false;
-    uint64_t itersave = (ri / B) * B;
+    uint64_t itersave = 0;
+    if (r == 0) {
+        itersave = (ri_itersave != kItersaveUnknown) ? (uint64_t)ri_itersave : (ri / B) * B;
+        if (itersave > ri) itersave = 0;
+    }
 
     for (uint64_t iter = resumeIter; iter < totalIters; ++iter) {
         if (interrupted) {
             const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-            save_ckpt((uint32_t)iter, elapsed_time);
+            save_ckpt((uint32_t)iter, (uint32_t)itersave, elapsed_time);
             delete eng;
             std::cout << "\nInterrupted by user, state saved at iteration " << iter << std::endl;
             if (guiServer_) {
@@ -238,7 +256,7 @@ int App::runLlSafeMarinDoubling()
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
             const double elapsed_time = std::chrono::duration<double>(now0 - start_clock).count() + restored_time;
             std::cout << "\nBackup point done at iter=" << iter << " start...." << std::endl;
-            save_ckpt((uint32_t)iter, elapsed_time);
+            save_ckpt((uint32_t)iter, (uint32_t)itersave, elapsed_time);
             lastBackup = now0;
             std::cout << "\nBackup point done at iter=" << iter << " done...." << std::endl;   
             spinner.displayBackupInfo(iter + 1, totalIters, timer.elapsed(), "");
@@ -271,7 +289,7 @@ int App::runLlSafeMarinDoubling()
 
         bool boundary = (((iter + 1) % B) == 0) || (iter + 1 == totalIters);
         if (boundary) {
-            uint64_t blk = ((iter + 1) % B == 0) ? B : ((iter + 1) - itersave);
+            uint64_t blk = (iter + 1) - itersave;
             eng->copy(RVCHK, RVC);
             eng->copy(RUCHK, RUC);
             for (uint64_t z = 0; z < blk; ++z) {
@@ -386,7 +404,21 @@ int App::runLlSafeMarinDoubling()
         }
     }*/
 
-    delete_checkpoints(options.exponent, options.wagstaff, true, true);
+io::WorktodoManager wm(options);
+const bool individual_saved = wm.saveIndividualJson(options.exponent, "llsafe2", json);
+const bool results_saved = wm.appendToResultsTxt(json);
+
+// Delete recovery state only after both result outputs are durable.
+// On any persistence failure keep the checkpoint so the completed work
+// can be recovered and saved again rather than silently lost.
+if (individual_saved && results_saved) {
+    std::remove(ckpt_file.c_str());
+    std::remove((ckpt_file + ".old").c_str());
+    std::remove((ckpt_file + ".new").c_str());
+} else {
+    std::cerr << "[LL-SAFE2] Result persistence failed; keeping checkpoint for recovery.\n";
+}
+
     delete eng;
     return is_prime ? 0 : 1;
 }

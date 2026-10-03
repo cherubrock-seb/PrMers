@@ -13,10 +13,16 @@ if [[ "$OS" == Darwin ]]; then
   "$CXX_BIN" -O2 -std=c++20 -Wall -Wextra \
     tests/native_pfa_engine_compare.cpp \
     -o build-tests/native-pfa-engine-compare
+  "$CXX_BIN" -O2 -std=c++20 -Wall -Wextra \
+    tests/native_pfa_dense_compare.cpp \
+    -o build-tests/native-pfa-dense-compare
 else
   "$CXX_BIN" -O2 -std=c++20 -Wall -Wextra \
     tests/native_pfa_engine_compare.cpp -ldl \
     -o build-tests/native-pfa-engine-compare
+  "$CXX_BIN" -O2 -std=c++20 -Wall -Wextra \
+    tests/native_pfa_dense_compare.cpp -ldl \
+    -o build-tests/native-pfa-dense-compare
 fi
 python3 tools/native_pfa_reference_test.py
 python3 tools/native_pfa_source_audit.py
