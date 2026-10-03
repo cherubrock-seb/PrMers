@@ -141,7 +141,8 @@ cl_device_id getDevice(u32 argsDevId);
 // Returns the 3 intervals: queued, submit, run
 std::array<i64, 3> getEventNanos(cl_event event);
 
-u32 getEventInfo(cl_event event);
+// The command execution status: CL_QUEUED..CL_COMPLETE (non-negative), or the negative error code of a command that terminated abnormally.
+int getEventInfo(cl_event event);
 
 cl_context getQueueContext(cl_command_queue q);
 
