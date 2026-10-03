@@ -256,3 +256,7 @@ native-pfa-gpu-test: native-pfa-build
 .PHONY: test-llsafe2-resume
 test-llsafe2-resume: all
 	bash tests/run_llsafe2_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-llsafe2-result
+test-llsafe2-result: all
+	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}
