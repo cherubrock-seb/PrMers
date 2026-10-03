@@ -171,6 +171,7 @@ test-gm:
 	python3 tests/gaussian_pair_full_pipeline_test.py
 	python3 tests/gaussian_pair_backend_policy_test.py
 	python3 tests/gaussian_pair_tf_math_test.py
+	python3 tests/gaussian_tf_checkpoint_factors_test.py
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
 
