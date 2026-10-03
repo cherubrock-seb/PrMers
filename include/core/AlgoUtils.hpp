@@ -18,6 +18,7 @@
 #include "marin/engine.h"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
+#include "util/Redact.hpp"
 #include "core/Version.hpp"
 #include <sys/stat.h>
 #include <cstdio>
@@ -94,10 +95,11 @@ inline static std::vector<std::string> parseConfigFile(const std::string& config
     if (!args.empty()) {
         std::cout << "Options from config file:" << std::endl;
         if (auto g = ui::WebGuiServer::instance()) g->appendLog("Options from config file:");
-        for (const auto& arg : args) std::cout << "  " << arg << std::endl;
+        const auto shown = util::redactSecretArgs(args);
+        for (const auto& arg : shown) std::cout << "  " << arg << std::endl;
         if (auto g = ui::WebGuiServer::instance()) {
             std::ostringstream oss;
-            for (const auto& arg : args) oss << "  " << arg << std::endl;
+            for (const auto& arg : shown) oss << "  " << arg << std::endl;
             g->appendLog(oss.str());
         }
     } else {
@@ -146,10 +148,11 @@ inline void restart_self(int argc, char* argv[]) {
 #else
     std::cout << "\nRestarting program without exponent:\n";
     if (auto g = ui::WebGuiServer::instance()) g->appendLog("\nRestarting program without exponent:\n");
-    for (const auto& arg : args) std::cout << "   " << arg << std::endl;
+    const auto shown = util::redactSecretArgs(args);
+    for (const auto& arg : shown) std::cout << "   " << arg << std::endl;
     if (auto g = ui::WebGuiServer::instance()) {
         std::ostringstream oss;
-        for (const auto& arg : args) oss << "  " << arg << std::endl;
+        for (const auto& arg : shown) oss << "  " << arg << std::endl;
         g->appendLog(oss.str());
     }
     std::vector<char*> exec_args;
