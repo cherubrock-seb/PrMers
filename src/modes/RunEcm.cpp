@@ -1699,7 +1699,7 @@ int App::runECMMarin()
                 }
 
                 if (duration_cast<seconds>(now - last_save).count() >= backup_period) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); last_save = now; }
-                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits<<""; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } curves_tested_for_found=(uint32_t)(c); options.curves_tested_for_found=(uint32_t)(c); write_result(); publish_json(); delete eng; return 0; }
+                if (interrupted) { double elapsed = duration<double>(now - t0).count() + saved_et; save_ckpt((uint32_t)(i + 1), elapsed); std::cout<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits<<""; if (guiServer_) { std::ostringstream oss; oss<<"[ECM] Interrupted at curve "<<(c+1)<<", iter "<<(i+1)<<"/"<<total_bits; guiServer_->appendLog(oss.str()); } std::cout<<" - checkpoint saved, exiting without publishing a result"<<std::endl; delete eng; return 0; }
             }
             std::cout<<std::endl;
             mpz_class gg;
