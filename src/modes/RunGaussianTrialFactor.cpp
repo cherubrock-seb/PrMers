@@ -414,12 +414,18 @@ fs::path resultPath(const TfRequest& request) {
     return request.outputDirectory / name.str();
 }
 
-void saveCheckpoint(const fs::path& path, std::uint64_t nextK) {
+// Checkpoint format: the next k on the first line, then one "factor family-bit"
+// line per factor found so far.  Older checkpoints hold only the first line.
+void saveCheckpoint(const fs::path& path, std::uint64_t nextK,
+                    const std::vector<FoundFactor>& found) {
     const fs::path temporary = path.string() + ".tmp";
     {
         std::ofstream output(temporary, std::ios::trunc);
         if (!output) throw std::runtime_error("Unable to write TF checkpoint");
         output << nextK << '\n';
+        for (const FoundFactor& factor : found) {
+            output << factor.factor << ' ' << factor.familyBits << '\n';
+        }
     }
 
     std::error_code error;
@@ -439,11 +445,22 @@ void saveCheckpoint(const fs::path& path, std::uint64_t nextK) {
     }
 }
 
-std::optional<std::uint64_t> loadCheckpoint(const fs::path& path) {
+struct TfCheckpoint {
+    std::uint64_t nextK = 0;
+    std::vector<FoundFactor> found;
+};
+
+std::optional<TfCheckpoint> loadCheckpoint(const fs::path& path) {
     std::ifstream input(path);
-    std::uint64_t value = 0;
-    if (input >> value) return value;
-    return std::nullopt;
+    TfCheckpoint checkpoint;
+    if (!(input >> checkpoint.nextK)) return std::nullopt;
+    std::uint64_t factor = 0;
+    std::uint32_t familyBits = 0;
+    while (input >> factor >> familyBits) {
+        if (factor == 0 || (familyBits != FAMILY_GM && familyBits != FAMILY_GQ)) continue;
+        checkpoint.found.push_back({factor, familyBits});
+    }
+    return checkpoint;
 }
 
 bool hasFamily(const std::vector<FoundFactor>& factors, std::uint32_t familyBit) {
@@ -541,9 +558,13 @@ int runTrialFactor(const TfRequest& request) {
 
     const fs::path checkpoint = checkpointPath(request);
     std::uint64_t nextK = firstK;
-    if (const auto saved = loadCheckpoint(checkpoint); saved && *saved >= firstK && *saved <= lastK + 1ULL) {
-        nextK = *saved;
-        std::cout << "Resuming Gaussian TF at k=" << nextK << '\n';
+    std::vector<FoundFactor> found;
+    if (const auto saved = loadCheckpoint(checkpoint);
+        saved && saved->nextK >= firstK && saved->nextK <= lastK + 1ULL) {
+        nextK = saved->nextK;
+        found = saved->found;
+        std::cout << "Resuming Gaussian TF at k=" << nextK << " with " << found.size()
+                  << " factor(s) already found\n";
     }
 
     prmers::ocl::Context context(request.device, 0, false, false);
@@ -571,7 +592,6 @@ int runTrialFactor(const TfRequest& request) {
 
     const std::string gpuName = deviceName(context.getDevice());
     const auto primes = smallPrimes(request.sievePrime);
-    std::vector<FoundFactor> found;
     std::uint64_t testedCandidates = 0;
     const auto started = std::chrono::steady_clock::now();
 
@@ -656,7 +676,7 @@ int runTrialFactor(const TfRequest& request) {
         }
 
         nextK = chunkEnd + 1ULL;
-        saveCheckpoint(checkpoint, nextK);
+        saveCheckpoint(checkpoint, nextK, found);
         const long double completed = static_cast<long double>(nextK - firstK);
         const long double total = static_cast<long double>(lastK - firstK + 1ULL);
         std::cout << "  progress       : " << std::fixed << std::setprecision(2)
