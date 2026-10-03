@@ -38,7 +38,7 @@ void OVERLOAD fft8(T2 *u) {
 void OVERLOAD fft8Core_skip1(T2 *u) {
   u[5] = mul_t8_delayed(u[5]);
   u[6] = mul_t4(u[6]);
-  u[7] = mul_t8_delayed(u[7]);
+  u[7] = mul_3t8_delayed(u[7]);                                 // Must match fft8Core: this fft4CoreSpecial does not absorb the factor of i
   fft4Core(u);
   fft4CoreSpecial(u + 4);
 }
