@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -157,6 +157,12 @@ test-proof-power:
 
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
+
+test-marin-invalid-device:
+	mkdir -p tests/build-marin-invalid-device
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
+	tests/build-marin-invalid-device/marin-invalid-device-test
+	rm -rf tests/build-marin-invalid-device
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
