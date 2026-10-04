@@ -1165,7 +1165,7 @@ args_.flags["MULTI_Q"] = "1";
         const double threshold = positiveEnvDouble("AEVUM_AUTOTUNE_MIN_GAIN", 1.04, 1.01, 1.20);
         auto candidates = autotuneCandidates(args_, exponent_, workload_, native_fft, candidate_cap);
         size_t strategic_candidate_count = 0;
-        if (exponent_ >= 198000000u && exponent_ <= 230000000u) {
+        if (workload_ == aevum_autotune::Workload::Prp && exponent_ >= 198000000u && exponent_ <= 230000000u) {
           const char* strategic_specs[] = {
               "1:1K:8:512:202",
               "1:1K:8:512:101",
