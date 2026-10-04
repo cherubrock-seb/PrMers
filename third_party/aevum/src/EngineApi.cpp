@@ -1163,7 +1163,32 @@ args_.flags["MULTI_Q"] = "1";
         const unsigned candidate_cap = boundedEnvUnsigned("AEVUM_AUTOTUNE_MAX_CANDIDATES", 5, 2, 10);
         const unsigned budget_ms = boundedEnvUnsigned("AEVUM_AUTOTUNE_BUDGET_MS", 7000, 1000, 30000);
         const double threshold = positiveEnvDouble("AEVUM_AUTOTUNE_MIN_GAIN", 1.04, 1.01, 1.20);
-        const auto candidates = autotuneCandidates(args_, exponent_, workload_, native_fft, candidate_cap);
+        auto candidates = autotuneCandidates(args_, exponent_, workload_, native_fft, candidate_cap);
+        size_t strategic_candidate_count = 0;
+        if (workload_ == aevum_autotune::Workload::Prp && exponent_ >= 198000000u && exponent_ <= 230000000u) {
+          const char* strategic_specs[] = {
+              "1:1K:8:512:202",
+              "1:1K:8:512:101",
+              "1:512:16:512:202",
+          };
+          for (const char* strategic_spec : strategic_specs) {
+            size_t found = candidates.size();
+            for (size_t i = strategic_candidate_count; i < candidates.size(); ++i) {
+              if (candidates[i] == strategic_spec) {
+                found = i;
+                break;
+              }
+            }
+            if (found < candidates.size()) {
+              const std::string promoted = candidates[found];
+              candidates.erase(candidates.begin() + found);
+              candidates.insert(candidates.begin() + strategic_candidate_count, promoted);
+            } else {
+              candidates.insert(candidates.begin() + strategic_candidate_count, strategic_spec);
+            }
+            ++strategic_candidate_count;
+          }
+        }
         double best_speedup = 1.0;
         std::string best_spec = native_fft.spec();
         unsigned tested = 0;
@@ -1175,10 +1200,12 @@ args_.flags["MULTI_Q"] = "1";
               aevum_autotune::workloadClass(workload_, register_count_).c_str(),
               band, band + 9999999u, native_fft.spec().c_str(), candidate_cap, budget_ms);
         }
-        for (const std::string& candidate_spec : candidates) {
+        for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+          const std::string& candidate_spec = candidates[candidate_index];
           const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now() - tune_start).count();
-          if (elapsed >= budget_ms || tested >= candidate_cap) break;
+          const bool strategic_seed_pending = candidate_index < strategic_candidate_count;
+          if (!strategic_seed_pending && (elapsed >= budget_ms || tested >= candidate_cap)) break;
           const auto candidate_fft = admissiblePlan(args_, exponent_, candidate_spec);
           if (!candidate_fft) continue;
           ++tested;
