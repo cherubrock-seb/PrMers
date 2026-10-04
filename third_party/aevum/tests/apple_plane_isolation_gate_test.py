@@ -15,5 +15,5 @@ for text in (fft, api):
     assert '!supported_aevum_type && !apple_diagnostic_plane' in text
 
 assert 'Apple Aevum plane-isolation diagnostic' in api
-assert 'FFT type 4 (power-of-two or explicit PFA9)' in fft
+assert 'fft.shape.fft_type == FFT64' in fft
 print('Apple plane-isolation compile gate and FFT323161 audit passed')
