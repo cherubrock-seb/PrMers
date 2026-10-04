@@ -1,5 +1,6 @@
 // Copyright (C) Mihai Preda and George Woltman
 
+#define AEVUM_GF61_CMUL_ALT 1
 #include "base.cl"
 #include "fft-middle.cl"
 #include "middle.cl"
