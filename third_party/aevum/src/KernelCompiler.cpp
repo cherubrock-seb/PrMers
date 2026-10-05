@@ -108,9 +108,9 @@ Program KernelCompiler::compile(const string& fileName, const string& extraArgs)
                              clSources.size(), (const cl_program*) (clSources.data()), getClFileNames().data(),
                              nullptr, nullptr);
 #else
-  // Skip first file (opencl_compat.cuh) if this is a standard openCL application rather than a CUDA translation
+  // Native OpenCL bundle begins with base.cl; pass every bundled header with its matching name.
   int err = clCompileProgram(p1.get(), 1, &deviceId, args.c_str(),
-                             clSources.size()-1, (const cl_program*) (clSources.data()+1), getClFileNames().data()+1,
+                             clSources.size(), (const cl_program*) (clSources.data()), getClFileNames().data(),
                              nullptr, nullptr);
 #endif
   if (string mes = getBuildLog(p1.get(), deviceId); !mes.empty()) { log("%s\n", mes.c_str()); }

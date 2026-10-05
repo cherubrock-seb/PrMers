@@ -107,7 +107,7 @@ public:
   // bound.  The full FP32 plane is then mathematically redundant.
   bool adaptive_type4_request = false;
   bool adaptive_type4_elided = false;
-  bool isPfa() const { return pfa_radix == 3 || pfa_radix == 9; }
+  bool isPfa() const { return pfa_radix == 3 || pfa_radix == 7 || pfa_radix == 9; }
 
   explicit FFTConfig(const string& spec);
   FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry);

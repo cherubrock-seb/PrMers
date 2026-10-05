@@ -252,6 +252,23 @@ constexpr bool isInList(const string& s, initializer_list<string> list) {
   return false;
 }
 
+// Correctness-first host derivation for the radix-7 base-field roots used by
+// the PFA middle DFT.  Generator 5 is the Aevum base-field orientation: it
+// reproduces the existing radix-3/radix-9 constants for both M31 and M61.
+u64 pfaMulMod(u64 a, u64 b, u64 p) {
+  return static_cast<u64>((u128(a) * u128(b)) % u128(p));
+}
+
+u64 pfaPowMod(u64 a, u64 e, u64 p) {
+  u64 r = 1;
+  while (e) {
+    if (e & 1) r = pfaMulMod(r, a, p);
+    e >>= 1;
+    if (e) a = pfaMulMod(a, a, p);
+  }
+  return r;
+}
+
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
   map<string, string> config;
@@ -418,6 +435,39 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     const u32 nwords = fft.shape.size();
     defines += toDefine("PFA_LOG2_ROOT_TWO31", inverseModSmall(nwords % 31u, 31u));
     defines += toDefine("PFA_LOG2_ROOT_TWO61", inverseModSmall(nwords % 61u, 61u));
+
+    if (fft.pfa_radix == 7) {
+      constexpr u64 M31 = (u64(1) << 31) - 1;
+      constexpr u64 M61 = (u64(1) << 61) - 1;
+      constexpr u64 generator = 5;
+
+      // Cross-check the orientation against the already validated radix-3 and
+      // radix-9 constants before exporting the new order-7 roots.
+      if (pfaPowMod(generator, (M31 - 1) / 3, M31) != 1513477735ULL ||
+          pfaPowMod(generator, (M31 - 1) / 9, M31) != 765383222ULL ||
+          pfaPowMod(generator, (M61 - 1) / 3, M61) != 1669582390241348315ULL ||
+          pfaPowMod(generator, (M61 - 1) / 9, M61) != 1102844585000305877ULL)
+        throw std::runtime_error("PFA7 base-field generator orientation mismatch");
+
+      const u64 root31 = pfaPowMod(generator, (M31 - 1) / 7, M31);
+      const u64 root61 = pfaPowMod(generator, (M61 - 1) / 7, M61);
+      if (root31 == 1 || root61 == 1 ||
+          pfaPowMod(root31, 7, M31) != 1 ||
+          pfaPowMod(root61, 7, M61) != 1)
+        throw std::runtime_error("PFA7 root-order proof failed");
+
+      const u64 inv_root31 = pfaPowMod(root31, 6, M31);
+      const u64 inv_root61 = pfaPowMod(root61, 6, M61);
+      const u64 inv7_31 = pfaPowMod(7, M31 - 2, M31);
+      const u64 inv7_61 = pfaPowMod(7, M61 - 2, M61);
+
+      defines += toDefine("PFA7_ROOT31", static_cast<u32>(root31));
+      defines += toDefine("PFA7_INVROOT31", static_cast<u32>(inv_root31));
+      defines += toDefine("PFA7_INV7_31", static_cast<u32>(inv7_31));
+      defines += toDefine("PFA7_ROOT61", root61);
+      defines += toDefine("PFA7_INVROOT61", inv_root61);
+      defines += toDefine("PFA7_INV7_61", inv7_61);
+    }
   }
 
   if (isAmdGpu(id)) {
@@ -2324,8 +2374,8 @@ void Gpu::fftPCarryB(Buffer<double>& buf, Buffer<Word>& in) {
   (void) buf; (void) in;
   throw std::runtime_error("PFA carry bridge is disabled on Apple");
 #else
-  if (!fft.isPfa() || fft.shape.fft_type != FFT3161 || useLongCarry)
-    throw std::runtime_error("PFA carry bridge requires a short-carry FFT3161 PFA plan");
+  if (!fft.isPfa() || fft.shape.fft_type != FFT3161)
+    throw std::runtime_error("PFA carry bridge requires an FFT3161 PFA plan");
   Buffer<double>* out = in_place ? &buf : &buf3;
   kfftPCarryB(*out, in);
 #endif
