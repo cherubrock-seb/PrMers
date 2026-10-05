@@ -383,6 +383,8 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
   fft4(u);
 #elif MIDDLE == 8
   fft8(u);
+#elif PFA_RADIX == 7 && MIDDLE == 7
+  fft7(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
   fft9(u);
 #elif MIDDLE == 16
@@ -393,7 +395,11 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
 }
 
 void OVERLOAD ifft_MIDDLE(F2 *u) {
-#if PFA_RADIX == 9
+#if PFA_RADIX == 7
+  fft7(u);
+#pragma unroll
+  for (u32 i = 0; i < 7; ++i) u[i] *= (1.0f / 7.0f);
+#elif PFA_RADIX == 9
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i].y = -u[i].y;
   fft9(u);
@@ -673,11 +679,73 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
   *o2 = sub(sub(a0, a1), wd);
 }
 
+#if PFA_RADIX == 7
+// Correctness-first direct seven-point DFT.  Keep this simple until profiling
+// identifies the odd-axis transform as the dominant PFA7 cost.
+void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
+ const Z31 c1 = (Z31)141971251U;
+ const Z31 c2 = (Z31)405239506U;
+ const Z31 c3 = (Z31)526531066U;
+ const Z31 s1 = w == (Z31)PFA7_ROOT31 ? (Z31)752284155U : (Z31)1395199492U;
+ const Z31 s2 = w == (Z31)PFA7_ROOT31 ? (Z31)1347360268U : (Z31)800123379U;
+ const Z31 s3 = w == (Z31)PFA7_ROOT31 ? (Z31)1073059520U : (Z31)1074424127U;
+
+ const GF31 x0 = u[0];
+ const GF31 x1 = u[1];
+ const GF31 x2 = u[2];
+ const GF31 x3 = u[3];
+ const GF31 x4 = u[4];
+ const GF31 x5 = u[5];
+ const GF31 x6 = u[6];
+
+ const GF31 a1 = add(x1, x6);
+ const GF31 a2 = add(x2, x5);
+ const GF31 a3 = add(x3, x4);
+ const GF31 b1 = sub(x1, x6);
+ const GF31 b2 = sub(x2, x5);
+ const GF31 b3 = sub(x3, x4);
+
+ GF31 t1 = x0;
+ t1 = add(t1, pfaMulScalar(a1, c1));
+ t1 = add(t1, pfaMulScalar(a2, c2));
+ t1 = add(t1, pfaMulScalar(a3, c3));
+ GF31 q1 = pfaMulScalar(b1, s1);
+ q1 = add(q1, pfaMulScalar(b2, s2));
+ q1 = add(q1, pfaMulScalar(b3, s3));
+
+ GF31 t2 = x0;
+ t2 = add(t2, pfaMulScalar(a1, c2));
+ t2 = add(t2, pfaMulScalar(a2, c3));
+ t2 = add(t2, pfaMulScalar(a3, c1));
+ GF31 q2 = pfaMulScalar(b1, s2);
+ q2 = sub(q2, pfaMulScalar(b2, s3));
+ q2 = sub(q2, pfaMulScalar(b3, s1));
+
+ GF31 t3 = x0;
+ t3 = add(t3, pfaMulScalar(a1, c3));
+ t3 = add(t3, pfaMulScalar(a2, c1));
+ t3 = add(t3, pfaMulScalar(a3, c2));
+ GF31 q3 = pfaMulScalar(b1, s3);
+ q3 = sub(q3, pfaMulScalar(b2, s1));
+ q3 = add(q3, pfaMulScalar(b3, s2));
+
+ u[0] = add(add(x0, a1), add(a2, a3));
+ u[1] = add(t1, q1);
+ u[6] = sub(t1, q1);
+ u[2] = add(t2, q2);
+ u[5] = sub(t2, q2);
+ u[3] = add(t3, q3);
+ u[4] = sub(t3, q3);
+}
+#endif
+
 void OVERLOAD pfaForwardMiddle(GF31 *u) {
 #if PFA_RADIX == 3
   GF31 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z31)1513477735U, &o0, &o1, &o2);
   u[0] = o0; u[1] = o1; u[2] = o2;
+#elif PFA_RADIX == 7
+  pfaDft7(u, (Z31)PFA7_ROOT31);
 #elif PFA_RADIX == 9
   const Z31 w9  = (Z31)765383222U;
   const Z31 w92 = (Z31)864490562U;
@@ -708,6 +776,10 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
   pfaDft3(u[0], u[1], u[2], (Z31)634005911U, &o0, &o1, &o2);
   const Z31 inv = (Z31)1431655765U;
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
+#elif PFA_RADIX == 7
+  pfaDft7(u, (Z31)PFA7_INVROOT31);
+#pragma unroll
+  for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z31)PFA7_INV7_31);
 #elif PFA_RADIX == 9
   const Z31 w9  = (Z31)473297587U;
   const Z31 w92 = (Z31)309107220U;
@@ -748,6 +820,8 @@ void OVERLOAD fft_MIDDLE(GF31 *u) {
 #elif MIDDLE == 16
   fft16(u);
 #elif PFA_RADIX == 3 && MIDDLE == 3
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 7 && MIDDLE == 7
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
   pfaForwardMiddle(u);
@@ -878,11 +952,71 @@ void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61
   *o2 = sub(sub(a0, a1), wd);
 }
 
+#if PFA_RADIX == 7
+void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
+ const Z61 c1 = (Z61)1773674115463894065UL;
+ const Z61 c2 = (Z61)901087505085424499UL;
+ const Z61 c3 = (Z61)784002893271222362UL;
+ const Z61 s1 = w == (Z61)PFA7_ROOT61 ? (Z61)673484497713682504UL : (Z61)1632358511500011447UL;
+ const Z61 s2 = w == (Z61)PFA7_ROOT61 ? (Z61)831884051671952528UL : (Z61)1473958957541741423UL;
+ const Z61 s3 = w == (Z61)PFA7_ROOT61 ? (Z61)381307857222696375UL : (Z61)1924535151990997576UL;
+
+ const GF61 x0 = u[0];
+ const GF61 x1 = u[1];
+ const GF61 x2 = u[2];
+ const GF61 x3 = u[3];
+ const GF61 x4 = u[4];
+ const GF61 x5 = u[5];
+ const GF61 x6 = u[6];
+
+ const GF61 a1 = add(x1, x6);
+ const GF61 a2 = add(x2, x5);
+ const GF61 a3 = add(x3, x4);
+ const GF61 b1 = sub(x1, x6);
+ const GF61 b2 = sub(x2, x5);
+ const GF61 b3 = sub(x3, x4);
+
+ GF61 t1 = x0;
+ t1 = add(t1, pfaMulScalar(a1, c1));
+ t1 = add(t1, pfaMulScalar(a2, c2));
+ t1 = add(t1, pfaMulScalar(a3, c3));
+ GF61 q1 = pfaMulScalar(b1, s1);
+ q1 = add(q1, pfaMulScalar(b2, s2));
+ q1 = add(q1, pfaMulScalar(b3, s3));
+
+ GF61 t2 = x0;
+ t2 = add(t2, pfaMulScalar(a1, c2));
+ t2 = add(t2, pfaMulScalar(a2, c3));
+ t2 = add(t2, pfaMulScalar(a3, c1));
+ GF61 q2 = pfaMulScalar(b1, s2);
+ q2 = sub(q2, pfaMulScalar(b2, s3));
+ q2 = sub(q2, pfaMulScalar(b3, s1));
+
+ GF61 t3 = x0;
+ t3 = add(t3, pfaMulScalar(a1, c3));
+ t3 = add(t3, pfaMulScalar(a2, c1));
+ t3 = add(t3, pfaMulScalar(a3, c2));
+ GF61 q3 = pfaMulScalar(b1, s3);
+ q3 = sub(q3, pfaMulScalar(b2, s1));
+ q3 = add(q3, pfaMulScalar(b3, s2));
+
+ u[0] = add(add(x0, a1), add(a2, a3));
+ u[1] = add(t1, q1);
+ u[6] = sub(t1, q1);
+ u[2] = add(t2, q2);
+ u[5] = sub(t2, q2);
+ u[3] = add(t3, q3);
+ u[4] = sub(t3, q3);
+}
+#endif
+
 void OVERLOAD pfaForwardMiddle(GF61 *u) {
 #if PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)1669582390241348315UL, &o0, &o1, &o2);
   u[0] = o0; u[1] = o1; u[2] = o2;
+#elif PFA_RADIX == 7
+  pfaDft7(u, (Z61)PFA7_ROOT61);
 #elif PFA_RADIX == 9
   const Z61 w9  = (Z61)1102844585000305877UL;
   const Z61 w92 = (Z61)594418010121383343UL;
@@ -913,6 +1047,10 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
   pfaDft3(u[0], u[1], u[2], (Z61)636260618972345635UL, &o0, &o1, &o2);
   const Z61 inv = (Z61)1537228672809129301UL;
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
+#elif PFA_RADIX == 7
+  pfaDft7(u, (Z61)PFA7_INVROOT61);
+#pragma unroll
+  for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z61)PFA7_INV7_61);
 #elif PFA_RADIX == 9
   const Z61 w9  = (Z61)2252987116782656529UL;
   const Z61 w92 = (Z61)633067237080992132UL;
@@ -953,6 +1091,8 @@ void OVERLOAD fft_MIDDLE(GF61 *u) {
 #elif MIDDLE == 16
   fft16(u);
 #elif PFA_RADIX == 3 && MIDDLE == 3
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 7 && MIDDLE == 7
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
   pfaForwardMiddle(u);

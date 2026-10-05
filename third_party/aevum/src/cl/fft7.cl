@@ -110,3 +110,52 @@ void fft7by(T2 *u, u32 base, u32 step, u32 M) {
 void fft7(T2 *u) { return fft7by(u, 0, 1, 7); }
 
 #endif
+
+#if FFT_FP32
+
+#define A(i) u[(base + i * step) % M]
+
+void fft7by(F2 *u, u32 base, u32 step, u32 M) {
+  const float
+      C1=-0.16666666666666666f,
+      C2=0.79015646852540022f,
+      C3=0.055854267289647735f,
+      C4=0.73430220123575241f,
+      S1=0.44095855184409843f,
+      S2=0.34087293062393137f,
+      S3=-0.53396936033772513f,
+      S4=0.87484229096165655f;
+
+  X2(A(1), A(6));
+  X2(A(2), A(5));
+  X2(A(3), A(4));
+  F2 t13 = A(2) - A(1);
+  F2 t9  = A(2) - A(3);
+  X2(A(1), A(3));
+  F2 m2 = -C2 * A(3);
+  F2 s0 = fmaT2(C3, t9, m2);
+  F2 t4 = A(1) + A(2);
+  A(2) = fmaT2(-C4, t13, m2);
+  F2 s4 = fmaT2(C1, t4, A(0));
+  A(0) = A(0) + t4;
+  A(1) = s4 - s0;
+  A(3) = s4 + s0 - A(2);
+  A(2) = s4 + A(2);
+  F2 m6 = -S2 * (A(4) + A(6));
+  F2 t2 = fmaT2(S3, A(5) + A(4), m6);
+  F2 s3 = fmaT2(S4, A(6) - A(5), m6);
+  F2 t1 = S1 * (A(5) - A(4) + A(6));
+  A(5) = mul_t4(t1 + s3);
+  A(6) = mul_t4(t1 - t2);
+  t1 = mul_t4(t1 + t2 - s3);
+  X2(A(1), A(6));
+  X2(A(2), A(5));
+  A(4) = A(3) + t1;
+  A(3) = A(3) - t1;
+}
+
+#undef A
+
+void fft7(F2 *u) { fft7by(u, 0, 1, 7); }
+
+#endif
