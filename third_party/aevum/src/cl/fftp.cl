@@ -931,6 +931,19 @@ inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
   return U2(c31.a[1] % 31u, c61.a[1] % 61u);
 }
 
+#if PFA_RADIX == 7
+// PFA7 paired noinline carried-load helper: keep one copy of the branch-heavy
+// lazy carry walk while serving both logical scalars with one function call.
+__attribute__((noinline))
+Word2 pfaLoadCanonicalWordsCarried(CP(Word2) in, CP(CarryABM) carryIn,
+                                   u32 logical0, u32 logical1) {
+  const Word2 value0 = pfaLoadCanonicalPairCarried(in, carryIn, logical0 >> 1);
+  const Word2 value1 = pfaLoadCanonicalPairCarried(in, carryIn, logical1 >> 1);
+  return U2((logical0 & 1u) ? value0.y : value0.x,
+            (logical1 & 1u) ? value1.y : value1.x);
+}
+#endif
+
 KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   local GF61 lds61[LDS_BYTES / sizeof(GF61)];
   local GF31 *lds31 = (local GF31 *) lds61;
@@ -957,16 +970,40 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   const u32 first_binary_pair = me * SMALL_HEIGHT + y;
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
+  // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
+  // line fixed while x advances by one compile-time step modulo WIDTH.
+  const u32 pair0 = n0 >> 1;
+  const u32 pair1 = n1 >> 1;
+  u32 x0 = pair0 / BIG_HEIGHT;
+  u32 x1 = pair1 / BIG_HEIGHT;
+  const u32 line0 = pair0 - x0 * BIG_HEIGHT;
+  const u32 line1 = pair1 - x1 * BIG_HEIGHT;
+  const u32 base0 = line0 * WIDTH;
+  const u32 base1 = line1 * WIDTH;
+  const u32 canonicalStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
+#endif
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
+#if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
+    const Word2 pairValue0 = in[base0 + x0];
+    const Word2 pairValue1 = in[base1 + x1];
+    const Word word0 = (n0 & 1u) ? pairValue0.y : pairValue0.x;
+    const Word word1 = (n1 & 1u) ? pairValue1.y : pairValue1.x;
+#else
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
+#endif
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
     n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
+#if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
+    x0 += canonicalStep; if (x0 >= WIDTH) x0 -= WIDTH;
+    x1 += canonicalStep; if (x1 >= WIDTH) x1 -= WIDTH;
+#endif
   }
 
   fft_WIDTH(lds31, u31, smallTrig31, 1, me);
@@ -1004,8 +1041,14 @@ KERNEL(G_W) fftPCarryB(P(T2) out, CP(Word2) in, CP(CarryABM) carryIn, Trig small
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
+#if PFA_RADIX == 7
+    const Word2 words = pfaLoadCanonicalWordsCarried(in, carryIn, n0, n1);
+    const Word word0 = words.x;
+    const Word word1 = words.y;
+#else
     const Word word0 = pfaLoadCanonicalWordCarried(in, carryIn, n0);
     const Word word1 = pfaLoadCanonicalWordCarried(in, carryIn, n1);
+#endif
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
