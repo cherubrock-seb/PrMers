@@ -880,7 +880,14 @@ inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
 // Apply the carryB correction lazily while gathering one canonical pair.
 // This lets a retained PFA square skip the separate transform-sized carryB
 // write before the next fftP.
-inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
+#if PFA_RADIX == 7
+// PFA7 noinline lazy-carry helper: fftPCarryB otherwise replicates this
+// branch-heavy carry walk into every unrolled scalar gather.
+#define PFA_CARRY_HELPER __attribute__((noinline))
+#else
+#define PFA_CARRY_HELPER inline
+#endif
+PFA_CARRY_HELPER Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;
   const u32 gx = x / G_W;
@@ -906,6 +913,8 @@ inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32
   }
   return value;
 }
+
+#undef PFA_CARRY_HELPER
 
 inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 logical) {
   const Word2 value = pfaLoadCanonicalPairCarried(in, carryIn, logical >> 1);
