@@ -880,14 +880,7 @@ inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
 // Apply the carryB correction lazily while gathering one canonical pair.
 // This lets a retained PFA square skip the separate transform-sized carryB
 // write before the next fftP.
-#if PFA_RADIX == 7
-// PFA7 noinline lazy-carry helper: fftPCarryB otherwise replicates this
-// branch-heavy carry walk into every unrolled scalar gather.
-#define PFA_CARRY_HELPER __attribute__((noinline))
-#else
-#define PFA_CARRY_HELPER inline
-#endif
-PFA_CARRY_HELPER Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
+inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;
   const u32 gx = x / G_W;
@@ -905,6 +898,14 @@ PFA_CARRY_HELPER Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) ca
   for (u32 i = 0; i < CARRY_LEN; ++i) {
     const bool biglit0 = baseFrac + (2u * i) * FRAC_BPW_HI <= FRAC_BPW_HI;
     const bool biglit1 = baseFrac + (2u * i) * FRAC_BPW_HI >= -FRAC_BPW_HI;
+    if (i == CARRY_LEN - 1) {
+      // Last pair of the group: as in carryB, add the carry into the high word
+      // without normalizing it so that nothing can escape the group.
+      value = in[(baseLine + i) * WIDTH + x];
+      value.x = carryStep(value.x + carry, &carry, biglit0);
+      value.y += carry;
+      break;
+    }
     value = carryWord(in[(baseLine + i) * WIDTH + x], &carry, biglit0, biglit1);
     if (i == within) break;
     // carryB stops as soon as the incoming carry becomes zero; all remaining
@@ -913,8 +914,6 @@ PFA_CARRY_HELPER Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) ca
   }
   return value;
 }
-
-#undef PFA_CARRY_HELPER
 
 inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 logical) {
   const Word2 value = pfaLoadCanonicalPairCarried(in, carryIn, logical >> 1);
@@ -972,8 +971,8 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
-  // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
-  // line fixed while x advances by one compile-time step modulo WIDTH.
+  // PFA7 composite normal-load recurrence: combine the independently-positive
+  // canonical-load recurrence with the paired fftPCarryB helper.
   const u32 pair0 = n0 >> 1;
   const u32 pair1 = n1 >> 1;
   u32 x0 = pair0 / BIG_HEIGHT;
