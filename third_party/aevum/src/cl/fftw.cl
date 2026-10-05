@@ -174,7 +174,8 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   const u32 baseEven = lineEven * WIDTH;
   const u32 baseOdd  = lineOdd * WIDTH;
   const u32 canonicalStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
-#pragma unroll
+  // PFA7 fftWGF61 experiment: keep the scatter loop rolled to cap code/register growth.
+#pragma unroll 1
   for (u32 i = 0; i < NW; ++i) {
     outScalar61[(baseEven + xEven) * 2u + 1u] = u[i].y;
     outScalar61[(baseOdd  + xOdd)  * 2u]      = u[i].x;
