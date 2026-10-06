@@ -983,6 +983,48 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   const u32 base1 = line1 * WIDTH;
   const u32 canonicalStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
 #endif
+#if PFA_RADIX == 3 && WIDTH == 512
+  const u32 pfa_weight_num = EXP % NWORDS;
+  const u64 pfa_weight_advance_num =
+      (u64)PFA_LOGICAL_STEP * (u64)pfa_weight_num;
+  const u32 pfa_weight_advance_q =
+      (u32)(pfa_weight_advance_num / NWORDS);
+  const u32 pfa_weight_advance_r =
+      (u32)(pfa_weight_advance_num % NWORDS);
+
+  const u32 pfa_weight_delta31 =
+      (pfa_weight_advance_q % 31u +
+       ((PFA_LOGICAL_STEP % 31u) * m31_step) % 31u) % 31u;
+  const u32 pfa_weight_delta61 =
+      (pfa_weight_advance_q % 61u +
+       ((PFA_LOGICAL_STEP % 61u) * m61_step) % 61u) % 61u;
+
+  const u32 pfa_weight_wrap31 =
+      (pfa_weight_num % 31u +
+       ((NWORDS % 31u) * m31_step) % 31u) % 31u;
+  const u32 pfa_weight_wrap61 =
+      (pfa_weight_num % 61u +
+       ((NWORDS % 61u) * m61_step) % 61u) % 61u;
+
+  const uint2 pfa_init_shift0 =
+      pfaWeightShifts3161(n0, m31_step, m61_step);
+  const uint2 pfa_init_shift1 =
+      pfaWeightShifts3161(n1, m31_step, m61_step);
+
+  u32 pfa_rem0 = (u32)(((u64)n0 * pfa_weight_num) % NWORDS);
+  u32 pfa_rem1 = (u32)(((u64)n1 * pfa_weight_num) % NWORDS);
+
+  u32 pfa_base31_0 = pfa_init_shift0.x + 31u - (pfa_rem0 != 0u);
+  u32 pfa_base31_1 = pfa_init_shift1.x + 31u - (pfa_rem1 != 0u);
+  u32 pfa_base61_0 = pfa_init_shift0.y + 61u - (pfa_rem0 != 0u);
+  u32 pfa_base61_1 = pfa_init_shift1.y + 61u - (pfa_rem1 != 0u);
+
+  if (pfa_base31_0 >= 31u) pfa_base31_0 -= 31u;
+  if (pfa_base31_1 >= 31u) pfa_base31_1 -= 31u;
+  if (pfa_base61_0 >= 61u) pfa_base61_0 -= 61u;
+  if (pfa_base61_1 >= 61u) pfa_base61_1 -= 61u;
+#endif
+
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
@@ -994,10 +1036,70 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
 #endif
+#if PFA_RADIX == 3 && WIDTH == 512
+    u32 shift31_0 = pfa_base31_0 + (pfa_rem0 != 0u);
+    u32 shift31_1 = pfa_base31_1 + (pfa_rem1 != 0u);
+    u32 shift61_0 = pfa_base61_0 + (pfa_rem0 != 0u);
+    u32 shift61_1 = pfa_base61_1 + (pfa_rem1 != 0u);
+
+    if (shift31_0 >= 31u) shift31_0 -= 31u;
+    if (shift31_1 >= 31u) shift31_1 -= 31u;
+    if (shift61_0 >= 61u) shift61_0 -= 61u;
+    if (shift61_1 >= 61u) shift61_1 -= 61u;
+
+    const uint2 shifts0 = U2(shift31_0, shift61_0);
+    const uint2 shifts1 = U2(shift31_1, shift61_1);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
-    u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
-    u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
+#endif
+
+    u31[i] = U2(shl(make_Z31(word0), shifts0.x),
+                shl(make_Z31(word1), shifts1.x));
+    u61[i] = U2(shl(make_Z61(word0), shifts0.y),
+                shl(make_Z61(word1), shifts1.y));
+
+#if PFA_RADIX == 3 && WIDTH == 512
+    const u32 pfa_wrap0 = n0 + PFA_LOGICAL_STEP >= NWORDS;
+    const u32 pfa_wrap1 = n1 + PFA_LOGICAL_STEP >= NWORDS;
+
+    u32 next_rem0 = pfa_rem0 + pfa_weight_advance_r;
+    u32 next_rem1 = pfa_rem1 + pfa_weight_advance_r;
+
+    const u32 pfa_carry0 = next_rem0 >= NWORDS;
+    const u32 pfa_carry1 = next_rem1 >= NWORDS;
+
+    if (pfa_carry0) next_rem0 -= NWORDS;
+    if (pfa_carry1) next_rem1 -= NWORDS;
+
+    pfa_base31_0 += pfa_weight_delta31 + pfa_carry0;
+    pfa_base31_1 += pfa_weight_delta31 + pfa_carry1;
+    pfa_base61_0 += pfa_weight_delta61 + pfa_carry0;
+    pfa_base61_1 += pfa_weight_delta61 + pfa_carry1;
+
+    if (pfa_base31_0 >= 31u) pfa_base31_0 -= 31u;
+    if (pfa_base31_1 >= 31u) pfa_base31_1 -= 31u;
+    if (pfa_base61_0 >= 61u) pfa_base61_0 -= 61u;
+    if (pfa_base61_1 >= 61u) pfa_base61_1 -= 61u;
+
+    if (pfa_wrap0) {
+      pfa_base31_0 += 31u - pfa_weight_wrap31;
+      pfa_base61_0 += 61u - pfa_weight_wrap61;
+      if (pfa_base31_0 >= 31u) pfa_base31_0 -= 31u;
+      if (pfa_base61_0 >= 61u) pfa_base61_0 -= 61u;
+    }
+
+    if (pfa_wrap1) {
+      pfa_base31_1 += 31u - pfa_weight_wrap31;
+      pfa_base61_1 += 61u - pfa_weight_wrap61;
+      if (pfa_base31_1 >= 31u) pfa_base31_1 -= 31u;
+      if (pfa_base61_1 >= 61u) pfa_base61_1 -= 61u;
+    }
+
+    pfa_rem0 = next_rem0;
+    pfa_rem1 = next_rem1;
+#endif
+
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
     n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
