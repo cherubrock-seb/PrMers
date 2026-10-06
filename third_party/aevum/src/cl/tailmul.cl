@@ -412,6 +412,9 @@ void OVERLOAD onePairMul(GF61* pa, GF61* pb, GF61* pc, GF61* pd, GF61 t_squared)
 void OVERLOAD pairMul(u32 N, GF61 *u, GF61 *v, GF61 *p, GF61 *q, GF61 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+#if PFA_RADIX
+#pragma unroll 1
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(mul2(foo2(u[i], p[i])));
