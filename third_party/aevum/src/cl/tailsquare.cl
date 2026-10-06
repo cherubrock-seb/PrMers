@@ -1630,7 +1630,11 @@ KERNEL(G_H) tailSquareGF61ApplePlaceholder(P(T2) out, CP(T2) in, Trig smallTrig)
 #if SINGLE_WIDE
 
 KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
+#if TAIL_GF61_REVERSE16
+  local GF61 lds[SMALL_HEIGHT];
+#else
   local GF61 lds[LDS_BYTES / sizeof(GF61)];
+#endif
 
   CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
   P(GF61) out61 = (P(GF61)) (out + DISTGF61);
