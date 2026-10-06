@@ -2645,9 +2645,7 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
 
 #else
 
-#if !UNROLL
   __attribute__((opencl_unroll_hint(1)))
-#endif
   for (u32 s = 1; s < WG; s *= RADIX) {
     fft_RADIX(u);
     tabMul(trig, u, s, lowMe);
