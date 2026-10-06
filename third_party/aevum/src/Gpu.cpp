@@ -308,6 +308,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.try_emplace("TAIL_TRIGS32", "2");
     config.try_emplace("TAIL_TRIGS31", "0");
     config.try_emplace("TAIL_TRIGS61", "0");
+
+    // ZEROHACK_H is only beneficial on the validated NVIDIA PFA path.
+    // Preserve explicit/tuned values and retain the existing default on
+    // non-NVIDIA devices.
+    if (isNvidiaGpu(id))
+      config.try_emplace("ZEROHACK_H", "0");
   }
 
   // Default value for -use options that must also be parsed in C++ code
