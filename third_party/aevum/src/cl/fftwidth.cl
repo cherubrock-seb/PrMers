@@ -69,4 +69,19 @@ void OVERLOAD fft_WIDTH(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 
 void OVERLOAD fft_WIDTH1(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe); }
 void OVERLOAD fft_WIDTH2(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe); }
 
+#if WIDTH == 512 && G_W == 64 && NW == 8
+// kfftWGF61-only chain-tabmul experiment.  Keep the normal fft_WIDTH path
+// unchanged for fftP, tailSquare and all other GF61 callers.
+void OVERLOAD fft_WIDTH_chain61(local GF61 *lds, GF61 *u, TrigGF61 trig,
+                                u32 numWG, u32 lowMe) {
+  for (u32 s = 1; s < G_W; s *= NW) {
+    fft_RADIX(u);
+    const u32 p = lowMe & ~(s - 1);
+    chainMul(u, TFLOAD(&trig[p]));
+    shufl(lds, u, s, numWG, lowMe);
+  }
+  fft_RADIX(u);
+}
+#endif
+
 #endif

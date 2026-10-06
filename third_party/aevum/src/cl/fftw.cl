@@ -157,7 +157,11 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   dependentLaunchWait();   // Previous kernel was fftMiddleOut
 
   readCarryFusedLine(in61, u, g, me);
+#if WIDTH == 512 && G_W == 64 && NW == 8
+  fft_WIDTH_chain61(lds, u, smallTrig61, 1, me);
+#else
   fft_WIDTH(lds, u, smallTrig61, 1, me);
+#endif
 #if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
   P(Z61) outScalar61 = (P(Z61)) out61;
   const u32 row = g / SMALL_HEIGHT;
