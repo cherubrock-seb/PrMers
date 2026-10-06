@@ -897,20 +897,20 @@ static string tailGF61KernelDefines(const Args& args,
                                     const FFTConfig& fft,
                                     const vector<KeyVal>& extraConf,
                                     string defines) {
-  bool explicit_unroll_h =
-      args.hasFlag("UNROLL_H") ||
-      hasUseKey(extraConf, "UNROLL_H");
+  bool explicit_shufl_bytes_h =
+      args.hasFlag("SHUFL_BYTES_H") ||
+      hasUseKey(extraConf, "SHUFL_BYTES_H");
 
   if (auto it = args.perFftConfig.find(fft.shape.spec());
       it != args.perFftConfig.end()) {
-    explicit_unroll_h =
-        explicit_unroll_h ||
-        hasUseKey(it->second, "UNROLL_H");
+    explicit_shufl_bytes_h =
+        explicit_shufl_bytes_h ||
+        hasUseKey(it->second, "SHUFL_BYTES_H");
   }
 
-  if (!explicit_unroll_h && isAmdGpu(deviceId) &&
-      fft.isPfa() && fft.shape.height == 512)
-    defines += " -DUNROLL_H=0";
+  if (!explicit_shufl_bytes_h && isAmdGpu(deviceId) &&
+      fft.isPfa() && fft.NTT_GF61)
+    defines += " -DSHUFL_BYTES_H=16";
 
   return defines;
 }
