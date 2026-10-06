@@ -941,7 +941,7 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
   GF61 a2, b2, b2t2, ab, addin, c, d;
 
 // This code should be faster (saves at least one wide mul) but the CUDA compiler makes poorer decisions regarding register usage resulting in local memory usage
-#if ENABLE_BETTER_ONEPAIRSQ
+#if ENABLE_BETTER_ONEPAIRSQ || AMDGPU
   X2qconjb(&a, &b);                             // X2(a, conjugate(b)).  a.x range is 0..2+, a.y range is -1-..1+, b.x range is -1-..1+, b.y range is 0..2+
   a.y += 2*M61;					// a range is  0..2+ / 1-..3+
   b.x += 2*M61;					// b range is 1-..3+ / 0..2+
