@@ -910,7 +910,7 @@ static string tailGF61KernelDefines(const Args& args,
 
   if (!explicit_shufl_bytes_h && isAmdGpu(deviceId) &&
       fft.isPfa() && fft.NTT_GF61)
-    defines += " -DSHUFL_BYTES_H=16";
+    defines += " -DTAIL_GF61_REVERSE16=1";
 
   return defines;
 }
