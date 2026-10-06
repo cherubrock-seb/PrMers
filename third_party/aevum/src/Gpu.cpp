@@ -909,7 +909,7 @@ static string tailGF61KernelDefines(const Args& args,
   }
 
   if (!explicit_shufl_bytes_h && isAmdGpu(deviceId) &&
-      fft.isPfa() && fft.NTT_GF61)
+      fft.isPfa() && fft.NTT_GF61 && fft.shape.height == 512)
     defines += " -DTAIL_GF61_REVERSE16=1";
 
   return defines;
