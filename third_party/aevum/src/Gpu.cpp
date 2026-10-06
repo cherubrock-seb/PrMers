@@ -887,6 +887,26 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
+  auto hasUseKey = [](const vector<KeyVal>& config, const string& key) {
+    return any_of(config.begin(), config.end(),
+                  [&](const KeyVal& item) { return item.first == key; });
+  };
+
+  bool explicit_tabmul_chain61 =
+      args.hasFlag("TABMUL_CHAIN61") ||
+      hasUseKey(extraConf, "TABMUL_CHAIN61");
+  if (auto it = args.perFftConfig.find(fft.shape.spec());
+      it != args.perFftConfig.end()) {
+    explicit_tabmul_chain61 =
+        explicit_tabmul_chain61 ||
+        hasUseKey(it->second, "TABMUL_CHAIN61");
+  }
+
+  string fftwGF61Defines = kernelDefines(K61);
+  if (!explicit_tabmul_chain61 && fft.isPfa() && WIDTH == 512 &&
+      isNvidiaGpu(shared.context->deviceId()))
+    fftwGF61Defines += " -DTABMUL_CHAIN61=1";
+
   K(kprpMiddle1, "tailsquare.cl", "tailSquare", hN / nH, (kernelDefines(KFP) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kprpMiddle1GF31, "tailsquare.cl", "tailSquareGF31", hN / nH, (kernelDefines(K31) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kprpMiddle1GF61, "tailsquare.cl", "tailSquareGF61", hN / nH, (kernelDefines(K61) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
@@ -988,7 +1008,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftWGF61WidthStageFused256Apple, "fftw.cl", "fftWGF61WidthStageFused256Apple", hN / nW, kernelDefines(K61).c_str()),
   K(kfftWGF61WidthStageFused512Apple, "fftw.cl", "fftWGF61WidthStageFused512Apple", hN / nW, kernelDefines(K61).c_str()),
 #else
-  K(kfftWGF61,             "fftw.cl", "fftWGF61", hN / nW, kernelDefines(K61).c_str()),
+  K(kfftWGF61,             "fftw.cl", "fftWGF61", hN / nW, fftwGF61Defines.c_str()),
 #endif
 
   K(kfftP,                 "fftp.cl", "fftP", hN / nW, kernelDefines(KALL).c_str()),
