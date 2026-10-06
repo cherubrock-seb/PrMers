@@ -46,6 +46,12 @@ jobs:
           bash tests/test_proof_marin_padding.sh
           python3 tests/proof_marin_source_regression_test.py
 
+      - name: Cache GMP source archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/gmp-${{ env.GMP_VERSION }}.tar.xz
+          key: gmp-source-${{ env.GMP_VERSION }}-${{ env.GMP_SHA256 }}
+
       - name: Build GMP for the portable deployment target
         shell: bash
         run: |
@@ -63,31 +69,60 @@ jobs:
             *) echo "Unsupported architecture: $ARCH" >&2; exit 2 ;;
           esac
 
-          rm -rf "$SOURCE_DIR" "$GMP_PREFIX" "$ARCHIVE"
+          rm -rf "$SOURCE_DIR" "$GMP_PREFIX"
 
-          # Download GMP from multiple official GNU/GMP sources.
-          # ftpmirror.gnu.org can occasionally return HTTP 502 from GitHub runners.
+          ARCHIVE_VALID=0
+          if [[ -s "$ARCHIVE" ]]; then
+            if printf '%s  %s\n' "$GMP_SHA256" "$ARCHIVE" \
+                | shasum -a 256 --check; then
+              echo "Using checksum-verified cached GMP archive."
+              ARCHIVE_VALID=1
+            else
+              echo "Discarding invalid cached GMP archive."
+              rm -f "$ARCHIVE"
+            fi
+          fi
+
+          # Download GMP through independent mirrors. Every cached or
+          # downloaded archive is accepted only after the official SHA256 check.
+          SCHEME="https"
           URLS=(
-            "https://ftpmirror.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
-            "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
-            "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://mirrors.kernel.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://mirror.math.princeton.edu/pub/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://mirror.csclub.uwaterloo.ca/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://www.mirrorservice.org/sites/ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://ftpmirror.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz"
+            "${SCHEME}://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz"
           )
 
-          rm -f "$ARCHIVE"
+          if [[ "$ARCHIVE_VALID" -eq 0 ]]; then
+            for url in "${URLS[@]}"; do
+              echo "Trying GMP source: $url"
+              rm -f "$ARCHIVE"
 
-          for url in "${URLS[@]}"; do
-            echo "Trying GMP source: $url"
+              if curl --fail --location --silent --show-error \
+                  --connect-timeout 15 \
+                  --max-time 90 \
+                  --retry 1 --retry-delay 2 --retry-all-errors \
+                  "$url" \
+                  --output "$ARCHIVE"; then
+                if printf '%s  %s\n' "$GMP_SHA256" "$ARCHIVE" \
+                    | shasum -a 256 --check; then
+                  echo "Downloaded checksum-verified GMP from: $url"
+                  ARCHIVE_VALID=1
+                  break
+                fi
 
-            if curl --fail --location --silent --show-error \
-                --retry 2 --retry-delay 2 --retry-all-errors \
-                "$url" \
-                --output "$ARCHIVE"; then
-              echo "Downloaded GMP from: $url"
-              break
-            fi
+                echo "Checksum mismatch from: $url" >&2
+              fi
+            done
+          fi
 
-            rm -f "$ARCHIVE"
-          done
+          if [[ "$ARCHIVE_VALID" -ne 1 ]]; then
+            echo "Unable to obtain a checksum-valid GMP ${GMP_VERSION} source archive." >&2
+            exit 1
+          fi
 
           test -s "$ARCHIVE"
 
