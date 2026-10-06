@@ -329,9 +329,12 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.85-pass5-prp-max`
-            - Standalone Aevum source SHA: `74715da3ac6a0aac2fdcc2f845377570122335cb`
-            - Validated PRP speedup near p≈170M: Radeon VII +13.527%; RTX 3080 +8.646%.
+            - Standalone Aevum tag: `v0.3.96-pass5-prp-max`
+            - Standalone Aevum source SHA: `13c43629d37b32dad8378fad9b7dae0d6b88dcef`
+            - PFA7 fftP gather KEEP: RTX 3080 fixed-plan median +0.631%; Radeon VII -0.121% within no-regression tolerance; PFA3/PFA9 exact and generated fftP unchanged.
+            - NVIDIA PFA WIDTH512 kfftWGF61 chain-tabmul specialization: RTX 3080 fixed-plan median +0.544% PFA7 and +0.655% PFA9 full iteration; kfftWGF61 +3.78%; Radeon VII generated kernel content remains byte-identical to stock and exact.
+            - CUDA ZEROHACK_W is selected empirically after plan selection using exact cached mini-benchmarking; RTX 3080 validated W0 while AMD/OpenCL behavior remains unchanged.
+            - PrMers wide-digit Aevum adapter correctness validated on Radeon VII at p=19121591 with fixed plan 1:256:4:256:101.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
             - Correctness and release preflight: PASS before tagging.
             Platform artifacts include SHA256 checksum files for verification.
