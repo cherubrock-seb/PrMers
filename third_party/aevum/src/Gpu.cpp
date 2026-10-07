@@ -1924,15 +1924,20 @@ void Gpu::replay(void) {
 #if defined(__APPLE__)
           if (fft.shape.fft_type == FFT3161) {
             // Exact global-memory decomposition of the upstream fftHinGF61.
-            // The source GF61 plane is free after the scalar load and serves
-            // as the alternate ping-pong bank; no extra transform allocation.
+            // Like the stock kernel it must leave `in` intact: exponentiate
+            // squares buf1 right after saving its fftHin into buf2.  The
+            // alternate ping-pong bank is the GF61 plane of buf3 instead,
+            // which fftMidIn has consumed and the next tail overwrites; no
+            // extra transform allocation.
+            if (out == &buf3 || in == &buf3)
+              throw std::runtime_error("Apple staged GF61 fftHin uses buf3 as scratch");
             kfftHinGF61LoadScalarApple(*out, *in);
             Buffer<double>* current = out;
             const u32 groupSize = SMALL_H / nH;
             for (u32 stage = 1; stage < groupSize; stage *= nH) {
               kfftHinGF61FftRadixApple(*current);
               kfftHinGF61FftTwiddleApple(*current, stage);
-              Buffer<double>* next = current == out ? in : out;
+              Buffer<double>* next = current == out ? &buf3 : out;
               kfftHinGF61FftShuffleApple(*current, *next, stage);
               current = next;
             }
