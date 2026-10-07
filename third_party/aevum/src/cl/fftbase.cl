@@ -382,7 +382,8 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
 #if FFT_FP32 | NTT_GF31
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs using two 4-byte floats.
-void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
+void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe,
+                      bool skipInitialBar) {
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
@@ -411,7 +412,7 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Pad one value after every row to eliminate bank conflicts.
     // gpuowl 6cf0dc first radix-8 padded shuffle.
     if (!force_default && f == 1 && RADIX == 8) {
-      bar(WG);
+      if (!skipInitialBar) bar(WG);
 
       for (u32 i = 0; i < RADIX; ++i)
         lds[i * (WG + 2) + lowMe] = u[i];
@@ -1642,7 +1643,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 #if FFT_FP32
 
 void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 numWG, u32 lowMe) {
-  shufl32(lds, u, f, numWG, lowMe);
+  shufl32(lds, u, f, numWG, lowMe, false);
 }
 
 void OVERLOAD fft_RADIX(F2 *u) {
@@ -2238,7 +2239,11 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
 #if NTT_GF31
 
 void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 numWG, u32 lowMe) {
-  shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe);
+  shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe, false);
+}
+
+void OVERLOAD shuflFirst(local GF31 *lds, GF31 *u, u32 f, u32 numWG, u32 lowMe) {
+  shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe, true);
 }
 
 void OVERLOAD fft_RADIX(GF31 *u) {
@@ -2399,7 +2404,8 @@ void OVERLOAD tabMul8_4b(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
   }
 }
 
-void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) {
+void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig,
+                         u32 numWG, u32 lowMe, bool skipInitialBar) {
 
 // Code for SIZE=256, RADIX=8
 #if WG == 32 && NW == 8
@@ -2419,7 +2425,8 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
   fft8(u);
   tabMul(trig, u, 1, lowMe);
-  shufl(lds, u, 1, numWG, lowMe);
+  if (skipInitialBar) shuflFirst(lds, u, 1, numWG, lowMe);
+  else shufl(lds, u, 1, numWG, lowMe);
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
@@ -2435,12 +2442,18 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
   for (u32 s = 1; s < WG; s *= RADIX) {
     fft_RADIX(u);
     tabMul(trig, u, s, lowMe);
-    shufl(lds, u, s, numWG, lowMe);
+    if (skipInitialBar && s == 1) shuflFirst(lds, u, s, numWG, lowMe);
+    else shufl(lds, u, s, numWG, lowMe);
   }
   fft_RADIX(u);
 
 #endif
 
+}
+
+void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig,
+                         u32 numWG, u32 lowMe) {
+  fft_common(lds, u, trig, numWG, lowMe, false);
 }
 
 #endif

@@ -59,6 +59,7 @@ void fft_HEIGHT2(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 lowMe) { ff
 // Three versions.  fft_HEIGHT1 and fft_HEIGHT2 are for the two tailSquare calls where a future version might save some data from call 1 for use in call 2.
 void OVERLOAD fft_HEIGHT(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe); }
 void OVERLOAD fft_HEIGHT1(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe); }
+void OVERLOAD fft_HEIGHT1_FIRST(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe, true); }
 void OVERLOAD fft_HEIGHT2(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) { fft_common(lds, u, trig, numWG, lowMe); }
 
 #endif
