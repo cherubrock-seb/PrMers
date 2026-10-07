@@ -334,6 +334,11 @@ test-error-check-retry:
 test-llsafe-error-recovery: all
 	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+
+.PHONY: test-legacy-prp-resume
+test-legacy-prp-resume: all
+bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:

@@ -233,18 +233,26 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
         std::cout << "Resuming from iteration " << resume
                   << " based on " << absLoop << std::endl;
 
-        // 3) Charger le vecteur binaire
+        // 3) Charger le vecteur binaire. Without a complete state file the loop counter is
+        // meaningless: start over rather than resume from a zero or truncated state.
         std::ifstream mersIn(mersFilename_, std::ios::binary);
+        const std::streamsize want = ss_from_size(x.size() * sizeof(uint64_t));
+        bool loaded = false;
         if (mersIn) {
-            mersIn.read(reinterpret_cast<char*>(x.data()),
-            ss_from_size(x.size() * sizeof(uint64_t)));
+            mersIn.read(reinterpret_cast<char*>(x.data()), want);
+            loaded = (mersIn.gcount() == want);
+        }
+        if (loaded) {
             std::cout << "Loaded state from "
                       << std::filesystem::absolute(mersFilename_)
                       << std::endl;
         } else {
-            std::cerr << "Warning: could not open mers file at "
+            std::cerr << "Warning: could not read a complete state from "
                       << std::filesystem::absolute(mersFilename_)
-                      << " — starting with uninitialized data\n";
+                      << " — ignoring the loop file and starting from iteration 0\n";
+            resume = 0;
+            x.assign(x.size(), 0ULL);
+            x[0] = (mode_ == "prp") ? 3ULL : 4ULL;
         }
     }
     else {
