@@ -440,7 +440,7 @@ App::App(int argc, char** argv)
             } else {
                 std::cerr << "Warning: -wagstaff only applies to PRP worktodo entries without "
                              "known factors; ignoring it for: " << e->rawLine << std::endl;
-                o.wagstaff = false;
+                io::dropWagstaff(o);
             }
         }
         if (e->gaussianMersenne) {

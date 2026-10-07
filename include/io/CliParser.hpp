@@ -166,7 +166,19 @@ struct CliOptions {
     bool ecm_continue_after_factor = false;
     bool s3only = false;
     bool s4only = false;
+    // -gerbiczli and -proof as they stood before -wagstaff forced both off (Wagstaff tests run
+    // unchecked and proofless). App restores them when -wagstaff is dropped for a worktodo entry.
+    bool gerbiczli_before_wagstaff = true;
+    bool proof_before_wagstaff = true;
 };
+
+// Cancel -wagstaff for a worktodo entry that is not Wagstaff work, and undo what -wagstaff forced:
+// the Gerbicz-Li check and proof generation come back unless the command line turned them off itself.
+inline void dropWagstaff(CliOptions& o) {
+    o.wagstaff = false;
+    o.gerbiczli = o.gerbiczli_before_wagstaff;
+    o.proof = o.proof_before_wagstaff;
+}
 
 class CliParser {
 public:

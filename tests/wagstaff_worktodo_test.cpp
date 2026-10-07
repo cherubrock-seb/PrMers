@@ -1,3 +1,4 @@
+#include "io/CliParser.hpp"
 #include "io/WorktodoParser.hpp"
 
 #include <filesystem>
@@ -48,6 +49,28 @@ int main() {
           "LL entry is not Wagstaff work");
     check(wagstaffFor("Pminus1=1,2,1000003,-1,100000,1000000,76", &parsed) == 0ULL && parsed,
           "P-1 entry is not Wagstaff work");
+
+    // Dropping -wagstaff for an entry that is not Wagstaff work gives the Gerbicz-Li check and proof
+    // generation back (-wagstaff switched both off), unless the command line had turned them off.
+    {
+        io::CliOptions o;
+        o.wagstaff = true;
+        o.gerbiczli_before_wagstaff = true;
+        o.proof_before_wagstaff = true;
+        o.gerbiczli = false;   // as forced by -wagstaff
+        o.proof = false;
+        io::dropWagstaff(o);
+        check(!o.wagstaff && o.gerbiczli && o.proof, "dropping -wagstaff restores Gerbicz-Li and proof");
+
+        io::CliOptions e;
+        e.wagstaff = true;
+        e.gerbiczli_before_wagstaff = false;   // -gerbiczli was given explicitly
+        e.proof_before_wagstaff = false;       // -proof 0 was given explicitly
+        e.gerbiczli = false;
+        e.proof = false;
+        io::dropWagstaff(e);
+        check(!e.wagstaff && !e.gerbiczli && !e.proof, "dropping -wagstaff keeps explicit -gerbiczli / -proof 0");
+    }
 
     if (failures) return 1;
     std::cout << "wagstaff worktodo test passed\n";

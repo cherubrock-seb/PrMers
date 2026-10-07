@@ -940,6 +940,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         //p  = p*2;
         opts.exponent = 2*opts.exponent;
         opts.mode = "prp";
+        opts.gerbiczli_before_wagstaff = opts.gerbiczli;
+        opts.proof_before_wagstaff = opts.proof;
         opts.gerbiczli = false;
         opts.proof = false;
     }
