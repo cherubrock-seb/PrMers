@@ -47,6 +47,20 @@ int main() {
         check(rnd.get_z_bits(2 * E + static_cast<mp_bitcnt_t>(rng() % 8)), E, "random");
     }
 
+    // isZeroResidue: 0 and 2^E - 1 are zero modulo 2^E - 1, nothing else is.
+    for (uint32_t E : {13u, 32u, 64u, 89u}) {
+        const size_t n = (E + 31) / 32;
+        std::vector<uint32_t> zero(n, 0u), ones(n, 0u), one(n, 0u), twoE(n, 0u);
+        for (uint32_t b = 0; b < E; ++b) ones[b / 32] |= uint32_t(1) << (b % 32);
+        one[0] = 1;
+        if (!util::isZeroResidue(zero, E)) { std::cerr << "zero residue not detected, E=" << E << "\n"; ++failures; }
+        if (!util::isZeroResidue(ones, E)) { std::cerr << "2^E-1 not detected, E=" << E << "\n"; ++failures; }
+        if (util::isZeroResidue(one, E)) { std::cerr << "1 taken for zero, E=" << E << "\n"; ++failures; }
+        std::vector<uint32_t> almost = ones;
+        almost[0] &= ~1u;
+        if (util::isZeroResidue(almost, E)) { std::cerr << "2^E-2 taken for zero, E=" << E << "\n"; ++failures; }
+    }
+
     if (failures) {
         std::cerr << "mersenneReduce regression: FAIL\n";
         return 1;

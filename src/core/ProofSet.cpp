@@ -23,6 +23,7 @@
 #include "io/Sha3Hash.h"
 #include "util/Crc32.hpp"
 #include "util/Timer.hpp"
+#include "util/GmpUtils.hpp"
 #include "opencl/NttEngine.hpp"
 #include "math/Carry.hpp"
 #include "io/JsonBuilder.hpp"
@@ -363,7 +364,9 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         }
 
         auto levelResult = gpu.read(bufferPool[0]);
-        if (levelResult.empty()) {
+        // gpu.read always returns ceil(E/32) words, so test the value: a proof
+        // middle is never 0 modulo 2^E - 1 (every term is a power of 3).
+        if (util::isZeroResidue(levelResult, E)) {
             throw std::runtime_error("Read ZERO during proof generation");
         }
 

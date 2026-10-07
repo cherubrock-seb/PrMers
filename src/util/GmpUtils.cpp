@@ -14,6 +14,20 @@ mpz_class convertToGMP(const std::vector<uint32_t>& words) {
   return result;
 }
 
+bool isZeroResidue(const std::vector<uint32_t>& words, uint32_t E) {
+  bool allZero = true;
+  bool allOnes = true;
+  for (size_t i = 0; i < words.size(); ++i) {
+    const uint64_t firstBit = static_cast<uint64_t>(i) * 32;
+    uint32_t mask = 0;  // bits of this word that are below bit E
+    if (firstBit + 32 <= E) mask = 0xFFFFFFFFu;
+    else if (firstBit < E) mask = (uint32_t(1) << (E - firstBit)) - 1u;
+    if (words[i] != 0) allZero = false;
+    if ((words[i] & mask) != mask || (words[i] & ~mask) != 0) allOnes = false;
+  }
+  return allZero || (allOnes && !words.empty());
+}
+
 // Optimized modular reduction for Mersenne numbers: x mod (2^E - 1), fully
 // reduced to [0, 2^E - 2].
 // Uses the identity: X mod (2^E - 1) ≡ (Xlo + Xhi) mod (2^E - 1)
