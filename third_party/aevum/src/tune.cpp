@@ -1027,11 +1027,15 @@ void Tune::tune() {
       u32 current_wmul = args->value("WMUL", 2);
       double best_cost = -1.0;
       double current_cost = -1.0;
+      // carryFused runs G_W * WMUL threads per workgroup.  Gpu::make would clamp a larger WMUL to what the device
+      // supports, so skip those rather than time the same kernel twice and report it under the wrong WMUL.
+      u32 const max_group = getMaxWorkGroupSize(shared.context->deviceId());
       for (u32 wmul : {1, 2, 4}) {
+        if (wmul > 1 && u64(wmul) * (fft.shape.width / fft.shape.nW()) > max_group) continue;
         args->flags["WMUL"] = to_string(wmul);
         double cost = Gpu::make(exponent, shared, fft, {}, false)->timePRP(quick);
         log("Time for %12s using WMUL=%u is %6.1f\n", fft.spec().c_str(), wmul, cost);
-        if (wmul == current_wmul) current_cost = cost;
+        if (wmul <= current_wmul) current_cost = cost;
         if (best_cost < 0.0 || cost < best_cost) { best_cost = cost; best_wmul = wmul; }
       }
       log("Best WMUL is %u.  Default WMUL is 2.\n", best_wmul);

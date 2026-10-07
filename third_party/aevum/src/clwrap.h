@@ -72,6 +72,8 @@ bool hasFreeMemInfo(cl_device_id id);
 bool isAmdGpu(cl_device_id id);
 bool isNvidiaGpu(cl_device_id id);
 u32 getNvidiaComputeCapability(cl_device_id id);
+u32 getMaxWorkGroupSize(cl_device_id id);
+u64 getLocalMemSize(cl_device_id id);
 // AMD only (cl_amd_device_attribute_query); 0 when not available (not AMD, or an older driver).
 u32 getAmdWavefrontWidth(cl_device_id id);
 // CDNA2/CDNA3 (gfx90a, gfx94x/gfx95x): natively wave64 like gfx906, but with a "back-off" barrier that
@@ -134,6 +136,7 @@ void waitForEvents(vector<cl_event>&& waits);
 
 int getKernelNumArgs(cl_kernel k);
 int getWorkGroupSize(cl_kernel k, cl_device_id device, const char *name);
+int getKernelMaxWorkGroupSize(cl_kernel k, cl_device_id device, const char *name);
 std::string getKernelArgName(cl_kernel k, int pos);
 
 cl_device_id getDevice(u32 argsDevId);
