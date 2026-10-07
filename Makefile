@@ -284,6 +284,10 @@ test-pm1-extend-ckpt: all
 test-marin-reg-offset-wrap:
 	bash tests/test_marin_reg_offset_wrap.sh
 
+.PHONY: test-gm-small-items
+test-gm-small-items: all
+	bash tests/gm_small_items_test.sh
+
 .PHONY: test-gm-ecm-resume
 test-gm-ecm-resume:
 	python3 tests/gm_ecm_resume_source_test.py

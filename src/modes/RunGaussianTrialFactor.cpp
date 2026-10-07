@@ -241,12 +241,25 @@ std::optional<TfRequest> parseWorktodoRequest(const std::vector<std::string>& ar
     return std::nullopt;
 }
 
+bool isPrimeSmall(std::uint64_t value) {
+    if (value < 2) return false;
+    for (std::uint64_t d = 2; d * d <= value; ++d) {
+        if (value % d == 0) return false;
+    }
+    return true;
+}
+
 void validateRequest(const TfRequest& request) {
     if (request.exponent < 3 || (request.exponent & 1ULL) == 0ULL) {
         throw std::runtime_error("Gaussian TF requires an odd exponent p >= 3");
     }
     if (request.exponent > std::numeric_limits<std::uint32_t>::max() / 4ULL) {
         throw std::runtime_error("Gaussian TF requires 4p <= 2^32-1");
+    }
+    // Factors of the norm are q = 4kp + 1 only for prime p; for composite p
+    // other divisors of 4p occur, so a "no factor" result would be misleading.
+    if (!isPrimeSmall(request.exponent)) {
+        throw std::runtime_error("Gaussian TF requires a prime exponent p");
     }
     if (request.fromBits < 8 || request.fromBits >= 64 ||
         request.toBits <= request.fromBits || request.toBits > 64) {
