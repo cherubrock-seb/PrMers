@@ -44,7 +44,8 @@ public:
     std::optional<WorktodoEntry> parse();
     // Append one line to a worktodo file (the GUI "Append & Run" path). If the file does not end in a
     // newline (hand-written files and many editors leave none), start a new line first so the new entry
-    // is not glued onto the last one. Returns false when the file cannot be written.
+    // is not glued onto the last one. Serialised with removeProcessedLine(), so an append cannot be lost to a
+    // concurrent rewrite of the file. Returns false when the file cannot be written.
     static bool appendLine(const std::string& path, const std::string& line);
     // Remove the line that was actually run (WorktodoEntry::rawLine) and archive it to worktodo_save.txt.
     // parse() skips lines it cannot run, so "the first actionable line" is not necessarily that line.

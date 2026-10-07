@@ -12,6 +12,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -98,6 +99,41 @@ int main() {
         ++failures;
     } else {
         std::cout << "PASS append failure is reported\n";
+    }
+
+    // The GUI thread appends while the main thread removes finished entries
+    // (removeProcessedLine rewrites the whole file and renames it over the
+    // original). An append that lands between its read and its rename used to
+    // be lost, although the GUI had already reported success.
+    {
+        const int kFiller = 400;
+        const int kAppended = 400;
+        {
+            std::ofstream out(kPath, std::ios::trunc);
+            for (int i = 0; i < kFiller; ++i) out << "Filler=" << i << "\n";
+        }
+        std::thread appender([&] {
+            for (int j = 0; j < kAppended; ++j)
+                io::WorktodoParser::appendLine(kPath, "Appended=" + std::to_string(j));
+        });
+        io::WorktodoParser parser(kPath);
+        for (int i = 0; i < kFiller; ++i) parser.removeProcessedLine("Filler=" + std::to_string(i));
+        appender.join();
+
+        std::ifstream in(kPath);
+        std::string line;
+        int appended = 0, filler = 0;
+        while (std::getline(in, line)) {
+            if (line.rfind("Appended=", 0) == 0) ++appended;
+            else if (line.rfind("Filler=", 0) == 0) ++filler;
+        }
+        if (appended != kAppended || filler != 0) {
+            std::cerr << "FAIL concurrent append/remove: " << appended << " of " << kAppended
+                      << " appended lines survived, " << filler << " filler lines left\n";
+            ++failures;
+        } else {
+            std::cout << "PASS concurrent append and remove keep every appended line\n";
+        }
     }
 
     std::filesystem::remove(kPath);

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <vector>
 #include <optional>
+#include <mutex>
 #include <limits>
 #include <cctype>
 #include <algorithm>
@@ -16,6 +17,13 @@
 #include <cmath>
 
 namespace io {
+
+// Serialises every in-process rewrite of a worktodo file: removeProcessedLine() (main thread) reads the
+// file and renames a filtered copy over it, which would drop a line appended by the GUI thread in between.
+static std::mutex& worktodoFileMutex() {
+    static std::mutex m;
+    return m;
+}
 
 WorktodoParser::WorktodoParser(const std::string& filename)
   : filename_(filename)
@@ -593,6 +601,7 @@ continue;
 }
 
 bool WorktodoParser::appendLine(const std::string& path, const std::string& line) {
+    std::lock_guard<std::mutex> lock(worktodoFileMutex());
     bool needNewline = false;
     {
         std::ifstream in(path, std::ios::binary | std::ios::ate);
@@ -615,6 +624,7 @@ bool WorktodoParser::appendLine(const std::string& path, const std::string& line
 }
 
 bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
+    std::lock_guard<std::mutex> lock(worktodoFileMutex());
     std::ifstream inFile(filename_);
     std::ofstream tempFile(filename_ + ".tmp");
     std::ofstream saveFile("worktodo_save.txt", std::ios::app);
