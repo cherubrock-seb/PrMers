@@ -772,7 +772,11 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
   readTailFusedLine(in31, v, line2, me);
 
   u32 zerohack = ZEROHACK_H * (u32) get_group_id(0) / 131072;
+#if AMDGPU && PFA_RADIX == 9
   fft_HEIGHT1_FIRST(lds + zerohack, u, smallTrig31 + zerohack, 1, me);
+#else
+  fft_HEIGHT1(lds + zerohack, u, smallTrig31 + zerohack, 1, me);
+#endif
   fft_HEIGHT1(lds + zerohack, v, smallTrig31 + zerohack, 1, me);
 
   // Do a little bit of memory access and a little bit of math.
