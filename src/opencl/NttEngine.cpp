@@ -4,6 +4,8 @@
 #include "util/OpenCLError.hpp"
 #include "math/Carry.hpp"
 #include <iostream>
+#include <stdexcept>
+#include <string>
 #include <algorithm>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
@@ -235,8 +237,9 @@ static void executeKernelAndDisplay(cl_command_queue queue,
     //std::cerr << "Kernel " << kernelName << " Actual actualLocalSize=" << actualLocalSize << " nullptr = " << nullptr << std::endl;
 
     if (err != CL_SUCCESS) {
-        std::cerr << "Kernel " << kernelName << util::getCLErrorString(err)
-                  << " (" << err << ")\n";
+        // Continuing would silently skip an NTT stage and corrupt the residue.
+        throw std::runtime_error("Kernel " + kernelName + ": clEnqueueNDRangeKernel failed: " +
+                                 util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
     }
     if (debug) {
         clFinish(queue);
@@ -379,8 +382,13 @@ int NttEngine::inverse_simple(cl_mem buf_x, uint64_t /*iter*/) {
 int NttEngine::pointwiseMul(cl_mem a, cl_mem b)
 {
     cl_kernel k = kernels_.getKernel("kernel_pointwise_mul");
-    clSetKernelArg(k, 0, sizeof(cl_mem), &a);
-    clSetKernelArg(k, 1, sizeof(cl_mem), &b);
+    for (cl_uint i = 0; i < 2; ++i) {
+        const cl_int argErr = clSetKernelArg(k, i, sizeof(cl_mem), i == 0 ? &a : &b);
+        if (argErr != CL_SUCCESS) {
+            throw std::runtime_error("kernel_pointwise_mul: clSetKernelArg(" + std::to_string(i) +
+                                     ") failed with error " + std::to_string(argErr));
+        }
+    }
     size_t n = pre_.getN();
     size_t ls0_val = ctx_.getLocalSize();
     const size_t* ls0 = &ls0_val;
@@ -424,7 +432,10 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
 }
 
 void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
-    clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
+    const cl_int err = clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("clEnqueueCopyBuffer failed with error " + std::to_string(err));
+    }
 }
 
 void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBytes) {
@@ -438,6 +449,9 @@ void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBy
         nullptr,
         &err
     );
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+    }
     copy(buffers_.input, temp, limbBytes);
    
     copy(B, buffers_.input, limbBytes);
@@ -467,6 +481,9 @@ void NttEngine::mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
         nullptr,
         &err
     );
+    if (err != CL_SUCCESS) {
+        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+    }
     copy(A, temp, limbBytes);
    
     copy(B, buffers_.input, limbBytes);
