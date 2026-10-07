@@ -177,6 +177,10 @@ test-legacy-enqueue-errors:
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
 
+.PHONY: test-self-exe-restart
+test-self-exe-restart:
+	bash tests/test_self_exe_restart.sh
+
 .PHONY: test-legacy-small-items
 
 test-legacy-small-items:
