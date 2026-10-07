@@ -14,6 +14,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/ErrorCheckRetry.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -232,6 +233,7 @@ int App::runLlSafeMarinDoubling()
     spinner.displayProgress(resumeIter, totalIters, 0.0, 0.0, p, resumeIter, startIter, "", guiServer_ ? guiServer_.get() : nullptr);
 
     bool errordone = false;
+    core::ErrorCheckRetry errcheck_retry;
     uint64_t itersave = 0;
     if (r == 0) {
         itersave = (ri_itersave != kItersaveUnknown) ? (uint64_t)ri_itersave : (ri / B) * B;
@@ -324,6 +326,15 @@ int App::runLlSafeMarinDoubling()
                           << "[Error check] Restore iter=" << itersave << "\n";
                     guiServer_->appendLog(oss.str());
                 }
+                options.gerbicz_error_count += 1;
+                if (errcheck_retry.failed()) {
+                    const std::string reason = errcheck_retry.reason(itersave,
+                        "Try -engine-marin or another -aevum-fft plan.");
+                    std::cout << "[Error check] " << reason << "\n";
+                    if (guiServer_) guiServer_->appendLog(std::string("[Error check] ") + reason);
+                    delete eng;
+                    throw std::runtime_error(reason);
+                }
                 eng->copy(RV, RVC);
                 eng->copy(RU, RUC);
                 if (itersave == 0) {
@@ -343,6 +354,7 @@ int App::runLlSafeMarinDoubling()
                 eng->copy(RVC, RV);
                 eng->copy(RUC, RU);
                 itersave = iter + 1;
+                errcheck_retry.passed();
             }
         }
     }
@@ -606,6 +618,11 @@ int App::runLlSafeMarin()
     uint64_t startIter  = iter_done;
     uint64_t itersave = (r==0) ? itersave_meta : (resumeIter ? resumeIter - 1 : 0);
     uint64_t jsave = (r==0) ? jsave_meta : (totalIters - resumeIter - 1);
+    // itersave is the index of the last verified iteration and is 0 both before any check and
+    // after a check at iteration 0; verified_done is the number of iterations the saved state has
+    // done, so a rollback does not repeat iteration 0 when the state is already past it.
+    uint64_t verified_done = (r==0 && itersave_meta != 0) ? itersave_meta + 1 : 0;
+    core::ErrorCheckRetry errcheck_retry;
     std::string res64_x; res64_pair(res64_x);
     spinner.displayProgress((uint32_t)resumeIter, (uint32_t)totalIters, 0.0, 0.0, p, (uint32_t)resumeIter, (uint32_t)startIter, res64_x, guiServer_ ? guiServer_.get() : nullptr);
 
@@ -680,6 +697,14 @@ int App::runLlSafeMarin()
             std::cout << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]" << std::endl;
             if (guiServer_) { std::ostringstream oss; oss << "[Gerbicz-Li] Check FAILED at iter=" << (iter + 1) << " block=[" << blk_start << ".." << blk_end << "]"; guiServer_->appendLog(oss.str()); }
             options.gerbicz_error_count += 1;
+            if (errcheck_retry.failed()) {
+                const std::string reason = errcheck_retry.reason(verified_done,
+                    "Try -engine-marin or another -aevum-fft plan.");
+                std::cout << "[Error check] " << reason << "\n";
+                if (guiServer_) guiServer_->appendLog(std::string("[Error check] ") + reason);
+                delete eng;
+                throw std::runtime_error(reason);
+            }
 
             eng->copy(static_cast<engine::Reg>(RRES_A), static_cast<engine::Reg>(RSAVE_R_A));
             eng->copy(static_cast<engine::Reg>(RRES_B), static_cast<engine::Reg>(RSAVE_R_B));
@@ -687,8 +712,8 @@ int App::runLlSafeMarin()
             eng->copy(static_cast<engine::Reg>(RACC_B), static_cast<engine::Reg>(RSAVE_F_B));
 
             checkpass = 0;
-            resumeIter = (itersave == 0) ? 0 : (itersave + 1);
-            if (itersave == 0) { iter = (uint64_t)-1; j = jsave+1; } else { iter = itersave; j = jsave; }
+            resumeIter = verified_done;
+            if (verified_done == 0) { iter = (uint64_t)-1; j = jsave+1; } else { iter = itersave; j = jsave; }
             std::cout << "[Gerbicz-Li] Restore iter=" << iter + 1 << std::endl;
             std::cout << "[Gerbicz-Li] Restore j=" << j - 1 << std::endl;
             continue;
@@ -702,8 +727,10 @@ int App::runLlSafeMarin()
             eng->copy(static_cast<engine::Reg>(RSAVE_F_A), static_cast<engine::Reg>(RACC_A));
             eng->copy(static_cast<engine::Reg>(RSAVE_F_B), static_cast<engine::Reg>(RACC_B));
             itersave = iter;
+            verified_done = iter + 1;
             jsave = j;
             checkpass = 0;
+            errcheck_retry.passed();
         }
     }
 
