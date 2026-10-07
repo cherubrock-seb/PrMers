@@ -326,6 +326,14 @@ test-llsafe2-resume: all
 test-llsafe2-result: all
 	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-error-check-retry
+test-error-check-retry:
+	bash tests/test_error_check_retry.sh
+
+.PHONY: test-llsafe-error-recovery
+test-llsafe-error-recovery: all
+	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:

@@ -14,6 +14,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/ErrorCheckRetry.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -315,6 +316,11 @@ int App::runPrpOrLl() {
 
     uint64_t itersave =  backupManager.loadGerbiczIterSave();
         
+    // itersave is the index of the last verified iteration and is 0 both before any check and
+    // after a check at iteration 0; verified_done is the number of iterations the saved state has
+    // done, so a rollback does not repeat iteration 0 when the state is already past it.
+    uint64_t verified_done = itersave != 0 ? itersave + 1 : 0;
+    core::ErrorCheckRetry errcheck_retry;
     uint64_t checkpass = 0;
     uint64_t jsave = backupManager.loadGerbiczJSave();
     if(jsave==0){
@@ -665,7 +671,9 @@ int App::runPrpOrLl() {
                     nttEngine->copy(buffers->save, buffers->last_correct_state, limbBytes);
                     nttEngine->copy(buffers->bufd, buffers->last_correct_bufd, limbBytes);
                     itersave = iter;
+                    verified_done = iter + 1;
                     jsave = j;
+                    errcheck_retry.passed();
                     cl_event postEvt;
                     clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
                     clWaitForEvents(1, &postEvt);
@@ -680,16 +688,25 @@ int App::runPrpOrLl() {
                             << "[Gerbicz Li] Restore iter=" << itersave << " (j=" << jsave << ")\n";
                                 guiServer_->appendLog(oss.str());
                     }
+                    options.gerbicz_error_count += 1;
+                    if (errcheck_retry.failed()) {
+                        const std::string reason = errcheck_retry.reason(verified_done,
+                            "Try the default Aevum or -engine-marin backend instead of -marin.");
+                        std::cout << "[Gerbicz Li] " << reason << "\n";
+                        if (guiServer_) guiServer_->appendLog(std::string("[Gerbicz Li] ") + reason);
+                        if (outOkBuf != nullptr)  clReleaseMemObject(outOkBuf);
+                        if (outIdxBuf != nullptr) clReleaseMemObject(outIdxBuf);
+                        throw std::runtime_error(reason);
+                    }
                     j = jsave;
                     iter = itersave;
                     lastIter = itersave;
                     lastIter = iter;
-                    if (iter == 0) {
+                    if (verified_done == 0) {
                         iter = iter - 1;
                         j = j + 1;
                     }
                     checkpass = 0;
-                    options.gerbicz_error_count += 1;
                     nttEngine->copy(buffers->last_correct_state, buffers->input, limbBytes);
                     nttEngine->copy(buffers->last_correct_bufd, buffers->bufd, limbBytes);
                     cl_event postEvt;
