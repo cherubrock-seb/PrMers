@@ -944,7 +944,7 @@ int App::runECMMarin()
             uint8_t  saved_tor  = 0;
             have_s2_base_cache = false;
             uint64_t saved_k = 0;
-            if (version == 6 || version == 7 || version == 8 || version == kCkptTorsionS2) {
+            if (version == 6 || version == 7 || version == 8 || version == 9 || version == kCkptTorsionS2) {
                 uint8_t in_chunk = 0;
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
@@ -1158,6 +1158,9 @@ int App::runECMMarin()
         mpz_class te_aE, te_dE, te_X0, te_Y0;
 
         if (resume_stage2) {
+            // Stage 1 is skipped on a stage-2 resume, so pick the stage-2 engine form here:
+            // Suyama curves (mode 0) run stage 1 and stage 2 in twisted Edwards coordinates.
+            if (pm_effective == 0) use_te_stage1 = true;
             if (pm_effective==0 || pm_effective==1 || pm_effective==2) mode_name="montgomery"; else mode_name="edwards--conv-->montgomery";
             if (pm_effective==0 || pm_effective==3) torsion_name="none"; else if (pm_effective==1 || pm_effective==4) torsion_name="16"; else torsion_name="8";
         }
