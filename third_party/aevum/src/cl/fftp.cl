@@ -632,8 +632,9 @@ KERNEL(256) fftP61WeightScalarApple(P(ulong2) outRaw, CP(Word2) in) {
       (bigword_weight_shift + 60) % 61;
 
   union { uint2 a; u64 b; } combo;
+  // word_index spans the whole FFT here (up to NWORDS-2), so reduce it mod 61 first: word_index * shift could exceed 2^32 and wrap.
   combo.b = comboFracBits(word_index) +
-            make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
+            make_u64(word_index % 61 * bigword_weight_shift_minus1, 0xFFFFFFFF);
   combo.a[1] %= 61;
   const u32 shift0 = combo.a[1];
 
@@ -746,8 +747,9 @@ KERNEL(G_W) fftP61WeightStage1FusedApple(P(ulong2) outRaw, CP(Word2) in,
     const u32 p = line * WIDTH + x;
     const u32 word_index = (line + BIG_HEIGHT * x) * 2;
     union { uint2 a; u64 b; } combo;
+    // word_index spans the whole FFT here (up to NWORDS-2), so reduce it mod 61 first: word_index * step could exceed 2^32 and wrap.
     combo.b = comboFracBits(word_index) +
-              make_u64(word_index * step, 0xFFFFFFFF);
+              make_u64(word_index % 61 * step, 0xFFFFFFFF);
     combo.a[1] %= 61;
     const u32 shift0 = combo.a[1];
     combo.b += make_u64(step, FRAC_BPW_HI);

@@ -192,9 +192,10 @@ MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
+APPLE_FFTP61_SEED_TEST := build-tests/aevum-apple-fftp61-seed-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
-.PHONY: test test-host test-gpu test-pfa9-lead-bridge-gpu
+.PHONY: test test-host test-apple-fftp61-seed test-gpu test-pfa9-lead-bridge-gpu
 
 test: test-host
 
@@ -211,6 +212,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_gf61_ffthin_staging_test.py
 	python3 tests/apple_gf31_width_staging_test.py
 	python3 tests/apple_fused_fftp_test.py
+	python3 tests/apple_fftp61_seed_overflow_test.py
 	python3 tests/apple_gf61_scalar_mapping_test.py
 	python3 tests/apple_gf61_width_staging_test.py
 	python3 tests/apple_gf61_middlein_staging_test.py
@@ -238,6 +240,13 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(AUTOTUNE_CACHE_TEST)
 	$(EVENT_STATUS_TEST)
 	$(FFT8_SKIP1_TEST)
+
+test-apple-fftp61-seed: $(APPLE_FFTP61_SEED_TEST)
+	$(APPLE_FFTP61_SEED_TEST)
+
+$(APPLE_FFTP61_SEED_TEST): tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
