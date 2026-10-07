@@ -4,9 +4,13 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
+#include <system_error>
 #include <thread>
 #ifndef _WIN32
 #include <csignal>
@@ -51,6 +55,44 @@ inline bool pm1SystemStatusInterrupted(int status) {
     if (WIFEXITED(status)) return WEXITSTATUS(status) == 128 + SIGINT || WEXITSTATUS(status) == 128 + SIGTERM;
     return false;
 #endif
+}
+
+/// The Prime95 state file `m<p>` is written from PrMers' stage-1 residue before
+/// the handoff, and Prime95 then saves its own stage-2 progress into that same
+/// file.  After an interrupt, rewriting it on the rerun would throw that
+/// progress away.  A small marker next to the state file records the bounds of
+/// the handoff in flight: while it exists and matches, the state file is kept.
+inline std::string pm1Prime95HandoffKey(uint64_t b1, uint64_t b2, uint64_t b2Start) {
+    return "B1=" + std::to_string(b1) + " B2=" + std::to_string(b2) + " B2Start=" + std::to_string(b2Start);
+}
+
+inline std::string pm1Prime95HandoffMarkerPath(const std::string& statePath) {
+    return statePath + ".prmers";
+}
+
+/// True when an earlier handoff with the same bounds was interrupted, so the
+/// state file holds Prime95's own progress and must not be rewritten.
+inline bool pm1Prime95HandoffPending(const std::string& statePath, const std::string& key) {
+    std::error_code ec;
+    if (!std::filesystem::exists(statePath, ec)) return false;
+    std::ifstream in(pm1Prime95HandoffMarkerPath(statePath));
+    if (!in) return false;
+    std::string stored;
+    std::getline(in, stored);
+    return stored == key;
+}
+
+/// Records a handoff that is about to start (after the state file was written).
+inline void pm1Prime95HandoffBegin(const std::string& statePath, const std::string& key) {
+    std::ofstream out(pm1Prime95HandoffMarkerPath(statePath), std::ios::trunc);
+    out << key << '\n';
+}
+
+/// Forgets the handoff: Prime95 finished or failed, so the next one starts from
+/// a freshly written state file.
+inline void pm1Prime95HandoffEnd(const std::string& statePath) {
+    std::error_code ec;
+    std::filesystem::remove(pm1Prime95HandoffMarkerPath(statePath), ec);
 }
 
 #ifndef _WIN32

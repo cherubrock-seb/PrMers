@@ -6271,10 +6271,19 @@ int App::runPM1Marin() {
         std::ostringstream p95_name;
         p95_name << 'm' << std::setw(7) << std::setfill('0') << p;
         const fs::path p95_state = p95_dir / p95_name.str();
-        int conv_rc = convertEcmResumeToPrime95(resume_save_path, p95_state.string(), ds, de);
-        if (conv_rc != 0) {
-            p95_log(std::string("[PM1] Prime95 Stage2 failed: could not write state file ") + p95_state.string());
-            return false;
+        const std::string handoff_key = core::pm1Prime95HandoffKey(options.B1, options.B2, options.B2Start);
+        if (core::pm1Prime95HandoffPending(p95_state.string(), handoff_key)) {
+            // An earlier handoff with these bounds was interrupted: the state
+            // file holds Prime95's own stage-2 progress.  Rewriting it from the
+            // stage-1 residue would restart stage 2 at B1.
+            p95_log(std::string("[PM1] Prime95 Stage2: keeping the interrupted state file ") + p95_state.string());
+        } else {
+            int conv_rc = convertEcmResumeToPrime95(resume_save_path, p95_state.string(), ds, de);
+            if (conv_rc != 0) {
+                p95_log(std::string("[PM1] Prime95 Stage2 failed: could not write state file ") + p95_state.string());
+                return false;
+            }
+            core::pm1Prime95HandoffBegin(p95_state.string(), handoff_key);
         }
 
         const std::string known_csv = p95_join_known_factors_csv(options.knownFactors);
@@ -6298,6 +6307,8 @@ int App::runPM1Marin() {
             // std::system() ignores SIGINT in this process while Prime95 runs, so
             // the signal never reached our handler; record it for the callers.
             interrupted.store(true, std::memory_order_relaxed);
+        } else {
+            core::pm1Prime95HandoffEnd(p95_state.string());
         }
         if (!rr.error.empty()) {
             p95_log(std::string("[PM1] Prime95 Stage2 error: ") + rr.error);

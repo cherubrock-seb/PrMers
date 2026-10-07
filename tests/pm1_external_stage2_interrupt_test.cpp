@@ -132,6 +132,27 @@ int main(int argc, char** argv) {
         CHECK(secs_since(t0) < 8.0);
     }
 
+    {   // The Prime95 state file is kept after an interrupt, rewritten otherwise.
+        const std::string state = dir + "/m0000113";
+        const std::string key = core::pm1Prime95HandoffKey(10, 20000, 0);
+        std::remove(state.c_str());
+        core::pm1Prime95HandoffEnd(state);
+        CHECK(!core::pm1Prime95HandoffPending(state, key));             // nothing written yet
+        { std::ofstream f(state); f << "stage-1 residue"; }
+        CHECK(!core::pm1Prime95HandoffPending(state, key));             // no marker: rewrite
+        core::pm1Prime95HandoffBegin(state, key);
+        CHECK(core::pm1Prime95HandoffPending(state, key));              // interrupted handoff: keep
+        CHECK(!core::pm1Prime95HandoffPending(state, core::pm1Prime95HandoffKey(10, 30000, 0)));  // other B2
+        CHECK(!core::pm1Prime95HandoffPending(state, core::pm1Prime95HandoffKey(11, 20000, 0)));  // other B1
+        CHECK(!core::pm1Prime95HandoffPending(state, core::pm1Prime95HandoffKey(10, 20000, 5000)));  // other B2 start
+        std::remove(state.c_str());
+        CHECK(!core::pm1Prime95HandoffPending(state, key));             // state file gone: rewrite
+        { std::ofstream f(state); f << "x"; }
+        core::pm1Prime95HandoffEnd(state);
+        CHECK(!core::pm1Prime95HandoffPending(state, key));             // handoff finished or failed
+        std::remove(state.c_str());
+    }
+
     if (g_fail) return 1;
     std::cout << "pm1 external stage-2 interrupt test passed\n";
     return 0;

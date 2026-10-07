@@ -19,5 +19,6 @@ n=$(grep -c 'pm1AfterExternalStage2(external_used, interrupted)' "$src")
 if grep -q 'if (!external_used)' "$src"; then
   echo "a handoff still falls through on !external_used" >&2; exit 1
 fi
+grep -q 'core::pm1Prime95HandoffPending(p95_state' "$src" || { echo "the handoff rewrites Prime95's state file unconditionally" >&2; exit 1; }
 grep -q 'pm1RunShellInterruptible(shell.str(), interrupted' "$src" || { echo "p95 task does not use the interruptible runner" >&2; exit 1; }
 echo "pm1 external stage-2 source check passed"

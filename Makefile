@@ -350,6 +350,9 @@ test-pm1-extend-stage2-rerun: all
 test-pm1-external-stage2-interrupt:
 	bash tests/pm1_external_stage2_interrupt_test.sh
 
+test-pm1-prime95-interrupted-state: all
+	bash tests/pm1_prime95_interrupted_state_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-interrupt-building-e: all
 	bash tests/pm1_interrupt_building_e_test.sh $${PRMERS_TEST_DEVICE:-0}
 
