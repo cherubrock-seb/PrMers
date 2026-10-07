@@ -103,7 +103,7 @@ int App::runPrpOrLlMarin()
     //if (guiServer_) guiServer_->appendLog("Hello world");
 
     Printer::banner(options);
-    if (auto code = QuickChecker::run(options.exponent)) return *code;
+    if (auto code = QuickChecker::run(options, hasWorktodoEntry_)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;//options.debug;

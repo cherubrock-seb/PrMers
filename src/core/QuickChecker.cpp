@@ -41,4 +41,9 @@ std::optional<int> QuickChecker::run(uint64_t p) {
     return isPrime ? 0 : 1;
 }
 
+std::optional<int> QuickChecker::run(const io::CliOptions& opts, bool fromWorktodo) {
+    if (fromWorktodo || opts.wagstaff || !opts.knownFactors.empty()) return std::nullopt;
+    return run(opts.exponent);
+}
+
 } // namespace core
