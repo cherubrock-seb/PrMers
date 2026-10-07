@@ -427,6 +427,13 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
         oss << ",\"b1\":" << opts.B1;
         if (opts.B2 > opts.B1) {
             oss << ",\"b2\":" << opts.B2;
+            // The low-memory stage 2 searches (B2Start, B2] when B2Start is above B1.
+            // Prime95 and PrimeNet have no field for that, so "b2" alone would claim
+            // the whole (B1, B2]: add the start bound so that the range actually
+            // searched can be told. It is not part of the checksum.
+            if (worktype == "pm1" && opts.pm1_lowmem && opts.B2Start > opts.B1) {
+                oss << ",\"b2-start\":" << opts.B2Start;
+            }
         }
     }
     if ((worktype == "ll") || (worktype == "llsafe") || (worktype == "llsafe2") || (worktype == "prp")) {
