@@ -75,7 +75,17 @@ std::string library_error_text() {
 
 NativeLibrary open_library(const std::filesystem::path& path) {
     int flags = RTLD_NOW | RTLD_LOCAL;
-#ifdef RTLD_DEEPBIND
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define PRMERS_ADDRESS_SANITIZER 1
+#  endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#  define PRMERS_ADDRESS_SANITIZER 1
+#endif
+    // AddressSanitizer refuses to dlopen with RTLD_DEEPBIND ("incompatible with sanitizer
+    // runtime"), so sanitizer builds load the engine without it.
+#if defined(RTLD_DEEPBIND) && !defined(PRMERS_ADDRESS_SANITIZER)
     flags |= RTLD_DEEPBIND;
 #endif
     dlerror();
