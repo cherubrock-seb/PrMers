@@ -19,6 +19,12 @@ for source in (gm, factor):
     assert "const unsigned __int128 step128" not in source
     assert "const unsigned __int128 q128" not in source
 
+vtrace = (root / "src/modes/RunGaussianMersennePm1VTrace.cpp").read_text()
+for source in (gm, factor, vtrace):
+    # 64-bit q must not be narrowed to `unsigned long` (32 bits on LLP64).
+    assert "static_cast<unsigned long>(q)" not in source
+    assert "core::gm_u64::is_proper_divisor" in source
+
 assert "static bool parse_cli_tail_option" in cli
 assert "parse_cli_tail_option(opts, i, argc, argv)" in cli
 

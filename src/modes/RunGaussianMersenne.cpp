@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmU64Divisor.hpp"
 #include "core/Version.hpp"
 #include "aevum/EngineAevum.hpp"
 #include "marin/engine.h"
@@ -299,8 +300,7 @@ std::uint64_t find_small_factor(std::uint64_t p, int /*chi*/, std::uint64_t limi
         const std::uint64_t q = step * k + 1;
         if (q > limit) break;
         if (!is_prime_u64(q)) continue;
-        if (mpz_divisible_ui_p(n.get_mpz_t(), static_cast<unsigned long>(q)) &&
-            mpz_cmp_ui(n.get_mpz_t(), static_cast<unsigned long>(q)) != 0) return q;
+        if (core::gm_u64::is_proper_divisor(n, q)) return q;
     }
     return 0;
 }

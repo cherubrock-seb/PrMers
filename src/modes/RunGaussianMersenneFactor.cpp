@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmU64Divisor.hpp"
 #include "core/GmEcmProgress.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
@@ -186,8 +187,7 @@ std::uint64_t find_admissible_small_factor(const GmTarget& t, std::uint64_t limi
         const std::uint64_t q = step * k + 1;
         if (q > limit) break;
         if (!is_prime_u64(q)) continue;
-        if (mpz_divisible_ui_p(t.n.get_mpz_t(), static_cast<unsigned long>(q)) &&
-            mpz_cmp_ui(t.n.get_mpz_t(), static_cast<unsigned long>(q)) != 0) return q;
+        if (core::gm_u64::is_proper_divisor(t.n, q)) return q;
     }
     return 0;
 }

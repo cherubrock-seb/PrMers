@@ -284,6 +284,12 @@ test-pm1-extend-ckpt: all
 test-marin-reg-offset-wrap:
 	bash tests/test_marin_reg_offset_wrap.sh
 
+.PHONY: test-gm-u64-divisor
+test-gm-u64-divisor:
+	mkdir -p /tmp/prmers-gm-u64-divisor-test
+	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_u64_divisor_test.cpp -o /tmp/prmers-gm-u64-divisor-test/gm_u64_divisor_test -lgmpxx -lgmp
+	/tmp/prmers-gm-u64-divisor-test/gm_u64_divisor_test
+
 .PHONY: test-gm-ecm-resume
 test-gm-ecm-resume:
 	python3 tests/gm_ecm_resume_source_test.py
