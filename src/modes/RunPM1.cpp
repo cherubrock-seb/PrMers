@@ -232,7 +232,10 @@ struct PM1Prime95Stage2Result {
     bool success = false;
     bool factor_found = false;
     bool known_factor = false;
-    std::string factor;
+    std::string factor;                  // first factor listed (kept for logging)
+    std::vector<std::string> factors;    // every factor listed in the result line
+    bool b2_reported = false;            // result line carries the B2 Prime95 reached
+    uint64_t b2_reached = 0;
     std::string json_line;
     int exit_code = -1;
     std::string error;
@@ -516,27 +519,58 @@ static bool p95_extract_json_string_field(const std::string& line, const std::st
     return true;
 }
 
-static bool p95_extract_json_first_factor(const std::string& line, std::string& factor) {
-    factor.clear();
+static bool p95_extract_json_factors(const std::string& line, std::vector<std::string>& factors) {
+    factors.clear();
     const std::string needle = "\"factors\"";
     size_t pos = line.find(needle);
     if (pos == std::string::npos) return false;
     pos = line.find('[', pos + needle.size());
     if (pos == std::string::npos) return false;
-    pos = line.find('"', pos + 1);
-    if (pos == std::string::npos) return false;
-    size_t end = line.find('"', pos + 1);
-    if (end == std::string::npos) return false;
-    factor = line.substr(pos + 1, end - pos - 1);
+    const size_t close = line.find(']', pos + 1);
+    if (close == std::string::npos) return false;
+    size_t cur = pos + 1;
+    for (;;) {
+        const size_t q1 = line.find('"', cur);
+        if (q1 == std::string::npos || q1 > close) break;
+        const size_t q2 = line.find('"', q1 + 1);
+        if (q2 == std::string::npos || q2 > close) break;
+        factors.push_back(line.substr(q1 + 1, q2 - q1 - 1));
+        cur = q2 + 1;
+    }
     return true;
 }
 
-static bool p95_parse_result_json_line(const std::string& line, std::string& status_out, std::string& factor_out) {
+static bool p95_extract_json_uint_field(const std::string& line, const std::string& key, uint64_t& value) {
+    value = 0;
+    const std::string needle = std::string("\"") + key + "\"";
+    size_t pos = line.find(needle);
+    if (pos == std::string::npos) return false;
+    pos = line.find(':', pos + needle.size());
+    if (pos == std::string::npos) return false;
+    ++pos;
+    while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])) != 0) ++pos;
+    if (pos >= line.size() || !std::isdigit(static_cast<unsigned char>(line[pos]))) return false;
+    uint64_t v = 0;
+    while (pos < line.size() && std::isdigit(static_cast<unsigned char>(line[pos]))) {
+        const uint64_t d = static_cast<uint64_t>(line[pos] - '0');
+        if (v > (UINT64_MAX - d) / 10) return false;
+        v = v * 10 + d;
+        ++pos;
+    }
+    value = v;
+    return true;
+}
+
+static bool p95_parse_result_json_line(const std::string& line, std::string& status_out,
+                                       std::vector<std::string>& factors_out) {
     status_out.clear();
-    factor_out.clear();
+    factors_out.clear();
     p95_extract_json_string_field(line, "status", status_out);
-    if (!p95_extract_json_first_factor(line, factor_out)) {
-        p95_extract_json_string_field(line, "factor", factor_out);
+    if (!p95_extract_json_factors(line, factors_out) || factors_out.empty()) {
+        std::string single;
+        if (p95_extract_json_string_field(line, "factor", single) && !single.empty()) {
+            factors_out.assign(1, single);
+        }
     }
     return !status_out.empty();
 }
@@ -674,15 +708,21 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
     }
 
     std::string status;
-    std::string factor;
-    if (!p95_parse_result_json_line(result.json_line, status, factor)) {
+    if (!p95_parse_result_json_line(result.json_line, status, result.factors)) {
         result.error = "Unable to parse Prime95 results.json.txt line";
         return result;
     }
 
-    result.factor = factor;
-    result.factor_found = (!factor.empty()) || (status == "F");
-    result.known_factor = result.factor_found && !factor.empty() && p95_is_known_factor_string(factor, known_factors);
+    // Every listed factor, not only the first one, must be known already for
+    // the result to count as "known"; the first unknown one is reported.
+    result.factor = result.factors.empty() ? std::string() : result.factors.front();
+    for (const std::string& f : result.factors) {
+        if (!f.empty() && !p95_is_known_factor_string(f, known_factors)) { result.factor = f; break; }
+    }
+    result.factor_found = (!result.factors.empty()) || (status == "F");
+    result.known_factor = result.factor_found && !result.factor.empty() &&
+                          p95_is_known_factor_string(result.factor, known_factors);
+    result.b2_reported = p95_extract_json_uint_field(result.json_line, "b2", result.b2_reached);
     result.success = (status == "NF") || (status == "F");
 
     if (!result.success && result.error.empty()) {
@@ -6266,17 +6306,41 @@ int App::runPM1Marin() {
         if (!rr.json_line.empty()) done << " | result=" << rr.json_line;
         p95_log(done.str());
 
+        if (rr.factor_found && rr.factors.empty()) {
+            p95_log("[PM1] Prime95 Stage2 error: result reports a factor but none could be parsed");
+            return false;
+        }
+
+        // Report the bound Prime95 really searched, not the one requested.
+        if (rr.b2_reported && rr.b2_reached != options.B2) {
+            std::ostringstream msg;
+            msg << "[PM1] Prime95 Stage2 reached B2=" << rr.b2_reached
+                << " instead of the requested B2=" << options.B2
+                << "; the result is reported for B2=" << rr.b2_reached;
+            p95_log(msg.str());
+            options.B2 = rr.b2_reached;
+        }
+
+        std::vector<std::string> new_factors;
+        for (const std::string& f : rr.factors) {
+            if (f.empty() || p95_is_known_factor_string(f, options.knownFactors)) continue;
+            if (p95_is_known_factor_string(f, new_factors)) continue;
+            new_factors.push_back(f);
+        }
+
         const std::string result_file = std::string("stage2_result_B2_") + std::to_string(options.B2) + "_p_" + std::to_string(options.exponent) + ".txt";
-        if (rr.factor_found && !rr.factor.empty() && !rr.known_factor) {
-            writeStageResult(result_file, std::string("B2=") + std::to_string(options.B2) + "  factor=" + rr.factor);
-            std::cout << "\n>>>  Factor P-1 (stage 2) found : " << rr.factor << '\n';
-            std::cout << "P-1 factor stage 2 found: " << rr.factor << '\n';
-            if (guiServer_) {
-                std::ostringstream oss;
-                oss << "\n>>>  Factor P-1 (stage 2) found : " << rr.factor << '\n';
-                guiServer_->appendLog(oss.str());
+        if (!new_factors.empty()) {
+            writeStageResult(result_file, std::string("B2=") + std::to_string(options.B2) + "  factor=" + p95_join_known_factors_csv(new_factors));
+            for (const std::string& f : new_factors) {
+                std::cout << "\n>>>  Factor P-1 (stage 2) found : " << f << '\n';
+                std::cout << "P-1 factor stage 2 found: " << f << '\n';
+                if (guiServer_) {
+                    std::ostringstream oss;
+                    oss << "\n>>>  Factor P-1 (stage 2) found : " << f << '\n';
+                    guiServer_->appendLog(oss.str());
+                }
+                options.knownFactors.push_back(f);
             }
-            options.knownFactors.push_back(rr.factor);
             factor_found_out = true;
         } else {
             writeStageResult(result_file, std::string("No factor P-1 up to B2=") + std::to_string(options.B2));

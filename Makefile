@@ -355,6 +355,9 @@ test-pm1-lowmem-stage1-ckpt: all
 test-pm1-vtrace-low-prime: all
 	bash tests/pm1_vtrace_low_prime_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-prime95-stage2-result: all
+	bash tests/pm1_prime95_stage2_result_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 
