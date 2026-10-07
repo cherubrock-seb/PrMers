@@ -53,8 +53,8 @@ std::vector<u32> compactBits(const vector<Word> &dataVect, u64 E) {
     }
   }
 
-  assert(haveBits);
-  out.push_back(outWord);
+  // When E is a multiple of 32 the last word was already pushed inside the loop.
+  if (haveBits) out.push_back(outWord);
 
   const u32 topBits = u32(E & 31u);
   const u32 topMask = topBits ? ((u32(1) << topBits) - 1u) : 0xffffffffu;
@@ -137,8 +137,6 @@ struct BitBucket {
 };
 
 vector<Word> expandBits(const vector<u32> &compactBits, u32 N, u64 E) {
-  assert(E % 32 != 0);
-
   std::vector<Word> out(N);
   Word *data = out.data();
   BitBucket bucket;
@@ -154,7 +152,7 @@ vector<Word> expandBits(const vector<u32> &compactBits, u32 N, u64 E) {
     data[p] = (Word) bucket.popSigned(len);
   }
   assert(it == itEnd);
-  assert(bucket.size == 32 - E % 32);
+  assert(bucket.size == (32 - E % 32) % 32);
   assert(bucket.bits == 0 || bucket.bits == 1);
   data[0] += u32(bucket.bits); // carry wrap-around.
   return out;

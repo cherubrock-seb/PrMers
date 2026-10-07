@@ -291,7 +291,10 @@ FFTConfig::FFTConfig(const string& input_spec) {
     *this = {FFTShape{fft_type, v[0], v[1], v[2]}, parseInt(v[3]), CARRY_AUTO};
   } else if (v.size() == 5) {
     int c = parseInt(v[4]);
-    assert(c == 0 || c == 1);
+    if (c != 0 && c != 1) {
+      log("Carry must be 0 (32-bit) or 1 (64-bit).\n");
+      throw "Invalid FFT spec";
+    }
     *this = {FFTShape{fft_type, v[0], v[1], v[2]}, parseInt(v[3]), c == 0 ? CARRY_32 : CARRY_64};
   } else {
     throw "FFT spec";
@@ -321,9 +324,13 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
   variant{variant},
   carry{carry}
 {
-  assert(variant_W(variant) < N_VARIANT_W);
-  assert(variant_M(variant) < N_VARIANT_M);
-  assert(variant_H(variant) < N_VARIANT_H);
+  // An out-of-range digit (e.g. an FFT spec ending in ":303") would index past the end of the bpw table.  These
+  // checks must survive NDEBUG builds, so they are not asserts.
+  if (variant_W(variant) >= N_VARIANT_W || variant_M(variant) >= N_VARIANT_M || variant_H(variant) >= N_VARIANT_H) {
+    log("Invalid FFT variant %u: digits must be W 0-%u, M 0-%u, H 0-%u.\n",
+        variant, N_VARIANT_W - 1, N_VARIANT_M - 1, N_VARIANT_H - 1);
+    throw "Invalid FFT spec";
+  }
 
   if      (shape.fft_type == FFT64)     FFT_FP64 = 1, FFT_FP32 = 0, NTT_GF31 = 0, NTT_GF61 = 0, WordSize = 4;
   else if (shape.fft_type == FFT3161)   FFT_FP64 = 0, FFT_FP32 = 0, NTT_GF31 = 1, NTT_GF61 = 1, WordSize = 8;

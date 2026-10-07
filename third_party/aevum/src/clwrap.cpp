@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <array>
+#include <atomic>
 #include <random>
 #include <system_error>
 
@@ -264,12 +265,20 @@ cl_context createContext(cl_device_id id) {
 }
 
 
-void release(cl_context context) { CHECK1(clReleaseContext(context)); }
-void release(cl_program program) { CHECK1(clReleaseProgram(program)); }
-void release(cl_mem buf)         { CHECK1(clReleaseMemObject(buf)); }
-void release(cl_queue queue)     { CHECK1(clReleaseCommandQueue(queue)); }
-void release(cl_kernel k)        { CHECK1(clReleaseKernel(k)); }
-void release(cl_event event)     { CHECK1(clReleaseEvent(event)); }
+// The release()s run from the Holder deleters, i.e. from destructors, often while an earlier CL error is
+// unwinding the stack.  A throw there calls std::terminate, so log the error instead of throwing it.
+// Log only the first: on a lost device every remaining object fails the same way.
+static void releaseCheck(int err, const char *what) {
+  static std::atomic<bool> logged{false};
+  if (err != CL_SUCCESS && !logged.exchange(true)) { log("%s: %s\n", what, errMes(err).c_str()); }
+}
+
+void release(cl_context context) { releaseCheck(clReleaseContext(context), "clReleaseContext"); }
+void release(cl_program program) { releaseCheck(clReleaseProgram(program), "clReleaseProgram"); }
+void release(cl_mem buf)         { releaseCheck(clReleaseMemObject(buf), "clReleaseMemObject"); }
+void release(cl_queue queue)     { releaseCheck(clReleaseCommandQueue(queue), "clReleaseCommandQueue"); }
+void release(cl_kernel k)        { releaseCheck(clReleaseKernel(k), "clReleaseKernel"); }
+void release(cl_event event)     { releaseCheck(clReleaseEvent(event), "clReleaseEvent"); }
 
 Program loadSource(cl_context context, const string &source) {
   const char *ptr = source.c_str();
@@ -323,11 +332,12 @@ Program loadBinary(cl_context context, cl_device_id id, string_view fileName) {
     log("Load binary %s : %s\n", string(fileName).c_str(), errMes(err).c_str());
     return {};
   }
+  Program holder{program};   // own the handle from here on, so a failed build releases it
   if ((err = clBuildProgram(program, 1, &id, NULL, NULL, NULL))) {
     log("Build binary %s : %s\n", string(fileName).c_str(), errMes(err).c_str());
     return {};
   }
-  return Program{program};
+  return holder;
 }
 
 string getBinary(cl_program program) {
@@ -348,21 +358,27 @@ void saveBinary(cl_program program, string_view fileName) {
       string(fileName) + ".tmp" + to_string(random_device{}())
   };
 
-  File::openWrite(tmp).write(binary);
+  // The kernel cache is only an optimization: a cache directory that is read-only or full, or a rename
+  // that fails, must not abort engine creation.  Log it and drop the temporary file.
+  try {
+    File::openWrite(tmp).write(binary);
 
-  std::error_code ec;
+    std::error_code ec;
 
-  // Windows rename() cannot reliably replace an existing destination.
-  // The complete replacement already exists in tmp at this point.
-  fs::remove(target, ec);
-  ec.clear();
+    // Windows rename() cannot reliably replace an existing destination.
+    // The complete replacement already exists in tmp at this point.
+    fs::remove(target, ec);
+    ec.clear();
 
-  fs::rename(tmp, target, ec);
-  if (ec) {
-    std::error_code cleanup_ec;
-    fs::remove(tmp, cleanup_ec);
-    throw WriteError{target.string()};
+    fs::rename(tmp, target, ec);
+    if (ec) throw WriteError{target.string()};
+  } catch (const fs::filesystem_error& e) {
+    log("Can't save kernel binary %s : %s\n", target.string().c_str(), e.what());
+  } catch (const WriteError& e) {
+    log("Can't save kernel binary %s\n", e.name.c_str());
   }
+  std::error_code cleanup_ec;
+  fs::remove(tmp, cleanup_ec);   // no-op after a successful rename
 }
 
 cl_kernel loadKernel(cl_program program, const char *name) {
