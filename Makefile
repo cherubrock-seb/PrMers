@@ -394,3 +394,6 @@ test-ecm-te16-construction-factor: ; bash tests/test_ecm_te16_construction_facto
 
 .PHONY: test-ecm-small-items
 test-ecm-small-items: ; python3 tests/ecm_small_items_source_test.py
+
+.PHONY: test-ecm-prime95-relative-path
+test-ecm-prime95-relative-path: ; bash tests/ecm_prime95_relative_path_test.sh $${PRMERS_TEST_DEVICE:-0}
