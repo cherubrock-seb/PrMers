@@ -610,40 +610,10 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
         wt.flush();
     }
 
-#ifdef _WIN32
-    auto future_rc = std::async(std::launch::async, [p95_exe, p95_dir, log_file = p95_dir / log_filename]() {
-        return p95_run_windows_process(p95_exe, p95_dir, log_file);
-    });
-#else
-    std::ostringstream shell;
-    shell << "cd " << p95_shell_quote_posix(p95_dir.string())
-          << " && " << p95_shell_quote_posix(p95_exe.string())
-          << " -d > " << p95_shell_quote_posix((p95_dir / log_filename).string()) << " 2>&1";
-    const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
-
-    auto future_rc = std::async(std::launch::async, [cmd]() {
-        return std::system(cmd.c_str());
-    });
-#endif
-
     const fs::path log_path = p95_dir / log_filename;
     const fs::path results_file = p95_dir / "results.json.txt";
     auto last_progress = std::chrono::steady_clock::now();
-
-    for (;;) {
-        if (future_rc.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
-            int rc = future_rc.get();
-            result.interrupted = core::pm1SystemStatusInterrupted(rc);
-#ifdef _WIN32
-            result.exit_code = rc;
-#else
-            if (rc == -1) result.exit_code = -1;
-            else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
-            else result.exit_code = rc;
-#endif
-            break;
-        }
-
+    auto show_progress = [&]() {
         auto now = std::chrono::steady_clock::now();
         if (now - last_progress >= std::chrono::seconds(5)) {
             std::cout << "[PM1] Prime95 Stage 2 still running... showing the last 5 lines of the log:" << std::endl;
@@ -657,18 +627,50 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
             }
             last_progress = now;
         }
+    };
+
+#ifdef _WIN32
+    auto future_rc = std::async(std::launch::async, [p95_exe, p95_dir, log_file = p95_dir / log_filename]() {
+        return p95_run_windows_process(p95_exe, p95_dir, log_file);
+    });
+    for (;;) {
+        if (future_rc.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
+            result.exit_code = future_rc.get();
+            break;
+        }
+        show_progress();
     }
+#else
+    // `exec` makes the shell become Prime95, so the signals sent below reach it.
+    std::ostringstream shell;
+    shell << "cd " << p95_shell_quote_posix(p95_dir.string())
+          << " && exec " << p95_shell_quote_posix(p95_exe.string())
+          << " -d > " << p95_shell_quote_posix((p95_dir / log_filename).string()) << " 2>&1";
+    // Not std::system(): that ignores SIGINT in this process while Prime95 runs, so
+    // a Ctrl-C would never reach our interrupt flag.  Prime95 stops gracefully on
+    // SIGINT/SIGTERM and exits 0, so only the flag tells an interrupt from a finish.
+    bool run_interrupted = false;
+    const int rc = core::pm1RunShellInterruptible(shell.str(), interrupted, show_progress, run_interrupted);
+    result.interrupted = run_interrupted || core::pm1SystemStatusInterrupted(rc);
+    if (rc == -1) result.exit_code = -1;
+    else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
+    else result.exit_code = rc;
+#endif
 
     if (!result.interrupted) {
         for (int attempt = 0; attempt < 200; ++attempt) {
             if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
+    } else {
+        // Do not wait for a results file that an interrupted Prime95 will not write;
+        // one that finished just before the interrupt is still used.
+        p95_read_last_non_empty_line(results_file, result.json_line);
     }
 
     restore_prime_txt();
 
-    if (result.interrupted) {
+    if (result.interrupted && result.json_line.empty()) {
         result.error = "Prime95 was interrupted";
         return result;
     }

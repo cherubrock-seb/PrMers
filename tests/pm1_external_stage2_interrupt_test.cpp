@@ -2,11 +2,15 @@
 // shell script that is started the same way the P-1 driver starts Prime95.
 #include "core/Pm1Stage2External.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -24,6 +28,19 @@ static int run_stub(const std::string& dir, const std::string& body) {
     chmod(exe.c_str(), 0755);
     const std::string cmd = "sh -lc 'cd " + dir + " && " + exe + " -d > " + dir + "/log 2>&1'";
     return std::system(cmd.c_str());
+}
+
+static std::atomic<bool> g_flag{false};
+static void on_sigint(int) { g_flag.store(true); }
+
+static void write_stub(const std::string& dir, const std::string& body) {
+    const std::string exe = dir + "/mprime";
+    { std::ofstream f(exe); f << "#!/bin/sh\n" << body << "\n"; }
+    chmod(exe.c_str(), 0755);
+}
+
+static double secs_since(std::chrono::steady_clock::time_point t0) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 }
 
 int main(int argc, char** argv) {
@@ -53,6 +70,67 @@ int main(int argc, char** argv) {
     rc = run_stub(dir, "kill -KILL $$; sleep 5");
     CHECK(!pm1SystemStatusInterrupted(rc));
     CHECK(!pm1SystemStatusInterrupted(-1));
+
+    // Before: std::system() ignores SIGINT in this process while the child runs,
+    // so a SIGINT sent to us (Ctrl-C) never reaches the interrupt flag.
+    {
+        std::signal(SIGINT, on_sigint);
+        g_flag = false;
+        write_stub(dir, "sleep 1.5");
+        std::thread t([] { std::this_thread::sleep_for(std::chrono::milliseconds(500)); kill(getpid(), SIGINT); });
+        const int src = run_stub(dir, "sleep 1.5");
+        t.join();
+        std::cout << "std::system(): SIGINT during the child -> flag=" << g_flag.load()
+                  << " status=" << src << " (flag stays 0: the interrupt is lost)\n";
+        CHECK(!g_flag.load());
+    }
+
+    // After: the runner leaves SIGINT to our handler, forwards SIGTERM to the
+    // child and reports the interrupt.  The stub behaves like Prime95: it stops
+    // gracefully on SIGTERM/SIGINT and exits 0, so the exit status alone looks
+    // like a normal end.
+    const std::string exec_stub = "cd " + dir + " && exec " + dir + "/mprime -d > " + dir + "/log 2>&1";
+    {
+        write_stub(dir, "trap 'exit 0' TERM INT\nwhile :; do sleep 0.1; done");
+        g_flag = false;
+        std::thread t([] { std::this_thread::sleep_for(std::chrono::milliseconds(500)); kill(getpid(), SIGINT); });
+        bool interrupted = false;
+        int ticks = 0;
+        const auto t0 = std::chrono::steady_clock::now();
+        const int st = core::pm1RunShellInterruptible(exec_stub, g_flag, [&] { ++ticks; }, interrupted);
+        t.join();
+        std::cout << "runner: SIGINT during the child -> interrupted=" << interrupted << " status=" << st
+                  << " after " << secs_since(t0) << " s, ticks=" << ticks << "\n";
+        CHECK(interrupted);
+        CHECK(g_flag.load());
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+        CHECK(!pm1SystemStatusInterrupted(st));   // the exit status alone cannot tell
+        CHECK(ticks > 0);
+        CHECK(secs_since(t0) < 5.0);
+        CHECK(pm1AfterExternalStage2(false, interrupted) == Pm1AfterExternalStage2::Interrupted);
+    }
+    {   // No interrupt: a finishing stub is not reported as interrupted.
+        write_stub(dir, "sleep 0.3\nexit 3");
+        std::atomic<bool> never{false};
+        bool interrupted = true;
+        const int st = core::pm1RunShellInterruptible(exec_stub, never, nullptr, interrupted);
+        CHECK(!interrupted);
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 3);
+        CHECK(pm1AfterExternalStage2(false, interrupted) == Pm1AfterExternalStage2::RunInternal);
+    }
+    {   // A child that ignores SIGTERM is killed after the grace period and reaped.
+        write_stub(dir, "trap '' TERM INT\nwhile :; do sleep 0.1; done");
+        std::atomic<bool> stop{false};
+        std::thread t([&] { std::this_thread::sleep_for(std::chrono::milliseconds(500)); stop = true; });
+        bool interrupted = false;
+        const auto t0 = std::chrono::steady_clock::now();
+        const int st = core::pm1RunShellInterruptible(exec_stub, stop, nullptr, interrupted, 1);
+        t.join();
+        std::cout << "runner: child ignoring SIGTERM -> status=" << st << " after " << secs_since(t0) << " s\n";
+        CHECK(interrupted);
+        CHECK(WIFSIGNALED(st) && WTERMSIG(st) == SIGKILL);
+        CHECK(secs_since(t0) < 8.0);
+    }
 
     if (g_fail) return 1;
     std::cout << "pm1 external stage-2 interrupt test passed\n";

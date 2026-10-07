@@ -1,10 +1,19 @@
 #ifndef CORE_PM1_STAGE2_EXTERNAL_HPP
 #define CORE_PM1_STAGE2_EXTERNAL_HPP
 
+#include <atomic>
+#include <cerrno>
+#include <chrono>
 #include <cstdlib>
+#include <functional>
+#include <string>
+#include <thread>
 #ifndef _WIN32
 #include <csignal>
+#include <spawn.h>
 #include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
 #endif
 
 namespace core {
@@ -43,6 +52,51 @@ inline bool pm1SystemStatusInterrupted(int status) {
     return false;
 #endif
 }
+
+#ifndef _WIN32
+/// Runs `sh -lc <script>` and waits for it, polling every 100 ms.  Unlike
+/// std::system(), the calling process keeps its own SIGINT/SIGTERM handlers
+/// while the child runs, so a Ctrl-C reaches the process-wide interrupt flag
+/// (`stop`).  When `stop` is set the child gets SIGTERM once (Prime95 stops its
+/// workers gracefully and exits normally, so its exit status cannot tell an
+/// interrupt from a finished run) and SIGKILL after `grace_seconds`; the child
+/// is always reaped.  `script` should end in `exec <program> ...` so the shell
+/// is replaced by the program and the signal reaches it.  `tick` is called on
+/// every poll.  Returns the raw wait status, or -1 if the shell cannot start.
+inline int pm1RunShellInterruptible(const std::string& script,
+                                    const std::atomic<bool>& stop,
+                                    const std::function<void()>& tick,
+                                    bool& interrupted,
+                                    int grace_seconds = 120) {
+    interrupted = false;
+    const char* argv[] = {"sh", "-lc", script.c_str(), nullptr};
+    pid_t pid = 0;
+    if (posix_spawn(&pid, "/bin/sh", nullptr, nullptr, const_cast<char* const*>(argv), environ) != 0) return -1;
+    bool term_sent = false;
+    auto term_at = std::chrono::steady_clock::now();
+    bool killed = false;
+    for (;;) {
+        int status = 0;
+        const pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) return status;
+        if (r < 0 && errno != EINTR) return -1;
+        if (stop.load(std::memory_order_relaxed)) {
+            interrupted = true;
+            if (!term_sent) {
+                kill(pid, SIGTERM);
+                term_sent = true;
+                term_at = std::chrono::steady_clock::now();
+            } else if (!killed &&
+                       std::chrono::steady_clock::now() - term_at > std::chrono::seconds(grace_seconds)) {
+                kill(pid, SIGKILL);
+                killed = true;
+            }
+        }
+        if (tick) tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+#endif
 
 } // namespace core
 
