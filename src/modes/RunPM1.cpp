@@ -7204,7 +7204,6 @@ int App::runPM1Marin() {
             if (guiServer_) { std::ostringstream oss; oss << "Chunk " << chunkIndex << "/" << estChunks << "  bits=" << bits << (useFast3 ? " [fast3]" : ""); guiServer_->appendLog(oss.str()); }
             uint64_t B = std::max<uint64_t>(1, (uint64_t)std::sqrt((double)bits));
             double desiredIntervalSeconds = 600.0;
-            uint64_t checkpass = 0;
             uint64_t checkpasslevel_auto = (uint64_t)((1000 * desiredIntervalSeconds) / (double)B);
             if (checkpasslevel_auto == 0) checkpasslevel_auto = ((uint64_t)bits/B)/((uint64_t)(std::sqrt((double)B)));
             uint64_t checkpasslevel = (options.checklevel > 0)
@@ -7323,7 +7322,7 @@ int App::runPM1Marin() {
                                 tunedCheckpass = true;
                             }
                         }*/
-                        bool doCheck = in_lot && (gl_checkpass == checkpass || i == 1);
+                        bool doCheck = in_lot && (gl_checkpass >= checkpasslevel || i == 1);
                         if (doCheck) {
                             std::cout << "[Gerbicz Li] Start a Gerbicz Li check....\n";
                             eng->copy(RCHK, RACC_L);
