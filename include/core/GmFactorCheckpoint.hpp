@@ -13,8 +13,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -98,6 +102,46 @@ inline bool load_factor_checkpoint(const std::filesystem::path& path,
     return true;
 }
 
+// Writes `h` + `data` + CRC to `<path>.new` and installs it as `path`, keeping
+// the previous file as `<path>.old`.  Throws std::runtime_error when the file
+// cannot be created or completely written (including a failed flush or close,
+// where a full disk is reported) or installed; the previous checkpoint is then
+// untouched and the partial `.new` file is removed.  The layout and CRC are the
+// ones `File` reads back.
+inline void write_checkpoint_file(const std::filesystem::path& path,
+                                  const FactorCheckpointHeader& h,
+                                  const std::vector<char>& data) {
+    const std::filesystem::path new_path = path.string() + ".new";
+    const std::filesystem::path old_path = path.string() + ".old";
+    std::FILE* f = std::fopen(new_path.string().c_str(), "wb");
+    if (f == nullptr) {
+        throw std::runtime_error("cannot create " + new_path.string() + ": " + std::strerror(errno));
+    }
+    std::uint32_t crc = File::rc_crc32(0, reinterpret_cast<const char*>(&h), sizeof(h));
+    crc = File::rc_crc32(crc, data.data(), data.size());
+    const std::uint32_t tail = ~crc ^ 0xa23777acU;
+    errno = 0;
+    bool ok = std::fwrite(&h, sizeof(h), 1, f) == 1 &&
+              (data.empty() || std::fwrite(data.data(), 1, data.size(), f) == data.size()) &&
+              std::fwrite(&tail, sizeof(tail), 1, f) == 1 &&
+              std::fflush(f) == 0 && std::ferror(f) == 0;
+    const int write_errno = errno;
+    if (std::fclose(f) != 0) ok = false;
+    if (!ok) {
+        std::error_code rec;
+        std::filesystem::remove(new_path, rec);
+        throw std::runtime_error("cannot write Gaussian factoring checkpoint " + new_path.string() +
+                                 (write_errno != 0 ? std::string(": ") + std::strerror(write_errno) : std::string()));
+    }
+    std::error_code ec;
+    std::filesystem::remove(old_path, ec);
+    ec.clear();
+    if (std::filesystem::exists(path)) std::filesystem::rename(path, old_path, ec);
+    ec.clear();
+    std::filesystem::rename(new_path, path, ec);
+    if (ec) throw std::runtime_error("cannot install Gaussian factoring checkpoint: " + ec.message());
+}
+
 template <class Target>
 inline void save_factor_checkpoint(const std::filesystem::path& path,
                             engine* eng,
@@ -132,24 +176,44 @@ inline void save_factor_checkpoint(const std::filesystem::path& path,
 
     std::vector<char> data(eng->get_checkpoint_size());
     if (!eng->get_checkpoint(data)) throw std::runtime_error("cannot read Gaussian factoring checkpoint");
+    write_checkpoint_file(path, h, data);
+}
 
-    const std::filesystem::path new_path = path.string() + ".new";
-    const std::filesystem::path old_path = path.string() + ".old";
-    {
-        File f(new_path.string(), "wb");
-        if (!f.write(reinterpret_cast<const char*>(&h), sizeof(h)) ||
-            !f.write(data.data(), data.size())) {
-            throw std::runtime_error("cannot write Gaussian factoring checkpoint");
-        }
-        f.write_crc32();
+// Runs `save` (a call to save_factor_checkpoint); a failure is reported as a
+// warning and returns false instead of ending the run.  A failed save leaves
+// the previous checkpoint in place, so the computation can go on and try again
+// at the next backup.  Returns true when the checkpoint was written.
+template <class Save>
+inline bool guarded_save(const std::filesystem::path& path, Save&& save) {
+    try {
+        save();
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "[GM] Warning: checkpoint " << path.string() << " was not saved: " << ex.what()
+                  << ". Continuing; the previous checkpoint, if any, is kept.\n";
+        return false;
     }
-    std::error_code ec;
-    std::filesystem::remove(old_path, ec);
-    ec.clear();
-    if (std::filesystem::exists(path)) std::filesystem::rename(path, old_path, ec);
-    ec.clear();
-    std::filesystem::rename(new_path, path, ec);
-    if (ec) throw std::runtime_error("cannot install Gaussian factoring checkpoint: " + ec.message());
+}
+
+// save_factor_checkpoint that reports a failure instead of throwing.
+template <class Target>
+inline bool try_save_factor_checkpoint(const std::filesystem::path& path,
+                                engine* eng,
+                                std::uint32_t mode,
+                                std::uint32_t phase,
+                                const Target& t,
+                                std::uint64_t B1,
+                                std::uint64_t B2,
+                                std::uint64_t scalar_bits,
+                                std::uint32_t base,
+                                std::uint32_t curve,
+                                std::uint64_t sigma,
+                                std::uint64_t token,
+                                double elapsed) {
+    return guarded_save(path, [&]() {
+        save_factor_checkpoint(path, eng, mode, phase, t, B1, B2, scalar_bits, base, curve,
+                               sigma, token, elapsed);
+    });
 }
 
 inline void clear_checkpoint(const std::filesystem::path& path) {

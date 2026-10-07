@@ -514,6 +514,10 @@ test-ecm-resume-seed-factor: all
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
 
+.PHONY: test-gm-factor-checkpoint-write-failure
+test-gm-factor-checkpoint-write-failure:
+	bash tests/gm_factor_checkpoint_write_failure_test.sh
+
 .PHONY: test-gm-pm1-vtrace-checkpoint
 test-gm-pm1-vtrace-checkpoint: all
 	python3 tests/gm_pm1_vtrace_checkpoint_source_test.py

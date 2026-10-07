@@ -477,7 +477,7 @@ std::string gm_result_json(const std::string& mode,
 using core::gm_factor_ckpt::FactorCheckpointHeader;
 using core::gm_factor_ckpt::matching_header;
 using core::gm_factor_ckpt::load_factor_checkpoint;
-using core::gm_factor_ckpt::save_factor_checkpoint;
+using core::gm_factor_ckpt::try_save_factor_checkpoint;
 using core::gm_factor_ckpt::clear_checkpoint;
 
 // Compute dst <- base^exponent in the lifted Mersenne ring.  The base is a
@@ -491,7 +491,7 @@ bool pow_small_base(engine* eng,
                     engine::Reg verify_reg,
                     std::uint64_t replay_block,
                     std::uint64_t& remaining,
-                    const std::function<void(std::uint64_t)>& checkpoint,
+                    const std::function<bool(std::uint64_t)>& checkpoint,
                     const std::function<double()>& elapsed,
                     const std::string& progress_label) {
     const std::uint64_t total = static_cast<std::uint64_t>(mpz_sizeinbase(exponent.get_mpz_t(), 2));
@@ -508,8 +508,12 @@ bool pow_small_base(engine* eng,
     auto last_backup = Clock::now();
     while (remaining > 0) {
         if (interrupted) {
-            checkpoint(remaining);
-            std::cout << "Interrupted; checkpoint saved with " << remaining << " bits remaining.\n";
+            if (checkpoint(remaining)) {
+                std::cout << "Interrupted; checkpoint saved with " << remaining << " bits remaining.\n";
+            } else {
+                std::cout << "Interrupted with " << remaining << " bits remaining; the checkpoint was not "
+                             "saved, so a rerun resumes from the previous one, if any.\n";
+            }
             return false;
         }
         const std::uint64_t block = safe_replay ? std::min(remaining, replay_block) : 1ULL;
@@ -536,7 +540,7 @@ bool pow_small_base(engine* eng,
             last_display = now;
         }
         if (now - last_backup >= std::chrono::seconds(60)) {
-            checkpoint(remaining);
+            (void)checkpoint(remaining);  // a failed backup is reported and retried at the next one
             last_backup = now;
         }
     }
@@ -775,7 +779,7 @@ bool montgomery_ladder(engine* eng,
                        const MontgomeryRegs& r,
                        const mpz_class& scalar,
                        std::uint64_t& remaining,
-                       const std::function<void(std::uint64_t)>& checkpoint,
+                       const std::function<bool(std::uint64_t)>& checkpoint,
                        const std::function<double()>& elapsed,
                        const std::string& label) {
     const std::uint64_t bits = static_cast<std::uint64_t>(mpz_sizeinbase(scalar.get_mpz_t(), 2));
@@ -787,8 +791,12 @@ bool montgomery_ladder(engine* eng,
 
     while (remaining > 0) {
         if (interrupted) {
-            checkpoint(remaining);
-            std::cout << "Interrupted; ECM checkpoint saved with " << remaining << " ladder bits remaining.\n";
+            if (checkpoint(remaining)) {
+                std::cout << "Interrupted; ECM checkpoint saved with " << remaining << " ladder bits remaining.\n";
+            } else {
+                std::cout << "Interrupted with " << remaining << " ladder bits remaining; no ECM checkpoint "
+                             "was saved, so a rerun resumes from the previous one, if any.\n";
+            }
             return false;
         }
         const std::uint64_t bit_index = remaining - 1;
@@ -809,7 +817,7 @@ bool montgomery_ladder(engine* eng,
             last_display = now;
         }
         if (now - last_backup >= std::chrono::seconds(60)) {
-            checkpoint(remaining);
+            (void)checkpoint(remaining);  // a failed backup is reported and retried at the next one
             last_backup = now;
         }
     }
@@ -986,9 +994,11 @@ int App::runGaussianMersennePM1() {
 
         const auto start = Clock::now();
         auto elapsed = [&]() { return restored + std::chrono::duration<double>(Clock::now() - start).count(); };
+        // A failed save (full or read-only disk) is reported and the run goes on:
+        // the previous checkpoint is untouched.
         auto save_s1 = [&](std::uint64_t rem) {
-            save_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
-                                   base, 0, 0, rem, elapsed());
+            return try_save_factor_checkpoint(s1_ckpt, eng.get(), 1, 1, t, B1, B2, exponent_bits,
+                                              base, 0, 0, rem, elapsed());
         };
 
         if (remaining == exponent_bits) eng->set(RSTATE, 1);
@@ -1001,11 +1011,13 @@ int App::runGaussianMersennePM1() {
         eng->sync();
         // Save the finished Stage 1 residue as a Stage 2 checkpoint before dropping
         // the Stage 1 one, so an interrupt before the first Stage 2 chunk keeps it.
-        if (!s2primes.empty()) {
-            save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
-                                   base, 0, 0, 0, elapsed());
+        // If that save fails the Stage 1 checkpoint stays as the resume point
+        // (the terminal paths below remove it).
+        if (s2primes.empty() ||
+            try_save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                       base, 0, 0, 0, elapsed())) {
+            clear_checkpoint(s1_ckpt);
         }
-        clear_checkpoint(s1_ckpt);
 
         h = project_reg(eng.get(), RSTATE, t.n);
         g = proper_gcd(mod_positive(h - 1, t.n), t.n);
@@ -1018,6 +1030,7 @@ int App::runGaussianMersennePM1() {
                                std::nullopt, std::nullopt, std::nullopt, g.get_str(),
                                backend, device_name, job_elapsed()));
             if (B2 <= B1 || !options.pm1_continue_stage2_after_factor) {
+                clear_checkpoint(s1_ckpt);
                 clear_checkpoint(s2_ckpt);
                 return 0;
             }
@@ -1062,9 +1075,10 @@ int App::runGaussianMersennePM1() {
     std::size_t chunk_no = 0;
     while (prime_index < s2primes.size()) {
         if (interrupted) {
-            save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
-                                   base, 0, 0, prime_index, s2_elapsed());
-            std::cout << "Interrupted at a clean Stage 2 chunk boundary.\n";
+            const bool saved = try_save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                                          base, 0, 0, prime_index, s2_elapsed());
+            std::cout << "Interrupted at a clean Stage 2 chunk boundary"
+                      << (saved ? ".\n" : "; the checkpoint was not saved, so a rerun resumes from the previous one, if any.\n");
             return 0;
         }
         const std::size_t end = choose_chunk_end(s2primes, prime_index, chunk_bits);
@@ -1101,9 +1115,10 @@ int App::runGaussianMersennePM1() {
         };
         if (!pow_window_base(eng.get(), RSTATE, RSTATE, qprod, window_regs, report_stage2)) {
             eng->copy(RSTATE, RSTART);
-            save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
-                                   base, 0, 0, prime_index, s2_elapsed());
-            std::cout << "Interrupted inside Stage 2 chunk; restored its start and saved a clean checkpoint.\n";
+            const bool saved = try_save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                                          base, 0, 0, prime_index, s2_elapsed());
+            std::cout << (saved ? "Interrupted inside Stage 2 chunk; restored its start and saved a clean checkpoint.\n"
+                                : "Interrupted inside Stage 2 chunk; the checkpoint was not saved, so a rerun resumes from the previous one, if any.\n");
             return 0;
         }
         if (options.gm_safe_replay) {
@@ -1111,8 +1126,8 @@ int App::runGaussianMersennePM1() {
             auto silent_progress = [](std::uint64_t, std::uint64_t, double) {};
             if (!pow_window_base(eng.get(), RVERIFY, RSTART, qprod, window_regs, silent_progress)) {
                 eng->copy(RSTATE, RSTART);
-                save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
-                                       base, 0, 0, prime_index, s2_elapsed());
+                (void)try_save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                                 base, 0, 0, prime_index, s2_elapsed());
                 return 0;
             }
             if (!eng->is_equal(RSTATE, RVERIFY)) {
@@ -1125,13 +1140,14 @@ int App::runGaussianMersennePM1() {
         h = project_reg(eng.get(), RSTATE, t.n);
         g = proper_gcd(mod_positive(h - 1, t.n), t.n);
         prime_index = end;
-        save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
-                               base, 0, 0, prime_index, s2_elapsed());
+        (void)try_save_factor_checkpoint(s2_ckpt, eng.get(), 1, 2, t, B1, B2, s2primes.size(),
+                                         base, 0, 0, prime_index, s2_elapsed());
         std::cout << std::fixed << std::setprecision(2)
                   << "[GM P-1 Stage 2] " << (100.0 * prime_index / s2primes.size())
                   << "% | residue low64=0x" << low_hex(h, 64)
                   << " | elapsed=" << s2_elapsed() << " s\n";
         if (is_proper_factor(g, t.n)) {
+            clear_checkpoint(s1_ckpt);
             clear_checkpoint(s2_ckpt);
             std::cout << ">>> Gaussian pair P-1 Stage 2 factor: " << g << "\n";
             write_json_result(
@@ -1143,11 +1159,13 @@ int App::runGaussianMersennePM1() {
         }
         if (g == t.n) {
             std::cout << "Stage 2 gcd=target; reduce -gm-factor-chunk-bits to isolate a factor.\n";
+            clear_checkpoint(s1_ckpt);
             clear_checkpoint(s2_ckpt);
             return 1;
         }
     }
 
+    clear_checkpoint(s1_ckpt);
     clear_checkpoint(s2_ckpt);
     std::cout << "No Gaussian pair P-1 factor through B2=" << B2 << ".\n";
     write_json_result(
@@ -1293,8 +1311,8 @@ int App::runGaussianMersenneECM() {
                                        0, static_cast<std::uint32_t>(curve), sigma, remaining, restored);
             }
             auto save_curve = [&](std::uint64_t rem) {
-                save_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
-                                       0, static_cast<std::uint32_t>(curve), sigma, rem, elapsed());
+                return try_save_factor_checkpoint(ckpt, eng.get(), 2, 1, t, B1, B2, kbits,
+                                                  0, static_cast<std::uint32_t>(curve), sigma, rem, elapsed());
             };
             std::vector<char> safe_stage1_start;
             std::uint64_t safe_stage1_remaining = remaining;
@@ -1317,7 +1335,7 @@ int App::runGaussianMersenneECM() {
                     throw std::runtime_error("cannot prepare Gaussian ECM Stage 1 replay");
                 }
                 std::uint64_t replay_remaining = safe_stage1_remaining;
-                auto no_checkpoint = [&](std::uint64_t) {};
+                auto no_checkpoint = [&](std::uint64_t) { return false; };
                 if (!montgomery_ladder(eng.get(), r, K, replay_remaining, no_checkpoint, elapsed,
                                        "GM ECM Stage 1 replay curve " + std::to_string(curve + 1))) {
                     return 0;
@@ -1333,13 +1351,15 @@ int App::runGaussianMersenneECM() {
             eng->sync();
             // Save the finished Stage 1 point as a Stage 2 checkpoint before dropping
             // the Stage 1 one, so an interrupt before the first Stage 2 chunk keeps it.
-            if (!s2primes.empty()) {
-                save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
-                                       0, static_cast<std::uint32_t>(curve), sigma, 0, elapsed());
+            // If that save fails the Stage 1 checkpoint stays as the resume point.
+            if (s2primes.empty() ||
+                try_save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
+                                           0, static_cast<std::uint32_t>(curve), sigma, 0, elapsed())) {
+                clear_checkpoint(ckpt);
             }
-            clear_checkpoint(ckpt);
             point = project_point(eng.get(), r, t.n);
             if (is_proper_factor(point.factor, t.n)) {
+                clear_checkpoint(ckpt);
                 clear_checkpoint(s2_ckpt);
                 std::cout << ">>> Gaussian pair ECM Stage 1 factor: " << point.factor << "\n";
                 write_json_result(
@@ -1350,6 +1370,7 @@ int App::runGaussianMersenneECM() {
                 return 0;
             }
             if (!point.normalized) {
+                clear_checkpoint(ckpt);
                 clear_checkpoint(s2_ckpt);
                 std::cout << "[GM ECM] Stage 1 produced a singular/trivial point; next curve.\n";
                 continue;
@@ -1372,10 +1393,12 @@ int App::runGaussianMersenneECM() {
                                    curve + 1, std::to_string(sigma), point.factor.get_str(),
                                    backend, device_name, job_elapsed(),
                                    std::string("stage2 checkpoint projection")));
+                clear_checkpoint(ckpt);
                 clear_checkpoint(s2_ckpt);
                 return 0;
             }
             if (!point.normalized) {
+                clear_checkpoint(ckpt);
                 clear_checkpoint(s2_ckpt);
                 std::cout << "[GM ECM] unusable Stage 2 checkpoint; restarting this curve Stage 2.\n";
                 index = 0;
@@ -1384,7 +1407,7 @@ int App::runGaussianMersenneECM() {
                 point.normalized = true;
                 montgomery_init_ladder(eng.get(), r, point.x, setup.a24, t.n);
                 std::uint64_t restart_remaining = kbits > 0 ? kbits - 1 : 0;
-                auto no_checkpoint = [&](std::uint64_t) {};
+                auto no_checkpoint = [&](std::uint64_t) { return false; };
                 if (!montgomery_ladder(eng.get(), r, K, restart_remaining, no_checkpoint, elapsed,
                                        "GM ECM Stage 1 restart curve " + std::to_string(curve + 1))) return 0;
                 point = project_point(eng.get(), r, t.n);
@@ -1399,10 +1422,11 @@ int App::runGaussianMersenneECM() {
         std::size_t chunk_no = 0;
         while (index < s2primes.size()) {
             if (interrupted) {
-                save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
-                                       0, static_cast<std::uint32_t>(curve), sigma,
-                                       index, total_s2_elapsed());
-                std::cout << "Interrupted at a clean ECM Stage 2 chunk boundary; checkpoint saved.\n";
+                const bool saved = try_save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
+                                                              0, static_cast<std::uint32_t>(curve), sigma,
+                                                              index, total_s2_elapsed());
+                std::cout << "Interrupted at a clean ECM Stage 2 chunk boundary; "
+                          << (saved ? "checkpoint saved.\n" : "the checkpoint was not saved, so a rerun resumes from the previous one, if any.\n");
                 return 0;
             }
             const std::size_t end = choose_chunk_end(s2primes, index, chunk_bits);
@@ -1429,7 +1453,7 @@ int App::runGaussianMersenneECM() {
             std::uint64_t s2_remaining = chunk_work;
             const auto s2_start = Clock::now();
             auto s2_elapsed = [&]() { return std::chrono::duration<double>(Clock::now() - s2_start).count(); };
-            auto no_ckpt = [&](std::uint64_t) {};
+            auto no_ckpt = [&](std::uint64_t) { return false; };
             if (!montgomery_ladder(eng.get(), r, qprod, s2_remaining, no_ckpt, s2_elapsed,
                                    "GM ECM Stage 2 curve " + std::to_string(curve + 1))) {
                 return 0;
@@ -1455,9 +1479,9 @@ int App::runGaussianMersenneECM() {
             eng->sync();
             point = project_point(eng.get(), r, t.n);
             index = end;
-            save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
-                                   0, static_cast<std::uint32_t>(curve), sigma,
-                                   index, total_s2_elapsed());
+            (void)try_save_factor_checkpoint(s2_ckpt, eng.get(), 2, 2, t, B1, B2, s2primes.size(),
+                                             0, static_cast<std::uint32_t>(curve), sigma,
+                                             index, total_s2_elapsed());
             if (is_proper_factor(point.factor, t.n)) {
                 std::cout << ">>> Gaussian pair ECM Stage 2 factor: " << point.factor << "\n";
                 write_json_result(
@@ -1465,6 +1489,7 @@ int App::runGaussianMersenneECM() {
                     gm_result_json("gm-ecm", "factor", 2, t, B1, B2, curves,
                                    curve + 1, std::to_string(sigma), point.factor.get_str(),
                                    backend, device_name, job_elapsed()));
+                clear_checkpoint(ckpt);
                 clear_checkpoint(s2_ckpt);
                 return 0;
             }
@@ -1477,6 +1502,7 @@ int App::runGaussianMersenneECM() {
                       << "% | x low64=0x" << low_hex(point.x, 64)
                       << " | elapsed=" << total_s2_elapsed() << " s\n";
         }
+        clear_checkpoint(ckpt);
         clear_checkpoint(s2_ckpt);
     }
 

@@ -603,18 +603,25 @@ int App::runGaussianMersennePM1() {
     auto last_report = s1_start;
     auto last_backup = s1_start;
     // `remaining` is the number of exponent bits still to process.
-    auto save_s1 = [&](std::uint64_t remaining) {
-        if (!s1_checkpoints) return;
-        gfc::save_factor_checkpoint(legacy_s1, s1.get(), 1, 1, t, B1, B2, e_bits,
-                                    base, 0, 0, remaining, seconds_since(s1_start));
+    // A save that fails (a full or read-only disk) only costs the checkpoint:
+    // the previous one stays, and the computation goes on.  Returns whether the
+    // checkpoint was written.
+    auto save_s1 = [&](std::uint64_t remaining) -> bool {
+        if (!s1_checkpoints) return false;
+        return gfc::try_save_factor_checkpoint(legacy_s1, s1.get(), 1, 1, t, B1, B2, e_bits,
+                                               base, 0, 0, remaining, seconds_since(s1_start));
     };
     for (std::uint64_t i = e_bits; i > 0; --i) {
         if (interrupted) {
             if (s1_checkpoints && i < e_bits) {
-                save_s1(i);
-                std::cout << "[GM-PM1] Interrupted during fast Stage 1; checkpoint saved with "
-                          << i << " bits remaining. Rerun to resume (the legacy resumable "
-                             "path picks it up).\n";
+                if (save_s1(i)) {
+                    std::cout << "[GM-PM1] Interrupted during fast Stage 1; checkpoint saved with "
+                              << i << " bits remaining. Rerun to resume (the legacy resumable "
+                                 "path picks it up).\n";
+                } else {
+                    std::cout << "[GM-PM1] Interrupted during fast Stage 1; the checkpoint could "
+                                 "not be saved, so a rerun resumes from the previous one, if any.\n";
+                }
             } else {
                 std::cout << "[GM-PM1] Interrupted during fast Stage 1; no checkpoint was written.\n";
             }
@@ -646,11 +653,12 @@ int App::runGaussianMersennePM1() {
     // The finished Stage 1 residue becomes the legacy Stage 2 checkpoint, so an
     // interrupted or fallen-back Stage 2 resumes without redoing Stage 1.
     if (s1_checkpoints) {
-        if (!primes.empty()) {
-            gfc::save_factor_checkpoint(legacy_s2, s1.get(), 1, 2, t, B1, B2, primes.size(),
-                                        base, 0, 0, 0, seconds_since(s1_start));
-        }
-        gfc::clear_checkpoint(legacy_s1);
+        // If that save fails, the Stage 1 checkpoint is the only resume point left
+        // and is kept (the terminal paths below remove it with the Stage 2 one).
+        const bool s2_saved = primes.empty() ||
+            gfc::try_save_factor_checkpoint(legacy_s2, s1.get(), 1, 2, t, B1, B2, primes.size(),
+                                            base, 0, 0, 0, seconds_since(s1_start));
+        if (s2_saved) gfc::clear_checkpoint(legacy_s1);
     }
 
     const mpz_class H_lift = get_reg_mpz(s1.get(), RH);
@@ -663,6 +671,7 @@ int App::runGaussianMersennePM1() {
         write_result(save_dir, t, "factor", 1, B1, B2, s1_backend, 0,
                      seconds_since(job_start), options.device_id, g.get_str());
         if (!options.pm1_continue_stage2_after_factor) {
+            gfc::clear_checkpoint(legacy_s1);
             gfc::clear_checkpoint(legacy_s2);
             return 0;
         }
@@ -683,6 +692,7 @@ int App::runGaussianMersennePM1() {
         std::cout << ">>> Gaussian pair P-1 Stage 2 setup factor: " << hg << "\n";
         write_result(save_dir, t, "factor", 2, B1, B2, s1_backend, 0,
                      seconds_since(job_start), options.device_id, hg.get_str());
+        gfc::clear_checkpoint(legacy_s1);
         gfc::clear_checkpoint(legacy_s2);
         return 0;
     }
@@ -811,6 +821,7 @@ int App::runGaussianMersennePM1() {
             std::cout << ">>> Gaussian pair P-1 Stage 2 V-trace factor: " << gg << "\n";
             write_result(save_dir, t, "factor", 2, B1, B2, backend, D,
                          seconds_since(job_start), options.device_id, gg.get_str());
+            gfc::clear_checkpoint(legacy_s1);
             gfc::clear_checkpoint(legacy_s2);
             return 0;
         }
@@ -893,6 +904,7 @@ int App::runGaussianMersennePM1() {
     std::cout << "No Gaussian pair P-1 factor through B2=" << B2 << ".\n";
     write_result(save_dir, t, "no-factor", 2, B1, B2, backend, D,
                  seconds_since(job_start), options.device_id, std::nullopt);
+    gfc::clear_checkpoint(legacy_s1);
     gfc::clear_checkpoint(legacy_s2);
     return 1;
 }

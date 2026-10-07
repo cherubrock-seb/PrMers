@@ -20,14 +20,14 @@ assert 'static constexpr std::size_t count = core::gm_factor_ckpt::PM1_WINDOW_RE
 assert 'std::size_t s1_regs = gfc::PM1_WINDOW_REGS;' in vt
 
 # Stage 1 saves periodically and on interrupt, with the bits still remaining.
-assert 'gfc::save_factor_checkpoint(legacy_s1, s1.get(), 1, 1, t, B1, B2, e_bits,' in vt
+assert 'gfc::try_save_factor_checkpoint(legacy_s1, s1.get(), 1, 1, t, B1, B2, e_bits,' in vt
 assert 'save_s1(i - 1);' in vt           # periodic
-assert 'save_s1(i);' in vt               # interrupt
+assert 'save_s1(i)' in vt                # interrupt
 assert 'No compact V-trace checkpoint was written' not in vt
 
 # The finished Stage 1 residue is kept as the legacy Stage 2 checkpoint, which
 # the terminal paths of the V-trace driver remove again.
-assert 'gfc::save_factor_checkpoint(legacy_s2, s1.get(), 1, 2, t, B1, B2, primes.size(),' in vt
+assert 'gfc::try_save_factor_checkpoint(legacy_s2, s1.get(), 1, 2, t, B1, B2, primes.size(),' in vt
 assert vt.count('gfc::clear_checkpoint(legacy_s2);') >= 4
 assert 'gfc::clear_checkpoint(legacy_s1);' in vt
 
