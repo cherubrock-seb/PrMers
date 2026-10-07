@@ -154,8 +154,8 @@ void printUsage(const char* progName) {
     std::cout << "  -aevum-fft <spec>    : Force an Aevum plan; pfa9:4 is capacity-adaptive, pfa9full:4 forces all three planes" << std::endl;
     std::cout << "  -pfa9-type4          : Force type-4 policy; automatically elides redundant FP32 when exact FFT3161 is sufficient" << std::endl;
     std::cout << "  -pfa9-type4-full     : Diagnostic only: force full FP32+GF31+GF61 PFA9 plan" << std::endl;
-    std::cout << "  -pfa [3|9]           : Enable/force native Aevum Good-Thomas PFA (auto when omitted)" << std::endl;
-    std::cout << "  -pfa3 / -pfa9        : Force native Aevum PFA radix 3 or radix 9" << std::endl;
+    std::cout << "  -pfa [3|7|9]         : Enable/force native Aevum Good-Thomas PFA (auto when omitted; radix 7 uses the validated fixed plan)" << std::endl;
+    std::cout << "  -pfa3 / -pfa7 / -pfa9 : Force native Aevum PFA radix 3, validated radix 7, or radix 9" << std::endl;
     std::cout << "  -pfa-off             : Keep the stock power-of-two Aevum plan" << std::endl;
     std::cout << "  Auto policy env      : AEVUM_AUTO_MAX_RATIO or workload-specific AEVUM_AUTO_PM1_STAGE1_MAX_RATIO, AEVUM_AUTO_PM1_STAGE2_MAX_RATIO, AEVUM_AUTO_ECM_MAX_RATIO" << std::endl;
     std::cout << "  -resume              : (Optional) write GMP-ECM and Prime 95 resume file after P-1 stage 1" << std::endl;
@@ -771,19 +771,22 @@ CliOptions CliParser::parse(int argc, char** argv ) {
                  std::strcmp(argv[i], "-pfa-auto") == 0 ||
                  std::strncmp(argv[i], "-pfa=", 5) == 0 ||
                  std::strcmp(argv[i], "-pfa3") == 0 ||
+                 std::strcmp(argv[i], "-pfa7") == 0 ||
                  std::strcmp(argv[i], "-pfa9") == 0) {
             int radix = -1;
             if (std::strcmp(argv[i], "-pfa3") == 0) radix = 3;
+            else if (std::strcmp(argv[i], "-pfa7") == 0) radix = 7;
             else if (std::strcmp(argv[i], "-pfa9") == 0) radix = 9;
             else if (std::strncmp(argv[i], "-pfa=", 5) == 0) {
                 const char* value = argv[i] + 5;
                 if (std::strcmp(value, "3") == 0) radix = 3;
+                else if (std::strcmp(value, "7") == 0) radix = 7;
                 else if (std::strcmp(value, "9") == 0) radix = 9;
                 else if (std::strcmp(value, "auto") != 0) {
-                    throw std::runtime_error("-pfa accepts only auto, 3, or 9");
+                    throw std::runtime_error("-pfa accepts only auto, 3, 7, or 9");
                 }
             } else if (i + 1 < argc &&
-                       (std::strcmp(argv[i + 1], "3") == 0 || std::strcmp(argv[i + 1], "9") == 0)) {
+                       (std::strcmp(argv[i + 1], "3") == 0 || std::strcmp(argv[i + 1], "7") == 0 || std::strcmp(argv[i + 1], "9") == 0)) {
                 radix = std::atoi(argv[++i]);
             }
             opts.aevum = true;
@@ -792,7 +795,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.marin = true;
             opts.aevum_pfa_radix = radix;
             opts.aevum_pfa_off = false;
-            opts.aevum_fft_spec = radix == 3 ? "pfa:3" : radix == 9 ? "pfa:9" : "pfa:auto";
+            opts.aevum_fft_spec = radix == 3 ? "pfa:3" : radix == 7 ? "pfa7:1:512:7:512:202" : radix == 9 ? "pfa:9" : "pfa:auto";
             opts.aevum_fft_spec_explicit = true;
         }
         else if (std::strcmp(argv[i], "-s3") == 0) {
