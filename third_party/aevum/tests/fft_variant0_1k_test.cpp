@@ -102,6 +102,9 @@ static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::str
   CHECK1(err);
   cl_mem btrig = clCreateBuffer(ctx, CL_MEM_READ_WRITE, N * 16, nullptr, &err);
   CHECK1(err);
+  // Release the kernels and buffers when the case ends (a kernel keeps its program alive).
+  KernelHolder kHold{k}, mkHold{mk};
+  std::unique_ptr<cl_mem> binHold{bin}, boutHold{bout}, btrigHold{btrig};
 
   std::vector<double> in(2 * N), out(2 * N);
   srand(4242);
