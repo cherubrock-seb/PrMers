@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Plan autotune must benchmark the production register paths, in an OpenCL
-context of its own, and stop at the first engine error."""
+context of its own, skip a candidate the engine refuses to build, and stop at
+the first engine error."""
 import re
 from pathlib import Path
 
@@ -54,5 +55,34 @@ if "rejected (" in loop:
     raise SystemExit("an engine error during autotune is still treated as a candidate rejection")
 if not re.search(r"if \(!failure\.empty\(\)\) \{.*?break;", loop, re.S):
     raise SystemExit("plan autotune does not stop at the first engine error")
+
+# A candidate the engine refuses to build is skipped, and the search goes on.  Only the
+# candidate's own Gpu construction is classified; the native build and the benchmark are not.
+if "struct CandidateRefused : std::runtime_error" not in engine:
+    raise SystemExit("no distinct exception for a refused candidate plan")
+if "Gpu::make(exponent, shared, native_fft, {}, false)" not in compare:
+    raise SystemExit("comparePlans no longer builds the native engine directly")
+if "makeCandidateGpu(exponent, shared, candidate_fft)" not in compare or "Gpu::make(exponent, shared, candidate_fft" in compare:
+    raise SystemExit("comparePlans does not build the candidate through makeCandidateGpu")
+if "CandidateRefused" in compare:
+    raise SystemExit("comparePlans turns errors after candidate construction into refusals")
+make = body("std::unique_ptr<Gpu> makeCandidateGpu(")
+cuda = make[make.index("#if defined(CUDA_BACKEND)"):make.index("#else")]
+if "try" in cuda or "CandidateRefused" in cuda:
+    raise SystemExit("CUDA driver errors cannot be told apart from refusals; they must stop the search")
+opencl = make[make.index("#else"):]
+order = [opencl.index(c) for c in ("catch (const gpu_error&) {\n    throw;",
+                                    "catch (const std::bad_alloc&) {\n    throw;",
+                                    "catch (const std::exception& e) {\n    throw CandidateRefused(")]
+if order != sorted(order):
+    raise SystemExit("OpenCL errors and allocation failures must pass through before the refusal catch")
+clwrap_h = (root / "src/clwrap.h").read_text()
+if "class gpu_error : public std::runtime_error" not in clwrap_h:
+    raise SystemExit("gpu_error must be visible to EngineApi")
+refused = re.search(r"catch \(const CandidateRefused& e\) \{(.*?)\}\s*catch \(const std::exception& e\)", loop, re.S)
+if not refused or "continue;" not in refused.group(1):
+    raise SystemExit("a refused candidate does not continue the search before the engine-error catch")
+if "tried.insert(candidate_spec);" not in loop[:loop.index("try {")]:
+    raise SystemExit("a refused candidate is not recorded as tried")
 
 print("engine_autotune_isolation_test: OK")

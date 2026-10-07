@@ -335,6 +335,41 @@ struct TuneContext {
   }
 };
 
+// A candidate plan the engine refused to build: a configuration check in Gpu
+// construction (carry width, workgroup limits, PFA constraints, a kernel that
+// does not compile or is missing) rejected it before any of its kernels ran.
+struct CandidateRefused : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+// Build a candidate's engine, turning a deterministic refusal into
+// CandidateRefused.  The native engine has just been built on the same tuning
+// context, and every earlier candidate finished its benchmark there, so the
+// context is known to work: a configuration error here belongs to this plan.
+// An OpenCL error status or an allocation failure may instead mean the
+// context is gone, and is passed on unchanged so the search stops.  Under CUDA
+// driver errors and configuration errors share one exception type, so every
+// failure is passed on.
+std::unique_ptr<Gpu> makeCandidateGpu(uint32_t exponent, const GpuCommon& shared, const FFTConfig& fft) {
+#if defined(CUDA_BACKEND)
+  return Gpu::make(exponent, shared, fft, {}, false);
+#else
+  try {
+    return Gpu::make(exponent, shared, fft, {}, false);
+  } catch (const gpu_error&) {
+    throw;
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& e) {
+    throw CandidateRefused(e.what());
+  } catch (const std::string& e) {
+    throw CandidateRefused(e);
+  } catch (const char* e) {
+    throw CandidateRefused(e ? e : "refused");
+  }
+#endif
+}
+
 void runPlanSequence(Gpu& gpu,
                      aevum_autotune::Workload workload,
                      const RegPaths& paths,
@@ -402,7 +437,7 @@ PlanComparison comparePlans(uint32_t exponent,
                             const FFTConfig& native_fft,
                             const FFTConfig& candidate_fft) {
   auto native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
-  auto candidate_gpu = Gpu::make(exponent, shared, candidate_fft, {}, false);
+  auto candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
   const RegPaths native_paths = productionRegPaths(*native_gpu, native_fft, device_name);
   const RegPaths candidate_paths = productionRegPaths(*candidate_gpu, candidate_fft, device_name);
   auto native_regs = native_gpu->makeBufVector(2);
@@ -1341,6 +1376,12 @@ args_.flags["MULTI_Q"] = "1";
               best_speedup = cmp.speedup;
               best_spec = candidate_fft->spec();
             }
+          } catch (const CandidateRefused& e) {
+            // A configuration this engine will not build: not a timing result
+            // and no sign of a broken context.  It stays in `tried`, so a
+            // later run does not build it again; go on to the next plan.
+            log("Aevum autotune: refuse %s (%s).\n", candidate_spec.c_str(), e.what());
+            continue;
           } catch (const std::exception& e) {
             failure = e.what();
           } catch (...) {

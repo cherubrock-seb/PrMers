@@ -45,17 +45,6 @@ string errMes(int err) {
   return mes + nb;
 }
 
-class gpu_error : public std::runtime_error {
-public:
-  const int err;
-  
-  gpu_error(int err, string_view mes) : runtime_error(errMes(err) + " " + string(mes)), err(err) {}
-
-  gpu_error(int err, const char *file, int line, const char *func, string_view mes)
-    : gpu_error(err, string(mes) + " at " + file + ":" + to_string(line) + " " + func) {
-  }
-};
-
 void check(int err, const char *file, int line, const char *func, string_view mes) {  
   if (err != CL_SUCCESS) {
     // log("CL error %s (%d) %s\n", errMes(err).c_str(), err, mes.c_str());
