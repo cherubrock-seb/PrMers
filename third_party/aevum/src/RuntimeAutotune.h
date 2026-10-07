@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace aevum_autotune {
 
@@ -28,6 +29,11 @@ struct Record {
   double implementation_speedup = 1.0;
   uint64_t tune_ms = 0;
   uint64_t created_unix = 0;
+  // A search cut short (time budget, engine error) is stored as deferred, with
+  // the candidates already tried, so a later run finishes it.  `plan` is then
+  // the best plan measured so far.
+  bool complete = true;
+  std::vector<std::string> tried;
 };
 
 Mode modeFromEnvironment();

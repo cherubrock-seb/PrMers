@@ -30,17 +30,48 @@ int main() {
   assert(key != makeKey("v100.11", "4318", "RTX 3080", "driver-a", "OpenCL 3.0",
                         Workload::Prp, 8, 200000007u, "radix1k=4;multiq=1"));
 
-  Record a{key, "4:512:8:512:202", true, 1.72, 1.08, 4321, 123};
+  Record a{key, "4:512:8:512:202", true, 1.72, 1.08, 4321, 123, true, {}};
   storeAtomic(tmp, a);
   auto loaded = load(tmp, key);
   assert(loaded && loaded->plan == a.plan && loaded->prepared_mul_lead);
   assert(loaded->tune_ms == 4321);
 
-  Record replacement{key, "1:512:16:512:202", false, 1.10, 1.0, 2222, 456};
+  Record replacement{key, "1:512:16:512:202", false, 1.10, 1.0, 2222, 456, true, {}};
   storeAtomic(tmp, replacement);
   loaded = load(tmp, key);
   assert(loaded && loaded->plan == replacement.plan && !loaded->prepared_mul_lead);
   assert(!load(tmp, key + "-stale"));
+  assert(loaded->complete && loaded->tried.empty());
+
+  // A search cut short is stored as deferred with the plans already tried,
+  // and a complete record keeps the original eight fields.
+  Record deferred{key, "1:512:16:512:202", false, 1.10, 1.0, 7100, 789, false, {"1:1K:8:512:202", "1:512:16:512:202"}};
+  storeAtomic(tmp, deferred);
+  loaded = load(tmp, key);
+  assert(loaded && !loaded->complete && loaded->tried == deferred.tried);
+  assert(loaded->plan == deferred.plan && loaded->tune_ms == 7100);
+  deferred.tried.clear();
+  storeAtomic(tmp, deferred);
+  loaded = load(tmp, key);
+  assert(loaded && !loaded->complete && loaded->tried.empty());
+  storeAtomic(tmp, replacement);
+  {
+    std::ifstream in(tmp);
+    std::string line, last;
+    while (std::getline(in, line)) if (line.rfind("1\t", 0) == 0) last = line;
+    size_t tabs = 0;
+    for (char c : last) tabs += c == '\t';
+    assert(tabs == 7);
+  }
+  loaded = load(tmp, key);
+  assert(loaded && loaded->complete && loaded->tried.empty());
+  {
+    std::ofstream out(tmp, std::ios::app);
+    out << "1\tbad-state\t1:512:16:512:202\t0\t1.1\t1\t1\t1\tpartial\n";
+    out << "1\tempty-plan\t1:512:16:512:202\t0\t1.1\t1\t1\t1\tdeferred:a,,b\n";
+  }
+  assert(!load(tmp, "bad-state"));
+  assert(!load(tmp, "empty-plan"));
 
   // Corruption is ignored rather than trusted.
   {
