@@ -767,6 +767,10 @@ int App::runPrpOrLlMarin()
                     << gpuProofError << std::endl;
 
                 proofFilePath = proofManagerMarin.proof();
+                // The GPU retries above lowered options.proofPower; the CPU
+                // proof always uses the full power the checkpoints were saved
+                // for, and that is what the result JSON must report.
+                options.proofPower = proofManagerMarin.power();
             }
 
             options.proofFile = proofFilePath.string();
