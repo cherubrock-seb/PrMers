@@ -2069,9 +2069,11 @@ __kernel void check_equal(__global const ulong* a,
                           uint n) {
     uint gid = get_global_id(0);
 
+    // The host rounds the global size up to a multiple of the work-group size
+    // (e.g. n=320 -> 512), so the tail work-items must not touch a or b.
+    if (gid >= n) return;
+
     if (a[gid] != b[gid]) {
         atomic_xchg_u(out_ok, 0u);
     }
-
-    
 }
