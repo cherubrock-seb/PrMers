@@ -142,10 +142,54 @@ std::vector<std::string> effectiveArguments(int argc, char** argv) {
     return output;
 }
 
+// Options of the regular PrMers command line that consume the next token as
+// their value. That token (a user name, a path, a bound, ...) is not a
+// Gaussian exponent and must never be parsed as one.
+bool optionTakesValue(const std::string& arg) {
+    static const std::unordered_set<std::string> valueOptions{
+        "-b1", "-b1old", "-b2", "-b3", "-b4",
+        "-b2start", "--b2start", "-s2from", "--s2from", "-stage2start", "--stage2start",
+        "-K", "-nmax", "-memlim", "-seed", "-sigma", "-tbits", "-erroriter",
+        "-ecm_check_interval", "-ecm_progress_ms", "-llsafeb",
+        "-l1", "-l2", "-l3", "-l5", "-checklevel", "-glblock", "-chunk256",
+        "-iterforce", "-iterforce2", "-maxe", "-enqueue_max", "-res64_display_interval",
+        "-user", "-password", "-computer", "-worktodo", "-config", "-kernelpath",
+        "-factors", "-d", "-f", "-c", "-t", "-filemers", "-proof", "-brent",
+        "-aevum-fft", "-p95path", "-http", "-host",
+        "-gm-family", "--gm-family", "-gm-base", "--gm-base",
+        "-gm-sieve", "--gm-sieve", "-gm-replay-block", "--gm-replay-block",
+        "-gm-factor-chunk-bits", "--gm-factor-chunk-bits",
+        "-gm-tf-chunk", "--gm-tf-chunk", "-gm-tf-sieve", "--gm-tf-sieve",
+        "-pm1-vtrace-d", "--pm1-vtrace-d", "-vtrace-d",
+        "-pm1-vtrace-deep-d", "--pm1-vtrace-deep-d", "-vtrace-deep-d",
+        "-pm1-vtrace-product-tree-width", "--pm1-vtrace-product-tree-width",
+        "-vtrace-product-tree-width",
+        "-pm1-vtrace-max-regs", "--pm1-vtrace-max-regs", "-vtrace-max-regs",
+        "-pm1-vtrace-baby-batch", "--pm1-vtrace-baby-batch", "-vtrace-baby-batch",
+        "-pm1-vtrace-max-batches", "--pm1-vtrace-max-batches", "-vtrace-max-batches",
+        "-pm1-vtrace-pair95-l", "--pm1-vtrace-pair95-l", "-vtrace-pair95-l",
+    };
+    return valueOptions.contains(arg);
+}
+
+// True when args[i] is an option whose value is args[i + 1]. "-pfa" and
+// "-pfa-auto" take an optional radix value, which is only consumed when it is
+// exactly 3 or 9.
+bool consumesNextToken(const std::vector<std::string>& args, std::size_t i) {
+    if (i + 1 >= args.size()) return false;
+    const std::string& arg = args[i];
+    if (optionTakesValue(arg)) return true;
+    if (arg == "-pfa" || arg == "-pfa-auto") return args[i + 1] == "3" || args[i + 1] == "9";
+    return false;
+}
+
 std::optional<TfRequest> parseDirectRequest(const std::vector<std::string>& args) {
     TfRequest request;
     bool selected = false;
-    bool exponentSet = false;
+    std::optional<std::string> exponentText;
+    // Option values are converted only once -gm-tf has been seen, so that an
+    // unrelated command line (or config file) never fails in this pre-parser.
+    std::optional<std::string> familyText, chunkText, sieveText, deviceText;
 
     for (std::size_t i = 1; i < args.size(); ++i) {
         const std::string& arg = args[i];
@@ -157,25 +201,31 @@ std::optional<TfRequest> parseDirectRequest(const std::vector<std::string>& args
             request.toBits = static_cast<unsigned>(parseU64(args[++i], "TF upper bit"));
             selected = true;
         } else if ((arg == "-gm-family" || arg == "--gm-family") && i + 1 < args.size()) {
-            request.familyBits = parseFamily(args[++i]);
+            familyText = args[++i];
         } else if ((arg == "-gm-tf-chunk" || arg == "--gm-tf-chunk") && i + 1 < args.size()) {
-            request.chunkSpan = parseU64(args[++i], "TF chunk span");
+            chunkText = args[++i];
         } else if ((arg == "-gm-tf-sieve" || arg == "--gm-tf-sieve") && i + 1 < args.size()) {
-            request.sievePrime = static_cast<std::uint32_t>(parseU64(args[++i], "TF sieve prime"));
+            sieveText = args[++i];
         } else if (arg == "-d" && i + 1 < args.size()) {
-            request.device = static_cast<int>(parseU64(args[++i], "device"));
+            deviceText = args[++i];
         } else if (arg == "-f" && i + 1 < args.size()) {
             request.outputDirectory = args[++i];
         } else if (arg == "-worktodo" && i + 1 < args.size()) {
             request.worktodoPath = args[++i];
-        } else if (!arg.empty() && arg[0] != '-' && !exponentSet) {
-            request.exponent = parseU64(arg, "Gaussian exponent");
-            exponentSet = true;
+        } else if (consumesNextToken(args, i)) {
+            ++i;
+        } else if (!arg.empty() && arg[0] != '-' && !exponentText) {
+            exponentText = arg;
         }
     }
 
     if (!selected) return std::nullopt;
-    if (!exponentSet) throw std::runtime_error("Gaussian TF requires the exponent p");
+    if (familyText) request.familyBits = parseFamily(*familyText);
+    if (chunkText) request.chunkSpan = parseU64(*chunkText, "TF chunk span");
+    if (sieveText) request.sievePrime = static_cast<std::uint32_t>(parseU64(*sieveText, "TF sieve prime"));
+    if (deviceText) request.device = static_cast<int>(parseU64(*deviceText, "device"));
+    if (!exponentText) throw std::runtime_error("Gaussian TF requires the exponent p");
+    request.exponent = parseU64(*exponentText, "Gaussian exponent");
     return request;
 }
 
@@ -193,7 +243,11 @@ bool hasExplicitNonTfWork(const std::vector<std::string>& args) {
     };
 
     for (std::size_t i = 1; i < args.size(); ++i) {
-        if (modes.contains(args[i])) return true;
+        const std::string& arg = args[i];
+        if (modes.contains(arg)) return true;
+
+        // An option's value (a user name, a path) is not a mode, whatever it spells.
+        if (consumesNextToken(args, i)) ++i;
     }
     return false;
 }
