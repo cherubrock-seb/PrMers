@@ -237,6 +237,9 @@ test-gm:
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
 
+test-gm-tf-worktodo-queue: all
+	bash tests/gmtf_worktodo_queue_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-stage1-ckpt: all
 	bash tests/pm1_stage1_ckpt_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
 

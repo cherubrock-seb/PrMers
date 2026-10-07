@@ -1,6 +1,8 @@
 #include "modes/GaussianTrialFactor.hpp"
 
+#include "core/AlgoUtils.hpp"
 #include "core/Version.hpp"
+#include "io/WorktodoParser.hpp"
 #include "opencl/Context.hpp"
 
 #ifdef __APPLE__
@@ -220,7 +222,11 @@ std::optional<TfRequest> parseWorktodoRequest(const std::vector<std::string>& ar
     while (std::getline(input, line)) {
         const std::string clean = trim(line);
         if (clean.empty() || clean[0] == '#' || clean[0] == ';') continue;
-        if (upper(clean.substr(0, std::min<std::size_t>(5, clean.size()))) != "GMTF=") continue;
+        // Only the first actionable line is considered. Any other entry in
+        // front of a GMTF line belongs to the regular worktodo processing in
+        // App, which runs it, archives it and restarts; the GMTF line is
+        // picked up once it reaches the top of the file.
+        if (upper(clean.substr(0, std::min<std::size_t>(5, clean.size()))) != "GMTF=") return std::nullopt;
         const auto parts = splitCsv(clean.substr(5));
         if (parts.size() < 3 || parts.size() > 6) {
             throw std::runtime_error(
@@ -247,6 +253,16 @@ bool isPrimeSmall(std::uint64_t value) {
         if (value % d == 0) return false;
     }
     return true;
+}
+
+bool hasPendingWorktodoLine(const fs::path& path) {
+    std::ifstream input(path);
+    std::string line;
+    while (std::getline(input, line)) {
+        const std::string clean = trim(line);
+        if (!clean.empty() && clean[0] != '#' && clean[0] != ';') return true;
+    }
+    return false;
 }
 
 void validateRequest(const TfRequest& request) {
@@ -715,7 +731,24 @@ std::optional<int> tryRunGaussianTrialFactor(int argc, char** argv) {
     const auto args = effectiveArguments(argc, argv);
     if (auto direct = parseDirectRequest(args)) return runTrialFactor(*direct);
     if (hasExplicitNonTfWork(args)) return std::nullopt;
-    if (auto worktodo = parseWorktodoRequest(args)) return runTrialFactor(*worktodo);
+    if (auto worktodo = parseWorktodoRequest(args)) {
+        const int rc = runTrialFactor(*worktodo);
+        if (rc != 0) return rc;
+        // A finished GMTF entry (factor or no-factor) is archived so it is not
+        // run again, then PrMers restarts on the next worktodo line.
+        io::WorktodoParser parser(worktodo->worktodoPath.string());
+        if (!parser.removeProcessedLine(worktodo->rawWorktodoLine)) {
+            std::cerr << "Failed to update " << worktodo->worktodoPath.string() << "\n";
+            return 2;
+        }
+        std::cout << "GMTF entry removed from " << worktodo->worktodoPath.string()
+                  << " and saved to worktodo_save.txt\n";
+        if (hasPendingWorktodoLine(worktodo->worktodoPath)) {
+            std::cout << "Restarting for next worktodo entry.\n";
+            core::algo::restart_self(argc, argv);
+        }
+        return 0;
+    }
     return std::nullopt;
 }
 
