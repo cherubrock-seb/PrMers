@@ -99,6 +99,11 @@ static void setSocketTimeouts(int fd) {
     setsockopt((SOCKET)fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof(ms));
     setsockopt((SOCKET)fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&ms, sizeof(ms));
 #else
+    // Linux does not pass O_NONBLOCK from the (non-blocking) listening socket to the accepted one, but
+    // macOS and the BSDs do. A non-blocking accepted socket makes recv() fail with EAGAIN whenever the
+    // request bytes have not arrived yet, which readRequest() treats as the end of the stream.
+    const int fl = fcntl(fd, F_GETFL, 0);
+    if (fl != -1 && (fl & O_NONBLOCK)) fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
     timeval tv{}; tv.tv_sec = kSocketTimeoutSeconds;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
