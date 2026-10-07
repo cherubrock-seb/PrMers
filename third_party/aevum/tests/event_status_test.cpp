@@ -105,6 +105,14 @@ int main() {
     queue.waitForMarkerEvent();
     EXPECT(!queue.markerQueued, "Queue::waitForMarkerEvent still returns normally for a completed marker");
   }
+  {
+    // A destructor must not throw: that is std::terminate.  Profiling data is not available for a user event, so
+    // retiring a completed one in ~Event throws from getEventNanos() (a driver failing the status query would do
+    // the same).  The destructor logs it instead.
+    TimeInfo tInfo{"test"};
+    { Event e{finishedUserEvent(context.get(), CL_COMPLETE), &tInfo}; }
+    EXPECT(true, "~Event survives an event whose retirement throws");
+  }
   alarm(0);
   return failures ? 1 : 0;
 }
