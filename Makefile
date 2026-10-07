@@ -251,6 +251,12 @@ test-pm1-stage2-record-factor: all
 test-pm1-bsgs-small-b1: all
 	bash tests/pm1_bsgs_small_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-stage2-ckpt-backend: all
+	bash tests/pm1_stage2_ckpt_backend_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+test-pm1-lowmem-stage1-ckpt: all
+	bash tests/pm1_lowmem_stage1_ckpt_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 
