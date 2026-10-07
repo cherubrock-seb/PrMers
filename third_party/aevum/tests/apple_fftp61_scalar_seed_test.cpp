@@ -68,6 +68,9 @@ int main(int argc, char** argv) {
     CHECK1(err);
     cl_mem bin = clCreateBuffer(ctx, CL_MEM_READ_WRITE, items * 16, nullptr, &err);
     CHECK1(err);
+    // Release the kernel and buffers when the case ends: each case builds a program, and a kernel keeps it alive.
+    KernelHolder kHold{k};
+    std::unique_ptr<cl_mem> boutHold{bout}, binHold{bin};
     // Word2 = long2 (WordSize 8).  Every component is 1, so the output component is 2^shift.
     std::vector<long long> ones(items * 2, 1);
     CHECK1(clEnqueueWriteBuffer(q, bin, 1, 0, items * 16, ones.data(), 0, nullptr, nullptr));
