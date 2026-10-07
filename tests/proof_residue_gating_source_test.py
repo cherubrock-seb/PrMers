@@ -37,4 +37,14 @@ for driver in ("RunPrpOrLlMarin.cpp", "RunPrpOrLl.cpp"):
 marin = body("RunPrpOrLlMarin.cpp")
 assert re.search(r"if \(resultSaved\) \{\s*backupManager\.clearState\(\);\s*delete_checkpoints\(", marin)
 
+# The kept checkpoint must be the finished one: a final checkpoint is saved after
+# the loop and before the proof releases the engine, and not when the run resumed
+# from a checkpoint already at the end.
+full = (ROOT / "src/modes/RunPrpOrLlMarin.cpp").read_text()
+final_save = re.search(r"if \(options\.mode == \"prp\" && !\(r == 0 && ri == totalIters\)\) \{[^}]*save_ckpt\(static_cast<uint32_t>\(totalIters\)", full)
+assert final_save, "no final checkpoint after the last iteration"
+assert final_save.start() > full.index("for (uint64_t iter = resumeIter")
+assert final_save.start() < full.index("proofManagerMarin.checkpointMarin(d, totalIters)")
+assert final_save.start() < full.index("delete eng;", final_save.start())
+
 print("Proof residue gating source regression: PASS")

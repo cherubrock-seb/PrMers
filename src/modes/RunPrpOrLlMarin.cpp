@@ -570,6 +570,17 @@ int App::runPrpOrLlMarin()
 
     }
 
+    // Save the finished (and, with Gerbicz-Li, verified) state.  If the result
+    // cannot be saved below, the checkpoint is kept, and this one lets the rerun
+    // resume at the end instead of redoing everything since the last periodic
+    // backup.  It is removed together with the other checkpoints once the result
+    // is saved.  The engine is released before the proof is made, so this has to
+    // happen now.
+    if (options.mode == "prp" && !(r == 0 && ri == totalIters)) {
+        const double final_elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+        save_ckpt(static_cast<uint32_t>(totalIters), final_elapsed);
+    }
+
     if (options.mode == "prp" && options.proof) {
         engine::digit d(eng, R0);
         saveProofResidue(d, totalIters);
@@ -983,8 +994,8 @@ int App::runPrpOrLlMarin()
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     // Keep the checkpoint and the proof residues unless the result is safely
-    // on disk: a rerun then resumes at the end and retries the write instead of
-    // starting from iteration 0.
+    // on disk: a rerun then resumes from the final checkpoint saved after the
+    // last iteration and retries the write instead of starting from iteration 0.
     if (resultSaved) {
         backupManager.clearState();
         delete_checkpoints(p, options.wagstaff, false, false);
