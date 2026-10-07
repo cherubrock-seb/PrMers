@@ -1100,9 +1100,13 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
   const Z61 inv = (Z61)1537228672809129301UL;
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
 #elif PFA_RADIX == 7
+#ifdef AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE
+  pfaDft7(u, (Z61)PFA7_INVROOT61);
+#else
   pfaDft7(u, (Z61)PFA7_INVROOT61);
 #pragma unroll
   for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z61)PFA7_INV7_61);
+#endif
 #elif PFA_RADIX == 9
   const Z61 w9  = (Z61)2252987116782656529UL;
   const Z61 w92 = (Z61)633067237080992132UL;
@@ -1141,7 +1145,19 @@ void OVERLOAD pfaMiddleTwiddle(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
   const u32 desired_root = x * y;
-#ifdef AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE
+#if defined(AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE)
+#if AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE == 1
+  const GF61 w = cmul(
+      pfaMulScalar(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), (Z61)PFA7_INV7_61),
+      TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+#elif AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE == 2
+  const GF61 w = cmul(
+      TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]),
+      pfaMulScalar(TFLOAD(&trig[desired_root / SMALL_HEIGHT]), (Z61)PFA7_INV7_61));
+#else
+#error INVALID AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE
+#endif
+#elif defined(AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE)
   GF61 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
   w = pfaMulScalar(w, (Z61)2049638230412172401UL);
 #else

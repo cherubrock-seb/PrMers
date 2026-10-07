@@ -1,6 +1,9 @@
 // Copyright (C) Mihai Preda and George Woltman
 
 #include "base.cl"
+#if NVIDIAGPU && PFA_RADIX == 7 && NTT_GF61
+#define AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE 1
+#endif
 #if NVIDIAGPU && PFA_RADIX == 9 && NTT_GF61
 #define AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE 1
 #endif
