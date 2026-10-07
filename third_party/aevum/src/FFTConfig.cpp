@@ -749,7 +749,17 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     }
 #endif
     if (fft.maxExp() * args.fftOverdrive < E) {
-      log("Warning: %s (max %" PRIu64 ") may be too small for %" PRIu64 "\n", fft.spec().c_str(), fft.maxExp(), E);
+      // An explicit plan past its measured capacity would compute a silently wrong residue (and an LL run has
+      // no Gerbicz check to notice), so refuse it.  -od raises the allowed exponent for the standalone program;
+      // AEVUM_ALLOW_OVERCAPACITY_PLAN=1 is the explicit override for engine users who really mean it.
+      const char* allow = std::getenv("AEVUM_ALLOW_OVERCAPACITY_PLAN");
+      const bool allowed = allow && allow[0] == '1' && allow[1] == '\0';
+      log("%s: %s (max %" PRIu64 ") may be too small for %" PRIu64 "\n", allowed ? "Warning" : "Error", fft.spec().c_str(), fft.maxExp(), E);
+      if (!allowed) {
+        throw std::runtime_error("Aevum FFT plan " + fft.spec() + " (max exponent " + std::to_string(fft.maxExp()) +
+                                 ") is too small for exponent " + std::to_string(E) +
+                                 "; use a larger plan or set AEVUM_ALLOW_OVERCAPACITY_PLAN=1 to run it anyway");
+      }
     }
     return fft;
   }
