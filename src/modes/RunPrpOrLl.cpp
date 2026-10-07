@@ -370,6 +370,24 @@ int App::runPrpOrLl() {
     }
     
     
+    // A proof residue that cannot be written or read back makes the proof
+    // impossible: say so now and carry on with the PRP instead of failing at
+    // the end, or losing the test.
+    auto saveProofResidue = [&](uint64_t iteration) {
+        try {
+            proofManager.checkpoint(buffers->input, static_cast<uint32_t>(iteration));
+        } catch (const core::ProofCheckpointError& e) {
+            const std::string msg = std::string("Error: ") + e.what() +
+                ". No proof will be produced for this test; "
+                "the PRP continues.";
+            std::cerr << msg << std::endl;
+            if (guiServer_)
+                guiServer_->appendLog(msg);
+            options.proof = false;
+            options.proofFile.clear();
+        }
+    };
+
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
@@ -560,7 +578,7 @@ int App::runPrpOrLl() {
 
 
         if (options.mode == "prp" && options.proof && iter + 1 < totalIters) {
-            proofManager.checkpoint(buffers->input, iter + 1);
+            saveProofResidue(iter + 1);
         }
 
         if (options.mode == "prp" && options.gerbiczli && ((j != 0 && (j % B == 0)) || iter == totalIters - 1)) {
@@ -845,7 +863,7 @@ int App::runPrpOrLl() {
 
         // Checkpoint the final result at iteration totalIters (after all p iterations are complete)
         if (options.proof) {
-            proofManager.checkpoint(buffers->input, totalIters);
+            saveProofResidue(totalIters);
         }
 
         bool debug = false;

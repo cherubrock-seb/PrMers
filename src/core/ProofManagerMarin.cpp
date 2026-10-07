@@ -51,30 +51,7 @@ void ProofManagerMarin::checkpoint(cl_mem buf, uint32_t iter) {
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
     
     // Save in PRPLL-compatible format
-    proofSet_.save(iter, words);
-    
-    // Verify the checkpoint by loading it back and comparing
-    try {
-        auto loadedWords = proofSet_.load(iter);
-        
-        // Compare the saved and loaded data
-        if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" 
-                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
-            return;
-        }
-        
-        for (size_t i = 0; i < words.size(); ++i) {
-            if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " 
-                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
-                return;
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter 
-                  << ": " << e.what() << std::endl;
-    }
+    saveProofCheckpointVerified(proofSet_, iter, words);
 }
 
 bool ProofManagerMarin::shouldCheckpoint(uint32_t iter) const {
@@ -95,29 +72,7 @@ void ProofManagerMarin::checkpointMarin(engine::digit host, uint32_t iter)
     }
 
     auto words = io::JsonBuilder::compactBits(digits, digitWidth_, exponent_);
-    proofSet_.save(iter, words);
-
-    try
-    {
-        auto loadedWords = proofSet_.load(iter);
-        if (words.size() != loadedWords.size())
-        {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch (" << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
-            return;
-        }
-        for (size_t i = 0; i < words.size(); ++i)
-        {
-            if (words[i] != loadedWords[i])
-            {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word " << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
-                return;
-            }
-        }
-    }
-    catch (const std::exception& e)
-    {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter << ": " << e.what() << std::endl;
-    }
+    saveProofCheckpointVerified(proofSet_, iter, words);
 }
 
 

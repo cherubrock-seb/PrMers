@@ -90,28 +90,7 @@ void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
 
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
 
-    proofSet_.save(iter, words);
-
-    try {
-        auto loadedWords = proofSet_.load(iter);
-
-        if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch ("
-                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
-            return;
-        }
-
-        for (size_t i = 0; i < words.size(); ++i) {
-            if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word "
-                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
-                return;
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter
-                  << ": " << e.what() << std::endl;
-    }
+    saveProofCheckpointVerified(proofSet_, iter, words);
 }
 
 void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
@@ -119,28 +98,7 @@ void ProofManager::checkpointMarin(std::vector<uint64_t> host, uint32_t iter) {
 
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
 
-    proofSet_.save(iter, words);
-
-    try {
-        auto loadedWords = proofSet_.load(iter);
-
-        if (words.size() != loadedWords.size()) {
-            std::cerr << "Warning: Checkpoint validation failed: size mismatch ("
-                      << words.size() << " vs " << loadedWords.size() << ")" << std::endl;
-            return;
-        }
-
-        for (size_t i = 0; i < words.size(); ++i) {
-            if (words[i] != loadedWords[i]) {
-                std::cerr << "Warning: Checkpoint validation failed: data mismatch at word "
-                          << i << " (0x" << words[i] << " vs 0x" << loadedWords[i] << ")" << std::endl;
-                return;
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Warning: Checkpoint validation failed at iteration " << iter
-                  << ": " << e.what() << std::endl;
-    }
+    saveProofCheckpointVerified(proofSet_, iter, words);
 }
 
 std::filesystem::path ProofManager::proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify) const {

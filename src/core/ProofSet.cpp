@@ -20,6 +20,7 @@
  * This code is released as free software. 
  */
 #include "core/ProofSet.hpp"
+#include "core/ProofCheckpoint.hpp"
 #include "io/Sha3Hash.h"
 #include "util/Crc32.hpp"
 #include "util/Timer.hpp"
@@ -127,7 +128,8 @@ void ProofSet::save(uint32_t iter, const std::vector<uint32_t>& words) {
   file.write(reinterpret_cast<const char*>(words.data()),
           static_cast<std::streamsize>(words.size() * sizeof(uint32_t)));
   
-  if (!file.good()) {
+  file.close();
+  if (file.fail() || !syncFileToDisk(filePath)) {
     throw std::runtime_error("Error writing proof checkpoint file: " + filePath.string());
   }
 }
