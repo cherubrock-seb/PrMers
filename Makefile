@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -201,6 +201,9 @@ test-legacy-small-items:
 
 test-legacy-check-equal:
 	bash tests/test_legacy_check_equal_device.sh $(MARIN_TEST_DEVICE)
+
+test-proof-fallback-power:
+	python3 tests/proof_fallback_power_source_test.py
 
 test-final-carry-digit0:
 	bash tests/test_final_carry_digit0.sh
