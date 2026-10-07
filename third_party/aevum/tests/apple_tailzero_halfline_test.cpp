@@ -46,6 +46,9 @@ int main(int argc, char** argv) {
     CHECK1(err);
     cl_mem b = clCreateBuffer(ctx, CL_MEM_READ_WRITE, 4, nullptr, &err);
     CHECK1(err);
+    // Release the kernel and buffer when the case ends (a kernel keeps its program alive).
+    KernelHolder kHold{k};
+    std::unique_ptr<cl_mem> bHold{b};
     CHECK1(clSetKernelArg(k, 0, sizeof b, &b));
     size_t one = 1;
     CHECK1(clEnqueueNDRangeKernel(q, k, 1, nullptr, &one, &one, 0, nullptr, nullptr));
