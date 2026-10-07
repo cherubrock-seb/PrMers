@@ -69,10 +69,7 @@ Buffers::Buffers(const prmers::ocl::Context& ctx, const math::Precompute& pre)
 
     const auto& maskBits = pre.getDigitWidthMask();
     size_t maskN = maskBits.size();
-    size_t chunks = (maskN + 63) / 64;
-    size_t chunks_padded = ((chunks + 3) & ~size_t(3));
-    bool add_guard = true;
-    if (add_guard) chunks_padded += 1;
+    size_t chunks_padded = maskPackedWords(maskN);
 
     std::vector<uint64_t> maskPacked(chunks_padded, 0ULL);
     for (size_t i = 0; i < maskN; ++i) {

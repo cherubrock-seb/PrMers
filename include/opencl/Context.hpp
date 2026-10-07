@@ -8,6 +8,7 @@
 #include <CL/cl.h>
 #endif
 
+#include <cmath>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -42,6 +43,16 @@ public:
     cl_uint getWorkGroupCount() const noexcept;
     void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, uint64_t p, bool debug = false, int localMaxSize = 0, int localMaxSize5 = 0);
     static void listAllOpenCLDevices();
+
+    // Smallest power of two d with maxdw^d >= maxdw^2 * n. When the digits are at most 1 bit wide
+    // that never holds (the doubling would not terminate), and a carry can ripple through every
+    // digit, so the whole transform length is used.
+    static std::size_t carryPropagationDepth(int maxdw, std::size_t n) {
+        if (maxdw < 2) return n < 1 ? std::size_t(1) : n;
+        std::size_t depth = 1;
+        while (std::pow(maxdw, depth) < std::pow(maxdw, 2) * static_cast<double>(n)) depth *= 2;
+        return depth;
+    }
 private:
     cl_platform_id    platform_;
     cl_device_id      device_;

@@ -177,6 +177,11 @@ test-legacy-enqueue-errors:
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
 
+.PHONY: test-legacy-small-items
+
+test-legacy-small-items:
+	bash tests/test_legacy_small_items.sh
+
 .PHONY: test-legacy-check-equal
 
 test-legacy-check-equal:
