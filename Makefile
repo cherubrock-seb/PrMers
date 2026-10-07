@@ -338,3 +338,6 @@ test-gm-ecm-resume:
 	mkdir -p /tmp/prmers-gm-ecm-resume-test
 	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_ecm_progress_test.cpp -o /tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
 	/tmp/prmers-gm-ecm-resume-test/gm_ecm_progress_test
+
+test-pm1-prime95-relative-path: all
+	bash tests/pm1_prime95_relative_path_test.sh $${PRMERS_TEST_DEVICE:-0}
