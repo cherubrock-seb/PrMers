@@ -720,7 +720,9 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_addsub_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_mul2_unit_p1);
 
-		if (_aux_split) _mul512_xbuf = create_kernel_transform_xbuf("mul512_xbuf");
+		// mul512_xbuf is compiled together with mul512, i.e. only for n >= 32768
+		// (see the (N_SZ >= 32768) guard in marin.cl); mul512 is its only user.
+		if (_aux_split && n >= 32768) _mul512_xbuf = create_kernel_transform_xbuf("mul512_xbuf");
 
 		_copy = _create_kernel("copy");
 		_set_kernel_arg(_copy, 0, sizeof(cl_mem), &_reg);
