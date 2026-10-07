@@ -161,6 +161,11 @@ test-marin-ll-radix5: all
 test-proof-power:
 	python3 tests/legacy_proof_power_source_test.py
 
+.PHONY: test-legacy-enqueue-errors
+
+test-legacy-enqueue-errors:
+	python3 tests/legacy_enqueue_errors_source_test.py
+
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
 
