@@ -545,7 +545,7 @@ std::size_t transform_size_from_spec(const std::string& spec) {
         start = pos + 1;
     }
     std::size_t offset = 0;
-    if (!fields.empty() && (fields[0] == "pfa3" || fields[0] == "pfa9" || fields[0] == "pfa9fast" || fields[0] == "pfa9full")) offset = 1;
+    if (!fields.empty() && (fields[0] == "pfa3" || fields[0] == "pfa7" || fields[0] == "pfa9" || fields[0] == "pfa9fast" || fields[0] == "pfa9full")) offset = 1;
     const bool supported_type = fields.size() >= offset + 4 &&
                                 (fields[offset] == "1" || fields[offset] == "4");
     if (!supported_type)
