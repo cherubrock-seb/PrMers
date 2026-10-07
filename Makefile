@@ -205,6 +205,9 @@ test-gm:
 test-pm1-stage1-ckpt: all
 	bash tests/pm1_stage1_ckpt_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-nk-stage2-b2: all
+	bash tests/pm1_nk_stage2_with_b2_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-bsgs-resume: all
 	bash tests/pm1_bsgs_resume_boundary_test.sh $${PRMERS_TEST_DEVICE:-0}
 
