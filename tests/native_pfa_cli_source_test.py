@@ -27,12 +27,13 @@ assert 'fallback = ""' in app
 assert app.count('? plan_override : "";') >= 2
 assert '"throughput:prp"' not in app
 assert '"throughput:ll"' not in app
-assert '"throughput:pm1"' in app
-assert '"throughput:ecm"' in app
+assert '"throughput:pm1"' not in app
+assert '"throughput:ecm"' not in app
 
 policy=(root/'src/aevum/AutoPolicy.cpp').read_text()
 gpu=(root/'src/marin/gpu.cpp').read_text()
-assert 'aevum_engine_resolve_fft(exponent, fft_spec' in policy
+import re
+assert re.search(r'aevum_engine_resolve_fft\(\s*exponent,\s*fft_spec', policy)
 assert 'aevum_auto_decide(p, reg_count, selected_workload, fft_spec)' in gpu
 assert '4:1K:8:256:101' in policy
 assert 'boundary-bridge=1' in policy
