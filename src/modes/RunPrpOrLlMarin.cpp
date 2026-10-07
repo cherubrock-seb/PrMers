@@ -197,21 +197,27 @@ int App::runPrpOrLlMarin()
 
     auto save_ckpt = [&](uint32_t i, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-        {
+        auto write_new = [&]() -> bool {
             File f(newf, "wb");
+            if (!f.exists()) return false;
             int version = ckpt_block ? 3 : 2;
-            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
-            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
-            if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return;
-            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return;
-            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return;
-            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
-            if (ckpt_block && !f.write(reinterpret_cast<const char*>(&ckpt_block), sizeof(ckpt_block))) return;
+            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return false;
+            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return false;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return false;
+            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return false;
+            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return false;
+            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return false;
+            if (ckpt_block && !f.write(reinterpret_cast<const char*>(&ckpt_block), sizeof(ckpt_block))) return false;
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
-            if (!eng->get_checkpoint(data)) return;
-            if (!f.write(data.data(), cksz)) return;
-            f.write_crc32();
+            if (!eng->get_checkpoint(data)) return false;
+            if (!f.write(data.data(), cksz)) return false;
+            return f.write_crc32() && f.close();
+        };
+        if (!write_new()) {
+            std::cout << "[Checkpoint] Warning: could not write checkpoint " << newf
+                      << "; continuing without saving it (the previous checkpoint, if any, is kept)." << std::endl;
+            return;
         }
         std::remove(oldf.c_str());
         struct stat s;

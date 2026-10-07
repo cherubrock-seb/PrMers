@@ -195,6 +195,14 @@ test-legacy-small-items:
 test-legacy-check-equal:
 	bash tests/test_legacy_check_equal_device.sh $(MARIN_TEST_DEVICE)
 
+.PHONY: test-marin-file-failure
+test-marin-file-failure:
+	rm -rf /tmp/prmers-marin-file-failure-test
+	mkdir -p /tmp/prmers-marin-file-failure-test/scratch
+	g++ -std=c++20 -O1 -Wall -Wextra -Iinclude tests/marin_file_write_failure_test.cpp -o /tmp/prmers-marin-file-failure-test/marin_file_write_failure_test
+	/tmp/prmers-marin-file-failure-test/marin_file_write_failure_test /tmp/prmers-marin-file-failure-test/scratch
+	rm -rf /tmp/prmers-marin-file-failure-test
+
 test-marin-invalid-device:
 	mkdir -p tests/build-marin-invalid-device
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
