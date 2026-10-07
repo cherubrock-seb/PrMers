@@ -23,6 +23,7 @@
 #include "io/CliParser.hpp"
 #include "aevum/EngineAevum.hpp"
 #include "modes/GaussianTrialFactor.hpp"
+#include "util/LogRedact.hpp"
 #include <fstream>
 #include <streambuf>
 #include <iostream>
@@ -59,17 +60,21 @@ protected:
 
 struct LogTee {
     std::ofstream file;
+    // What reaches the log file goes through this filter: the GUI URL printed for the user carries the
+    // access token, which must not be stored in a (by default world-readable) file.
+    util::TokenRedactingBuf* fileFilter = nullptr;
     std::streambuf *oldCout = nullptr, *oldCerr = nullptr, *oldClog = nullptr;
     TeeBuf *teeCout = nullptr, *teeCerr = nullptr, *teeClog = nullptr;
 
     explicit LogTee(const std::string& path) : file(path, std::ios::app) {
         if (!file) return;
+        fileFilter = new util::TokenRedactingBuf(file.rdbuf());
         oldCout = std::cout.rdbuf();
         oldCerr = std::cerr.rdbuf();
         oldClog = std::clog.rdbuf();
-        teeCout = new TeeBuf(oldCout, file.rdbuf());
-        teeCerr = new TeeBuf(oldCerr, file.rdbuf());
-        teeClog = new TeeBuf(oldClog, file.rdbuf());
+        teeCout = new TeeBuf(oldCout, fileFilter);
+        teeCerr = new TeeBuf(oldCerr, fileFilter);
+        teeClog = new TeeBuf(oldClog, fileFilter);
         std::cout.rdbuf(teeCout);
         std::cerr.rdbuf(teeCerr);
         std::clog.rdbuf(teeClog);
@@ -82,6 +87,7 @@ struct LogTee {
         if (teeCout) { std::cout.rdbuf(oldCout); delete teeCout; }
         if (teeCerr) { std::cerr.rdbuf(oldCerr); delete teeCerr; }
         if (teeClog) { std::clog.rdbuf(oldClog); delete teeClog; }
+        delete fileFilter;
         if (file) file.flush();
     }
 };

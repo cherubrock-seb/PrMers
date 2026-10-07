@@ -189,6 +189,10 @@ test-self-exe-restart:
 test-io-input-validation:
 	bash tests/test_io_input_validation.sh
 
+.PHONY: test-log-redact
+test-log-redact:
+	bash tests/test_log_redact.sh
+
 .PHONY: test-legacy-small-items
 
 test-legacy-small-items:
