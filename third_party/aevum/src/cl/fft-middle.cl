@@ -1045,12 +1045,18 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
 #if PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)636260618972345635UL, &o0, &o1, &o2);
+#ifdef AEVUM_PFA_MIDOUT_FUSE_INV_SCALE
+  u[0] = o0; u[1] = o1; u[2] = o2;
+#else
   const Z61 inv = (Z61)1537228672809129301UL;
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
+#endif
 #elif PFA_RADIX == 7
   pfaDft7(u, (Z61)PFA7_INVROOT61);
+#ifndef AEVUM_PFA_MIDOUT_FUSE_INV_SCALE
 #pragma unroll
   for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z61)PFA7_INV7_61);
+#endif
 #elif PFA_RADIX == 9
   const Z61 w9  = (Z61)2252987116782656529UL;
   const Z61 w92 = (Z61)633067237080992132UL;
@@ -1071,9 +1077,35 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
     pfaDft3(t[k2], t[3+k2], t[6+k2], (Z61)636260618972345635UL, &a, &b, &c);
     o[k2] = a; o[k2+3] = b; o[k2+6] = c;
   }
+#ifdef AEVUM_PFA_MIDOUT_FUSE_INV_SCALE
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = o[i];
+#else
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
 #endif
+#endif
+}
+
+// WIDTH x SMALL_HEIGHT Cooley-Tukey twiddle of the binary axis.
+// For the NVIDIA GF61 middle-out specialization, fold the inverse-radix
+// normalization scalar into this common twiddle rather than normalizing
+// every radix output separately.
+void OVERLOAD pfaMiddleTwiddle(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
+  assert(x < WIDTH);
+  assert(y < SMALL_HEIGHT);
+  const u32 desired_root = x * y;
+  GF61 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+#ifdef AEVUM_PFA_MIDOUT_FUSE_INV_SCALE
+#if PFA_RADIX == 3
+  w = pfaMulScalar(w, (Z61)1537228672809129301UL);
+#elif PFA_RADIX == 7
+  w = pfaMulScalar(w, (Z61)PFA7_INV7_61);
+#elif PFA_RADIX == 9
+  w = pfaMulScalar(w, (Z61)2049638230412172401UL);
+#endif
+#endif
+  for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
 }
 #endif
 

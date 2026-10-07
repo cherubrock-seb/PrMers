@@ -4,6 +4,10 @@
 #define AEVUM_GF61_CMUL_ALT 1
 #endif
 
+#if NVIDIAGPU && PFA_RADIX && NTT_GF61
+#define AEVUM_PFA_MIDOUT_FUSE_INV_SCALE 1
+#endif
+
 #include "base.cl"
 #include "fft-middle.cl"
 #include "middle.cl"
@@ -248,6 +252,7 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
 
 #if PFA_RADIX
   ifft_MIDDLE(u);
+  pfaMiddleTwiddle(u, y, x, trig61);
 #else
   middleMul(u, x, trig61);
   fft_MIDDLE(u);
