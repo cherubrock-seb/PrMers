@@ -849,7 +849,7 @@ int App::runECMMarinTwistedEdwards()
     // 1 and derive later deterministic seeds from it so the continuation option
     // can actually exercise subsequent curves.
     const bool forcedSeedSeries = forceCurve && options.ecm_continue_after_factor && curves > 1;
-    if (forceCurve && !forcedSeedSeries) curves = 1ULL;
+    if ((forceCurve && !forcedSeedSeries) || forceSigma) curves = 1ULL;
     const uint32_t progress_interval_ms = (options.ecm_progress_interval_ms > 0) ? options.ecm_progress_interval_ms : 2000;
 
     const bool stage2_debug_checks = true;
