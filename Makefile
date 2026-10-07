@@ -223,6 +223,10 @@ test-legacy-enqueue-errors:
 test-legacy-pm1-periodic-save:
 	python3 tests/legacy_pm1_periodic_save_source_test.py
 
+.PHONY: test-llsafe-keep-checkpoint
+test-llsafe-keep-checkpoint:
+	python3 tests/llsafe_keep_checkpoint_source_test.py
+
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
 

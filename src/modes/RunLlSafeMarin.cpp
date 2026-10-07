@@ -793,7 +793,13 @@ int App::runLlSafeMarin()
     bool resultSaved = wm.saveIndividualJson(options.exponent, "llsafe", json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
 
-    delete_checkpoints(p, options.wagstaff, false, true);
+    // Delete the recovery state only once the result is saved; otherwise keep the
+    // checkpoint so a rerun does not start the whole test over.
+    if (resultSaved) {
+        delete_checkpoints(p, options.wagstaff, false, true);
+    } else {
+        std::cerr << "[LL-SAFE] Result could not be saved; keeping the checkpoint.\n";
+    }
     logger.logEnd(elapsed_time);
     delete eng;
 
