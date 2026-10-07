@@ -701,13 +701,7 @@ int App::runPrpOrLlMarin()
             // removed and a worktodo entry is retired. The Wagstaff number is not 2^p - 1, so it
             // gets its own record: the PrimeNet record for the exponent p would claim 2^p - 1.
             is_prp_prime = isWagstaffPRP;
-            std::ostringstream wj;
-            wj << "{\"status\":\"" << (isWagstaffPRP ? "P" : "C") << "\""
-               << ",\"exponent\":" << options.exponent / 2
-               << ",\"worktype\":\"Wagstaff-PRP\""
-               << ",\"number\":\"(2^" << options.exponent / 2 << "+1)/3\""
-               << ",\"program\":{\"name\":\"prmers\",\"version\":\"" << core::PRMERS_VERSION << "\"}}";
-            wagstaff_json = wj.str();
+            wagstaff_json = core::algo::wagstaff_result_json(options.exponent, isWagstaffPRP);
     }
     
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;

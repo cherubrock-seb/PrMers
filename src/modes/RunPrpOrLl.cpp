@@ -872,6 +872,43 @@ int App::runPrpOrLl() {
                 }
             }
 
+            // Record the verdict, remove the checkpoint and retire the worktodo entry, as the
+            // Marin path does; returning here left the result unsaved and the entry in place, so
+            // the next start ran it again.
+            const std::string wagstaffJson =
+                core::algo::wagstaff_result_json(options.exponent, isWagstaffPRP);
+            backupManager.clearState();
+            io::WorktodoManager wm(options);
+            bool resultSaved = wm.saveIndividualJson(options.exponent / 2, "wagstaff", wagstaffJson);
+            resultSaved = wm.appendToResultsTxt(wagstaffJson) && resultSaved;
+            if (hasWorktodoEntry_ && !resultSaved) {
+                std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+            }
+            if (hasWorktodoEntry_ && resultSaved) {
+                if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+                    std::cout << "Entry removed from " << options.worktodo_path
+                              << " and saved to worktodo_save.txt\n";
+                    bool more = false;
+                    {
+                        std::ifstream f(options.worktodo_path);
+                        std::string l;
+                        while (std::getline(f, l)) {
+                            if (!l.empty() && l[0] != '#') { more = true; break; }
+                        }
+                    }
+                    if (more) {
+                        std::cout << "Restarting for next entry in worktodo.txt\n";
+                        restart_self(argc_, argv_);
+                    } else {
+                        std::cout << "No more entries in worktodo.txt, exiting.\n";
+                        if (!options.gui) std::exit(0);
+                    }
+                } else {
+                    std::cerr << "Failed to update " << options.worktodo_path << "\n";
+                    if (!options.gui) std::exit(-1);
+                }
+            }
+
             return isWagstaffPRP ? 0 : 1;
         }
 

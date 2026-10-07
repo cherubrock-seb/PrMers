@@ -470,6 +470,10 @@ test-marin-dead-kernels:
 test-llunsafe-checkpoint-cleanup: all
 	bash tests/run_llunsafe_checkpoint_cleanup.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-legacy-wagstaff-result
+test-legacy-wagstaff-result: all
+	bash tests/run_legacy_wagstaff_result.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:
