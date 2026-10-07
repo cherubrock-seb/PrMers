@@ -248,7 +248,17 @@ void Carry::handleFinalCarry(std::vector<uint64_t>& x, const std::vector<int>& d
         }
     }
 
-    x[0] -= 1;
+    // Take the 1 added above back off.  When the low digit is 0 here (the
+    // input's low digit was all ones), borrow from the next non-zero digit
+    // instead of letting digit 0 wrap to 2^64-1.
+    size_t k = 0;
+    while (k < x.size() && x[k] == 0) {
+        x[k] = (uint64_t(1) << digit_width_cpu[k]) - 1;
+        ++k;
+    }
+    // If every digit was 0, the value is 0 and 0 - 1 = 2^p - 2 (mod 2^p - 1):
+    // every digit is now all ones, so only digit 0 loses its last bit.
+    x[k < x.size() ? k : 0] -= 1;
 }
 
 } // namespace math
