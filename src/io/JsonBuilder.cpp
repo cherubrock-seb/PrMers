@@ -59,6 +59,13 @@ static void doDiv9(uint32_t E, std::vector<uint32_t>& W) {
     doDiv3(E, W);
 }
 
+// Low 64 bits of a residue held in 32-bit words. An exponent of at most 32 bits has a single word.
+static uint64_t lowest64(const std::vector<uint32_t>& W) {
+    const uint64_t lo = W.empty() ? 0u : W[0];
+    const uint64_t hi = W.size() > 1 ? W[1] : 0u;
+    return (hi << 32) | lo;
+}
+
 static std::string toLower(const std::string& s){
     std::string t = s;
     std::transform(t.begin(), t.end(), t.begin(),
@@ -633,7 +640,7 @@ std::string JsonBuilder::computeRes64(
 {
     auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
-    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    const uint64_t finalRes64 = lowest64(words);
     std::ostringstream oss;
     oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << finalRes64;
     return oss.str();
@@ -647,7 +654,7 @@ std::string JsonBuilder::computeRes64Iter(
     int)
 {
     auto words = JsonBuilder::compactBits(x, digit_width, opts.exponent);
-    uint64_t finalRes64 = (uint64_t(words[1]) << 32) | words[0];
+    const uint64_t finalRes64 = lowest64(words);
     std::ostringstream oss;
     oss << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << finalRes64;
     return oss.str();
@@ -664,7 +671,8 @@ std::string JsonBuilder::computeRes2048(
     if (opts.mode == "prp") doDiv9(opts.exponent, words);
     std::ostringstream oss;
     for (int i = 63; i >= 0; --i) {
-        oss << std::hex << std::nouppercase << std::setw(8) << std::setfill('0') << words[static_cast<size_t>(i)];
+        const size_t k = static_cast<size_t>(i);
+        oss << std::hex << std::nouppercase << std::setw(8) << std::setfill('0') << (k < words.size() ? words[k] : 0u);
     }
     return oss.str();
 }
