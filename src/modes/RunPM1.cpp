@@ -380,15 +380,56 @@ static std::string p95_shell_quote_posix(const std::string& s) {
     return out;
 }
 
-static std::string p95_shell_quote_win(const std::string& s) {
-    std::string out = "\"";
-    for (char ch : s) {
-        if (ch == '"') out += '\\';
-        out.push_back(ch);
+#ifdef _WIN32
+// Run "<exe> -d" in <dir> with stdout/stderr redirected to <log> and wait for it. No shell is
+// involved, so the paths only need CommandLineToArgvW-style quoting. Returns the exit code, or -1
+// if the process could not be started.
+static int p95_run_windows_process(const fs::path& exe, const fs::path& dir, const fs::path& log) {
+    SECURITY_ATTRIBUTES sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    HANDLE h_log = CreateFileW(log.wstring().c_str(), GENERIC_WRITE, share, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE h_nul = CreateFileW(L"NUL", GENERIC_READ, share, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h_log == INVALID_HANDLE_VALUE || h_nul == INVALID_HANDLE_VALUE) {
+        std::cerr << "[PM1] Cannot open " << log.string() << " for the Prime95 log (Win32 error " << GetLastError() << ")" << std::endl;
+        if (h_log != INVALID_HANDLE_VALUE) CloseHandle(h_log);
+        if (h_nul != INVALID_HANDLE_VALUE) CloseHandle(h_nul);
+        return -1;
     }
-    out += "\"";
-    return out;
+
+    STARTUPINFOW si;
+    std::memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = h_nul;
+    si.hStdOutput = h_log;
+    si.hStdError = h_log;
+    PROCESS_INFORMATION pi;
+    std::memset(&pi, 0, sizeof(pi));
+
+    const std::wstring exe_w = exe.wstring();
+    const std::wstring cwd_w = dir.wstring();
+    const std::wstring cmd_w = util::winCommandLine(std::vector<std::wstring>{exe_w, L"-d"});
+    std::vector<wchar_t> cmdline(cmd_w.begin(), cmd_w.end());
+    cmdline.push_back(L'\0');
+
+    int rc = -1;
+    if (CreateProcessW(exe_w.c_str(), cmdline.data(), nullptr, nullptr, TRUE, 0, nullptr, cwd_w.c_str(), &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD code = 0;
+        rc = GetExitCodeProcess(pi.hProcess, &code) ? static_cast<int>(code) : -1;
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    } else {
+        std::cerr << "[PM1] Failed to launch Prime95 '" << exe.string() << "' (Win32 error " << GetLastError() << ")" << std::endl;
+    }
+    CloseHandle(h_log);
+    CloseHandle(h_nul);
+    return rc;
 }
+#endif
 
 static bool p95_read_last_non_empty_line(const fs::path& file, std::string& last_line) {
     std::ifstream in(file, std::ios::in);
@@ -564,22 +605,21 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
         wt.flush();
     }
 
-    std::ostringstream shell;
 #ifdef _WIN32
-    shell << "cd /d " << p95_shell_quote_win(p95_dir.string())
-          << " && " << p95_shell_quote_win(p95_exe.string())
-          << " -d > " << p95_shell_quote_win((p95_dir / log_filename).string()) << " 2>&1";
-    const std::string cmd = std::string("cmd /C ") + p95_shell_quote_win(shell.str());
+    auto future_rc = std::async(std::launch::async, [p95_exe, p95_dir, log_file = p95_dir / log_filename]() {
+        return p95_run_windows_process(p95_exe, p95_dir, log_file);
+    });
 #else
+    std::ostringstream shell;
     shell << "cd " << p95_shell_quote_posix(p95_dir.string())
           << " && " << p95_shell_quote_posix(p95_exe.string())
           << " -d > " << p95_shell_quote_posix((p95_dir / log_filename).string()) << " 2>&1";
     const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
-#endif
 
     auto future_rc = std::async(std::launch::async, [cmd]() {
         return std::system(cmd.c_str());
     });
+#endif
 
     const fs::path log_path = p95_dir / log_filename;
     const fs::path results_file = p95_dir / "results.json.txt";

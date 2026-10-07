@@ -354,16 +354,6 @@ static std::string p95_shell_quote_posix(const std::string& s) {
     return out;
 }
 
-static std::string p95_shell_quote_win(const std::string& s) {
-    std::string out = "\"";
-    for (char ch : s) {
-        if (ch == '\"') out += '\\';
-        out.push_back(ch);
-    }
-    out += "\"";
-    return out;
-}
-
 static bool p95_read_text_file(const fs::path& file, std::string& out) {
     std::ifstream in(file, std::ios::in | std::ios::binary);
     if (!in.is_open()) return false;
