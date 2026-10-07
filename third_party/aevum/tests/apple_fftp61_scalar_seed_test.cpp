@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 
     Program prog = loadSource(ctx, HARNESS);
     std::string opts = "-cl-std=CL1.2 -I " + dir + " -DAEVUM_APPLE_SPLIT_FFTP=1 -DNO_ASM=1 -DAMDGPU=0 "
-      "-DFFT_TYPE=1 -DFFT_FP64=0 -DFFT_FP32=0 -DNTT_GF31=1 -DNTT_GF61=1 -DWordSize=8u -DCARRY_LEN=8u -DPFA_RADIX=0u -DMAXBPW=3998u "
+      "-DFFT_TYPE=1 -DFFT_FP64=0 -DFFT_FP32=0 -DNTT_GF31=1 -DNTT_GF61=1 -DCARRY64=1 -DWordSize=8u -DCARRY_LEN=8u -DPFA_RADIX=0u -DMAXBPW=3998u "
       "-DEXP=" + std::to_string(E) + "u -DWIDTH=" + std::to_string(WIDTH) + "u -DSMALL_HEIGHT=" + std::to_string(SMALL_HEIGHT) +
       "u -DMIDDLE=" + std::to_string(MIDDLE) + "u -DNW=8u -DNH=8u -DFFT_VARIANT=101u "
       "-DDISTGF31=0 -DDISTWTRIGGF31=0 -DDISTMTRIGGF31=0 -DDISTHTRIGGF31=0 -DDISTGF61=0ul -DDISTWTRIGGF61=0ul -DDISTMTRIGGF61=0ul -DDISTHTRIGGF61=0ul "
