@@ -417,6 +417,11 @@ int App::runGaussianMersenne() {
         return 1;
     }
     if (p64 == 2) {
+        // GM_2 = 5 is prime; GQ_2 = 5/5 = 1 is not.
+        if (is_gq) {
+            std::cout << target_label << "_2 = 1 is not prime.\n";
+            return 1;
+        }
         std::cout << target_label << "_2 special value 5 is prime.\n";
         return 0;
     }

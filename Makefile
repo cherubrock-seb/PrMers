@@ -308,6 +308,10 @@ test-pm1-extend-ckpt: all
 test-marin-reg-offset-wrap:
 	bash tests/test_marin_reg_offset_wrap.sh
 
+.PHONY: test-gm-small-items
+test-gm-small-items: all
+	bash tests/gm_small_items_test.sh
+
 .PHONY: test-gm-u64-divisor
 test-gm-u64-divisor:
 	mkdir -p /tmp/prmers-gm-u64-divisor-test
