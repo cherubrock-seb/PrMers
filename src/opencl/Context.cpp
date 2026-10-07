@@ -395,9 +395,7 @@ void Context::computeOptimalSizes(std::size_t n,
     localCarryPropagationDepth_ = 1;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
     if (debug_) std::cout << "max digit width = " << maxdw << std::endl;
-    while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
-        localCarryPropagationDepth_ *= 2;
-    }
+    localCarryPropagationDepth_ = carryPropagationDepth(maxdw, n);
     if (debug_)
         std::cout << "localCarryPropagationDepth_ =  " << localCarryPropagationDepth_ << std::endl;
     const std::size_t lcd = std::max<std::size_t>(std::size_t(1), localCarryPropagationDepth_);

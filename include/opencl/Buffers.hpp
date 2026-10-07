@@ -33,6 +33,14 @@ public:
     cl_mem tmp; 
     cl_mem r2,save,bufd,buf3,last_correct_state,last_correct_bufd;
     std::vector<cl_mem> evenPow;
+    // Number of 64-bit words in the packed digit-width mask for n digits. The carry kernels
+    // prefetch maskPacked[base + 2] with base up to (n - 1) / 64, so at least two guard words
+    // must follow the last word that holds mask bits.
+    static size_t maskPackedWords(size_t n) {
+        const size_t chunks = (n + 63) / 64;
+        const size_t padded = (chunks + 3) & ~size_t(3);
+        return padded < chunks + 2 ? chunks + 2 : padded;
+    }
     static cl_mem createBuffer(const prmers::ocl::Context& ctx, cl_mem_flags flags,
                                size_t size, const void* ptr,
                                const std::string& name);
