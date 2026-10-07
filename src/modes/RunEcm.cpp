@@ -430,7 +430,7 @@ int App::runECMMarin()
             EchunkPre = 1;
             const uint32_t chunkStartPre = idxPre;
             while (idxPre < (uint32_t)primesS2_v.size()) {
-                mpz_mul_ui(EchunkPre.get_mpz_t(), EchunkPre.get_mpz_t(), primesS2_v[idxPre]);
+                ecm_mpz_mul_u64(EchunkPre, primesS2_v[idxPre]);
                 ++idxPre;
                 if (mpz_sizeinbase(EchunkPre.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS_PRE && idxPre > chunkStartPre) break;
             }
@@ -670,7 +670,7 @@ int App::runECMMarin()
                 EchunkPre = 1;
                 const uint32_t chunkStartPre = idxPre;
                 while (idxPre < (uint32_t)primesS2_v.size()) {
-                    mpz_mul_ui(EchunkPre.get_mpz_t(), EchunkPre.get_mpz_t(), primesS2_v[idxPre]);
+                    ecm_mpz_mul_u64(EchunkPre, primesS2_v[idxPre]);
                     ++idxPre;
                     if (mpz_sizeinbase(EchunkPre.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS_PRE && idxPre > chunkStartPre) break;
                 }
@@ -1982,14 +1982,14 @@ int App::runECMMarin()
                         chunk_start = resume_s2_chunk_start;
                         chunk_end = resume_s2_chunk_end;
                         for (uint32_t qi = chunk_start; qi < chunk_end; ++qi) {
-                            mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[qi]);
+                            ecm_mpz_mul_u64(Echunk, primesS2_v[qi]);
                         }
                         chunk_bits = resume_s2_chunk_bits ? resume_s2_chunk_bits : (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
                         chunk_resume_steps_done = std::min<uint32_t>(resume_s2_steps_done, chunk_bits);
                         resume_this_chunk = true;
                     } else {
                         while (chunk_end < totalS2Primes) {
-                            mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
+                            ecm_mpz_mul_u64(Echunk, primesS2_v[chunk_end]);
                             ++chunk_end;
                             if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
                         }
@@ -2226,14 +2226,14 @@ auto setup_stage2_base = [&]() -> int {
                     chunk_start = resume_s2_chunk_start;
                     chunk_end = resume_s2_chunk_end;
                     for (uint32_t qi = chunk_start; qi < chunk_end; ++qi) {
-                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[qi]);
+                        ecm_mpz_mul_u64(Echunk, primesS2_v[qi]);
                     }
                     chunk_bits = resume_s2_chunk_bits ? resume_s2_chunk_bits : (uint32_t)mpz_sizeinbase(Echunk.get_mpz_t(), 2);
                     chunk_resume_steps_done = std::min<uint32_t>(resume_s2_steps_done, chunk_bits);
                     resume_this_chunk = true;
                 } else {
                     while (chunk_end < totalS2Primes) {
-                        mpz_mul_ui(Echunk.get_mpz_t(), Echunk.get_mpz_t(), primesS2_v[chunk_end]);
+                        ecm_mpz_mul_u64(Echunk, primesS2_v[chunk_end]);
                         ++chunk_end;
                         if (mpz_sizeinbase(Echunk.get_mpz_t(), 2) >= MAX_S2_CHUNK_BITS && chunk_end > chunk_start) break;
                     }
