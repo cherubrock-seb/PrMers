@@ -1601,7 +1601,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     queue.setSquareKernels(5 + ((fft.FFT_FP64 + fft.FFT_FP32 + fft.NTT_GF31 + fft.NTT_GF61) - 1));
   else
     queue.setSquareKernels(1 + 3 * (fft.FFT_FP64 + fft.FFT_FP32 + fft.NTT_GF31 + fft.NTT_GF61));
-  prpMiddle1 = args.value("PRP_MIDDLE1", 0) && fft.shape.middle == 1 &&
+  // prp_middle1.cl only has FP32, GF31 and GF61 versions of the fused read/write, so a plan with an FP64 plane cannot use it.
+  prpMiddle1 = args.value("PRP_MIDDLE1", 0) && fft.shape.middle == 1 && !fft.FFT_FP64 &&
       !fft.isPfa() && !in_place && !useLongCarry && !tail_single_wide && tail_single_kernel;
 #if defined(__APPLE__) || defined(CUDA_BACKEND)
   prpMiddle1 = false;
