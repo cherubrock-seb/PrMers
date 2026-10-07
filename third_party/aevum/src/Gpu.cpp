@@ -1,6 +1,7 @@
 // Copyright (C) Mihai Preda and George Woltman.
 
 #include "Gpu.h"
+#include "StatsSlot.h"
 #include "UseOptions.h"
 #include "Proof.h"
 #include "TimeInfo.h"
@@ -2565,7 +2566,7 @@ void Gpu::measureTransferSpeed() {
 #endif
 
 u32 Gpu::updateCarryPos(u32 bit) {
-  return (statsBits & bit) && (carryPos < CARRY_SIZE) ? carryPos++ : carryPos;
+  return nextStatsSlot(carryPos, CARRY_SIZE, statsBits & bit);
 }
 
 vector<Buffer<Word>> Gpu::makeBufVector(u32 size) {

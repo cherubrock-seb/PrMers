@@ -192,9 +192,10 @@ MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
+STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
-.PHONY: test test-host test-gpu test-pfa9-lead-bridge-gpu
+.PHONY: test test-host test-stats-slot test-gpu test-pfa9-lead-bridge-gpu
 
 test: test-host
 
@@ -202,7 +203,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(STATS_SLOT_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
@@ -242,6 +243,14 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(AUTOTUNE_CACHE_TEST)
 	$(EVENT_STATUS_TEST)
 	$(FFT8_SKIP1_TEST)
+	$(STATS_SLOT_TEST)
+
+test-stats-slot: $(STATS_SLOT_TEST)
+	$(STATS_SLOT_TEST)
+
+$(STATS_SLOT_TEST): tests/stats_slot_test.cpp src/StatsSlot.h src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/stats_slot_test.cpp -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
