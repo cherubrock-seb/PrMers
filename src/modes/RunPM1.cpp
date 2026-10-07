@@ -15,6 +15,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/Pm1Stage2External.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -235,6 +236,7 @@ struct PM1Prime95Stage2Result {
     std::string factor;
     std::string json_line;
     int exit_code = -1;
+    bool interrupted = false;   // Prime95 (or its shell) was ended by SIGINT/SIGTERM
     std::string error;
 };
 
@@ -631,6 +633,7 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
     for (;;) {
         if (future_rc.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
             int rc = future_rc.get();
+            result.interrupted = core::pm1SystemStatusInterrupted(rc);
 #ifdef _WIN32
             result.exit_code = rc;
 #else
@@ -656,12 +659,19 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
         }
     }
 
-    for (int attempt = 0; attempt < 200; ++attempt) {
-        if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    if (!result.interrupted) {
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            if (p95_read_last_non_empty_line(results_file, result.json_line)) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
     }
 
     restore_prime_txt();
+
+    if (result.interrupted) {
+        result.error = "Prime95 was interrupted";
+        return result;
+    }
 
     if (result.json_line.empty()) {
         std::ostringstream oss;
@@ -6270,6 +6280,11 @@ int App::runPM1Marin() {
         const std::string log_filename = std::string("prmers_p95stage2_pm1_p") + std::to_string(p) + ".log";
         p95_log(std::string("[PM1] Prime95 Stage2 start | state=") + p95_state.string() + " | log=" + (p95_dir / log_filename).string());
         PM1Prime95Stage2Result rr = p95_run_pm1_stage2_task(p95_dir, p95_exe, p95_state, wt.str(), log_filename, options.knownFactors);
+        if (rr.interrupted) {
+            // std::system() ignores SIGINT in this process while Prime95 runs, so
+            // the signal never reached our handler; record it for the callers.
+            interrupted.store(true, std::memory_order_relaxed);
+        }
         if (!rr.error.empty()) {
             p95_log(std::string("[PM1] Prime95 Stage2 error: ") + rr.error);
             return false;
@@ -7247,7 +7262,11 @@ int App::runPM1Marin() {
                 external_used = run_pm1_stage2_external(resume_save_path, ds, de, ext_found);
                 factorFound = ext_found || factorFound;
             }
-            if (!external_used) {
+            const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
+            if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+                std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
+                pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
+            } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
                 pm1_fold_stage2(runPM1Stage2Marin(), factorFound, stage2Stop);
             }
         }
@@ -7719,7 +7738,11 @@ int App::runPM1Marin() {
             external_used = run_pm1_stage2_external(resume_save_path, ds, de, ext_found);
             factorFound = ext_found || factorFound;
         }
-        if (!external_used) {
+        const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
+        if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+            std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
+            pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
+        } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
             // Stage 2 may need to allocate a fresh GPU engine.  In PM1 low-memory
             // modes we perform an aggressive and observable GPU handoff: finish queues,
             // release kernels/buffers/program/context, clear host-side large vectors,
