@@ -1287,6 +1287,12 @@ int App::runECMMarinTwistedEdwards()
         return oss.str();
     };
 
+    // The resume line must name the number the residues were computed modulo:
+    // X, A and CHECKSUM are all taken mod N, which is the cofactor once known
+    // factors have been divided out.
+    const std::string resume_n_field =
+        (N == ((mpz_class(1) << p) - 1)) ? ("2^" + std::to_string(p) + "-1") : N.get_str();
+
     auto append_ecm_stage1_resume_line = [&](uint64_t curve_idx, const mpz_class& Aresume, const mpz_class& xAff, const mpz_class* sigmaForP95)->std::string {
         std::string curve_p95_resume_path;
         mpz_class Ared = Aresume;
@@ -1302,7 +1308,7 @@ int App::runECMMarinTwistedEdwards()
         const std::string ecmResumeWho = options.user;
 
         mpz_class chk;
-        mpz_set_ui(chk.get_mpz_t(), (unsigned long)B1);
+        chk = ecm_mpz_from_u64(B1);
         chk *= mpz_class(mpz_fdiv_ui(Ared.get_mpz_t(), CHKSUMMOD));
         chk *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
         chk *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
@@ -1310,7 +1316,7 @@ int App::runECMMarinTwistedEdwards()
 
         {
             std::ofstream out(ecm_stage1_resume_save_file, std::ios::out | std::ios::app);
-            const std::string nField = ("2^" + std::to_string(p) + "-1");
+            const std::string nField = resume_n_field;
 
             if (!out) {
                 std::ostringstream oss;
@@ -1335,14 +1341,13 @@ int App::runECMMarinTwistedEdwards()
             const mpz_class& sigma = *sigmaForP95;
 
             mpz_class chk2;
-            mpz_set_ui(chk2.get_mpz_t(), (unsigned long)B1);
+            chk2 = ecm_mpz_from_u64(B1);
             chk2 *= mpz_class(mpz_fdiv_ui(sigma.get_mpz_t(), CHKSUMMOD));
             chk2 *= mpz_class(mpz_fdiv_ui(N.get_mpz_t(), CHKSUMMOD));
             chk2 *= mpz_class(mpz_fdiv_ui(xred.get_mpz_t(), CHKSUMMOD));
             const uint32_t chk_u2 = (uint32_t)mpz_fdiv_ui(chk2.get_mpz_t(), CHKSUMMOD);
 
-            //const std::string nField = N.get_str();
-            const std::string nField = ("2^" + std::to_string(p) + "-1");
+            const std::string nField = resume_n_field;
 
             std::ofstream outp(ecm_stage1_resume_p95_file, std::ios::out | std::ios::app);
             if (!outp) {
