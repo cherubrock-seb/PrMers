@@ -159,6 +159,10 @@ test-worktodo-manager:
 test-worktodo-doublecheck:
 	bash tests/test_worktodo_doublecheck.sh
 
+.PHONY: test-worktodo-pminus1-factors
+test-worktodo-pminus1-factors:
+	bash tests/test_worktodo_pminus1_factors.sh
+
 test-marin-ll-radix5: all
 	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
