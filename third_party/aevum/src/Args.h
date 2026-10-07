@@ -28,6 +28,9 @@ public:
   void setDefaults();
   bool uses(const std::string& key) const { return flags.find(key) != flags.end(); }
   int value(const std::string& key, int valNotFound = -1) const;
+  // The value of a -use key as the kernels compiled for FFT shape fftSpec see it (see clDefines): extraConf first,
+  // then -use, then a "! <fftSpec> ..." line from config.txt.  value() above sees only -use.
+  int valueFor(const std::string& key, int valNotFound, const std::string& fftSpec, const vector<KeyVal>& extraConf) const;
   void readConfig(const fs::path& path);
   u32 getProofPow(u64 exponent) const;
   string tailDir() const;

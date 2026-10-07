@@ -190,6 +190,7 @@ STATE_TEST := build-tests/aevum-state-compact-test
 OPENCL_STANDARD_TEST := build-tests/aevum-opencl-standard-test
 MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
+ARGS_VALUE_FOR_TEST := build-tests/aevum-args-value-for-test
 FFT_SIZE_ONLY_SPEC_TEST := build-tests/aevum-fft-size-only-spec-test
 FFT_SPEC_ROBUSTNESS_TEST := build-tests/aevum-fft-spec-robustness-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
@@ -204,7 +205,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
@@ -237,6 +238,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
 	$(TYPE4_PLAN_TEST)
+	$(ARGS_VALUE_FOR_TEST)
 	$(FFT_SIZE_ONLY_SPEC_TEST)
 	$(FFT_SPEC_ROBUSTNESS_TEST)
 	$(AUTOTUNE_CACHE_TEST)
@@ -271,6 +273,12 @@ $(FFT_SPEC_ROBUSTNESS_TEST): tests/fft_spec_robustness_test.cpp src/FFTConfig.cp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
 		tests/fft_spec_robustness_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
+
+$(ARGS_VALUE_FOR_TEST): tests/args_value_for_test.cpp src/Args.cpp src/Args.h src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/args_value_for_test.cpp src/Args.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
 $(HOST_TEST): tests/host_gf_test.cpp
