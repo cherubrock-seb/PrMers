@@ -184,7 +184,7 @@ private:
 
 	uint32 xform_arg_base() const { return _aux_split ? 4u : 2u; }
 	uint32 carry_arg_base() const { return (_aux_split || _weight_compact) ? 5u : 4u; }
-	uint32 subtract_arg_base() const { return _aux_split ? 4u : 3u; }
+	uint32 subtract_arg_base() const { return (_aux_split || _weight_compact) ? 4u : 3u; }
 
 	segloc seg_loc(const size_t logical) const
 	{
@@ -728,7 +728,7 @@ public:
 		_subtract = _create_kernel("subtract");
 		_set_kernel_arg(_subtract, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(_subtract, 1, sizeof(cl_mem), &_weight);
-		if (_aux_split)
+		if (_aux_split || _weight_compact)
 		{
 			_set_kernel_arg(_subtract, 2, sizeof(cl_mem), &_weight1);
 			_set_kernel_arg(_subtract, 3, sizeof(cl_mem), &_digit_width);
@@ -739,7 +739,7 @@ public:
 		_subtract_reg = _create_kernel("subtract_reg");
 		_set_kernel_arg(_subtract_reg, 0, sizeof(cl_mem), &_reg);
 		_set_kernel_arg(_subtract_reg, 1, sizeof(cl_mem), &_weight);
-		if (_aux_split)
+		if (_aux_split || _weight_compact)
 		{
 			_set_kernel_arg(_subtract_reg, 2, sizeof(cl_mem), &_weight1);
 			_set_kernel_arg(_subtract_reg, 3, sizeof(cl_mem), &_digit_width);

@@ -286,6 +286,7 @@ test-llsafe2-result: all
 
 test-marin-exact-sub:
 	bash tests/test_marin_exact_subtraction_device.sh
+	PRMERS_MARIN_COMPACT_WEIGHT_FORCE=1 bash tests/test_marin_exact_subtraction_device.sh $(MARIN_TEST_DEVICE) 13 1159 4423
 
 .PHONY: test-wagstaff-decode
 
