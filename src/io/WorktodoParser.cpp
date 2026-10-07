@@ -592,6 +592,28 @@ continue;
     return std::nullopt;
 }
 
+bool WorktodoParser::appendLine(const std::string& path, const std::string& line) {
+    bool needNewline = false;
+    {
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (in.is_open()) {
+            const std::streamoff size = in.tellg();
+            if (size > 0) {
+                in.seekg(-1, std::ios::end);
+                char last = '\n';
+                in.get(last);
+                needNewline = (last != '\n');
+            }
+        }
+    }
+    std::ofstream out(path, std::ios::app);
+    if (!out) return false;
+    if (needNewline) out << '\n';
+    out << line << '\n';
+    out.close();
+    return static_cast<bool>(out);
+}
+
 bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
     std::ifstream inFile(filename_);
     std::ofstream tempFile(filename_ + ".tmp");
