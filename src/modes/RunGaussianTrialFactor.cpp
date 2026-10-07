@@ -182,28 +182,21 @@ std::optional<TfRequest> parseDirectRequest(const std::vector<std::string>& args
     return request;
 }
 
+// Command lines that ask for something other than worktodo-driven work, so a GMTF line in the worktodo
+// must not take over: the explicit Gaussian-Mersenne modes, benchmarks, memory tests, help and version.
+// A mode flag such as -prp or -pm1, or an exponent, does not count: the worktodo entry overrides it, as
+// it does for every other entry type, and the GUI's generated settings always name a mode.
 bool hasExplicitNonTfWork(const std::vector<std::string>& args) {
     static const std::unordered_set<std::string> modes{
         "-gm", "--gm", "-gm-proth", "--gm-proth",
         "-gm-prp", "--gm-prp", "-gm-pm1", "--gm-pm1",
-        "-gm-ecm", "--gm-ecm", "-prp", "-ll", "-llunsafe",
-        "-llsafe2", "-pm1", "-ecm", "-bench", "-memtest",
+        "-gm-ecm", "--gm-ecm",
+        "-bench", "-memtest",
         "-v", "--version", "-version", "-h", "--help", "-help"
     };
 
     for (std::size_t i = 1; i < args.size(); ++i) {
-        const std::string& arg = args[i];
-        if (modes.contains(arg)) return true;
-
-        if (arg == "-d" || arg == "-f" || arg == "-worktodo" ||
-            arg == "-gm-family" || arg == "--gm-family" ||
-            arg == "-gm-tf-chunk" || arg == "--gm-tf-chunk" ||
-            arg == "-gm-tf-sieve" || arg == "--gm-tf-sieve") {
-            if (i + 1 < args.size()) ++i;
-            continue;
-        }
-
-        if (!arg.empty() && arg[0] != '-') return true;
+        if (modes.contains(args[i])) return true;
     }
     return false;
 }
@@ -255,14 +248,29 @@ bool isPrimeSmall(std::uint64_t value) {
     return true;
 }
 
+// True when the restarted process will find work: a GMTF line on top, or a line the regular worktodo
+// parser accepts. A raw "any non-comment line" check also counts lines nothing can run (unsupported
+// keywords, malformed entries), which restarts into a process that finds no entry.
 bool hasPendingWorktodoLine(const fs::path& path) {
-    std::ifstream input(path);
-    std::string line;
-    while (std::getline(input, line)) {
-        const std::string clean = trim(line);
-        if (!clean.empty() && clean[0] != '#' && clean[0] != ';') return true;
+    {
+        std::ifstream input(path);
+        std::string line;
+        while (std::getline(input, line)) {
+            const std::string clean = trim(line);
+            if (clean.empty() || clean[0] == '#' || clean[0] == ';') continue;
+            if (upper(clean.substr(0, std::min<std::size_t>(5, clean.size()))) == "GMTF=") return true;
+            break;
+        }
     }
-    return false;
+    // parse() reports what it loads or skips; this is only a check, so keep it quiet. Nothing else is
+    // running yet (the pre-App path, no GUI thread), so swapping the stream buffers is safe.
+    struct QuietStreams {
+        std::ostringstream sink;
+        std::streambuf* out = std::cout.rdbuf(sink.rdbuf());
+        std::streambuf* err = std::cerr.rdbuf(sink.rdbuf());
+        ~QuietStreams() { std::cout.rdbuf(out); std::cerr.rdbuf(err); }
+    } quiet;
+    return io::WorktodoParser(path.string()).parse().has_value();
 }
 
 void validateRequest(const TfRequest& request) {
