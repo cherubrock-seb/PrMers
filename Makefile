@@ -181,6 +181,10 @@ test-aevum-source:
 test-ecm-interrupt-no-result:
 	python3 tests/ecm_interrupt_no_result_test.py
 
+.PHONY: test-ecm-te-sigma-checkpoint
+test-ecm-te-sigma-checkpoint:
+	python3 tests/ecm_te_sigma_checkpoint_source_test.py
+
 test-gm:
 	python3 tests/gaussian_mersenne_math_test.py
 	python3 tests/gaussian_mersenne_isolation_test.py
