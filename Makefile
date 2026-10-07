@@ -533,3 +533,10 @@ test-ecm-resume-seed-factor: all
 
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
+
+.PHONY: test-gm-chain-resume
+test-gm-chain-resume:
+	python3 tests/gm_chain_resume_source_test.py
+	mkdir -p /tmp/prmers-gm-chain-resume-test
+	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_chain_progress_test.cpp -o /tmp/prmers-gm-chain-resume-test/gm_chain_progress_test
+	/tmp/prmers-gm-chain-resume-test/gm_chain_progress_test
