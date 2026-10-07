@@ -189,6 +189,7 @@ int App::runPrpOrLl() {
     auto lastBackup = startTime;
     auto lastDisplay = startTime;
     uint64_t lastIter = resumeIter;
+    bool anyIterationRun = false;
     uint64_t startIter = resumeIter;
     
     uint64_t L = options.exponent;
@@ -373,6 +374,7 @@ int App::runPrpOrLl() {
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters && !interrupted; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
+        anyIterationRun = true;
         if (options.erroriter > 0 && iter + 1 == options.erroriter && !errordone) {
             errordone = true;
             uint64_t limb0;
@@ -746,7 +748,11 @@ int App::runPrpOrLl() {
                         }
         clFinish(queue);
         queued = 0;
-        backupManager.saveState(buffers->input, lastIter);
+        // saveState records iteration + 1 as the number of iterations done. When the loop was
+        // interrupted before its first iteration the buffer is still at the resumed state, so
+        // record one iteration less (0 on a fresh start, which loads as a fresh start).
+        const uint64_t savedIter = anyIterationRun ? lastIter : lastIter - 1;
+        backupManager.saveState(buffers->input, savedIter);
         backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
         
         std::cout << "\nInterrupted by user, state saved at iteration "

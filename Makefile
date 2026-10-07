@@ -264,6 +264,10 @@ test-llsafe2-resume: all
 test-llsafe2-result: all
 	bash tests/run_llsafe2_result_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-legacy-prp-resume
+test-legacy-prp-resume: all
+	bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:
