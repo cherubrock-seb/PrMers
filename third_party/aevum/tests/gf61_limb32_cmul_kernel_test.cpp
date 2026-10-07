@@ -59,6 +59,9 @@ static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::str
   CHECK1(err);
   cl_mem bo = clCreateBuffer(ctx, CL_MEM_READ_WRITE, n * 16, nullptr, &err);
   CHECK1(err);
+  // Release the kernel and buffers when the case ends (a kernel keeps its program alive).
+  KernelHolder kHold{k};
+  std::unique_ptr<cl_mem> baHold{ba}, bbHold{bb}, boHold{bo};
   std::vector<u64_t> a(2 * n), b(2 * n), o(2 * n);
   srand(7);
   auto rnd = [] { return ((u64_t) rand() << 40 ^ (u64_t) rand() << 20 ^ (u64_t) rand()) % M61; };
