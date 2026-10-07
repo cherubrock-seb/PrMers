@@ -95,7 +95,7 @@ using core::algo::gcd_with_dots;
 int App::runPrpOrLl() {
     
     Printer::banner(options);
-    if (auto code = QuickChecker::run(options.exponent))
+    if (auto code = QuickChecker::run(options, hasWorktodoEntry_))
         return *code;
 
     cl_command_queue queue   = context.getQueue();

@@ -102,7 +102,7 @@ int App::runLlSafeMarinDoubling()
                     guiServer_->appendLog(oss.str());
     }
     
-    if (auto code = QuickChecker::run(options.exponent)) return *code;
+    if (auto code = QuickChecker::run(options, hasWorktodoEntry_)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;//options.debug;
@@ -427,7 +427,7 @@ int App::runLlSafeMarin()
 {
     if (guiServer_) { guiServer_->setProgress(0, 100, "Started"); guiServer_->setStatus("LL-SAFE"); }
     Printer::banner(options);
-    if (auto code = QuickChecker::run(options.exponent)) return *code;
+    if (auto code = QuickChecker::run(options, hasWorktodoEntry_)) return *code;
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
