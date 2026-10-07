@@ -96,6 +96,33 @@ return consumed == token.size() &&
 
 }
 
+// Collect the known factors from parts[first..]. A quoted part is a
+// comma-separated list ("f1,f2", Prime95 style); several quoted parts
+// ("f1","f2") are concatenated, so every factor is kept. An unquoted part is
+// taken as one bare factor when allowBare is set and ignored otherwise.
+// Returns false for a malformed line: a quoted part followed by an unquoted
+// one.
+static bool collectKnownFactors(const std::vector<std::string>& parts, size_t first,
+                                bool allowBare, std::vector<std::string>& out) {
+    bool sawQuoted = false;
+    for (size_t i = first; i < parts.size(); ++i) {
+        std::string part = parts[i];
+        trim_inplace(part);
+        if (part.empty()) continue;
+        if (isQuoted(part)) {
+            sawQuoted = true;
+            for (std::string& f : parseFactors(part)) {
+                trim_inplace(f);
+                if (!f.empty()) out.push_back(std::move(f));
+            }
+        } else {
+            if (sawQuoted) return false;
+            if (allowBare) out.push_back(std::move(part));
+        }
+    }
+    return true;
+}
+
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
     if (!file.is_open()) {
@@ -362,18 +389,7 @@ continue;
 
                 if (parts.size() >= 7) {
                     std::vector<std::string> kf;
-                    auto q = parseFactors(parts.back());
-                    if (!q.empty()) {
-                        kf = std::move(q);
-                    } else {
-                        for (size_t i = 6; i < parts.size(); ++i) {
-                            std::string s = parts[i];
-                            if (!s.empty() && s.front() == '"' && s.back() == '"')
-                                s = s.substr(1, s.size() - 2);
-                            trim_inplace(s);
-                            if (!s.empty()) kf.push_back(std::move(s));
-                        }
-                    }
+                    if (!collectKnownFactors(parts, 6, true, kf)) continue;
                     if (!kf.empty()) entry.knownFactors = std::move(kf);
                 }
 
@@ -484,18 +500,7 @@ continue;
 
                 if (parts.size() >= 8) {
                     std::vector<std::string> kf;
-                    auto q = parseFactors(parts.back());
-                    if (!q.empty()) {
-                        kf = std::move(q);
-                    } else {
-                        for (size_t i = 7; i < parts.size(); ++i) {
-                            std::string s = parts[i];
-                            if (!s.empty() && s.front() == '"' && s.back() == '"')
-                                s = s.substr(1, s.size() - 2);
-                            trim_inplace(s);
-                            if (!s.empty()) kf.push_back(std::move(s));
-                        }
-                    }
+                    if (!collectKnownFactors(parts, 7, true, kf)) continue;
                     if (!kf.empty()) {
                         if (math::Cofactor::validateFactors(exp, kf)) {
                             entry.knownFactors = std::move(kf);
@@ -558,8 +563,15 @@ continue;
                 residueType = std::stoi(parts[idx]);  idx++;
             }
 
-            if (idx < parts.size() && isQuoted(parts.back()) && isPRP) {
-                auto factors = parseFactors(parts.back());
+            bool hasQuotedPart = false;
+            for (size_t i = idx; i < parts.size(); ++i) {
+                std::string part = parts[i];
+                trim_inplace(part);
+                if (isQuoted(part)) hasQuotedPart = true;
+            }
+            if (isPRP && hasQuotedPart) {
+                std::vector<std::string> factors;
+                if (!collectKnownFactors(parts, idx, false, factors)) continue;
                 if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
                     entry.knownFactors = std::move(factors);
                     entry.residueType = static_cast<uint32_t>((residueType != 0) ? residueType : 5);
