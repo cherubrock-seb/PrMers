@@ -1,5 +1,6 @@
 #include "ui/WebGuiServer.hpp"
 #include <cstring>
+#include <iostream>
 #include <cstdlib>
 #include <sstream>
 #include <chrono>
@@ -158,8 +159,8 @@ static std::string firstLanIPv4() {
 }
 
 
-void WebGuiServer::start() {
-    if (running_) return;
+bool WebGuiServer::start() {
+    if (running_) return true;
 #ifdef _WIN32
     WSADATA wsa; WSAStartup(MAKEWORD(2,2), &wsa);
 #endif
@@ -178,7 +179,16 @@ void WebGuiServer::start() {
 
 
     listen_fd_ = createListenSocket(host, cfg_.port, cfg_.port);
-    if (listen_fd_ < 0) return;
+    if (listen_fd_ < 0) {
+#ifdef _WIN32
+        std::cerr << "Error: cannot start the GUI on " << host << ":" << cfg_.port
+                  << " (socket error " << WSAGetLastError() << ")" << std::endl;
+#else
+        std::cerr << "Error: cannot start the GUI on " << host << ":" << cfg_.port
+                  << ": " << std::strerror(errno) << std::endl;
+#endif
+        return false;
+    }
     url_ = "http://" + host + ":" + std::to_string(cfg_.port) + "/";
     //std::string host = firstLanIPv4();
     if (host.empty()) host = "127.0.0.1";    // fallback
@@ -186,6 +196,7 @@ void WebGuiServer::start() {
 
     running_ = true;
     thr_ = std::thread([this]{ run(); });
+    return true;
 }
 
 
@@ -330,13 +341,20 @@ int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int
 #else
     else if (inet_pton(AF_INET, h.c_str(), &ip) != 1) ip.s_addr = htonl(INADDR_LOOPBACK);
 #endif
+    if (h != "0.0.0.0" && ip.s_addr == htonl(INADDR_LOOPBACK) && h != "127.0.0.1") {
+        // Not an IPv4 address literal: only a numeric address is understood here, so the GUI listens on
+        // the loopback interface only, whatever name the URL advertises.
+        std::cerr << "Warning: GUI host '" << h << "' is not an IPv4 address; listening on 127.0.0.1 only." << std::endl;
+    }
     addr.sin_addr = ip;
 
     if (::bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { 
 #ifdef _WIN32
         closesocket((SOCKET)fd);
 #else
+        const int savedErrno = errno;
         ::close(fd);
+        errno = savedErrno;
 #endif
         return -1; 
     }
@@ -344,7 +362,9 @@ int WebGuiServer::createListenSocket(const std::string& bind_host, int port, int
 #ifdef _WIN32
         closesocket((SOCKET)fd);
 #else
+        const int savedErrno = errno;
         ::close(fd);
+        errno = savedErrno;
 #endif
         return -1; 
     }

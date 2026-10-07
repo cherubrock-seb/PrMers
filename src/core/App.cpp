@@ -1051,16 +1051,29 @@ int App::run() {
                                        "backend will be selected from workload and transform sizes");
 #endif
         }
-        guiServer_->start();
-        std::cout << "GUI " << guiServer_->url() << std::endl;
+        if (!guiServer_->start()) {
+            // No GUI: carry on headless if there is work, otherwise there is nothing left to wait for
+            // (the idle loop below can only be ended through the GUI or a signal).
+            std::cerr << "The GUI could not be started." << std::endl;
+            if (!hasWorktodoEntry_ && options.exponent == 0) {
+                std::cerr << "Nothing to run and no GUI; exiting." << std::endl;
+                return 1;
+            }
+            std::cerr << "Continuing without the GUI." << std::endl;
+            guiServer_.reset();
+            ui::WebGuiServer::setInstance(nullptr);
+            options.gui = false;
+        } else {
+            std::cout << "GUI " << guiServer_->url() << std::endl;
+        }
         const bool gui_loopback = !options.ipv4 &&
             (options.http_host.empty() || options.http_host == "localhost" ||
              options.http_host.rfind("127.", 0) == 0);
-        if (!gui_loopback) {
+        if (guiServer_ && !gui_loopback) {
             std::cout << "Warning: the GUI is reachable from other machines on your network. "
                          "Anyone who can connect to it can control this PrMers instance." << std::endl;
         }
-        if (!file_non_empty(cfg.worktodo_path)) {
+        if (guiServer_ && !file_non_empty(cfg.worktodo_path)) {
             guiServer_->setStatus("Idle");
             while (!g_stop && gui_alive) std::this_thread::sleep_for(std::chrono::milliseconds(200));
             if (guiServer_) guiServer_->stop();

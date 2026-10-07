@@ -26,7 +26,8 @@ public:
     using StopFn = std::function<void()>;
     WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit, StopFn onStop = {});
     ~WebGuiServer();
-    void start();
+    // Returns false (after printing the reason to stderr) when the listening socket cannot be set up.
+    bool start();
     void stop();
     std::string url() const;
     static std::shared_ptr<WebGuiServer> instance();
