@@ -8,6 +8,7 @@ app = (root / "src/core/App.cpp").read_text()
 header = (root / "include/core/App.hpp").read_text()
 options = (root / "include/io/CliParser.hpp").read_text()
 version = (root / "include/core/Version.hpp").read_text()
+checkpoint = (root / "include/core/GmFactorCheckpoint.hpp").read_text()
 
 for token in (
     "runGaussianMersennePM1",
@@ -22,7 +23,7 @@ for token in (
     r'\"schema_version\": 2',
     "h.version >= 2 && h.version <= GMF_VERSION",
 ):
-    assert token in source or token in parser or token in app or token in header or token in options
+    assert token in source or token in parser or token in app or token in header or token in options or token in checkpoint
 
 assert 'opts.mode = "gm-pm1"' in parser
 assert 'opts.mode = "gm-ecm"' in parser
