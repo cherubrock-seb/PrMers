@@ -183,4 +183,12 @@ for q,k,d in plan:
     accN=accN*((giant[0]*baby[1]-giant[1]*baby[0])%N)%N
 assert gcd(accN,N) == 1069
 
+# Checkpoints record the bit length of the Stage 1 scalar and are rejected
+# when it differs: the saved bit counter is only meaningful for that scalar.
+assert "std::uint64_t scalar_bits;" in opt
+assert "h.scalar_bits != scalar_bits" in opt
+assert "h.scalar_bits = scalar_bits;" in opt
+assert "GM_OPT_CHECKPOINT_VERSION = 2;" in opt
+assert opt.count("s2plan.D, kbits, s2plan.baby_d.size(),") == 8
+
 print("BSGS plan coverage and batched-GCD golden: OK")
