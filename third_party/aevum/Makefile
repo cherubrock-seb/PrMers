@@ -269,6 +269,17 @@ $(OPENCL_STANDARD_TEST): tests/opencl_standard_test.cpp src/OpenCLStandard.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
 
+DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
+
+.PHONY: test-data-layout
+test-host: test-data-layout
+test-data-layout: $(DATA_LAYOUT_TEST)
+	$(DATA_LAYOUT_TEST)
+
+$(DATA_LAYOUT_TEST): tests/data_layout_test.cpp src/DataLayout.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
+
 test-gpu: $(BIN)/aevum
 	bash tests/gpu_prp_smoke.sh $(BIN)/aevum
 
