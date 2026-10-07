@@ -1719,7 +1719,15 @@ int App::runECMMarin()
             if (!use_te_stage1) {
                 mpz_class Zfin = compute_X_with_dots(eng, (engine::Reg)1, N);
                 gg = gcd_with_dots(Zfin, N);
-                if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
+                if (gg == N) {
+                    std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
+                    // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
+                    std::error_code ec0;
+                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    delete eng;
+                    continue;
+                }
                 if (gg == 1) {
                     mpz_class Xv = compute_X_with_dots(eng, (engine::Reg)0, N);
                     mpz_class invZ;
@@ -1728,7 +1736,15 @@ int App::runECMMarin()
             } else {
                 mpz_class Tfin = compute_X_with_dots(eng, (engine::Reg)5, N);
                 gg = gcd_with_dots(Tfin, N);
-                if (gg == N) { std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n"; delete eng; continue; }
+                if (gg == N) {
+                    std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
+                    // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
+                    std::error_code ec0;
+                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    delete eng;
+                    continue;
+                }
                 if (gg == 1) {
                     mpz_class Zv = compute_X_with_dots(eng, (engine::Reg)1, N);
                     mpz_class Yv = compute_X_with_dots(eng, (engine::Reg)4, N);
@@ -2079,7 +2095,7 @@ int App::runECMMarin()
                     mpz_class Tchunk = compute_X_with_dots(eng, (engine::Reg)5, N);
                     mpz_class gz = gcd_with_dots(Tchunk, N);
                     if (gz == N) {
-                        std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n";
+                        std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, skipping curve\n";
                         abort_curve = true;
                         break;
                     }
@@ -2420,7 +2436,7 @@ auto setup_stage2_base = [&]() -> int {
             mpz_class Zres = compute_X_with_dots(eng, (engine::Reg)7, N);
             mpz_class gg2  = gcd_with_dots(Zres, N);
             if (gg2 == N) {
-                std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n";
+                std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, skipping curve\n";
                 std::error_code ec0;
                 fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
                 fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);

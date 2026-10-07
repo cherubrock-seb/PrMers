@@ -388,3 +388,9 @@ test-ecm-resume-curve-index: ; python3 tests/ecm_resume_curve_index_source_test.
 
 .PHONY: test-ecm-stage2-u64-primes
 test-ecm-stage2-u64-primes: ; python3 tests/ecm_stage2_u64_primes_source_test.py
+
+.PHONY: test-ecm-te16-construction-factor
+test-ecm-te16-construction-factor: ; bash tests/test_ecm_te16_construction_factor.sh
+
+.PHONY: test-ecm-small-items
+test-ecm-small-items: ; python3 tests/ecm_small_items_source_test.py

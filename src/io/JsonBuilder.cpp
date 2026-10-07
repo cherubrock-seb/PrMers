@@ -458,7 +458,7 @@ std::cerr << "[DBG] knownFactors_start=" << knownFactors_start.size()
             oss << ",\"sigma-hex\":"                   << jsonEscape(opts.sigma_hex);
         }
         oss << ",\"curve-seed\":"                  <<            opts.curve_seed;
-        oss << ",\"base-seed\":"                   <<            opts.curve_seed;
+        oss << ",\"base-seed\":"                   <<            (opts.base_seed != 0 ? opts.base_seed : opts.curve_seed);
         oss << ",\"errors\":{\"invariant\":"         <<            opts.invarianterror << "}";
     }
     else if (worktype == "pm1") {
