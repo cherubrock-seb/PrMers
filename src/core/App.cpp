@@ -1283,25 +1283,19 @@ int App::run() {
                 rc_local = pm1Stage2ExitCode(runPM1Stage2Marin());
                 ran_local = true;
             }
-            else if ((haveS2) && options.nmax == 0  && options.K == 0) {
-                std::ostringstream msg;
-                msg << "Detected P-1 checkpoint(s): "
-                    << (haveS2 ? "[Stage 2] " : "")
-                    << (haveS1 ? "[Stage 1] " : "")
-                    << "-> jumping to runPM1Stage2Marin()";
-                std::cout << msg.str() << std::endl;
-                if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Resuming P-1 Stage 2"); }
-
-                rc_local = pm1Stage2ExitCode(runPM1Stage2Marin());
-                ran_local = true;
-            } else {
+            else {
+                // A stage-2 checkpoint is resumed by runPM1Marin: it reads the
+                // finished stage-1 checkpoint, runs stage 2 from where it
+                // stopped and then does the cleanup (stage-1 checkpoint, worktodo
+                // line, next entry).  Calling stage 2 directly skipped all that.
                 std::string msg;
-                if (haveS1) {
+                if (haveS1 || haveS2) {
                     std::ostringstream oss;
                     oss << "Detected P-1 checkpoint(s): "
                         << (haveS2 ? "[Stage 2] " : "")
                         << (haveS1 ? "[Stage 1] " : "")
-                        << "-> running Stage 1 with " << engine::configured_gpu_backend_name();
+                        << "-> running Stage 1 with " << engine::configured_gpu_backend_name()
+                        << (haveS2 ? " (it resumes Stage 2 from its checkpoint)" : "");
                     msg = oss.str();
                 } else {
                     msg = std::string("No P-1 checkpoints found -> running Stage 1 with ") + engine::configured_gpu_backend_name();

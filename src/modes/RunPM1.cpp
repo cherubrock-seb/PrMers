@@ -1545,6 +1545,18 @@ static void pm1_fold_stage2(Pm1Stage2Result r, bool& factorFound, Pm1Stage2Resul
     else if (pm1_stage2_incomplete(r)) stop = r;
 }
 
+// Removes the checkpoint of the classic BSGS stage 2 (pm1_s2_m_<p>.ckpt).  That
+// stage 2 deletes it itself when it finishes, but a run that stopped at a
+// different stage-2 variant (V-trace) or right after stage 2 can leave one
+// behind, and it must not outlive the worktodo entry.
+static void pm1_remove_classic_stage2_ckpt(uint64_t exponent) {
+    const std::string base = "pm1_s2_m_" + std::to_string(exponent) + ".ckpt";
+    std::error_code ec;
+    fs::remove(base, ec);
+    fs::remove(base + ".old", ec);
+    fs::remove(base + ".new", ec);
+}
+
 Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
     using namespace std::chrono;
 
@@ -7308,6 +7320,7 @@ int App::runPM1Marin() {
         }
 
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
+        pm1_remove_classic_stage2_ckpt(options.exponent);
         { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
         {
             // The extension is complete: a leftover _ext.ckpt would otherwise
@@ -7816,6 +7829,7 @@ int App::runPM1Marin() {
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);
+    pm1_remove_classic_stage2_ckpt(options.exponent);
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_ && !resultSaved) {
