@@ -385,3 +385,6 @@ test-ecm-resume-line-checksum: ; python3 tests/ecm_resume_line_checksum_test.py
 
 .PHONY: test-ecm-resume-curve-index
 test-ecm-resume-curve-index: ; python3 tests/ecm_resume_curve_index_source_test.py
+
+.PHONY: test-ecm-stage2-u64-primes
+test-ecm-stage2-u64-primes: ; python3 tests/ecm_stage2_u64_primes_source_test.py
