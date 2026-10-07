@@ -2213,7 +2213,9 @@ int App::runPM1Stage2MarinVTrace() {
     const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
 
     auto is_prime_trial = [&](uint64_t n)->bool{
-        if (n < 2) return false;
+        // The base primes only certify primality up to B2; anything larger
+        // (e.g. a wrapped-around unsigned value) is not a Stage-2 prime.
+        if (n < 2 || n > B2u) return false;
         for (uint32_t p32 : basePrimes) {
             const uint64_t p = (uint64_t)p32;
             if (p * p > n) break;
@@ -2288,7 +2290,8 @@ int App::runPM1Stage2MarinVTrace() {
             uint64_t rem = q - k * d;
             uint64_t j = rem;
             if (rem > d / 2) { ++k; j = d - rem; }
-            const uint64_t qminus = k * d - j;
+            // k == 0 (q <= d/2) has no lower member kd-j; do not let it wrap.
+            const uint64_t qminus = (k >= 1) ? k * d - j : 0;
             const uint64_t qplus  = k * d + j;
             bool process = true;
             if (j != 0 && q == qplus && qminus > B1u && is_prime_fast(qminus)) process = false;
@@ -2830,7 +2833,9 @@ int App::runPM1Stage2MarinVTrace() {
             ++k;
             j = D - rem;
         }
-        return TracePair{k, j, k * D - j, k * D + j};
+        // k == 0 (q <= D/2) has no lower member kD-j; 0 means "none" and never
+        // satisfies the "qminus > B1" duplicate-pair tests.
+        return TracePair{k, j, (k >= 1) ? k * D - j : 0, k * D + j};
     };
 
     // v97: Pair95 is now the default Stage-2 V-trace planner when the dense
