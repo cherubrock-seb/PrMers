@@ -863,13 +863,13 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
 
 // Native Good-Thomas pack: gather canonical transposed register digits,
 // apply the unchanged Aevum IBDWT weights, then run the stock width NTT.
-inline u32 pfaLogicalIndex(u32 row, u32 binary_index) {
+static inline u32 pfaLogicalIndex(u32 row, u32 binary_index) {
   const u32 delta = (row + PFA_RADIX - binary_index % PFA_RADIX) % PFA_RADIX;
   const u32 t = (delta * PFA_L_INV) % PFA_RADIX;
   return binary_index + PFA_BINARY_LENGTH * t;
 }
 
-inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
+static inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
   const u32 pair = logical >> 1;
   const u32 x = pair / BIG_HEIGHT;
   const u32 g = pair - x * BIG_HEIGHT;
@@ -880,7 +880,7 @@ inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
 // Apply the carryB correction lazily while gathering one canonical pair.
 // This lets a retained PFA square skip the separate transform-sized carryB
 // write before the next fftP.
-inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
+static inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;
   const u32 gx = x / G_W;
@@ -915,7 +915,7 @@ inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32
   return value;
 }
 
-inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 logical) {
+static inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 logical) {
   const Word2 value = pfaLoadCanonicalPairCarried(in, carryIn, logical >> 1);
   return (logical & 1u) ? value.y : value.x;
 }
@@ -923,7 +923,7 @@ inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 
 // Compute both CRT-plane shifts from one shared fixed-point fracBits product.
 // Reduce logical before multiplying: (logical*step) mod p equals
 // ((logical mod p)*step) mod p and avoids expensive 64-bit division.
-inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
   const u64 frac = comboFracBits(logical);
   union { uint2 a; u64 b; } c31, c61;
   c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
@@ -1274,13 +1274,13 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
 
 // Experimental hybrid PFA9 pack.  The FP32, GF31 and GF61 planes gather the
 // same Good-Thomas logical digits before their stock width transforms.
-inline u32 pfaLogicalIndex(u32 row, u32 binary_index) {
+static inline u32 pfaLogicalIndex(u32 row, u32 binary_index) {
   const u32 delta = (row + PFA_RADIX - binary_index % PFA_RADIX) % PFA_RADIX;
   const u32 t = (delta * PFA_L_INV) % PFA_RADIX;
   return binary_index + PFA_BINARY_LENGTH * t;
 }
 
-inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
+static inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
   const u32 pair = logical >> 1;
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;
@@ -1288,7 +1288,7 @@ inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
   return (logical & 1u) ? value.y : value.x;
 }
 
-inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
   const u64 frac = comboFracBits(logical);
   union { uint2 a; u64 b; } c31, c61;
   c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
@@ -1299,7 +1299,7 @@ inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
 // Reconstruct the stock separable FP32 IBDWT weight for an arbitrary
 // canonical logical digit.  This avoids native_exp2 and keeps the same table,
 // fancy-multiply and half-correction behavior as the power-of-two type-4 path.
-inline F pfaWeightFP32(u32 logical, BigTabFP32 THREAD_WEIGHTS) {
+static inline F pfaWeightFP32(u32 logical, BigTabFP32 THREAD_WEIGHTS) {
   const u32 even_logical = logical & ~1u;
   const u32 pair = even_logical >> 1;
   const u32 x = pair / BIG_HEIGHT;

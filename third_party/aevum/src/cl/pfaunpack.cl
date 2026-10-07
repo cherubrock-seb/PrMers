@@ -6,7 +6,7 @@
 
 #if FFT_TYPE == FFT3161 && PFA_RADIX
 
-inline u32 pfaSourcePairIndex(u32 logical) {
+static inline u32 pfaSourcePairIndex(u32 logical) {
   const u32 row = logical % PFA_RADIX;
   const u32 b = logical % PFA_BINARY_LENGTH;
   const u32 binary_pair = b >> 1;
@@ -16,7 +16,7 @@ inline u32 pfaSourcePairIndex(u32 logical) {
   return line * WIDTH + x;
 }
 
-inline u32 pfaCanonicalTransformIndex(u32 pair) {
+static inline u32 pfaCanonicalTransformIndex(u32 pair) {
   const u32 x = pair / BIG_HEIGHT;
   const u32 g = pair - x * BIG_HEIGHT;
   return g * WIDTH + x;

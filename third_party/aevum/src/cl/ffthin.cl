@@ -125,11 +125,11 @@ KERNEL(G_H) fftHinGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 // exact same fft_HEIGHT operation.  The data remains FFT3161 GF(M61^2), with
 // the same twiddles, radix order and final layout.  Only the work is split
 // across several smaller kernels on Apple.
-inline u32 appleFftHinGF61LineBase(u32 line) {
+static inline u32 appleFftHinGF61LineBase(u32 line) {
   return SMALL_HEIGHT * transPos(line, MIDDLE, WIDTH);
 }
 
-inline u32 appleFftHinGF61Index(u32 line, u32 slot, u32 me) {
+static inline u32 appleFftHinGF61Index(u32 line, u32 slot, u32 me) {
   return appleFftHinGF61LineBase(line) + slot * G_H + me;
 }
 
