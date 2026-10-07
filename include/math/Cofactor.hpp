@@ -10,7 +10,7 @@ namespace math {
 class Cofactor {
 public:
     // Check that factors actually divide the Mersenne number
-    static bool validateFactors(uint32_t exponent, const std::vector<std::string>& factors);
+    static bool validateFactors(uint32_t exponent, const std::vector<std::string>& factors, bool verbose = true);
     
     // Check if the cofactor is PRP based on the final computed residue
     // KF = product(known_factors)

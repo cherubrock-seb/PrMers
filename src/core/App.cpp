@@ -1058,7 +1058,15 @@ int App::run() {
             std::cout << "Warning: the GUI is reachable from other machines on your network. "
                          "Anyone who can connect to it can control this PrMers instance." << std::endl;
         }
-        if (!file_non_empty(cfg.worktodo_path)) {
+        // Nothing runnable: an empty worktodo, or one whose lines parse() skips (comments, unsupported or
+        // malformed entries) with no exponent given. Running with exponent 0 would only fail; wait for
+        // "Append & Run" instead.
+        if (!file_non_empty(cfg.worktodo_path) || (!hasWorktodoEntry_ && options.exponent == 0 &&
+                                                  !options.bench && options.filemers.empty())) {
+            if (file_non_empty(cfg.worktodo_path)) {
+                std::cout << "No runnable entry in " << cfg.worktodo_path << "; waiting for a new entry.\n";
+                guiServer_->appendLog("No runnable entry in " + cfg.worktodo_path + "; waiting for a new entry.");
+            }
             guiServer_->setStatus("Idle");
             while (!g_stop && gui_alive) std::this_thread::sleep_for(std::chrono::milliseconds(200));
             if (guiServer_) guiServer_->stop();
@@ -1324,16 +1332,7 @@ int App::run() {
         if (worktodoParser_ && worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Gaussian-Mersenne entry removed from "
                       << options.worktodo_path << " and saved to worktodo_save.txt\n";
-            bool pending = false;
-            std::ifstream wt(options.worktodo_path);
-            std::string line;
-            while (std::getline(wt, line)) {
-                const auto first = line.find_first_not_of(" \t\r\n");
-                if (first != std::string::npos && line[first] != '#' && line[first] != ';') {
-                    pending = true;
-                    break;
-                }
-            }
+            const bool pending = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
             if (pending) {
                 std::cout << "Restarting for next Gaussian-Mersenne worktodo entry.\n";
                 restart_self(argc_, argv_);

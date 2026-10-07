@@ -45,12 +45,15 @@ public:
     // Remove the line that was actually run (WorktodoEntry::rawLine) and archive it to worktodo_save.txt.
     // parse() skips lines it cannot run, so "the first actionable line" is not necessarily that line.
     bool removeProcessedLine(const std::string& rawLine);
-    // True when the file still has a line with a supported worktodo keyword.
-    // Blank lines, '#' and ';' comments and unsupported lines do not count.
+    // True when parse() would return an entry for this file: a dry run of parse() with no output.
+    // Blank lines, '#' and ';' comments, unsupported keywords and lines parse() rejects (malformed
+    // fields, a Pfactor with no bounded P-1 work, invalid known factors, glued entries) do not count,
+    // so "restart for the next entry" is only taken when the restarted process will find one.
     static bool hasPendingEntry(const std::string& filename);
 
 private:
     std::string filename_;
+    bool quiet_ = false;   // dry run: parse() prints nothing
 };
 
 } // namespace io

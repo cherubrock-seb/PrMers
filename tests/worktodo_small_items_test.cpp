@@ -1,5 +1,6 @@
 // Host checks for small worktodo/log fixes:
-//  - WorktodoParser::hasPendingEntry ignores comments, blanks and unsupported lines
+//  - WorktodoParser::hasPendingEntry ignores comments, blanks and unsupported lines, and lines
+//    parse() would skip (malformed fields, no-bounds Pfactor, bad known factors, glued lines)
 //  - the PRP line the GUI generates (tf/tests_saved padding) keeps the residue type
 //  - removeProcessedLine replaces the file and leaves no .tmp behind
 //  - Logger::logStart prints a 64-bit exponent correctly
@@ -51,6 +52,21 @@ int main() {
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "indented lower-case PRP is pending");
         write(wt, "GMCHAIN=45951761,100000,1000000,2000,0,2,1000000,262144,proth,BOTH\n");
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "GM entry is pending");
+
+        // A line with a supported keyword that parse() skips is not pending work: the restart would
+        // find no entry and land in the interactive prompt (or, under -gui, run exponent 0).
+        write(wt, "PRP=1,2,127,-1PRP=1,2,521,-1\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "glued lines are not pending");
+        write(wt, "Pfactor=N/A,1,2,127,-1,70,0\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "Pfactor with no bounded P-1 work is not pending");
+        write(wt, "PRP=1,2,29,-1,76,2,3,5,\"1105\"\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "cofactor PRP with a bad factor is not pending");
+        write(wt, "PRP=1,2,127,-1PRP=1,2,521,-1\n; comment\nPRP=1,2,521,-1\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "a runnable line after a skipped one is pending");
+        write(wt, "Pfactor=N/A,1,2,20000003,-1,70,2\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "Pfactor with bounds is pending");
+        write(wt, "PRP=1,2,29,-1,76,2,3,5,\"233,1103,2089\"\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "cofactor PRP is pending");
     }
 
     // PRP residue type: Prime95 order is k,b,n,c,tf,tests_saved,base,residue_type.
