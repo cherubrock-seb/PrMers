@@ -3380,7 +3380,11 @@ int App::runECMMarinTwistedEdwards()
             mpz_class Zacc = compute_X_with_dots(eng, (engine::Reg)5, N);
             mpz_class g = gcd_with_dots(Zacc, N);
             if (g == N) {
-                std::cout<<"[ECM] Curve "<<(c+1)<<": singular or failure, retrying\n";
+                std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
+                // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
+                std::error_code ec0;
+                fs::remove(ckpt_file, ec0);  fs::remove(ckpt_file + ".old", ec0);  fs::remove(ckpt_file + ".new", ec0);
+                fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
                 delete eng;
                 continue;
             }
@@ -3788,7 +3792,7 @@ int App::runECMMarinTwistedEdwards()
                     if (guiServer_) guiServer_->appendLog(oss.str());
                 }
                 if (gz == N) {
-                    std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, retrying\n";
+                    std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, skipping curve\n";
                     abort_curve = true;
                     break;
                 }

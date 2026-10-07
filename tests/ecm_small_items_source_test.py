@@ -20,6 +20,16 @@ def test_te_sigma_forces_one_curve():
         '-sigma must force a single curve in the twisted Edwards path as in the Montgomery path'
 
 
+def test_gcd_n_drops_checkpoints():
+    for name, src in (('RunEcm.cpp', mont), ('RunEcmTwistedEdwards.cpp', te)):
+        assert 'singular or failure, retrying' not in src, name + ': gcd=N skips the curve, it does not retry it'
+        assert 'gcd=N, retrying' not in src, name
+        assert 'stage 1 gcd=N' in src, name
+        for m in re.finditer(r'stage 1 gcd=N[^\n]*\n(.*?)continue;', src, re.S):
+            assert 'fs::remove(ckpt_file' in m.group(1), name + ': stage-1 gcd=N leaves the checkpoint behind'
+
+
 test_json_base_seed()
 test_te_sigma_forces_one_curve()
+test_gcd_n_drops_checkpoints()
 print('PrMers ECM small-items source test passed')
