@@ -169,6 +169,10 @@ test-marin-ll-radix5: all
 test-proof-power:
 	python3 tests/legacy_proof_power_source_test.py
 
+.PHONY: test-cli-exponent-range
+test-cli-exponent-range:
+	bash tests/test_cli_exponent_range.sh
+
 .PHONY: test-legacy-enqueue-errors
 
 test-legacy-enqueue-errors:

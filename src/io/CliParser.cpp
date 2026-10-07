@@ -24,7 +24,9 @@
 #include "util/StringUtils.hpp"
 #include <iostream>
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <cstring>
 #include "util/PathUtils.hpp"
 #include <filesystem>
@@ -973,6 +975,16 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     if (opts.exponent > MAX_EXPONENT) {
         std::cerr << "Error: Exponent must be <= " << MAX_EXPONENT
                   << ". Given: " << opts.exponent << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+    // Every engine and driver holds the exponent in 32 bits; a larger value would
+    // be silently truncated and a different (smaller) Mersenne number tested.
+    constexpr uint64_t MAX_ENGINE_EXPONENT = std::numeric_limits<uint32_t>::max();
+    if (opts.exponent > MAX_ENGINE_EXPONENT) {
+        std::cerr << "Error: Exponent must be <= " << MAX_ENGINE_EXPONENT
+                  << " (the largest exponent the engines support). Given: " << opts.exponent
+                  << (opts.wagstaff ? " (twice the requested Wagstaff exponent)" : "")
+                  << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
