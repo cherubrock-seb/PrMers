@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include "core/ProofSet.hpp"
+#include "core/ProofCheckpoint.hpp"
 
 // Forward declarations
 namespace prmers::ocl {

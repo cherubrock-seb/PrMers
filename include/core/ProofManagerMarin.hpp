@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include "core/ProofSetMarin.hpp"
+#include "core/ProofCheckpoint.hpp"
 #include "marin/engine.h"
 
 namespace core {

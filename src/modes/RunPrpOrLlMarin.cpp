@@ -320,6 +320,24 @@ int App::runPrpOrLlMarin()
         std::cout << "M_"<< options.exponent <<" IS DIVISIBLE BY 9" << std::endl;
     }
 
+    // A proof residue that cannot be written or read back makes the proof
+    // impossible: say so now and carry on with the PRP instead of failing at
+    // the end, or losing the test.
+    auto saveProofResidue = [&](engine::digit& d, uint64_t iteration) {
+        try {
+            proofManagerMarin.checkpointMarin(d, static_cast<uint32_t>(iteration));
+        } catch (const core::ProofCheckpointError& e) {
+            const std::string msg = std::string("Error: ") + e.what() +
+                ". No proof will be produced for this test; "
+                "the PRP continues.";
+            std::cerr << msg << std::endl;
+            if (guiServer_)
+                guiServer_->appendLog(msg);
+            options.proof = false;
+            options.proofFile.clear();
+        }
+    };
+
     for (uint64_t iter = resumeIter, j= totalIters-resumeIter-1; iter < totalIters; ++iter, --j) {
         lastJ = j;
         lastIter = iter;
@@ -485,14 +503,14 @@ int App::runPrpOrLlMarin()
 
         if (options.mode == "prp"  && options.proof && (iter + 1) < totalIters && proofManagerMarin.shouldCheckpoint(iter+1)) {
             engine::digit d(eng, R0);
-            proofManagerMarin.checkpointMarin(d, iter + 1);
+            saveProofResidue(d, iter + 1);
         }
 
     }
 
     if (options.mode == "prp" && options.proof) {
         engine::digit d(eng, R0);
-        proofManagerMarin.checkpointMarin(d, totalIters);
+        saveProofResidue(d, totalIters);
     }
 
     bool is_prp_prime = false;
