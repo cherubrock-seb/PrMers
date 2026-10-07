@@ -43,7 +43,7 @@ using core::algo::interrupted;
 
 constexpr const char* GM_ECM_OPT_RELEASE = "v100.02";
 constexpr std::array<char, 8> GM_OPT_MAGIC{{'P','R','G','M','O','P','T','1'}};
-constexpr std::uint32_t GM_OPT_CHECKPOINT_VERSION = 1;
+constexpr std::uint32_t GM_OPT_CHECKPOINT_VERSION = 2;
 
 struct OptTarget {
     std::string family = "GM";
@@ -895,6 +895,10 @@ struct OptCheckpointHeader {
     std::uint64_t B2;
     std::uint64_t sigma;
     std::uint64_t D;
+    // Bit length of the Stage 1 scalar E = buildE(B1).  The token counts
+    // ladder bits of that exact scalar, so a checkpoint made against a
+    // different (or partially built) E must not be resumed.
+    std::uint64_t scalar_bits;
     std::uint64_t token;
     std::uint64_t aux;
     double elapsed;
@@ -910,6 +914,7 @@ bool load_opt_checkpoint(const std::filesystem::path& path,
                          std::uint64_t B2,
                          std::uint64_t sigma,
                          std::uint64_t D,
+                         std::uint64_t scalar_bits,
                          std::size_t baby_count,
                          std::uint64_t& token,
                          std::uint64_t& aux,
@@ -923,6 +928,7 @@ bool load_opt_checkpoint(const std::filesystem::path& path,
         h.phase != phase || h.p != t.p || h.lift != t.lift ||
         h.curve != curve || h.B1 != B1 || h.B2 != B2 ||
         h.sigma != sigma || h.D != D ||
+        h.scalar_bits != scalar_bits ||
         h.baby_count != baby_count ||
         h.checkpoint_bytes != eng->get_checkpoint_size()) return false;
 
@@ -946,6 +952,7 @@ void save_opt_checkpoint(const std::filesystem::path& path,
                          std::uint64_t B2,
                          std::uint64_t sigma,
                          std::uint64_t D,
+                         std::uint64_t scalar_bits,
                          std::size_t baby_count,
                          std::uint64_t token,
                          std::uint64_t aux,
@@ -964,6 +971,7 @@ void save_opt_checkpoint(const std::filesystem::path& path,
     h.B2 = B2;
     h.sigma = sigma;
     h.D = D;
+    h.scalar_bits = scalar_bits;
     h.token = token;
     h.aux = aux;
     h.elapsed = elapsed;
@@ -1278,13 +1286,13 @@ int App::runGaussianMersenneECMOptimized() {
         if (options.resume && stage2_enabled) {
             resumed_s2 = load_opt_checkpoint(
                 s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                 current_k, terms_since_gcd, s2_restored);
             if (!resumed_s2) {
                 resumed_s2 = load_opt_checkpoint(
                     s2ck.string() + ".old", eng.get(), t, 2,
                     static_cast<std::uint32_t>(curve), B1, B2, sigma,
-                    s2plan.D, s2plan.baby_d.size(),
+                    s2plan.D, kbits, s2plan.baby_d.size(),
                     current_k, terms_since_gcd, s2_restored);
             }
         }
@@ -1302,13 +1310,13 @@ int App::runGaussianMersenneECMOptimized() {
             if (options.resume) {
                 resumed_s1 = load_opt_checkpoint(
                     s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
-                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     remaining, unused_aux, restored);
                 if (!resumed_s1) {
                     resumed_s1 = load_opt_checkpoint(
                         s1ck.string() + ".old", eng.get(), t, 1,
                         static_cast<std::uint32_t>(curve), B1, B2, sigma,
-                        s2plan.D, s2plan.baby_d.size(),
+                        s2plan.D, kbits, s2plan.baby_d.size(),
                         remaining, unused_aux, restored);
                 }
             }
@@ -1335,7 +1343,7 @@ int App::runGaussianMersenneECMOptimized() {
             auto save_s1 = [&](std::uint64_t rem) {
                 save_opt_checkpoint(
                     s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
-                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     rem, 0, elapsed());
             };
 
@@ -1442,7 +1450,7 @@ int App::runGaussianMersenneECMOptimized() {
             // Stage 2 now has a complete state: checkpoint it, then drop Stage 1.
             save_opt_checkpoint(
                 s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                 current_k, terms_since_gcd, 0.0);
             clear_opt_checkpoint(s1ck);
         } else {
@@ -1496,7 +1504,7 @@ int App::runGaussianMersenneECMOptimized() {
             if (interrupted) {
                 save_opt_checkpoint(
                     s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     current_k, terms_since_gcd, s2_elapsed());
                 std::cout << "\nInterrupted; BSGS checkpoint saved at k="
                           << current_k << ".\n";
@@ -1577,7 +1585,7 @@ int App::runGaussianMersenneECMOptimized() {
                     options.backup_interval > 0 ? options.backup_interval : 120)) {
                 save_opt_checkpoint(
                     s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                    B1, B2, sigma, s2plan.D, s2plan.baby_d.size(),
+                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     current_k, terms_since_gcd, s2_elapsed());
                 last_save = now;
             }
