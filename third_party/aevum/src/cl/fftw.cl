@@ -190,6 +190,7 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;
   const u32 firstBinaryPair = me * SMALL_HEIGHT + y;
+#if NVIDIAGPU && (PFA_RADIX == 7 || PFA_RADIX == 9)
   const u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
   const u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
   const u32 pairEven = nEven >> 1;
@@ -210,6 +211,17 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
     outEven += outStep; if (outEven >= endEven) outEven -= WIDTH;
     outOdd  += outStep; if (outOdd  >= endOdd)  outOdd  -= WIDTH;
   }
+#else
+  u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
+  u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    outScalar61[pfaWCanonicalPairIndex(nEven) * 2u + 1u] = u[i].y;
+    outScalar61[pfaWCanonicalPairIndex(nOdd)  * 2u]      = u[i].x;
+    nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
+    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
+  }
+#endif
 #else
   out61 += WIDTH * g;
   write(G_W, NW, u, out61, 0);
