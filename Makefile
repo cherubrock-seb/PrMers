@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-proof-marin test-ecm-torsion test-ecm-prime95-relative-path test-marin-ibdwt-bound test-worktodo-manager test-marin-ll-radix5 test-proof-power test-proof-verify test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -146,6 +146,10 @@ test-proof-marin:
 
 test-ecm-torsion:
 	bash tests/test_ecm_torsion_curves.sh
+
+# Needs an OpenCL device; PRMERS_BIN overrides ./prmers.
+test-ecm-prime95-relative-path:
+	bash tests/ecm_prime95_relative_path_test.sh $${PRMERS_TEST_DEVICE:-0}
 
 # Marin transform-size bound: exact 128-bit check and OpenCL/GMP device check.
 test-marin-ibdwt-bound:

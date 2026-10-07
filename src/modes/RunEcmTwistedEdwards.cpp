@@ -1204,6 +1204,13 @@ int App::runECMMarinTwistedEdwards()
         //p95_dir = fs::path(options.p95path);
         p95_dir = p95_expand_user_path(options.p95path);
         std::error_code ec;
+        // Prime95 is started after "cd <dir>", so every path derived from the
+        // directory (executable, log file, state file) must not depend on the current directory.
+        {
+            std::error_code abs_ec;
+            const fs::path abs_dir = fs::absolute(p95_dir, abs_ec);
+            if (!abs_ec) p95_dir = abs_dir;
+        }
         if (!fs::exists(p95_dir, ec) || !fs::is_directory(p95_dir, ec)) {
             //p95_log(std::string("[ECM] Prime95 Stage2 disabled: invalid directory '") + options.p95path + "'");
             p95_log(std::string("[ECM] Prime95 Stage2 disabled: invalid directory '") + options.p95path + "' -> resolved to '" + p95_dir.string() + "'");
