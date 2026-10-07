@@ -1038,7 +1038,11 @@ int App::runPM1() {
         
         auto now = high_resolution_clock::now();
         if ((((now - lastDisplay >= seconds(180)))) ) {
-                    backupManager.saveState(buffers->input, lastIter-1);
+                    // Bit lastIter-1 has just been processed, so a resume must
+                    // continue at loop value lastIter-1.  saveState() records
+                    // its argument plus one (as in the interrupt save above,
+                    // which runs before the bit is processed).
+                    if (lastIter > 1) backupManager.saveState(buffers->input, lastIter-2);
         }
         if ((((now - lastDisplay >= seconds(10)))) ) {
                 std::string res64_x;
