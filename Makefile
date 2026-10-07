@@ -185,6 +185,10 @@ test-quick-checker:
 test-self-exe-restart:
 	bash tests/test_self_exe_restart.sh
 
+.PHONY: test-io-input-validation
+test-io-input-validation:
+	bash tests/test_io_input_validation.sh
+
 .PHONY: test-legacy-small-items
 
 test-legacy-small-items:

@@ -115,8 +115,15 @@ int validateCompatibilityBeforeApp(int argc, char** argv) {
     for (auto& arg : args) parsed_argv.push_back(arg.data());
     parsed_argv.push_back(nullptr);
 
-    const auto options = io::CliParser::parse(
-        static_cast<int>(args.size()), parsed_argv.data());
+    // CliParser::parse() throws on invalid values (-pfa=..., -gm-family, ...). This is the first call and
+    // it runs outside any handler: an uncaught exception would end in std::terminate.
+    io::CliOptions options;
+    try {
+        options = io::CliParser::parse(static_cast<int>(args.size()), parsed_argv.data());
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 2;
+    }
 
     if (options.pm1_ultralowmem && options.aevum) {
         std::cerr << "[Backend Compatibility] -pm1-ultralowmem is a Marin fast3-only "

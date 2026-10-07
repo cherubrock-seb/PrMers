@@ -31,6 +31,8 @@
 #include "math/Carry.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
+#include "io/MersFileName.hpp"
+#include "io/ExponentInput.hpp"
 #include "io/WorktodoManager.hpp"
 #include "marin/engine.h"
 #include "aevum/AutoPolicy.hpp"
@@ -128,7 +130,8 @@ namespace core {
 
 
 
-static int askExponentInteractively() {
+static uint64_t askExponentInteractively() {
+  uint64_t exponent = 0;
   #ifdef _WIN32
     char buffer[32];
     MessageBoxA(
@@ -140,7 +143,11 @@ static int askExponentInteractively() {
     );
     std::cout << "Enter the exponent to test (e.g. 21701): ";
     std::cin.getline(buffer, sizeof(buffer));
-    return std::atoi(buffer);
+    if (!io::parseExponentAnswer(buffer, exponent)) {
+      std::cerr << "Invalid input. Aborting.\n";
+      std::exit(1);
+    }
+    return exponent;
   #else
     std::cout << "============================================\n"
               << " PrMers: GPU-accelerated Mersenne primality test\n"
@@ -149,12 +156,11 @@ static int askExponentInteractively() {
     std::string input;
     std::cout << "Enter the exponent to test (e.g. 21701): ";
     std::getline(std::cin, input);
-    try {
-      return std::stoi(input);
-    } catch (...) {
+    if (!io::parseExponentAnswer(input, exponent)) {
       std::cerr << "Invalid input. Aborting.\n";
       std::exit(1);
     }
+    return exponent;
   #endif
 }
 static engine::gpu_backend gaussian_selected_backend(const io::CliOptions& options) {
@@ -500,7 +506,7 @@ App::App(int argc, char** argv)
                 
     
     if (!options.gui) {
-        o.exponent = static_cast<uint64_t>(askExponentInteractively());
+        o.exponent = askExponentInteractively();
     }
     o.mode = "prp";
     //std::exit(-1);
@@ -661,15 +667,11 @@ int App::exportResumeFromMersFile(const std::string& mersPath,
     if (!read_mers_file(mersPath, v)) return -1;
 
     std::string fname = std::filesystem::path(mersPath).filename().string();
-    size_t pos_pm = fname.find("pm");
-    size_t pos_dot = fname.rfind('.');
-    if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot)
+    uint32_t p = 0;
+    uint64_t B1 = 0;
+    if (!io::parseMersFileName(fname, p, B1))
         return std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n", -1;
-
-    std::string p_str  = fname.substr(0, pos_pm);
-    std::string b1_str = fname.substr(pos_pm + 2, pos_dot - (pos_pm + 2));
-    uint32_t p  = std::stoul(p_str);
-    uint64_t B1 = std::stoull(b1_str);
+    const size_t pos_dot = fname.rfind('.');
 
     mpz_class Mp = (mpz_class(1) << p) - 1;
     mpz_class X  = util::vectToMpz(v, precompute.getDigitWidth(), Mp);
