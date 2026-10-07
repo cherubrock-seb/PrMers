@@ -1390,7 +1390,9 @@ int App::run() {
             guiServer_->setStatus(ran ? "Completed" : "Idle");
         }
         install_signal_handlers();
-        g_stop = 0;
+        // Idle until Ctrl-C / the GUI's Stop. A stop that already ended the run must not be cleared:
+        // resetting g_stop here made the process keep idling ("Completed") until a second signal, and
+        // let a pending "Append & Run" restart the queue the user had just stopped.
         while (!g_stop) {
             gui_restart_for_appended_entry(guiServer_, argc_, argv_);
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
