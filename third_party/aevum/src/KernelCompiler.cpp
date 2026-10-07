@@ -19,15 +19,36 @@ const std::vector<const char*>& getClFiles();
 
 static_assert(sizeof(Program) == sizeof(cl_program));
 
-static string openclStandardArg(cl_device_id deviceId) {
+// Does the device's compiler accept this -cl-std?  Compiles an empty kernel with just that option.
+#if !defined(__APPLE__) && !defined(CUDA_BACKEND)
+static bool acceptsClStd(cl_context context, cl_device_id deviceId, const string& clStd) {
+  Program probe = loadSource(context, "kernel void probe() {}\n");
+  if (!probe) { return false; }
+  const string opts = "-cl-std=" + clStd;
+  return clCompileProgram(probe.get(), 1, &deviceId, opts.c_str(), 0, nullptr, nullptr, nullptr, nullptr) == CL_SUCCESS;
+}
+#endif
+
+static string openclStandardArg(cl_context context, cl_device_id deviceId) {
 #if defined(__APPLE__)
+  (void) context;
   return aevum_opencl_standard_arg(getOpenCLCVersion(deviceId),
                                    getOpenCLDeviceVersion(deviceId),
                                    true) + "-DAEVUM_APPLE_OPENCL12=1 ";
 #else
+  (void) context;
   (void) deviceId;
   // Preserve the upstream PRPLL/Aevum build contract exactly on Linux,
   // Windows, OpenCL and CUDA backends.
+#if !defined(CUDA_BACKEND)
+  // An OpenCL 3.0 implementation is not required to offer OpenCL C 2.0 (POCL does not, and Mesa rusticl likely
+  // does not) but does offer OpenCL C 3.0, whose optional features cover what the kernels use from 2.0 (generic
+  // address space, memory-order atomics).  Probe once; every GPU driver that accepts CL2.0 is unchanged.
+  if (!acceptsClStd(context, deviceId, "CL2.0") && acceptsClStd(context, deviceId, "CL3.0")) {
+    log("OpenCL C 2.0 is not available on this device; compiling the kernels as OpenCL C 3.0\n");
+    return "-cl-std=CL3.0 ";
+  }
+#endif
   return "-cl-std=CL2.0 ";
 #endif
 }
@@ -41,8 +62,8 @@ static string openclStandardArg(cl_device_id deviceId) {
 KernelCompiler::KernelCompiler(const Args& args, const Context* context, const string& clArgs) :
   cacheDir{args.cacheDir.string()},
   context{context->get()},
-  linkArgs{"-cl-finite-math-only " },
-  baseArgs{linkArgs + openclStandardArg(context->deviceId()) + clArgs},
+  linkArgs{},   // clLinkProgram accepts only linker options: the compile-only -cl-finite-math-only stays in baseArgs
+  baseArgs{"-cl-finite-math-only " + openclStandardArg(context->get(), context->deviceId()) + clArgs},
   dump{args.dump},
   useCache{args.useCache},
   verbose{args.verbose},
