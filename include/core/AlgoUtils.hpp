@@ -19,6 +19,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "util/Redact.hpp"
+#include "util/SelfExe.hpp"
 #include "core/Version.hpp"
 #include <sys/stat.h>
 #include <cstdio>
@@ -155,12 +156,10 @@ inline void restart_self(int argc, char* argv[]) {
         for (const auto& arg : shown) oss << "  " << arg << std::endl;
         g->appendLog(oss.str());
     }
-    std::vector<char*> exec_args;
-    for (auto& s : args) exec_args.push_back(const_cast<char*>(s.c_str()));
-    exec_args.push_back(nullptr);
-    execv(exec_args[0], exec_args.data());
-    std::cerr << "Failed to restart program (execv failed)" << std::endl;
-    if (auto g = ui::WebGuiServer::instance()) g->appendLog("Failed to restart program (execv failed)");
+    util::execSelf(args);
+    const std::string err = std::string("Failed to restart program (exec failed: ") + std::strerror(errno) + ")";
+    std::cerr << err << std::endl;
+    if (auto g = ui::WebGuiServer::instance()) g->appendLog(err);
 #endif
 }
 
