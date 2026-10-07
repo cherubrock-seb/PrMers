@@ -379,3 +379,6 @@ test-gm-ecm-resume:
 
 test-pm1-prime95-relative-path: all
 	bash tests/pm1_prime95_relative_path_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-ecm-resume-line-checksum
+test-ecm-resume-line-checksum: ; python3 tests/ecm_resume_line_checksum_test.py
