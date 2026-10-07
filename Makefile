@@ -343,6 +343,9 @@ test-pm1-stage2-incomplete: all
 test-pm1-stage2-resume-cleanup: all
 	bash tests/pm1_stage2_resume_cleanup_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-extend-stage2-rerun: all
+	bash tests/pm1_extend_stage2_rerun_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 # Host-only: the Prime95 stage-2 handoff stops on an interrupt (stub mprime, no GPU).
 test-pm1-external-stage2-interrupt:
 	bash tests/pm1_external_stage2_interrupt_test.sh

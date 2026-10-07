@@ -6615,8 +6615,36 @@ int App::runPM1Marin() {
     uint8_t in_lot_ck = 0, firstChunk_ck = 1;
     mpz_class eacc_ck = 0, wbits_ck = 0;
     bool restored = false;
-    // The stage-1 checkpoint is never resumed in extend mode (the extension
-    // has its own _ext.ckpt), so don't read it there: H_old is already in RBASE.
+    // An extension that ran to the end has H_new = H_old^E_diff in the stage-1
+    // checkpoint written just before stage 2 (i == 0, no chunk size).
+    bool extStage1Complete = false;
+    // A partly done extension is never resumed from the stage-1 checkpoint (it
+    // has its own _ext.ckpt), so don't read it for that: H_old is already in RBASE.
+    if (doExtend) {
+        // Read into locals: the extension keeps its own chunk bookkeeping.
+        uint32_t ri = 0;
+        double et = 0.0;
+        uint64_t x_chk = 0, x_blks = 0, x_bib = 0, x_cbl = 0, x_chunk = 0, x_start = 0, x_processed = 0, x_bits = 0;
+        uint8_t x_inlot = 0, x_first = 0;
+        mpz_class x_eacc = 0, x_wbits = 0;
+        // Only trust a checkpoint whose sidecar records this B1 (and -maxe): the
+        // residue must be 3^E(B1_new) and nothing else.  read_ckpt itself would
+        // also accept a legacy checkpoint without that record.
+        uint64_t ck_b1 = 0, ck_maxe = 0;
+        const bool params_ok = pm1_checkpoint_read_params(ckpt_file, ck_b1, ck_maxe) && ck_b1 == B1 && ck_maxe == MAX_E_BITS;
+        const int rr = params_ok
+            ? read_ckpt(ckpt_file, ri, et, x_chk, x_blks, x_bib, x_cbl, x_inlot, x_eacc, x_wbits, x_chunk, x_start, x_first, x_processed, x_bits)
+            : -1;
+        if (rr == 0 && ri == 0 && x_bits == 0) {
+            if (!eng->set_checkpoint(ckpt_restore_data)) {
+                std::cerr << "[PM1] Cannot load checkpoint " << ckpt_file << " into the engine\n";
+                delete eng;
+                return -1;
+            }
+            restored_time = et;
+            extStage1Complete = true;
+        }
+    }
     if (!doExtend) {
         int rr = read_ckpt(ckpt_file, resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
         if (rr < 0) rr = read_ckpt(ckpt_file + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
@@ -6634,20 +6662,29 @@ int App::runPM1Marin() {
     ckpt_restore_data.shrink_to_fit();
     auto start_sys = std::chrono::system_clock::now();
     if (doExtend) {
-        std::cout << "Building E_diff for (B1old=" << B1_old << ", B1new=" << B1_new << ")...\n" << std::flush;
-        mpz_class E_diff = buildE_incremental_fast(B1_old, B1_new);
-        std::cout << "E_diff built (" << mpz_sizeinbase(E_diff.get_mpz_t(), 2) << " bits)\n" << std::flush;
+        mpz_class E_diff;
+        mp_bitcnt_t bits = 0;
+        if (extStage1Complete) {
+            std::cout << "[PM1] Stage 1 checkpoint " << ckpt_file << " already holds the extended residue; skipping the extension.\n";
+            if (guiServer_) guiServer_->appendLog("[PM1] Stage 1 checkpoint already holds the extended residue; skipping the extension.");
+        } else {
+            std::cout << "Building E_diff for (B1old=" << B1_old << ", B1new=" << B1_new << ")...\n" << std::flush;
+            E_diff = buildE_incremental_fast(B1_old, B1_new);
+            std::cout << "E_diff built (" << mpz_sizeinbase(E_diff.get_mpz_t(), 2) << " bits)\n" << std::flush;
 
-        mp_bitcnt_t bits = mpz_sizeinbase(E_diff.get_mpz_t(), 2);
+            bits = mpz_sizeinbase(E_diff.get_mpz_t(), 2);
 
-        std::cout << "Extending PM1 exponent: E_diff has " << bits << " bits\n";
-        if (guiServer_) {
-            std::ostringstream oss;
-            oss << "Extending PM1 exponent: E_diff has " << bits << " bits\n";
-            guiServer_->appendLog(oss.str());
+            std::cout << "Extending PM1 exponent: E_diff has " << bits << " bits\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Extending PM1 exponent: E_diff has " << bits << " bits\n";
+                guiServer_->appendLog(oss.str());
+            }
         }
 
-        if (bits == 0) {
+        if (extStage1Complete) {
+            // Nothing to do: RSTATE already holds H_new.
+        } else if (bits == 0) {
             std::cout << "Nothing to extend (E_diff = 1)\n";
         } else {
             // Réinitialise les timers locaux pour l'extension
@@ -7192,6 +7229,18 @@ int App::runPM1Marin() {
         bool factorFound = (g != 1) && (g != Mp);
         bool newStage1FactorFound = false;
         Pm1Stage2Result stage2Stop = Pm1Stage2Result::NotFound;
+        auto release_stage1_engine = [&]() {
+            if (eng == nullptr) return;
+            if (options.pm1_lowmem) {
+                std::cout << "[PM1] Low-memory GPU handoff: releasing the extension engine before Stage 2...\n";
+                eng->release_gpu_resources_for_lowmem_handoff();
+            }
+            delete eng;
+            eng = nullptr;
+            if (options.pm1_lowmem) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(options.pm1_ultralowmem ? 2500 : 1000));
+            }
+        };
 
         std::string filename = "stage1_result_B1_" + std::to_string(B1_new) +
                                "_p_" + std::to_string(options.exponent) + ".txt";
@@ -7281,6 +7330,10 @@ int App::runPM1Marin() {
                 std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
                 pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
             } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
+                // Stage 2 allocates its own engine: free the stage-1 one (11
+                // registers) first, as the normal path does, so they are never
+                // resident together.
+                if (!(options.nmax > 0 && options.K > 0)) release_stage1_engine();
                 pm1_fold_stage2(runPM1Stage2Marin(), factorFound, stage2Stop);
             }
         }
@@ -7308,6 +7361,7 @@ int App::runPM1Marin() {
                 0
             );
 
+            release_stage1_engine();
             pm1_fold_stage2(runPM1Stage2MarinNKVersion(), factorFound, stage2Stop);
         }
 
