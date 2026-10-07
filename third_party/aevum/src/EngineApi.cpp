@@ -1407,6 +1407,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 #endif
     gpu_ = Gpu::make(exponent_, shared_, fft, pfa_use, verbose);
     transform_size_ = gpu_->getFFTSize();
+    plan_spec_ = fft.spec();
 
     const char* ll_env = std::getenv("AEVUM_FUSED_LL");
     const bool validated_ll_device = device_name.find("RTX 3080") != std::string::npos ||
@@ -1552,6 +1553,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   size_t transform_size() const { return transform_size_; }
+  const std::string& plan_spec() const { return plan_spec_; }
   size_t word_count() const { return word_count_; }
 
   void sync() {
@@ -1897,6 +1899,7 @@ private:
   aevum_autotune::Workload workload_;
   size_t word_count_;
   size_t transform_size_{};
+  std::string plan_spec_;
   Args args_;
   std::unique_ptr<Context> context_;
   Background background_;
@@ -2017,6 +2020,15 @@ void aevum_engine_destroy(aevum_engine_handle handle) {
 
 size_t aevum_engine_transform_size(aevum_engine_handle handle) {
   try { return runtime(handle).transform_size(); } catch (...) { return 0; }
+}
+
+int aevum_engine_plan_spec(aevum_engine_handle handle, char* output, size_t output_size) {
+  try {
+    const std::string& spec = runtime(handle).plan_spec();
+    if (!output || spec.empty() || spec.size() + 1 > output_size) return 0;
+    std::memcpy(output, spec.c_str(), spec.size() + 1);
+    return 1;
+  } catch (...) { return 0; }
 }
 
 size_t aevum_engine_word_count(aevum_engine_handle handle) {

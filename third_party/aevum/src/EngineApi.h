@@ -65,6 +65,10 @@ AEVUM_ENGINE_API aevum_engine_handle aevum_engine_create_ex(
 AEVUM_ENGINE_API void aevum_engine_destroy(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_transform_size(aevum_engine_handle handle);
 AEVUM_ENGINE_API size_t aevum_engine_word_count(aevum_engine_handle handle);
+// Copies the FFT plan the engine was actually created with (e.g. "1:1K:16:256:101") into output.
+// This can differ from what aevum_engine_resolve_fft() predicts: autotune, tune.txt replay and device
+// specific profiles are applied at creation.  Returns 1 on success, 0 if the buffer is too small.
+AEVUM_ENGINE_API int aevum_engine_plan_spec(aevum_engine_handle handle, char* output, size_t output_size);
 AEVUM_ENGINE_API int aevum_engine_sync(aevum_engine_handle handle);
 
 // Opt-in production timing decomposition. Counters are inactive unless
