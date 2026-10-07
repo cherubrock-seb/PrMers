@@ -1280,7 +1280,7 @@ int App::run() {
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("P-1 Stage 2 resume2reg"); }
 
-                rc_local = runPM1Stage2Marin();
+                rc_local = pm1Stage2ExitCode(runPM1Stage2Marin());
                 ran_local = true;
             }
             else if ((haveS2) && options.nmax == 0  && options.K == 0) {
@@ -1292,7 +1292,7 @@ int App::run() {
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("Resuming P-1 Stage 2"); }
 
-                rc_local = runPM1Stage2Marin();
+                rc_local = pm1Stage2ExitCode(runPM1Stage2Marin());
                 ran_local = true;
             } else {
                 std::string msg;

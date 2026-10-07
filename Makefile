@@ -337,6 +337,9 @@ test-pm1-stage1-checklevel: all
 test-pm1-bsgs-resume: all
 	bash tests/pm1_bsgs_resume_boundary_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+test-pm1-stage2-incomplete: all
+	bash tests/pm1_stage2_incomplete_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-interrupt-building-e: all
 	bash tests/pm1_interrupt_building_e_test.sh $${PRMERS_TEST_DEVICE:-0}
 

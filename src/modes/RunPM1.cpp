@@ -1519,7 +1519,21 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
     return found;
 }
 
-int App::runPM1Stage2MarinLowMem() {
+// True when a stage-2 run did not search its whole range (interrupted or failed).
+// The stage-1 checkpoint and the worktodo entry must then be kept.
+static bool pm1_stage2_incomplete(Pm1Stage2Result r) {
+    return r == Pm1Stage2Result::Interrupted || r == Pm1Stage2Result::Error;
+}
+
+// Folds the result of one stage-2 run into the state of the calling P-1 run:
+// a factor sets `factorFound`, an interrupted or failed run is remembered in
+// `stop` (a later Found/NotFound never overwrites it).
+static void pm1_fold_stage2(Pm1Stage2Result r, bool& factorFound, Pm1Stage2Result& stop) {
+    if (r == Pm1Stage2Result::Found) factorFound = true;
+    else if (pm1_stage2_incomplete(r)) stop = r;
+}
+
+Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
     using namespace std::chrono;
 
     const uint64_t B1u = options.B1, B2u = options.B2;
@@ -1530,12 +1544,12 @@ int App::runPM1Stage2MarinLowMem() {
     if (B2u <= stage2Low) {
         std::cerr << "Stage 2 error B2 <= stage2 lower bound. B1/resume=" << B1u
                   << " stage2Low=" << stage2Low << " B2=" << B2u << "\n";
-        return -1;
+        return Pm1Stage2Result::Error;
     }
     if (options.pm1_s2_resume2reg && stage2Low < B1u) {
         std::cerr << "Stage 2 resume2reg error: -b2start must be >= -b1 resume bound. B1/resume="
                   << B1u << " stage2Low=" << stage2Low << "\n";
-        return -1;
+        return Pm1Stage2Result::Error;
     }
 
     std::cout << "\nStart a P-1 factoring : Stage 2 Resume B1 = " << B1u
@@ -1638,7 +1652,7 @@ int App::runPM1Stage2MarinLowMem() {
         if (rr != 0) {
             std::cerr << "Stage 2 lowmem: cannot load PM1 Stage 1 checkpoint " << ckpt_file
                       << " (tried 3 and 11 registers).\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
         std::cout << "[PM1] Low-memory Stage 2 loaded H from " << ckpt_file
                   << " through the Marin checkpoint path.\n";
@@ -1651,7 +1665,7 @@ int App::runPM1Stage2MarinLowMem() {
     if (primes.empty()) {
         std::cout << "\nNo factor P-1 (stage 2) in range (" << stage2Low << ", " << B2u
                   << "] (no primes in range)\n";
-        return 1;
+        return Pm1Stage2Result::NotFound;
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
@@ -1702,17 +1716,17 @@ int App::runPM1Stage2MarinLowMem() {
         } else {
             std::cerr << "[PM1] Stage2 resume2reg: cannot load Stage-1 state from "
                       << resumeSave << " nor " << resumeP95 << "\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
         if (p_file != pexp) {
             std::cerr << "[PM1] Stage2 resume2reg: resume exponent mismatch: file p="
                       << p_file << ", expected p=" << pexp << "\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
         if (B1_file != B1u) {
             std::cerr << "[PM1] Stage2 resume2reg: resume B1 mismatch: file B1="
                       << B1_file << ", expected B1=" << B1u << "\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         uint64_t chunkBitLimit = 200000ULL;
@@ -1743,7 +1757,7 @@ int App::runPM1Stage2MarinLowMem() {
             std::cout << " failed.\n";
             std::cerr << "[PM1] Stage2 resume2reg: 2-register GPU allocation failed: "
                       << ex.what() << "\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         try {
@@ -1760,7 +1774,7 @@ int App::runPM1Stage2MarinLowMem() {
         } catch (const std::exception& ex) {
             std::cerr << "[PM1] Stage2 resume2reg: failed to upload H: " << ex.what() << "\n";
             delete eng;
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         const auto texp0 = high_resolution_clock::now();
@@ -1890,7 +1904,7 @@ int App::runPM1Stage2MarinLowMem() {
                 std::cout << "[PM1] Stopped after a clean chunk boundary. Re-run the same command to restart from the original S1 resume.\n";
                 interrupted = false;
                 delete eng;
-                return 0;
+                return Pm1Stage2Result::Interrupted;
             }
         }
 
@@ -1943,7 +1957,7 @@ int App::runPM1Stage2MarinLowMem() {
         wm.appendToResultsTxt(json);
 
         delete eng;
-        return found ? 0 : 1;
+        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
     }
 
     if (options.pm1_ultralowmem) {
@@ -1964,7 +1978,7 @@ int App::runPM1Stage2MarinLowMem() {
         if (interrupted) {
             std::cout << "\nInterrupted by user while building E2.\n";
             interrupted = false;
-            return 0;
+            return Pm1Stage2Result::Interrupted;
         }
         E2 *= mpz_class(2) * mpz_from_u64(options.exponent);
         for (uint64_t q : primes) mpz_mul_u64(E2, q);
@@ -1980,7 +1994,7 @@ int App::runPM1Stage2MarinLowMem() {
             std::cout << " failed.\n";
             std::cerr << "[PM1] Ultra-low-memory one-register GPU Stage 2 allocation failed: "
                       << ex.what() << "\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         eng->set((engine::Reg)RSTATE, 1u);
@@ -2008,7 +2022,7 @@ int App::runPM1Stage2MarinLowMem() {
                 std::cout << "\nInterrupted by user during Stage 2 ultralowmem one-register exponentiation.\n";
                 delete eng;
                 interrupted = false;
-                return 0;
+                return Pm1Stage2Result::Interrupted;
             }
         }
         std::cout << "\n[PM1] Stage 2 one-register exponentiation done. Computing GCD of (X-1, M_p)...\n";
@@ -2023,7 +2037,7 @@ int App::runPM1Stage2MarinLowMem() {
         const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                     "ultralowmem GPU one-register product exponent");
         delete eng;
-        return found ? 0 : 1;
+        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -2057,7 +2071,7 @@ int App::runPM1Stage2MarinLowMem() {
             std::cout << "\nInterrupted by user during Stage 2 lowmem streamed product.\n";
             delete eng;
             interrupted = false;
-            return 0;
+            return Pm1Stage2Result::Interrupted;
         }
     }
     std::cout << "\n";
@@ -2067,11 +2081,11 @@ int App::runPM1Stage2MarinLowMem() {
     const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                 "lowmem streamed product");
     delete eng;
-    return found ? 0 : 1;
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 
-int App::runPM1Stage2MarinVTrace() {
+Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     using namespace std::chrono;
 
     if (guiServer_) guiServer_->setStatus("P-1 factoring stage 2 (V-trace BSGS)");
@@ -2083,13 +2097,13 @@ int App::runPM1Stage2MarinVTrace() {
     if (B2 <= B1) {
         std::cerr << "Stage 2 V-trace error B2 < B1.\n";
         if (guiServer_) guiServer_->appendLog("Stage 2 V-trace error B2 < B1.");
-        return -1;
+        return Pm1Stage2Result::Error;
     }
 
     uint64_t D = options.pm1_vtrace_D ? options.pm1_vtrace_D : 30030ULL;
     if (D < 4 || (D & 1ULL)) {
         std::cerr << "[PM1-VTRACE] D must be even and >= 4. Use e.g. -pm1-vtrace-d 210, 630 or 2310.\n";
-        return -1;
+        return Pm1Stage2Result::Error;
     }
 
     const uint32_t pexp = static_cast<uint32_t>(options.exponent);
@@ -2307,7 +2321,7 @@ int App::runPM1Stage2MarinVTrace() {
     if (p0 > B2) {
         std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << " (no primes in range)\n";
         if (guiServer_) guiServer_->appendLog("No factor P-1 Stage 2 V-trace (no primes in range).");
-        return 1;
+        return Pm1Stage2Result::NotFound;
     }
     const uint64_t p0u = mpz_get_u64(p0.get_mpz_t());
 
@@ -2614,7 +2628,7 @@ int App::runPM1Stage2MarinVTrace() {
                 std::cerr << "[PM1-VTRACE-MEM] no V-trace D candidate fits this transform/device "
                           << "under max-regs=" << maxRegs << ". Falling back to classic Stage 2 is recommended: "
                           << "rerun with -pm1-vtrace-off, or set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1 to force.\n";
-                return -2;
+                return Pm1Stage2Result::Error;
             }
 
             if (bestD != D) {
@@ -3190,7 +3204,7 @@ int App::runPM1Stage2MarinVTrace() {
     const size_t babyCount = babyOffset.size();
     if (!babyCount) {
         std::cerr << "[PM1-VTRACE] no usable baby residues for D=" << D << "\n";
-        return -2;
+        return Pm1Stage2Result::Error;
     }
 
     struct Pair95Task {
@@ -3258,7 +3272,7 @@ int App::runPM1Stage2MarinVTrace() {
                 if ((base % D) != 0) {
                     std::cerr << "[PM1-VTRACE-PAIR95] internal residue error for q=" << q
                               << " r=" << r << " D=" << D << "\n";
-                    return -4;
+                    return Pm1Stage2Result::Error;
                 }
                 pair95Tasks.push_back(Pair95Task{base / D, chosenBi, q, chosenMate, true});
                 covered[pi] = uint8_t(1);
@@ -3268,7 +3282,7 @@ int App::runPM1Stage2MarinVTrace() {
                 if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
                     std::cerr << "[PM1-VTRACE-PAIR95] internal fallback error: no classic baby for q="
                               << q << " j=" << tp.j << " D=" << D << "\n";
-                    return -4;
+                    return Pm1Stage2Result::Error;
                 }
                 pair95Tasks.push_back(Pair95Task{tp.k, j2i[(size_t)tp.j], q, q, false});
                 covered[pi] = uint8_t(1);
@@ -3317,7 +3331,7 @@ int App::runPM1Stage2MarinVTrace() {
                 if (tp.j >= j2i.size() || j2i[(size_t)tp.j] < 0) {
                     std::cerr << "[PM1-VTRACE-PRODUCT-TREE] INTERNAL ERROR: no baby V_j for q="
                               << q << " j=" << tp.j << " D=" << D << "\n";
-                    return -4;
+                    return Pm1Stage2Result::Error;
                 }
                 bi = j2i[(size_t)tp.j];
             }
@@ -3548,11 +3562,11 @@ int App::runPM1Stage2MarinVTrace() {
         if (options.pm1_vtrace_D == 0) {
             std::cerr << "[PM1-VTRACE] auto-D should have avoided this. Retry with -pm1-vtrace-d 42 or -pm1-vtrace-d 30; if intentional, set PRMERS_PM1_VTRACE_ALLOW_TIGHT_MEM=1.\n";
         }
-        return -2;
+        return Pm1Stage2Result::Error;
     }
     if (!eng) {
         std::cerr << "[PM1-VTRACE] cannot allocate GPU engine.\n";
-        return -2;
+        return Pm1Stage2Result::Error;
     }
     const bool aevum_vtrace_backend = eng->is_aevum_backend();
 
@@ -3770,7 +3784,7 @@ int App::runPM1Stage2MarinVTrace() {
     if (!resumed_s2) {
         // ---- load H from the Stage-1 checkpoint written by runPM1Marin() ----
         engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, (size_t)options.device_id, verbose);
-        if (!eng_load) { delete eng; return -2; }
+        if (!eng_load) { delete eng; return Pm1Stage2Result::Error; }
 
         std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
         const std::string ckpt_file = ck.str();
@@ -3817,7 +3831,7 @@ int App::runPM1Stage2MarinVTrace() {
             delete eng_load; delete eng;
             std::cerr << "[PM1-VTRACE] cannot load pm1 stage1 checkpoint " << ckpt_file << "\n";
             if (guiServer_) guiServer_->appendLog("PM1-VTRACE: cannot load stage1 checkpoint.");
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         mpz_t H; mpz_init(H);
@@ -3838,10 +3852,10 @@ int App::runPM1Stage2MarinVTrace() {
                 std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
                 writeStageResult(filename, "inverse(H) failed because factor already divides H: factor=" + g.get_str());
                 std::cout << "\n>>> P-1 factor found while building V_1: " << g.get_str() << "\n";
-                return 0;
+                return Pm1Stage2Result::Found;
             }
             std::cerr << "[PM1-VTRACE] H is not invertible modulo M_p, but no proper factor was isolated.\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
         mpz_clear(H);
 
@@ -3915,7 +3929,7 @@ int App::runPM1Stage2MarinVTrace() {
             if (it == denseStage2Primes.end() || *it != p_ui) {
                 delete eng;
                 std::cerr << "[PM1-VTRACE] start prime not found in dense prime table.\n";
-                return -3;
+                return Pm1Stage2Result::Error;
             }
             densePosRun = (size_t)std::distance(denseStage2Primes.begin(), it);
         } else {
@@ -3926,7 +3940,7 @@ int App::runPM1Stage2MarinVTrace() {
             if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
                 delete eng;
                 std::cerr << "[PM1-VTRACE] start prime not found in segmented sieve.\n";
-                return -3;
+                return Pm1Stage2Result::Error;
             }
         }
     }
@@ -4030,7 +4044,7 @@ int App::runPM1Stage2MarinVTrace() {
                     std::cerr << "\n[PM1-VTRACE-PAIR95] INTERNAL ERROR: bucketed task has non-resident baby index "
                               << task.babyIndex << " in pass " << (passNo + 1) << ".\n";
                     delete eng;
-                    return -4;
+                    return Pm1Stage2Result::Error;
                 }
 
                 if (interrupted) {
@@ -4038,7 +4052,7 @@ int App::runPM1Stage2MarinVTrace() {
                     std::cout << "\nInterrupted by user during V-trace pair95 Stage 2. "
                               << "v97 does not checkpoint inside the irregular pair planner yet.\n";
                     interrupted = false;
-                    return 0;
+                    return Pm1Stage2Result::Interrupted;
                 }
 
                 advance_giant_to(task.k);
@@ -4094,7 +4108,7 @@ int App::runPM1Stage2MarinVTrace() {
                 std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
                           << "v71 does not checkpoint inside a baby-batched pass.\n";
                 interrupted = false;
-                return 0;
+                return Pm1Stage2Result::Interrupted;
             }
 
             std::cout << "[PM1-VTRACE-BATCH] pass " << (batchStart / activeBabyCount + 1)
@@ -4119,7 +4133,7 @@ int App::runPM1Stage2MarinVTrace() {
                 if (it == denseStage2Primes.end() || *it != bPrime) {
                     delete eng;
                     std::cerr << "[PM1-VTRACE-BATCH] start prime not found in dense prime table.\n";
-                    return -3;
+                    return Pm1Stage2Result::Error;
                 }
                 bDensePos = (size_t)std::distance(denseStage2Primes.begin(), it);
             } else {
@@ -4130,7 +4144,7 @@ int App::runPM1Stage2MarinVTrace() {
                 if (bPos >= bPrimesRun.size() || bPrimesRun[bPos] != bPrime) {
                     delete eng;
                     std::cerr << "[PM1-VTRACE-BATCH] start prime not found in segmented sieve.\n";
-                    return -3;
+                    return Pm1Stage2Result::Error;
                 }
             }
             auto bAdvancePrime = [&](uint64_t& out)->bool{
@@ -4159,7 +4173,7 @@ int App::runPM1Stage2MarinVTrace() {
                     std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
                               << "v71 does not checkpoint inside a baby-batched pass.\n";
                     interrupted = false;
-                    return 0;
+                    return Pm1Stage2Result::Interrupted;
                 }
 
                 const uint64_t q = bPrime;
@@ -4182,7 +4196,7 @@ int App::runPM1Stage2MarinVTrace() {
                         delete eng;
                         std::cerr << "\n[PM1-VTRACE-BATCH] INTERNAL ERROR: no baby V_j for q=" << q
                                   << " j=" << tp.j << " D=" << D << "\n";
-                        return -4;
+                        return Pm1Stage2Result::Error;
                     }
                     const int32_t globalBaby = j2i[(size_t)tp.j];
                     localBaby = (globalBaby >= 0 && (size_t)globalBaby < babyGlobalToLocal.size())
@@ -4243,7 +4257,7 @@ int App::runPM1Stage2MarinVTrace() {
         if (bucketPos > productTreeBuckets.size()) {
             delete eng;
             std::cerr << "[PM1-VTRACE-PRODUCT-TREE] checkpoint bucket index is outside bucket table.\n";
-            return -3;
+            return Pm1Stage2Result::Error;
         }
         for (; bucketPos < productTreeBuckets.size(); ++bucketPos) {
             if (interrupted) {
@@ -4253,7 +4267,7 @@ int App::runPM1Stage2MarinVTrace() {
                 std::cout << "\nInterrupted by user, V-trace product-tree Stage 2 state saved at bucket "
                           << bucketPos << " k=" << cur_k << "\n";
                 interrupted = false;
-                return 0;
+                return Pm1Stage2Result::Interrupted;
             }
 
             const ProductTreeBucket& bucket = productTreeBuckets[bucketPos];
@@ -4339,7 +4353,7 @@ int App::runPM1Stage2MarinVTrace() {
             std::cout << "\nInterrupted by user, V-trace Stage 2 state saved at prime " << p_ui
                       << " idx=" << idx << " k=" << cur_k << "\n";
             interrupted = false;
-            return 0;
+            return Pm1Stage2Result::Interrupted;
         }
 
         const uint64_t q = p_ui;
@@ -4369,7 +4383,7 @@ int App::runPM1Stage2MarinVTrace() {
                     delete eng;
                     std::cerr << "\n[PM1-VTRACE] INTERNAL ERROR: no baby V_j for q=" << q
                               << " j=" << tp.j << " D=" << D << "\n";
-                    return -4;
+                    return Pm1Stage2Result::Error;
                 }
                 const size_t babyReg = babyBase + (size_t)j2i[(size_t)tp.j];
                 if (useNegBabyAdd) {
@@ -4500,16 +4514,16 @@ int App::runPM1Stage2MarinVTrace() {
     wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? 0 : 1;
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
-int App::runPM1Stage2Marin() {
+Pm1Stage2Result App::runPM1Stage2Marin() {
     const bool useVTraceDefault = (!options.pm1_vtrace_off && !options.pm1_lowmem);
     const bool useVTrace = (!options.pm1_vtrace_off && (options.pm1_vtrace || useVTraceDefault));
     if (useVTrace) {
         if (options.pm1_lowmem) {
             std::cerr << "[PM1-VTRACE] V-trace is a normal-memory Stage 2 path; do not combine it with -pm1-lowmem/-pm1-ultralowmem.\n";
-            return -1;
+            return Pm1Stage2Result::Error;
         }
         return runPM1Stage2MarinVTrace();
     }
@@ -4527,7 +4541,7 @@ int App::runPM1Stage2Marin() {
     if (B2 <= B1) {
         std::cerr << "Stage 2 error B2 < B1.\n";
         if (guiServer_) guiServer_->appendLog("Stage 2 error B2 < B1.");
-        return -1;
+        return Pm1Stage2Result::Error;
     }
 
     std::cout << "\nStart a P-1 factoring : Stage 2 Bounds: B1 = " << B1 << ", B2 = " << B2 << std::endl;
@@ -4675,7 +4689,7 @@ int App::runPM1Stage2Marin() {
                 if (classicMem.maxAlloc != 0) std::cerr << ", max single allocation=" << gib_classic((long double)classicMem.maxAlloc) << " GiB";
                 if (appleClassicFlatGuard) {
                     std::cerr << ". Apple classic BSGS requires a flat slab; choose a smaller D.\n";
-                    return -2;
+                    return Pm1Stage2Result::Error;
                 }
                 std::cerr << ". Set PRMERS_PM1_CLASSIC_ALLOW_TIGHT_MEM=1 only if intentional.\n";
             }
@@ -4709,7 +4723,7 @@ int App::runPM1Stage2Marin() {
         if (bestD == 0) {
             std::cerr << "[PM1-CLASSIC-MEM] No classic BSGS D candidate fits this transform/device. "
                       << "Retry V-trace default, -pm1-lowmem, or set PRMERS_PM1_CLASSIC_D/PRMERS_PM1_CLASSIC_ALLOW_TIGHT_MEM if intentional.\n";
-            return -2;
+            return Pm1Stage2Result::Error;
         }
         if (bestD != 630 || rejectedByMem) {
             const size_t bc = classic_baby_count_for_D(bestD);
@@ -4812,7 +4826,7 @@ int App::runPM1Stage2Marin() {
     if (p0 > B2) {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << '\n';
         if (guiServer_) guiServer_->appendLog("No factor P-1 (stage 2) (no primes in range).");
-        return 1;
+        return Pm1Stage2Result::NotFound;
     }
     const uint64_t p0u = mpz_get_u64(p0.get_mpz_t());
 
@@ -4833,7 +4847,7 @@ int App::runPM1Stage2Marin() {
     const size_t babyCount = residues.size();
     if (!babyCount) {
         std::cerr << "Stage2 BSGS: no residues for D=" << D << "\n";
-        return -2;
+        return Pm1Stage2Result::Error;
     }
 
     std::cout << "Stage 2 BSGS: D=" << D << " | baby=" << babyCount << "\n";
@@ -4907,7 +4921,7 @@ int App::runPM1Stage2Marin() {
             delete eng_load; delete eng;
             std::cerr << "Stage 2: cannot load pm1 stage1 checkpoint.\n";
             if (guiServer_) guiServer_->appendLog("Stage 2: cannot load pm1 stage1 checkpoint.");
-            return -2;
+            return Pm1Stage2Result::Error;
         }
 
         mpz_t H; mpz_init(H);
@@ -4992,7 +5006,7 @@ int App::runPM1Stage2Marin() {
     if (posRun >= primesRun.size() || primesRun[posRun] != p_ui) {
         delete eng;
         std::cerr << "Stage 2: start prime not found in segmented sieve.\n";
-        return -3;
+        return Pm1Stage2Result::Error;
     }
 
     auto advancePrime = [&](uint64_t& out)->bool{
@@ -5042,7 +5056,7 @@ int App::runPM1Stage2Marin() {
             delete eng;
             std::cout << "\nInterrupted by user, Stage 2 state saved at prime " << p_ui << " idx=" << idx << "\n";
             interrupted = false;
-            return 0;
+            return Pm1Stage2Result::Interrupted;
         }
 
         const uint64_t r = p_ui;
@@ -5059,7 +5073,7 @@ int App::runPM1Stage2Marin() {
             std::cerr << "\n[BSGS] INTERNAL ERROR: residue not found for prime r=" << r
                       << " (e=" << e << ", D=" << D << ")\n";
             delete eng;
-            return -3;
+            return Pm1Stage2Result::Error;
         }
 
         const size_t babyReg = babyBase + (size_t)bi;
@@ -5197,7 +5211,7 @@ int App::runPM1Stage2Marin() {
     wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? 0 : 1;
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 #include <array>
 #include <cstdlib>
@@ -5627,12 +5641,12 @@ int App::runPM1Stage1SLnTorusMarin()
 
 /* ===== n^K Stage-2 (Topics in advanced scientific computation. by: Crandall, Richard E) ===== */
 /* Fast b^{n^K} (Stirling init + z-chain); product of differences; GCD. */
-int App::runPM1Stage2MarinNKVersion() {
+Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
     using namespace std::chrono;
     const uint32_t pexp  = (uint32_t)options.exponent;
     const uint32_t K     = (uint32_t)options.K;
     const uint64_t nmax  = (uint64_t)options.nmax;
-    if (K == 0 || nmax == 0) { std::cout << "Nothing to do (K=0 or nmax=0)\n"; return 0; }
+    if (K == 0 || nmax == 0) { std::cout << "Nothing to do (K=0 or nmax=0)\n"; return Pm1Stage2Result::NotFound; }
     if (guiServer_) { std::ostringstream oss; oss << "P-1 Stage 2 (n^K) — K=" << K << ", nmax=" << nmax; guiServer_->setStatus(oss.str()); }
 
     const size_t RSTATE=0, RACC=1, RTMP=2, RPOW=3, RDIFF=4, RONE=5;
@@ -5696,7 +5710,7 @@ int App::runPM1Stage2MarinNKVersion() {
             if (rr == 0) break;
         }
     }
-    if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return -2; }
+    if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return Pm1Stage2Result::Error; }
     mpz_t H; mpz_init(H); eng_s1->get_mpz(H, (engine::Reg)0); delete eng_s1;
 
     engine* eng = engine::create_gpu(pexp, regCount, (size_t)options.device_id, options.debug);
@@ -5725,7 +5739,7 @@ int App::runPM1Stage2MarinNKVersion() {
 
     size_t Z0 = 6, VAL0 = Z0 + (size_t)K + 1;
     eng->set((engine::Reg)(Z0 + 0), 1);
-    for (uint32_t j = 1; j <= K; ++j) { mpz_class e = fact[j] * S[K][j]; if (!pow_big_mpz(Z0 + j, RSTATE, e)) { delete eng; std::cout << "Interrupted during initialization\n"; return 0; } }
+    for (uint32_t j = 1; j <= K; ++j) { mpz_class e = fact[j] * S[K][j]; if (!pow_big_mpz(Z0 + j, RSTATE, e)) { delete eng; std::cout << "Interrupted during initialization\n"; return Pm1Stage2Result::Interrupted; } }
 
     eng->set((engine::Reg)RACC, 1);
     eng->set((engine::Reg)RONE, 1);
@@ -5748,7 +5762,7 @@ int App::runPM1Stage2MarinNKVersion() {
             std::cout << "build " << m << "/" << nmax << " | " << std::fixed << std::setprecision(2) << (done*100.0/total) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
             last = now;
         }
-        if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+        if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return Pm1Stage2Result::Interrupted; }
     }
     std::cout << "\nAccumulating pairwise differences on GPU\n";
 
@@ -5786,7 +5800,7 @@ int App::runPM1Stage2MarinNKVersion() {
                 std::cout << "pairs " << pairsDone << "/" << totalPairs << " | " << std::fixed << std::setprecision(2) << (total ? (done*100.0/total) : 100.0) << "% | ETA " << (int(eta)/3600) << "h " << (int(eta)%3600)/60 << "m\r" << std::flush;
                 last = now;
             }
-            if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return 0; }
+            if (interrupted) { delete eng; std::cout << "\nInterrupted by user\n"; return Pm1Stage2Result::Interrupted; }
         }
     }
     std::cout << "\nComputing GCD...\n";
@@ -5799,7 +5813,7 @@ int App::runPM1Stage2MarinNKVersion() {
     const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
     if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
     delete eng;
-    return found ? 0 : 1;
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 static inline unsigned u64_bits(uint64_t x){
@@ -7148,6 +7162,7 @@ int App::runPM1Marin() {
         }
         bool factorFound = (g != 1) && (g != Mp);
         bool newStage1FactorFound = false;
+        Pm1Stage2Result stage2Stop = Pm1Stage2Result::NotFound;
 
         std::string filename = "stage1_result_B1_" + std::to_string(B1_new) +
                                "_p_" + std::to_string(options.exponent) + ".txt";
@@ -7193,8 +7208,12 @@ int App::runPM1Marin() {
         bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
         resultSaved = wm.appendToResultsTxt(json) && resultSaved;
         options.B2 = B2save;
-        const bool runRequestedStage2 = options.B2 > 0 &&
+        // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
+        const bool runRequestedStage2 = options.B2 > options.B1 &&
             (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
+        if (options.B2 > 0 && options.B2 <= options.B1) {
+            std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
+        }
         if (options.B2 > 0 && newStage1FactorFound && !options.pm1_continue_stage2_after_factor) {
             std::cout << "[PM1] New Stage 1 factor found; Stage 2 skipped by default. "
                          "Use -pm1-continue-stage2-after-factor to run it anyway.\n";
@@ -7229,11 +7248,11 @@ int App::runPM1Marin() {
                 factorFound = ext_found || factorFound;
             }
             if (!external_used) {
-                factorFound = runPM1Stage2Marin() || factorFound;
+                pm1_fold_stage2(runPM1Stage2Marin(), factorFound, stage2Stop);
             }
         }
 
-        if(options.nmax > 0 && options.K > 0 &&
+        if(options.nmax > 0 && options.K > 0 && !pm1_stage2_incomplete(stage2Stop) &&
            (!newStage1FactorFound || options.pm1_continue_stage2_after_factor)){
             const double elapsed_time_ck =
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
@@ -7256,7 +7275,15 @@ int App::runPM1Marin() {
                 0
             );
 
-            factorFound = runPM1Stage2MarinNKVersion() || factorFound;
+            pm1_fold_stage2(runPM1Stage2MarinNKVersion(), factorFound, stage2Stop);
+        }
+
+        if (pm1_stage2_incomplete(stage2Stop)) {
+            const char* what = (stage2Stop == Pm1Stage2Result::Interrupted) ? "interrupted" : "failed";
+            std::cout << "[PM1] Stage 2 " << what << "; keeping the checkpoint and the worktodo entry so it can be resumed.\n";
+            if (guiServer_) guiServer_->appendLog(std::string("[PM1] Stage 2 ") + what + "; checkpoint and worktodo entry kept.");
+            delete eng;
+            return pm1Stage2ExitCode(stage2Stop);
         }
 
         delete_checkpoints(options.exponent, options.wagstaff, true, false);
@@ -7614,6 +7641,7 @@ int App::runPM1Marin() {
     }
     bool factorFound = false;
     bool newStage1FactorFound = false;
+    Pm1Stage2Result stage2Stop = Pm1Stage2Result::NotFound;
     std::string filename = "stage1_result_B1_" + std::to_string(B1) + "_p_" + std::to_string(options.exponent) + ".txt";
     if (options.pm1_no_stage1_gcd) {
         writeStageResult(filename, "Stage 1 GCD skipped at B1=" + std::to_string(B1));
@@ -7651,8 +7679,12 @@ int App::runPM1Marin() {
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
     options.B2 = B2save;
 
-    const bool runRequestedStage2 = options.B2 > 0 &&
+    // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
+    const bool runRequestedStage2 = options.B2 > options.B1 &&
         (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
+    if (options.B2 > 0 && options.B2 <= options.B1) {
+        std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
+    }
     if (options.B2 > 0 && newStage1FactorFound && !options.pm1_continue_stage2_after_factor) {
         std::cout << "[PM1] New Stage 1 factor found; Stage 2 skipped by default. "
                      "Use -pm1-continue-stage2-after-factor to run it anyway.\n";
@@ -7709,10 +7741,10 @@ int App::runPM1Marin() {
                 delete eng;
                 eng = nullptr;
             }
-            factorFound = runPM1Stage2Marin() || factorFound;
+            pm1_fold_stage2(runPM1Stage2Marin(), factorFound, stage2Stop);
         }
     }
-   if(options.nmax > 0 && options.K > 0 &&
+   if(options.nmax > 0 && options.K > 0 && !pm1_stage2_incomplete(stage2Stop) &&
       (!newStage1FactorFound || options.pm1_continue_stage2_after_factor)){
         {
             std::cout << "P-1 STAGE 2 IN **** n^K variant  n=" << options.nmax << " K=" << options.K << "******\n";
@@ -7748,7 +7780,14 @@ int App::runPM1Marin() {
             delete eng;
             eng = nullptr;
         }
-        factorFound = runPM1Stage2MarinNKVersion() || factorFound;
+        pm1_fold_stage2(runPM1Stage2MarinNKVersion(), factorFound, stage2Stop);
+    }
+    if (pm1_stage2_incomplete(stage2Stop)) {
+        const char* what = (stage2Stop == Pm1Stage2Result::Interrupted) ? "interrupted" : "failed";
+        std::cout << "[PM1] Stage 2 " << what << "; keeping the checkpoint and the worktodo entry so it can be resumed.\n";
+        if (guiServer_) guiServer_->appendLog(std::string("[PM1] Stage 2 ") + what + "; checkpoint and worktodo entry kept.");
+        delete eng;
+        return pm1Stage2ExitCode(stage2Stop);
     }
     //else{
     delete_checkpoints(options.exponent, options.wagstaff, true, false);

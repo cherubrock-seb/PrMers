@@ -7,11 +7,11 @@ src/main.o: src/main.cpp include/core/App.hpp include/io/CliParser.hpp \
  include/core/Spinner.hpp include/core/Printer.hpp \
  include/core/QuickChecker.hpp include/core/ProofManager.hpp \
  include/core/ProofSet.hpp include/core/Proof.hpp \
- include/core/ProofManagerMarin.hpp include/core/ProofSetMarin.hpp \
- include/core/ProofMarin.hpp include/marin/engine.h include/marin/arith.h \
- include/core/Logger.hpp include/util/Timer.hpp \
- include/io/JsonBuilder.hpp include/aevum/EngineAevum.hpp \
- include/modes/GaussianTrialFactor.hpp
+ include/core/ProofCheckpoint.hpp include/core/ProofManagerMarin.hpp \
+ include/core/ProofSetMarin.hpp include/core/ProofMarin.hpp \
+ include/marin/engine.h include/marin/arith.h include/core/Logger.hpp \
+ include/util/Timer.hpp include/io/JsonBuilder.hpp \
+ include/aevum/EngineAevum.hpp include/modes/GaussianTrialFactor.hpp
 include/core/App.hpp:
 include/io/CliParser.hpp:
 include/io/WorktodoParser.hpp:
@@ -30,6 +30,7 @@ include/core/QuickChecker.hpp:
 include/core/ProofManager.hpp:
 include/core/ProofSet.hpp:
 include/core/Proof.hpp:
+include/core/ProofCheckpoint.hpp:
 include/core/ProofManagerMarin.hpp:
 include/core/ProofSetMarin.hpp:
 include/core/ProofMarin.hpp:
