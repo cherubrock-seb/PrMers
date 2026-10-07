@@ -978,7 +978,6 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
 /*        Code to manage a cache of trigBuffers         */
 /********************************************************/
 
-#define make_key_part(b,tt,b31,tt31,b32,tt32,b61,tt61,tk) ((((((((b+tt) << 2) + b31+tt31) << 2) + b32+tt32) << 2) + b61+tt61) << 2) + tk
 
 TrigBufCache::~TrigBufCache() = default;
 
@@ -991,7 +990,7 @@ TrigPtr TrigBufCache::smallTrig(Args *args, FFTConfig fft, const vector<KeyVal>&
   u32 tail_trigs31 = args->valueFor("TAIL_TRIGS31", 0, fft.shape.spec(), extraConf);             // Default (as in the kernels) is reading GF31 trigs from memory
   u32 tail_trigs32 = args->valueFor("TAIL_TRIGS32", 2, fft.shape.spec(), extraConf);             // Default is calculating FP32 trigs from scratch, no memory accesses
   u32 tail_trigs61 = args->valueFor("TAIL_TRIGS61", 0, fft.shape.spec(), extraConf);             // Default (as in the kernels) is reading GF61 trigs from memory
-  u32 key_part = make_key_part(fft.FFT_FP64, tail_trigs, fft.NTT_GF31, tail_trigs31, fft.FFT_FP32, tail_trigs32, fft.NTT_GF61, tail_trigs61, tail_single_wide);
+  u32 key_part = trigKeyPart(fft.FFT_FP64, tail_trigs, fft.NTT_GF31, tail_trigs31, fft.FFT_FP32, tail_trigs32, fft.NTT_GF61, tail_trigs61, tail_single_wide);
 
   // See if there is an existing smallTrigCombo that we can return (using only a subset of the data)
   // In theory, we could match any smallTrigCombo where width matches.  However, SMALLTRIG_GF31_SIZE wouldn't be able to figure out the size.
@@ -1019,7 +1018,7 @@ TrigPtr TrigBufCache::smallTrigCombo(Args *args, FFTConfig fft, const vector<Key
   u32 tail_trigs31 = args->valueFor("TAIL_TRIGS31", 0, fft.shape.spec(), extraConf);             // Default (as in the kernels) is reading GF31 trigs from memory
   u32 tail_trigs32 = args->valueFor("TAIL_TRIGS32", 2, fft.shape.spec(), extraConf);             // Default is calculating FP32 trigs from scratch, no memory accesses
   u32 tail_trigs61 = args->valueFor("TAIL_TRIGS61", 0, fft.shape.spec(), extraConf);             // Default (as in the kernels) is reading GF61 trigs from memory
-  u32 key_part = make_key_part(fft.FFT_FP64, tail_trigs, fft.NTT_GF31, tail_trigs31, fft.FFT_FP32, tail_trigs32, fft.NTT_GF61, tail_trigs61, tail_single_wide);
+  u32 key_part = trigKeyPart(fft.FFT_FP64, tail_trigs, fft.NTT_GF31, tail_trigs31, fft.FFT_FP32, tail_trigs32, fft.NTT_GF61, tail_trigs61, tail_single_wide);
 
   // If there are no pre-computed trig values we might be able to share this trig table with fft_WIDTH
   if (((tail_trigs == 2 && fft.FFT_FP64) || (tail_trigs32 == 2 && fft.FFT_FP32)) && !fft.NTT_GF31 && !fft.NTT_GF61)
@@ -1042,7 +1041,7 @@ TrigPtr TrigBufCache::smallTrigCombo(Args *args, FFTConfig fft, const vector<Key
 TrigPtr TrigBufCache::middleTrig(Args *args, FFTConfig fft, u32 SMALL_H, u32 MIDDLE, u32 width) {
   lock_guard lock{mut};
   auto& m = middle;
-  u32 key_part = make_key_part(fft.FFT_FP64, 0, fft.NTT_GF31, 0, fft.FFT_FP32, 0, fft.NTT_GF61, 0, 0);
+  u32 key_part = trigKeyPart(fft.FFT_FP64, 0, fft.NTT_GF31, 0, fft.FFT_FP32, 0, fft.NTT_GF61, 0, 0);
   decay_t<decltype(m)>::key_type key{SMALL_H, MIDDLE, width, key_part};
 
   TrigPtr p{};

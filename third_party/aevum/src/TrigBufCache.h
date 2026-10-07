@@ -23,6 +23,15 @@ public:
   }
 };
 
+// Key of the small/middle trig caches.  Each field is one "is this number type in use" flag and that type's
+// TAIL_TRIGS setting, and they need separate bits: added together, a type in use with TAIL_TRIGS=n is
+// indistinguishable from that type unused with TAIL_TRIGS=n+1, and a TAIL_TRIGS of 3 or more carries into the
+// neighbouring field.  Two Gpus sharing a cache could then be handed each other's tables (silently wrong twiddles).
+inline u32 trigKeyField(bool inUse, u32 tailTrigs) { return (u32(inUse) << 3) | (tailTrigs & 7u); }
+inline u32 trigKeyPart(bool b, u32 tt, bool b31, u32 tt31, bool b32, u32 tt32, bool b61, u32 tt61, bool tailSingleWide) {
+  return (((((trigKeyField(b, tt) << 4) | trigKeyField(b31, tt31)) << 4 | trigKeyField(b32, tt32)) << 4 | trigKeyField(b61, tt61)) << 1) | u32(tailSingleWide);
+}
+
 class TrigBufCache {  
   const Context* context;
   std::mutex mut;
