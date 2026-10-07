@@ -4454,10 +4454,21 @@ int App::runPM1Stage2Marin() {
         while (b) { uint64_t t = a % b; a = b; b = t; }
         return a;
     };
+    // A stage-2 prime r = kD + e has gcd(e, D) = 1 unless r itself divides D
+    // (k = 0, e = r).  Such primes lie in (B1, B2] when B1 is smaller than the
+    // largest prime factor of D, so they need their own baby step H^r.
+    auto classic_needs_baby = [&](uint64_t e, uint64_t d)->bool{
+        if (gcd_u64_classic_autod(e, d) == 1) return true;
+        if (e <= B1u || e > B2u) return false;
+        for (uint64_t q = 3; q * q <= e; q += 2) {
+            if (e % q == 0) return false;
+        }
+        return (d % e) == 0;
+    };
     auto classic_baby_count_for_D = [&](uint64_t d)->size_t{
         size_t c = 0;
         for (uint64_t e = 1; e < d; e += 2) {
-            if (gcd_u64_classic_autod(e, d) == 1) ++c;
+            if (classic_needs_baby(e, d)) ++c;
         }
         return c;
     };
@@ -4701,16 +4712,12 @@ int App::runPM1Stage2Marin() {
     const uint64_t root = isqrt_u64(B2u);
     const std::vector<uint32_t> basePrimes = sieve_base_primes((uint32_t)root);
 
-    auto gcd_u64 = [](uint64_t a, uint64_t b)->uint64_t{
-        while (b) { uint64_t t = a % b; a = b; b = t; }
-        return a;
-    };
-
-    // residues e in [1..D-1], gcd(e,D)=1 (odd only)
+    // residues e in [1..D-1], gcd(e,D)=1 (odd only), plus odd primes e | D
+    // that fall in (B1, B2]
     std::vector<int32_t> e2i(D, -1);
     std::vector<uint32_t> residues;
     for (uint64_t e = 1; e < D; e += 2) {
-        if (gcd_u64(e, D) == 1) {
+        if (classic_needs_baby(e, D)) {
             e2i[(size_t)e] = (int32_t)residues.size();
             residues.push_back((uint32_t)e);
         }
@@ -4943,7 +4950,8 @@ int App::runPM1Stage2Marin() {
         if (bi < 0) {
             std::cerr << "\n[BSGS] INTERNAL ERROR: residue not found for prime r=" << r
                       << " (e=" << e << ", D=" << D << ")\n";
-            std::abort();
+            delete eng;
+            return -3;
         }
 
         const size_t babyReg = babyBase + (size_t)bi;
