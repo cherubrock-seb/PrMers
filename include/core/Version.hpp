@@ -4,7 +4,7 @@
 #include <string>
 
 namespace core {
-    const std::string PRMERS_VERSION = "4.20.97-alpha-v100.26-aevum-pass5-prp-max";
+    const std::string PRMERS_VERSION = "4.20.97-alpha-v100.27-aevum-pass5-prp-max";
 } // namespace core
 
 #endif // VERSION_HPP

@@ -435,6 +435,7 @@ jobs:
             - PFA7 fftP gather KEEP: RTX 3080 fixed-plan median +0.631%; Radeon VII -0.121% within no-regression tolerance; PFA3/PFA9 exact and generated fftP unchanged.
             - NVIDIA PFA WIDTH512 kfftWGF61 chain-tabmul specialization: RTX 3080 fixed-plan median +0.544% PFA7 and +0.655% PFA9 full iteration; kfftWGF61 +3.78%; Radeon VII generated kernel content remains byte-identical to stock and exact.
             - NVIDIA PFA ZEROHACK_H=0 tail/height policy: RTX 3080 fixed-plan full iteration +0.131% PFA3, +0.079% PFA7, +0.151% PFA9 with 20/20 paired blocks winning; Radeon VII retains the existing ZEROHACK_H default and remains exact on PFA3/PFA7/PFA9.
+            - AMD PFA GF61 H512 reverseLine LDS specialization: Radeon VII fixed-plan paired geomean +3.474% PFA7 and +1.704% PFA9 in 12/12-win confirmation; six additional range exponents were exact and positive (+1.880% to +4.071% PFA7, +1.694% to +2.169% PFA9); RTX PFA3/PFA7/PFA9 stayed exact and performance-neutral with the AMD specialization absent.
             - CUDA ZEROHACK_W is selected empirically after plan selection using exact cached mini-benchmarking; RTX 3080 validated W0 while AMD/OpenCL behavior remains unchanged.
             - PrMers wide-digit Aevum adapter correctness validated on Radeon VII at p=19121591 with fixed plan 1:256:4:256:101.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
