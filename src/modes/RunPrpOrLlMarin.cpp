@@ -161,9 +161,14 @@ int App::runPrpOrLlMarin()
     // sqrt(p)) followed by goodIter, the iteration of the verified state held in R4/R5.  R0/R1 are
     // the state at the saved iteration, which may be past the last full check and so unverified.
     // Older files do not record goodIter, so their R4/R5 cannot be placed in the iteration sequence.
+    // While the restore point is still the never-verified state of such a file, saves keep the old
+    // format (version 3, or 2 for sqrt(p)): writing version 4 would record that state as verified, and
+    // a restart would then skip the early check and the hint about the old file.
     const bool gl_active = options.mode == "prp" && options.gerbiczli;
     uint32_t ckpt_block = 0;
     uint64_t goodIter = 0;
+    // True while R4/R5 hold the state of an older checkpoint that has not passed a full check yet.
+    bool restore_point_unverified = false;
     auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint32_t& block,
                          bool& has_good, uint32_t& good)->int{
         File f(file);
@@ -216,7 +221,8 @@ int App::runPrpOrLlMarin()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         {
             File f(newf, "wb");
-            int version = gl_active ? 4 : (ckpt_block ? 3 : 2);
+            const bool record_good = gl_active && !restore_point_unverified;
+            int version = record_good ? 4 : (ckpt_block ? 3 : 2);
             if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
             if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return;
             if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return;
@@ -300,8 +306,7 @@ int App::runPrpOrLlMarin()
     // bad transform/plan, so do not loop forever.
     uint32_t gl_failure_streak = 0;
     constexpr uint32_t gl_failure_limit = 3;
-    // True while the restore point is the state of an older checkpoint that was never verified.
-    bool restore_point_unverified = resumed_unverified_legacy;
+    restore_point_unverified = resumed_unverified_legacy;
 
     uint64_t L = options.exponent;
     // Gerbicz-Li block size B. A full check costs B squarings and each block one multiplication,
