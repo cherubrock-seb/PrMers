@@ -169,6 +169,27 @@ int App::runPrpOrLl() {
     // Display proof disk usage estimate at start of computation
     if (options.mode == "prp" && options.proof) {
         uint32_t proofPower = options.manual_proofPower ? options.proofPower : ProofSet::bestPower(options.exponent);
+        // A test resumed at iteration resumeIter needs every proof residue of
+        // the points before it. Lower the proof power to what the residues on
+        // disk still allow, or drop the proof, now and not after the whole
+        // test has run.
+        if (resumeIter > 0) {
+            const uint32_t usable = ProofSetMarin::effectivePower(options.exponent, proofPower, static_cast<uint32_t>(resumeIter));
+            if (usable != proofPower) {
+                std::ostringstream oss;
+                if (usable == 0) {
+                    oss << "Proof residues before iteration " << resumeIter << " are missing: proof generation disabled for this test.";
+                    options.proof = false;
+                    options.proofFile.clear();
+                } else {
+                    oss << "Proof residues before iteration " << resumeIter << " are missing: proof of power " << usable << " (instead of " << proofPower << ").";
+                }
+                std::cout << oss.str() << std::endl;
+                if (guiServer_) guiServer_->appendLog(oss.str());
+                proofManager.setPower(usable);
+                proofPower = usable;
+            }
+        }
         options.proofPower = proofPower;
         double diskUsageGB = ProofSet::diskUsageGB(options.exponent, proofPower);
         std::cout << "Proof of power " << proofPower << " requires about "

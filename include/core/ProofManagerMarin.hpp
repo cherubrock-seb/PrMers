@@ -30,6 +30,9 @@ public:
     // Power of the proof proof() writes: the one the checkpoints were saved for.
     uint32_t power() const { return proofSet_.power; }
 
+    // Lower the power residues are saved for; see ProofSetMarin::setPower.
+    void setPower(uint32_t newPower) { proofSet_.setPower(newPower); }
+
 private:
     ProofSetMarin           proofSet_;
     cl_command_queue   queue_;
