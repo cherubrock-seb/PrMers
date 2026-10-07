@@ -622,6 +622,12 @@ int App::runGaussianMersenne() {
             fft_before_factor_guard,
             engine::gpu_workload::prp);
     }
+    if (selected.base > eng->max_multiplier()) {
+        std::cerr << "-gm-base " << selected.base << " is too large for the " << eng->get_size()
+                  << "-word transform of this exponent; the largest base supported is "
+                  << eng->max_multiplier() << ".\n";
+        return 2;
+    }
     std::cout << "  backend       : " << (eng->is_aevum_backend() ? "Aevum" : "Marin") << "\n"
               << "  transform     : " << eng->get_size() << " words\n"
               << "  registers     : " << register_count << "\n";

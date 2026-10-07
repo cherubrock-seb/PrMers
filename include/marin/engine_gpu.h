@@ -169,6 +169,22 @@ public:
 	void set_aux_split(const bool v) { _aux_split = v; }
 	void set_weight_compact(const bool v) { _weight_compact = v; }
 	void set_weight_exponent_q(const uint32 q) { _q = q; }
+
+	// Largest multiplier the carry kernels handle exactly for this transform (see ibdwt::max_small_multiplier).
+	uint32 max_multiplier() const { return (_q == 0) ? 0xffffffffu : ibdwt::max_small_multiplier(_n, _q); }
+	// adc_mul keeps its carry in 64 bits: a larger multiplier silently yields a wrong residue.
+	void check_multiplier(const uint32 a) const
+	{
+		if (a <= 1) return;
+		const uint32 cap = max_multiplier();
+		if (a > cap)
+		{
+			std::ostringstream ss;
+			ss << "Marin: multiplier " << a << " is too large for the " << _n << "-word transform of exponent " << _q
+			   << " (the carry would overflow 64 bits); the largest supported multiplier is " << cap;
+			throw std::runtime_error(ss.str());
+		}
+	}
 	bool uses_compact_weight() const { return _weight_compact; }
 
 private:
@@ -1060,6 +1076,7 @@ public:
 
 	void carry_weight_mul(const size_t src, const uint32 a)
 	{
+		check_multiplier(a);
 		const segloc l = seg_loc(src);
 		bind_reg_segment(_carry_weight_mul_p1, l.seg);
 		bind_reg_segment(_carry_weight_p2, l.seg);
@@ -1073,6 +1090,7 @@ public:
 
 	void carry_weight_mul_copy(const size_t src, const size_t dst, const uint32 a)
 	{
+		check_multiplier(a);
 		if (_reg_segmented && !same_segment(src, dst))
 		{
 			carry_weight_mul(src, a);
@@ -1096,6 +1114,7 @@ public:
 
 	void carry_weight_muladd(const size_t dst, const size_t add_src, const uint32 a)
 	{
+		check_multiplier(a);
 		const segloc d = seg_loc(dst);
 		const size_t addLocal = materialize_src_in_segment(add_src, d.seg, 0);
 		bind_reg_segment(_carry_weight_muladd_p1, d.seg);
@@ -1620,6 +1639,7 @@ void subtract_reg_group_apply(__global uint64 * restrict const reg,
 	}
 
 	size_t get_size() const override { return _n; }
+	uint32 max_multiplier() const override { return _gpu->max_multiplier(); }
 
 	void sync() const override
 	{
@@ -2626,6 +2646,7 @@ public:
     }
 
     size_t get_size() const override { return _n; }
+    uint32 max_multiplier() const override { return _flat->max_multiplier(); }
     void sync() const override { if (_flat) _flat->sync(); }
 
     void set(const Reg dst, const uint32 a) const override

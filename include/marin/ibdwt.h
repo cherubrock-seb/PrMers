@@ -47,6 +47,41 @@ public:
 		return std::min(n2, n5);	// must be >= 4 and divide (MOD_P-1)/192
 	}
 
+	// Largest multiplier a for which the carry kernels (carry_weight_mul_p1 and friends: square_mul(r, a), mul(.., a))
+	// are exact with an n-point transform for the exponent q.
+	//
+	// adc_mul() multiplies each unweighted coefficient u by a and propagates the carry in 64-bit registers. The
+	// coefficient is at most Lmax = 2 * n * (2^{w + 1} - 1)^2 (see transform_size) with w = floor(q / n); the digit
+	// width is at least w, so a digit that receives a carry c_in sends on at most
+	//   c_out <= (u * a + c_in) / 2^w   =>   c_out <= Lmax * a / (2^w - 1).
+	// The carry must stay below 2^64: a * c, the (u >> width) * a term, is added to a 64-bit carry and the carries
+	// are stored in 64-bit words between work-groups. Hence
+	//   a <= (2^64 - 1) * (2^w - 1) / Lmax.
+	// (If w = 0 there is no decay, the carry can accumulate over the n digits: a <= (2^64 - 1) / (n * Lmax).)
+	// The result is capped at 2^32 - 1, the range of the kernel argument.
+	static constexpr uint32_t max_small_multiplier(const size_t n, const uint32_t q)
+	{
+		constexpr uint64_t u64max = ~uint64_t(0), u32max = 0xffffffffull;
+		const uint64_t w = (n != 0) ? q / n : 0;
+		if (n == 0 || w >= 30) return 0;	// not a valid transform
+		const uint64_t d = (uint64_t(2) << w) - 1;	// 2^{w + 1} - 1
+		if (d * d > u64max / (2 * uint64_t(n))) return 0;	// coefficient would exceed 2^64: not a valid transform
+		const uint64_t lmax = 2 * uint64_t(n) * d * d;
+		if (w == 0 && lmax > u64max / n) return 0;
+		const uint64_t decay = (w == 0) ? 1 : (uint64_t(1) << w) - 1;	// 2^w - 1
+		const uint64_t denom = (w == 0) ? lmax * uint64_t(n) : lmax;
+#ifdef __SIZEOF_INT128__
+		const unsigned __int128 cap = (unsigned __int128)u64max * decay / denom;
+		return cap > u32max ? uint32_t(u32max) : uint32_t(cap);
+#else
+		// floor(u64max / denom) * decay never exceeds the exact bound u64max * decay / denom
+		const uint64_t q1 = u64max / denom;
+		if (q1 >= u32max) return uint32_t(u32max);
+		const uint64_t cap = q1 * decay;
+		return cap > u32max ? uint32_t(u32max) : uint32_t(cap);
+#endif
+	}
+
 	static constexpr bool is_even(const size_t n)
 	{
 		size_t m = (n % 5 == 0) ? n / 5 : n;
