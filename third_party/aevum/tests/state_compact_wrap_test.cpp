@@ -51,6 +51,20 @@ int main() {
                 "small canonical import roundtrip");
   }
 
+  // An exponent that is a multiple of 32 fills its last compact word exactly.  The word count must stay
+  // E / 32 (an extra trailing word breaks readback) and the canonical import must round-trip.
+  for (u64 e : {64u, 128u}) {
+    const u32 n = 8;
+    const auto zeros = compactBits(std::vector<Word>(n, 0), e);
+    expect_word(zeros, std::vector<u32>(e / 32, 0u), "multiple-of-32 exponent compact size");
+    for (u32 value : {0u, 1u, 2u, 3u, 5u}) {
+      const auto compact = makeWords(e, value);
+      expect_word(compactBits(expandBits(compact, n, e), e), compact, "multiple-of-32 exponent roundtrip");
+    }
+    const auto modulus = modulus_digits(n, e);
+    expect_word(compactBits(modulus, e), std::vector<u32>(e / 32, 0u), "multiple-of-32 exponent modulus is zero");
+  }
+
   std::cout << "Aevum compact Mersenne carry and canonical import tests passed\n";
   return 0;
 }
