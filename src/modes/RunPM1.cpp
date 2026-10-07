@@ -7161,7 +7161,16 @@ int App::runPM1Marin() {
         return factorFound ? 0 : 1;
     }
     else{
-        while (true) {
+        // The checkpoint written just before stage 2 has i == 0 and no chunk
+        // size: stage 1 is finished and RSTATE already holds H.  Do not rebuild
+        // E for it (the ultra-low-memory guard below would also reject that
+        // rebuild, because firstChunk is already false).
+        const bool stage1AlreadyComplete = restored && resumeI_ck == 0 && bits_in_chunk_ck == 0;
+        if (stage1AlreadyComplete) {
+            std::cout << "[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2." << std::endl;
+            if (guiServer_) guiServer_->appendLog("[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2.");
+        }
+        while (!stage1AlreadyComplete) {
             bool errordone = false;
             bool useFast3Candidate = firstChunk;
             uint64_t nextStart = 0;
