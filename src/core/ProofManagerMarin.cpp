@@ -24,6 +24,8 @@
 #include "io/JsonBuilder.hpp"
 #include <vector>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 
 namespace core {
 
@@ -126,22 +128,32 @@ std::filesystem::path ProofManagerMarin::proof() const {
         // Generate proof from collected checkpoints
         ProofMarin proof = proofSet_.computeProof();
         
-        // Create proof file name: {exponent}-{power}.proof
+        // Create proof file name: {exponent}-{power}.proof, in proof/ like the
+        // GPU proof writer, so both paths leave the file in the same place.
         std::string filename = std::to_string(exponent_) + "-" + 
                               std::to_string(proof.middles.size()) + ".proof";
-        std::filesystem::path proofFilePath = std::filesystem::current_path() / filename;
-        
-        
-        // Save the proof file
-        proof.save(proofFilePath);
-        
-        // Check the proof was saved correctly by attempting to load it
+        const std::filesystem::path proofDir = std::filesystem::current_path() / "proof";
+        std::filesystem::create_directories(proofDir);
+        const std::filesystem::path proofFilePath = proofDir / filename;
+        const std::filesystem::path tmpPath = proofDir / (filename + ".tmp");
+
+        // Save under a temporary name and check it loads back before it takes
+        // the final name: a proof that cannot be read is not reported.
+        std::error_code ec;
         try {
-            auto loadedProof = ProofMarin::load(proofFilePath);
+            proof.save(tmpPath);
+            auto loadedProof = ProofMarin::load(tmpPath);
+            if (loadedProof.E != proof.E || loadedProof.B != proof.B ||
+                loadedProof.middles != proof.middles) {
+                throw std::runtime_error("proof file does not read back as written");
+            }
         } catch (const std::exception& e) {
-            std::cerr << "Warning: Proof file validation failed: " << e.what() << std::endl;
+            std::filesystem::remove(tmpPath, ec);
+            throw std::runtime_error(std::string("Proof file validation failed: ") + e.what());
         }
-        
+        std::filesystem::remove(proofFilePath, ec);
+        std::filesystem::rename(tmpPath, proofFilePath);
+
         return proofFilePath;
         
     } catch (const std::exception& e) {
