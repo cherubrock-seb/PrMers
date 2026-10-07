@@ -192,9 +192,11 @@ MONOLITHIC_SOURCE_TEST := build-tests/aevum-opencl-monolithic-source-test
 TYPE4_PLAN_TEST := build-tests/aevum-type4-pfa9-plan-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
+RADIX1K_POLICY_TEST := build-tests/aevum-radix1k-policy-test
+RADIX1K_POLICY_APPLE_TEST := build-tests/aevum-radix1k-policy-apple-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
-.PHONY: test test-host test-gpu test-pfa9-lead-bridge-gpu
+.PHONY: test test-host test-radix1k-policy test-gpu test-pfa9-lead-bridge-gpu
 
 test: test-host
 
@@ -202,7 +204,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(RADIX1K_POLICY_TEST) $(RADIX1K_POLICY_APPLE_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
@@ -238,6 +240,20 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(AUTOTUNE_CACHE_TEST)
 	$(EVENT_STATUS_TEST)
 	$(FFT8_SKIP1_TEST)
+	$(RADIX1K_POLICY_TEST)
+	$(RADIX1K_POLICY_APPLE_TEST)
+
+test-radix1k-policy: $(RADIX1K_POLICY_TEST) $(RADIX1K_POLICY_APPLE_TEST)
+	$(RADIX1K_POLICY_TEST)
+	$(RADIX1K_POLICY_APPLE_TEST)
+
+$(RADIX1K_POLICY_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/radix1k_policy_test.cpp -o $@
+
+$(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -DAEVUM_FORCE_RADIX4_1K=1 -Isrc tests/radix1k_policy_test.cpp -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
