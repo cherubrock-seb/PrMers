@@ -1495,7 +1495,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #define combo_counter   combo.b
 
   const u64 combo_step = make_u64(bigword_weight_shift_minus1, FRAC_BPW_HI);
-  const u64 combo_bigstep = (comboFracBits(G_W * H * 2 - 1) + make_u64((G_W * H * 2 - 1) * bigword_weight_shift_minus1, 0)) % (61ULL << 32);
+  const u64 combo_bigstep = (comboFracBits(G_W * H * 2 - 1) + make_u64((G_W * H * 2 - 1) * bigword_weight_shift_minus1, 0)) % (31ULL << 32);
   combo_counter = comboFracBits(word_index) + make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
   weight_shift = weight_shift % 31;
   u64 starting_combo_counter = combo_counter;     // Save starting counter before adding log2_NWORDS+1 for applying weights after carry propagation

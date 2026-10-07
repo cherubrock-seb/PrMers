@@ -232,6 +232,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/engine_lead_cache_test.py
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/kernel_config_guards_test.py
+	python3 tests/carryfused_weight_shift_modulus_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
