@@ -59,9 +59,6 @@ ProofSetMarin::ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector
   if(exponent%2!=0){
       assert(E & 1); // E is supposed to be prime
     
-    // Create proof directory
-    std::filesystem::create_directories(proofPath(E));
-
     // Calculate checkpoint points using binary tree structure
     std::vector<uint32_t> spans;
     for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
@@ -101,6 +98,11 @@ void ProofSetMarin::save(uint32_t iter, const std::vector<uint32_t>& words) {
   if (!shouldCheckpoint(iter)) {
     return;
   }
+
+  // The directory is created with the first residue, so that tests that make
+  // no proof (LL, P-1, ECM, -proof 0) leave nothing behind.
+  std::error_code dirError;
+  std::filesystem::create_directories(proofPath(E), dirError);
 
   // Create the file path for this iteration
   auto filePath = proofPath(E) / std::to_string(iter);
@@ -157,6 +159,13 @@ bool ProofSetMarin::isInPoints(uint32_t E, uint32_t power, uint32_t k) {
 
 std::filesystem::path ProofSetMarin::proofPath(uint32_t E) {
   return std::filesystem::path(std::to_string(E)) / "proof";
+}
+
+void ProofSetMarin::clearResidues(uint32_t E) {
+  std::error_code ec;
+  std::filesystem::remove_all(proofPath(E), ec);
+  // Only the (now empty) exponent directory; anything else in it stays.
+  std::filesystem::remove(std::filesystem::path(std::to_string(E)), ec);
 }
 
 bool ProofSetMarin::isValidTo(uint32_t limitK) const {

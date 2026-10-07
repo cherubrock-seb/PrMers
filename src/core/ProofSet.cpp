@@ -68,9 +68,6 @@ Words Words::fromUint64(const std::vector<uint64_t>& host, uint32_t exponent) {
 // ProofSet
 ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
   : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
-  // Create proof directory
-  std::filesystem::create_directories(proofPath(E));
-
   // Calculate checkpoint points using binary tree structure
   std::vector<uint32_t> spans;
   for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
@@ -113,6 +110,11 @@ void ProofSet::save(uint32_t iter, const std::vector<uint32_t>& words) {
   if (!shouldCheckpoint(iter)) {
     return;
   }
+
+  // The directory is created with the first residue, so that tests that make
+  // no proof (LL, P-1, ECM, -proof 0) leave nothing behind.
+  std::error_code dirError;
+  std::filesystem::create_directories(proofPath(E), dirError);
 
   // Create the file path for this iteration
   auto filePath = proofPath(E) / std::to_string(iter);

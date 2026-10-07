@@ -1070,6 +1070,10 @@ int App::runPrpOrLl() {
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
+    // The proof (if any) is written and the test is over: the residues are of
+    // no further use and take about 10-18 GB at the wavefront.
+    if (options.mode == "prp" && !options.wagstaff)
+        ProofSetMarin::clearResidues(options.exponent);
 
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
