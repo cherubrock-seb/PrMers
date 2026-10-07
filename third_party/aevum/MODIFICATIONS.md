@@ -1,3 +1,20 @@
+## v0.3.97 NVIDIA PFA9 GF61 middle-out normalization
+
+- NVIDIA PFA9 GF61 middle-out now folds the inverse-radix normalization into
+  the single shared middle twiddle instead of applying nine per-output scalar
+  normalizations.
+- Scope is deliberately restricted to NVIDIA, PFA9 and GF61 middle-out.
+  PFA3 and PFA7 retain their previous arithmetic, and Radeon compilation
+  retains the stock path.
+- PrMers validation: central fixed-plan confirmation 20/20 wins at about
+  +0.059%, range validation 12/12 wins at about +0.058%.
+- RTX JIT resources improved from 70 to 66 registers and from 1498 to 1290
+  PTX instructions, with zero local-memory spill and unchanged 7-block/SM
+  occupancy.
+- Standalone Aevum validation passed host/API gates on RTX and Radeon,
+  PFA9 exact 10000 on both GPUs, PFA7 stock-path exact 5000 on both GPUs,
+  and standalone RTX PFA9 confirmation 4/4 positive.
+
 ## Word-exact three-plane FFT323161 PFA9
 
 - The FP32 plane of the `pfa9full:4:...` / non-elided `pfa9:4:...` plan now
