@@ -106,5 +106,9 @@ int main(int argc, char ** argv)
 	}
 
 	std::printf("legacy check_equal device test: %d/%d mismatches -> %s\n", fails, total, fails ? "FAIL" : "OK");
+
+	// Release the OpenCL objects the test created, so a leak checker sees only real leaks.
+	clReleaseMemObject(a); clReleaseMemObject(b); clReleaseMemObject(okb);
+	clReleaseCommandQueue(foreign); clReleaseContext(ctx2);
 	return fails ? 1 : 0;
 }
