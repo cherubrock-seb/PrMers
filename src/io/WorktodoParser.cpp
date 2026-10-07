@@ -423,8 +423,17 @@ continue;
                     if (!s.empty()) entry.B2Start = static_cast<uint64_t>(std::stoull(s));
                     ++next;
                 }
-                if (next < parts.size()) {
-                    auto factors = parseFactors(parts[next]);
+                // Known factors are one quoted comma-separated list ("f1,f2",
+                // Prime95 style) or several separately quoted factors
+                // ("f1","f2", as the web GUI writes them). Keep all of them.
+                {
+                    std::vector<std::string> factors;
+                    for (size_t i = next; i < parts.size(); ++i) {
+                        for (std::string& f : parseFactors(parts[i])) {
+                            trim_inplace(f);
+                            if (!f.empty()) factors.push_back(std::move(f));
+                        }
+                    }
                     if (!factors.empty()) entry.knownFactors = std::move(factors);
                 }
 
