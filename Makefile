@@ -382,3 +382,6 @@ test-pm1-prime95-relative-path: all
 
 .PHONY: test-ecm-resume-line-checksum
 test-ecm-resume-line-checksum: ; python3 tests/ecm_resume_line_checksum_test.py
+
+.PHONY: test-ecm-resume-curve-index
+test-ecm-resume-curve-index: ; python3 tests/ecm_resume_curve_index_source_test.py

@@ -684,7 +684,14 @@ int App::runECMMarin()
 
     const int backup_period = options.backup_interval > 0 ? options.backup_interval : 10;
     //const std::string ckpt2 = "ecm2_m_p" + std::to_string(p) + "_curve" + std::to_string(curve_seed) + ".ckpt2";
-    for (uint64_t c = 0; c < curves; ++c)
+    // Curves before the one whose checkpoint was found already completed in an
+    // earlier run (their checkpoints are removed when a curve finishes).
+    const uint64_t start_curve = (!options.seed && have_resume_seed) ? resume_curve_idx : 0;
+    if (start_curve != 0) {
+        std::cout << "[ECM] Resuming at curve " << (start_curve + 1) << "/" << curves
+                  << " (earlier curves already completed)" << std::endl;
+    }
+    for (uint64_t c = start_curve; c < curves; ++c)
     {
         result_factor = 0;
         result_status = "NF";
