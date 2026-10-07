@@ -930,6 +930,8 @@ int App::runPrpOrLl() {
                                 guiServer_->appendLog(oss.str());
     }
     // Generate proof file after successful completion
+    const bool proofRequested = options.mode == "prp" && options.proof;
+    bool proofCompleted = false;
     if (options.mode == "prp" && options.proof) {
         int proofPower = static_cast<int>(options.proofPower);
         bool proofSaved = false;
@@ -953,6 +955,7 @@ int App::runPrpOrLl() {
                     guiServer_->appendLog(oss.str());
                 }
                 proofSaved = true;
+                proofCompleted = true;
                 break;
             } catch (const core::ProofVerificationError& e) {
                 // A proof that does not verify is never kept or reported, and
@@ -1066,17 +1069,32 @@ int App::runPrpOrLl() {
     }*/
 
 
-    backupManager.clearState();
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    // The proof (if any) is written and the test is over: the residues are of
-    // no further use and take about 10-18 GB at the wavefront.
-    if (options.mode == "prp" && !options.wagstaff)
+    // Keep the loop state and the proof residues unless the result is safely
+    // on disk: a rerun then resumes at the end instead of starting from 0.
+    if (resultSaved)
+        backupManager.clearState();
+    const auto residueAction = ProofSetMarin::residueAction(
+        options.mode == "prp", options.wagstaff, proofRequested,
+        proofCompleted, resultSaved);
+    if (residueAction == ProofSetMarin::ResidueAction::Clear) {
+        // The proof (if any) is written and the test is over: the residues
+        // are of no further use and take about 10-18 GB at the wavefront.
         ProofSetMarin::clearResidues(options.exponent);
+    } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
+        const std::string msg =
+            ProofSetMarin::residuesKeptMessage(options.exponent, residueAction);
+        std::cerr << msg << std::endl;
+        if (guiServer_)
+            guiServer_->appendLog(msg);
+    }
 
-    if (hasWorktodoEntry_ && !resultSaved) {
-        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    if (!resultSaved) {
+        std::cerr << "Result could not be saved; keeping the saved state"
+                  << (hasWorktodoEntry_ ? std::string(" and the entry in ") + options.worktodo_path : std::string())
+                  << "\n";
     }
     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {

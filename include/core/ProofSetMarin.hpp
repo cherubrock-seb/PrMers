@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
+#include <string>
 
 namespace core {
 
@@ -41,6 +42,24 @@ public:
     // that leaves it empty). Call when the test is over and the proof has
     // been made or given up; a test that can still be resumed needs them.
     static void clearResidues(uint32_t E);
+
+    // What to do with the residues once a PRP test has finished. They are
+    // deleted only when the result is saved and any requested proof has been
+    // made (and verified, unless -noverify); otherwise they are kept, because
+    // a failed or interrupted proof can still be retried from them and a
+    // result that could not be saved needs a rerun.
+    enum class ResidueAction {
+        NotApplicable,       // not a Mersenne PRP test: nothing to do
+        Clear,
+        KeepResultNotSaved,
+        KeepProofFailed
+    };
+    static ResidueAction residueAction(bool isPrp, bool wagstaff,
+                                       bool proofRequested, bool proofCompleted,
+                                       bool resultSaved);
+    // Message for the two Keep actions: where the residues are and that they
+    // can be deleted by hand.
+    static std::string residuesKeptMessage(uint32_t E, ResidueAction action);
     static double diskUsageGB(uint32_t E, uint32_t power);
     
     // Core proof generation algorithm

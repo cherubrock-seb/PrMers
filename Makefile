@@ -285,6 +285,7 @@ test-marin-file-failure:
 
 test-proof-residue-cleanup:
 	bash tests/test_proof_residue_cleanup.sh
+	python3 tests/proof_residue_gating_source_test.py
 
 test-marin-invalid-device:
 	mkdir -p tests/build-marin-invalid-device

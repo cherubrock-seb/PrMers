@@ -75,6 +75,44 @@ int main() {
                "other exponent kept");
     }
 
+    // When the residues may be deleted: only once the result is saved and any
+    // requested proof was made; never for LL or Wagstaff.
+    {
+        using A = core::ProofSetMarin::ResidueAction;
+        auto act = core::ProofSetMarin::residueAction;
+        //                 prp    wag    wanted done   saved
+        expect(act(true,  false, true,  true,  true)  == A::Clear, "proof made: clear");
+        expect(act(true,  false, false, false, true)  == A::Clear, "proofs disabled: clear");
+        expect(act(true,  false, true,  false, true)  == A::KeepProofFailed,
+               "proof failed or did not verify: keep");
+        expect(act(true,  false, true,  true,  false) == A::KeepResultNotSaved,
+               "result not saved: keep");
+        expect(act(true,  false, false, false, false) == A::KeepResultNotSaved,
+               "result not saved without proof: keep");
+        expect(act(true,  false, true,  false, false) == A::KeepResultNotSaved,
+               "result not saved and proof failed: keep");
+        expect(act(false, false, true,  true,  true)  == A::NotApplicable, "LL: untouched");
+        expect(act(true,  true,  true,  true,  true)  == A::NotApplicable, "Wagstaff: untouched");
+    }
+
+    // The message says where the residues are and that they can be deleted.
+    {
+        using A = core::ProofSetMarin::ResidueAction;
+        const std::string proofMsg =
+            core::ProofSetMarin::residuesKeptMessage(E, A::KeepProofFailed);
+        const std::string saveMsg =
+            core::ProofSetMarin::residuesKeptMessage(E, A::KeepResultNotSaved);
+        const std::string where =
+            fs::absolute(core::ProofSetMarin::proofPath(E)).string();
+        expect(proofMsg.find(where) != std::string::npos, "message names the directory");
+        expect(proofMsg.find("delete that directory by hand") != std::string::npos,
+               "message says the residues can be deleted by hand");
+        expect(proofMsg.find("retry") != std::string::npos, "proof message gives the reason");
+        expect(saveMsg.find(where) != std::string::npos, "save message names the directory");
+        expect(saveMsg.find("could not be saved") != std::string::npos, "save message gives the reason");
+        expect(core::ProofSetMarin::residuesKeptMessage(E, A::Clear).empty(), "no message when clearing");
+    }
+
     fs::current_path(oldCwd);
     std::error_code ec;
     fs::remove_all(dir, ec);

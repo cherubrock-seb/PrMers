@@ -758,6 +758,10 @@ int App::runPrpOrLlMarin()
             provisionalJson);
     }
 
+    // The residues are only deleted once a requested proof has been made (and
+    // verified, unless -noverify); see ProofSetMarin::residueAction.
+    const bool proofRequested = options.mode == "prp" && options.proof;
+    bool proofCompleted = false;
     if (options.mode == "prp" && options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -858,6 +862,7 @@ int App::runPrpOrLlMarin()
             }
 
             options.proofFile = proofFilePath.string();
+            proofCompleted = true;
 
             std::cout
                 << "Proof file saved: "
@@ -974,18 +979,34 @@ int App::runPrpOrLlMarin()
         }
     }*/
 
-    backupManager.clearState();
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    delete_checkpoints(p, options.wagstaff, false, false); 
-    // The proof (if any) is written and the test is over: the residues are of
-    // no further use and take about 10-18 GB at the wavefront.
-    if (options.mode == "prp" && !options.wagstaff)
+    // Keep the checkpoint and the proof residues unless the result is safely
+    // on disk: a rerun then resumes at the end and retries the write instead of
+    // starting from iteration 0.
+    if (resultSaved) {
+        backupManager.clearState();
+        delete_checkpoints(p, options.wagstaff, false, false);
+    }
+    const auto residueAction = ProofSetMarin::residueAction(
+        options.mode == "prp", options.wagstaff, proofRequested,
+        proofCompleted, resultSaved);
+    if (residueAction == ProofSetMarin::ResidueAction::Clear) {
+        // The proof (if any) is written and the test is over: the residues
+        // are of no further use and take about 10-18 GB at the wavefront.
         ProofSetMarin::clearResidues(options.exponent);
-    backupManager.clearState();
-    if (hasWorktodoEntry_ && !resultSaved) {
-        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
+        const std::string msg =
+            ProofSetMarin::residuesKeptMessage(options.exponent, residueAction);
+        std::cerr << msg << std::endl;
+        if (guiServer_)
+            guiServer_->appendLog(msg);
+    }
+    if (!resultSaved) {
+        std::cerr << "Result could not be saved; keeping the checkpoint"
+                  << (hasWorktodoEntry_ ? std::string(" and the entry in ") + options.worktodo_path : std::string())
+                  << "\n";
     }
     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
