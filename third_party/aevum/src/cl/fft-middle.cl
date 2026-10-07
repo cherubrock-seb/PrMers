@@ -1123,8 +1123,13 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
     pfaDft3(t[k2], t[3+k2], t[6+k2], (Z61)636260618972345635UL, &a, &b, &c);
     o[k2] = a; o[k2+3] = b; o[k2+6] = c;
   }
+#ifdef AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = o[i];
+#else
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
+#endif
 #endif
 }
 #endif
@@ -1136,7 +1141,12 @@ void OVERLOAD pfaMiddleTwiddle(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
   const u32 desired_root = x * y;
+#ifdef AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE
+  GF61 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+  w = pfaMulScalar(w, (Z61)2049638230412172401UL);
+#else
   const GF61 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+#endif
   for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
 }
 #endif

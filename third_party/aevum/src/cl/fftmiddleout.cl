@@ -1,6 +1,9 @@
 // Copyright (C) Mihai Preda and George Woltman
 
 #include "base.cl"
+#if NVIDIAGPU && PFA_RADIX == 9 && NTT_GF61
+#define AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE 1
+#endif
 #include "fft-middle.cl"
 #include "middle.cl"
 
