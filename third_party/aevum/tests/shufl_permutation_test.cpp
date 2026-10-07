@@ -101,6 +101,9 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   CHECK1(err);
   cl_mem bbad = clCreateBuffer(ctx, CL_MEM_READ_WRITE, 4, nullptr, &err);
   CHECK1(err);
+  // Release the kernel and buffers when the case ends (a kernel keeps its program alive).
+  KernelHolder kHold{k};
+  std::unique_ptr<cl_mem> binHold{bin}, boutHold{bout}, bbadHold{bbad};
 
   // Element (i, me) carries the code i * 1000 + me + 1 (component 0) and its negation / +7 (component 1).
   auto code = [&](unsigned i, unsigned me) { return i * 1000u + me + 1u; };
