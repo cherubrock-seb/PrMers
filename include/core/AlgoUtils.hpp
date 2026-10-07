@@ -638,7 +638,9 @@ static inline uint32_t checksum_prime95_s1(uint64_t B1, const std::vector<uint8_
         uint32_t w = (uint32_t)data[i] | ((uint32_t)data[i+1]<<8) | ((uint32_t)data[i+2]<<16) | ((uint32_t)data[i+3]<<24);
         sum32 += w;
     }
-    uint64_t chk64 = ((B1<<1) + 6u + (data.size()>>1) + sum32) & 0xFFFFFFFFULL;
+    // B1 is written twice as a 64-bit field (B_done, C_done); Prime95 adds the
+    // low 32 bits of (high word + low word) for each, which is not B1<<1 once B1 >= 2^32.
+    uint64_t chk64 = (2u * ((B1 >> 32) + B1) + 6u + (data.size()>>1) + sum32) & 0xFFFFFFFFULL;
     return (uint32_t)chk64;
 }
 

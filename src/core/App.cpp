@@ -1252,7 +1252,7 @@ int App::run() {
                 rc_local = runPM1Stage3Marin();
                 ran_local = true;
             }
-            if(options.s4only){
+            else if(options.s4only){
                 std::ostringstream msg;
                 msg << "S4 only requested " 
                     << "-> jumping to runPM1Stage4Marin()";
