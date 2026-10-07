@@ -194,20 +194,21 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   const u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
   const u32 pairEven = nEven >> 1;
   const u32 pairOdd  = nOdd >> 1;
-  u32 xEven = pairEven / BIG_HEIGHT;
-  u32 xOdd  = pairOdd / BIG_HEIGHT;
-  const u32 lineEven = pairEven - xEven * BIG_HEIGHT;
-  const u32 lineOdd  = pairOdd - xOdd * BIG_HEIGHT;
-  const u32 baseEven = lineEven * WIDTH;
-  const u32 baseOdd  = lineOdd * WIDTH;
-  const u32 canonicalStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
-  // PFA7 fftWGF61 experiment: keep the scatter loop rolled to cap code/register growth.
-#pragma unroll 1
+  const u32 xEven = pairEven / BIG_HEIGHT;
+  const u32 xOdd  = pairOdd / BIG_HEIGHT;
+  const u32 baseEven = (pairEven - xEven * BIG_HEIGHT) * WIDTH;
+  const u32 baseOdd  = (pairOdd  - xOdd  * BIG_HEIGHT) * WIDTH;
+  u32 outEven = baseEven + xEven;
+  u32 outOdd  = baseOdd  + xOdd;
+  const u32 endEven = baseEven + WIDTH;
+  const u32 endOdd  = baseOdd  + WIDTH;
+  const u32 outStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
+#pragma unroll
   for (u32 i = 0; i < NW; ++i) {
-    outScalar61[(baseEven + xEven) * 2u + 1u] = u[i].y;
-    outScalar61[(baseOdd  + xOdd)  * 2u]      = u[i].x;
-    xEven += canonicalStep; if (xEven >= WIDTH) xEven -= WIDTH;
-    xOdd  += canonicalStep; if (xOdd  >= WIDTH) xOdd  -= WIDTH;
+    outScalar61[outEven * 2u + 1u] = u[i].y;
+    outScalar61[outOdd  * 2u]      = u[i].x;
+    outEven += outStep; if (outEven >= endEven) outEven -= WIDTH;
+    outOdd  += outStep; if (outOdd  >= endOdd)  outOdd  -= WIDTH;
   }
 #else
   out61 += WIDTH * g;
