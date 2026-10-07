@@ -3,6 +3,13 @@
 #if CARRY64
 typedef i64 CFcarry;
 #else
+// A 32-bit carry cannot hold the carries of a big word once nBits = EXP / NWORDS + 1 exceeds 19 (for FP64 the
+// RNDVAL window would reach bit 51; the NTT carries do not fit in 32 bits either).  The host selects CARRY64
+// itself (FFTShape::needsLargeCarry) and refuses an explicit 32-bit carry at this exponent; fail the build
+// rather than compute wrong carries if a configuration ever gets past it.
+#if EXP / NWORDS >= 19
+#error "CARRY32 requires EXP / NWORDS <= 18; this exponent needs CARRY64 (carry spec :1)"
+#endif
 typedef i32 CFcarry;
 #endif
 

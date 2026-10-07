@@ -127,6 +127,10 @@ public:
   float minBpw() const { return shape.minBpw(); }
   float maxBpw() const;
 
+  // A 32-bit carry cannot represent the carries of a big word once EXP / NWORDS reaches 19 (any FFT/NTT type;
+  // see carryutil.cl).  CARRY_AUTO never selects it there; only an explicit ":0" spec can.
+  bool carry32TooWide(u64 E) const { return carry == CARRY_32 && E / shape.size() >= 19; }
+
   bool knownUnsafeOrdinaryPrp(u64 exponent) const;
   FFTConfig promoteKnownUnsafeOrdinaryPrp(
       const Args& args, u64 exponent) const;
