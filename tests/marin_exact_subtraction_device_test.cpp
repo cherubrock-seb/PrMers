@@ -97,9 +97,36 @@ struct Tester
 		return ok;
 	}
 
+	// x -= a (small constant) on the device, compared with (X - a) mod M
+	void sub_const(const char * const name, const mpz_t & X, const uint32 a)
+	{
+		mpz_t r, e; mpz_inits(r, e, nullptr);
+		eng->set_mpz(0, X);
+		eng->sub(0, a);
+		eng->get_mpz(r, 0); mpz_mod(r, r, M);
+		mpz_sub_ui(e, X, a); mpz_mod(e, e, M);
+		const bool ok = (mpz_cmp(r, e) == 0);
+		report(name, ok);
+		mpz_clears(r, e, nullptr);
+	}
+
 	void run()
 	{
 		std::vector<uint64> x(n), y(n);
+
+		// single-register subtraction of a small constant (the serial `subtract` kernel)
+		{
+			mpz_t X; mpz_init(X);
+			mpz_set_ui(X, 10); sub_const("10 - 1", X, 1);
+			mpz_set_ui(X, 0); sub_const("0 - 1", X, 1);
+			mpz_set_ui(X, 3); sub_const("3 - 7", X, 7);
+			mpz_sub_ui(X, M, 1); sub_const("(2^q-2) - 1", X, 1);
+			gmp_randstate_t st; gmp_randinit_default(st); gmp_randseed_ui(st, q + 1);
+			for (int it = 0; it < 20; ++it) { mpz_urandomm(X, st, M); sub_const("random - small", X, uint32(rng() % 3)); }
+			gmp_randclear(st);
+			mpz_clear(X);
+		}
+
 		auto zero = [&](std::vector<uint64> & v) { std::fill(v.begin(), v.end(), 0); };
 
 		random_digits(x); random_digits(y); sub("normalised random", y, x);
