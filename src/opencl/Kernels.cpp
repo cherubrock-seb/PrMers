@@ -21,6 +21,8 @@
  */
 #include "opencl/Kernels.hpp"
 #include <stdexcept>
+#include <string>
+#include <algorithm>
 
 namespace opencl {
 
@@ -79,15 +81,29 @@ void Kernels::runCheckEqual(cl_mem a, cl_mem b,
                             cl_uint n, size_t wg)
 {
     cl_kernel k = getKernel("check_equal");
-    clSetKernelArg(k, 0, sizeof(cl_mem), &a);
-    clSetKernelArg(k, 1, sizeof(cl_mem), &b);
-    clSetKernelArg(k, 2, sizeof(cl_mem), &outOk);
-    clSetKernelArg(k, 3, sizeof(cl_uint), &n);
+    auto check = [](cl_int err, const char* what) {
+        if (err != CL_SUCCESS) {
+            throw std::runtime_error(std::string("check_equal: ") + what + " failed (" + std::to_string(err) + ")");
+        }
+    };
+    check(clSetKernelArg(k, 0, sizeof(cl_mem), &a), "clSetKernelArg(0)");
+    check(clSetKernelArg(k, 1, sizeof(cl_mem), &b), "clSetKernelArg(1)");
+    check(clSetKernelArg(k, 2, sizeof(cl_mem), &outOk), "clSetKernelArg(2)");
+    check(clSetKernelArg(k, 3, sizeof(cl_uint), &n), "clSetKernelArg(3)");
+
+    // Never ask for a work-group larger than this kernel can run on the device.
+    cl_device_id dev = nullptr;
+    check(clGetCommandQueueInfo(queue_, CL_QUEUE_DEVICE, sizeof(dev), &dev, nullptr), "clGetCommandQueueInfo");
+    size_t kernelWg = 0;
+    check(clGetKernelWorkGroupInfo(k, dev, CL_KERNEL_WORK_GROUP_SIZE, sizeof(kernelWg), &kernelWg, nullptr),
+          "clGetKernelWorkGroupInfo");
+    if (kernelWg != 0) wg = std::min(wg, kernelWg);
 
     size_t local  = std::min(wg, (size_t)std::max<cl_uint>(1, n));
     size_t global = ((n + local - 1) / local) * local;
 
-    clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr);
+    check(clEnqueueNDRangeKernel(queue_, k, 1, nullptr, &global, &local, 0, nullptr, nullptr),
+          "clEnqueueNDRangeKernel");
 }
 
 
