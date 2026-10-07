@@ -413,7 +413,7 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) std::abort();
+    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for squaring");
     
     clEnqueueCopyBuffer(queue_, A, tmpA,
                         0, 0, limbBytes,
@@ -503,14 +503,17 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) std::abort();
+    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for multiplication");
 
     cl_mem tmpB = clCreateBuffer(ctx_.getContext(),
                                  CL_MEM_READ_WRITE,
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) std::abort();
+    if (err != CL_SUCCESS) {
+        clReleaseMemObject(tmpA);
+        throw std::runtime_error("Failed to create GPU buffer for multiplication");
+    }
 
     clEnqueueCopyBuffer(queue_, A, tmpA,
                         0, 0, limbBytes,
@@ -577,17 +580,24 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     clEnqueueWriteBuffer(queue_, accumulator_buf, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
     
     // Binary exponentiation: result = base^exp mod (2^E - 1)
-    while (exp > 0) {
-        if (exp & 1) {
-            // accumulator = accumulator * base_copy mod (2^E - 1)
-            mulInPlace5(accumulator_buf, base_copy_buf, carry, limbBytes);
+    try {
+        while (exp > 0) {
+            if (exp & 1) {
+                // accumulator = accumulator * base_copy mod (2^E - 1)
+                mulInPlace5(accumulator_buf, base_copy_buf, carry, limbBytes);
+            }
+
+            exp >>= 1;
+            if (exp > 0) {
+                // base_copy = base_copy * base_copy mod (2^E - 1)
+                squareInPlace(base_copy_buf, carry, limbBytes);
+            }
         }
-        
-        exp >>= 1;
-        if (exp > 0) {
-            // base_copy = base_copy * base_copy mod (2^E - 1)
-            squareInPlace(base_copy_buf, carry, limbBytes);
-        }
+    } catch (...) {
+        // A failed allocation must not leak the temporaries: callers retry.
+        clReleaseMemObject(base_copy_buf);
+        clReleaseMemObject(accumulator_buf);
+        throw;
     }
     
     // Copy final result to result buffer

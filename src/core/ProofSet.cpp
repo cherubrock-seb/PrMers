@@ -24,6 +24,7 @@
 #include "io/Sha3Hash.h"
 #include "util/Crc32.hpp"
 #include "util/Timer.hpp"
+#include "util/GmpUtils.hpp"
 #include "opencl/NttEngine.hpp"
 #include "math/Carry.hpp"
 #include "io/JsonBuilder.hpp"
@@ -311,6 +312,13 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         }
     }
 
+    // Releases the buffers on every exit, including a GPU error thrown from the
+    // transforms (the caller may retry at a lower power).
+    struct PoolGuard {
+        std::vector<cl_mem>& pool;
+        ~PoolGuard() { for (cl_mem m : pool) clReleaseMemObject(m); }
+    } poolGuard{bufferPool};
+
     for (uint32_t p = 0; p < power; ++p) {
         assert(p == hashes.size());
 
@@ -321,23 +329,18 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         for (uint32_t i = 0; i < levelBuffers; ++i) {
             const uint32_t checkpointIndex = s * (i * 2 + 1) - 1;
             if (checkpointIndex >= points.size()) {
-                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
                 throw std::runtime_error("Missing checkpoint index");
             }
 
             const uint32_t iteration = points[checkpointIndex];
             if (iteration > E) {
-                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
                 throw std::runtime_error("Invalid checkpoint iteration");
             }
             if (!shouldCheckpoint2(iteration, power)) {
-                for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
                 throw std::runtime_error("Missing checkpoint file");
             }
 
             if (bufIndex >= maxBuffers) {
-                for (uint32_t t = 0; t < maxBuffers; ++t)
-                    clReleaseMemObject(bufferPool[t]);
                 throw std::runtime_error(
                     "Proof reduction stack exceeded O(power) buffer bound");
             }
@@ -349,7 +352,6 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
             for (uint32_t k = 0; (i & (1u << k)) != 0; ++k) {
                 assert(k <= p - 1);
                 if (bufIndex < 2) {
-                    for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
                     throw std::runtime_error("Insufficient buffers for reduction");
                 }
                 --bufIndex;
@@ -360,13 +362,13 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         }
 
         if (bufIndex != 1) {
-            for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
             throw std::runtime_error("Invalid buffer reduction at level");
         }
 
         auto levelResult = gpu.read(bufferPool[0]);
-        if (levelResult.empty()) {
-            for (uint32_t t = 0; t < maxBuffers; ++t) clReleaseMemObject(bufferPool[t]);
+        // gpu.read always returns ceil(E/32) words, so test the value: a proof
+        // middle is never 0 modulo 2^E - 1 (every term is a power of 3).
+        if (util::isZeroResidue(levelResult, E)) {
             throw std::runtime_error("Read ZERO during proof generation");
         }
 
@@ -379,8 +381,6 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         std::cout << "proof [" << p << "] : M " << std::hex << std::setfill('0') << std::setw(16) << middleRes64
                   << ", h " << std::setw(16) << newHash << std::dec << std::endl;
     }
-
-    for (uint32_t i = 0; i < maxBuffers; ++i) clReleaseMemObject(bufferPool[i]);
 
     double elapsed = timer.elapsed();
     std::cout << "Proof generated in " << std::fixed << std::setprecision(2) << elapsed << " seconds." << std::endl;

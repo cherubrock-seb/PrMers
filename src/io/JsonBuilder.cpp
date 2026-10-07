@@ -243,12 +243,23 @@ std::vector<uint32_t> JsonBuilder::compactBits(
             haveBits  += w;
         }
     }
-    if (haveBits > 0 || carry) {
+    if (haveBits > 0 && o < totalWords) {
         out[o++] = outWord;
-        for (uint32_t i = 1; carry && i < o; ++i) {
-            uint64_t sum = static_cast<uint64_t>(out[i]) + static_cast<uint64_t>(carry);
-            out[i]       = uint32_t(sum & 0xFFFFFFFFu);
-            carry        = int(sum >> 32);
+    }
+    // The carry out of the top digit has weight 2^E == 1 (mod 2^E - 1), so it
+    // wraps to bit 0. Adding it can carry past bit E again; fold that too.
+    const uint32_t topBits = E - 32u * (totalWords - 1u);  // 1..32
+    uint64_t c = static_cast<uint64_t>(carry);
+    while (c) {
+        for (uint32_t i = 0; i < totalWords && c; ++i) {
+            const uint64_t sum = static_cast<uint64_t>(out[i]) + c;
+            out[i] = uint32_t(sum & 0xFFFFFFFFu);
+            c      = sum >> 32;
+        }
+        if (topBits < 32) {
+            const uint32_t over = out[totalWords - 1] >> topBits;
+            out[totalWords - 1] &= (uint32_t(1) << topBits) - 1u;
+            c = over + (c << (32u - topBits));
         }
     }
     return out;

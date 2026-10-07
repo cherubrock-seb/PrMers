@@ -14,35 +14,42 @@ mpz_class convertToGMP(const std::vector<uint32_t>& words) {
   return result;
 }
 
-// Optimized modular reduction for Mersenne numbers: x mod (2^E - 1)
+bool isZeroResidue(const std::vector<uint32_t>& words, uint32_t E) {
+  bool allZero = true;
+  bool allOnes = true;
+  for (size_t i = 0; i < words.size(); ++i) {
+    const uint64_t firstBit = static_cast<uint64_t>(i) * 32;
+    uint32_t mask = 0;  // bits of this word that are below bit E
+    if (firstBit + 32 <= E) mask = 0xFFFFFFFFu;
+    else if (firstBit < E) mask = (uint32_t(1) << (E - firstBit)) - 1u;
+    if (words[i] != 0) allZero = false;
+    if ((words[i] & mask) != mask || (words[i] & ~mask) != 0) allOnes = false;
+  }
+  return allZero || (allOnes && !words.empty());
+}
+
+// Optimized modular reduction for Mersenne numbers: x mod (2^E - 1), fully
+// reduced to [0, 2^E - 2].
 // Uses the identity: X mod (2^E - 1) ≡ (Xlo + Xhi) mod (2^E - 1)
 mpz_class mersenneReduce(const mpz_class& x, uint32_t E) {
-  // For small numbers, use regular mod
-  if (mpz_sizeinbase(x.get_mpz_t(), 2) <= E + 1) {
-    return x;
-  }
-  
-  // Create Mersenne modulus: 2^E - 1
   mpz_class mersenne_mod = 1;
   mersenne_mod <<= E;
   mersenne_mod -= 1;
-  
-  // Split x into high and low parts
-  // xlo = x & (2^E - 1)  (low E bits)
-  mpz_class xlo = x & mersenne_mod;
-  
-  // xhi = x >> E  (remaining high bits)
-  mpz_class xhi = x >> E;
-  
-  // Add high and low parts
-  mpz_class result = xlo + xhi;
-  
-  // If result >= 2^E - 1, subtract the modulus
-  if (result >= mersenne_mod) {
-    result -= mersenne_mod;
+
+  mpz_class r = x;
+  // Fold the bits above E onto the low E bits until the value fits in E bits.
+  while (mpz_sizeinbase(r.get_mpz_t(), 2) > E) {
+    mpz_class xlo = r & mersenne_mod;
+    mpz_class xhi = r >> E;
+    r = xlo + xhi;
   }
-  
-  return result;
+
+  // Now r < 2^E; the only value left to reduce is 2^E - 1 itself.
+  if (r >= mersenne_mod) {
+    r -= mersenne_mod;
+  }
+
+  return r;
 }
 
 // Optimized modular exponentiation for Mersenne numbers: base^exp mod (2^E - 1)
