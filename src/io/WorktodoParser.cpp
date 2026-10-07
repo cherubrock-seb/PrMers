@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cmath>
+#include <filesystem>
+#include <system_error>
 
 namespace io {
 
@@ -96,6 +98,35 @@ return consumed == token.size() &&
 
 }
 
+// Keywords parse() can turn into an entry (upper case).
+static bool isSupportedKeyword(const std::string& keywordUpper) {
+    return keywordUpper == "PRP" || keywordUpper == "PRPDC"
+        || keywordUpper == "TEST" || keywordUpper == "DOUBLECHECK"
+        || keywordUpper == "PFACTOR" || keywordUpper == "PMINUS1"
+        || keywordUpper == "ECM2" || keywordUpper == "GMPRP"
+        || keywordUpper == "GMPROTH" || keywordUpper == "GMTEST"
+        || keywordUpper == "GMPMINUS1" || keywordUpper == "GMPM1"
+        || keywordUpper == "GMECM"
+        || keywordUpper == "GMCHAIN" || keywordUpper == "GMCAMPAIGN";
+}
+
+bool WorktodoParser::hasPendingEntry(const std::string& filename) {
+    std::ifstream file(filename);
+    std::string line;
+    while (std::getline(file, line)) {
+        trim_inplace(line);
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        const auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string keyword = line.substr(0, eq);
+        trim_inplace(keyword);
+        std::transform(keyword.begin(), keyword.end(), keyword.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+        if (isSupportedKeyword(keyword)) return true;
+    }
+    return false;
+}
+
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     std::ifstream file(filename_);
     if (!file.is_open()) {
@@ -129,8 +160,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         bool isGMPM1 = (keywordUpper == "GMPMINUS1" || keywordUpper == "GMPM1");
         bool isGMECM = (keywordUpper == "GMECM");
         bool isGMCHAIN = (keywordUpper == "GMCHAIN" || keywordUpper == "GMCAMPAIGN");
-        if (!(isPRP || isLL || isPF || isPM1 || isECM2 ||
-              isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN)) continue;
+        if (!isSupportedKeyword(keywordUpper)) continue;
 
         auto parts = splitRespectingQuotes(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
@@ -620,8 +650,13 @@ bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
         std::remove((filename_ + ".tmp").c_str());
         return false;
     }
-    if (std::remove(filename_.c_str()) != 0 ||
-        std::rename((filename_ + ".tmp").c_str(), filename_.c_str()) != 0) {
+    // Replace in one step: filesystem::rename overwrites the destination
+    // (atomically on POSIX), so a failure leaves the original worktodo intact
+    // instead of having already deleted it.
+    std::error_code ec;
+    std::filesystem::rename(filename_ + ".tmp", filename_, ec);
+    if (ec) {
+        std::remove((filename_ + ".tmp").c_str());
         return false;
     }
     return true;

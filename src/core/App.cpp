@@ -495,11 +495,11 @@ App::App(int argc, char** argv)
 
     if (!hasWorktodoEntry_ && o.exponent == 0) {
     std::cerr << "Error: no valid entry in " 
-                << options.worktodo_path 
+                << o.worktodo_path
                 << " and no exponent provided on the command line\n";
-                
-    
-    if (!options.gui) {
+
+
+    if (!o.gui) {
         o.exponent = static_cast<uint64_t>(askExponentInteractively());
     }
     o.mode = "prp";
