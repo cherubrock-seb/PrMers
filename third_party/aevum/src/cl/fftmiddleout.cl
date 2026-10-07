@@ -252,7 +252,7 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
 
   dependentLaunch();       // Next kernel will be carryfused which must dependentLaunchWait before reading data
 
-#if MIDDLE_OUT_LDS_TRANSPOSE
+#if MIDDLE_OUT_LDS_TRANSPOSE && !(NVIDIAGPU && PFA_RADIX)
   // Transpose the x and y values
   local Z61 lds[OUT_WG / 2 * (MIDDLE <= 8 ? 2 * MIDDLE : MIDDLE)];
   middleShuffle(lds, u, OUT_WG, OUT_SIZEX);
