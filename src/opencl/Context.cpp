@@ -395,6 +395,10 @@ void Context::computeOptimalSizes(std::size_t n,
     localCarryPropagationDepth_ = 1;
     int maxdw = *std::max_element(digit_width_cpu.begin(), digit_width_cpu.end());
     if (debug_) std::cout << "max digit width = " << maxdw << std::endl;
+    // With 1-bit digits (tiny exponents) 1^depth never reaches 1^2 * n and the
+    // depth search below would not terminate; use the smallest radix with a
+    // finite answer.
+    if (maxdw < 2) maxdw = 2;
     while (std::pow(maxdw, localCarryPropagationDepth_) < std::pow(maxdw, 2) * n) {
         localCarryPropagationDepth_ *= 2;
     }
