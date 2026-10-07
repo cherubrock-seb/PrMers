@@ -28,6 +28,10 @@
 #define SINGLE_WIDE    (TAIL_KERNELS < 2)         // Old single-wide tailSquare vs. new double-wide tailSquare
 #define SINGLE_KERNEL  ((TAIL_KERNELS & 1) == 0)  // TailSquare uses a single kernel vs. two kernels
 
+#if !defined(TAIL_GF61_REVERSE16)
+#define TAIL_GF61_REVERSE16 0
+#endif
+
 // 64-bit implementations of reverse routines
 
 #if FFT_FP64 | NTT_GF61
@@ -85,7 +89,7 @@ void OVERLOAD reverseLine(local T2 *lds, T2 *u) {
   u32 me = get_local_id(0);
   u32 revMe = WG - 1 - me;
 
-  if (SHUFL_BYTES_H == 16) {
+  if (SHUFL_BYTES_H == 16 || (NTT_GF61 && TAIL_GF61_REVERSE16)) {
     local T2 *ldsOut = lds + revMe;
     local T2 *ldsIn = lds + me;
     bar(WG);
