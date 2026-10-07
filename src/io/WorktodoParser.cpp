@@ -86,6 +86,24 @@ static void trim_inplace(std::string& s){
     if (a == std::string::npos) { s.clear(); return; }
     s = s.substr(a, b - a + 1);
 }
+
+// Parse the exponent field of a k,b,n,c worktodo line. The whole field must be
+// a plain decimal number in [1, 2^32 - 1]: a value that does not fit the
+// 32-bit exponent, or one followed by junk ("127abc"), makes the line invalid
+// instead of being silently truncated to a different exponent.
+static bool parseExponentField(const std::string& raw, uint32_t& exponent) {
+    std::string token = raw;
+    trim_inplace(token);
+    if (token.empty() || token.size() > 10) return false;
+    uint64_t value = 0;
+    for (char c : token) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+        value = value * 10 + static_cast<uint64_t>(c - '0');
+    }
+    if (value == 0 || value > std::numeric_limits<uint32_t>::max()) return false;
+    exponent = static_cast<uint32_t>(value);
+    return true;
+}
 /*
 static uint64_t mul_sat_u64(uint64_t a, uint64_t b){
     if (a == 0 || b == 0) return 0;
@@ -415,8 +433,8 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                 if (parts.size() < 6) continue;
                 if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
 
-                uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
-                if (exp == 0) continue;
+                uint32_t exp = 0;
+                if (!parseExponentField(parts[2], exp)) continue;
 
                 WorktodoEntry entry;
                 entry.pm1Test   = true;
@@ -496,8 +514,8 @@ continue;
                 if (parts.size() < 6) continue;
                 if (parts[0] != "1" || parts[1] != "2" || parts[3] != "-1") continue;
 
-                uint32_t exp = static_cast<uint32_t>(std::stoul(parts[2]));
-                if (exp == 0) continue;
+                uint32_t exp = 0;
+                if (!parseExponentField(parts[2], exp)) continue;
 
                 WorktodoEntry entry;
                 entry.pm1Test   = true;
@@ -564,8 +582,8 @@ continue;
                 const std::string k = parts[0], b = parts[1], nstr = parts[2], c = parts[3];
                 if (k != "1" || b != "2" || c != "-1") continue;
 
-                uint32_t exp = static_cast<uint32_t>(std::stoul(nstr));
-                if (exp == 0) continue;
+                uint32_t exp = 0;
+                if (!parseExponentField(nstr, exp)) continue;
 
                 uint64_t B1 = static_cast<uint64_t>(std::stoull(parts[4]));
                 uint64_t B2 = static_cast<uint64_t>(std::stoull(parts[5]));
@@ -615,8 +633,8 @@ continue;
             const std::string k = parts[idx++], b = parts[idx++], nstr = parts[idx++], c = parts[idx++];
             if (k != "1" || b != "2" || c != "-1") continue;
 
-            uint32_t exp = static_cast<uint32_t>(std::stoul(nstr));
-            if (exp == 0) continue;
+            uint32_t exp = 0;
+            if (!parseExponentField(nstr, exp)) continue;
 
             WorktodoEntry entry;
             entry.prpTest   = isPRP;

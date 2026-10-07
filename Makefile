@@ -223,6 +223,10 @@ test-worktodo-archive-dir:
 test-worktodo-archive-dir-run: all
 	bash tests/worktodo_archive_dir_run_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-worktodo-exponent-range
+test-worktodo-exponent-range:
+	bash tests/test_worktodo_exponent_range.sh
+
 test-marin-ll-radix5: all
 	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
