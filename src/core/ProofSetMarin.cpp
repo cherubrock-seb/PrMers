@@ -257,30 +257,43 @@ std::vector<uint32_t> ProofSetMarin::load(uint32_t iter) const {
 }
 
 bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK) {
+  std::map<uint32_t, bool> checked;
+  return canDo(E, power, currentK, checked);
+}
+
+bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK,
+                          std::map<uint32_t, bool>& checked) {
   // Every residue below E from iterations up to and including currentK must
   // be there (a residue at currentK itself is written before the test can be
-  // saved at currentK). The newest is also read back in full.
-  uint32_t newest = 0;
-  bool any = false;
+  // saved at currentK), with the right size and a matching CRC: the proof
+  // reads all of them, so one damaged residue makes the proof impossible.
+  // This reads each of them once when a test is resumed (power 10 at the
+  // wavefront: about 1000 files and up to the full proof disk usage).
   for (uint32_t point : proofPoints(E, power)) {
     if (point >= E || point > currentK) break;
-    if (!fileExists(E, point)) return false;
-    newest = point;
-    any = true;
-  }
-  if (any) {
-    try {
-      loadResidue(E, newest);
-    } catch (const std::exception&) {
-      return false;
+    auto it = checked.find(point);
+    if (it == checked.end()) {
+      bool ok = fileExists(E, point);
+      if (ok) {
+        try {
+          loadResidue(E, point);
+        } catch (const std::exception&) {
+          ok = false;
+        }
+      }
+      it = checked.emplace(point, ok).first;
     }
+    if (!it->second) return false;
   }
   return true;
 }
 
 uint32_t ProofSetMarin::effectivePower(uint32_t E, uint32_t power, uint32_t currentK) {
+  // The points of a lower power are a subset of those of a higher one, so
+  // each residue is checked at most once across the powers tried.
+  std::map<uint32_t, bool> checked;
   for (uint32_t p = power; p > 0; --p) {
-    if (canDo(E, p, currentK)) return p;
+    if (canDo(E, p, currentK, checked)) return p;
   }
   return 0;
 }

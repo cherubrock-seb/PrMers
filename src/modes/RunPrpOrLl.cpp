@@ -178,11 +178,11 @@ int App::runPrpOrLl() {
             if (usable != proofPower) {
                 std::ostringstream oss;
                 if (usable == 0) {
-                    oss << "Proof residues before iteration " << resumeIter << " are missing: proof generation disabled for this test.";
+                    oss << "Proof residues before iteration " << resumeIter << " are missing or damaged: proof generation disabled for this test.";
                     options.proof = false;
                     options.proofFile.clear();
                 } else {
-                    oss << "Proof residues before iteration " << resumeIter << " are missing: proof of power " << usable << " (instead of " << proofPower << ").";
+                    oss << "Proof residues before iteration " << resumeIter << " are missing or damaged: proof of power " << usable << " (instead of " << proofPower << ").";
                 }
                 std::cout << oss.str() << std::endl;
                 if (guiServer_) guiServer_->appendLog(oss.str());

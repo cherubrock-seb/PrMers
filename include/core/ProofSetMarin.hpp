@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
+#include <map>
 #include <string>
 
 namespace core {
@@ -70,7 +71,7 @@ public:
     // Checkpoint iterations of a proof of this power, ascending, ending with E.
     static std::vector<uint32_t> proofPoints(uint32_t E, uint32_t power);
     // True when every residue a proof of this power needs from iterations up
-    // to currentK is on disk, and the newest of them reads back intact.
+    // to currentK is on disk and reads back intact (size and CRC).
     static bool canDo(uint32_t E, uint32_t power, uint32_t currentK);
     // The highest power <= power that canDo for a test resumed at currentK,
     // or 0 when no proof is possible.
@@ -83,6 +84,10 @@ private:
     std::vector<uint32_t> points; // checkpoint iteration points
     
     static bool fileExists(uint32_t E, uint32_t k);
+    // canDo with the result of each residue check remembered in `checked`,
+    // so that effectivePower reads each residue at most once.
+    static bool canDo(uint32_t E, uint32_t power, uint32_t currentK,
+                      std::map<uint32_t, bool>& checked);
     static std::vector<uint32_t> loadResidue(uint32_t E, uint32_t iter);
 };
 

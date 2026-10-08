@@ -283,11 +283,11 @@ int App::runPrpOrLlMarin()
         if (usable != wanted) {
             std::ostringstream oss;
             if (usable == 0) {
-                oss << "Proof residues before iteration " << ri << " are missing: proof generation disabled for this test.";
+                oss << "Proof residues before iteration " << ri << " are missing or damaged: proof generation disabled for this test.";
                 options.proof = false;
                 options.proofFile.clear();
             } else {
-                oss << "Proof residues before iteration " << ri << " are missing: proof of power " << usable << " (instead of " << wanted << ").";
+                oss << "Proof residues before iteration " << ri << " are missing or damaged: proof of power " << usable << " (instead of " << wanted << ").";
             }
             std::cout << oss.str() << std::endl;
             if (guiServer_) guiServer_->appendLog(oss.str());

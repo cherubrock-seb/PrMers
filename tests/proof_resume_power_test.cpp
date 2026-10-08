@@ -1,4 +1,5 @@
 // Host test for the proof power usable when a test is resumed.
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -94,6 +95,82 @@ int main() {
         f.put('\x55');
     }
     expectPower(E, 1, 100, 0);
+
+    // Every required residue is CRC-checked, not only the newest: an older
+    // one damaged in place (same size) rules out the powers that need it.
+    auto saveAll = [&]() {
+        for (uint32_t k : p3) {
+            if (k < E) set.save(k, residue);
+        }
+    };
+    auto corrupt = [&](uint32_t k) {
+        std::fstream f(core::ProofSetMarin::proofPath(E) / std::to_string(k),
+                       std::ios::binary | std::ios::in | std::ios::out);
+        f.seekp(8);
+        f.put('\x55');
+    };
+    saveAll();
+    expectPower(E, 3, 190, 3);
+    corrupt(24);                // power-3 point, older than the newest (168)
+    expectPower(E, 3, 190, 2);
+    expectPower(E, 3, 23, 3);   // not needed yet before iteration 24
+    expectPower(E, 3, 24, 2);
+    saveAll();
+    corrupt(48);                // power-2 point
+    expectPower(E, 3, 190, 1);
+    saveAll();
+    corrupt(96);                // needed by every power
+    expectPower(E, 3, 190, 0);
+    expectPower(E, 3, 95, 3);
+    saveAll();
+    corrupt(168);               // not needed by a test resumed before it
+    expectPower(E, 3, 167, 3);
+    expectPower(E, 3, 190, 2);
+
+    // Boundary resume iterations: 0 needs nothing; 2^32-1 and E need every
+    // point below E.
+    saveAll();
+    expectPower(E, 3, 0, 3);
+    expectPower(E, 3, 0xFFFFFFFFu, 3);
+    expectPower(E, 3, E, 3);
+    corrupt(120);
+    expectPower(E, 3, 0xFFFFFFFFu, 2);
+    expectPower(E, 3, 0, 3);
+
+    // An empty file or a directory in place of a residue counts as missing.
+    saveAll();
+    {
+        std::ofstream f(core::ProofSetMarin::proofPath(E) / "72", std::ios::binary | std::ios::trunc);
+    }
+    expectPower(E, 3, 190, 2);
+    fs::remove(core::ProofSetMarin::proofPath(E) / "72");
+    fs::create_directory(core::ProofSetMarin::proofPath(E) / "72");
+    expectPower(E, 3, 190, 2);
+    fs::remove(core::ProofSetMarin::proofPath(E) / "72");
+
+    // A residue one word too long is rejected too.
+    saveAll();
+    {
+        std::ofstream f(core::ProofSetMarin::proofPath(E) / "144", std::ios::binary | std::ios::app);
+        f.write("\0\0\0\0", 4);
+    }
+    expectPower(E, 3, 190, 1);  // 144 is a power-2 and power-3 point
+    saveAll();
+
+    // The points of a lower power are a subset of those of a higher one
+    // (effectivePower and setPower rely on it).
+    for (uint32_t e : {3u, 5u, 7u, 191u, 1279u, 11213u, 82589933u}) {
+        for (uint32_t pw = 2; pw <= 10; ++pw) {
+            const auto hi = core::ProofSetMarin::proofPoints(e, pw);
+            for (uint32_t k : core::ProofSetMarin::proofPoints(e, pw - 1)) {
+                if (!std::binary_search(hi.begin(), hi.end(), k)) {
+                    std::cerr << "FAIL: point " << k << " of power " << pw - 1
+                              << " is not a point of power " << pw << " (E=" << e << ")\n";
+                    ++failures;
+                }
+            }
+        }
+    }
 
     // setPower lowers the points residues are saved for.
     set.setPower(1);
