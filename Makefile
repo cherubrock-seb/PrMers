@@ -342,6 +342,11 @@ test-llsafe-error-recovery: all
 test-legacy-prp-resume: all
 bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-marin-dead-kernels
+
+test-marin-dead-kernels:
+	python3 tests/marin_dead_kernels_source_test.py
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:
