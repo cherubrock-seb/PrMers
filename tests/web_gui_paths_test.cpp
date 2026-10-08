@@ -8,6 +8,7 @@
 #include "util/GuiSettings.hpp"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -252,6 +253,10 @@ static void testHttp() {
               body.find("id=opt_out") == std::string::npos && body.find("id=path_worktodo") != std::string::npos &&
               body.find("'-worktodo'") == std::string::npos && body.find("'-kernelpath'") == std::string::npos,
           "page shows paths read-only and generates no path options");
+    // The current worktodo is shown separately: Append & Run must not post the whole file back.
+    check(body.find("id=wtcur") != std::string::npos && body.find("$('#wt').value=t") == std::string::npos,
+          "page does not preload the worktodo into the append box");
+    if (const char* dump = std::getenv("GUI_PAGE_DUMP")) std::ofstream(dump) << body;
 
     // append-worktodo
     auto nSubmitted = [&]() { std::lock_guard<std::mutex> lk(m); return submitted.size(); };
