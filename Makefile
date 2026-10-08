@@ -146,6 +146,9 @@ test-pm1-bounds:
 test-pm1-vtrace-small-b1:
 	python3 tests/pm1_vtrace_small_b1_test.py
 
+test-prime95-s1-checksum:
+	bash tests/test_prime95_s1_checksum.sh
+
 test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py

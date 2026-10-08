@@ -783,12 +783,27 @@ static inline bool read_prime95_s1_to_bytes(const std::string& path,
     if (!read_i32(in, flag1))   return false;
     if (!read_i32(in, nWords))  return false;
 
+    if (magic != 830093643u) {
+        std::cerr << "Error: " << path << " is not a Prime95 save file (bad magic number)\n";
+        return false;
+    }
     if (nWords < 0) {
         std::cerr << "Error: negative word count in Prime95 S1 file " << path << "\n";
         return false;
     }
 
     size_t nBytes = static_cast<size_t>(nWords) * 4u;
+    {
+        // Do not allocate for a damaged word count larger than the file.
+        const std::streamoff here = in.tellg();
+        in.seekg(0, std::ios::end);
+        const std::streamoff fileEnd = in.tellg();
+        in.seekg(here);
+        if (here < 0 || fileEnd < here || (uint64_t)(fileEnd - here) < (uint64_t)nBytes) {
+            std::cerr << "Error: truncated Prime95 S1 data in " << path << "\n";
+            return false;
+        }
+    }
     data_out.assign(nBytes, 0);
 
     in.read(reinterpret_cast<char*>(data_out.data()),
@@ -805,9 +820,11 @@ static inline bool read_prime95_s1_to_bytes(const std::string& path,
     // Vérifier le checksum (même formule que lors de l’écriture)
     uint32_t chk_calc = checksum_prime95_s1(B1_out, data_out);
     if (chk_calc != chk_file) {
-        std::cerr << "Warning: checksum mismatch in Prime95 S1 file " << path
-                  << " (file=" << chk_file << ", computed=" << chk_calc << ")\n";
-        // On continue quand même : les données sont probablement correctes.
+        // A damaged residue must not seed an extension or a stage-2 resume.
+        std::cerr << "Error: checksum mismatch in Prime95 S1 file " << path
+                  << " (file=" << chk_file << ", computed=" << chk_calc << "); ignoring it\n";
+        data_out.clear();
+        return false;
     }
 
     return true;
