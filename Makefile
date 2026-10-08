@@ -409,3 +409,16 @@ test-gm-tf-worktodo-queue: all
 .PHONY: test-ecm-te-sigma-checkpoint
 test-ecm-te-sigma-checkpoint:
 	python3 tests/ecm_te_sigma_checkpoint_source_test.py
+
+.PHONY: test-ecm-known-factors
+test-ecm-known-factors:
+	mkdir -p /tmp/prmers-ecm-known-factors-test
+	g++ -std=c++20 -Wall -Wextra -Iinclude tests/ecm_known_factors_test.cpp -o /tmp/prmers-ecm-known-factors-test/ecm_known_factors_test -lgmpxx -lgmp
+	/tmp/prmers-ecm-known-factors-test/ecm_known_factors_test
+
+.PHONY: test-ecm-random-words
+test-ecm-random-words: ; bash tests/ecm_random_words_test.sh
+
+.PHONY: test-ecm-resume-seed-factor
+test-ecm-resume-seed-factor: all
+	bash tests/ecm_resume_seed_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
