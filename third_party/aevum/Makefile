@@ -366,3 +366,17 @@ test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
 $(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# PR132 cumulative semantic integration
+STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
+.PHONY: test-pr132-small-items test-stats-slot
+test-host: test-pr132-small-items
+test-pr132-small-items: test-stats-slot
+	python3 tests/kernel_config_guards_test.py
+	python3 tests/carryfused_weight_shift_modulus_test.py
+	python3 tests/carry_gf61_seed_overflow_test.py
+	python3 tests/prp_middle1_type_gate_test.py
+test-stats-slot: $(STATS_SLOT_TEST)
+	$(STATS_SLOT_TEST)
+$(STATS_SLOT_TEST): tests/stats_slot_test.cpp src/StatsSlot.h src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/stats_slot_test.cpp -o $@
