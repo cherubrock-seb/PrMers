@@ -59,27 +59,9 @@ ProofSetMarin::ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector
   if(exponent%2!=0){
       assert(E & 1); // E is supposed to be prime
     
-    // Calculate checkpoint points using binary tree structure
-    std::vector<uint32_t> spans;
-    for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
-      spans.push_back(span); 
-    }
-
-    points.push_back(0);
-    for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
-      for (uint32_t i = 0, end = static_cast<uint32_t>(points.size()); i < end; ++i) {
-        points.push_back(points[i] + span);
-      }
-    }
-
+    points = proofPoints(E, power);
     assert(points.size() == (1u << power));
-    assert(points.front() == 0);
-
-    points.front() = E;
-    std::sort(points.begin(), points.end());
-
-    assert(points.size() == (1u << power));
-    assert(points.back() == E);
+    assert(points.front() > 0 && points.back() == E);
 
     points.push_back(uint32_t(-1)); // guard element
 
@@ -87,6 +69,28 @@ ProofSetMarin::ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector
     for (uint32_t p : points) {
       assert(p > E || isInPoints(E, power, p));
     }
+  }
+}
+
+std::vector<uint32_t> ProofSetMarin::proofPoints(uint32_t E, uint32_t power) {
+  // Checkpoint points using the binary tree structure.
+  std::vector<uint32_t> pts;
+  pts.push_back(0);
+  for (uint32_t p = 0, span = (E + 1) / 2; p < power; ++p, span = (span + 1) / 2) {
+    for (uint32_t i = 0, end = static_cast<uint32_t>(pts.size()); i < end; ++i) {
+      pts.push_back(pts[i] + span);
+    }
+  }
+  pts.front() = E;
+  std::sort(pts.begin(), pts.end());
+  return pts;
+}
+
+void ProofSetMarin::setPower(uint32_t newPower) {
+  power = newPower;
+  if (E % 2 != 0) {
+    points = proofPoints(E, power);
+    points.push_back(uint32_t(-1)); // guard element
   }
 }
 
@@ -205,27 +209,14 @@ std::string ProofSetMarin::residuesKeptMessage(uint32_t E, ResidueAction action)
          "). They take several GB; delete that directory by hand when you no longer need them.";
 }
 
-bool ProofSetMarin::isValidTo(uint32_t limitK) const {
-  // Check if we have all required checkpoint files up to limitK
-  for (uint32_t point : points) {
-    if (point > limitK) break;
-    if (point < E && !fileExists(point)) {
-      return false;
-    }
-  }
-  return true;
+bool ProofSetMarin::fileExists(uint32_t E, uint32_t k) {
+  // CRC32 followed by ceil(E/32) 32-bit words.
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(proofPath(E) / std::to_string(k), ec);
+  return !ec && size == sizeof(uint32_t) * (1u + (static_cast<uint64_t>(E) + 31) / 32);
 }
 
-bool ProofSetMarin::fileExists(uint32_t k) const {
-  auto filePath = proofPath(E) / std::to_string(k);
-  return std::filesystem::exists(filePath);
-}
-
-std::vector<uint32_t> ProofSetMarin::load(uint32_t iter) const {
-  if (!shouldCheckpoint(iter)) {
-    throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
-  }
-
+std::vector<uint32_t> ProofSetMarin::loadResidue(uint32_t E, uint32_t iter) {
   auto filePath = proofPath(E) / std::to_string(iter);
   std::ifstream file(filePath, std::ios::binary);
   if (!file) {
@@ -256,6 +247,55 @@ std::vector<uint32_t> ProofSetMarin::load(uint32_t iter) const {
   }
 
   return words;
+}
+
+std::vector<uint32_t> ProofSetMarin::load(uint32_t iter) const {
+  if (!shouldCheckpoint(iter)) {
+    throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
+  }
+  return loadResidue(E, iter);
+}
+
+bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK) {
+  std::map<uint32_t, bool> checked;
+  return canDo(E, power, currentK, checked);
+}
+
+bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK,
+                          std::map<uint32_t, bool>& checked) {
+  // Every residue below E from iterations up to and including currentK must
+  // be there (a residue at currentK itself is written before the test can be
+  // saved at currentK), with the right size and a matching CRC: the proof
+  // reads all of them, so one damaged residue makes the proof impossible.
+  // This reads each of them once when a test is resumed (power 10 at the
+  // wavefront: about 1000 files and up to the full proof disk usage).
+  for (uint32_t point : proofPoints(E, power)) {
+    if (point >= E || point > currentK) break;
+    auto it = checked.find(point);
+    if (it == checked.end()) {
+      bool ok = fileExists(E, point);
+      if (ok) {
+        try {
+          loadResidue(E, point);
+        } catch (const std::exception&) {
+          ok = false;
+        }
+      }
+      it = checked.emplace(point, ok).first;
+    }
+    if (!it->second) return false;
+  }
+  return true;
+}
+
+uint32_t ProofSetMarin::effectivePower(uint32_t E, uint32_t power, uint32_t currentK) {
+  // The points of a lower power are a subset of those of a higher one, so
+  // each residue is checked at most once across the powers tried.
+  std::map<uint32_t, bool> checked;
+  for (uint32_t p = power; p > 0; --p) {
+    if (canDo(E, p, currentK, checked)) return p;
+  }
+  return 0;
 }
 
 ProofMarin ProofSetMarin::computeProof() const {

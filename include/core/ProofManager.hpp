@@ -43,6 +43,9 @@ public:
                  const std::vector<std::string>& knownFactors = {});
     void checkpoint(cl_mem buf, uint32_t iter);  
     void checkpointMarin(std::vector<uint64_t> host, uint32_t iter);
+    // Lower the power residues are saved for (the points of a lower power are
+    // a subset of those of the original power).
+    void setPower(uint32_t newPower) { proofSet_.power = newPower; }
     std::filesystem::path proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify=true) const;
 
 private:

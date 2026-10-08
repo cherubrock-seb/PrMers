@@ -273,6 +273,29 @@ int App::runPrpOrLlMarin()
         eng->set(R0, (options.mode == "prp") ? 3 : 4);
     }
 
+    // A test resumed at iteration ri needs every proof residue of the points
+    // before ri. If some are missing (or damaged), lower the proof power to
+    // the highest one the residues on disk still allow, or drop the proof,
+    // now and not after the whole test has run.
+    if (r == 0 && ri > 0 && options.mode == "prp" && options.proof) {
+        const uint32_t wanted = proofManagerMarin.power();
+        const uint32_t usable = ProofSetMarin::effectivePower(options.exponent, wanted, static_cast<uint32_t>(ri));
+        if (usable != wanted) {
+            std::ostringstream oss;
+            if (usable == 0) {
+                oss << "Proof residues before iteration " << ri << " are missing or damaged: proof generation disabled for this test.";
+                options.proof = false;
+                options.proofFile.clear();
+            } else {
+                oss << "Proof residues before iteration " << ri << " are missing or damaged: proof of power " << usable << " (instead of " << wanted << ").";
+            }
+            std::cout << oss.str() << std::endl;
+            if (guiServer_) guiServer_->appendLog(oss.str());
+            proofManagerMarin.setPower(usable);
+            options.proofPower = usable;
+        }
+    }
+
     // R4/R5 hold the last verified state.  A fresh start, or a file that does not record
     // goodIter, has no better candidate than the state just loaded.  A version 4 file keeps
     // its own R4/R5 and goodIter: R0/R1 may have been saved after the last full check, so the
