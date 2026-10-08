@@ -220,6 +220,11 @@ test-self-exe-restart:
 test-legacy-small-items:
 	bash tests/test_legacy_small_items.sh
 
+.PHONY: test-legacy-transform-size
+
+test-legacy-transform-size:
+	bash tests/test_legacy_transform_size.sh
+
 .PHONY: test-legacy-check-equal
 
 test-legacy-check-equal:
