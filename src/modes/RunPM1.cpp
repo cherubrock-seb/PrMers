@@ -1288,16 +1288,7 @@ int App::runPM1() {
                       << " and saved to worktodo_save.txt\n";
                       guiServer_->appendLog(oss.str());
             }
-            std::ifstream f(options.worktodo_path);
-            std::string    l;
-            bool           more = false;
-            while (std::getline(f, l)) {
-                if (!l.empty() && l[0] != '#') {
-                    more = true;
-                    break;
-                }
-            }
-            f.close();
+            bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
 
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
@@ -7189,9 +7180,7 @@ int App::runPM1Marin() {
                 if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
-                    std::ifstream f(options.worktodo_path);
-                    std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
-                    f.close();
+                    bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
                     if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
                     else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
                 } else {
@@ -7659,9 +7648,7 @@ int App::runPM1Marin() {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
-            std::ifstream f(options.worktodo_path);
-            std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
-            f.close();
+            bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
             if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
             else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
         } else {
@@ -8198,9 +8185,7 @@ int App::runPM1Stage3Marin() {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
-                std::ifstream f(options.worktodo_path);
-                std::string l; bool more = false; while (std::getline(f, l)) { if (!l.empty() && l[0] != '#') { more = true; break; } }
-                f.close();
+                bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
                 if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
                 else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
             } else {
@@ -8798,13 +8783,7 @@ int App::runPM1Stage4Marin() {
                 guiServer_->appendLog(oss.str());
             }
 
-            std::ifstream f(options.worktodo_path);
-            std::string l;
-            bool more = false;
-            while (std::getline(f, l)) {
-                if (!l.empty() && l[0] != '#') { more = true; break; }
-            }
-            f.close();
+            bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
 
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";

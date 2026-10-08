@@ -329,16 +329,7 @@ int App::runECMMarin()
                         << " and saved to worktodo_save.txt\n";
                     guiServer_->appendLog(oss.str());
                 }
-                std::ifstream f(options.worktodo_path);
-                std::string    l;
-                bool           more = false;
-                while (std::getline(f, l)) {
-                    if (!l.empty() && l[0] != '#') {
-                        more = true;
-                        break;
-                    }
-                }
-                f.close();
+                bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
 
                 if (more) {
                     std::cout << "Restarting for next entry in worktodo.txt\n";

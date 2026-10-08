@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cmath>
+#include <filesystem>
+#include <system_error>
 
 namespace io {
 
@@ -96,10 +98,41 @@ return consumed == token.size() &&
 
 }
 
+// An ostream that discards everything, for the quiet (dry run) mode of parse().
+static std::ostream& nullStream() {
+    struct NullBuf : std::streambuf {
+        int overflow(int c) override { return c; }
+    };
+    static NullBuf buf;
+    static std::ostream stream(&buf);
+    return stream;
+}
+
+// Keywords parse() can turn into an entry (upper case).
+static bool isSupportedKeyword(const std::string& keywordUpper) {
+    return keywordUpper == "PRP" || keywordUpper == "PRPDC"
+        || keywordUpper == "TEST" || keywordUpper == "DOUBLECHECK"
+        || keywordUpper == "PFACTOR" || keywordUpper == "PMINUS1"
+        || keywordUpper == "ECM2" || keywordUpper == "GMPRP"
+        || keywordUpper == "GMPROTH" || keywordUpper == "GMTEST"
+        || keywordUpper == "GMPMINUS1" || keywordUpper == "GMPM1"
+        || keywordUpper == "GMECM"
+        || keywordUpper == "GMCHAIN" || keywordUpper == "GMCAMPAIGN";
+}
+
+bool WorktodoParser::hasPendingEntry(const std::string& filename) {
+    WorktodoParser parser(filename);
+    parser.quiet_ = true;
+    return parser.parse().has_value();
+}
+
 std::optional<WorktodoEntry> WorktodoParser::parse() {
+    // hasPendingEntry() runs parse() as a dry run: same decisions, no messages.
+    std::ostream& logOut = quiet_ ? nullStream() : std::cout;
+    std::ostream& logErr = quiet_ ? nullStream() : std::cerr;
     std::ifstream file(filename_);
     if (!file.is_open()) {
-        std::cerr << "Cannot open " << filename_ << "\n";
+        logErr << "Cannot open " << filename_ << "\n";
         return std::nullopt;
     }
 
@@ -129,8 +162,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         bool isGMPM1 = (keywordUpper == "GMPMINUS1" || keywordUpper == "GMPM1");
         bool isGMECM = (keywordUpper == "GMECM");
         bool isGMCHAIN = (keywordUpper == "GMCHAIN" || keywordUpper == "GMCAMPAIGN");
-        if (!(isPRP || isLL || isPF || isPM1 || isECM2 ||
-              isGMPRP || isGMPROTH || isGMPM1 || isGMECM || isGMCHAIN)) continue;
+        if (!isSupportedKeyword(keywordUpper)) continue;
 
         auto parts = splitRespectingQuotes(top[1], ',');
         if (!parts.empty() && (parts[0].empty() || parts[0] == "N/A"))
@@ -174,14 +206,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
                     if (!spm1.empty() && !isQuoted(spm1)) entry.pminus1ed = (std::stoul(spm1) != 0);
                 }
 
-                std::cout << "Loaded entry: " << (entry.doubleCheck ? "DoubleCheck" : "Test")
+                logOut << "Loaded entry: " << (entry.doubleCheck ? "DoubleCheck" : "Test")
                           << " exponent=" << entry.exponent
                           << (aid.empty() ? "" : " (AID=" + aid + ")")
                           << "\n";
                 if (entry.sieveDepth > 0.0) {
-                    std::cout << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
+                    logOut << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
                 }
-                std::cout << "P-1 pretest flag: " << (entry.pminus1ed ? 1 : 0) << "\n";
+                logOut << "P-1 pretest flag: " << (entry.pminus1ed ? 1 : 0) << "\n";
                 return entry;
             } catch (...) {
                 continue;
@@ -285,17 +317,17 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
 
                 const char* kind = isGMPRP ? "GMPRP" : isGMPROTH ? "GMPROTH" :
                                    isGMPM1 ? "GMPMINUS1" : isGMCHAIN ? "GMCHAIN" : "GMECM";
-                std::cout << "Loaded entry: " << kind << " exponent=" << entry.exponent;
+                logOut << "Loaded entry: " << kind << " exponent=" << entry.exponent;
                 if (isGMPM1 || isGMECM || isGMCHAIN)
-                    std::cout << " B1=" << entry.B1 << " B2=" << entry.B2;
-                if (isGMECM) std::cout << " curves=" << entry.curves;
-                if (isGMCHAIN) std::cout << " ecm=" << entry.gmEcmB1 << "/" << entry.gmEcmB2
+                    logOut << " B1=" << entry.B1 << " B2=" << entry.B2;
+                if (isGMECM) logOut << " curves=" << entry.curves;
+                if (isGMCHAIN) logOut << " ecm=" << entry.gmEcmB1 << "/" << entry.gmEcmB2
                                           << " curves=" << entry.gmEcmCurves
                                            << " finish=" << (entry.gmPipelineProth ? "proth" : "factor");
-                std::cout << " family=" << entry.gmFamily << " sieve=" << entry.gmSieveLimit;
+                logOut << " family=" << entry.gmFamily << " sieve=" << entry.gmSieveLimit;
                 if (entry.gmFactorChunkBits != 0)
-                    std::cout << " chunk_bits=" << entry.gmFactorChunkBits;
-                std::cout << "\n";
+                    logOut << " chunk_bits=" << entry.gmFactorChunkBits;
+                logOut << "\n";
                 return entry;
             }
 
@@ -321,7 +353,7 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
 double tfBits = 0.0, testsSaved = 0.0;
 if (!parsePfactorNonnegativeFinite(parts[4], tfBits) ||
 !parsePfactorNonnegativeFinite(parts[5], testsSaved)) {
-std::cerr << "Skipping malformed Pfactor line "
+logErr << "Skipping malformed Pfactor line "
 << "(how_far_factored and tests_saved must be complete finite non-negative numbers): "
 << line << "\n";
 continue;
@@ -335,7 +367,7 @@ if (std::isfinite(v) && v > 0.0) stage2Cost = v;
             const math::Pm1Bounds bounds =
                 math::choosePm1Bounds(exp, tfBits, testsSaved, stage2Cost);
 if (bounds.B1 == 0) {
-std::cout << "Pfactor: no economically bounded P-1 work fits this assignment; "
+logOut << "Pfactor: no economically bounded P-1 work fits this assignment; "
 << "leaving it pending.\n";
 continue;
 }
@@ -348,14 +380,14 @@ continue;
             std::snprintf(pct, sizeof(pct), "%.2f",
                           bounds.probability.total() * 100.0);
 
-            std::cout << "Pfactor: trial factored to 2^" << tfBits
+            logOut << "Pfactor: trial factored to 2^" << tfBits
                       << ", " << testsSaved
                       << " test(s) saved -> chose B1=" << bounds.B1
                       << " B2=" << bounds.B2
                       << " (estimated success " << pct << "%)\n";
 
             if (bounds.gain <= 0.0) {
-                std::cout << "Pfactor: no P-1 bounds pay for themselves here; "
+                logOut << "Pfactor: no P-1 bounds pay for themselves here; "
                           << "using a fallback bounded by the maximum work the requested "
                           << "primality tests could save.\n";
             }
@@ -377,16 +409,16 @@ continue;
                     if (!kf.empty()) entry.knownFactors = std::move(kf);
                 }
 
-                std::cout << "Loaded entry: PFactor exponent=" << entry.exponent
+                logOut << "Loaded entry: PFactor exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
                 if (!entry.knownFactors.empty()) {
-                    std::cout << "Known factors: ";
+                    logOut << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
-                        if (i) std::cout << ", ";
-                        std::cout << entry.knownFactors[i];
+                        if (i) logOut << ", ";
+                        logOut << entry.knownFactors[i];
                     }
-                    std::cout << "\n";
+                    logOut << "\n";
                 }
                 return entry;
             }
@@ -437,22 +469,22 @@ continue;
                     if (!factors.empty()) entry.knownFactors = std::move(factors);
                 }
 
-                std::cout << "Loaded entry: Pminus1 exponent=" << entry.exponent
+                logOut << "Loaded entry: Pminus1 exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
                 if (entry.sieveDepth > 0.0) {
-                    std::cout << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
+                    logOut << "Trial factoring completed to: 2^" << entry.sieveDepth << "\n";
                 }
                 if (entry.B2Start > 0) {
-                    std::cout << "Stage 2 start bound: " << entry.B2Start << "\n";
+                    logOut << "Stage 2 start bound: " << entry.B2Start << "\n";
                 }
                 if (!entry.knownFactors.empty()) {
-                    std::cout << "Known factors: ";
+                    logOut << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
-                        if (i) std::cout << ", ";
-                        std::cout << entry.knownFactors[i];
+                        if (i) logOut << ", ";
+                        logOut << entry.knownFactors[i];
                     }
-                    std::cout << "\n";
+                    logOut << "\n";
                 }
                 return entry;
             }
@@ -497,7 +529,7 @@ continue;
                         }
                     }
                     if (!kf.empty()) {
-                        if (math::Cofactor::validateFactors(exp, kf)) {
+                        if (math::Cofactor::validateFactors(exp, kf, !quiet_)) {
                             entry.knownFactors = std::move(kf);
                         } else {
                             continue;
@@ -505,17 +537,17 @@ continue;
                     }
                 }
 
-                std::cout << "Loaded entry: ECM2 exponent=" << entry.exponent
+                logOut << "Loaded entry: ECM2 exponent=" << entry.exponent
                           << " B1=" << entry.B1 << " B2=" << entry.B2
                           << " curves=" << entry.curves
                           << (aid.empty() ? "" : " (AID=" + aid + ")") << "\n";
                 if (!entry.knownFactors.empty()) {
-                    std::cout << "Known factors: ";
+                    logOut << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
-                        if (i) std::cout << ", ";
-                        std::cout << entry.knownFactors[i];
+                        if (i) logOut << ", ";
+                        logOut << entry.knownFactors[i];
                     }
-                    std::cout << "\n";
+                    logOut << "\n";
                 }
                 return entry;
             }
@@ -535,7 +567,7 @@ continue;
             entry.exponent  = exp;
             entry.rawLine   = line;
             entry.aid       = aid;
-            std::cout << "Loaded entry: " << (entry.prpTest ? "PRP" : "LL")
+            logOut << "Loaded entry: " << (entry.prpTest ? "PRP" : "LL")
                       << " exponent=" << entry.exponent
                       << (aid.empty() ? "" : " (AID=" + aid + ")")
                       << "\n";
@@ -560,15 +592,15 @@ continue;
 
             if (idx < parts.size() && isQuoted(parts.back()) && isPRP) {
                 auto factors = parseFactors(parts.back());
-                if (!factors.empty() && math::Cofactor::validateFactors(exp, factors)) {
+                if (!factors.empty() && math::Cofactor::validateFactors(exp, factors, !quiet_)) {
                     entry.knownFactors = std::move(factors);
                     entry.residueType = static_cast<uint32_t>((residueType != 0) ? residueType : 5);
-                    std::cout << "Known factors: ";
+                    logOut << "Known factors: ";
                     for (size_t i = 0; i < entry.knownFactors.size(); ++i) {
-                        if (i > 0) std::cout << ", ";
-                        std::cout << entry.knownFactors[i];
+                        if (i > 0) logOut << ", ";
+                        logOut << entry.knownFactors[i];
                     }
-                    std::cout << std::endl;
+                    logOut << std::endl;
                 } else {
                     continue;
                 }
@@ -577,8 +609,8 @@ continue;
             }
 
             if (entry.llTest && !entry.knownFactors.empty()) {
-                std::cerr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
-                std::cerr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;
+                logErr << "Warning: Lucas-Lehmer test cannot be used on Mersenne cofactors." << std::endl;
+                logErr << "Warning: Use PRP test for Mersenne cofactors instead." << std::endl;
                 continue;
             }
             return entry;
@@ -588,7 +620,7 @@ continue;
         }
     }
 
-    std::cerr << "No valid entry found in " << filename_ << "\n";
+    logErr << "No valid entry found in " << filename_ << "\n";
     return std::nullopt;
 }
 
@@ -620,8 +652,13 @@ bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
         std::remove((filename_ + ".tmp").c_str());
         return false;
     }
-    if (std::remove(filename_.c_str()) != 0 ||
-        std::rename((filename_ + ".tmp").c_str(), filename_.c_str()) != 0) {
+    // Replace in one step: filesystem::rename overwrites the destination
+    // (atomically on POSIX), so a failure leaves the original worktodo intact
+    // instead of having already deleted it.
+    std::error_code ec;
+    std::filesystem::rename(filename_ + ".tmp", filename_, ec);
+    if (ec) {
+        std::remove((filename_ + ".tmp").c_str());
         return false;
     }
     return true;

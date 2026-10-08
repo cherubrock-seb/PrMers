@@ -27,6 +27,7 @@
 #include <string>
 #include <iostream>
 #include <cstdarg>
+#include <cinttypes>
 
 namespace core {
 
@@ -37,7 +38,7 @@ Logger::Logger(const std::string& logFile)
 {}
 
 void Logger::logStart(const io::CliOptions& options) {
-    logmsg("=== Début : exponent=%u, mode=%s\n",
+    logmsg("=== Début : exponent=%" PRIu64 ", mode=%s\n",
            options.exponent,
            options.mode.c_str());
 }
