@@ -1,5 +1,6 @@
 // io/WorktodoParser.hpp
 #pragma once
+#include <mutex>
 #include <optional>
 #include <string>
 #include <cstdint>
@@ -59,6 +60,10 @@ public:
     // fields, a Pfactor with no bounded P-1 work, invalid known factors, glued entries) do not count,
     // so "restart for the next entry" is only taken when the restarted process will find one.
     static bool hasPendingEntry(const std::string& filename);
+    // Take the lock appendLine()/removeProcessedLine() hold while they write. restart_self holds it
+    // through the exec, so a GUI append on another thread is never cut off half-written (a truncated
+    // line can parse as a different exponent). The lock is never released if the restart succeeds.
+    static std::unique_lock<std::mutex> lockFileWrites();
 
 private:
     std::string filename_;

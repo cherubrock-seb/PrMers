@@ -67,6 +67,8 @@
 #include <sstream>
 #include <tuple>
 #include <atomic>
+#include <mutex>
+#include "core/StopRestartGate.hpp"
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -715,7 +717,8 @@ int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string
 }
 
 static volatile sig_atomic_t prmers_bench_stop = 0;
-static void prmers_bench_sigint(int) { prmers_bench_stop = 1; }
+// Also a Stop for the GUI idle loop that follows, and for a restart already committed.
+static void prmers_bench_sigint(int) { prmers_bench_stop = 1; core::stop_or_exit(); }
 
 static std::string fmt_dhms(double s) {
     if (s < 0) s = 0;
@@ -944,10 +947,16 @@ int App::runGpuBenchmarkMarin() {
 }
 
 namespace {
-  std::atomic<bool> g_stop{false};
+  // The stop flag and the GUI "Append & Run" pending flag live in core::g_stop_restart_gate, which
+  // orders a Stop against a restart (see core/StopRestartGate.hpp). The append handler (HTTP worker
+  // thread) only marks the entry pending; it never interrupts a running test: the running mode picks
+  // the line up when its entry finishes, and the idle loops in App::run() (main thread) start it when
+  // nothing is running.
+  bool stop_requested() noexcept { return core::g_stop_restart_gate.stopRequested(); }
+  // Signal handler and the GUI's Stop. Async-signal-safe.
   void handle_signal(int) noexcept {
-    g_stop.store(true, std::memory_order_relaxed);
     core::algo::interrupted.store(true, std::memory_order_relaxed);
+    core::stop_or_exit();
   }
 }
 
@@ -989,6 +998,23 @@ static void install_signal_handlers() {
 
 
 
+// Called from the main thread while the GUI is idle: if "Append & Run" added a line since the last
+// check, restart so the new entry starts. Nothing is running at this point, so no work is lost.
+// A Stop wins over the restart at every step: before the claim it makes the claim fail; after it,
+// restart_self's commit fails (and restart_self returns); once committed, the Stop ends the process
+// before the relaunch (core::stop_or_exit). The appended line stays in worktodo in every case.
+static void gui_restart_for_appended_entry(const std::shared_ptr<ui::WebGuiServer>& gui, int argc, char** argv) {
+    if (core::g_stop_restart_gate.claimAppendedEntry() != core::StopRestartGate::Claim::Restart) return;
+    std::cout << "Starting appended worktodo entry" << std::endl;
+    if (gui) {
+        gui->appendLog("Starting appended worktodo entry");
+        gui->stop();
+    }
+    restart_self(argc, argv);
+    // Only reached when a Stop came first; the idle loop then ends.
+    std::cout << "The appended entry stays in worktodo for the next start." << std::endl;
+}
+
 static bool file_non_empty(const std::string& p) {
     std::ifstream f(p, std::ios::binary);
     if (!f.is_open()) return false;
@@ -1019,14 +1045,16 @@ int App::run() {
         cfg.results_path = (std::filesystem::path(options.save_path.empty() ? "." : options.save_path) / "results.txt").string();
         static std::atomic<bool> gui_alive{true};
         auto submitFn = [this](const std::string& line){
+            // Runs on the HTTP worker thread: only append. Restarting from here would kill the
+            // running test without a checkpoint (and repeated requests would keep restarting it).
             if (!io::WorktodoParser::appendLine(this->options.worktodo_path, line)) {
                 std::cerr << "Failed to append to " << this->options.worktodo_path << "\n";
                 if (guiServer_) guiServer_->appendLog("Failed to append to " + this->options.worktodo_path);
                 return;
             }
-            std::cout << "worktodo appended\n";
-            if (guiServer_) guiServer_->stop();
-            restart_self(argc_, argv_);
+            std::cout << "worktodo appended; it starts after the current entry finishes (immediately if idle)\n";
+            if (guiServer_) guiServer_->appendLog("worktodo appended; it starts after the current entry finishes (immediately if idle)");
+            core::g_stop_restart_gate.markAppendPending();
         };
         auto stopFn = [&](){
             handle_signal(SIGINT);
@@ -1090,7 +1118,10 @@ int App::run() {
                 guiServer_->appendLog("No runnable entry in " + cfg.worktodo_path + "; waiting for a new entry.");
             }
             guiServer_->setStatus("Idle");
-            while (!g_stop && gui_alive) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            while (!stop_requested() && gui_alive) {
+                gui_restart_for_appended_entry(guiServer_, argc_, argv_);
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
             if (guiServer_) guiServer_->stop();
             return 0;
         }
@@ -1413,8 +1444,13 @@ int App::run() {
             guiServer_->setStatus(ran ? "Completed" : "Idle");
         }
         install_signal_handlers();
-        g_stop = 0;
-        while (!g_stop) std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        // Idle until Ctrl-C / the GUI's Stop. A stop that already ended the run must not be cleared:
+        // resetting the stop flag here made the process keep idling ("Completed") until a second signal, and
+        // let a pending "Append & Run" restart the queue the user had just stopped.
+        while (!stop_requested()) {
+            gui_restart_for_appended_entry(guiServer_, argc_, argv_);
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
         if (guiServer_) guiServer_->stop();
     }
 

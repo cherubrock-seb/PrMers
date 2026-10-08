@@ -22,9 +22,14 @@ namespace io {
 
 // Serialises every in-process rewrite of a worktodo file: removeProcessedLine() (main thread) reads the
 // file and renames a filtered copy over it, which would drop a line appended by the GUI thread in between.
+// Never destroyed: restart_self may still hold it when the process exits (Windows restarts with exit()).
 static std::mutex& worktodoFileMutex() {
-    static std::mutex m;
-    return m;
+    static std::mutex* m = new std::mutex;
+    return *m;
+}
+
+std::unique_lock<std::mutex> WorktodoParser::lockFileWrites() {
+    return std::unique_lock<std::mutex>(worktodoFileMutex());
 }
 
 WorktodoParser::WorktodoParser(const std::string& filename)

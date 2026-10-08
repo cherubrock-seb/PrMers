@@ -13,6 +13,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <atomic>
+#include <chrono>
 
 namespace {
 
@@ -133,6 +135,33 @@ int main() {
             ++failures;
         } else {
             std::cout << "PASS concurrent append and remove keep every appended line\n";
+        }
+    }
+
+    // restart_self holds lockFileWrites() through the exec: a GUI append must wait for it instead of
+    // being cut off half-written by the exec (a truncated line can parse as a different exponent).
+    {
+        write("PRP=1,2,127,-1\n");
+        std::atomic<bool> done{false};
+        std::thread appender;
+        {
+            auto held = io::WorktodoParser::lockFileWrites();
+            appender = std::thread([&] {
+                io::WorktodoParser::appendLine(kPath, "PRP=1,2,521,-1");
+                done = true;
+            });
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            if (done || slurp() != "PRP=1,2,127,-1\n") {
+                std::cerr << "FAIL append did not wait for lockFileWrites()\n";
+                ++failures;
+            }
+        }
+        appender.join();
+        if (slurp() != "PRP=1,2,127,-1\nPRP=1,2,521,-1\n") {
+            std::cerr << "FAIL append after lockFileWrites() released: " << slurp() << "\n";
+            ++failures;
+        } else {
+            std::cout << "PASS append waits while a restart holds the worktodo lock\n";
         }
     }
 
