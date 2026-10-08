@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -289,6 +290,52 @@ static void testHttp() {
     server.stop();
     std::remove(cfgPath.c_str());
     std::remove("gui_paths_worktodo.txt");
+
+    // Settings file in a read-only directory: the save fails cleanly and the old file is intact.
+    namespace fs = std::filesystem;
+    fs::create_directory("ro");
+    std::ofstream("ro/settings.cfg") << "-f /keep\n";
+    fs::permissions("ro", fs::perms::owner_read | fs::perms::owner_exec);
+    {
+        ui::WebGuiConfig c2 = cfg;
+        c2.config_path = "ro/settings.cfg";
+        ui::WebGuiServer s2(c2, [](const std::string&) {});
+        s2.start();
+        const std::string u2 = s2.url();
+        g_port = std::stoi(u2.substr(u2.rfind(':') + 1));
+        g_auth = "X-PrMers-Token: " + u2.substr(u2.find("token=") + 6) + "\r\n";
+        const bool writable = ::access("ro", W_OK) == 0;   // root ignores the mode
+        if (!writable) {
+            check(post("/api/save-settings", "-d 1", &body) == 500, "save into a read-only directory reports failure: " + body);
+            check(readAll("ro/settings.cfg") == "-f /keep\n", "old settings file intact after a failed save");
+            check(!fs::exists("ro/settings.cfg.gui-tmp"), "no temporary file left behind");
+        } else {
+            std::cout << "  skip read-only directory case (running with write access to it)\n";
+        }
+        s2.stop();
+    }
+    fs::permissions("ro", fs::perms::owner_all);
+    fs::remove_all("ro");
+
+    // A symlinked settings file: its target is updated and the link kept.
+    std::ofstream("real.cfg") << "-f /keep\n";
+    fs::remove("link.cfg");
+    fs::create_symlink("real.cfg", "link.cfg");
+    {
+        ui::WebGuiConfig c3 = cfg;
+        c3.config_path = "link.cfg";
+        ui::WebGuiServer s3(c3, [](const std::string&) {});
+        s3.start();
+        const std::string u3 = s3.url();
+        g_port = std::stoi(u3.substr(u3.rfind(':') + 1));
+        g_auth = "X-PrMers-Token: " + u3.substr(u3.find("token=") + 6) + "\r\n";
+        check(post("/api/save-settings", "-d 2") == 200 && fs::is_symlink("link.cfg") &&
+                  joined(util::readConfigArgsFromText(readAll("real.cfg")).args) == "-f /keep -d 2",
+              "save through a symlink updates its target");
+        s3.stop();
+    }
+    fs::remove("link.cfg");
+    fs::remove("real.cfg");
 }
 
 int main() {
