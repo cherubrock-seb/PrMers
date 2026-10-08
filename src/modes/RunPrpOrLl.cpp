@@ -174,7 +174,12 @@ int App::runPrpOrLl() {
         // disk still allow, or drop the proof, now and not after the whole
         // test has run.
         if (resumeIter > 0) {
-            const uint32_t usable = ProofSetMarin::effectivePower(options.exponent, proofPower, static_cast<uint32_t>(resumeIter));
+            // Residues an older version left in <E>/proof under the working
+            // directory count too (not under -f): look where they are.
+            adoptLegacyProofResidues(resumeIter);
+            const uint32_t usable = ProofSetMarin::effectivePower(proofManager.location(), options.exponent, proofPower, static_cast<uint32_t>(resumeIter));
+            if (usable == 0)
+                proofManager.releaseLegacyResidues();  // of no use: leave them alone
             if (usable != proofPower) {
                 std::ostringstream oss;
                 if (usable == 0) {
@@ -1152,10 +1157,10 @@ int App::runPrpOrLl() {
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
         // The proof (if any) is written and the test is over: the residues
         // are of no further use and take about 10-18 GB at the wavefront.
-        ProofSetMarin::clearResidues(options.exponent);
+        ProofSetMarin::clearResidues(proofManager.location(), options.exponent);
     } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
         const std::string msg =
-            ProofSetMarin::residuesKeptMessage(options.exponent, residueAction);
+            ProofSetMarin::residuesKeptMessage(proofManager.location(), options.exponent, residueAction);
         std::cerr << msg << std::endl;
         if (guiServer_)
             guiServer_->appendLog(msg);

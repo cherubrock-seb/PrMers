@@ -6,10 +6,11 @@ mgr = (ROOT / "src/core/ProofManagerMarin.cpp").read_text()
 gpu = (ROOT / "src/core/ProofManager.cpp").read_text()
 
 # The CPU fallback writes its proof where the GPU path does: proof/ under the
-# working directory.
-assert 'ensureDir(base / "proof")' in gpu
+# save path (-f), like the checkpoints and results.txt.
+assert 'ensureDir(where.proofDir())' in gpu
 cpu = mgr[mgr.index("ProofManagerMarin::proof() const"):]
-assert 'current_path() / "proof"' in cpu
+assert 'proofSet_.location().proofDir()' in cpu
+assert 'current_path()' not in cpu and 'current_path()' not in gpu
 
 # A proof that does not read back is an error, not a warning, and only a
 # validated file gets its final name.

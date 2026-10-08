@@ -66,8 +66,9 @@ Words Words::fromUint64(const std::vector<uint64_t>& host, uint32_t exponent) {
 }
 
 // ProofSet
-ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
-  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
+ProofSet::ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors,
+                   ProofLocation location)
+  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)}, location_{std::move(location)} {
   // Calculate checkpoint points using binary tree structure
   std::vector<uint32_t> spans;
   for (uint32_t span = (E + 1) / 2; spans.size() < power; span = (span + 1) / 2) { 
@@ -114,10 +115,10 @@ void ProofSet::save(uint32_t iter, const std::vector<uint32_t>& words) {
   // The directory is created with the first residue, so that tests that make
   // no proof (LL, P-1, ECM, -proof 0) leave nothing behind.
   std::error_code dirError;
-  std::filesystem::create_directories(proofPath(E), dirError);
+  std::filesystem::create_directories(location_.residueDir(E), dirError);
 
   // Create the file path for this iteration
-  auto filePath = proofPath(E) / std::to_string(iter);
+  auto filePath = location_.residueWriteFile(E, iter);
   
   // Write the words data to file
   std::ofstream file(filePath, std::ios::binary);
@@ -169,8 +170,20 @@ bool ProofSet::isInPoints(uint32_t E, uint32_t npower, uint32_t k) {
   return false;
 }
 
-std::filesystem::path ProofSet::proofPath(uint32_t E) {
-  return std::filesystem::path(std::to_string(E)) / "proof";
+std::filesystem::path ProofSet::proofPath(const ProofLocation& location, uint32_t E) {
+  return location.residueDir(E);
+}
+
+bool ProofSet::adoptLegacyResidues(uint32_t resumeIter, std::string& note) {
+  note.clear();
+  if (resumeIter == 0) return false;
+  // Every proof point the interrupted run had passed: the ones the resumed
+  // run will not write again. The points are the ones of the power asked for.
+  std::vector<uint32_t> needed;
+  for (uint32_t point : points) {
+    if (point < E && point <= resumeIter) needed.push_back(point);
+  }
+  return location_.adoptLegacy(E, needed, note);
 }
 
 bool ProofSet::isValidTo(uint32_t limitK) const {
@@ -185,8 +198,7 @@ bool ProofSet::isValidTo(uint32_t limitK) const {
 }
 
 bool ProofSet::fileExists(uint32_t k) const {
-  auto filePath = proofPath(E) / std::to_string(k);
-  return std::filesystem::exists(filePath);
+  return std::filesystem::exists(location_.residueFile(E, k));
 }
 
 std::vector<uint32_t> ProofSet::load(uint32_t iter) const {
@@ -194,7 +206,7 @@ std::vector<uint32_t> ProofSet::load(uint32_t iter) const {
     throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
   }
 
-  auto filePath = proofPath(E) / std::to_string(iter);
+  auto filePath = location_.residueFile(E, iter);
   std::ifstream file(filePath, std::ios::binary);
   if (!file) {
     throw std::runtime_error("Cannot open proof checkpoint file: " + filePath.string());
@@ -231,7 +243,7 @@ std::vector<uint32_t> ProofSet::load2(uint32_t iter, uint32_t npower) const {
     throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
   }
 
-  auto filePath = proofPath(E) / std::to_string(iter);
+  auto filePath = location_.residueFile(E, iter);
   std::ifstream file(filePath, std::ios::binary);
   if (!file) {
     throw std::runtime_error("Cannot open proof checkpoint file: " + filePath.string());

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Proof.hpp"
+#include "core/ProofLocation.hpp"
 #include <cstdint>
 #include <vector>
 #include <filesystem>
@@ -61,7 +62,8 @@ public:
     mutable uint32_t power;
     const std::vector<std::string> knownFactors;
 
-    ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {});
+    ProofSet(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {},
+             ProofLocation location = ProofLocation());
 
     bool shouldCheckpoint(uint32_t iter) const;
     bool shouldCheckpoint2(uint32_t iter, uint32_t npower) const;
@@ -72,12 +74,19 @@ public:
     static Words fromUint64(const std::vector<uint64_t>& host, uint32_t exponent);
     static uint32_t bestPower(uint32_t E);
     static bool isInPoints(uint32_t E, uint32_t power, uint32_t k);
-    static std::filesystem::path proofPath(uint32_t E);
+    // Directory of the residues of E under `location` (the save path).
+    static std::filesystem::path proofPath(const ProofLocation& location, uint32_t E);
+    const ProofLocation& location() const { return location_; }
+    // See ProofSetMarin::adoptLegacyResidues.
+    bool adoptLegacyResidues(uint32_t resumeIter, std::string& note);
+    // The residues in the old location cannot be used: do not delete them.
+    void releaseLegacyResidues() { location_.releaseLegacy(); }
     static double diskUsageGB(uint32_t E, uint32_t power);
 
     Proof computeProof(const GpuContext& gpu, uint32_t npower) const;
 
 private:
+    ProofLocation location_;
     mutable std::vector<uint32_t> points;
     bool isValidTo(uint32_t limitK) const;
     bool fileExists(uint32_t k) const;

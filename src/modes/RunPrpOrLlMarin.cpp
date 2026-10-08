@@ -279,7 +279,15 @@ int App::runPrpOrLlMarin()
     // now and not after the whole test has run.
     if (r == 0 && ri > 0 && options.mode == "prp" && options.proof) {
         const uint32_t wanted = proofManagerMarin.power();
-        const uint32_t usable = ProofSetMarin::effectivePower(options.exponent, wanted, static_cast<uint32_t>(ri));
+        // Residues an older version left in <E>/proof under the working
+        // directory count too (not under -f): look where they are.
+        adoptLegacyProofResidues(ri);
+        const uint32_t usable = ProofSetMarin::effectivePower(proofManagerMarin.location(), options.exponent, wanted, static_cast<uint32_t>(ri));
+        if (usable == 0) {
+            // None of them is of use: leave them alone, and do not delete them later.
+            proofManagerMarin.releaseLegacyResidues();
+            proofManager.releaseLegacyResidues();
+        }
         if (usable != wanted) {
             std::ostringstream oss;
             if (usable == 0) {
@@ -1048,10 +1056,12 @@ int App::runPrpOrLlMarin()
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
         // The proof (if any) is written and the plain PRP test is over: the
         // residues are of no further use and can consume many gigabytes.
-        ProofSetMarin::clearResidues(options.exponent);
+        // Both proof backends read from the same place; each clears what it used.
+        ProofSetMarin::clearResidues(proofManagerMarin.location(), options.exponent);
+        ProofSetMarin::clearResidues(proofManager.location(), options.exponent);
     } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
         const std::string msg =
-            ProofSetMarin::residuesKeptMessage(options.exponent, residueAction);
+            ProofSetMarin::residuesKeptMessage(proofManagerMarin.location(), options.exponent, residueAction);
         std::cerr << msg << std::endl;
         if (guiServer_)
             guiServer_->appendLog(msg);

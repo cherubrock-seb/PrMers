@@ -34,6 +34,7 @@ int main() {
     fs::current_path(dir);
 
     constexpr uint32_t E = 191;
+    const core::ProofLocation here; // the working directory: no save path
     const std::vector<uint32_t> residue{1u, 2u, 3u, 4u, 5u, 6u};
 
     // Making the set (every test does) creates no directory; saving a residue
@@ -42,26 +43,26 @@ int main() {
         core::ProofSetMarin set(E, 2);
         expect(!fs::exists(std::to_string(E)), "no directory before the first residue");
         set.save(E, residue);
-        expect(fs::exists(core::ProofSetMarin::proofPath(E) / std::to_string(E)),
+        expect(fs::exists(core::ProofSetMarin::proofPath(here, E) / std::to_string(E)),
                "first residue creates <E>/proof");
         set.save(96, residue);
         expect(set.load(96) == residue, "residue round trip");
     }
 
     // Clearing removes the residues and the exponent directory.
-    core::ProofSetMarin::clearResidues(E);
+    core::ProofSetMarin::clearResidues(here, E);
     expect(!fs::exists(std::to_string(E)), "<E> removed with its residues");
 
     // Clearing when nothing was ever saved is fine.
-    core::ProofSetMarin::clearResidues(E);
+    core::ProofSetMarin::clearResidues(here, E);
 
     // Other content of <E> is not touched.
     {
         core::ProofSetMarin set(E, 2);
         set.save(E, residue);
         std::ofstream(fs::path(std::to_string(E)) / "keep.txt") << "x";
-        core::ProofSetMarin::clearResidues(E);
-        expect(!fs::exists(core::ProofSetMarin::proofPath(E)), "<E>/proof removed");
+        core::ProofSetMarin::clearResidues(here, E);
+        expect(!fs::exists(core::ProofSetMarin::proofPath(here, E)), "<E>/proof removed");
         expect(fs::exists(fs::path(std::to_string(E)) / "keep.txt"),
                "other files in <E> are kept");
     }
@@ -70,8 +71,8 @@ int main() {
     {
         core::ProofSetMarin other(193, 2);
         other.save(193, std::vector<uint32_t>(7, 1u));
-        core::ProofSetMarin::clearResidues(E);
-        expect(fs::exists(core::ProofSetMarin::proofPath(193) / "193"),
+        core::ProofSetMarin::clearResidues(here, E);
+        expect(fs::exists(core::ProofSetMarin::proofPath(here, 193) / "193"),
                "other exponent kept");
     }
 
@@ -106,11 +107,11 @@ int main() {
     {
         using A = core::ProofSetMarin::ResidueAction;
         const std::string proofMsg =
-            core::ProofSetMarin::residuesKeptMessage(E, A::KeepProofFailed);
+            core::ProofSetMarin::residuesKeptMessage(here, E, A::KeepProofFailed);
         const std::string saveMsg =
-            core::ProofSetMarin::residuesKeptMessage(E, A::KeepResultNotSaved);
+            core::ProofSetMarin::residuesKeptMessage(here, E, A::KeepResultNotSaved);
         const std::string where =
-            fs::absolute(core::ProofSetMarin::proofPath(E)).string();
+            fs::absolute(core::ProofSetMarin::proofPath(here, E)).string();
         expect(proofMsg.find(where) != std::string::npos, "message names the directory");
         expect(proofMsg.find("delete that directory by hand") != std::string::npos,
                "message says the residues can be deleted by hand");
@@ -118,11 +119,11 @@ int main() {
         expect(saveMsg.find(where) != std::string::npos, "save message names the directory");
         expect(saveMsg.find("could not be saved") != std::string::npos, "save message gives the reason");
         const std::string entryMsg =
-            core::ProofSetMarin::residuesKeptMessage(E, A::KeepEntryNotRetired);
+            core::ProofSetMarin::residuesKeptMessage(here, E, A::KeepEntryNotRetired);
         expect(entryMsg.find(where) != std::string::npos, "entry message names the directory");
         expect(entryMsg.find("worktodo entry could not be removed") != std::string::npos,
                "entry message gives the reason");
-        expect(core::ProofSetMarin::residuesKeptMessage(E, A::Clear).empty(), "no message when clearing");
+        expect(core::ProofSetMarin::residuesKeptMessage(here, E, A::Clear).empty(), "no message when clearing");
     }
 
     fs::current_path(oldCwd);
