@@ -112,7 +112,7 @@ void printUsage(const char* progName) {
     std::cout << "  -gm | -gm-proth      : Deterministic Gaussian-Mersenne Proth test for G_p = Norm((1+i)^p-1)" << std::endl;
     std::cout << "  -gm-prp              : Base-a Fermat PRP for G_p (fast screening, not a proof)" << std::endl;
     std::cout << "  -gm-family <GM|GQ|BOTH> : Select the Gaussian norm(s); legacy default is GM" << std::endl;
-    std::cout << "  -gm-base <a>         : Small base; deterministic Proth applies to GM, while GQ uses Fermat PRP" << std::endl;
+    std::cout << "  -gm-base <a>         : Small base; deterministic Proth applies to GM, while GQ uses Fermat PRP (Marin rejects a base that would overflow its 64-bit carry for the exponent)" << std::endl;
     std::cout << "  -gm-sieve <limit>    : Search admissible prime factors q=4kp+1 through limit (default 1000000, 0 disables)" << std::endl;
     std::cout << "  -gm-cpu              : GMP reference implementation instead of GPU" << std::endl;
     std::cout << "  -gm-safe             : Full independent block replay check (strong safety, about 2x arithmetic)" << std::endl;

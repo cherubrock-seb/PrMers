@@ -355,6 +355,10 @@ test-marin-exact-sub:
 	bash tests/test_marin_exact_subtraction_device.sh
 	PRMERS_MARIN_COMPACT_WEIGHT_FORCE=1 bash tests/test_marin_exact_subtraction_device.sh $(MARIN_TEST_DEVICE) 13 1159 4423
 
+# Marin multiply-by-a carry bound: needs an OpenCL device (PoCL works).
+test-marin-adc-mul-base:
+	bash tests/test_marin_adc_mul_large_base_device.sh $(MARIN_TEST_DEVICE)
+
 .PHONY: test-wagstaff-decode
 
 test-wagstaff-decode:

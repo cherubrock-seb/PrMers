@@ -558,6 +558,12 @@ int App::runGaussianMersennePM1() {
         return 2;
     }
     if (!s1) return 2;
+    if (base > s1->max_multiplier()) {
+        std::cerr << "-gm-base " << base << " is too large for the " << s1->get_size()
+                  << "-word transform of this exponent; the largest base supported is "
+                  << s1->max_multiplier() << ".\n";
+        return 2;
+    }
     for (std::size_t r = 0; r < 3; ++r) s1->set(r, 1);
     const std::string s1_backend = s1->is_aevum_backend() ? "Aevum" : "Marin";
     std::cout << "  Stage 1 backend: " << s1_backend << "\n";

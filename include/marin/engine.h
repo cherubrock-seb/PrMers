@@ -47,6 +47,9 @@ public:
 	// get transform size
 	virtual size_t get_size() const = 0;
 
+	// Largest multiplier `a` accepted by square_mul/mul/mul_add/... without losing exactness.
+	virtual uint32 max_multiplier() const { return 0xffffffffu; }
+
 	// Explicitly wait for all queued GPU work to finish. CPU/default engines can no-op.
 	// Used by PM1 Stage2 resume2reg progress reporting so IPS/ETA measure real
 	// completed work rather than asynchronous OpenCL enqueue speed.

@@ -1057,6 +1057,12 @@ int App::runGaussianMersennePM1() {
     const Pm1WindowRegs window_regs;
     std::unique_ptr<engine> eng(engine::create_gpu(t.lift, Pm1WindowRegs::count,
                                                     static_cast<std::size_t>(options.device_id), true));
+    if (base > eng->max_multiplier()) {
+        std::cerr << "-gm-base " << base << " is too large for the " << eng->get_size()
+                  << "-word transform of this exponent; the largest base supported is "
+                  << eng->max_multiplier() << ".\n";
+        return 2;
+    }
     const std::string backend = eng->is_aevum_backend() ? "Aevum" : "Marin";
     // Checkpoints contain every allocated register. Initializing the scratch
     // registers avoids harmless Aevum "Read ZERO" diagnostics during the
