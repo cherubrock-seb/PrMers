@@ -626,13 +626,18 @@ int App::runECMMarin()
         return false;
     };
 
-    if (!options.seed && !forceCurveSeed) {
+    // A single forced seed runs exactly one curve and never resumes from a probe.  A forced
+    // seed series (-seed with -K n and -ecm-continue-after-factor) has deterministic per-curve
+    // seeds, so it resumes at the first curve whose checkpoint carries the seed the series
+    // would use for that curve; a checkpoint from some other seed is not ours.
+    if (!options.seed && (!forceCurveSeed || forcedSeedSeries)) {
         for (uint64_t c = 0; c < curves; ++c) {
             const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
             const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
             uint64_t s = 0;
             if (try_probe_mont_ckpt(ckpt2, s) || try_probe_mont_ckpt(ckpt2 + ".old", s) ||
                 try_probe_mont_ckpt(ckpt_file, s) || try_probe_mont_ckpt(ckpt_file + ".old", s)) {
+                if (forcedSeedSeries && s != (c == 0 ? forcedCurveSeedValue : mix64(forcedCurveSeedValue, c))) continue;
                 resume_curve_idx = c;
                 resume_curve_seed = s;
                 have_resume_seed = true;
