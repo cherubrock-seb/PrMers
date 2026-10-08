@@ -213,6 +213,36 @@ int main() {
         }
         CHECK(gp::Progress(f, k).family_rc("GM").value_or(-1) == 1);
         fs::remove(f);
+
+        // Unwritable location: mark must not throw and leaves no stray file.
+        {
+            gp::Progress p(dir / "no_such_dir" / "x.done", k);
+            p.mark(gp::phase_token("GM", "pm1"));
+            CHECK(!fs::exists(dir / "no_such_dir"));
+        }
+        // Rename onto a directory fails; the temp file is cleaned up.
+        {
+            const fs::path blocked = dir / "blocked.done";
+            fs::create_directories(blocked / "child");
+            gp::Progress p(blocked, k);
+            p.mark(gp::phase_token("GM", "pm1"));
+            CHECK(!fs::exists(blocked.string() + ".new"));
+            fs::remove_all(blocked);
+        }
+
+        // Write failure (full disk): the temp file is /dev/full, so the buffered
+        // data fails on flush.  The record must not be installed.
+        if (fs::exists("/dev/full")) {
+            const fs::path full = dir / "full.done";
+            std::error_code ec;
+            fs::create_symlink("/dev/full", full.string() + ".new", ec);
+            if (!ec) {
+                gp::Progress p(full, k);
+                p.mark(gp::phase_token("GM", "pm1"));
+                CHECK(!fs::exists(full));
+                CHECK(!fs::is_symlink(full.string() + ".new"));
+            }
+        }
     }
 
     fs::remove_all(dir);

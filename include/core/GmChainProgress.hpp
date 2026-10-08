@@ -83,14 +83,16 @@ inline std::vector<std::string> load(const std::filesystem::path& file, const st
 inline void save(const std::filesystem::path& file, const std::string& key,
                  const std::vector<std::string>& tokens) {
     const std::filesystem::path tmp = file.string() + ".new";
+    std::error_code ec;
     {
-        std::ofstream out(tmp, std::ios::trunc);
+        std::ofstream out(tmp, std::ios::trunc | std::ios::binary);
         out << magic() << '\n' << key << '\n';
         for (const auto& token : tokens) out << token << '\n';
-        if (!out) return;
+        out.close();   // flush now so a full disk is seen before the rename
+        if (!out) { std::filesystem::remove(tmp, ec); return; }
     }
-    std::error_code ec;
     std::filesystem::rename(tmp, file, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
 }
 
 inline void clear(const std::filesystem::path& file) {
