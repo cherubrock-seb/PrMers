@@ -203,14 +203,17 @@ static bool pm1_checkpoint_read_params(const std::string& checkpoint_file, uint6
 
 static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
                                            const engine* eng,
-                                           std::string* reason = nullptr) {
+                                           std::string* reason = nullptr,
+                                           bool accept_unmarked = false) {
     const std::string sidecar = pm1_checkpoint_backend_sidecar(checkpoint_file);
     std::ifstream in(sidecar);
     if (!in) {
-        // Checkpoints written before v99.5 did not carry a backend marker.
-        // They used the Marin register layout by default and must never be
-        // injected into Aevum buffers.
-        if (eng && eng->is_aevum_backend()) {
+        // Stage-1 checkpoints written before v99.5 did not carry a backend
+        // marker.  They used the Marin register layout by default and must
+        // never be injected into Aevum buffers.  Stage-2 checkpoints only got
+        // a marker later and were never tied to a layout, so callers can
+        // accept an unmarked file there (the size and CRC checks still apply).
+        if (!accept_unmarked && eng && eng->is_aevum_backend()) {
             if (reason) *reason = "legacy checkpoint has no backend marker and is assumed to use Marin registers";
             return false;
         }
@@ -1558,8 +1561,13 @@ int App::runPM1Stage2MarinLowMem() {
         std::cout << "[PM1] Ultra-low-memory Stage 2 legacy one-register mode: recomputes "
                   << "3^(E*Q) directly on GPU with the fast3 path.\n";
     } else {
-        const size_t s1Regs = 3u;
-        auto load_h_from = [&](const std::string& file)->int {
+        // Stage 1 writes 3 registers in low-memory mode and 11 otherwise (a
+        // -b1old extension always uses 11).  The register count is not stored,
+        // so try both and accept an image only when the whole file, CRC
+        // included, matches that layout.
+        auto load_h_from = [&](const std::string& file, size_t s1Regs)->int {
+            File f(file);
+            if (!f.exists()) return -1;
             engine* e = nullptr;
             try {
                 e = engine::create_gpu(pexp, s1Regs, (size_t)options.device_id, verbose);
@@ -1568,8 +1576,11 @@ int App::runPM1Stage2MarinLowMem() {
                           << "-register checkpoint loader: " << ex.what() << "\n";
                 return -2;
             }
-            File f(file);
-            if (!f.exists()) { delete e; return -1; }
+            std::string backend_reason;
+            if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+                std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+                delete e; return -3;
+            }
             int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) { delete e; return -2; }
             if (version != 3) { delete e; return -2; }
             uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) { delete e; return -2; }
@@ -1581,6 +1592,30 @@ int App::runPM1Stage2MarinLowMem() {
             const size_t cksz = e->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) { delete e; return -2; }
+
+            // Trailing metadata, then the CRC, before the image is used.  With
+            // the wrong register count these fields are misaligned, so bound
+            // the string lengths by the file size before allocating.
+            std::error_code fsEc;
+            const uintmax_t fsz = fs::file_size(file, fsEc);
+            const uint64_t fileSize = fsEc ? 0 : (uint64_t)fsz;
+            uint64_t tmp64;
+            for (int i = 0; i < 4; ++i) if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) { delete e; return -2; }
+            uint8_t inlot = 0; if (!f.read(reinterpret_cast<char*>(&inlot), sizeof(inlot))) { delete e; return -2; }
+            uint32_t eacc_len = 0; if (!f.read(reinterpret_cast<char*>(&eacc_len), sizeof(eacc_len))) { delete e; return -2; }
+            if (eacc_len > fileSize) { delete e; return -2; }
+            if (eacc_len) { std::string skip(eacc_len, '\0'); if (!f.read(skip.data(), eacc_len)) { delete e; return -2; } }
+            uint32_t wbits_len = 0; if (!f.read(reinterpret_cast<char*>(&wbits_len), sizeof(wbits_len))) { delete e; return -2; }
+            if (wbits_len > fileSize) { delete e; return -2; }
+            if (wbits_len) { std::string skip(wbits_len, '\0'); if (!f.read(skip.data(), wbits_len)) { delete e; return -2; } }
+            uint64_t chunkIdx = 0, startP = 0; uint8_t first = 0; uint64_t processedBits = 0, bitsInChunk = 0;
+            if (!f.read(reinterpret_cast<char*>(&chunkIdx), sizeof(chunkIdx))) { delete e; return -2; }
+            if (!f.read(reinterpret_cast<char*>(&startP), sizeof(startP))) { delete e; return -2; }
+            if (!f.read(reinterpret_cast<char*>(&first), sizeof(first))) { delete e; return -2; }
+            if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) { delete e; return -2; }
+            if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) { delete e; return -2; }
+            if (!f.check_crc32()) { delete e; return -2; }
+
             if (!e->set_checkpoint(data)) { delete e; return -2; }
             hData.resize(e->get_register_data_size());
             if (!e->get_data(hData, (engine::Reg)0)) { delete e; return -2; }
@@ -1590,11 +1625,19 @@ int App::runPM1Stage2MarinLowMem() {
 
         std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
         std::string ckpt_file = ck.str();
-        int rr = load_h_from(ckpt_file);
-        if (rr < 0) rr = load_h_from(ckpt_file + ".old");
+        int rr = -1;
+        for (const size_t s1Regs : {size_t(3), size_t(11)}) {
+            rr = load_h_from(ckpt_file, s1Regs);
+            if (rr < 0 && rr != -3) rr = load_h_from(ckpt_file + ".old", s1Regs);
+            if (rr == 0 || rr == -3) break;
+            if (rr != -1 && s1Regs == 3u) {
+                std::cout << "[PM1] Stage 1 checkpoint is not a 3-register image (a \"Bad file (crc32)\" "
+                          << "above is expected here); trying the 11-register layout.\n";
+            }
+        }
         if (rr != 0) {
             std::cerr << "Stage 2 lowmem: cannot load PM1 Stage 1 checkpoint " << ckpt_file
-                      << " using " << s1Regs << " register(s).\n";
+                      << " (tried 3 and 11 registers).\n";
             return -2;
         }
         std::cout << "[PM1] Low-memory Stage 2 loaded H from " << ckpt_file
@@ -3546,6 +3589,11 @@ int App::runPM1Stage2MarinVTrace() {
         compactLoaded = false;
         File f(file);
         if (!f.exists()) return -1;
+        std::string backend_reason;
+        if (!pm1_checkpoint_backend_matches(file, e, &backend_reason, true)) {
+            std::cerr << "[PM1-VTRACE] Stage 2 checkpoint ignored: " << backend_reason << "\n";
+            return -3;
+        }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != ckptVersionS2) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -3553,23 +3601,31 @@ int App::runPM1Stage2MarinVTrace() {
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
+        // A checkpoint for other bounds is of no use; leave the engine alone.
+        if (sB1 != B1u || sB2 != B2u || sD != D) return -3;
         if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
 
+        // Buffer the register image and load it into the engine only once the
+        // whole file, CRC included, has been accepted.
         if (version == 24) {
             uint32_t nregs = 0;
             if (!f.read(reinterpret_cast<char*>(&nregs), sizeof(nregs))) return -2;
             const size_t rsz = e->get_register_data_size();
-            std::vector<char> one(rsz);
+            std::vector<std::pair<uint32_t, std::vector<char>>> regImages;
             for (uint32_t i = 0; i < nregs; ++i) {
                 uint32_t reg = 0;
                 if (!f.read(reinterpret_cast<char*>(&reg), sizeof(reg))) return -2;
+                std::vector<char> one(rsz);
                 if (!f.read(one.data(), rsz)) return -2;
-                if (!e->set_data((engine::Reg)reg, one)) return -2;
+                regImages.emplace_back(reg, std::move(one));
             }
             if (!f.check_crc32()) return -2;
+            for (auto& ri : regImages) {
+                if (!e->set_data((engine::Reg)ri.first, ri.second)) return -2;
+            }
             compactLoaded = true;
             return 0;
         }
@@ -3577,8 +3633,8 @@ int App::runPM1Stage2MarinVTrace() {
         const size_t cksz = e->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
-        if (!e->set_checkpoint(data)) return -2;
         if (!f.check_crc32()) return -2;
+        if (!e->set_checkpoint(data)) return -2;
         return 0;
     };
 
@@ -3622,6 +3678,7 @@ int App::runPM1Stage2MarinVTrace() {
         struct stat st;
         if ((stat(ckpt_file_s2.c_str(), &st) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file_s2.c_str());
+        write_pm1_checkpoint_backend(ckpt_file_s2, e);
     };
 
     uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
@@ -4434,6 +4491,7 @@ int App::runPM1Stage2MarinVTrace() {
     std::remove(ckpt_file_s2.c_str());
     std::remove((ckpt_file_s2 + ".old").c_str());
     std::remove((ckpt_file_s2 + ".new").c_str());
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
 
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
@@ -4693,6 +4751,11 @@ int App::runPM1Stage2Marin() {
                             uint64_t& sB1, uint64_t& sB2, uint64_t& sD)->int{
         File f(file);
         if (!f.exists()) return -1;
+        std::string backend_reason;
+        if (!pm1_checkpoint_backend_matches(file, e, &backend_reason, true)) {
+            std::cerr << "[PM1] Stage 2 checkpoint ignored: " << backend_reason << "\n";
+            return -3;
+        }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != 10) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -4700,15 +4763,19 @@ int App::runPM1Stage2Marin() {
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
+        // A checkpoint for other bounds is of no use; leave the engine alone.
+        if (sB1 != B1u || sB2 != B2u || sD != D) return -3;
         if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
 
+        // Load the register image into the engine only once the CRC has been
+        // checked.
         const size_t cksz = e->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
-        if (!e->set_checkpoint(data)) return -2;
         if (!f.check_crc32()) return -2;
+        if (!e->set_checkpoint(data)) return -2;
         return 0;
     };
 
@@ -4736,6 +4803,7 @@ int App::runPM1Stage2Marin() {
         struct stat s;
         if ((stat(ckpt_file_s2.c_str(), &s) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
         std::rename(newf.c_str(), ckpt_file_s2.c_str());
+        write_pm1_checkpoint_backend(ckpt_file_s2, e);
     };
 
     // ---- early prime check ----
@@ -5120,6 +5188,7 @@ int App::runPM1Stage2Marin() {
     std::remove(ckpt_file_s2.c_str());
     std::remove((ckpt_file_s2 + ".old").c_str());
     std::remove((ckpt_file_s2 + ".new").c_str());
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
 
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
@@ -5580,6 +5649,11 @@ int App::runPM1Stage2MarinNKVersion() {
     auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
         File f(file);
         if (!f.exists()) return -1;
+        std::string backend_reason;
+        if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+            std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+            return -3;
+        }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         if (version != 3) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -5590,7 +5664,6 @@ int App::runPM1Stage2MarinNKVersion() {
         const size_t cksz = e->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
-        if (!e->set_checkpoint(data)) return -2;
         uint64_t tmp64;
         if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
         if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
@@ -5608,6 +5681,7 @@ int App::runPM1Stage2MarinNKVersion() {
         if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
         if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
         if (!f.check_crc32()) return -2;
+        if (!e->set_checkpoint(data)) return -2;
         return 0;
     };
     int rr = read_ckpt_s1(eng_s1, ck.str());
@@ -7853,6 +7927,11 @@ int App::runPM1Stage3Marin() {
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
                 if (!f.exists()) return -1;
+                std::string backend_reason;
+                if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+                    std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+                    return -3;
+                }
                 int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
                 if (version != 3) return -2;
                 uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -7863,7 +7942,6 @@ int App::runPM1Stage3Marin() {
                 const size_t cksz = e->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!f.read(data.data(), cksz)) return -2;
-                if (!e->set_checkpoint(data)) return -2;
                 uint64_t tmp64;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
@@ -7881,6 +7959,7 @@ int App::runPM1Stage3Marin() {
                 if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
                 if (!f.check_crc32()) return -2;
+                if (!e->set_checkpoint(data)) return -2;
                 return 0;
             };
 
@@ -8402,6 +8481,11 @@ int App::runPM1Stage4Marin() {
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
                 if (!f.exists()) return -1;
+                std::string backend_reason;
+                if (!pm1_checkpoint_backend_matches(file, e, &backend_reason)) {
+                    std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
+                    return -3;
+                }
                 int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
                 if (version != 3) return -2;
                 uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -8412,7 +8496,6 @@ int App::runPM1Stage4Marin() {
                 const size_t cksz = e->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!f.read(data.data(), cksz)) return -2;
-                if (!e->set_checkpoint(data)) return -2;
                 uint64_t tmp64;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&tmp64), sizeof(tmp64))) return -2;
@@ -8430,6 +8513,7 @@ int App::runPM1Stage4Marin() {
                 if (!f.read(reinterpret_cast<char*>(&processedBits), sizeof(processedBits))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&bitsInChunk), sizeof(bitsInChunk))) return -2;
                 if (!f.check_crc32()) return -2;
+                if (!e->set_checkpoint(data)) return -2;
                 return 0;
             };
 
