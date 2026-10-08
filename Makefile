@@ -397,6 +397,9 @@ test-pm1-ultralowmem-resume: all
 test-pm1-extend-ckpt: all
 	bash tests/test_pm1_extend_stale_ckpt.sh
 
+test-pm1-b2start-json:
+	bash tests/test_pm1_b2start_json.sh
+
 .PHONY: test-marin-reg-offset-wrap
 
 test-marin-reg-offset-wrap:
