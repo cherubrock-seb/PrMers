@@ -2208,6 +2208,9 @@ auto setup_stage2_base = [&]() -> int {
                 }
                 if (setup_rc == 1) continue;
                 if (setup_rc < 0) {
+                    std::error_code ec0;
+                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
                     delete eng;
                     continue;
                 }
@@ -2387,6 +2390,14 @@ auto setup_stage2_base = [&]() -> int {
                         break;
                     }
                     if (rz < 0) {
+                        // Z == 0 (mod N): every prime factor was hit in the same chunk, so
+                        // the curve cannot continue.  Drop its checkpoints (they would pin
+                        // every restart to this curve) and release the engine.
+                        std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 Z is 0 mod N, skipping curve\n";
+                        std::error_code ec0;
+                        fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                        fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                        delete eng;
                         next_curve_after_stage2 = true;
                         break;
                     }
