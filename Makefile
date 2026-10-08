@@ -474,6 +474,11 @@ test-wagstaff-decode:
 test-pm1-ultralowmem-resume: all
 	bash tests/pm1_ultralowmem_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-pm1-lowmem-extend
+
+test-pm1-lowmem-extend: all
+	bash tests/pm1_lowmem_extend_test.sh
+
 .PHONY: test-pm1-extend-ckpt
 
 test-pm1-extend-ckpt: all
