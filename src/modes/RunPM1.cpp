@@ -235,6 +235,7 @@ struct PM1Prime95Stage2Result {
     std::string factor;                  // first factor listed (kept for logging)
     std::vector<std::string> factors;    // every factor listed in the result line
     bool b2_reported = false;            // result line carries the B2 Prime95 reached
+    bool b2_malformed = false;           // a "b2" field is present but is not an unsigned integer
     uint64_t b2_reached = 0;
     std::string json_line;
     int exit_code = -1;
@@ -723,6 +724,7 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
     result.known_factor = result.factor_found && !result.factor.empty() &&
                           p95_is_known_factor_string(result.factor, known_factors);
     result.b2_reported = p95_extract_json_uint_field(result.json_line, "b2", result.b2_reached);
+    result.b2_malformed = !result.b2_reported && result.json_line.find("\"b2\"") != std::string::npos;
     result.success = (status == "NF") || (status == "F");
 
     if (!result.success && result.error.empty()) {
@@ -6318,6 +6320,10 @@ int App::runPM1Marin() {
         // internal Stage 2.  A bound beyond the request is not claimed: only
         // the requested B2 was asked for, so it is kept.  A bound below the
         // request is reported as reached.
+        if (rr.b2_malformed) {
+            p95_log("[PM1] Prime95 Stage2 error: result has a \"b2\" field that is not an unsigned integer; ignoring the result");
+            return false;
+        }
         if (rr.b2_reported) {
             const uint64_t lowest = std::max<uint64_t>(options.B1, options.B2Start);
             if (rr.b2_reached <= lowest) {

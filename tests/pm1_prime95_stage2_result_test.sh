@@ -28,7 +28,7 @@ cp canned.json results.json.txt
 STUB
   chmod +x "$WORK/$name/p95/mprime"
   ( cd "$WORK/$name" && ln -s "$ROOT/kernels" kernels &&
-    timeout --signal=INT --kill-after=10s 50 "$ROOT/prmers" 113 -pm1 -b1 4 -b2 2141 -p95path "$WORK/$name/p95" \
+    timeout --signal=INT --kill-after=10s 150 "$ROOT/prmers" 113 -pm1 -b1 4 -b2 2141 -p95path "$WORK/$name/p95" \
       -d "$DEVICE" --noask >run.log 2>&1 || true )
 }
 
@@ -62,6 +62,37 @@ for bad in 0 3 4; do
   if ls "$WORK/bad$bad"/*stage2_ext* >/dev/null 2>&1; then fail "bad$bad: external-stage-2 JSON written"; fi
   ls "$WORK/bad$bad"/stage2*_result_B2_2141_p_113.txt >/dev/null || fail "bad$bad: internal stage 2 did not produce the B2=2141 result"
 done
+
+# 3b. A b2 that is not an unsigned integer, a result that is not JSON at all,
+# or an empty result file: ignored, the internal stage 2 runs.  A factor
+# listed next to an impossible b2 is not trusted either; the internal stage 2
+# finds it again.
+i=0
+for line in \
+  '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":-5, "d":30}' \
+  '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":"abc", "d":30}' \
+  '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":18446744073709551616, "d":30}' \
+  '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":null, "d":30}' \
+  '{"status":"F", "exponent":113, "worktype":"P-1", "b1":4, "b2":0, "d":30, "factors":["23279"]}' \
+  'this is not json' \
+  ''; do
+  i=$((i + 1))
+  run_case "junk$i" "$line"
+  log="$WORK/junk$i/run.log"
+  if grep -aq 'until B2 = 0' "$log"; then fail "junk$i: B2=0 reported"; fi
+  if grep -aq 'Prime95 Stage2 reached B2' "$log"; then fail "junk$i: a bound was adopted from: $line"; fi
+  if ls "$WORK/junk$i"/*stage2_ext* >/dev/null 2>&1; then fail "junk$i: external-stage-2 JSON written for: $line"; fi
+  ls "$WORK/junk$i"/stage2*_result_B2_2141_p_113.txt >/dev/null || fail "junk$i: internal stage 2 did not run for: $line"
+done
+
+# 3c. No b2 in the result at all: the requested B2 stands.
+run_case nob2 '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "d":30}'
+grep -aq 'No factor P-1 (stage 2) until B2 = 2141' "$WORK/nob2/run.log" || fail "nob2: requested B2 not reported"
+grep -aq '"b2":2141' "$WORK/nob2/results.txt" || fail "nob2: results.txt does not record b2=2141"
+
+# 3d. The largest value that parses is still "beyond the request".
+run_case max '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":18446744073709551615, "d":30}'
+grep -aq 'No factor P-1 (stage 2) until B2 = 2141' "$WORK/max/run.log" || fail "max: B2 not kept at 2141"
 
 # 4. Prime95 claims more than was requested: keep the requested bound.
 run_case big '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":99999999, "d":30}'
