@@ -444,6 +444,11 @@ test-marin-ocl-exec-errors:
 test-legacy-program-small:
 	bash tests/test_legacy_program_small_device.sh $(MARIN_TEST_DEVICE)
 
+.PHONY: test-legacy-modulus-p
+
+test-legacy-modulus-p:
+	bash tests/test_legacy_modulus_p.sh
+
 .PHONY: test-legacy-carry-mul3
 
 test-legacy-carry-mul3:

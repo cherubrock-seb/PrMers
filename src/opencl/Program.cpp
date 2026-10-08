@@ -89,7 +89,7 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
     if(div2==0){
         div2 = 1;
     }
-    int     modP       = context.getExponent();
+    const uint64_t modP = context.getExponent();
     cl_uint nTrans     = static_cast<cl_uint>(n);
 
     std::ostringstream ss;
@@ -106,7 +106,7 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
       << " -DLOCAL_PROPAGATION_DEPTH_DIV2_MIN="  << div2_min
       << " -DWORKER_NTT="                  << wNtt
       << " -DWORKER_NTT_2_STEPS="          << w2step
-      << " -DMODULUS_P="                   << modP
+      << " " << Program::modulusDefine(modP)
       << " -DTRANSFORM_SIZE_N="            << nTrans
       << " -DLOCAL_SIZE="                  << ls
       << " -DLOCAL_SIZE2="                 << ls2
