@@ -3,12 +3,30 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 namespace io {
 
 // Largest exponent PrMers accepts (command line and interactive prompt alike).
 constexpr uint64_t kMaxExponent = 5650242869ULL;
+// Every engine and driver holds the exponent in 32 bits; a larger value would be silently truncated
+// and a different (smaller) number tested.
+constexpr uint64_t kMaxEngineExponent = std::numeric_limits<uint32_t>::max();
+
+// Empty when `exponent` (the exponent actually run, i.e. after any -wagstaff doubling) is within
+// both limits, otherwise the error message to print. The command line and the -wagstaff worktodo
+// path both go through this so they accept and reject the same values.
+inline std::string exponentLimitError(uint64_t exponent, bool wagstaff = false) {
+    const std::string suffix = wagstaff ? " (twice the requested Wagstaff exponent)" : "";
+    if (exponent > kMaxExponent)
+        return "Error: Exponent must be <= " + std::to_string(kMaxExponent) + ". Given: " +
+               std::to_string(exponent) + suffix;
+    if (exponent > kMaxEngineExponent)
+        return "Error: Exponent must be <= " + std::to_string(kMaxEngineExponent) +
+               " (the largest exponent the engines support). Given: " + std::to_string(exponent) + suffix;
+    return std::string();
+}
 
 // Parse an exponent typed at the interactive prompt: plain decimal digits (surrounding blanks allowed)
 // with 2 <= value <= kMaxExponent. A negative, zero, garbage or oversized answer is rejected instead of

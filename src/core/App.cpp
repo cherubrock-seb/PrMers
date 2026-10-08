@@ -436,6 +436,13 @@ App::App(int argc, char** argv)
             // -wagstaff; the worktodo exponent replaces it, so double that one
             // too instead of testing (2^(p/2)+1)/3.
             if (const uint64_t wagstaffExponent = io::wagstaffExponentForEntry(*e)) {
+                // The doubled exponent is subject to the same limit the command line applies to
+                // -wagstaff after doubling.
+                if (const std::string limitError = io::exponentLimitError(wagstaffExponent, true);
+                    !limitError.empty()) {
+                    std::cerr << limitError << " (" << e->rawLine << ")" << std::endl;
+                    std::exit(EXIT_FAILURE);
+                }
                 o.exponent = wagstaffExponent;
             } else {
                 std::cerr << "Warning: -wagstaff only applies to PRP worktodo entries without "
