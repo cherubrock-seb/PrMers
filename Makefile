@@ -195,6 +195,11 @@ test-cli-exponent-range:
 test-legacy-enqueue-errors:
 	python3 tests/legacy_enqueue_errors_source_test.py
 
+.PHONY: test-legacy-pm1-periodic-save
+
+test-legacy-pm1-periodic-save:
+	python3 tests/legacy_pm1_periodic_save_source_test.py
+
 test-proof-verify:
 	python3 tests/proof_verify_result_source_test.py
 
