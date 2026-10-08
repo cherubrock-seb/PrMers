@@ -137,6 +137,9 @@ test-gui-state:
 test-gui-http:
 	bash tests/test_web_gui_http.sh
 
+test-win-cmdline:
+	bash tests/test_win_cmdline_quote.sh
+
 test-pm1-bounds:
 	bash tests/test_pm1_bounds.sh
 

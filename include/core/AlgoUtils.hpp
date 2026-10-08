@@ -20,6 +20,7 @@
 #include "ui/WebGuiServer.hpp"
 #include "util/Redact.hpp"
 #include "util/SelfExe.hpp"
+#include "util/WinCmdLine.hpp"
 #include "core/Version.hpp"
 #include <sys/stat.h>
 #include <cstdio>
@@ -134,8 +135,9 @@ inline void restart_self(int argc, char* argv[]) {
     }
 
 #ifdef _WIN32
-    std::string command = "\"" + args[0] + "\"";
-    for (size_t i = 1; i < args.size(); ++i) command += " \"" + args[i] + "\"";
+    // Quote for CommandLineToArgvW / the C runtime: embedded quotes, backslashes before a quote
+    // and trailing backslashes are escaped, empty arguments become "".
+    std::string command = util::winCommandLine(args);
     STARTUPINFO si = { sizeof(si) };
     PROCESS_INFORMATION pi;
     if (CreateProcessA(NULL, const_cast<char*>(command.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
