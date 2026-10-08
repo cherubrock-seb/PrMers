@@ -24,6 +24,7 @@
 #define NOMINMAX
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmChainProgress.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
@@ -1135,7 +1136,40 @@ int App::run() {
         else
             std::cout << ", then stop after factoring.\n";
 
+        // Completed phases/families are recorded so a restarted chain resumes
+        // after them instead of repeating the whole pipeline. The job key is the
+        // raw worktodo line (or the chain parameters for a command-line chain).
+        const std::filesystem::path chain_dir =
+            options.save_path.empty() ? std::filesystem::path(".")
+                                      : std::filesystem::path(options.save_path);
+        std::string chain_key = activeWorktodoRawLine_;
+        if (chain_key.empty()) {
+            chain_key = "gmchain|p=" + std::to_string(options.exponent) +
+                        "|family=" + requested_family +
+                        "|pm1=" + std::to_string(pm1_B1) + "," + std::to_string(pm1_B2) +
+                        "|ecm=" + std::to_string(ecm_B1) + "," + std::to_string(ecm_B2) +
+                        "," + std::to_string(ecm_curves) +
+                        "|proth=" + (options.gm_pipeline_proth ? "1" : "0") +
+                        "|sieve=" + std::to_string(sieve_limit);
+        }
+        core::gm_chain_progress::Progress chain_progress(
+            chain_dir / ("gm_chain_p" + std::to_string(options.exponent) + "_phases.done"),
+            chain_key);
+        namespace gcp = core::gm_chain_progress;
+        // A record that exists but cannot be used is reported once, here, rather
+        // than silently redoing finished work.
+        if (const std::string chain_notice = chain_progress.notice(); !chain_notice.empty()) {
+            std::cerr << chain_notice << std::endl;
+            if (guiServer_) guiServer_->appendLog(chain_notice);
+        }
+
         auto run_family_pipeline = [&](const std::string& family) -> int {
+            if (const auto finished = chain_progress.family_rc(family)) {
+                std::cout << "[GMCHAIN] " << family << " already completed (rc=" << *finished
+                          << "); skipping. Delete " << chain_progress.file().string()
+                          << " to start the chain over.\n";
+                return *finished;
+            }
             options.gm_family = family;
             options.mode = "gm-pm1";
             options.B1 = pm1_B1;
@@ -1144,18 +1178,29 @@ int App::run() {
             options.nmax = 0;
             options.gm_sieve_limit = sieve_limit;
             options.gm_prp_only = false;
-            configure_gaussian_phase_backend(options, engine::gpu_workload::pm1, "P-1");
-            int family_rc = runGaussianMersennePM1();
+            int family_rc = 1;
+            if (chain_progress.has(gcp::phase_token(family, "pm1"))) {
+                std::cout << "[GMCHAIN] " << family << " P-1 already completed; skipping.\n";
+            } else {
+                configure_gaussian_phase_backend(options, engine::gpu_workload::pm1, "P-1");
+                family_rc = runGaussianMersennePM1();
+                if (!interrupted && family_rc == 1) chain_progress.mark(gcp::phase_token(family, "pm1"));
+            }
 
             if (!interrupted && family_rc == 1 && ecm_curves != 0) {
-                options.mode = "gm-ecm";
-                options.B1 = ecm_B1;
-                options.B2 = ecm_B2;
-                options.K = ecm_curves;
-                options.nmax = ecm_curves;
-                options.gm_sieve_limit = 0; // already performed by P-1
-                configure_gaussian_phase_backend(options, engine::gpu_workload::ecm, "ECM");
-                family_rc = runGaussianMersenneECM();
+                if (chain_progress.has(gcp::phase_token(family, "ecm"))) {
+                    std::cout << "[GMCHAIN] " << family << " ECM already completed; skipping.\n";
+                } else {
+                    options.mode = "gm-ecm";
+                    options.B1 = ecm_B1;
+                    options.B2 = ecm_B2;
+                    options.K = ecm_curves;
+                    options.nmax = ecm_curves;
+                    options.gm_sieve_limit = 0; // already performed by P-1
+                    configure_gaussian_phase_backend(options, engine::gpu_workload::ecm, "ECM");
+                    family_rc = runGaussianMersenneECM();
+                    if (!interrupted && family_rc == 1) chain_progress.mark(gcp::phase_token(family, "ecm"));
+                }
             }
 
             if (!interrupted && family_rc == 1 && options.gm_pipeline_proth) {
@@ -1170,6 +1215,7 @@ int App::run() {
                                                   family == "GQ" ? "GQ Fermat PRP" : "GM Proth");
                 family_rc = runGaussianMersenne();
             }
+            if (!interrupted && family_rc != 2) chain_progress.mark(gcp::done_token(family, family_rc));
             return family_rc;
         };
 
@@ -1186,6 +1232,7 @@ int App::run() {
             rc = run_family_pipeline(requested_family);
         }
         ran = true;
+        if (!interrupted && rc != 2) chain_progress.clear();
 
         options.mode = pipeline_mode;
         options.gm_family = requested_family;
