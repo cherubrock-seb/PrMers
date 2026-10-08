@@ -1484,7 +1484,13 @@ int App::runInner() {
     // dedicated modes intentionally remain isolated from the historical
     // Prime95-compatible mode implementations. A completed task (factor,
     // no-factor, prime or composite) is archived, then PrMers restarts on the
-    // next non-comment line. Interrupted/error runs keep the current line.
+    // next non-comment line. Interrupted/error runs keep the current line. The
+    // Gaussian-Mersenne modes do not report a separate "result saved" point (they
+    // write their result line and return, and an interrupted mode returns 0 too),
+    // so a stop that is set when the mode returns is taken to mean it was cut
+    // short and the line stays queued. A stop that lands after this check finds
+    // the entry already archived and the restart (the next call) refused by the
+    // stop/restart gate; the process then exits 1.
     if (hasWorktodoEntry_ && options.gaussian_mersenne && !interrupted &&
         !core::algo::stop_requested_any() &&
         (rc == 0 || rc == 1)) {

@@ -309,6 +309,11 @@ test-exit-codes:
 test-interrupt-exit-code: all
 	python3 tests/interrupt_exit_code_test.py ./prmers $${PRMERS_TEST_DEVICE:-0} INT
 
+# A stop that lands after the result was saved still retires the entry and deletes the state (needs gdb; skips without it).
+.PHONY: test-stop-after-result
+test-stop-after-result: all
+	python3 tests/stop_after_result_test.py ./prmers $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-worktodo-small-items
 test-worktodo-small-items:
 	bash tests/test_worktodo_small_items.sh

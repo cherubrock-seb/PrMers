@@ -318,7 +318,8 @@ int App::runECMMarin()
         if (hasWorktodoEntry_ && !resultSaved) {
             std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
         }
-        if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
+        const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
+        if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path
                         << " and saved to worktodo_save.txt\n";
@@ -330,7 +331,7 @@ int App::runECMMarin()
                 }
                 bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
 
-                if (more) {
+                if (stopAfterResult) { /* stop requested: the next entry is not started */ } else if (more) {
                     std::cout << "Restarting for next entry in worktodo.txt\n";
                     if (guiServer_) {
                         std::ostringstream oss;
@@ -357,7 +358,7 @@ int App::runECMMarin()
                     oss  << "Failed to update " << options.worktodo_path << "\n";
                     guiServer_->appendLog(oss.str());
                 }
-                if (!options.gui) {
+                if (!options.gui && !stopAfterResult) {
                     std::exit(-1);
                 }
             }

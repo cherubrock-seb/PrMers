@@ -81,9 +81,18 @@ void install_stop_handlers();
 // True once a stop was requested by any source (signal, console event, GUI Stop). Sticky: it is the
 // stop bit of core::g_stop_restart_gate, which every stop handler sets and nothing clears. Unlike
 // `interrupted` (which modes also set and clear themselves: a found ECM factor, a stage that handled
-// a stop) it can therefore decide the exit code (core/ExitCodes.hpp) and whether a finished worktodo
-// entry may be archived and the run restarted.
+// a stop) it can therefore decide the exit code (core/ExitCodes.hpp) and whether the run restarts for
+// the next worktodo entry. It does not decide whether a finished entry is retired: once the result is
+// saved, the entry is retired and the state deleted even if a stop is pending (see stop_after_result).
 bool stop_requested_any() noexcept;
+
+// Called at the end of a job once its result has been written (resultSaved) and before the worktodo
+// entry is retired. Returns stop_requested_any(). A stop that arrives after the result is saved does
+// not stop the bookkeeping: the entry is retired and the state deleted as after a normal finish, so
+// the next run does not repeat the job and write its result a second time. Only the restart for the
+// next worktodo entry is skipped, and the process exits core::kExitInterrupted. Prints a line saying
+// so when it returns true with a saved result.
+bool stop_after_result(bool resultSaved);
 
 
 inline static std::vector<std::string> parseConfigFile(const std::string& config_path) {

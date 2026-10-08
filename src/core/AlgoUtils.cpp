@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <iostream>
 #include <thread>
 #include "core/StopRestartGate.hpp"
 #include "core/InheritedSignals.hpp"
@@ -25,6 +26,17 @@ namespace core { namespace algo {
 
   bool stop_requested_any() noexcept {
     return core::g_stop_restart_gate.stopRequested();
+  }
+
+  bool stop_after_result(bool resultSaved) {
+    const bool stopped = stop_requested_any();
+    if (stopped && resultSaved) {
+      const char* msg = "Stop requested after the result was saved; the result is recorded, the entry "
+                        "is finished as usual and the next entry is not started";
+      std::cout << msg << std::endl;
+      if (auto g = ui::WebGuiServer::instance()) g->appendLog(msg);
+    }
+    return stopped;
   }
 
 #ifdef _WIN32
