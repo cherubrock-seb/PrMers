@@ -4,6 +4,7 @@
 #include "StatsSlot.h"
 #include "AppleTailZero.h"
 #include "UseOptions.h"
+#include "WmulLimit.h"
 #include "Proof.h"
 #include "TimeInfo.h"
 #include "Trig.h"
@@ -385,18 +386,31 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
 
   // Maximum WMUL is 32KB / (WIDTH * SHUFL_BYTES_W).  If using the 32KB maximum, LDS padding must be disabled.
   // Furthermore, I've seen the CUDA compiler refuse to create a kernel with 1024 threads.  Thus, we limit WMUL to 2 for a 1K width and to 1 for a 4K width.
+  // carryFused's workgroup is G_W * WMUL threads, which must not exceed the device's maximum workgroup size.  WMUL must be at
+  // least 1, and must divide BIG_HEIGHT as carryFused is launched with BIG_HEIGHT / WMUL + 1 workgroups.
   {
-    u32 shufl_bytes_w = args.value("SHUFL_BYTES_W", 8);
-    u32 max_wmul = 32768 / (fft.shape.width * shufl_bytes_w);
-    if (max_wmul > 2 && fft.shape.width >= 1024) max_wmul = 2;
-    if (max_wmul > 1 && fft.shape.width >= 4096) max_wmul = 1;
-    if (wmul > max_wmul) {
-      wmul = max_wmul;
-      config["WMUL"] = to_string(wmul);
-      log("WMUL setting too large for this FFT width.  Changing to WMUL=%d\n", wmul);
+    u32 const shufl_bytes_w = config.contains("SHUFL_BYTES_W") ? atoi(config["SHUFL_BYTES_W"].c_str()) : 8;
+    // shufl handles only 4, 8 and 16 bytes, and the value is a divisor below.
+    if (shufl_bytes_w != 4 && shufl_bytes_w != 8 && shufl_bytes_w != 16) {
+      log("Invalid -use SHUFL_BYTES_W=%s (must be 4, 8 or 16)\n", config["SHUFL_BYTES_W"].c_str());
+      throw "Invalid SHUFL_BYTES_W";
     }
-    if (fft.shape.width * shufl_bytes_w * wmul >= 32768) {
-      log("Local shared memory limit of 32KB exceeded.  Changing to LDSPAD_W=0\n");
+    u32 const lds_limit = u32(std::min<u64>(32768, getLocalMemSize(id)));
+    u32 const big_h = fft.shape.height * fft.shape.middle;
+    if (fft.shape.width * shufl_bytes_w > getLocalMemSize(id)) {
+      log("SHUFL_BYTES_W=%u needs %u bytes of local memory at width %u, the device has %u\n",
+          shufl_bytes_w, fft.shape.width * shufl_bytes_w, fft.shape.width, u32(getLocalMemSize(id)));
+      throw "SHUFL_BYTES_W too large";
+    }
+    u32 const max_wmul = wmul_limit::maxWmul(fft.shape.width, fft.shape.nW(), shufl_bytes_w, getLocalMemSize(id), getMaxWorkGroupSize(id));
+    u32 const requested = wmul;
+    wmul = wmul_limit::clampWmul(wmul, max_wmul, big_h);
+    if (wmul != requested) {
+      config["WMUL"] = to_string(wmul);
+      log("WMUL=%u is not usable for this FFT on this device.  Changing to WMUL=%u\n", requested, wmul);
+    }
+    if (fft.shape.width * shufl_bytes_w * wmul >= lds_limit) {
+      log("Local shared memory limit of %uKB exceeded.  Changing to LDSPAD_W=0\n", lds_limit / 1024);
       config["LDSPAD_W"] = to_string(0);
     }
   }
