@@ -370,7 +370,7 @@ test-llsafe-error-recovery: all
 
 .PHONY: test-legacy-prp-resume
 test-legacy-prp-resume: all
-bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
+	bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
 .PHONY: test-marin-exact-sub
 
