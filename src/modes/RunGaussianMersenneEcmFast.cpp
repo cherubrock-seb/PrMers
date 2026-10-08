@@ -1,6 +1,7 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmEcmProgress.hpp"
+#include "core/GmFactorCheckpoint.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
@@ -23,6 +24,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_MSC_VER) && defined(_M_X64)
@@ -509,22 +511,17 @@ void save_naf_checkpoint(const std::filesystem::path& path,
     std::vector<char> data(eng->get_checkpoint_size());
     if (!eng->get_checkpoint(data)) throw std::runtime_error("cannot capture GM ECM NAF checkpoint");
 
-    const std::filesystem::path new_path = path.string() + ".new";
-    const std::filesystem::path old_path = path.string() + ".old";
-    {
-        File f(new_path.string(), "wb");
-        if (!f.write(reinterpret_cast<const char*>(&h), sizeof(h)) ||
-            !f.write(data.data(), data.size()))
-            throw std::runtime_error("cannot write GM ECM NAF checkpoint");
-        f.write_crc32();
-    }
-    std::error_code ec;
-    std::filesystem::remove(old_path, ec);
-    ec.clear();
-    if (std::filesystem::exists(path)) std::filesystem::rename(path, old_path, ec);
-    ec.clear();
-    std::filesystem::rename(new_path, path, ec);
-    if (ec) throw std::runtime_error("cannot install GM ECM NAF checkpoint: " + ec.message());
+    core::gm_factor_ckpt::write_checkpoint_blob(path, &h, sizeof(h), data);
+}
+
+// save_naf_checkpoint that reports a failure (full or read-only disk) as a warning
+// instead of ending the run; the previous checkpoint, if any, is kept.  Returns
+// true when the checkpoint was written.
+template <class... Args>
+bool try_save_naf_checkpoint(const std::filesystem::path& path, Args&&... args) {
+    return core::gm_factor_ckpt::guarded_save(path, [&]() {
+        save_naf_checkpoint(path, std::forward<Args>(args)...);
+    });
 }
 
 void clear_naf_checkpoint(const std::filesystem::path& path) {
@@ -784,11 +781,15 @@ int App::runGaussianMersenneECM() {
             while (step < total_steps) {
                 if (interrupted) {
                     if (allow_checkpoint) {
-                        save_naf_checkpoint(ckpt, eng.get(), t, B1,
-                                            static_cast<std::uint32_t>(curve), sigma,
-                                            total_steps, step, elapsed());
-                        std::cout << "Interrupted; GM ECM NAF checkpoint saved at "
-                                  << step << "/" << total_steps << ".\n";
+                        if (try_save_naf_checkpoint(ckpt, eng.get(), t, B1,
+                                                    static_cast<std::uint32_t>(curve), sigma,
+                                                    total_steps, step, elapsed())) {
+                            std::cout << "Interrupted; GM ECM NAF checkpoint saved at "
+                                      << step << "/" << total_steps << ".\n";
+                        } else {
+                            std::cout << "Interrupted; the GM ECM NAF checkpoint could not be "
+                                         "saved, so a rerun resumes from the last good one.\n";
+                        }
                     }
                     return false;
                 }
@@ -811,9 +812,9 @@ int App::runGaussianMersenneECM() {
                     last_display = now;
                 }
                 if (allow_checkpoint && now - last_backup >= std::chrono::seconds(backup_period)) {
-                    save_naf_checkpoint(ckpt, eng.get(), t, B1,
-                                        static_cast<std::uint32_t>(curve), sigma,
-                                        total_steps, step, elapsed());
+                    (void)try_save_naf_checkpoint(ckpt, eng.get(), t, B1,
+                                                  static_cast<std::uint32_t>(curve), sigma,
+                                                  total_steps, step, elapsed());
                     last_backup = now;
                 }
             }

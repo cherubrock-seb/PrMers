@@ -22,6 +22,8 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmU64Divisor.hpp"
+
+#include "core/GmFactorCheckpoint.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 
@@ -550,12 +552,39 @@ int App::runGaussianMersennePM1() {
         static_cast<std::uint64_t>(mpz_sizeinbase(exponent.get_mpz_t(), 2));
     std::cout << "  Stage 1 bits   : " << e_bits << "\n";
 
-    std::unique_ptr<engine> s1;
+    // Stage 2 primes: needed up front because their count keys the Stage 2
+    // checkpoint written when Stage 1 finishes.
+    std::vector<std::uint32_t> primes;
     try {
-        s1.reset(engine::create_gpu(t.lift, 3, static_cast<std::size_t>(options.device_id), true));
+        primes = primes_in_range(B1, B2);
     } catch (const std::exception& ex) {
-        std::cerr << "[GM-PM1] Stage 1 engine allocation failed: " << ex.what() << "\n";
+        std::cerr << "[GM-PM1] Stage 2 sieve failed: " << ex.what() << "\n";
         return 2;
+    }
+    primes.erase(std::remove(primes.begin(), primes.end(), t.p), primes.end());
+
+    // Stage 1 can run for hours, so it is checkpointed in the legacy
+    // `_stage1.ckpt` format.  That needs an engine with the legacy register
+    // count; a restart then finds the legacy checkpoint above and resumes
+    // through the legacy path.
+    namespace gfc = core::gm_factor_ckpt;
+    auto make_engine = [&](std::size_t regs) -> std::unique_ptr<engine> {
+        try {
+            return std::unique_ptr<engine>(engine::create_gpu(
+                t.lift, regs, static_cast<std::size_t>(options.device_id), true));
+        } catch (const std::exception& ex) {
+            std::cerr << "[GM-PM1] Stage 1 engine allocation failed: " << ex.what() << "\n";
+            return nullptr;
+        }
+    };
+    bool s1_checkpoints = true;
+    std::size_t s1_regs = gfc::PM1_WINDOW_REGS;
+    std::unique_ptr<engine> s1 = make_engine(s1_regs);
+    if (!s1) {
+        std::cout << "[GM-PM1] Retrying Stage 1 with a smaller engine and no checkpoints.\n";
+        s1_checkpoints = false;
+        s1_regs = 3;
+        s1 = make_engine(s1_regs);
     }
     if (!s1) return 2;
     if (base > s1->max_multiplier()) {
@@ -564,7 +593,7 @@ int App::runGaussianMersennePM1() {
                   << s1->max_multiplier() << ".\n";
         return 2;
     }
-    for (std::size_t r = 0; r < 3; ++r) s1->set(r, 1);
+    for (std::size_t r = 0; r < s1_regs; ++r) s1->set(r, 1);
     const std::string s1_backend = s1->is_aevum_backend() ? "Aevum" : "Marin";
     std::cout << "  Stage 1 backend: " << s1_backend << "\n";
 
@@ -572,17 +601,36 @@ int App::runGaussianMersennePM1() {
     s1->set(RH, 1);
     const auto s1_start = Clock::now();
     auto last_report = s1_start;
+    auto last_backup = s1_start;
+    // `remaining` is the number of exponent bits still to process.
+    // A save that fails (a full or read-only disk) only costs the checkpoint:
+    // the previous one stays, and the computation goes on.  Returns whether the
+    // checkpoint was written.
+    auto save_s1 = [&](std::uint64_t remaining) -> bool {
+        if (!s1_checkpoints) return false;
+        return gfc::try_save_factor_checkpoint(legacy_s1, s1.get(), 1, 1, t, B1, B2, e_bits,
+                                               base, 0, 0, remaining, seconds_since(s1_start));
+    };
     for (std::uint64_t i = e_bits; i > 0; --i) {
+        if (interrupted) {
+            if (s1_checkpoints && i < e_bits) {
+                if (save_s1(i)) {
+                    std::cout << "[GM-PM1] Interrupted during fast Stage 1; checkpoint saved with "
+                              << i << " bits remaining. Rerun to resume (the legacy resumable "
+                                 "path picks it up).\n";
+                } else {
+                    std::cout << "[GM-PM1] Interrupted during fast Stage 1; the checkpoint could "
+                                 "not be saved, so a rerun resumes from the previous one, if any.\n";
+                }
+            } else {
+                std::cout << "[GM-PM1] Interrupted during fast Stage 1; no checkpoint was written.\n";
+            }
+            return 0;
+        }
         const bool bit = mpz_tstbit(exponent.get_mpz_t(), i - 1) != 0;
         s1->square_mul(RH, bit ? base : 1U);
         if ((i & 4095ULL) == 0 || i == 1) {
             s1->sync();
-            if (interrupted) {
-                std::cout << "[GM-PM1] Interrupted during fast Stage 1. "
-                             "No compact V-trace checkpoint was written; rerun with "
-                             "PRMERS_GM_PM1_PRODUCT_STAGE2=1 or -gm-safe to use the legacy path.\n";
-                return 0;
-            }
             const auto now = Clock::now();
             if (now - last_report >= std::chrono::seconds(5) || i == 1) {
                 const std::uint64_t done = e_bits - i + 1;
@@ -595,11 +643,26 @@ int App::runGaussianMersennePM1() {
                           << " | elapsed " << sec << " s\n";
                 last_report = now;
             }
+            if (i > 1 && now - last_backup >= std::chrono::seconds(60)) {
+                save_s1(i - 1);
+                last_backup = now;
+            }
         }
     }
     s1->sync();
+    // The finished Stage 1 residue becomes the legacy Stage 2 checkpoint, so an
+    // interrupted or fallen-back Stage 2 resumes without redoing Stage 1.
+    if (s1_checkpoints) {
+        // If that save fails, the Stage 1 checkpoint is the only resume point left
+        // and is kept (the terminal paths below remove it with the Stage 2 one).
+        const bool s2_saved = primes.empty() ||
+            gfc::try_save_factor_checkpoint(legacy_s2, s1.get(), 1, 2, t, B1, B2, primes.size(),
+                                            base, 0, 0, 0, seconds_since(s1_start));
+        if (s2_saved) gfc::clear_checkpoint(legacy_s1);
+    }
 
     const mpz_class H_lift = get_reg_mpz(s1.get(), RH);
+    s1.reset();
     mpz_class h = mod_positive(H_lift, t.n);
     mpz_class g = proper_gcd(mod_positive(h - 1, t.n), t.n);
     std::cout << "Stage 1 residue low64: 0x" << low_hex(h) << "\n";
@@ -607,7 +670,11 @@ int App::runGaussianMersennePM1() {
         std::cout << ">>> Gaussian pair P-1 Stage 1 factor: " << g << "\n";
         write_result(save_dir, t, "factor", 1, B1, B2, s1_backend, 0,
                      seconds_since(job_start), options.device_id, g.get_str());
-        if (!options.pm1_continue_stage2_after_factor) return 0;
+        if (!options.pm1_continue_stage2_after_factor) {
+            gfc::clear_checkpoint(legacy_s1);
+            gfc::clear_checkpoint(legacy_s2);
+            return 0;
+        }
         std::cout << "[GM-PM1] Continuing Stage 2 by explicit "
                      "-pm1-continue-stage2-after-factor.\n";
     } else if (g == t.n) {
@@ -625,6 +692,8 @@ int App::runGaussianMersennePM1() {
         std::cout << ">>> Gaussian pair P-1 Stage 2 setup factor: " << hg << "\n";
         write_result(save_dir, t, "factor", 2, B1, B2, s1_backend, 0,
                      seconds_since(job_start), options.device_id, hg.get_str());
+        gfc::clear_checkpoint(legacy_s1);
+        gfc::clear_checkpoint(legacy_s2);
         return 0;
     }
     mpz_class hinv;
@@ -643,14 +712,6 @@ int App::runGaussianMersennePM1() {
         return runGaussianMersennePM1Legacy();
     }
 
-    std::vector<std::uint32_t> primes;
-    try {
-        primes = primes_in_range(B1, B2);
-    } catch (const std::exception& ex) {
-        std::cerr << "[GM-PM1] Stage 2 sieve failed: " << ex.what() << "\n";
-        return 2;
-    }
-    primes.erase(std::remove(primes.begin(), primes.end(), t.p), primes.end());
     if (primes.empty()) {
         write_result(save_dir, t, "no-factor", 2, B1, B2, s1_backend, D,
                      seconds_since(job_start), options.device_id, std::nullopt);
@@ -760,6 +821,8 @@ int App::runGaussianMersennePM1() {
             std::cout << ">>> Gaussian pair P-1 Stage 2 V-trace factor: " << gg << "\n";
             write_result(save_dir, t, "factor", 2, B1, B2, backend, D,
                          seconds_since(job_start), options.device_id, gg.get_str());
+            gfc::clear_checkpoint(legacy_s1);
+            gfc::clear_checkpoint(legacy_s2);
             return 0;
         }
         if (gg == t.n) {
@@ -821,8 +884,9 @@ int App::runGaussianMersennePM1() {
 
         if (interrupted) {
             std::cout << "[GM-PM1-VTRACE] interrupted at a clean term boundary. "
-                         "Compact V-trace resume is intentionally not enabled in RC1; "
-                         "rerun with PRMERS_GM_PM1_PRODUCT_STAGE2=1 to use the legacy resumable path.\n";
+                         "Compact V-trace Stage 2 resume is intentionally not enabled in RC1; "
+                         "rerun to resume Stage 2 from the saved Stage 1 residue with the legacy "
+                         "resumable path.\n";
             return 0;
         }
     }
@@ -840,6 +904,8 @@ int App::runGaussianMersennePM1() {
     std::cout << "No Gaussian pair P-1 factor through B2=" << B2 << ".\n";
     write_result(save_dir, t, "no-factor", 2, B1, B2, backend, D,
                  seconds_since(job_start), options.device_id, std::nullopt);
+    gfc::clear_checkpoint(legacy_s1);
+    gfc::clear_checkpoint(legacy_s2);
     return 1;
 }
 

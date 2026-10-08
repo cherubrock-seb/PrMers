@@ -555,3 +555,17 @@ test-ecm-prime95-handoff: ; bash tests/ecm_prime95_handoff_test.sh
 
 .PHONY: test-ecm-prime95-handoff-resume
 test-ecm-prime95-handoff-resume: ; bash tests/ecm_prime95_handoff_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-gm-factor-checkpoint-write-failure
+test-gm-factor-checkpoint-write-failure:
+	bash tests/gm_factor_checkpoint_write_failure_test.sh
+
+.PHONY: test-gm-pm1-vtrace-checkpoint
+test-gm-pm1-vtrace-checkpoint: all
+	python3 tests/gm_pm1_vtrace_checkpoint_source_test.py
+	bash tests/gm_pm1_vtrace_checkpoint_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-gm-checkpoint-write-failure-drivers test-gm-ecm-stage2-restart
+test-gm-checkpoint-write-failure-drivers: all
+	bash tests/gm_checkpoint_write_failure_drivers_test.sh $${PRMERS_TEST_DEVICE:-0}
+test-gm-ecm-stage2-restart: ; python3 tests/gm_ecm_stage2_restart_source_test.py

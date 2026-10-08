@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <system_error>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -456,12 +457,21 @@ fs::path resultPath(const TfRequest& request) {
 void saveCheckpoint(const fs::path& path, std::uint64_t nextK,
                     const std::vector<FoundFactor>& found) {
     const fs::path temporary = path.string() + ".tmp";
+    std::error_code removeError;
     {
         std::ofstream output(temporary, std::ios::trunc);
         if (!output) throw std::runtime_error("Unable to write TF checkpoint");
         output << nextK << '\n';
         for (const FoundFactor& factor : found) {
             output << factor.factor << ' ' << factor.familyBits << '\n';
+        }
+        // A full disk is only reported by the flush or the close; without this a
+        // truncated file would replace the good checkpoint.
+        output.flush();
+        output.close();
+        if (!output) {
+            fs::remove(temporary, removeError);
+            throw std::runtime_error("Unable to write TF checkpoint (disk full?)");
         }
     }
 
@@ -476,9 +486,24 @@ void saveCheckpoint(const fs::path& path, std::uint64_t nextK,
         error.clear();
         fs::rename(temporary, path, error);
         if (error) {
+            fs::remove(temporary, removeError);
             throw std::runtime_error(
                 "Unable to replace TF checkpoint: " + error.message());
         }
+    }
+}
+
+// saveCheckpoint that turns a failure into a warning: the previous checkpoint is kept
+// and the search goes on; the next chunk tries again.
+bool trySaveCheckpoint(const fs::path& path, std::uint64_t nextK,
+                       const std::vector<FoundFactor>& found) {
+    try {
+        saveCheckpoint(path, nextK, found);
+        return true;
+    } catch (const std::exception& ex) {
+        std::cerr << "[GM TF] Warning: checkpoint " << path.string() << " was not saved: " << ex.what()
+                  << ". Continuing; the previous checkpoint, if any, is kept.\n";
+        return false;
     }
 }
 
@@ -713,7 +738,7 @@ int runTrialFactor(const TfRequest& request) {
         }
 
         nextK = chunkEnd + 1ULL;
-        saveCheckpoint(checkpoint, nextK, found);
+        (void)trySaveCheckpoint(checkpoint, nextK, found);
         const long double completed = static_cast<long double>(nextK - firstK);
         const long double total = static_cast<long double>(lastK - firstK + 1ULL);
         std::cout << "  progress       : " << std::fixed << std::setprecision(2)
