@@ -69,7 +69,8 @@ check_driver() {
   ln -s /dev/full "$ckpt.new"
   stop_bg
   flat i.log | grep -aq 'could not be saved' || fail "$name: a failing interrupt-time save was not reported"
-  [ "$RC" -eq 0 ] || fail "$name: exit code $RC after a failed interrupt-time save"
+  # a stopped run exits 1 (core/ExitCodes.hpp) whether or not the save worked; it must not crash or report an error
+  [ "$RC" -eq 1 ] || fail "$name: exit code $RC after a failed interrupt-time save"
   dead_end i.log && fail "$name: the failed interrupt-time save ended the run with an error"
 }
 

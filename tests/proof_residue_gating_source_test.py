@@ -26,20 +26,26 @@ for driver in ("RunPrpOrLlMarin.cpp", "RunPrpOrLl.cpp"):
     assert end.count("removeProcessedLine(") == 1, driver
     assert "const bool entryRetired = !hasWorktodoEntry_ || retired;" in end, driver
     if driver == "RunPrpOrLlMarin.cpp":
-        gate = re.search(r"if \(resultSaved && entryRetired\)\s*\{", end)
+        gate = re.search(r"if \(resultSaved && entryRetired && !stopped\)\s*\{", end)
         assert gate and gate.start() > retire > save, driver
         exact_remove = end.index("std::filesystem::remove(ckpt_file, ec);")
         clear_state = end.index("backupManager.clearState();")
         assert gate.start() < exact_remove < clear_state, driver
     else:
-        gate = re.search(r"if \(resultSaved && entryRetired\)\s*\{?\s*backupManager\.clearState\(\);", end)
+        gate = re.search(r"if \(resultSaved && entryRetired && !stopped\)\s*\{?\s*backupManager\.clearState\(\);", end)
         assert gate and gate.start() > retire > save, driver
     assert "ProofSetMarin::residueAction(" in end, driver
     assert "options.mode == \"prp\", options.wagstaff, proofRequested," in end, driver
     assert "proofCompleted, resultSaved, entryRetired);" in end, driver
     assert end.index("ProofSetMarin::clearResidues") > end.index("residueAction(") > retire, driver
     # The "kept" notice does not depend on a worktodo entry.
-    assert "if (!resultSaved || !entryRetired) {" in end, driver
+    assert "if (!stopped && (!resultSaved || !entryRetired)) {" in end, driver
+    # A stop keeps the entry and all resumable state, and does not restart.
+    stop = end.index("const bool stopped = core::algo::stop_requested_any();")
+    assert stop < retire, driver
+    assert "const bool retired = !stopped && resultSaved && hasWorktodoEntry_ &&" in end, driver
+    assert "const auto residueAction = stopped ? ProofSetMarin::ResidueAction::NotApplicable" in end, driver
+    assert "if (hasWorktodoEntry_ && resultSaved && !stopped) {" in end, driver
     # No unconditional removal ahead of the result write.
     head = text[:text.index("bool resultSaved = wm.saveIndividualJson")]
     tail_of_head = head[-400:]
@@ -47,7 +53,7 @@ for driver in ("RunPrpOrLlMarin.cpp", "RunPrpOrLl.cpp"):
 
 marin = body("RunPrpOrLlMarin.cpp")
 assert re.search(
-    r"if \(resultSaved && entryRetired\) \{.*?"
+    r"if \(resultSaved && entryRetired && !stopped\) \{.*?"
     r"std::filesystem::remove\(ckpt_file, ec\);.*?"
     r"backupManager\.clearState\(\);",
     marin,

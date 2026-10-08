@@ -914,7 +914,7 @@ int App::runECMMarinTwistedEdwards()
         if (hasWorktodoEntry_ && !resultSaved) {
             std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
         }
-        if (hasWorktodoEntry_ && resultSaved) {
+        if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path
                           << " and saved to worktodo_save.txt\n";

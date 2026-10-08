@@ -774,6 +774,8 @@ std::optional<int> tryRunGaussianTrialFactor(int argc, char** argv) {
     if (auto worktodo = parseWorktodoRequest(args)) {
         const int rc = runTrialFactor(*worktodo);
         if (rc != 0) return rc;
+        // A stop that arrived as the entry finished: keep the line queued and do not restart.
+        if (core::algo::stop_requested_any()) return core::kExitInterrupted;
         // A finished GMTF entry (factor or no-factor) is archived so it is not
         // run again, then PrMers restarts on the next worktodo line.
         io::WorktodoParser parser(worktodo->worktodoPath.string());

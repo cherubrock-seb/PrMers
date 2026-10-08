@@ -668,6 +668,17 @@ Examples:
 
 Curve and arithmetic options include Montgomery, Edwards, torsion variants, seeds and sigma values. Use `./prmers -h` for the exact list supported by your build.
 
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | The requested work finished. |
+| `1` | The run was stopped before it finished (Ctrl-C / `SIGINT`, or `SIGTERM` / `SIGHUP`, which stop a run the same way). The checkpoint was saved and the worktodo entry is still queued, so the same command resumes where it stopped. Every mode (PRP, LL, LL-safe, P-1, ECM, Gaussian-Mersenne, GMCHAIN, GMTF, bench, memtest) uses this code; P-1 stage 2 and memtest already did. In `-gui` mode Stop is the normal way to quit and the exit code is unchanged. |
+| `1` (also) | Gaussian-Mersenne modes also use `1` as a result code (composite or no factor). |
+| `2` | General errors and the Gaussian-Mersenne error result. |
+
+An exit status of `1` therefore means either "stopped" or, in the Gaussian-Mersenne modes, "finished with composite / no factor". The exit status alone cannot tell them apart: a script that needs to know must check the log output or the results file (a stopped run leaves its worktodo entry queued, a finished one archives it to `worktodo_save.txt`).
+
 ## worktodo.txt and AutoPrimeNet
 
 PrMers can read GIMPS-style `worktodo.txt` assignments.

@@ -1150,12 +1150,24 @@ int App::runPrpOrLl() {
     // entry, 3. only then delete the loop state and the proof residues. If 1
     // or 2 fails they are kept: the test is then run again, and resumes at
     // the end instead of from 0.
-    const bool retired = resultSaved && hasWorktodoEntry_ &&
+    // A stop received by now (read once, so every step below agrees) keeps the
+    // entry queued and everything the test needs to resume: the checkpoint, the
+    // loop state and the proof residues.
+    const bool stopped = core::algo::stop_requested_any();
+    const bool retired = !stopped && resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
     const bool entryRetired = !hasWorktodoEntry_ || retired;
-    if (resultSaved && entryRetired)
+    if (resultSaved && entryRetired && !stopped)
         backupManager.clearState();
-    const auto residueAction = ProofSetMarin::residueAction(
+    if (stopped) {
+        const std::string msg = std::string("Stop requested; keeping the saved state")
+            + (proofRequested && !options.wagstaff ? ", the proof residues" : "")
+            + (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string());
+        std::cerr << msg << "\n";
+        if (guiServer_)
+            guiServer_->appendLog(msg + "\n");
+    }
+    const auto residueAction = stopped ? ProofSetMarin::ResidueAction::NotApplicable : ProofSetMarin::residueAction(
         options.mode == "prp", options.wagstaff, proofRequested,
         proofCompleted, resultSaved, entryRetired);
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
@@ -1170,7 +1182,7 @@ int App::runPrpOrLl() {
             guiServer_->appendLog(msg);
     }
 
-    if (!resultSaved || !entryRetired) {
+    if (!stopped && (!resultSaved || !entryRetired)) {
         const std::string msg =
             (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
             + "; keeping the saved state"
@@ -1179,7 +1191,7 @@ int App::runPrpOrLl() {
         if (guiServer_)
             guiServer_->appendLog(msg + "\n");
     }
-    if (hasWorktodoEntry_ && resultSaved) {
+    if (hasWorktodoEntry_ && resultSaved && !stopped) {  // a stopped run keeps its entry and does not restart
         if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";

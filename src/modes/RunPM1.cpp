@@ -1339,7 +1339,7 @@ int App::runPM1() {
      if (hasWorktodoEntry_ && !resultSaved) {
          std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
      }
-     if (hasWorktodoEntry_ && resultSaved) {
+     if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
@@ -7511,7 +7511,7 @@ int App::runPM1Marin() {
         if (hasWorktodoEntry_ && !resultSaved) {
             std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
         }
-        if (hasWorktodoEntry_ && resultSaved) {
+        if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
                 if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -8016,7 +8016,7 @@ int App::runPM1Marin() {
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
     }
-    if (hasWorktodoEntry_ && resultSaved) {
+    if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -8558,7 +8558,7 @@ int App::runPM1Stage3Marin() {
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
     }
-    if (hasWorktodoEntry_ && resultSaved) {
+    if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
                 if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
@@ -9156,7 +9156,7 @@ int App::runPM1Stage4Marin() {
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
     }
-    if (hasWorktodoEntry_ && resultSaved) {
+    if (hasWorktodoEntry_ && resultSaved && !core::algo::stop_requested_any()) {  // a stopped run keeps its entry
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
             if (guiServer_) {

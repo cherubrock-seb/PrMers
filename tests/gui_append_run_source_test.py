@@ -53,7 +53,8 @@ lock = r.index('io::WorktodoParser::lockFileWrites();')
 assert r.index('commitRestart') < lock < r.index('CreateProcessA') and lock < r.index('util::execSelf(args)')
 
 # The bench and memtest SIGINT handlers are stop sources too.
-assert 'static void prmers_bench_sigint(int) { prmers_bench_stop = 1; core::stop_or_exit(); }' in app
+import re
+assert re.search(r'static void prmers_bench_sigint\(int\) \{[^}]*core::stop_or_exit\(\);', app)
 memtest = (root / 'src/modes/RunMemTest.cpp').read_text()
-assert 'auto onint = +[](int){ stop_flag = 1; core::stop_or_exit(); };' in memtest
+assert re.search(r'auto onint = \+\[\]\(int\)\{[^}]*core::stop_or_exit\(\);', memtest)
 print('GUI append-run source test passed')

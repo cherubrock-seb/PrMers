@@ -24,7 +24,7 @@ namespace core { namespace algo {
   }
 
   bool stop_requested_any() noexcept {
-    return interrupted.load(std::memory_order_relaxed) || core::g_stop_restart_gate.stopRequested();
+    return core::g_stop_restart_gate.stopRequested();
   }
 
 #ifdef _WIN32

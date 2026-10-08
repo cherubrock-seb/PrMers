@@ -148,7 +148,7 @@ static void test_race() {
 static void on_signal(int) { core::stop_or_exit(); }
 
 // Child process: install the real handler, commit a restart, then get a signal before the "exec".
-// stop_or_exit must _Exit(0) so the marker (standing in for the relaunch) is never printed.
+// stop_or_exit must _Exit(kExitInterrupted) so the marker (standing in for the relaunch) is never printed.
 static int run_child(bool commitFirst, bool viaThread) {
     struct sigaction sa; std::memset(&sa, 0, sizeof sa); sa.sa_handler = on_signal; sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, nullptr);
@@ -189,7 +189,9 @@ static void test_signal_paths() {
         int st = 0;
         waitpid(pid, &st, 0);
         CHECK(WIFEXITED(st));
-        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+        // Stop after the restart was committed: the process ends with the interrupted code; a stop before
+        // the commit makes the commit fail and the child carries on (exit 0 from run_child).
+        CHECK(WIFEXITED(st) && WEXITSTATUS(st) == (commitFirst ? core::kExitInterrupted : 0));
         CHECK(n <= 0 || std::strstr(buf, "RELAUNCHED") == nullptr);
     }
 }

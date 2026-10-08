@@ -65,6 +65,6 @@ if kill -0 "$pid" 2>/dev/null; then
 fi
 rc=0
 wait "$pid" || rc=$?
-[ "$rc" -eq 0 ] || { echo "int: exit status $rc, expected 0" >&2; exit 1; }
+[ "$rc" -eq 1 ] || { echo "int: exit status $rc, expected 1 (stopped)" >&2; exit 1; }
 check_kept int 677 interrupted
 echo "pm1 stage-2 incomplete test passed"

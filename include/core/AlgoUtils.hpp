@@ -78,7 +78,11 @@ void handle_sigint(int) noexcept;
 // would otherwise survive a SIGTERM).
 void install_stop_handlers();
 
-// True once a stop was requested by any source (signal, console event, GUI Stop).
+// True once a stop was requested by any source (signal, console event, GUI Stop). Sticky: it is the
+// stop bit of core::g_stop_restart_gate, which every stop handler sets and nothing clears. Unlike
+// `interrupted` (which modes also set and clear themselves: a found ECM factor, a stage that handled
+// a stop) it can therefore decide the exit code (core/ExitCodes.hpp) and whether a finished worktodo
+// entry may be archived and the run restarted.
 bool stop_requested_any() noexcept;
 
 

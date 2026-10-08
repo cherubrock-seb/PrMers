@@ -25,6 +25,7 @@
 #include "core/App.hpp"
 #include "core/InheritedSignals.hpp"
 #include "core/LegacyLlGuard.hpp"
+#include "core/ExitCodes.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmChainProgress.hpp"
 #include "core/QuickChecker.hpp"
@@ -1083,6 +1084,11 @@ static bool file_non_empty(const std::string& p) {
 
 
 int App::run() {
+    const int rc = runInner();
+    return core::exitCodeForRun(rc, core::algo::stop_requested_any(), options.gui);
+}
+
+int App::runInner() {
 
     //std::cout << "host : " << options.http_host << "\n";
     
@@ -1480,6 +1486,7 @@ int App::run() {
     // no-factor, prime or composite) is archived, then PrMers restarts on the
     // next non-comment line. Interrupted/error runs keep the current line.
     if (hasWorktodoEntry_ && options.gaussian_mersenne && !interrupted &&
+        !core::algo::stop_requested_any() &&
         (rc == 0 || rc == 1)) {
         if (worktodoParser_ && worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Gaussian-Mersenne entry removed from "

@@ -1075,10 +1075,14 @@ int App::runPrpOrLlMarin()
     bool resultSaved = wm.saveIndividualJson(options.wagstaff ? options.exponent / 2 : options.exponent,
                                              options.wagstaff ? "wagstaff" : options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    const bool retired = resultSaved && hasWorktodoEntry_ &&
+    // A stop received by now (read once, so every step below agrees) keeps the
+    // entry queued and everything the test needs to resume: the checkpoint, the
+    // loop state and the proof residues.
+    const bool stopped = core::algo::stop_requested_any();
+    const bool retired = !stopped && resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
     const bool entryRetired = !hasWorktodoEntry_ || retired;
-    if (resultSaved && entryRetired) {
+    if (resultSaved && entryRetired && !stopped) {
         // Remove this run's own checkpoint (llunsafe_ for LL, wagstaff_ for Wagstaff,
         // plain for PRP). Using the exact ckpt_file avoids deleting another mode's state.
         std::error_code ec;
@@ -1088,7 +1092,15 @@ int App::runPrpOrLlMarin()
         remove_legacy_ckpt();
         backupManager.clearState();
     }
-    const auto residueAction = ProofSetMarin::residueAction(
+    if (stopped) {
+        const std::string msg = std::string("Stop requested; keeping the checkpoint")
+            + (proofRequested && !options.wagstaff ? ", the proof residues" : "")
+            + (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string());
+        std::cerr << msg << "\n";
+        if (guiServer_)
+            guiServer_->appendLog(msg + "\n");
+    }
+    const auto residueAction = stopped ? ProofSetMarin::ResidueAction::NotApplicable : ProofSetMarin::residueAction(
         options.mode == "prp", options.wagstaff, proofRequested,
         proofCompleted, resultSaved, entryRetired);
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
@@ -1104,7 +1116,7 @@ int App::runPrpOrLlMarin()
         if (guiServer_)
             guiServer_->appendLog(msg);
     }
-    if (!resultSaved || !entryRetired) {
+    if (!stopped && (!resultSaved || !entryRetired)) {
         const std::string msg =
             (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
             + "; keeping the checkpoint"
@@ -1113,7 +1125,7 @@ int App::runPrpOrLlMarin()
         if (guiServer_)
             guiServer_->appendLog(msg + "\n");
     }
-    if (hasWorktodoEntry_ && resultSaved) {
+    if (hasWorktodoEntry_ && resultSaved && !stopped) {  // a stopped run keeps its entry and does not restart
         if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
