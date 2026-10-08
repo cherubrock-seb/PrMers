@@ -140,6 +140,9 @@ inline void restart_self(int argc, char* argv[]) {
         if (auto g = ui::WebGuiServer::instance()) g->appendLog("Stop requested; not restarting.");
         return;
     }
+    // Wait for a GUI append in progress on another thread, and keep further ones out until the exec
+    // (or the exit after a failed one): the new process reads a complete worktodo.
+    auto worktodoWrites = io::WorktodoParser::lockFileWrites();
     std::vector<std::string> args(argv, argv + argc);
 
     if (args.size() > 1 && args[1].find_first_not_of("0123456789") == std::string::npos) {

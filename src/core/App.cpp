@@ -716,7 +716,8 @@ int App::convertEcmResumeToPrime95(const std::string& ecmPath, const std::string
 }
 
 static volatile sig_atomic_t prmers_bench_stop = 0;
-static void prmers_bench_sigint(int) { prmers_bench_stop = 1; }
+// Also a Stop for the GUI idle loop that follows, and for a restart already committed.
+static void prmers_bench_sigint(int) { prmers_bench_stop = 1; core::stop_or_exit(); }
 
 static std::string fmt_dhms(double s) {
     if (s < 0) s = 0;

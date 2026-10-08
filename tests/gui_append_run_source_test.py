@@ -47,4 +47,13 @@ assert rs, 'restart_self not found'
 r = rs.group(1)
 assert 'if (!core::g_stop_restart_gate.commitRestart()) {' in r
 assert r.index('commitRestart') < r.index('CreateProcessA') and r.index('commitRestart') < r.index('util::execSelf(args)')
+# ... and holds the worktodo write lock from the commit through the exec, so a GUI append on another
+# thread is never cut off half-written.
+lock = r.index('io::WorktodoParser::lockFileWrites();')
+assert r.index('commitRestart') < lock < r.index('CreateProcessA') and lock < r.index('util::execSelf(args)')
+
+# The bench and memtest SIGINT handlers are stop sources too.
+assert 'static void prmers_bench_sigint(int) { prmers_bench_stop = 1; core::stop_or_exit(); }' in app
+memtest = (root / 'src/modes/RunMemTest.cpp').read_text()
+assert 'auto onint = +[](int){ stop_flag = 1; core::stop_or_exit(); };' in memtest
 print('GUI append-run source test passed')

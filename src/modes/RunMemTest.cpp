@@ -49,6 +49,7 @@
 #include <deque>
 #include <filesystem>
 #include <set>
+#include "core/StopRestartGate.hpp"
 
 using namespace core;
 using namespace std::chrono;
@@ -242,7 +243,8 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     struct ErrRec { uint32_t test; uint32_t buf; uint32_t sec; uint32_t offmod; cl_ulong addr, exp, cur, reread; };
     std::vector<ErrRec> samples; samples.reserve(128);
     static volatile std::sig_atomic_t stop_flag = 0;
-    auto onint = +[](int){ stop_flag = 1; };
+    // Also a Stop for the GUI idle loop that follows (the run must not be restarted after it).
+    auto onint = +[](int){ stop_flag = 1; core::stop_or_exit(); };
     std::signal(SIGINT, onint);
 #ifdef SIGTERM
     std::signal(SIGTERM, onint);
