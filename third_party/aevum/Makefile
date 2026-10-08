@@ -420,3 +420,9 @@ $(RADIX1K_POLICY_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
 $(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -DAEVUM_FORCE_RADIX4_1K=1 -Isrc tests/radix1k_policy_test.cpp -o $@
+
+# PR136 cumulative semantic integration
+.PHONY: test-pr136-small-items
+test-host: test-pr136-small-items
+test-pr136-small-items:
+	python3 tests/kernel_inline_linkage_test.py

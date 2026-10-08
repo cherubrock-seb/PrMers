@@ -281,7 +281,7 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
 // isolated fft_MIDDLE stage retains GF61 u[MIDDLE], a pipeline shape already
 // accepted by Apple for fftMiddleInGF61FftApple.  The existing raw GF61 scratch
 // plane holds exactly one transform and no additional allocation is required.
-inline u32 appleMiddleOutGF61TmpIndex(u32 g, u32 k, u32 me) {
+static inline u32 appleMiddleOutGF61TmpIndex(u32 g, u32 k, u32 me) {
   return g * MIDDLE * OUT_WG + k * OUT_WG + me;
 }
 

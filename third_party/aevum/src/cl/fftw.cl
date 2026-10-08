@@ -8,13 +8,13 @@
 // Map one scalar produced by an inverse PFA width row directly to the
 // canonical transposed pair layout consumed by carry.cl.  This fuses the
 // former transform-sized pfaUnpack pass into fftW.
-inline u32 pfaWLogicalIndex(u32 row, u32 binary_index) {
+static inline u32 pfaWLogicalIndex(u32 row, u32 binary_index) {
   const u32 delta = (row + PFA_RADIX - binary_index % PFA_RADIX) % PFA_RADIX;
   const u32 t = (delta * PFA_L_INV) % PFA_RADIX;
   return binary_index + PFA_BINARY_LENGTH * t;
 }
 
-inline u32 pfaWCanonicalPairIndex(u32 logical) {
+static inline u32 pfaWCanonicalPairIndex(u32 logical) {
   const u32 pair = logical >> 1;
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;

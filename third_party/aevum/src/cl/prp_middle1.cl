@@ -8,7 +8,7 @@
 
 // Coordinates of a scalar in fftMiddleOut's output, before its optional LDS
 // transpose. Writing this scalar directly has the same layout including PAD.
-inline u32 prpMiddle1OutLane(u32 x, u32 y) {
+static inline u32 prpMiddle1OutLane(u32 x, u32 y) {
   return (x % OUT_SIZEX) * (OUT_WG / OUT_SIZEX) + y % (OUT_WG / OUT_SIZEX);
 }
 

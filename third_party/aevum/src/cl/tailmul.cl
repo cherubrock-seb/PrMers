@@ -561,7 +561,7 @@ KERNEL(G_H) tailMulGF61(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 // bases are expressed in GF61 elements, allowing the same kernels to operate
 // on a combined GF31/GF61 transform buffer (base DISTGF61) or the raw scratch
 // plane (base zero).
-inline u32 appleTailMulGF61LineIndex(u32 base, u32 line, u32 slot, u32 me) {
+static inline u32 appleTailMulGF61LineIndex(u32 base, u32 line, u32 slot, u32 me) {
   return base + transPos(line, MIDDLE, WIDTH) * SMALL_HEIGHT + slot * G_H + me;
 }
 

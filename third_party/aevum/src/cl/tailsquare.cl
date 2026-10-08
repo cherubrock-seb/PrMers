@@ -1156,11 +1156,11 @@ KERNEL(G_H) tailSquareZeroGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 // value owned by line `which`, private slot `i` and lane `me` is stored at
 //   bank * (2 * SMALL_HEIGHT) + which * SMALL_HEIGHT + i * G_H + me.
 // The complete allocation is 4 * SMALL_HEIGHT GF61 values.
-inline u32 appleTailZeroGF61BankIndex(u32 bank, u32 which, u32 i, u32 me) {
+static inline u32 appleTailZeroGF61BankIndex(u32 bank, u32 which, u32 i, u32 me) {
   return bank * (2 * SMALL_HEIGHT) + which * SMALL_HEIGHT + i * G_H + me;
 }
 
-inline u32 appleTailZeroGF61Index(u32 which, u32 i, u32 me) {
+static inline u32 appleTailZeroGF61Index(u32 which, u32 i, u32 me) {
   return appleTailZeroGF61BankIndex(0, which, i, me);
 }
 
@@ -1354,17 +1354,17 @@ KERNEL(G_H) tailSquareZeroGF61WriteDirectApple(P(GF61) out61, CP(GF61) scratch,
 // Normal-line ordinal mapping excludes the two exceptional lines 0 and H/2:
 //   ordinal 0..H/2-2   -> line 1..H/2-1
 //   ordinal H/2-1..H-3 -> line H/2+1..H-1
-inline u32 appleTailGF61NormalLine(u32 ordinal) {
+static inline u32 appleTailGF61NormalLine(u32 ordinal) {
   const u32 H = ND / SMALL_HEIGHT;
   const u32 halfH = H / 2;
   return ordinal < halfH - 1 ? ordinal + 1 : ordinal + 2;
 }
 
-inline u32 appleTailGF61LineBase(u32 line) {
+static inline u32 appleTailGF61LineBase(u32 line) {
   return transPos(line, MIDDLE, WIDTH) * SMALL_HEIGHT;
 }
 
-inline u32 appleTailGF61LineIndex(u32 line, u32 slot, u32 me) {
+static inline u32 appleTailGF61LineIndex(u32 line, u32 slot, u32 me) {
   return appleTailGF61LineBase(line) + slot * G_H + me;
 }
 
@@ -1533,7 +1533,7 @@ KERNEL(G_H) tailSquareGF61PairApple(P(T2) data, Trig smallTrig) {
 // LDS or cross-work-item barrier is used, so the kernel remains compatible
 // with Apple's OpenCL 1.2 to Metal compiler while eliminating two full GF61
 // global-memory round trips per height stage.
-inline GF61 appleTailGF61TwiddleFused(GF61 value, TrigGF61 smallTrig61,
+static inline GF61 appleTailGF61TwiddleFused(GF61 value, TrigGF61 smallTrig61,
                                       u32 i, u32 me, u32 f) {
   if (i == 0) return value;
   const u32 p = me & ~(f - 1);
@@ -1547,7 +1547,7 @@ inline GF61 appleTailGF61TwiddleFused(GF61 value, TrigGF61 smallTrig61,
 #endif
 }
 
-inline void appleTailGF61ScatterFused(P(GF61) dst61, u32 line,
+static inline void appleTailGF61ScatterFused(P(GF61) dst61, u32 line,
                                       GF61 value, u32 i, u32 me, u32 f) {
   const u32 remainder = me & (f - 1);
   const u32 logical = ((me / f) * RADIX + i) * f + remainder;
