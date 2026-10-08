@@ -174,12 +174,14 @@ bool optionTakesValue(const std::string& arg) {
 
 // True when args[i] is an option whose value is args[i + 1]. "-pfa" and
 // "-pfa-auto" take an optional radix value, which is only consumed when it is
-// exactly 3 or 9.
+// 3, 7 or 9, matching CliParser.
 bool consumesNextToken(const std::vector<std::string>& args, std::size_t i) {
     if (i + 1 >= args.size()) return false;
     const std::string& arg = args[i];
     if (optionTakesValue(arg)) return true;
-    if (arg == "-pfa" || arg == "-pfa-auto") return args[i + 1] == "3" || args[i + 1] == "9";
+    if (arg == "-pfa" || arg == "-pfa-auto") {
+        return args[i + 1] == "3" || args[i + 1] == "7" || args[i + 1] == "9";
+    }
     return false;
 }
 

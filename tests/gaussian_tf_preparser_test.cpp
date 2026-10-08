@@ -104,6 +104,21 @@ int main() {
     expectError("worktodo_with_computer_gui",
                 {"-computer", "box1", "-worktodo", gmtf}, "odd exponent");
 
+    // The optional -pfa / -pfa-auto radix value (3, 7 or 9) must not stop the
+    // worktodo GMTF entry from being reached or be taken for the exponent.
+    for (const char* radix : {"3", "7", "9"}) {
+        for (const char* flag : {"-pfa", "-pfa-auto"}) {
+            expectError((std::string("worktodo_with_") + flag + "_" + radix).c_str(),
+                        {flag, radix, "-worktodo", gmtf}, "odd exponent");
+            expectError((std::string("tf_exponent_after_") + flag + "_" + radix).c_str(),
+                        {flag, radix, "4", "-gm-tf", "20", "30"}, "odd exponent");
+        }
+    }
+    // Without a radix value the flag stands alone, and a non-radix number after it is the exponent.
+    expectError("worktodo_with_bare_pfa", {"-pfa", "-worktodo", gmtf}, "odd exponent");
+    expectError("pfa_without_radix_then_exponent", {"-pfa", "4", "-gm-tf", "20", "30"},
+                "odd exponent");
+
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     if (failures != 0) {
