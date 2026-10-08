@@ -17,6 +17,7 @@
 #include "KernelCompiler.h"
 #include "Saver.h"
 #include "timeutil.h"
+#include "StrictInt.h"
 #include "TrigBufCache.h"
 #include "fs.h"
 #include "Sha3Hash.h"
@@ -337,10 +338,19 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
 
     // Some -use options are needed in both OpenCL code and C++ initialization code
     if (k == "TAIL_KERNELS") {
-      if (atoi(v.c_str()) == 0) tail_single_wide = 1, tail_single_kernel = 1;
-      if (atoi(v.c_str()) == 1) tail_single_wide = 1, tail_single_kernel = 0;
-      if (atoi(v.c_str()) == 2) tail_single_wide = 0, tail_single_kernel = 1;
-      if (atoi(v.c_str()) == 3) tail_single_wide = 0, tail_single_kernel = 0;
+      // The kernels derive SINGLE_WIDE and SINGLE_KERNEL from the same value (tailutil.cl), and those formulas disagree with the
+      // host's choices for anything outside 0..3, so refuse such a value rather than let host and kernels expect different geometry.
+      // The text is also forwarded to the kernels as -DTAIL_KERNELS=<text>, so it must be a plain integer (atoi would turn
+      // "garbage" into 0 here while the kernels' preprocessor sees an undefined identifier).
+      int tailKernels = 0;
+      if (!parseStrictInt(v, tailKernels) || tailKernels < 0 || tailKernels > 3) {
+        log("Invalid TAIL_KERNELS='%s', must be an integer 0..3\n", v.c_str());
+        throw "invalid TAIL_KERNELS";
+      }
+      if (tailKernels == 0) tail_single_wide = 1, tail_single_kernel = 1;
+      if (tailKernels == 1) tail_single_wide = 1, tail_single_kernel = 0;
+      if (tailKernels == 2) tail_single_wide = 0, tail_single_kernel = 1;
+      if (tailKernels == 3) tail_single_wide = 0, tail_single_kernel = 0;
     }
     if (k == "INPLACE") in_place = atoi(v.c_str());
     if (k == "WMUL") wmul = atoi(v.c_str());

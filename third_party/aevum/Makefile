@@ -197,6 +197,7 @@ FFT_SPEC_ROBUSTNESS_TEST := build-tests/aevum-fft-spec-robustness-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
 WMUL_LIMIT_TEST := build-tests/aevum-wmul-limit-test
+STRICT_INT_TEST := build-tests/aevum-strict-int-test
 FFT_VARIANT0_1K_TEST := build-tests/aevum-fft-variant0-1k-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
@@ -208,7 +209,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(STRICT_INT_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
@@ -238,6 +239,8 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/gpu_init_order_test.py
 	python3 tests/engine_autotune_isolation_test.py
 	python3 tests/engine_lead_cache_test.py
+	python3 tests/tail_kernels_range_source_test.py
+	$(STRICT_INT_TEST)
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/asm_string_braces_test.py
 	$(HOST_TEST)
@@ -264,6 +267,10 @@ test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 $(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
+
+$(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
