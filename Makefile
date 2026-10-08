@@ -418,6 +418,26 @@ test-llsafe-error-recovery: all
 test-legacy-prp-resume: all
 	bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-marin-ocl-exec-errors
+
+test-marin-ocl-exec-errors:
+	bash tests/test_marin_ocl_exec_errors_device.sh $(MARIN_TEST_DEVICE)
+
+.PHONY: test-legacy-program-small
+
+test-legacy-program-small:
+	bash tests/test_legacy_program_small_device.sh $(MARIN_TEST_DEVICE)
+
+.PHONY: test-legacy-carry-mul3
+
+test-legacy-carry-mul3:
+	bash tests/test_legacy_carry_mul3_device.sh $(MARIN_TEST_DEVICE)
+
+.PHONY: test-marin-dead-kernels
+
+test-marin-dead-kernels:
+	python3 tests/marin_dead_kernels_source_test.py
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:

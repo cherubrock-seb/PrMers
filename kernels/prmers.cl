@@ -516,6 +516,9 @@ __kernel void kernel_carry_mul_3(
 
         sel = bitselect(DW1, DW2, (sel));
 
+        // Normalise this block on its own: carry1 must not chain from the previous block, whose carry-out
+        // is already added (times 3) to the multiplication carry below. Chaining counted it twice.
+        carry1 = 0UL;
         x_vec = digit_adc4(x_vec, sel, &carry1);
         ulong4 lo_vec = x_vec * CONST_SCALAR_VEC;
         x_vec = digit_adc4(lo_vec, sel, &carry);

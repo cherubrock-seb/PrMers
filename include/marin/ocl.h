@@ -28,7 +28,6 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <algorithm>
 
 // #define ocl_debug		1
-#define ocl_fast_exec		1
 
 namespace ocl
 {
@@ -644,13 +643,10 @@ protected:
 protected:
 	static void _set_kernel_arg(cl_kernel kernel, const cl_uint arg_index, const size_t arg_size, const void * const arg_value)
 	{
-#if !defined(ocl_fast_exec) || defined(ocl_debug)
-		cl_int err =
-#endif
-		clSetKernelArg(kernel, arg_index, arg_size, arg_value);
-#if !defined(ocl_fast_exec) || defined(ocl_debug)
-		fatal(err);
-#endif
+		// Always check the result: a rejected argument would leave the previous value in place and the stage would
+		// run with a wrong operand. A compare on a register is free next to a kernel launch.
+		const cl_int err = clSetKernelArg(kernel, arg_index, arg_size, arg_value);
+		if (err != CL_SUCCESS) fatal(err, "clSetKernelArg");
 	}
 
 protected:
@@ -658,13 +654,10 @@ protected:
 	{
 		if (!_profile)
 		{
-#if !defined(ocl_fast_exec) || defined(ocl_debug)
-			cl_int err =
-#endif
-			clEnqueueNDRangeKernel(_queue, kernel, 1, nullptr, &global_worksize, (local_worksize == 0) ? nullptr : &local_worksize, 0, nullptr, nullptr);
-#if !defined(ocl_fast_exec) || defined(ocl_debug)
-			fatal(err);
-#endif
+			// Always check the result: a launch rejected by the driver (CL_INVALID_WORK_GROUP_SIZE,
+			// CL_OUT_OF_RESOURCES, ...) would silently skip the stage.
+			const cl_int err = clEnqueueNDRangeKernel(_queue, kernel, 1, nullptr, &global_worksize, (local_worksize == 0) ? nullptr : &local_worksize, 0, nullptr, nullptr);
+			if (err != CL_SUCCESS) fatal(err, "clEnqueueNDRangeKernel");
 			if (_is_sync)
 			{
 				++_sync_count;

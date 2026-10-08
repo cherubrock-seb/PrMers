@@ -98,7 +98,7 @@ private:
 	cl_kernel _forward_mul512 = nullptr, _sqr512 = nullptr, _mul512 = nullptr;
 	cl_kernel _forward_mul1024 = nullptr, _sqr1024 = nullptr, _mul1024 = nullptr;
 	// cl_kernel _forward_mul2048 = nullptr, _sqr2048 = nullptr, _mul2048 = nullptr;
-	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_addsub_p1 = nullptr, _carry_weight_addsub_p2 = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_addsub_p1_copy = nullptr, _carry_weight_addsub_p2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
+	cl_kernel _carry_weight_mul_p1 = nullptr, _carry_weight_add_p1 = nullptr, _carry_weight_add_neg_p1 = nullptr, _carry_weight_p2 = nullptr, _carry_weight_sub_p2_phase = nullptr, _carry_weight_p2x2 = nullptr, _carry_weight_mul_p1_copy = nullptr, _carry_weight_p2_copy = nullptr, _carry_weight_mul2_unit_p1 = nullptr;
 	cl_kernel _copy = nullptr, _subtract = nullptr, _subtract_reg = nullptr;
 	// v99.99: exact parallel mixed-radix subtraction for Marin.
 	cl_kernel _subtract_reg_group_p1 = nullptr;
@@ -725,15 +725,10 @@ public:
 		CREATE_KERNEL_CARRY(carry_weight_add_p1);
 		CREATE_KERNEL_CARRY(carry_weight_add_neg_p1);
 		CREATE_KERNEL_CARRY(carry_weight_p2);
-		CREATE_KERNEL_CARRY(carry_weight_sub_p2);
 			CREATE_KERNEL_CARRY(carry_weight_sub_p2_phase);
-		CREATE_KERNEL_CARRY(carry_weight_addsub_p1);
-		CREATE_KERNEL_CARRY(carry_weight_addsub_p2);
 		CREATE_KERNEL_CARRY(carry_weight_p2x2);
 		CREATE_KERNEL_CARRY(carry_weight_mul_p1_copy);
 		CREATE_KERNEL_CARRY(carry_weight_p2_copy);
-		CREATE_KERNEL_CARRY(carry_weight_addsub_p1_copy);
-		CREATE_KERNEL_CARRY(carry_weight_addsub_p2_copy);
 		CREATE_KERNEL_CARRY(carry_weight_mul2_unit_p1);
 
 		// mul512_xbuf is compiled together with mul512, i.e. only for n >= 32768
@@ -1199,36 +1194,6 @@ public:
 	}
 
 	
-	void carry_weight_addsub(const size_t sum, const size_t diff, const size_t a, const size_t b)
-	{
-		if (_reg_segmented && !same_segment4(sum, diff, a, b))
-		{
-			copy(sum, a);
-			carry_weight_add(sum, b);
-			copy(diff, a);
-			carry_weight_sub(diff, b);
-			return;
-		}
-		const segloc sl = seg_loc(sum), dl = seg_loc(diff), al = seg_loc(a), bl = seg_loc(b);
-		bind_reg_segment(_carry_weight_addsub_p1, sl.seg);
-		bind_reg_segment(_carry_weight_addsub_p2, sl.seg);
-		uint64 offS = uint64(sl.local * _n);
-		uint64 offD = uint64(dl.local * _n);
-		uint64 offA = uint64(al.local * _n);
-		uint64 offB = uint64(bl.local * _n);
-
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base(), sizeof(uint64), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 1, sizeof(uint64), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 2, sizeof(uint64), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1, carry_arg_base() + 3, sizeof(uint64), &offB);
-		_execute_kernel(_carry_weight_addsub_p1, _n / 4, 1u << _lcwm_wg_size);
-
-		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base(), sizeof(uint64), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2, carry_arg_base() + 1, sizeof(uint64), &offD);
-		_execute_kernel(_carry_weight_addsub_p2, (_n / 4) >> _lcwm_wg_size);
-	}
-
-
 	void carry_weight_mul2_unit(const size_t dst0, const size_t dst1)
 	{
 		if (_reg_segmented && !same_segment(dst0, dst1))
@@ -1250,42 +1215,6 @@ public:
 		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base(), sizeof(uint64), &off0);
 		_set_kernel_arg(_carry_weight_p2x2, carry_arg_base() + 1, sizeof(uint64), &off1);
 		_execute_kernel(_carry_weight_p2x2, (_n / 4) >> _lcwm_wg_size);
-	}
-
-
-	void addsub_copy(const size_t sum, const size_t diff, const size_t sum_copy, const size_t diff_copy,
-					const size_t a, const size_t b)
-	{
-		if (_reg_segmented && !(same_segment4(sum, diff, a, b) && same_segment(sum, sum_copy) && same_segment(diff, diff_copy)))
-		{
-			carry_weight_addsub(sum, diff, a, b);
-			copy(sum_copy, sum);
-			copy(diff_copy, diff);
-			return;
-		}
-		const segloc sl = seg_loc(sum), dl = seg_loc(diff), scl = seg_loc(sum_copy), dcl = seg_loc(diff_copy), al = seg_loc(a), bl = seg_loc(b);
-		bind_reg_segment(_carry_weight_addsub_p1_copy, sl.seg);
-		bind_reg_segment(_carry_weight_addsub_p2_copy, sl.seg);
-		const uint64 offS = uint64(sl.local * _n);
-		const uint64 offD = uint64(dl.local * _n);
-		const uint64 offSc = uint64(scl.local * _n);
-		const uint64 offDc = uint64(dcl.local * _n);
-		const uint64 offA = uint64(al.local * _n);
-		const uint64 offB = uint64(bl.local * _n);
-
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base(), sizeof(uint64), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 1, sizeof(uint64), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 2, sizeof(uint64), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 3, sizeof(uint64), &offDc);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 4, sizeof(uint64), &offA);
-		_set_kernel_arg(_carry_weight_addsub_p1_copy, carry_arg_base() + 5, sizeof(uint64), &offB);
-		_execute_kernel(_carry_weight_addsub_p1_copy, _n / 4, 1u << _lcwm_wg_size);
-
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base(), sizeof(uint64), &offS);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 1, sizeof(uint64), &offD);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 2, sizeof(uint64), &offSc);
-		_set_kernel_arg(_carry_weight_addsub_p2_copy, carry_arg_base() + 3, sizeof(uint64), &offDc);
-		_execute_kernel(_carry_weight_addsub_p2_copy, (_n / 4) >> _lcwm_wg_size);
 	}
 
 
