@@ -214,6 +214,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/pfa9_lead_bridge_source_test.py
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
+	python3 tests/apple_ffthin_preserves_input_test.py
 	python3 tests/apple_gf31_width_staging_test.py
 	python3 tests/apple_fused_fftp_test.py
 	python3 tests/apple_gf61_scalar_mapping_test.py
