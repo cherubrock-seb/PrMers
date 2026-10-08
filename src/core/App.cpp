@@ -1156,6 +1156,12 @@ int App::run() {
             chain_dir / ("gm_chain_p" + std::to_string(options.exponent) + "_phases.done"),
             chain_key);
         namespace gcp = core::gm_chain_progress;
+        // A record that exists but cannot be used is reported once, here, rather
+        // than silently redoing finished work.
+        if (const std::string chain_notice = chain_progress.notice(); !chain_notice.empty()) {
+            std::cerr << chain_notice << std::endl;
+            if (guiServer_) guiServer_->appendLog(chain_notice);
+        }
 
         auto run_family_pipeline = [&](const std::string& family) -> int {
             if (const auto finished = chain_progress.family_rc(family)) {

@@ -9,6 +9,10 @@ assert '#include "core/GmChainProgress.hpp"' in app
 assert 'core::gm_chain_progress::Progress chain_progress(' in app
 assert 'std::string chain_key = activeWorktodoRawLine_;' in app
 
+# An unusable record is reported once, to stderr and the GUI log.
+assert 'chain_progress.notice()' in app
+assert 'guiServer_->appendLog(chain_notice)' in app
+
 start = app.index('auto run_family_pipeline = [&]')
 end = app.index('if (requested_family == "BOTH")', start)
 body = app[start:end]

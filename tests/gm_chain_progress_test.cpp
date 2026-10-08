@@ -245,6 +245,124 @@ int main() {
         }
     }
 
+    // Why a record was not used: a missing file is silent, a record for another
+    // job gets a note, and every kind of damage gets a warning with its reason.
+    {
+        const std::string k = "job";
+        namespace rs = gp::reason;
+        const auto D = gp::Status::Damaged;
+        auto check = [&](const std::string& content, gp::Status status, const std::string& why) {
+            write_raw(f, content);
+            const gp::LoadResult r = gp::load_checked(f, k);
+            if (r.status != status || r.reason != why) {
+                std::cerr << "FAIL: expected reason '" << why << "', got '" << r.reason << "' for:\n"
+                          << content << "\n";
+                return false;
+            }
+            const gp::Progress p(f, k);
+            return p.status() == status && p.reason() == why &&
+                   p.notice().empty() == (status == gp::Status::Ok);
+        };
+
+        // Missing file: no reason, no message.
+        fs::remove(f);
+        {
+            const gp::LoadResult r = gp::load_checked(f, k);
+            CHECK(r.status == gp::Status::Missing && r.reason.empty() && r.tokens.empty());
+            const gp::Progress p(f, k);
+            CHECK(p.status() == gp::Status::Missing && p.reason().empty() && p.notice().empty());
+        }
+        // Dangling symlink behaves like a missing file.
+        {
+            std::error_code ec;
+            fs::create_symlink(dir / "nowhere", f, ec);
+            if (!ec) {
+                CHECK(gp::Progress(f, k).notice().empty());
+                CHECK(gp::load_checked(f, k).status == gp::Status::Missing);
+                fs::remove(f);
+            }
+        }
+        // A usable record has no message, with or without tokens.
+        CHECK(check(file_with(k, ""), gp::Status::Ok, ""));
+        CHECK(check(file_with(k, "GM pm1\nGM done 1\n"), gp::Status::Ok, ""));
+
+        // A record for another job: a note that names the file, not a damage warning.
+        CHECK(check(file_with("job2", "GM done 1\n"), gp::Status::DifferentJob, rs::other_job()));
+        {
+            const std::string n = gp::Progress(f, k).notice();
+            CHECK(n.rfind("Note: ", 0) == 0);
+            CHECK(n.find(f.string()) != std::string::npos);
+            CHECK(n.find("different assignment") != std::string::npos);
+            CHECK(n.find("starts over") != std::string::npos);
+            CHECK(n.find("damaged") == std::string::npos);
+        }
+        CHECK(check(file_with("job ", "GM done 1\n"), gp::Status::DifferentJob, rs::other_job()));
+        CHECK(check(file_with("", "GM done 1\n"), gp::Status::DifferentJob, rs::other_job()));
+
+        // Damage: each case reports its reason.
+        CHECK(check(file_with(k, "GM done 0junk\n"), D, "line 3 is not a valid entry"));
+        CHECK(check(file_with(k, "GM pm1\nGM done 1junk\n"), D, "line 4 is not a valid entry"));
+        CHECK(check(file_with(k, "GM pm1\n\nGM ecm\n"), D, "line 4 is not a valid entry"));
+        CHECK(check(file_with(k, "XX pm1\n"), D, "line 3 is not a valid entry"));
+        CHECK(check(file_with(k, "GM done 1\nGM done 0\n"), D, "line 4 contradicts an earlier result"));
+        CHECK(check(file_with(k, "GM done 0\nGM done 1\n"), D, "line 4 contradicts an earlier result"));
+        CHECK(check(file_with(k, "GM done 1"), D, "line 3 is incomplete"));
+        CHECK(check(file_with(k, "GM pm1\nGM ec"), D, "line 4 is incomplete"));
+        CHECK(check(file_with(k, "GM done 1\r\n"), D, "line 3 is not a valid entry"));
+        CHECK(check(file_with(k, "GM done 1\n") + "garbage\n", D, "line 4 is not a valid entry"));
+        CHECK(check(file_with(k, std::string(2u << 20, 'A') + "\n"), D, rs::too_large()));
+        CHECK(check("PRMERS-GM-CHAIN 2\n" + k + "\nGM done 1\n", D, rs::bad_header()));
+        CHECK(check("something else\n" + k + "\nGM done 1\n", D, rs::bad_header()));
+        CHECK(check(kMagic + "\r\n" + k + "\r\nGM done 1\r\n", D, rs::bad_header()));
+        CHECK(check(kMagic + "\n" + k + "\r\nGM done 1\n", D, rs::crlf_key()));
+        CHECK(check("", D, rs::incomplete_header()));
+        CHECK(check(kMagic, D, rs::incomplete_header()));
+        CHECK(check(kMagic.substr(0, 10), D, rs::incomplete_header()));
+        CHECK(check(kMagic + "\n", D, rs::incomplete_key()));
+        CHECK(check(kMagic + "\n" + k, D, rs::incomplete_key()));
+        CHECK(check(std::string(4, '\0'), D, rs::incomplete_header()));
+        CHECK(check(std::string("\xff\xfe\n") + k + "\n", D, rs::bad_header()));
+        {
+            write_raw(f, file_with(k, "GM done 0junk\n"));
+            const std::string n = gp::Progress(f, k).notice();
+            CHECK(n.rfind("Warning: ", 0) == 0);
+            CHECK(n.find(f.string()) != std::string::npos);
+            CHECK(n.find("damaged") != std::string::npos);
+            CHECK(n.find("line 3 is not a valid entry") != std::string::npos);
+            CHECK(n.find("starts over") != std::string::npos);
+            CHECK(n.find('\n') == std::string::npos);          // one line
+            CHECK(n.find("junk") == std::string::npos);        // file content is not echoed
+        }
+
+        // A directory in place of the record is damage, not a missing file.
+        fs::remove(f);
+        fs::create_directory(f);
+        CHECK(gp::load_checked(f, k).status == D);
+        CHECK(gp::load_checked(f, k).reason == rs::not_regular_file());
+        CHECK(!gp::Progress(f, k).notice().empty());
+        fs::remove(f);
+
+        // The reason is fixed at construction: marking progress (which rewrites
+        // the file) does not change what an existing Progress reports.
+        write_raw(f, file_with(k, "GM done 0junk\n"));
+        {
+            gp::Progress p(f, k);
+            const std::string first = p.notice();
+            CHECK(!first.empty());
+            p.mark(gp::phase_token("GM", "pm1"));
+            CHECK(p.notice() == first);
+            CHECK(p.has(gp::phase_token("GM", "pm1")));
+            CHECK(!p.family_rc("GM").has_value());
+        }
+        // The rewritten record is good, so the next run is silent.
+        CHECK(gp::Progress(f, k).notice().empty());
+        CHECK(gp::Progress(f, k).status() == gp::Status::Ok);
+        // load() keeps returning empty tokens for every unusable record.
+        write_raw(f, file_with(k, "GM done 0junk\n"));
+        CHECK(gp::load(f, k).empty());
+        fs::remove(f);
+    }
+
     fs::remove_all(dir);
     std::cout << "GM chain progress test passed\n";
     return 0;
