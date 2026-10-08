@@ -380,3 +380,14 @@ test-stats-slot: $(STATS_SLOT_TEST)
 $(STATS_SLOT_TEST): tests/stats_slot_test.cpp src/StatsSlot.h src/common.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/stats_slot_test.cpp -o $@
+# PR133 cumulative semantic integration
+APPLE_FFTP61_SEED_TEST := build-tests/aevum-apple-fftp61-seed-test
+.PHONY: test-pr133-small-items test-apple-fftp61-seed
+test-host: test-pr133-small-items
+test-pr133-small-items:
+	python3 tests/apple_fftp61_seed_overflow_test.py
+test-apple-fftp61-seed: $(APPLE_FFTP61_SEED_TEST)
+	$(APPLE_FFTP61_SEED_TEST)
+$(APPLE_FFTP61_SEED_TEST): tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
