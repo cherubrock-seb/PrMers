@@ -397,3 +397,7 @@ test-ecm-small-items: ; python3 tests/ecm_small_items_source_test.py
 
 .PHONY: test-ecm-prime95-relative-path
 test-ecm-prime95-relative-path: ; bash tests/ecm_prime95_relative_path_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+# PR138 cumulative semantic integration
+test-gm-tf-worktodo-queue: all
+	bash tests/gmtf_worktodo_queue_test.sh $${PRMERS_TEST_DEVICE:-0}
