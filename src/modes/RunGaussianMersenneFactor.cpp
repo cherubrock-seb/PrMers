@@ -1411,6 +1411,20 @@ int App::runGaussianMersenneECM() {
                 if (!montgomery_ladder(eng.get(), r, K, restart_remaining, no_checkpoint, elapsed,
                                        "GM ECM Stage 1 restart curve " + std::to_string(curve + 1))) return 0;
                 point = project_point(eng.get(), r, t.n);
+                // The restarted Stage 1 point gets the same checks as the original one.
+                if (is_proper_factor(point.factor, t.n)) {
+                    std::cout << ">>> Gaussian pair ECM Stage 1 factor: " << point.factor << "\n";
+                    write_json_result(
+                        save_dir, factor_result_filename("ecm", t),
+                        gm_result_json("gm-ecm", "factor", 1, t, B1, std::nullopt,
+                                       curves, curve + 1, std::to_string(sigma), point.factor.get_str(),
+                                       backend, device_name, job_elapsed()));
+                    return 0;
+                }
+                if (!point.normalized) {
+                    std::cout << "[GM ECM] Stage 1 restart produced a singular/trivial point; next curve.\n";
+                    continue;
+                }
             } else {
                 std::cout << "Resuming ECM Stage 2 at prime index " << index << "/" << s2primes.size() << "\n";
             }
