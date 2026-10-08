@@ -28,10 +28,18 @@ enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50,
 // The path remains compiled in but is never enabled implicitly.
 // AEVUM_RADIX1K=8 is an explicit diagnostic/tune override.
 // Missing, empty, or AEVUM_RADIX1K=4 preserves historical radix-4.
+//
+// The Apple staged pipelines in Gpu.cpp run their height/width FFT as generic radix passes (stage *= nH up to the group size, then a final
+// radix), which for a 1K side is 8 * 8 * 8 * 8 instead of the 8 * 8 * 16 the radix-8 kernels need.  They are only correct for radix 4, so
+// Apple never takes the radix-8 path (AEVUM_FORCE_RADIX4_1K lets a host test exercise the same rule on another platform).
+#if defined(__APPLE__) || defined(AEVUM_FORCE_RADIX4_1K)
+inline bool aevumRadix8For1K() { return false; }
+#else
 inline bool aevumRadix8For1K() {
   const char* value = std::getenv("AEVUM_RADIX1K");
   return value && value[0] == '8' && value[1] == '\0';
 }
+#endif
 
 class FFTShape {
 public:

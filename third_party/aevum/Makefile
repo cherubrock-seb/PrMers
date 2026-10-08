@@ -402,3 +402,21 @@ test-apple-tailzero-halfline: $(APPLE_TAILZERO_TEST)
 $(APPLE_TAILZERO_TEST): tests/apple_tailzero_halfline_test.cpp src/AppleTailZero.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_tailzero_halfline_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# PR135 cumulative semantic integration
+RADIX1K_POLICY_TEST := build-tests/aevum-radix1k-policy-test
+RADIX1K_POLICY_APPLE_TEST := build-tests/aevum-radix1k-policy-apple-test
+.PHONY: test-pr135-small-items test-radix1k-policy
+test-host: test-pr135-small-items
+test-pr135-small-items: test-radix1k-policy
+test-radix1k-policy: $(RADIX1K_POLICY_TEST) $(RADIX1K_POLICY_APPLE_TEST)
+	$(RADIX1K_POLICY_TEST)
+	$(RADIX1K_POLICY_APPLE_TEST)
+
+$(RADIX1K_POLICY_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/radix1k_policy_test.cpp -o $@
+
+$(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -DAEVUM_FORCE_RADIX4_1K=1 -Isrc tests/radix1k_policy_test.cpp -o $@
