@@ -9,8 +9,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE="${1:-0}"
-P="${2:-11213}"
-Q="${3:-42737}"
+P="${2:-4423}"
+Q="${3:-5807}"
 RUN="${PRMERS_TEST_RUN_PREFIX:-}"
 export AEVUM_CARRY_WMUL=1 AEVUM_AUTOTUNE=off
 
@@ -25,9 +25,10 @@ check_case() {
         echo "$entry" > worktodo.txt
 
         # 1. The result cannot be saved (results.txt is a directory): the entry and
-        # the state stay. -t 1 saves the state every second, so some exists at the end.
+        # the state stay. -t 0 saves the state at every iteration, so some exists at
+        # the end however fast the device is.
         mkdir results.txt
-        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 1 "$@" -d "$DEVICE" -noask -f "$work" > nosave.log 2>&1
+        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 0 "$@" -d "$DEVICE" -noask -f "$work" > nosave.log 2>&1
         echo "$name: SAVE_FAILURE_RUN_RC=$?"
         grep -qF "$entry" worktodo.txt || { echo "FAIL($name): entry removed although the result was not saved"; exit 1; }
         [ -f "$state" ] || { echo "FAIL($name): $state deleted although the result was not saved"; ls; exit 1; }
@@ -38,7 +39,7 @@ check_case() {
         # 2. The result is saved but the worktodo update fails (worktodo_save.txt
         # is a directory): the entry and the state stay.
         mkdir worktodo_save.txt
-        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 1 "$@" -d "$DEVICE" -noask -f "$work" > fail.log 2>&1
+        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 0 "$@" -d "$DEVICE" -noask -f "$work" > fail.log 2>&1
         echo "$name: RETIRE_FAILURE_RUN_RC=$?"
 
         [ -s results.txt ] || { echo "FAIL($name): result not saved"; exit 1; }
@@ -49,7 +50,7 @@ check_case() {
 
         # 3. Both succeed: the entry is retired and the state removed.
         rmdir worktodo_save.txt
-        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 1 "$@" -d "$DEVICE" -noask -f "$work" > ok.log 2>&1
+        $RUN timeout 600 "$ROOT/prmers" -worktodo worktodo.txt -t 0 "$@" -d "$DEVICE" -noask -f "$work" > ok.log 2>&1
         echo "$name: RETRY_RUN_RC=$?"
 
         grep -q 'Entry removed from worktodo.txt' ok.log || { echo "FAIL($name): entry not retired on retry"; cat ok.log; exit 1; }
