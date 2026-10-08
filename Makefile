@@ -133,6 +133,7 @@ test-aevum-default:
 
 test-gui-append-run:
 	python3 tests/gui_append_run_source_test.py
+	bash tests/test_stop_restart_gate.sh
 
 test-gui-state:
 	bash tests/test_web_gui_backend_state.sh

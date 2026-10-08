@@ -67,6 +67,7 @@
 #include <tuple>
 #include <atomic>
 #include <mutex>
+#include "core/StopRestartGate.hpp"
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -944,14 +945,16 @@ int App::runGpuBenchmarkMarin() {
 }
 
 namespace {
-  std::atomic<bool> g_stop{false};
-  // Set by the GUI "Append & Run" handler (HTTP worker thread) after it has appended a line to
-  // worktodo. It never interrupts a running test: the running mode picks the line up when its
-  // entry finishes, and the idle loops in App::run() (main thread) start it when nothing is running.
-  std::atomic<bool> g_gui_append_pending{false};
+  // The stop flag and the GUI "Append & Run" pending flag live in core::g_stop_restart_gate, which
+  // orders a Stop against a restart (see core/StopRestartGate.hpp). The append handler (HTTP worker
+  // thread) only marks the entry pending; it never interrupts a running test: the running mode picks
+  // the line up when its entry finishes, and the idle loops in App::run() (main thread) start it when
+  // nothing is running.
+  bool stop_requested() noexcept { return core::g_stop_restart_gate.stopRequested(); }
+  // Signal handler and the GUI's Stop. Async-signal-safe.
   void handle_signal(int) noexcept {
-    g_stop.store(true, std::memory_order_relaxed);
     core::algo::interrupted.store(true, std::memory_order_relaxed);
+    core::stop_or_exit();
   }
 }
 
@@ -995,14 +998,19 @@ static void install_signal_handlers() {
 
 // Called from the main thread while the GUI is idle: if "Append & Run" added a line since the last
 // check, restart so the new entry starts. Nothing is running at this point, so no work is lost.
+// A Stop wins over the restart at every step: before the claim it makes the claim fail; after it,
+// restart_self's commit fails (and restart_self returns); once committed, the Stop ends the process
+// before the relaunch (core::stop_or_exit). The appended line stays in worktodo in every case.
 static void gui_restart_for_appended_entry(const std::shared_ptr<ui::WebGuiServer>& gui, int argc, char** argv) {
-    if (!g_gui_append_pending.exchange(false, std::memory_order_acq_rel)) return;
-    std::cout << "Starting appended worktodo entry\n";
+    if (core::g_stop_restart_gate.claimAppendedEntry() != core::StopRestartGate::Claim::Restart) return;
+    std::cout << "Starting appended worktodo entry" << std::endl;
     if (gui) {
         gui->appendLog("Starting appended worktodo entry");
         gui->stop();
     }
     restart_self(argc, argv);
+    // Only reached when a Stop came first; the idle loop then ends.
+    std::cout << "The appended entry stays in worktodo for the next start." << std::endl;
 }
 
 static bool file_non_empty(const std::string& p) {
@@ -1040,7 +1048,7 @@ int App::run() {
             }
             std::cout << "worktodo appended; it starts after the current entry finishes (immediately if idle)\n";
             if (guiServer_) guiServer_->appendLog("worktodo appended; it starts after the current entry finishes (immediately if idle)");
-            g_gui_append_pending.store(true, std::memory_order_release);
+            core::g_stop_restart_gate.markAppendPending();
         };
         auto stopFn = [&](){
             handle_signal(SIGINT);
@@ -1104,7 +1112,7 @@ int App::run() {
                 guiServer_->appendLog("No runnable entry in " + cfg.worktodo_path + "; waiting for a new entry.");
             }
             guiServer_->setStatus("Idle");
-            while (!g_stop && gui_alive) {
+            while (!stop_requested() && gui_alive) {
                 gui_restart_for_appended_entry(guiServer_, argc_, argv_);
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
             }
@@ -1391,9 +1399,9 @@ int App::run() {
         }
         install_signal_handlers();
         // Idle until Ctrl-C / the GUI's Stop. A stop that already ended the run must not be cleared:
-        // resetting g_stop here made the process keep idling ("Completed") until a second signal, and
+        // resetting the stop flag here made the process keep idling ("Completed") until a second signal, and
         // let a pending "Append & Run" restart the queue the user had just stopped.
-        while (!g_stop) {
+        while (!stop_requested()) {
             gui_restart_for_appended_entry(guiServer_, argc_, argv_);
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }

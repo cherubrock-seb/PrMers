@@ -7,6 +7,7 @@
 #include <iomanip>
 #define NOMINMAX
 #include "core/App.hpp"
+#include "core/StopRestartGate.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
@@ -127,7 +128,18 @@ inline void writeStageResult(const std::string& file, const std::string& message
 }
 
 
+// Restart on the next worktodo entry. Returns (without restarting) only when a Stop was requested
+// first; the caller then carries on as if the queue had ended. Never returns after a failed restart.
 inline void restart_self(int argc, char* argv[]) {
+    // Commit point: from here on a Stop ends the process (core::stop_or_exit) instead of being lost
+    // to the relaunch. Flush first, since that exit skips buffered output.
+    std::cout.flush();
+    std::fflush(nullptr);
+    if (!core::g_stop_restart_gate.commitRestart()) {
+        std::cout << "Stop requested; not restarting." << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog("Stop requested; not restarting.");
+        return;
+    }
     std::vector<std::string> args(argv, argv + argc);
 
     if (args.size() > 1 && args[1].find_first_not_of("0123456789") == std::string::npos) {
