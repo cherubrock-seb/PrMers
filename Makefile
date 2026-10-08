@@ -387,6 +387,11 @@ test-marin-adc-mul-base:
 test-wagstaff-decode:
 	python3 tests/wagstaff_decode_source_test.py
 
+.PHONY: test-pm1-ultralowmem-resume
+
+test-pm1-ultralowmem-resume: all
+	bash tests/pm1_ultralowmem_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-pm1-extend-ckpt
 
 test-pm1-extend-ckpt: all
