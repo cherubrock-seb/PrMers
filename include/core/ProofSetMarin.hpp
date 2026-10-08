@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <filesystem>
+#include <string>
 
 namespace core {
 
@@ -37,6 +38,30 @@ public:
     static uint32_t bestPower(uint32_t E);
     static bool isInPoints(uint32_t E, uint32_t power, uint32_t k);
     static std::filesystem::path proofPath(uint32_t E);
+    // Remove the saved proof residues of exponent E (<E>/proof, and <E> when
+    // that leaves it empty). Call when the test is over and the proof has
+    // been made or given up; a test that can still be resumed needs them.
+    static void clearResidues(uint32_t E);
+
+    // What to do with the residues once a PRP test has finished. They are
+    // deleted only when the result is saved, the worktodo entry (if any) is
+    // retired and any requested proof has been made (and verified, unless
+    // -noverify); otherwise they are kept, because a failed or interrupted
+    // proof can still be retried from them, and a result that could not be
+    // saved or an entry still in the worktodo means the test is run again.
+    enum class ResidueAction {
+        NotApplicable,       // not a Mersenne PRP test: nothing to do
+        Clear,
+        KeepResultNotSaved,
+        KeepEntryNotRetired,
+        KeepProofFailed
+    };
+    static ResidueAction residueAction(bool isPrp, bool wagstaff,
+                                       bool proofRequested, bool proofCompleted,
+                                       bool resultSaved, bool entryRetired);
+    // Message for the two Keep actions: where the residues are and that they
+    // can be deleted by hand.
+    static std::string residuesKeptMessage(uint32_t E, ResidueAction action);
     static double diskUsageGB(uint32_t E, uint32_t power);
     
     // Core proof generation algorithm

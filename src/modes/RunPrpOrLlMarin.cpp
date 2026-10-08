@@ -570,6 +570,17 @@ int App::runPrpOrLlMarin()
 
     }
 
+    // Save the finished (and, with Gerbicz-Li, verified) state.  If the result
+    // cannot be saved below, the checkpoint is kept, and this one lets the rerun
+    // resume at the end instead of redoing everything since the last periodic
+    // backup.  It is removed together with the other checkpoints once the result
+    // is saved.  The engine is released before the proof is made, so this has to
+    // happen now.
+    if (options.mode == "prp" && !(r == 0 && ri == totalIters)) {
+        const double final_elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+        save_ckpt(static_cast<uint32_t>(totalIters), final_elapsed);
+    }
+
     if (options.mode == "prp" && options.proof) {
         engine::digit d(eng, R0);
         saveProofResidue(d, totalIters);
@@ -758,6 +769,10 @@ int App::runPrpOrLlMarin()
             provisionalJson);
     }
 
+    // The residues are only deleted once a requested proof has been made (and
+    // verified, unless -noverify); see ProofSetMarin::residueAction.
+    const bool proofRequested = options.mode == "prp" && options.proof;
+    bool proofCompleted = false;
     if (options.mode == "prp" && options.proof) {
         try {
             std::cout << "\nGenerating PRP proof file..." << std::endl;
@@ -858,6 +873,7 @@ int App::runPrpOrLlMarin()
             }
 
             options.proofFile = proofFilePath.string();
+            proofCompleted = true;
 
             std::cout
                 << "Proof file saved: "
@@ -974,17 +990,45 @@ int App::runPrpOrLlMarin()
         }
     }*/
 
-    backupManager.clearState();
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    delete_checkpoints(p, options.wagstaff, false, false); 
-    backupManager.clearState();
-    if (hasWorktodoEntry_ && !resultSaved) {
-        std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
+    // End of job, in this order: 1. save the result, 2. retire the worktodo
+    // entry, 3. only then delete the checkpoint and the proof residues. If 1
+    // or 2 fails they are kept: the test is then run again, and resumes from
+    // the final checkpoint saved after the last iteration instead of from 0.
+    const bool retired = resultSaved && hasWorktodoEntry_ &&
+                         worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
+    const bool entryRetired = !hasWorktodoEntry_ || retired;
+    if (resultSaved && entryRetired) {
+        backupManager.clearState();
+        delete_checkpoints(p, options.wagstaff, false, false);
+    }
+    const auto residueAction = ProofSetMarin::residueAction(
+        options.mode == "prp", options.wagstaff, proofRequested,
+        proofCompleted, resultSaved, entryRetired);
+    if (residueAction == ProofSetMarin::ResidueAction::Clear) {
+        // The proof (if any) is written and the test is over: the residues
+        // are of no further use and take about 10-18 GB at the wavefront.
+        ProofSetMarin::clearResidues(options.exponent);
+    } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
+        const std::string msg =
+            ProofSetMarin::residuesKeptMessage(options.exponent, residueAction);
+        std::cerr << msg << std::endl;
+        if (guiServer_)
+            guiServer_->appendLog(msg);
+    }
+    if (!resultSaved || !entryRetired) {
+        const std::string msg =
+            (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
+            + "; keeping the checkpoint"
+            + (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string());
+        std::cerr << msg << "\n";
+        if (guiServer_)
+            guiServer_->appendLog(msg + "\n");
     }
     if (hasWorktodoEntry_ && resultSaved) {
-        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+        if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
@@ -1014,12 +1058,6 @@ int App::runPrpOrLlMarin()
                 }
             }
         } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            if (guiServer_) {
-                    std::ostringstream oss;
-                    oss  << "Failed to update " << options.worktodo_path << "\n";
-                    guiServer_->appendLog(oss.str());
-            }
             if (!options.gui) {
                 std::exit(-1);
             }

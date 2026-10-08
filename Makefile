@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -295,6 +295,10 @@ test-marin-file-failure:
 	/tmp/prmers-marin-file-failure-test/marin_file_write_failure_test /tmp/prmers-marin-file-failure-test/scratch
 	rm -rf /tmp/prmers-marin-file-failure-test
 
+test-proof-residue-cleanup:
+	bash tests/test_proof_residue_cleanup.sh
+	python3 tests/proof_residue_gating_source_test.py
+
 test-marin-invalid-device:
 	mkdir -p tests/build-marin-invalid-device
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
@@ -440,6 +444,10 @@ test-error-check-retry:
 .PHONY: test-llsafe-error-recovery
 test-llsafe-error-recovery: all
 	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-prp-worktodo-retire
+test-prp-worktodo-retire: all
+	bash tests/run_prp_worktodo_retire_failure.sh $${AEVUM_TEST_DEVICE:-0}
 
 
 .PHONY: test-legacy-prp-resume
