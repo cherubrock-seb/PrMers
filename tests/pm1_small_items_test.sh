@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Regression checks for small P-1 driver defects:
 #  1. -nogcd-stage1 without stage 2 must not record a "no factor" result (the
-#     GCD never ran; M269 B1=2141 does have the factor 13822297).
+#     GCD never ran; M269 B1=2141 does have the factor 13822297), and with
+#     stage 2 requested it must not emit a stage-1 result either.
 #  2. -s3 must run stage 3 only, not fall through into stage 1.
 #  3. A GMP-ECM .save file whose CHECKSUM does not match its residue must be
 #     rejected when extending a stage-1 run.
@@ -28,6 +29,15 @@ run() {
 run nogcd 50 269 -pm1 -b1 2141 -nogcd-stage1
 grep -aq 'ordinary GCD skipped' "$WORK/nogcd/run.log" || fail "nogcd: stage 1 GCD was not skipped"
 if [ -s "$WORK/nogcd/results.txt" ]; then fail "nogcd: results.txt records a result although no GCD was run"; fi
+
+# 1b. -nogcd-stage1 with stage 2: stage 1 must not emit a result either (no
+# stage-1 JSON, no b2=0 entry in results.txt); only stage 2 reports.
+run nogcd2 50 269 -pm1 -b1 2141 -b2 5000 -nogcd-stage1
+grep -aq 'ordinary GCD skipped' "$WORK/nogcd2/run.log" || fail "nogcd2: stage 1 GCD was not skipped"
+if ls "$WORK"/nogcd2/*_stage1_result.json >/dev/null 2>&1; then fail "nogcd2: stage-1 result JSON written although no GCD was run"; fi
+if grep -aq '"b2":0[^0-9]' "$WORK/nogcd2/results.txt" 2>/dev/null; then fail "nogcd2: results.txt has a stage-1 result although no GCD was run"; fi
+grep -aq 'stage 2' "$WORK/nogcd2/run.log" || fail "nogcd2: stage 2 did not run"
+grep -aq '"b2":5000' "$WORK/nogcd2/results.txt" || fail "nogcd2: results.txt lacks the stage-2 result"
 
 # 2. -s3 must not fall through into stage 1.
 run s3 50 269 -pm1 -b1 100 -b2 100

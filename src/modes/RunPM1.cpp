@@ -7660,10 +7660,11 @@ int App::runPM1Marin() {
         }
     }
     uint64_t B2save = options.B2; 
-    // With the GCD skipped and no stage 2 requested nothing was tested for a
-    // factor, so there is no result to report; do not record a "no factor" line.
+    // With the stage-1 GCD skipped nothing was tested for a factor, so there
+    // is no stage-1 result to report, whether or not stage 2 follows; stage 2
+    // reports its own result.  Do not record a "no factor" line.
     bool resultSaved = true;
-    if (!(options.pm1_no_stage1_gcd && B2save == 0)) {
+    if (!options.pm1_no_stage1_gcd) {
         options.B2 = 0;
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
