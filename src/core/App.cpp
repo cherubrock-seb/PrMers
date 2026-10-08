@@ -431,6 +431,25 @@ App::App(int argc, char** argv)
     if (!o.gaussian_mersenne) worktodo_entry = wp.parse();
     if (auto e = worktodo_entry) {
         o.exponent     = e->exponent;
+        if (o.wagstaff) {
+            // The command line doubled its own exponent when it parsed
+            // -wagstaff; the worktodo exponent replaces it, so double that one
+            // too instead of testing (2^(p/2)+1)/3.
+            if (const uint64_t wagstaffExponent = io::wagstaffExponentForEntry(*e)) {
+                // The doubled exponent is subject to the same limit the command line applies to
+                // -wagstaff after doubling.
+                if (const std::string limitError = io::exponentLimitError(wagstaffExponent, true);
+                    !limitError.empty()) {
+                    std::cerr << limitError << " (" << e->rawLine << ")" << std::endl;
+                    std::exit(EXIT_FAILURE);
+                }
+                o.exponent = wagstaffExponent;
+            } else {
+                std::cerr << "Warning: -wagstaff only applies to PRP worktodo entries without "
+                             "known factors; ignoring it for: " << e->rawLine << std::endl;
+                io::dropWagstaff(o);
+            }
+        }
         if (e->gaussianMersenne) {
             o.gaussian_mersenne = true;
             o.gm_prp_only = e->gmPrpOnly;
@@ -509,7 +528,15 @@ App::App(int argc, char** argv)
 
 
     if (!o.gui) {
-        o.exponent = askExponentInteractively();
+        // The prompt answer replaces the (absent) command-line exponent after CliParser has
+        // doubled it for -wagstaff and checked the limits, so do both here as well.
+        const uint64_t answer = askExponentInteractively();
+        o.exponent = o.wagstaff ? 2 * answer : answer;
+        if (const std::string limitError = io::exponentLimitError(o.exponent, o.wagstaff);
+            !limitError.empty()) {
+            std::cerr << limitError << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
     }
     o.mode = "prp";
     //std::exit(-1);

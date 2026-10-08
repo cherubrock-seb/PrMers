@@ -940,6 +940,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         //p  = p*2;
         opts.exponent = 2*opts.exponent;
         opts.mode = "prp";
+        opts.gerbiczli_before_wagstaff = opts.gerbiczli;
+        opts.proof_before_wagstaff = opts.proof;
         opts.gerbiczli = false;
         opts.proof = false;
     }
@@ -970,20 +972,10 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         std::cerr << "Error: No exponent provided.\n";
         std::exit(EXIT_FAILURE);
     }*/
-    constexpr uint64_t MAX_EXPONENT = kMaxExponent;
-    if (opts.exponent > MAX_EXPONENT) {
-        std::cerr << "Error: Exponent must be <= " << MAX_EXPONENT
-                  << ". Given: " << opts.exponent << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-    // Every engine and driver holds the exponent in 32 bits; a larger value would
-    // be silently truncated and a different (smaller) Mersenne number tested.
-    constexpr uint64_t MAX_ENGINE_EXPONENT = std::numeric_limits<uint32_t>::max();
-    if (opts.exponent > MAX_ENGINE_EXPONENT) {
-        std::cerr << "Error: Exponent must be <= " << MAX_ENGINE_EXPONENT
-                  << " (the largest exponent the engines support). Given: " << opts.exponent
-                  << (opts.wagstaff ? " (twice the requested Wagstaff exponent)" : "")
-                  << std::endl;
+    // Checked on the exponent actually run (after the -wagstaff doubling); App applies the same
+    // check to the doubled worktodo exponent.
+    if (const std::string limitError = exponentLimitError(opts.exponent, opts.wagstaff); !limitError.empty()) {
+        std::cerr << limitError << std::endl;
         std::exit(EXIT_FAILURE);
     }
 

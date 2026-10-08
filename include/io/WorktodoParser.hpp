@@ -39,6 +39,16 @@ struct WorktodoEntry {
     std::string sigma;
 };
 
+// Exponent to test for a worktodo entry when -wagstaff is given, or 0 when
+// the entry cannot be a Wagstaff test. -wagstaff tests (2^p+1)/3 by running
+// the PRP on 2^(2p) - 1, so a PRP entry's p is doubled exactly as the command
+// line exponent is. Other entry types and cofactor entries (the known factors
+// divide 2^p - 1, not (2^p+1)/3) are not Wagstaff work.
+inline uint64_t wagstaffExponentForEntry(const WorktodoEntry& e) {
+    if (!e.prpTest || e.gaussianMersenne || !e.knownFactors.empty()) return 0;
+    return 2ULL * e.exponent;
+}
+
 class WorktodoParser {
 public:
     explicit WorktodoParser(const std::string& filename);

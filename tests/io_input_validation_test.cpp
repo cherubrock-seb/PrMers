@@ -71,6 +71,28 @@ int main() {
     expectAnswer("99999999999", false);
     expectAnswer("99999999999999999999", false);
 
+    // App runs a prompt answer through the same limit check as the command line (and doubles it
+    // first for -wagstaff): the prompt accepts up to kMaxExponent, but the engines hold the
+    // exponent in 32 bits, so anything above 2^32 - 1 must still be refused.
+    auto promptLimitError = [](const std::string& text, bool wagstaff) {
+        uint64_t got = 0;
+        if (!io::parseExponentAnswer(text, got)) return std::string("unparsed");
+        return io::exponentLimitError(wagstaff ? 2 * got : got, wagstaff);
+    };
+    check(promptLimitError("4294967295", false).empty(), "prompt answer 2^32 - 1 is accepted");
+    check(promptLimitError("4294967296", false).find("<= 4294967295") != std::string::npos,
+          "prompt answer 2^32 is refused with the engine limit");
+    check(promptLimitError("5650242869", false).find("<= 4294967295") != std::string::npos,
+          "prompt answer kMaxExponent is refused with the engine limit");
+    check(promptLimitError("2147483647", true).empty(), "Wagstaff prompt answer 2^31 - 1 is accepted");
+    check(promptLimitError("2147483648", true).find("twice the requested Wagstaff exponent") != std::string::npos,
+          "Wagstaff prompt answer 2^31 is refused");
+    check(promptLimitError("5650242869", true).find("<= 5650242869") != std::string::npos,
+          "Wagstaff prompt answer kMaxExponent is refused with the global limit");
+    check(io::exponentLimitError(io::kMaxExponent + 1).find("<= 5650242869. Given: 5650242870") != std::string::npos,
+          "global limit message is unchanged");
+    check(io::exponentLimitError(0).empty() && io::exponentLimitError(2).empty(), "small exponents pass the limit check");
+
     if (failures != 0) {
         std::cerr << failures << " CLI input validation check(s) failed\n";
         return 1;
