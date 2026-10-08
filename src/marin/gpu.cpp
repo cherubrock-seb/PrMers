@@ -620,6 +620,23 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
 
         engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec, static_cast<std::uint32_t>(selected_workload));
 
+        // The plugin chooses the plan when the engine is created (runtime autotune, tune.txt replay, device
+        // profiles), which can differ from the policy's resolver preview that was logged and published above.
+        // Report the plan that actually runs.
+        const std::string active_plan = aevum_engine_active_plan(created);
+        if (!active_plan.empty()) {
+            resolved_fft = active_plan;
+            if (configured == gpu_backend::auto_select && active_plan != decision.fft_spec) {
+                std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
+                          << ": Aevum created FFT " << active_plan
+                          << " (policy preview was " << decision.fft_spec << ")." << std::endl;
+                publish("Auto", "Aevum",
+                        "created-FFT=" + active_plan + ", transform=" + std::to_string(created->get_size()) +
+                        " | policy preview: " + decision.detail + " | " + aevum_radix1k_policy_detail(),
+                        created->get_size(), active_plan);
+            }
+        }
+
         // v100.17 safety quarantine for forced ordinary PRP as well as AUTO.
         // AUTO is rejected earlier by AutoPolicy; this guard prevents an
         // explicit -aevum / <=512K plan from accidentally producing a result
@@ -641,7 +658,7 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
         }
 
         if (configured != gpu_backend::auto_select) {
-            if (resolved_transform == 0) resolved_transform = created->get_size();
+            if (resolved_transform == 0 || !active_plan.empty()) resolved_transform = created->get_size();
             publish("Forced Aevum", "Aevum",
                     "selected by -aevum | " + aevum_radix1k_policy_detail(),
                     resolved_transform, resolved_fft);

@@ -95,6 +95,7 @@ struct Api {
     using create_ex_fn = Handle (*)(uint32_t, std::size_t, uint32_t, int, const char*, const char*, uint32_t);
     using destroy_fn = void (*)(Handle);
     using size_fn = std::size_t (*)(Handle);
+    using plan_spec_fn = int (*)(Handle, char*, std::size_t);
     using sync_fn = int (*)(Handle);
     using set_u32_fn = int (*)(Handle, std::size_t, uint32_t);
     using set_words_fn = int (*)(Handle, std::size_t, const uint32_t*, std::size_t);
@@ -116,6 +117,7 @@ struct Api {
     create_ex_fn create_ex = nullptr;
     destroy_fn destroy = nullptr;
     size_fn transform_size = nullptr;
+    plan_spec_fn plan_spec = nullptr;      // optional: older plugins cannot report the plan they created
     size_fn word_count = nullptr;
     sync_fn sync = nullptr;
     set_u32_fn set_u32 = nullptr;
@@ -244,6 +246,7 @@ struct Api {
         create_ex = load_optional_symbol<create_ex_fn>("aevum_engine_create_ex");
         destroy = load_symbol<destroy_fn>("aevum_engine_destroy");
         transform_size = load_symbol<size_fn>("aevum_engine_transform_size");
+        plan_spec = load_optional_symbol<plan_spec_fn>("aevum_engine_plan_spec");
         word_count = load_symbol<size_fn>("aevum_engine_word_count");
         sync = load_symbol<sync_fn>("aevum_engine_sync");
         set_u32 = load_symbol<set_u32_fn>("aevum_engine_set_u32");
@@ -285,11 +288,18 @@ public:
             handle_ = nullptr;
             throw std::runtime_error("Aevum plugin returned an invalid transform");
         }
+        // The plugin decides the plan at creation (autotune, tune.txt, device profiles), which can differ from
+        // what the resolver predicted beforehand.  Ask it which plan it actually built.
+        if (api_.plan_spec) {
+            std::array<char, 96> actual{};
+            if (api_.plan_spec(handle_, actual.data(), actual.size())) plan_spec_ = actual.data();
+        }
         const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
         const bool radix1k_8 = radix1k_env && std::string(radix1k_env) == "8";
         std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT323161"
                   << " | transform=" << transform_size_
                   << " | requested-plan=" << (fft_spec.empty() ? "plugin-auto" : fft_spec)
+                  << " | plan=" << (plan_spec_.empty() ? "unknown" : plan_spec_)
                   << " | radix1k=" << (radix1k_8 ? "8(explicit-override)" : "4(safe-default)")
                   << " | regs=" << register_count_
                   << " | plugin=" << api_.path
@@ -300,6 +310,9 @@ public:
     ~engine_aevum() override { release_gpu_resources_for_lowmem_handoff(); }
 
     bool is_aevum_backend() const override { return true; }
+
+    // FFT plan the plugin created, or empty if the plugin cannot report it.
+    const std::string& plan_spec() const { return plan_spec_; }
 
     void release_gpu_resources_for_lowmem_handoff() override {
         if (handle_) {
@@ -543,6 +556,7 @@ private:
     Handle handle_ = nullptr;
     std::size_t transform_size_ = 0;
     std::size_t word_count_ = 0;
+    std::string plan_spec_;
 };
 
 } // namespace
@@ -721,6 +735,11 @@ bool aevum_engine_resolve_fft(uint32_t exponent,
 
 bool aevum_engine_supports_auto_fft(uint32_t exponent, std::string* reason) {
     return aevum_engine_resolve_auto_fft(exponent, nullptr, nullptr, reason);
+}
+
+std::string aevum_engine_active_plan(const engine* eng) {
+    const auto* aevum = dynamic_cast<const engine_aevum*>(eng);
+    return aevum ? aevum->plan_spec() : std::string();
 }
 
 engine* create_aevum_engine(uint32_t exponent,

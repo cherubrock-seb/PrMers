@@ -119,6 +119,9 @@ test-aevum-host:
 test-aevum-reg:
 	bash tests/test_aevum_reg_adapter.sh
 
+test-aevum-reported-plan:
+	bash tests/test_aevum_reported_plan.sh
+
 test-aevum-pfa9-bridge: aevum-engine
 	bash third_party/aevum/scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}
 
