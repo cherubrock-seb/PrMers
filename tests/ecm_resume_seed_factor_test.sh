@@ -126,6 +126,18 @@ wait_for o1.log 'Stage1 [0-9]*/[0-9]' 60 || wait_for o1.log 'Stage1 start' 5 || 
 stop_bg
 flat o1.log | grep -aq 'Resuming at curve' && fail "cmont single: unexpected series resume"
 
+# interrupted during Stage 2 (p = 701 has no small factor, so the curve reaches Stage 2)
+newdir mont_s2
+S2=(701 -ecm -cmont -torsion8 -b1 50 -b2 20000 -seed 11 -K 3 -ecm-continue-after-factor)
+start_bg t1.log "${S2[@]}"
+wait_for t1.log 'Stage2 [0-9]' 120 || fail "cmont series: never reached Stage 2"
+sleep 1; stop_bg
+ls ecm2_m_701_c0.ckpt* >/dev/null 2>&1 || fail "cmont series: Stage 2 interrupt left no checkpoint"
+start_bg t2.log "${S2[@]}"
+wait_for t2.log 'Resuming Stage2' 60 || fail "cmont series: Stage 2 checkpoint of the series was not resumed"
+stop_bg
+flat t2.log | grep -aq 'Curve 1/3 | Stage1 start' && fail "cmont series: Stage 1 was redone after a Stage 2 interrupt"
+
 # ------------------------------------------------- 3. factors found earlier
 newdir known
 run_fg k.log 239 -ecm -cmont -b1 800 -b2 0 -seed 7 -K 3 -ecm-continue-after-factor
