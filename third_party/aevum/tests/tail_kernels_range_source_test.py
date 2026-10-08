@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TAIL_KERNELS outside 0..3 must be rejected by the host and by the kernels.
+"""TAIL_KERNELS outside 0..3, or not an integer at all, must be rejected by the host; outside 0..3 also by the kernels.
 
 The host (Gpu.cpp clDefines) only recognises 0..3 when choosing the tail launch geometry, while tailutil.cl derives
 SINGLE_WIDE = (TAIL_KERNELS < 2) and SINGLE_KERNEL = ((TAIL_KERNELS & 1) == 0) from the same -DTAIL_KERNELS value.  For any other value
@@ -24,8 +24,14 @@ else:
         fail.append("Gpu.cpp: TAIL_KERNELS is not range-checked against 0..3")
     if "throw" not in body:
         fail.append("Gpu.cpp: an out-of-range TAIL_KERNELS does not throw")
-    if body.count("atoi(") != 1:
-        fail.append("Gpu.cpp: TAIL_KERNELS must be parsed once and the result range-checked")
+    # The text must be parsed strictly: atoi() maps "garbage" to 0 and "3x" to 3, which would pass the range check while
+    # the raw text is still forwarded to the kernels as -DTAIL_KERNELS=<text> (behaviour covered by strict_int_test.cpp).
+    if "atoi(" in body:
+        fail.append("Gpu.cpp: TAIL_KERNELS must not be parsed with atoi (accepts nonnumeric text)")
+    if body.count("parseStrictInt(") != 1:
+        fail.append("Gpu.cpp: TAIL_KERNELS must be parsed once with parseStrictInt and the result range-checked")
+    elif not re.search(r'!\s*parseStrictInt\([^;{]*\)\s*\|\|', body):
+        fail.append("Gpu.cpp: a TAIL_KERNELS value that does not parse as an integer is not rejected")
 
 if not re.search(r'#if\s+TAIL_KERNELS\s*<\s*0\s*\|\|\s*TAIL_KERNELS\s*>\s*3\s*\n#error', tail):
     fail.append("tailutil.cl: no #error for TAIL_KERNELS outside 0..3")
