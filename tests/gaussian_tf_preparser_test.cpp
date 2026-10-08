@@ -119,6 +119,20 @@ int main() {
     expectError("pfa_without_radix_then_exponent", {"-pfa", "4", "-gm-tf", "20", "30"},
                 "odd exponent");
 
+    // Hostile values. An option value that spells a mode flag is still a value, so it does not
+    // stop the worktodo entry; a bare exponent on the command line does not either.
+    expectError("mode_spelled_value_skipped", {"-user", "-gm", "-worktodo", gmtf}, "odd exponent");
+    expectError("bare_exponent_with_worktodo", {"4", "-worktodo", gmtf}, "odd exponent");
+    expectDeclined("value_option_at_end", {"-worktodo", none, "-user"});
+    expectDeclined("garbage_device_without_tf", {"-d", "abc", "-worktodo", none});
+    expectError("garbage_device_with_worktodo", {"-d", "abc", "-worktodo", gmtf}, "Invalid device");
+    expectError("garbage_device_with_tf", {"-d", "abc", "-gm-tf", "20", "30", "5"}, "Invalid device");
+    expectError("exponent_overflow", {"-gm-tf", "20", "30", "18446744073709551616"},
+                "Invalid Gaussian exponent");
+    expectError("exponent_leading_zeros", {"-gm-tf", "20", "30", "0004"}, "odd exponent");
+    expectError("exponent_hex", {"-gm-tf", "20", "30", "0x5"}, "Invalid Gaussian exponent");
+    expectError("tf_bits_missing", {"-user", "bob", "-gm-tf", "20"}, "requires FROM_BITS");
+
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     if (failures != 0) {

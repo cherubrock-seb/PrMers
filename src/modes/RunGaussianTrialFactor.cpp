@@ -256,9 +256,12 @@ bool hasExplicitNonTfWork(const std::vector<std::string>& args) {
 
 std::optional<TfRequest> parseWorktodoRequest(const std::vector<std::string>& args) {
     TfRequest defaults;
+    // The device is converted only once a GMTF line is found, so a bad -d value on a command line
+    // without Gaussian work is left to the regular option parser.
+    std::optional<std::string> deviceText;
     for (std::size_t i = 1; i < args.size(); ++i) {
         if (args[i] == "-worktodo" && i + 1 < args.size()) defaults.worktodoPath = args[++i];
-        else if (args[i] == "-d" && i + 1 < args.size()) defaults.device = static_cast<int>(parseU64(args[++i], "device"));
+        else if (args[i] == "-d" && i + 1 < args.size()) deviceText = args[++i];
         else if (args[i] == "-f" && i + 1 < args.size()) defaults.outputDirectory = args[++i];
     }
 
@@ -279,6 +282,7 @@ std::optional<TfRequest> parseWorktodoRequest(const std::vector<std::string>& ar
                 "GMTF format is GMTF=p,from_bits,to_bits[,GM|GQ|BOTH[,chunk_span[,sieve_prime]]]");
         }
         TfRequest request = defaults;
+        if (deviceText) request.device = static_cast<int>(parseU64(*deviceText, "device"));
         request.exponent = parseU64(parts[0], "Gaussian exponent");
         request.fromBits = static_cast<unsigned>(parseU64(parts[1], "TF lower bit"));
         request.toBits = static_cast<unsigned>(parseU64(parts[2], "TF upper bit"));
