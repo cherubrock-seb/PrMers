@@ -90,6 +90,7 @@ int main() {
     cfg.config_path = "gui_http_settings.cfg";
     cfg.results_path = "gui_http_results.txt";
     cfg.worktodo_path = "gui_http_worktodo.txt";
+    cfg.worktodo_line_ok = [](const std::string& line) { return line.rfind("PRP=", 0) == 0; };
     ui::WebGuiServer server(cfg, [](const std::string&) {});
     server.start();
 

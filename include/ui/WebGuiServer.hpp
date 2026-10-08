@@ -15,6 +15,11 @@ struct WebGuiConfig {
     std::string worktodo_path;
     std::string config_path;
     std::string results_path;
+    // Shown read-only in the page with the paths above; the GUI cannot change any of them.
+    std::string save_path;
+    std::string kernel_path;
+    // Accepts one line for /api/append-worktodo (a runnable worktodo entry). Unset: appends are refused.
+    std::function<bool(const std::string&)> worktodo_line_ok;
     std::string bind_host;
     std::string advertise_host;
     bool lanipv4 = false;
@@ -62,6 +67,7 @@ private:
     SubmitFn onSubmit_;
     StopFn onStop_;
     mutable std::mutex mtx_;
+    std::mutex settingsMtx_;   // one settings save (read, merge, replace) at a time
     State st_;
     std::atomic<bool> running_{false};
     std::thread thr_;
@@ -87,7 +93,11 @@ private:
     std::string handleStateJson();
     std::string handleResultsJson(size_t limit, const std::string& pathOverride);
     std::string handleLoadSettings();
-    bool handleSaveSettings(const std::string& body);
+    // Empty on success, otherwise the reason (sets `status` to the HTTP code to answer with).
+    std::string handleSaveSettings(const std::string& body, int& status);
+    // Empty and `lines` set to the lines to append when the body is acceptable, otherwise the reason.
+    std::string checkWorktodoAppend(const std::string& body, std::string& lines) const;
+    std::string handlePathsJson() const;
     std::string handleLoadWorktodo();
     bool handleStop();
     std::string htmlPage();
@@ -97,7 +107,7 @@ private:
     std::string httpError(int code, const std::string& msg);
     static std::string jsonEscape(const std::string& s);
     static std::string readFile(const std::string& path);
-    static bool writeFile(const std::string& path, const std::string& data);
+    static bool writeFileReplacing(const std::string& path, const std::string& data);
     static std::vector<std::string> tailLines(const std::string& path, size_t limit);
 };
 

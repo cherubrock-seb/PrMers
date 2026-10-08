@@ -161,15 +161,33 @@ bool WorktodoParser::hasPendingEntry(const std::string& filename) {
     return parser.parse().has_value();
 }
 
+bool WorktodoParser::isValidEntryLine(const std::string& line) {
+    if (line.find_first_of("\r\n") != std::string::npos) return false;
+    WorktodoParser parser("<line>");
+    parser.quiet_ = true;
+    parser.text_ = &line;
+    return parser.parse().has_value();
+}
+
 std::optional<WorktodoEntry> WorktodoParser::parse() {
     // hasPendingEntry() runs parse() as a dry run: same decisions, no messages.
     std::ostream& logOut = quiet_ ? nullStream() : std::cout;
     std::ostream& logErr = quiet_ ? nullStream() : std::cerr;
-    std::ifstream file(filename_);
-    if (!file.is_open()) {
-        logErr << "Cannot open " << filename_ << "\n";
-        return std::nullopt;
+    // isValidEntryLine() parses one line held in memory instead of the file.
+    std::ifstream fileStream;
+    std::istringstream textStream;
+    std::istream* input = &textStream;
+    if (text_) {
+        textStream.str(*text_);
+    } else {
+        fileStream.open(filename_);
+        if (!fileStream.is_open()) {
+            logErr << "Cannot open " << filename_ << "\n";
+            return std::nullopt;
+        }
+        input = &fileStream;
     }
+    std::istream& file = *input;
 
     std::string line;
     while (std::getline(file, line)) {

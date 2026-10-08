@@ -3,6 +3,7 @@
 #include "core/AlgoUtils.hpp"
 #include "core/Version.hpp"
 #include "io/WorktodoParser.hpp"
+#include "util/GuiSettings.hpp"
 #include "opencl/Context.hpp"
 
 #ifdef __APPLE__
@@ -131,14 +132,8 @@ std::vector<std::string> effectiveArguments(int argc, char** argv) {
         if (argument == "-config" && i + 1 < argc) {
             std::ifstream config(argv[++i]);
             if (!config) throw std::runtime_error("Unable to open PrMers config file");
-            std::string line;
-            while (std::getline(config, line)) {
-                const auto comment = line.find('#');
-                if (comment != std::string::npos) line.resize(comment);
-                std::istringstream tokens(line);
-                std::string token;
-                while (tokens >> token) output.push_back(token);
-            }
+            // Same reading as App's parseConfigFile (GUI-written path options are ignored).
+            for (auto& token : util::readConfigArgs(config).args) output.push_back(std::move(token));
         } else {
             output.push_back(argument);
         }

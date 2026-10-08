@@ -19,6 +19,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "util/Redact.hpp"
+#include "util/GuiSettings.hpp"
 #include "util/SelfExe.hpp"
 #include "util/WinCmdLine.hpp"
 #include "core/Version.hpp"
@@ -69,7 +70,6 @@ void handle_sigint(int) noexcept;
 inline static std::vector<std::string> parseConfigFile(const std::string& config_path) {
     std::ifstream config(config_path);
     std::vector<std::string> args;
-    std::string line;
 
     if (!config.is_open()) {
         std::cerr << "Warning: no config file: " << config_path << std::endl;
@@ -88,10 +88,24 @@ inline static std::vector<std::string> parseConfigFile(const std::string& config
         g->appendLog(oss.str());
     }
 
-    while (std::getline(config, line)) {
-        std::istringstream iss(line);
-        std::string token;
-        while (iss >> token) args.push_back(token);
+    auto read = util::readConfigArgs(config);
+    args = std::move(read.args);
+    if (!read.dangling.empty()) {
+        std::ostringstream oss;
+        oss << "Warning: ignoring options in the settings file that are missing their value:";
+        for (const auto& t : read.dangling) oss << ' ' << t;
+        oss << " (an option at the end of the file, or just above the GUI marker line, never takes its value"
+               " from what follows)";
+        std::cerr << oss.str() << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog(oss.str());
+    }
+    if (!read.ignored.empty()) {
+        std::ostringstream oss;
+        oss << "Warning: ignoring options written by the GUI that set a path or the GUI's network address:";
+        for (const auto& t : read.ignored) oss << ' ' << t;
+        oss << " (pass them on the command line or edit the settings file above the GUI marker line)";
+        std::cerr << oss.str() << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog(oss.str());
     }
 
     if (!args.empty()) {
