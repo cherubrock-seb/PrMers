@@ -320,6 +320,26 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
 
 
 
+void App::adoptLegacyProofResidues(uint64_t resumeIter)
+{
+    if (options.mode != "prp" || !options.proof || options.wagstaff || resumeIter == 0)
+        return;
+    // The GPU proof reads the residues through proofManager and the CPU
+    // fallback through proofManagerMarin, so both must agree on where they are.
+    std::string note;
+    std::string noteMarin;
+    const bool adopted = proofManager.adoptLegacyResidues(
+        static_cast<uint32_t>(resumeIter), note);
+    const bool adoptedMarin = proofManagerMarin.adoptLegacyResidues(
+        static_cast<uint32_t>(resumeIter), noteMarin);
+    if (adopted != adoptedMarin)
+        std::cerr << "Warning: the proof residue locations of the two proof backends differ" << std::endl;
+    if (note.empty()) note = noteMarin;
+    if (note.empty()) return;
+    std::cout << note << std::endl;
+    if (guiServer_) guiServer_->appendLog(note);
+}
+
 void App::ensureProofGpuBackend()
 {
     if (buffers && program && kernels && nttEngine) return;
@@ -650,7 +670,8 @@ App::App(int argc, char** argv)
         context.getQueue(),
         precompute.getN(),
         precompute.getDigitWidth(),
-        options.knownFactors
+        options.knownFactors,
+        options.save_path
     ),
     proofManagerMarin(
         options.exponent,
@@ -662,7 +683,8 @@ App::App(int argc, char** argv)
         context.getQueue(),
         precompute.getN(),
         precompute.getDigitWidth(),
-        options.knownFactors
+        options.knownFactors,
+        options.save_path
     )
   , spinner()
   , logger(options.output_path)

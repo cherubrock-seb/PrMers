@@ -415,7 +415,10 @@ Useful files include:
 |---|---|
 | `results.txt` | Human-readable result history |
 | `<p>_prp_result.json` | JSON result for automation |
-| proof files | Optional PRP proof output depending on proof settings |
+| `proof/<p>-<power>.proof` | Optional PRP proof output depending on proof settings |
+| `<p>/proof/` | Proof residues, checkpoint data kept while the test runs and deleted when the result and the proof are done |
+
+The result files, the proof and its residues are all kept under the `-f <path>` directory (the current directory when `-f` is not given). A run resumed after an upgrade still uses residues an older version left in `<p>/proof` under the working directory, reads them where they are, and deletes them from there at the end.
 
 Cofactor PRP:
 

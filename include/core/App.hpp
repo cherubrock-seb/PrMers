@@ -92,6 +92,10 @@ public:
     int convertEcmResumeToPrime95(const std::string& ecmPath, const std::string& outPath,const std::string& date_start, const std::string& date_end);
 private:
   void ensureProofGpuBackend();
+  // A PRP test with a proof that resumed at resumeIter: use the residues an
+  // older version left in <E>/proof under the working directory, when they are
+  // not under the save path (-f). Prints a note when it does.
+  void adoptLegacyProofResidues(uint64_t resumeIter);
   int    argc_;
   char** argv_;
   std::unique_ptr<io::WorktodoParser> worktodoParser_;

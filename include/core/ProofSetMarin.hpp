@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ProofMarin.hpp"
+#include "core/ProofLocation.hpp"
 #include <cstdint>
 #include <vector>
 #include <filesystem>
@@ -29,7 +30,8 @@ public:
     uint32_t power;       // proof power level (see setPower)
     const std::vector<std::string> knownFactors; // known factors (for cofactor tests)
 
-    ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {});
+    ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors = {},
+                  ProofLocation location = ProofLocation());
 
     bool shouldCheckpoint(uint32_t iter) const;
     // Lower the power residues are saved for (a resumed test may lack the
@@ -42,11 +44,22 @@ public:
     static WordsMarin fromUint64(const std::vector<uint64_t>& host, uint32_t exponent);
     static uint32_t bestPower(uint32_t E);
     static bool isInPoints(uint32_t E, uint32_t power, uint32_t k);
-    static std::filesystem::path proofPath(uint32_t E);
-    // Remove the saved proof residues of exponent E (<E>/proof, and <E> when
-    // that leaves it empty). Call when the test is over and the proof has
-    // been made or given up; a test that can still be resumed needs them.
-    static void clearResidues(uint32_t E);
+    // Directory of the residues of E under `location` (the save path).
+    static std::filesystem::path proofPath(const ProofLocation& location, uint32_t E);
+    const ProofLocation& location() const { return location_; }
+    // A run that resumed at resumeIter calls this before it makes its proof:
+    // residues that an older version left in <E>/proof under the working
+    // directory, and that this run needs, are then read from there. Returns
+    // true when it adopted them; `note` is a line to print (it may be set
+    // when it did not).
+    bool adoptLegacyResidues(uint32_t resumeIter, std::string& note);
+    // The residues in the old location cannot be used: do not delete them.
+    void releaseLegacyResidues() { location_.releaseLegacy(); }
+    // Remove the saved proof residues of exponent E (<save path>/<E>/proof,
+    // and <E> when that leaves it empty; also the old location, when this run
+    // used it). Call when the test is over and the proof has been made or
+    // given up; a test that can still be resumed needs them.
+    static void clearResidues(const ProofLocation& location, uint32_t E);
 
     // What to do with the residues once a PRP test has finished. They are
     // deleted only when the result is saved, the worktodo entry (if any) is
@@ -66,29 +79,30 @@ public:
                                        bool resultSaved, bool entryRetired);
     // Message for the two Keep actions: where the residues are and that they
     // can be deleted by hand.
-    static std::string residuesKeptMessage(uint32_t E, ResidueAction action);
+    static std::string residuesKeptMessage(const ProofLocation& location, uint32_t E, ResidueAction action);
     static double diskUsageGB(uint32_t E, uint32_t power);
     // Checkpoint iterations of a proof of this power, ascending, ending with E.
     static std::vector<uint32_t> proofPoints(uint32_t E, uint32_t power);
     // True when every residue a proof of this power needs from iterations up
     // to currentK is on disk and reads back intact (size and CRC).
-    static bool canDo(uint32_t E, uint32_t power, uint32_t currentK);
+    static bool canDo(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK);
     // The highest power <= power that canDo for a test resumed at currentK,
     // or 0 when no proof is possible.
-    static uint32_t effectivePower(uint32_t E, uint32_t power, uint32_t currentK);
+    static uint32_t effectivePower(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK);
     
     // Core proof generation algorithm
     ProofMarin computeProof() const;
 
 private:
+    ProofLocation location_;
     std::vector<uint32_t> points; // checkpoint iteration points
     
-    static bool fileExists(uint32_t E, uint32_t k);
+    static bool fileExists(const ProofLocation& location, uint32_t E, uint32_t k);
     // canDo with the result of each residue check remembered in `checked`,
     // so that effectivePower reads each residue at most once.
-    static bool canDo(uint32_t E, uint32_t power, uint32_t currentK,
+    static bool canDo(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK,
                       std::map<uint32_t, bool>& checked);
-    static std::vector<uint32_t> loadResidue(uint32_t E, uint32_t iter);
+    static std::vector<uint32_t> loadResidue(const ProofLocation& location, uint32_t E, uint32_t iter);
 };
 
 } // namespace core

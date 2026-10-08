@@ -32,8 +32,9 @@ namespace core {
 ProofManagerMarin::ProofManagerMarin(uint32_t exponent, int proofLevel,
                            cl_command_queue queue, uint32_t n,
                            const std::vector<int>& digitWidth,
-                           const std::vector<std::string>& knownFactors)
-  : proofSet_(exponent, static_cast<uint32_t>(proofLevel), knownFactors)
+                           const std::vector<std::string>& knownFactors,
+                           const std::string& savePath)
+  : proofSet_(exponent, static_cast<uint32_t>(proofLevel), knownFactors, ProofLocation(savePath))
   , queue_(queue)
   , n_(n)
   , exponent_(exponent)
@@ -83,11 +84,12 @@ std::filesystem::path ProofManagerMarin::proof() const {
         // Generate proof from collected checkpoints
         ProofMarin proof = proofSet_.computeProof();
         
-        // Create proof file name: {exponent}-{power}.proof, in proof/ like the
-        // GPU proof writer, so both paths leave the file in the same place.
+        // Create proof file name: {exponent}-{power}.proof, in proof/ under the
+        // save path (-f) like the GPU proof writer, so both paths leave the
+        // file in the same place.
         std::string filename = std::to_string(exponent_) + "-" + 
                               std::to_string(proof.middles.size()) + ".proof";
-        const std::filesystem::path proofDir = std::filesystem::current_path() / "proof";
+        const std::filesystem::path proofDir = proofSet_.location().proofDir();
         std::filesystem::create_directories(proofDir);
         const std::filesystem::path proofFilePath = proofDir / filename;
         const std::filesystem::path tmpPath = proofDir / (filename + ".tmp");

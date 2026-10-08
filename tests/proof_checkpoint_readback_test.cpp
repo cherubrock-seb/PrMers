@@ -76,6 +76,7 @@ int main() {
     std::filesystem::current_path(dir);
 
     constexpr uint32_t E = 191;  // 6 words
+    const core::ProofLocation here; // the working directory: no save path
     core::ProofSetMarin set(E, 2);
     const std::vector<uint32_t> residue{9u, 8u, 7u, 6u, 5u, 4u};
 
@@ -95,7 +96,7 @@ int main() {
 
     // A residue file that cannot be created (a directory is in the way).
     {
-        const auto path = core::ProofSetMarin::proofPath(E) / std::to_string(E);
+        const auto path = core::ProofSetMarin::proofPath(here, E) / std::to_string(E);
         std::filesystem::remove(path);
         std::filesystem::create_directories(path);
         bool threw = false;

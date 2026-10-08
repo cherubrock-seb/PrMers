@@ -13,9 +13,10 @@
 namespace {
 
 int failures = 0;
+const core::ProofLocation here; // the working directory: no save path
 
 void expectPower(uint32_t E, uint32_t power, uint32_t k, uint32_t want) {
-    const uint32_t got = core::ProofSetMarin::effectivePower(E, power, k);
+    const uint32_t got = core::ProofSetMarin::effectivePower(here, E, power, k);
     if (got != want) {
         std::cerr << "FAIL: effectivePower(E=" << E << ", power=" << power
                   << ", k=" << k << ") = " << got << ", want " << want << "\n";
@@ -57,30 +58,30 @@ int main() {
     expectPower(E, 3, 190, 3);
 
     // A point after the resume iteration is not needed yet.
-    fs::remove(core::ProofSetMarin::proofPath(E) / "168");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "168");
     expectPower(E, 3, 100, 3);
     expectPower(E, 3, 168, 2);  // power 3 needs 168 once resumed at 168
     expectPower(E, 3, 190, 2);  // power 2 does not use 168
 
     // 72 is only a power-3 point.
-    fs::remove(core::ProofSetMarin::proofPath(E) / "72");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "72");
     expectPower(E, 3, 100, 2);
     expectPower(E, 3, 71, 3);
 
     // 48 is a power-2 point; power 1 only needs 96.
-    fs::remove(core::ProofSetMarin::proofPath(E) / "48");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "48");
     expectPower(E, 3, 100, 1);
     expectPower(E, 2, 100, 1);
     expectPower(E, 3, 47, 3);
 
     // 96 is needed by every power.
-    fs::remove(core::ProofSetMarin::proofPath(E) / "96");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "96");
     expectPower(E, 3, 100, 0);
     expectPower(E, 3, 95, 1);  // power 1 needs nothing before 96
 
     // A residue of the wrong size is as good as missing.
     {
-        std::ofstream f(core::ProofSetMarin::proofPath(E) / "96", std::ios::binary);
+        std::ofstream f(core::ProofSetMarin::proofPath(here, E) / "96", std::ios::binary);
         f << "short";
     }
     expectPower(E, 1, 100, 0);
@@ -89,7 +90,7 @@ int main() {
     set.save(96, residue);
     expectPower(E, 1, 100, 1);
     {
-        std::fstream f(core::ProofSetMarin::proofPath(E) / "96",
+        std::fstream f(core::ProofSetMarin::proofPath(here, E) / "96",
                        std::ios::binary | std::ios::in | std::ios::out);
         f.seekp(8);
         f.put('\x55');
@@ -104,7 +105,7 @@ int main() {
         }
     };
     auto corrupt = [&](uint32_t k) {
-        std::fstream f(core::ProofSetMarin::proofPath(E) / std::to_string(k),
+        std::fstream f(core::ProofSetMarin::proofPath(here, E) / std::to_string(k),
                        std::ios::binary | std::ios::in | std::ios::out);
         f.seekp(8);
         f.put('\x55');
@@ -140,18 +141,18 @@ int main() {
     // An empty file or a directory in place of a residue counts as missing.
     saveAll();
     {
-        std::ofstream f(core::ProofSetMarin::proofPath(E) / "72", std::ios::binary | std::ios::trunc);
+        std::ofstream f(core::ProofSetMarin::proofPath(here, E) / "72", std::ios::binary | std::ios::trunc);
     }
     expectPower(E, 3, 190, 2);
-    fs::remove(core::ProofSetMarin::proofPath(E) / "72");
-    fs::create_directory(core::ProofSetMarin::proofPath(E) / "72");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "72");
+    fs::create_directory(core::ProofSetMarin::proofPath(here, E) / "72");
     expectPower(E, 3, 190, 2);
-    fs::remove(core::ProofSetMarin::proofPath(E) / "72");
+    fs::remove(core::ProofSetMarin::proofPath(here, E) / "72");
 
     // A residue one word too long is rejected too.
     saveAll();
     {
-        std::ofstream f(core::ProofSetMarin::proofPath(E) / "144", std::ios::binary | std::ios::app);
+        std::ofstream f(core::ProofSetMarin::proofPath(here, E) / "144", std::ios::binary | std::ios::app);
         f.write("\0\0\0\0", 4);
     }
     expectPower(E, 3, 190, 1);  // 144 is a power-2 and power-3 point

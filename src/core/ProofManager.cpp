@@ -72,8 +72,9 @@ namespace core {
 ProofManager::ProofManager(uint32_t exponent, int proofLevel,
                            cl_command_queue queue, uint32_t n,
                            const std::vector<int>& digitWidth,
-                           const std::vector<std::string>& knownFactors)
-  : proofSet_(exponent, static_cast<uint32_t>(proofLevel), knownFactors)
+                           const std::vector<std::string>& knownFactors,
+                           const std::string& savePath)
+  : proofSet_(exponent, static_cast<uint32_t>(proofLevel), knownFactors, ProofLocation(savePath))
   , queue_(queue)
   , n_(n)
   , exponent_(exponent)
@@ -112,9 +113,10 @@ std::filesystem::path ProofManager::proof(const prmers::ocl::Context& ctx, openc
         std::string filename = std::to_string(exponent_) + "-" +
                                std::to_string(proof.middles.size()) + ".proof";
 
-        fs::path base = fs::current_path();
-        fs::path proofDir = ensureDir(base / "proof");
-        fs::path tmpDir = ensureDir(base / "proof-tmp");
+        // Under the save path (-f) with the checkpoints and results.txt.
+        const ProofLocation& where = proofSet_.location();
+        fs::path proofDir = ensureDir(where.proofDir());
+        fs::path tmpDir = ensureDir(where.proofTmpDir());
 
         fs::path finalPath = proofDir / filename;
         fs::path tmpPath = uniqueTmpPath(tmpDir, filename);

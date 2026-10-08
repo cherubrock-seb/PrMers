@@ -54,8 +54,9 @@ WordsMarin WordsMarin::fromUint64(const std::vector<uint64_t>& host, uint32_t ex
 }
 
 // ProofSetMarin
-ProofSetMarin::ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors)
-  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)} {
+ProofSetMarin::ProofSetMarin(uint32_t exponent, uint32_t proofLevel, std::vector<std::string> factors,
+                             ProofLocation location)
+  : E{exponent}, power{proofLevel}, knownFactors{std::move(factors)}, location_{std::move(location)} {
   if(exponent%2!=0){
       assert(E & 1); // E is supposed to be prime
     
@@ -106,10 +107,10 @@ void ProofSetMarin::save(uint32_t iter, const std::vector<uint32_t>& words) {
   // The directory is created with the first residue, so that tests that make
   // no proof (LL, P-1, ECM, -proof 0) leave nothing behind.
   std::error_code dirError;
-  std::filesystem::create_directories(proofPath(E), dirError);
+  std::filesystem::create_directories(location_.residueDir(E), dirError);
 
   // Create the file path for this iteration
-  auto filePath = proofPath(E) / std::to_string(iter);
+  auto filePath = location_.residueWriteFile(E, iter);
   
   // Write the words data to file
   std::ofstream file(filePath, std::ios::binary);
@@ -161,15 +162,25 @@ bool ProofSetMarin::isInPoints(uint32_t E, uint32_t power, uint32_t k) {
   return false;
 }
 
-std::filesystem::path ProofSetMarin::proofPath(uint32_t E) {
-  return std::filesystem::path(std::to_string(E)) / "proof";
+std::filesystem::path ProofSetMarin::proofPath(const ProofLocation& location, uint32_t E) {
+  return location.residueDir(E);
 }
 
-void ProofSetMarin::clearResidues(uint32_t E) {
-  std::error_code ec;
-  std::filesystem::remove_all(proofPath(E), ec);
+bool ProofSetMarin::adoptLegacyResidues(uint32_t resumeIter, std::string& note) {
+  note.clear();
+  if (resumeIter == 0) return false;
+  // Every proof point the interrupted run had passed: the ones the resumed
+  // run will not write again.
+  std::vector<uint32_t> needed;
+  for (uint32_t point : points) {
+    if (point < E && point <= resumeIter) needed.push_back(point);
+  }
+  return location_.adoptLegacy(E, needed, note);
+}
+
+void ProofSetMarin::clearResidues(const ProofLocation& location, uint32_t E) {
   // Only the (now empty) exponent directory; anything else in it stays.
-  std::filesystem::remove(std::filesystem::path(std::to_string(E)), ec);
+  location.clear(E);
 }
 
 ProofSetMarin::ResidueAction ProofSetMarin::residueAction(
@@ -186,11 +197,9 @@ ProofSetMarin::ResidueAction ProofSetMarin::residueAction(
   return ResidueAction::Clear;
 }
 
-std::string ProofSetMarin::residuesKeptMessage(uint32_t E, ResidueAction action) {
-  std::error_code ec;
-  auto dir = std::filesystem::absolute(proofPath(E), ec);
-  if (ec)
-    dir = proofPath(E);
+std::string ProofSetMarin::residuesKeptMessage(const ProofLocation& location, uint32_t E,
+                                               ResidueAction action) {
+  const std::string dir = location.describe(E);
   std::string why;
   switch (action) {
     case ResidueAction::KeepResultNotSaved:
@@ -205,19 +214,19 @@ std::string ProofSetMarin::residuesKeptMessage(uint32_t E, ResidueAction action)
     default:
       return std::string();
   }
-  return "Proof residues kept in " + dir.string() + " (" + why +
+  return "Proof residues kept in " + dir + " (" + why +
          "). They take several GB; delete that directory by hand when you no longer need them.";
 }
 
-bool ProofSetMarin::fileExists(uint32_t E, uint32_t k) {
+bool ProofSetMarin::fileExists(const ProofLocation& location, uint32_t E, uint32_t k) {
   // CRC32 followed by ceil(E/32) 32-bit words.
   std::error_code ec;
-  const auto size = std::filesystem::file_size(proofPath(E) / std::to_string(k), ec);
+  const auto size = std::filesystem::file_size(location.residueFile(E, k), ec);
   return !ec && size == sizeof(uint32_t) * (1u + (static_cast<uint64_t>(E) + 31) / 32);
 }
 
-std::vector<uint32_t> ProofSetMarin::loadResidue(uint32_t E, uint32_t iter) {
-  auto filePath = proofPath(E) / std::to_string(iter);
+std::vector<uint32_t> ProofSetMarin::loadResidue(const ProofLocation& location, uint32_t E, uint32_t iter) {
+  auto filePath = location.residueFile(E, iter);
   std::ifstream file(filePath, std::ios::binary);
   if (!file) {
     throw std::runtime_error("Cannot open proof checkpoint file: " + filePath.string());
@@ -253,15 +262,15 @@ std::vector<uint32_t> ProofSetMarin::load(uint32_t iter) const {
   if (!shouldCheckpoint(iter)) {
     throw std::runtime_error("Attempt to load non-checkpoint iteration: " + std::to_string(iter));
   }
-  return loadResidue(E, iter);
+  return loadResidue(location_, E, iter);
 }
 
-bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK) {
+bool ProofSetMarin::canDo(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK) {
   std::map<uint32_t, bool> checked;
-  return canDo(E, power, currentK, checked);
+  return canDo(location, E, power, currentK, checked);
 }
 
-bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK,
+bool ProofSetMarin::canDo(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK,
                           std::map<uint32_t, bool>& checked) {
   // Every residue below E from iterations up to and including currentK must
   // be there (a residue at currentK itself is written before the test can be
@@ -273,10 +282,10 @@ bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK,
     if (point >= E || point > currentK) break;
     auto it = checked.find(point);
     if (it == checked.end()) {
-      bool ok = fileExists(E, point);
+      bool ok = fileExists(location, E, point);
       if (ok) {
         try {
-          loadResidue(E, point);
+          loadResidue(location, E, point);
         } catch (const std::exception&) {
           ok = false;
         }
@@ -288,12 +297,12 @@ bool ProofSetMarin::canDo(uint32_t E, uint32_t power, uint32_t currentK,
   return true;
 }
 
-uint32_t ProofSetMarin::effectivePower(uint32_t E, uint32_t power, uint32_t currentK) {
+uint32_t ProofSetMarin::effectivePower(const ProofLocation& location, uint32_t E, uint32_t power, uint32_t currentK) {
   // The points of a lower power are a subset of those of a higher one, so
   // each residue is checked at most once across the powers tried.
   std::map<uint32_t, bool> checked;
   for (uint32_t p = power; p > 0; --p) {
-    if (canDo(E, p, currentK, checked)) return p;
+    if (canDo(location, E, p, currentK, checked)) return p;
   }
   return 0;
 }

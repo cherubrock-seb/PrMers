@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <stdexcept>
+#include <string>
 #include "core/ProofSet.hpp"
 #include "core/ProofCheckpoint.hpp"
 
@@ -40,13 +41,22 @@ public:
     ProofManager(uint32_t exponent, int proofLevel,
                  cl_command_queue queue, uint32_t n,
                  const std::vector<int>& digitWidth,
-                 const std::vector<std::string>& knownFactors = {});
+                 const std::vector<std::string>& knownFactors = {},
+                 const std::string& savePath = std::string());
     void checkpoint(cl_mem buf, uint32_t iter);  
     void checkpointMarin(std::vector<uint64_t> host, uint32_t iter);
     // Lower the power residues are saved for (the points of a lower power are
     // a subset of those of the original power).
     void setPower(uint32_t newPower) { proofSet_.power = newPower; }
     std::filesystem::path proof(const prmers::ocl::Context& ctx, opencl::NttEngine& ntt, math::Carry& carry, uint32_t proofPower, bool verify=true) const;
+
+    // Where this run keeps its proof files: under the save path (-f).
+    const ProofLocation& location() const { return proofSet_.location(); }
+    // See ProofSetMarin::adoptLegacyResidues.
+    bool adoptLegacyResidues(uint32_t resumeIter, std::string& note) {
+        return proofSet_.adoptLegacyResidues(resumeIter, note);
+    }
+    void releaseLegacyResidues() { proofSet_.releaseLegacyResidues(); }
 
 private:
     ProofSet           proofSet_;

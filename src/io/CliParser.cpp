@@ -70,7 +70,7 @@ void printUsage(const char* progName) {
     std::cout << "  -K <value>           : Exponent K for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -nmax <value>        : Maximum value of n for the n^K variant of P-1 stage 2" << std::endl;
     std::cout << "  -t <seconds>         : (Optional) Specify backup interval in seconds (default: 120)" << std::endl;
-    std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint files (default: current directory)" << std::endl;
+    std::cout << "  -f <path>            : (Optional) Specify path for saving/loading checkpoint, result and proof files (default: current directory)" << std::endl;
     //std::cout << "  -l1 <value>          : (Optional) Force local size max for NTT kernels" << std::endl;
     //std::cout << "  -l5 <value>          : (Optional) Force local size max for NTT kernels radix 5" << std::endl;
     //std::cout << "  -l2 <value>          : (Optional) Force local size for 2-step radix-16 NTT kernel" << std::endl;

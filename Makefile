@@ -310,6 +310,14 @@ test-proof-residue-cleanup:
 test-proof-resume-power:
 	bash tests/test_proof_resume_power.sh
 
+.PHONY: test-proof-location
+test-proof-location:
+	bash tests/test_proof_location.sh
+
+.PHONY: test-proof-save-path
+test-proof-save-path: all
+	bash tests/run_proof_save_path_regression.sh $${AEVUM_TEST_DEVICE:-0}
+
 test-marin-invalid-device:
 	mkdir -p tests/build-marin-invalid-device
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
