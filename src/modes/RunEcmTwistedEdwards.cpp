@@ -760,6 +760,21 @@ int App::runECMMarinTwistedEdwards()
     const bool forceCurve = (options.curve_seed != 0ULL);
     const uint64_t forcedCurveSeedValue = options.curve_seed;
     const bool forceSigma = !options.sigma.empty();
+    // Identity of a user-supplied -sigma curve, stored in checkpoints so a run with a
+    // different sigma never resumes another curve's state.  0 means "not -sigma".
+    // Checkpoint versions: stage 1 v1 and stage 2 v2..v6 do not record it; stage 1 v2
+    // and stage 2 v7 do.
+    const uint64_t sigma_id = [&]() -> uint64_t {
+        if (!forceSigma) return 0ULL;
+        mpz_class sv;
+        const std::string canon = (mpz_set_str(sv.get_mpz_t(), options.sigma.c_str(), 0) == 0)
+                                      ? sv.get_str(16) : options.sigma;
+        uint64_t h = 0xCBF29CE484222325ULL;
+        for (char ch : canon) { h ^= static_cast<unsigned char>(ch); h *= 0x100000001B3ULL; }
+        return h ? h : 1ULL;
+    }();
+    constexpr int kTeCkptS1Sigma = 2;  // stage 1 checkpoint carrying sigma_id
+    constexpr int kTeCkptS2Sigma = 7;  // stage 2 checkpoint carrying sigma_id
     // A fixed curve seed historically implied exactly one curve.  When the
     // caller explicitly requests continuation and K>1, use that seed for curve
     // 1 and derive later deterministic seeds from it so the continuation option
@@ -1494,7 +1509,7 @@ int App::runECMMarinTwistedEdwards()
 
         int version = 0;
         if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-        if (version != 1) return false; // checkpoints S1 Twisted-Edwards
+        if (version != 1 && version != kTeCkptS1Sigma) return false; // checkpoints S1 Twisted-Edwards
 
         uint32_t rp = 0;
         if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
@@ -1516,6 +1531,13 @@ int App::runECMMarinTwistedEdwards()
         if (!f.read(reinterpret_cast<char*>(&saved_curve_family),  sizeof(saved_curve_family)))  return false;
         uint8_t current_curve_family = current_te_family_mode;
         if (saved_curve_family != current_curve_family) return false;
+        if (version == kTeCkptS1Sigma) {
+            uint64_t saved_sigma_id = 0;
+            if (!f.read(reinterpret_cast<char*>(&saved_sigma_id), sizeof(saved_sigma_id))) return false;
+            if (saved_sigma_id != sigma_id) return false;
+        } else if (forceSigma) {
+            return false; // version 1 does not record which sigma it was built from
+        }
 
         out_seed = saved_curve_seed;
         return true;
@@ -1527,7 +1549,7 @@ int App::runECMMarinTwistedEdwards()
 
         int version = 0;
         if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-        if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6) return false;
+        if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6 && version != kTeCkptS2Sigma) return false;
 
         uint32_t rp = 0;
         if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return false;
@@ -1545,7 +1567,7 @@ int App::runECMMarinTwistedEdwards()
 
         out_seed = 0;
         out_has_seed = false;
-        if (version == 6 || version == 5) {
+        if (version == kTeCkptS2Sigma || version == 6 || version == 5) {
             uint64_t saved_seed = 0;
             uint8_t saved_tor = 0;
             double et = 0.0;
@@ -1553,6 +1575,13 @@ int App::runECMMarinTwistedEdwards()
             uint32_t chunk_start_idx = 0, chunk_end_idx = 0, chunk_bits_saved = 0, chunk_steps_done_saved = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return false;
             if (!f.read(reinterpret_cast<char*>(&saved_tor), sizeof(saved_tor))) return false;
+            if (version == kTeCkptS2Sigma) {
+                uint64_t saved_sigma_id = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_sigma_id), sizeof(saved_sigma_id))) return false;
+                if (saved_sigma_id != sigma_id) return false;
+            } else if (forceSigma) {
+                return false; // older versions do not record which sigma they were built from
+            }
             if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return false;
             if (!f.read(reinterpret_cast<char*>(&in_chunk), sizeof(in_chunk))) return false;
             if (!f.read(reinterpret_cast<char*>(&chunk_start_idx), sizeof(chunk_start_idx))) return false;
@@ -1565,6 +1594,7 @@ int App::runECMMarinTwistedEdwards()
             out_has_seed = true;
             return true;
         }
+        if (forceSigma) return false; // versions 2..4 do not record which sigma they were built from
         if (version == 4) {
             uint64_t saved_seed = 0;
             uint8_t saved_tor = 0;
@@ -1594,9 +1624,9 @@ int App::runECMMarinTwistedEdwards()
 
         // version 2: no seed or torsion information recorded.
         // Safe only when the curve is externally fixed and can be rebuilt identically.
-        if (forceCurve || forceSigma) {
-            out_seed = forceCurve ? options.curve_seed : 0ULL;
-            out_has_seed = forceCurve;
+        if (forceCurve) {
+            out_seed = options.curve_seed;
+            out_has_seed = true;
             return true;
         }
         return false;
@@ -1606,15 +1636,11 @@ int App::runECMMarinTwistedEdwards()
         for (uint64_t c = 0; c < curves; ++c) {
             const std::string ckpt2_file      = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
             const std::string ckpt2_file_o    = ckpt2_file + ".old";
-            const std::string ckpt2_legacy    = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-            const std::string ckpt2_legacy_o  = ckpt2_legacy + ".old";
 
             uint64_t s = 0;
             bool has_seed = false;
             if (try_probe_te_ckpt2(ckpt2_file, s, has_seed) ||
-                try_probe_te_ckpt2(ckpt2_file_o, s, has_seed) ||
-                try_probe_te_ckpt2(ckpt2_legacy, s, has_seed) ||
-                try_probe_te_ckpt2(ckpt2_legacy_o, s, has_seed)) {
+                try_probe_te_ckpt2(ckpt2_file_o, s, has_seed)) {
                 resume_curve_idx   = c;
                 resume_curve_seed  = s;
                 have_resume_seed   = has_seed;
@@ -1757,8 +1783,6 @@ int App::runECMMarinTwistedEdwards()
 
         const std::string ckpt_file      = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
         const std::string ckpt2_file     = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-        const std::string ckpt_legacy    = "ecm_m_"     + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-        const std::string ckpt2_legacy   = "ecm2_m_"    + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
 
         mpz_class s2_base_Xpos, s2_base_Ypos, s2_base_Tpos;
         mpz_class s2_base_Xneg, s2_base_Yneg, s2_base_Tneg;
@@ -1798,7 +1822,7 @@ int App::runECMMarinTwistedEdwards()
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 1;
+                int version = kTeCkptS1Sigma;
                 if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
                 if (!f.write(reinterpret_cast<const char*>(&p),       sizeof(p)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&i),       sizeof(i)))       return;
@@ -1810,6 +1834,7 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&curve_seed), sizeof(curve_seed))) return;
                 uint8_t curve_family_mode = current_te_family_mode;
                 if (!f.write(reinterpret_cast<const char*>(&curve_family_mode), sizeof(curve_family_mode))) return;
+                if (!f.write(reinterpret_cast<const char*>(&sigma_id), sizeof(sigma_id))) return;
 
                 const size_t cksz = eng->get_checkpoint_size();
                 std::vector<char> data(cksz);
@@ -1831,7 +1856,7 @@ int App::runECMMarinTwistedEdwards()
 
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 1) return -2;
+            if (version != 1 && version != kTeCkptS1Sigma) return -2;
 
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp),  sizeof(rp)))  return -2;
@@ -1850,6 +1875,13 @@ int App::runECMMarinTwistedEdwards()
             if (!f.read(reinterpret_cast<char*>(&saved_curve_family),  sizeof(saved_curve_family)))  return -2;
             uint8_t current_curve_family = current_te_family_mode;
             if ((!forceSigma && saved_curve_seed != curve_seed) || saved_curve_family != current_curve_family) return -2;
+            if (version == kTeCkptS1Sigma) {
+                uint64_t saved_sigma_id = 0;
+                if (!f.read(reinterpret_cast<char*>(&saved_sigma_id), sizeof(saved_sigma_id))) return -2;
+                if (saved_sigma_id != sigma_id) return -2;
+            } else if (forceSigma) {
+                return -2; // version 1 does not record which sigma it was built from
+            }
 
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -1865,8 +1897,6 @@ int App::runECMMarinTwistedEdwards()
         auto read_ckpt = [&](uint32_t& ri, uint32_t& rnb, double& et)->int{
             int rr = read_ckpt_one(ckpt_file, ri, rnb, et);
             if (rr < 0) rr = read_ckpt_one(ckpt_file + ".old", ri, rnb, et);
-            if (rr < 0) rr = read_ckpt_one(ckpt_legacy, ri, rnb, et);         
-            if (rr < 0) rr = read_ckpt_one(ckpt_legacy + ".old", ri, rnb, et);
             return rr;
         };
 
@@ -1879,7 +1909,7 @@ int App::runECMMarinTwistedEdwards()
             const std::string oldf = ckpt2_file + ".old", newf = ckpt2_file + ".new";
             {
                 File f(newf, "wb");
-                int version = 6;
+                int version = kTeCkptS2Sigma;
                 if (!f.write(reinterpret_cast<const char*>(&version),  sizeof(version)))  return;
                 if (!f.write(reinterpret_cast<const char*>(&p),        sizeof(p)))        return;
                 if (!f.write(reinterpret_cast<const char*>(&idx),      sizeof(idx)))      return;
@@ -1890,6 +1920,7 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.write(reinterpret_cast<const char*>(&seed64),   sizeof(seed64)))   return;
                 uint8_t curve_family_mode = current_te_family_mode;
                 if (!f.write(reinterpret_cast<const char*>(&curve_family_mode), sizeof(curve_family_mode))) return;
+                if (!f.write(reinterpret_cast<const char*>(&sigma_id), sizeof(sigma_id))) return;
                 if (!f.write(reinterpret_cast<const char*>(&et),       sizeof(et)))       return;
                 if (!f.write(reinterpret_cast<const char*>(&in_chunk), sizeof(in_chunk))) return;
                 if (!f.write(reinterpret_cast<const char*>(&chunk_start_idx), sizeof(chunk_start_idx))) return;
@@ -1931,7 +1962,7 @@ int App::runECMMarinTwistedEdwards()
 
             int version = 0;
             if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6) return -2;
+            if (version != 2 && version != 3 && version != 4 && version != 5 && version != 6 && version != kTeCkptS2Sigma) return -2;
 
             uint32_t rp = 0;
             if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
@@ -1947,9 +1978,13 @@ int App::runECMMarinTwistedEdwards()
             have_s2_base_cache = false;
             uint64_t saved_seed = 0;
             uint8_t  saved_tor  = 0;
-            if (version == 6 || version == 5) {
+            uint64_t saved_sigma_id = 0;
+            if (version == kTeCkptS2Sigma || version == 6 || version == 5) {
                 if (!f.read(reinterpret_cast<char*>(&saved_seed), sizeof(saved_seed))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&saved_tor),  sizeof(saved_tor)))  return -2;
+                if (version == kTeCkptS2Sigma) {
+                    if (!f.read(reinterpret_cast<char*>(&saved_sigma_id), sizeof(saved_sigma_id))) return -2;
+                }
                 if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
                 uint8_t in_chunk = 0;
                 if (!f.read(reinterpret_cast<char*>(&in_chunk), sizeof(in_chunk))) return -2;
@@ -1958,7 +1993,7 @@ int App::runECMMarinTwistedEdwards()
                 if (!f.read(reinterpret_cast<char*>(&resume_s2_chunk_bits), sizeof(resume_s2_chunk_bits))) return -2;
                 if (!f.read(reinterpret_cast<char*>(&resume_s2_steps_done), sizeof(resume_s2_steps_done))) return -2;
                 resume_stage2_in_chunk = (in_chunk != 0);
-                if (version == 6) {
+                if (version == 6 || version == kTeCkptS2Sigma) {
                     uint8_t has_stage2_base = 0;
                     if (!f.read(reinterpret_cast<char*>(&has_stage2_base), sizeof(has_stage2_base))) return -2;
                     if (has_stage2_base) {
@@ -1989,6 +2024,13 @@ int App::runECMMarinTwistedEdwards()
                 uint8_t current_tor = current_te_family_mode;
                 if ((!forceSigma && saved_seed != (uint64_t)curve_seed) || saved_tor != current_tor) return -2;
             }
+            if (version == kTeCkptS2Sigma) {
+                if (saved_sigma_id != sigma_id) return -2;
+            } else if (forceSigma) {
+                return -2; // older versions do not record which sigma they were built from
+            }
+            // Version 2 records neither seed nor torsion: usable only for an externally fixed curve.
+            if (version == 2 && !forceCurve) return -2;
 
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -2008,8 +2050,6 @@ int App::runECMMarinTwistedEdwards()
             resume_s2_steps_done = 0;
             int rr = read_ckpt2_one(ckpt2_file, idx, cnt_bits, et);
             if (rr < 0) rr = read_ckpt2_one(ckpt2_file + ".old", idx, cnt_bits, et);
-            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy, idx, cnt_bits, et);
-            if (rr < 0) rr = read_ckpt2_one(ckpt2_legacy + ".old", idx, cnt_bits, et);
             return rr;
         };
 
@@ -3032,6 +3072,13 @@ int App::runECMMarinTwistedEdwards()
         eng->set_multiplicand((engine::Reg)46,(engine::Reg)9);  // T2 (will be T_pos)
         uint32_t start_i = 0, nb_ck = 0;
         double   saved_et = 0.0;
+        // Registers of the freshly built curve, to fall back to if a checkpoint fails the invariant.
+        std::vector<char> fresh_state;
+        bool have_fresh_state = false;
+        if (ctx_ckpt_size > 0) {
+            fresh_state.resize(ctx_ckpt_size);
+            have_fresh_state = eng->get_checkpoint(fresh_state);
+        }
         int rr = read_ckpt(start_i, nb_ck, saved_et);
         
         int rr2 = read_ckpt2(s2_idx, s2_cnt, s2_et); 
@@ -3040,12 +3087,27 @@ int App::runECMMarinTwistedEdwards()
         
 
         bool resumed = (rr == 0 && start_i > 0);
-        if (!resumed) {
-            start_i = 0;
-            saved_et = 0.0;
-            nb_ck = 0;
-        } else {
-            // Treat the resumed state as a valid last-good checkpoint
+        if (resumed && !resume_stage2) {
+            // A loaded checkpoint is only a "last good" state once it passes the curve
+            // invariant.  A state that fails it (corrupted file, other curve) is dropped
+            // and the curve restarts from the beginning.
+            current_iter_for_invariant = start_i;
+            std::cout << "[ECM] Checking resumed Stage1 state at iteration " << start_i << std::endl;
+            if (!check_invariant()) {
+                std::cout << "[ECM] Resumed Stage1 checkpoint fails the curve invariant, discarding it and restarting this curve" << std::endl;
+                std::error_code rm_ec;
+                fs::remove(ckpt_file, rm_ec);
+                fs::remove(ckpt_file + ".old", rm_ec);
+                have_last_good_state = false;
+                resumed = false;
+                if (!have_fresh_state || !eng->set_checkpoint(fresh_state)) {
+                    std::cout << "[ECM] Could not restore the initial curve state, skipping curve" << std::endl;
+                    delete eng;
+                    continue;
+                }
+            }
+        } else if (resumed) {
+            // Stage 2 resume: the Stage1 invariant does not apply to the loaded registers.
             if (ctx_ckpt_size > 0) {
                 last_good_state.resize(ctx_ckpt_size);
                 if (eng->get_checkpoint(last_good_state)) {
@@ -3054,6 +3116,11 @@ int App::runECMMarinTwistedEdwards()
                     current_iter_for_invariant = start_i;
                 }
             }
+        }
+        if (!resumed) {
+            start_i = 0;
+            saved_et = 0.0;
+            nb_ck = 0;
         }
 
         auto t0 = high_resolution_clock::now();
@@ -3172,6 +3239,10 @@ int App::runECMMarinTwistedEdwards()
         }
         bool errordone = false;
         bool fatal_error = false;
+        // Consecutive failed error checks; a check that passes resets it.  Bounds the
+        // rollback-and-retry loop when the error is deterministic.
+        int invariant_fail_streak = 0;
+        constexpr int kMaxInvariantRetries = 3;
         if(resume_stage2){
             start_i = total_steps;
         }
@@ -3236,10 +3307,14 @@ int App::runECMMarinTwistedEdwards()
                 std::cout << "\n[ECM] Error check ...." << std::endl;
                 current_iter_for_invariant = i + 1;
                 if (check_invariant()) {
+                    invariant_fail_streak = 0;
                     std::cout << "[ECM] Error check Done ! ...." << std::endl;
                 } else {
                     std::cout << "[ECM] Error detected!!!!!!!! ...." << std::endl;
-                    if (have_last_good_state) {
+                    if (++invariant_fail_streak > kMaxInvariantRetries) {
+                        std::cout << "[ECM] Error check failed " << invariant_fail_streak
+                                  << " times in a row, aborting curve." << std::endl;
+                    } else if (have_last_good_state) {
                         options.invarianterror += 1;
                         std::cout << "[ECM] Restoring last known good state at iteration "
                                 << last_good_iter << " and retrying from there." << std::endl;

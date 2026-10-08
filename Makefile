@@ -401,3 +401,8 @@ test-ecm-prime95-relative-path: ; bash tests/ecm_prime95_relative_path_test.sh $
 # PR138 cumulative semantic integration
 test-gm-tf-worktodo-queue: all
 	bash tests/gmtf_worktodo_queue_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+# PR140 cumulative semantic integration
+.PHONY: test-ecm-te-sigma-checkpoint
+test-ecm-te-sigma-checkpoint:
+	python3 tests/ecm_te_sigma_checkpoint_source_test.py
