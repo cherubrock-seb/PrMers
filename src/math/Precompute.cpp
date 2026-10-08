@@ -42,9 +42,13 @@ uint32_t transformsize(uint64_t exponent) {
     if (n2 >= 128) {
         uint64_t n5 = (n2 >> 3) * 5u; // n2 * 5 / 8
         if (n5 >= 80) {               // sécurité : n5 doit être ≥ 80
+            // n5 = 5 * 2^k.  Digits are below 2^(w5+1) and the IBDWT weight contributes a factor 1
+            // or 2 to each product, so a convolution coefficient is at most
+            // n5 * 2 * (2^(w5+1) - 1)^2 < 2^(2(w5+1) + k + 1 + log2(5)) and must stay below
+            // MOD_P < 2^64: that is 2(w5+1) + k <= 60 (the same bound as ibdwt::transform_size).
             uint64_t w5 = exponent / n5;
-            long double cost5 = std::log2((long double)n5) + 2.0L * (w5 + 1);
-            if (cost5 < 64.0L)
+            uint64_t k = log_n - 3;
+            if (2 * (w5 + 1) + k <= 60)
                 return n5;
         }
     }

@@ -65,6 +65,7 @@ private:
     uint64_t b2_;
     bool             wagstaff_;
     bool             marin_;
+    bool             stateDiscarded_ = false; // loadState rejected an unusable state file
     std::string hqFilename_, qFilename_, loop2Filename_;
 
 };

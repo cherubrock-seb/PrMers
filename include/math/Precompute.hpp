@@ -5,6 +5,10 @@
 
 namespace math {
 
+// Legacy transform size for an exponent: a power of two or 5 * 2^k such that every convolution
+// coefficient stays below the NTT prime.
+uint32_t transformsize(uint64_t exponent);
+
 class Precompute {
 public:
     explicit Precompute(uint64_t exponent);

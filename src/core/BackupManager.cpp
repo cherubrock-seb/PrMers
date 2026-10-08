@@ -96,6 +96,27 @@ static inline std::streamsize ss_from_size(size_t n) {
 }
 
 
+// Read exactly `words` 64-bit words from `file`. Legacy checkpoints are raw images of the transform-size
+// digit vector, so a file of any other length was written for a different transform size (or truncated or
+// extended) and must not be used. Returns false if the file is missing, has any other size, or is unreadable.
+static bool readExactWords(const std::string& file, uint64_t* data, size_t words, const char* what) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec)) return false;
+    const uintmax_t want = static_cast<uintmax_t>(words) * sizeof(uint64_t);
+    const uintmax_t have = std::filesystem::file_size(file, ec);
+    if (ec || have != want) {
+        std::cerr << "Warning: " << what << " " << file << " has "
+                  << (ec ? std::string("an unreadable size") : std::to_string(have) + " bytes")
+                  << " but this transform size needs " << want << " bytes — ignoring it\n";
+        return false;
+    }
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return false;
+    in.read(reinterpret_cast<char*>(data), ss_from_size(static_cast<size_t>(want)));
+    return in.gcount() == ss_from_size(static_cast<size_t>(want));
+}
+
+
 uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
                                        cl_mem qBuf,
                                        size_t bytes)
@@ -106,20 +127,22 @@ uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
         std::ifstream loopIn(loop2Filename_);
         if (loopIn >> resume && resume > 0) {
             std::cout << "Stage-2 resume at iteration " << resume << std::endl;
-            std::vector<uint64_t> tmp(bytes / sizeof(uint64_t));
+            const size_t words = bytes / sizeof(uint64_t);
+            std::vector<uint64_t> hq(words), q(words);
 
-            std::ifstream hqIn(hqFilename_, std::ios::binary);
-            if (hqIn) {
-                hqIn.read(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
-                clEnqueueWriteBuffer(queue_, hqBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
+            // Both buffers must be restored from files of the current transform size; otherwise
+            // the loop counter is meaningless and stage 2 restarts from its beginning.
+            if (!readExactWords(hqFilename_, hq.data(), words, "stage-2 state") ||
+                !readExactWords(qFilename_,  q.data(),  words, "stage-2 state")) {
+                std::cerr << "Warning: could not read complete stage-2 buffers — ignoring "
+                          << loop2Filename_ << " and starting stage 2 from the beginning\n";
+                return 0;
             }
-
-            std::ifstream qIn(qFilename_, std::ios::binary);
-            if (qIn) {
-                qIn.read(reinterpret_cast<char*>(tmp.data()), ss_from_size(bytes));
-                clEnqueueWriteBuffer(queue_, qBuf, CL_TRUE, 0, bytes, tmp.data(), 0, nullptr, nullptr);
-            }
+            clEnqueueWriteBuffer(queue_, hqBuf, CL_TRUE, 0, bytes, hq.data(), 0, nullptr, nullptr);
+            clEnqueueWriteBuffer(queue_, qBuf, CL_TRUE, 0, bytes, q.data(), 0, nullptr, nullptr);
             std::cout << "Stage-2 buffers restored" << std::endl;
+        } else {
+            resume = 0;
         }
     }
     return resume;
@@ -127,9 +150,9 @@ uint64_t BackupManager::loadStatePM1S2(cl_mem hqBuf,
 
 void BackupManager::loadGerbiczLiBufDState(std::vector<uint64_t>& x) {
     if(!marin_){
-        std::ifstream in(GerbiczLiBufDFilename_, std::ios::binary);
-        if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
+        std::vector<uint64_t> tmp(x.size());
+        if (readExactWords(GerbiczLiBufDFilename_, tmp.data(), tmp.size(), "Gerbicz-Li state")) {
+            x = std::move(tmp);
             std::cout << "Loaded GerbiczLiBufD from " << std::filesystem::absolute(GerbiczLiBufDFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -142,9 +165,9 @@ void BackupManager::loadGerbiczLiBufDState(std::vector<uint64_t>& x) {
 
 void BackupManager::loadGerbiczLiCorrectState(std::vector<uint64_t>& x) {
     if(!marin_){
-        std::ifstream in(GerbiczLiCorrectBufFilename_, std::ios::binary);
-        if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
+        std::vector<uint64_t> tmp(x.size());
+        if (readExactWords(GerbiczLiCorrectBufFilename_, tmp.data(), tmp.size(), "Gerbicz-Li state")) {
+            x = std::move(tmp);
             std::cout << "Loaded GerbiczLiCorrectBuf from " << std::filesystem::absolute(GerbiczLiCorrectBufFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -156,9 +179,9 @@ void BackupManager::loadGerbiczLiCorrectState(std::vector<uint64_t>& x) {
 
 void BackupManager::loadGerbiczLiCorrectBufDState(std::vector<uint64_t>& x) {
     if(!marin_){
-        std::ifstream in(GerbiczLiLastBufDFilename_, std::ios::binary);
-        if (in) {
-            in.read(reinterpret_cast<char*>(x.data()), ss_from_size(x.size() * sizeof(uint64_t)));
+        std::vector<uint64_t> tmp(x.size());
+        if (readExactWords(GerbiczLiLastBufDFilename_, tmp.data(), tmp.size(), "Gerbicz-Li state")) {
+            x = std::move(tmp);
             std::cout << "Loaded GerbiczLiLastBufD from " << std::filesystem::absolute(GerbiczLiLastBufDFilename_) << std::endl;
         } else {
             x.assign(x.size(), 0ULL);
@@ -170,7 +193,7 @@ void BackupManager::loadGerbiczLiCorrectBufDState(std::vector<uint64_t>& x) {
 
 uint64_t core::BackupManager::loadGerbiczIterSave() {
     uint64_t v = 0;
-    if(!marin_){
+    if(!marin_ && !stateDiscarded_){
         std::ifstream in(GerbiczLiIterSaveFilename_);
         if (in) {
             in >> v;
@@ -184,7 +207,7 @@ uint64_t core::BackupManager::loadGerbiczIterSave() {
 
 uint64_t core::BackupManager::loadGerbiczJSave() {
     uint64_t v = 0;
-    if(!marin_){
+    if(!marin_ && !stateDiscarded_){
         std::ifstream in(GerbiczLiJSaveFilename_);
         if (in) {
             in >> v;
@@ -233,15 +256,10 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
         std::cout << "Resuming from iteration " << resume
                   << " based on " << absLoop << std::endl;
 
-        // 3) Charger le vecteur binaire. Without a complete state file the loop counter is
-        // meaningless: start over rather than resume from a zero or truncated state.
-        std::ifstream mersIn(mersFilename_, std::ios::binary);
-        const std::streamsize want = ss_from_size(x.size() * sizeof(uint64_t));
-        bool loaded = false;
-        if (mersIn) {
-            mersIn.read(reinterpret_cast<char*>(x.data()), want);
-            loaded = (mersIn.gcount() == want);
-        }
+        // 3) Charger le vecteur binaire. Without a complete state file of exactly the current
+        // transform size the loop counter is meaningless: start over rather than resume from a
+        // zero, truncated or differently sized state.
+        const bool loaded = readExactWords(mersFilename_, x.data(), x.size(), "state file");
         if (loaded) {
             std::cout << "Loaded state from "
                       << std::filesystem::absolute(mersFilename_)
@@ -251,6 +269,7 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
                       << std::filesystem::absolute(mersFilename_)
                       << " — ignoring the loop file and starting from iteration 0\n";
             resume = 0;
+            stateDiscarded_ = true;
             x.assign(x.size(), 0ULL);
             x[0] = (mode_ == "prp") ? 3ULL : 4ULL;
         }
