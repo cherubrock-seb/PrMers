@@ -36,6 +36,23 @@ namespace ui { class WebGuiServer; }
 
 namespace core {
 
+/// Outcome of a P-1 stage 2 run.  Only Found and NotFound mean that the whole
+/// stage 2 range was searched; after Interrupted or Error the stage-1
+/// checkpoint and the worktodo line must be kept so the job can be resumed.
+enum class Pm1Stage2Result { Found, NotFound, Interrupted, Error };
+
+/// Process exit status for a stand-alone stage 2 run: 0 for a factor or an
+/// interrupted run (like stage 1), 1 for no factor, 2 for an error.
+inline int pm1Stage2ExitCode(Pm1Stage2Result r) {
+    switch (r) {
+        case Pm1Stage2Result::Found:       return 0;
+        case Pm1Stage2Result::NotFound:    return 1;
+        case Pm1Stage2Result::Interrupted: return 0;
+        case Pm1Stage2Result::Error:       return 2;
+    }
+    return 2;
+}
+
 /// Top-level application driver.
 class App {
 public:
@@ -56,13 +73,13 @@ public:
     int runPM1();
     int runPM1Marin();
     int runPM1Stage2();
-    int runPM1Stage2Marin();
-    int runPM1Stage2MarinVTrace();
-    int runPM1Stage2MarinLowMem();
+    Pm1Stage2Result runPM1Stage2Marin();
+    Pm1Stage2Result runPM1Stage2MarinVTrace();
+    Pm1Stage2Result runPM1Stage2MarinLowMem();
     int runPM1Stage3Marin();
     int runPM1Stage4Marin();
     int runPM1Stage1SLnTorusMarin();
-    int runPM1Stage2MarinNKVersion();
+    Pm1Stage2Result runPM1Stage2MarinNKVersion();
     int runMemtestOpenCL();
     int runECMMarin();
     int runECMMarinTwistedEdwards();
