@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def body(name):
     text = (ROOT / "src/modes" / name).read_text()
-    start = text.index("bool resultSaved = wm.saveIndividualJson")
+    start = text.rindex("bool resultSaved = wm.saveIndividualJson")
     return text[start:start + 3500]
 
 
@@ -25,8 +25,15 @@ for driver in ("RunPrpOrLlMarin.cpp", "RunPrpOrLl.cpp"):
     retire = end.index("worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)")
     assert end.count("removeProcessedLine(") == 1, driver
     assert "const bool entryRetired = !hasWorktodoEntry_ || retired;" in end, driver
-    gate = re.search(r"if \(resultSaved && entryRetired\)\s*\{?\s*backupManager\.clearState\(\);", end)
-    assert gate and gate.start() > retire > save, driver
+    if driver == "RunPrpOrLlMarin.cpp":
+        gate = re.search(r"if \(resultSaved && entryRetired\)\s*\{", end)
+        assert gate and gate.start() > retire > save, driver
+        exact_remove = end.index("std::filesystem::remove(ckpt_file, ec);")
+        clear_state = end.index("backupManager.clearState();")
+        assert gate.start() < exact_remove < clear_state, driver
+    else:
+        gate = re.search(r"if \(resultSaved && entryRetired\)\s*\{?\s*backupManager\.clearState\(\);", end)
+        assert gate and gate.start() > retire > save, driver
     assert "ProofSetMarin::residueAction(" in end, driver
     assert "options.mode == \"prp\", options.wagstaff, proofRequested," in end, driver
     assert "proofCompleted, resultSaved, entryRetired);" in end, driver
@@ -39,7 +46,14 @@ for driver in ("RunPrpOrLlMarin.cpp", "RunPrpOrLl.cpp"):
     assert "backupManager.clearState();" not in tail_of_head, driver
 
 marin = body("RunPrpOrLlMarin.cpp")
-assert re.search(r"if \(resultSaved && entryRetired\) \{\s*backupManager\.clearState\(\);\s*delete_checkpoints\(", marin)
+assert re.search(
+    r"if \(resultSaved && entryRetired\) \{.*?"
+    r"std::filesystem::remove\(ckpt_file, ec\);.*?"
+    r"backupManager\.clearState\(\);",
+    marin,
+    re.S,
+)
+assert "delete_checkpoints(p, options.wagstaff, false, false);" not in marin
 
 # The kept checkpoint must be the finished one: a final checkpoint is saved after
 # the loop and before the proof releases the engine, and not when the run resumed

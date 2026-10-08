@@ -872,6 +872,50 @@ int App::runPrpOrLl() {
                 }
             }
 
+            // Record the verdict, retire the worktodo entry and remove the saved state, as the
+            // Marin path does; returning here left the result unsaved and the entry in place, so
+            // the next start ran it again. End of job, in this order: 1. save the result,
+            // 2. retire the worktodo entry, 3. only then delete the saved state. If 1 or 2
+            // fails the state is kept, so the rerun resumes at the end instead of from 0.
+            const std::string wagstaffJson =
+                core::algo::wagstaff_result_json(options.exponent, isWagstaffPRP);
+            io::WorktodoManager wm(options);
+            bool resultSaved = wm.saveIndividualJson(options.exponent / 2, "wagstaff", wagstaffJson);
+            resultSaved = wm.appendToResultsTxt(wagstaffJson) && resultSaved;
+            const bool retired = resultSaved && hasWorktodoEntry_ &&
+                                 worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
+            if (resultSaved && (!hasWorktodoEntry_ || retired)) {
+                backupManager.clearState();
+            } else {
+                std::cerr << (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
+                          << "; keeping the saved state"
+                          << (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string())
+                          << "\n";
+            }
+            if (hasWorktodoEntry_ && resultSaved) {
+                if (retired) {
+                    std::cout << "Entry removed from " << options.worktodo_path
+                              << " and saved to worktodo_save.txt\n";
+                    bool more = false;
+                    {
+                        std::ifstream f(options.worktodo_path);
+                        std::string l;
+                        while (std::getline(f, l)) {
+                            if (!l.empty() && l[0] != '#') { more = true; break; }
+                        }
+                    }
+                    if (more) {
+                        std::cout << "Restarting for next entry in worktodo.txt\n";
+                        restart_self(argc_, argv_);
+                    } else {
+                        std::cout << "No more entries in worktodo.txt, exiting.\n";
+                        if (!options.gui) std::exit(0);
+                    }
+                } else {
+                    if (!options.gui) std::exit(-1);
+                }
+            }
+
             return isWagstaffPRP ? 0 : 1;
         }
 

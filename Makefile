@@ -474,6 +474,18 @@ test-legacy-carry-mul3:
 test-marin-dead-kernels:
 	python3 tests/marin_dead_kernels_source_test.py
 
+.PHONY: test-llunsafe-checkpoint-cleanup
+test-llunsafe-checkpoint-cleanup: all
+	bash tests/run_llunsafe_checkpoint_cleanup.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-legacy-wagstaff-result
+test-legacy-wagstaff-result: all
+	bash tests/run_legacy_wagstaff_result.sh $${AEVUM_TEST_DEVICE:-0}
+
+.PHONY: test-worktodo-retire-cleanup
+test-worktodo-retire-cleanup: all
+	bash tests/run_worktodo_retire_failure_cleanup.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:

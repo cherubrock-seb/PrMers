@@ -1,5 +1,6 @@
 #pragma once
 #include <cctype>
+#include <mutex>
 #include <streambuf>
 #include <string>
 
@@ -28,25 +29,30 @@ inline std::string redactGuiToken(std::string text) {
 
 // A streambuf that forwards to `sink` with the GUI token redacted. Text is passed on line by line (and at
 // sync(), except for a trailing "token=<chars>" that may still be growing), so a token is never split.
+// Several threads write to std::cout (the progress spinner and the main loop): every entry point takes the
+// lock, because they all modify the same pending_ buffer.
 class TokenRedactingBuf : public std::streambuf {
 public:
     explicit TokenRedactingBuf(std::streambuf* sink) : sink_(sink) {}
-    ~TokenRedactingBuf() override { flushAll(); }
+    ~TokenRedactingBuf() override { std::lock_guard<std::mutex> lock(mutex_); flushAll(); }
 
 protected:
     int overflow(int ch) override {
+        std::lock_guard<std::mutex> lock(mutex_);
         if (ch == traits_type::eof()) return traits_type::not_eof(ch);
         pending_.push_back(static_cast<char>(ch));
         if (ch == '\n') flushUpTo(pending_.size());
         return ch;
     }
     std::streamsize xsputn(const char* s, std::streamsize n) override {
+        std::lock_guard<std::mutex> lock(mutex_);
         pending_.append(s, static_cast<size_t>(n));
         const size_t nl = pending_.rfind('\n');
         if (nl != std::string::npos) flushUpTo(nl + 1);
         return n;
     }
     int sync() override {
+        std::lock_guard<std::mutex> lock(mutex_);
         flushUpTo(safePrefix());
         return sink_ ? sink_->pubsync() : 0;
     }
@@ -73,6 +79,7 @@ private:
         if (sink_) sink_->pubsync();
     }
 
+    std::mutex mutex_;
     std::streambuf* sink_;
     std::string pending_;
 };

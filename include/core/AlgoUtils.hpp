@@ -142,6 +142,20 @@ inline void writeStageResult(const std::string& file, const std::string& message
 }
 
 
+// Result record of a Wagstaff test. The tested number is (2^q + 1)/3 with q = doubledExponent / 2 (the
+// PRP runs on 2^(2q) - 1), not 2^q - 1, so it gets its own record: the PrimeNet record for the
+// exponent q would claim 2^q - 1.
+inline std::string wagstaff_result_json(uint64_t doubledExponent, bool isPrp) {
+    const uint64_t q = doubledExponent / 2;
+    std::ostringstream wj;
+    wj << "{\"status\":\"" << (isPrp ? "P" : "C") << "\""
+       << ",\"exponent\":" << q
+       << ",\"worktype\":\"Wagstaff-PRP\""
+       << ",\"number\":\"(2^" << q << "+1)/3\""
+       << ",\"program\":{\"name\":\"prmers\",\"version\":\"" << core::PRMERS_VERSION << "\"}}";
+    return wj.str();
+}
+
 // Restart on the next worktodo entry. Returns (without restarting) only when a Stop was requested
 // first; the caller then carries on as if the queue had ended. Never returns after a failed restart.
 inline void restart_self(int argc, char* argv[]) {

@@ -674,6 +674,7 @@ int App::runPrpOrLlMarin()
         guiServer_ ? guiServer_.get() : nullptr
     );
 
+    std::string wagstaff_json;
     if (options.wagstaff) {
             mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
             mpz_class Fp = (mpz_class(1) << options.exponent/2) + 1;
@@ -690,7 +691,6 @@ int App::runPrpOrLlMarin()
             rM %= Mp;
             mpz_class rF = rM % Fp;
             bool isWagstaffPRP = (rF == 9);
-            const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
             if (isWagstaffPRP) {
                 std::cout << "Wagstaff PRP confirmed: (2^"<< options.exponent/2 <<"+1)/3 is a probable prime.\n";
                 if (guiServer_) {
@@ -707,12 +707,19 @@ int App::runPrpOrLlMarin()
                 }
             }
 
-            logger.logEnd(elapsed_time);
-            return isWagstaffPRP ? 0 : 1;
+
+            // Fall through to the common ending so the verdict is recorded, the checkpoint is
+            // removed and a worktodo entry is retired. The Wagstaff number is not 2^p - 1, so it
+            // gets its own record: the PrimeNet record for the exponent p would claim 2^p - 1.
+            is_prp_prime = isWagstaffPRP;
+            wagstaff_json = core::algo::wagstaff_result_json(options.exponent, isWagstaffPRP);
     }
     
     const double elapsed_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
-    if (options.mode == "prp") {
+    if (options.wagstaff) {
+        // The verdict on the Wagstaff number was reported above.
+    }
+    else if (options.mode == "prp") {
         std::cout << "2^" << p << " - 1 is " << (is_prp_prime ? "a probable prime" : ("composite, res64 = " + (res64_hex))) << ", time = " << std::fixed << std::setprecision(2) << elapsed_time << " s." << std::endl;
         if (guiServer_) {
                 std::ostringstream oss;
@@ -733,7 +740,7 @@ int App::runPrpOrLlMarin()
     // Persist a completed PRP/cofactor result before optional proof
     // generation. Proof metadata is intentionally disabled here.
     // The normal final path overwrites this JSON after proof success.
-    if (options.mode == "prp") {
+    if (options.mode == "prp" && !options.wagstaff) {
         auto provisionalOptions = options;
         provisionalOptions.proof = false;
         provisionalOptions.proofFile.clear();
@@ -911,7 +918,10 @@ int App::runPrpOrLlMarin()
     }
 
     std::string json;
-    if (!options.knownFactors.empty()) {
+    if (options.wagstaff) {
+        json = wagstaff_json;
+    }
+    else if (!options.knownFactors.empty()) {
         auto [isPrime, res64, res2048] = io::JsonBuilder::computeResultMarin(d, options);
     
         is_prp_prime = isPrime;
@@ -990,26 +1000,31 @@ int App::runPrpOrLlMarin()
         }
     }*/
 
+    // End of job, in this order: 1. save the result, 2. retire the worktodo entry,
+    // 3. only then delete this run's checkpoint and, when applicable, proof residues.
+    // If saving or retirement fails, resumable state is kept.
     io::WorktodoManager wm(options);
-    bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
+    bool resultSaved = wm.saveIndividualJson(options.wagstaff ? options.exponent / 2 : options.exponent,
+                                             options.wagstaff ? "wagstaff" : options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    // End of job, in this order: 1. save the result, 2. retire the worktodo
-    // entry, 3. only then delete the checkpoint and the proof residues. If 1
-    // or 2 fails they are kept: the test is then run again, and resumes from
-    // the final checkpoint saved after the last iteration instead of from 0.
     const bool retired = resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
     const bool entryRetired = !hasWorktodoEntry_ || retired;
     if (resultSaved && entryRetired) {
+        // Remove this run's own checkpoint (llunsafe_ for LL, wagstaff_ for Wagstaff,
+        // plain for PRP). Using the exact ckpt_file avoids deleting another mode's state.
+        std::error_code ec;
+        std::filesystem::remove(ckpt_file, ec);
+        std::filesystem::remove(ckpt_file + ".old", ec);
+        std::filesystem::remove(ckpt_file + ".new", ec);
         backupManager.clearState();
-        delete_checkpoints(p, options.wagstaff, false, false);
     }
     const auto residueAction = ProofSetMarin::residueAction(
         options.mode == "prp", options.wagstaff, proofRequested,
         proofCompleted, resultSaved, entryRetired);
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
-        // The proof (if any) is written and the test is over: the residues
-        // are of no further use and take about 10-18 GB at the wavefront.
+        // The proof (if any) is written and the plain PRP test is over: the
+        // residues are of no further use and can consume many gigabytes.
         ProofSetMarin::clearResidues(options.exponent);
     } else if (residueAction != ProofSetMarin::ResidueAction::NotApplicable) {
         const std::string msg =

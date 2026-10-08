@@ -14,6 +14,7 @@ trap 'rm -rf "$BUILD"' EXIT
   -O2 \
   -Wall \
   -Wextra \
+  -pthread \
   -I"$ROOT/include" \
   "$ROOT/tests/log_redact_test.cpp" \
   -o "$BUILD/log-redact-test"
