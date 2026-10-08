@@ -11,8 +11,11 @@ trap 'rm -rf "$BUILD"' EXIT
 # The settings generator and worktodo builder in the web GUI page must use
 # option and field forms the CLI/parser understand.
 GUI="$ROOT/src/ui/WebGuiServer.cpp"
-grep -qF "parts.push('-kernelpath',kp)" "$GUI" \
-  || { echo "FAIL: GUI must emit -kernelpath (the CLI has no -kernel_path)"; exit 1; }
+# The kernel path is read-only in the GUI (path options cannot be set from it), so the generated
+# settings must not name it in any spelling.
+if grep -qE "parts\.push\('-kernel_?path'" "$GUI"; then
+  echo "FAIL: GUI settings generator must not emit a kernel path option"; exit 1
+fi
 grep -qF 'line+=`,0,0,`+basert[0]+`,`+basert[1]' "$GUI" \
   || { echo "FAIL: GUI PRP line must pad tf/tests_saved before base,residue_type"; exit 1; }
 
