@@ -426,3 +426,15 @@ $(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
 test-host: test-pr136-small-items
 test-pr136-small-items:
 	python3 tests/kernel_inline_linkage_test.py
+
+# PR137 cumulative semantic integration
+GF61_LIMB32_CMUL_TEST := build-tests/aevum-gf61-limb32-cmul-test
+.PHONY: test-pr137-small-items test-gf61-limb32-cmul
+test-host: test-pr137-small-items
+test-pr137-small-items: test-gf61-limb32-cmul
+test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
+	$(GF61_LIMB32_CMUL_TEST)
+
+$(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@

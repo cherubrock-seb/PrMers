@@ -1236,6 +1236,7 @@ GF61 OVERLOAD cmul(GF61 a, GF61 b) {
   const u64 q=aevumMul61Canonical(ay,by);
   const u64 r=aevumMul61Canonical(aevumCanonical61(ax+ay),aevumCanonical61(bx+by));
   return U2(aevumCmul61Real(p,q),aevumCmul61Imag(p,q,r));
+}
 #elif !defined(AEVUM_GF61_CMUL_ALT)
 GF61 OVERLOAD cmul(GF61 a, GF61 b) {
   u128 k1 = mul64(b.x, a.x + a.y);                            // max value is 2*M61^2+epsilon
