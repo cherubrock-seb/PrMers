@@ -31,7 +31,7 @@ required_gpu = [
     "ktailSquareZeroGF61PairApple(bufAppleTailZeroGF61, bufTrigH, 1u);",
     "ktailSquareZeroGF61ReverseGlobalApple(bufAppleTailZeroGF61, 1u, 0u);",
     "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, 0u, 0u);",
-    "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, (fft.shape.middle / 2u) * SMALL_H);",
+    "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, appleTailZeroHalfLineOffset(WIDTH, fft.shape.middle, SMALL_H));",
     "BUF(bufAppleTailZeroGF61, fft.NTT_GF61 ? 8 * SMALL_H : 0)",
 ]
 for token in required_gpu:
@@ -218,7 +218,7 @@ for forbidden in ("transPos", "writeTailFusedValue", "GF61 u[NH]", "for (", "whi
     assert forbidden not in write_block
 assert 'K(ktailSquareZeroGF61WriteDirectApple,   "tailsquare.cl", "tailSquareZeroGF61WriteDirectApple",   SMALL_H' in gpu
 assert "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, 0u, 0u);" in gpu
-assert "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, (fft.shape.middle / 2u) * SMALL_H);" in gpu
+assert "ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, appleTailZeroHalfLineOffset(WIDTH, fft.shape.middle, SMALL_H));" in gpu
 
 # Verify the two host-provided bases reproduce transPos(line)*SMALL_HEIGHT.
 def trans_pos(k, middle, width):

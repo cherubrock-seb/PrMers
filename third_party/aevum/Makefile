@@ -391,3 +391,14 @@ test-apple-fftp61-seed: $(APPLE_FFTP61_SEED_TEST)
 $(APPLE_FFTP61_SEED_TEST): tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# PR134 cumulative semantic integration
+APPLE_TAILZERO_TEST := build-tests/aevum-apple-tailzero-halfline-test
+.PHONY: test-pr134-small-items test-apple-tailzero-halfline
+test-host: test-pr134-small-items
+test-pr134-small-items: test-apple-tailzero-halfline
+test-apple-tailzero-halfline: $(APPLE_TAILZERO_TEST)
+	$(APPLE_TAILZERO_TEST)
+
+$(APPLE_TAILZERO_TEST): tests/apple_tailzero_halfline_test.cpp src/AppleTailZero.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_tailzero_halfline_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@

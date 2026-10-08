@@ -2,6 +2,7 @@
 
 #include "Gpu.h"
 #include "StatsSlot.h"
+#include "AppleTailZero.h"
 #include "UseOptions.h"
 #include "Proof.h"
 #include "TimeInfo.h"
@@ -1988,7 +1989,7 @@ void Gpu::replay(void) {
               runAppleTailZeroGF61Fft();
               ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, 0u, 0u);
               appleStageFinish();
-              ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, (fft.shape.middle / 2u) * SMALL_H);
+              ktailSquareZeroGF61WriteDirectApple(*out, bufAppleTailZeroGF61, SMALL_H, appleTailZeroHalfLineOffset(WIDTH, fft.shape.middle, SMALL_H));
               appleStageFinish();
             } else {
               ktailSquareZeroGF61(*out, *in);
