@@ -785,19 +785,13 @@ struct Stage2Plan {
     std::uint64_t k_max = 0;
 };
 
-Stage2Plan make_stage2_plan(std::uint64_t B1, std::uint64_t B2) {
+// Fill the Stage 2 plan for one D. Every prime q in (B1, B2] must be written as
+// k*D +- delta with k >= 1 and gcd(delta, D) = 1; a prime that does not fit is
+// not reached by the giant steps and would be skipped silently.
+Stage2Plan build_stage2_plan(std::uint64_t D, const std::vector<std::uint32_t>& primes) {
     Stage2Plan p;
-    if (B2 <= B1) return p;
-
-    std::uint64_t D = env_u64_opt("PRMERS_GM_ECM_BSGS_D",
-                                  (B1 < 100 || B2 <= 10'000 ? 30ULL : 210ULL));
-    if (D < 6 || (D & 1ULL) != 0 || D > 10'000)
-        throw std::runtime_error("PRMERS_GM_ECM_BSGS_D must be even and in [6,10000]");
-
-    const auto primes = primes_range_opt(B1, B2);
     p.D = D;
     std::set<std::uint32_t> babies;
-
     for (std::uint32_t q : primes) {
         const std::uint64_t k =
             (static_cast<std::uint64_t>(q) + D / 2) / D;
@@ -814,41 +808,61 @@ Stage2Plan make_stage2_plan(std::uint64_t B1, std::uint64_t B2) {
         });
         babies.insert(static_cast<std::uint32_t>(delta));
     }
-
     p.baby_d.assign(babies.begin(), babies.end());
     if (!p.entries.empty()) {
         p.k_min = p.entries.front().k;
         p.k_max = p.entries.back().k;
     }
+    return p;
+}
+
+// The primes up to D/2 get k == 0 (or share a factor with D), so they cannot be
+// represented; they have to lie in Stage 1, i.e. D/2 < the first Stage 2 prime.
+bool stage2_d_covers_primes(std::uint64_t D, const std::vector<std::uint32_t>& primes) {
+    return primes.empty() || static_cast<std::uint64_t>(primes.front()) > D / 2;
+}
+
+Stage2Plan make_stage2_plan(std::uint64_t B1, std::uint64_t B2) {
+    if (B2 <= B1) return Stage2Plan{};
+
+    const bool explicit_D = std::getenv("PRMERS_GM_ECM_BSGS_D") != nullptr;
+    std::uint64_t D = env_u64_opt("PRMERS_GM_ECM_BSGS_D",
+                                  (B1 < 100 || B2 <= 10'000 ? 30ULL : 210ULL));
+    if (D < 6 || (D & 1ULL) != 0 || D > 10'000)
+        throw std::runtime_error("PRMERS_GM_ECM_BSGS_D must be even and in [6,10000]");
+
+    const auto primes = primes_range_opt(B1, B2);
+    if (explicit_D) {
+        if (!stage2_d_covers_primes(D, primes))
+            throw std::runtime_error(
+                "GM ECM BSGS Stage 2 needs D/2 < the first prime above B1; "
+                "use a smaller PRMERS_GM_ECM_BSGS_D or a larger B1");
+    } else {
+        // Automatic D: shrink it for small B1 so that no prime is dropped.
+        bool chosen = false;
+        for (std::uint64_t candidate : {210ULL, 30ULL, 6ULL, 4ULL}) {
+            if (candidate > D) continue;
+            if (stage2_d_covers_primes(candidate, primes)) {
+                D = candidate;
+                chosen = true;
+                break;
+            }
+        }
+        if (!chosen)
+            throw std::runtime_error(
+                "GM ECM BSGS Stage 2 requires B1 >= 2 (the smallest D=4 has to be "
+                "below the first Stage 2 prime)");
+    }
+    Stage2Plan p = build_stage2_plan(D, primes);
 
     // Keep the first production implementation safely within a modest register
     // count. D=210 needs 24 baby x-coordinates (48 registers).
-    if (p.baby_d.size() > 64 && std::getenv("PRMERS_GM_ECM_BSGS_D") == nullptr) {
+    if (p.baby_d.size() > 64 && !explicit_D) {
         // Automatic large-D selection should never reach this today; if future
         // policies change, fall back to the proven D=210 footprint.
-        D = 210;
-        p = Stage2Plan{};
-        p.D = D;
-        const auto primes2 = primes_range_opt(B1, B2);
-        std::set<std::uint32_t> babies2;
-        for (std::uint32_t q : primes2) {
-            const std::uint64_t k =
-                (static_cast<std::uint64_t>(q) + D / 2) / D;
-            if (k == 0) continue;
-            const std::uint64_t kd = k * D;
-            const std::uint64_t delta =
-                kd >= q ? kd - q : static_cast<std::uint64_t>(q) - kd;
-            if (delta == 0 || delta > D / 2 || std::gcd(delta, D) != 1) continue;
-            p.entries.push_back(Stage2Entry{
-                q, k, static_cast<std::uint32_t>(delta)
-            });
-            babies2.insert(static_cast<std::uint32_t>(delta));
-        }
-        p.baby_d.assign(babies2.begin(), babies2.end());
-        if (!p.entries.empty()) {
-            p.k_min = p.entries.front().k;
-            p.k_max = p.entries.back().k;
-        }
+        if (!stage2_d_covers_primes(210, primes))
+            throw std::runtime_error("GM ECM BSGS Stage 2: D=210 does not cover B1");
+        p = build_stage2_plan(210, primes);
     }
     return p;
 }

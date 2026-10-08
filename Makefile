@@ -257,6 +257,7 @@ test-gm:
 	python3 tests/gaussian_mersenne_ecm_seed_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_naf_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_optimized_regression_test.py
+	python3 tests/gaussian_mersenne_ecm_bsgs_small_primes_test.py
 	python3 tests/gaussian_mersenne_ecm_special32_regression_test.py
 	python3 tests/gaussian_mersenne_ecm_special4096_regression_test.py
 	python3 tests/gaussian_mersenne_windows_portability_test.py
@@ -267,6 +268,9 @@ test-gm:
 	python3 tests/gaussian_tf_checkpoint_factors_test.py
 	python3 tests/test_gaussian_worktodo_generator.py
 	bash tests/test_gaussian_worktodo_parser.sh
+
+test-gm-ecm-bsgs-small-b1: all
+	bash tests/gm_ecm_bsgs_small_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
 
 test-pm1-stage1-ckpt: all
 	bash tests/pm1_stage1_ckpt_b1_test.sh $${PRMERS_TEST_DEVICE:-0}
