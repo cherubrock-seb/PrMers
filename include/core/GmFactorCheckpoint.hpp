@@ -102,14 +102,16 @@ inline bool load_factor_checkpoint(const std::filesystem::path& path,
     return true;
 }
 
-// Writes `h` + `data` + CRC to `<path>.new` and installs it as `path`, keeping
+// Writes `header` + `data` + CRC to `<path>.new` and installs it as `path`, keeping
 // the previous file as `<path>.old`.  Throws std::runtime_error when the file
 // cannot be created or completely written (including a failed flush or close,
 // where a full disk is reported) or installed; the previous checkpoint is then
 // untouched and the partial `.new` file is removed.  The layout and CRC are the
-// ones `File` reads back.
-inline void write_checkpoint_file(const std::filesystem::path& path,
-                                  const FactorCheckpointHeader& h,
+// ones `File` reads back, so every Gaussian-Mersenne checkpoint format that is a
+// fixed header followed by the engine state can use it.
+inline void write_checkpoint_blob(const std::filesystem::path& path,
+                                  const void* header,
+                                  std::size_t header_bytes,
                                   const std::vector<char>& data) {
     const std::filesystem::path new_path = path.string() + ".new";
     const std::filesystem::path old_path = path.string() + ".old";
@@ -117,11 +119,11 @@ inline void write_checkpoint_file(const std::filesystem::path& path,
     if (f == nullptr) {
         throw std::runtime_error("cannot create " + new_path.string() + ": " + std::strerror(errno));
     }
-    std::uint32_t crc = File::rc_crc32(0, reinterpret_cast<const char*>(&h), sizeof(h));
+    std::uint32_t crc = File::rc_crc32(0, reinterpret_cast<const char*>(header), header_bytes);
     crc = File::rc_crc32(crc, data.data(), data.size());
     const std::uint32_t tail = ~crc ^ 0xa23777acU;
     errno = 0;
-    bool ok = std::fwrite(&h, sizeof(h), 1, f) == 1 &&
+    bool ok = std::fwrite(header, header_bytes, 1, f) == 1 &&
               (data.empty() || std::fwrite(data.data(), 1, data.size(), f) == data.size()) &&
               std::fwrite(&tail, sizeof(tail), 1, f) == 1 &&
               std::fflush(f) == 0 && std::ferror(f) == 0;
@@ -130,7 +132,7 @@ inline void write_checkpoint_file(const std::filesystem::path& path,
     if (!ok) {
         std::error_code rec;
         std::filesystem::remove(new_path, rec);
-        throw std::runtime_error("cannot write Gaussian factoring checkpoint " + new_path.string() +
+        throw std::runtime_error("cannot write checkpoint " + new_path.string() +
                                  (write_errno != 0 ? std::string(": ") + std::strerror(write_errno) : std::string()));
     }
     std::error_code ec;
@@ -139,7 +141,17 @@ inline void write_checkpoint_file(const std::filesystem::path& path,
     if (std::filesystem::exists(path)) std::filesystem::rename(path, old_path, ec);
     ec.clear();
     std::filesystem::rename(new_path, path, ec);
-    if (ec) throw std::runtime_error("cannot install Gaussian factoring checkpoint: " + ec.message());
+    if (ec) {
+        std::error_code rec;
+        std::filesystem::remove(new_path, rec);
+        throw std::runtime_error("cannot install checkpoint " + path.string() + ": " + ec.message());
+    }
+}
+
+inline void write_checkpoint_file(const std::filesystem::path& path,
+                                  const FactorCheckpointHeader& h,
+                                  const std::vector<char>& data) {
+    write_checkpoint_blob(path, &h, sizeof(h), data);
 }
 
 template <class Target>

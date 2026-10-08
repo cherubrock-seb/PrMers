@@ -1,6 +1,7 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmEcmProgress.hpp"
+#include "core/GmFactorCheckpoint.hpp"
 #include "core/Version.hpp"
 #include "marin/engine.h"
 #include "marin/file.h"
@@ -29,6 +30,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined(_MSC_VER) && defined(_M_X64)
@@ -577,7 +579,7 @@ bool mont_ladder_fused_opt(engine* eng,
                            const MRegsOpt& r,
                            const mpz_class& scalar,
                            std::uint64_t& remaining,
-                           const std::function<void(std::uint64_t)>& checkpoint,
+                           const std::function<bool(std::uint64_t)>& checkpoint,
                            const std::function<double()>& elapsed,
                            const std::string& label,
                            bool progress = true) {
@@ -592,9 +594,13 @@ bool mont_ladder_fused_opt(engine* eng,
 
     while (remaining > 0) {
         if (interrupted) {
-            checkpoint(remaining);
-            std::cout << "Interrupted; optimized GM ECM checkpoint saved with "
-                      << remaining << " fused-ladder bits remaining.\n";
+            if (checkpoint(remaining)) {
+                std::cout << "Interrupted; optimized GM ECM checkpoint saved with "
+                          << remaining << " fused-ladder bits remaining.\n";
+            } else {
+                std::cout << "Interrupted; the optimized GM ECM checkpoint could not be saved, "
+                             "so a rerun resumes from the last good one.\n";
+            }
             return false;
         }
 
@@ -670,7 +676,7 @@ bool scalar_point_opt(engine* eng,
     mpz_import(k.get_mpz_t(), 1, 1, sizeof(scalar), 0, 0, &scalar);
     std::uint64_t rem =
         static_cast<std::uint64_t>(mpz_sizeinbase(k.get_mpz_t(), 2)) - 1;
-    auto no_ckpt = [](std::uint64_t) {};
+    auto no_ckpt = [](std::uint64_t) { return true; };
     auto elapsed = []() { return 0.0; };
     return mont_ladder_fused_opt(eng, r, k, rem, no_ckpt, elapsed, "", false);
 }
@@ -995,25 +1001,17 @@ void save_opt_checkpoint(const std::filesystem::path& path,
     if (!eng->get_checkpoint(data))
         throw std::runtime_error("cannot capture optimized GM ECM checkpoint");
 
-    const std::filesystem::path np = path.string() + ".new";
-    const std::filesystem::path op = path.string() + ".old";
-    {
-        File f(np.string(), "wb");
-        if (!f.write(reinterpret_cast<const char*>(&h), sizeof(h)) ||
-            !f.write(data.data(), data.size()))
-            throw std::runtime_error("cannot write optimized GM ECM checkpoint");
-        f.write_crc32();
-    }
+    core::gm_factor_ckpt::write_checkpoint_blob(path, &h, sizeof(h), data);
+}
 
-    std::error_code ec;
-    std::filesystem::remove(op, ec);
-    ec.clear();
-    if (std::filesystem::exists(path)) std::filesystem::rename(path, op, ec);
-    ec.clear();
-    std::filesystem::rename(np, path, ec);
-    if (ec)
-        throw std::runtime_error("cannot install optimized GM ECM checkpoint: " +
-                                 ec.message());
+// save_opt_checkpoint that reports a failure (full or read-only disk) as a warning
+// instead of ending the run; the previous checkpoint, if any, is kept.  Returns
+// true when the checkpoint was written.
+template <class... Args>
+bool try_save_opt_checkpoint(const std::filesystem::path& path, Args&&... args) {
+    return core::gm_factor_ckpt::guarded_save(path, [&]() {
+        save_opt_checkpoint(path, std::forward<Args>(args)...);
+    });
 }
 
 void clear_opt_checkpoint(const std::filesystem::path& path) {
@@ -1354,8 +1352,8 @@ int App::runGaussianMersenneECMOptimized() {
                 return restored +
                     std::chrono::duration<double>(Clock::now() - curve_start).count();
             };
-            auto save_s1 = [&](std::uint64_t rem) {
-                save_opt_checkpoint(
+            auto save_s1 = [&](std::uint64_t rem) -> bool {
+                return try_save_opt_checkpoint(
                     s1ck, eng.get(), t, 1, static_cast<std::uint32_t>(curve),
                     B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     rem, 0, elapsed());
@@ -1369,7 +1367,7 @@ int App::runGaussianMersenneECMOptimized() {
  }
  }
 
- if (stage2_enabled) save_s1(0);
+ if (stage2_enabled) (void)save_s1(0);
 
             // With Stage 2 pending, keep the Stage 1 checkpoint until the Stage 2
             // checkpoint exists (below), so an interrupt during the baby-point
@@ -1462,11 +1460,13 @@ int App::runGaussianMersenneECMOptimized() {
             terms_since_gcd = 0;
 
             // Stage 2 now has a complete state: checkpoint it, then drop Stage 1.
-            save_opt_checkpoint(
-                s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
-                current_k, terms_since_gcd, 0.0);
-            clear_opt_checkpoint(s1ck);
+            // If it cannot be written the Stage 1 checkpoint is kept.
+            if (try_save_opt_checkpoint(
+                    s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
+                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
+                    current_k, terms_since_gcd, 0.0)) {
+                clear_opt_checkpoint(s1ck);
+            }
         } else {
             std::cout << "[GM ECM Stage 2 BSGS] resuming at giant k="
                       << current_k << ", pending product terms="
@@ -1516,12 +1516,16 @@ int App::runGaussianMersenneECMOptimized() {
 
         while (current_k <= s2plan.k_max) {
             if (interrupted) {
-                save_opt_checkpoint(
-                    s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
-                    B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
-                    current_k, terms_since_gcd, s2_elapsed());
-                std::cout << "\nInterrupted; BSGS checkpoint saved at k="
-                          << current_k << ".\n";
+                if (try_save_opt_checkpoint(
+                        s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
+                        B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
+                        current_k, terms_since_gcd, s2_elapsed())) {
+                    std::cout << "\nInterrupted; BSGS checkpoint saved at k="
+                              << current_k << ".\n";
+                } else {
+                    std::cout << "\nInterrupted; the BSGS checkpoint could not be saved, "
+                                 "so a rerun resumes from the last good one.\n";
+                }
                 return 0;
             }
 
@@ -1597,7 +1601,7 @@ int App::runGaussianMersenneECMOptimized() {
 
             if (now - last_save >= std::chrono::seconds(
                     options.backup_interval > 0 ? options.backup_interval : 120)) {
-                save_opt_checkpoint(
+                (void)try_save_opt_checkpoint(
                     s2ck, eng.get(), t, 2, static_cast<std::uint32_t>(curve),
                     B1, B2, sigma, s2plan.D, kbits, s2plan.baby_d.size(),
                     current_k, terms_since_gcd, s2_elapsed());

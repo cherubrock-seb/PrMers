@@ -1,5 +1,6 @@
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
+#include "core/GmFactorCheckpoint.hpp"
 #include "core/GmU64Divisor.hpp"
 #include "core/Version.hpp"
 #include "aevum/EngineAevum.hpp"
@@ -682,39 +683,28 @@ int App::runGaussianMersenne() {
         return true;
     };
 
-    auto save_checkpoint = [&](std::uint64_t next, double elapsed) {
-        eng->sync();
-        const std::filesystem::path new_path = checkpoint_path.string() + ".new";
-        const std::filesystem::path old_path = checkpoint_path.string() + ".old";
-        GmCheckpointHeader h{};
-        std::copy(GM_CHECKPOINT_MAGIC.begin(), GM_CHECKPOINT_MAGIC.end(), h.magic);
-        h.version = GM_CHECKPOINT_VERSION;
-        h.p = p;
-        h.lift_exponent = lift_exponent;
-        h.base = selected.base;
-        h.chi = chi;
-        h.prp_only = static_cast<std::uint32_t>(prp_only);
-        h.safe_replay = static_cast<std::uint32_t>(options.gm_safe_replay);
-        h.next_operation = next;
-        h.total_operations = total_ops;
-        h.elapsed_seconds = elapsed;
-        h.checkpoint_bytes = eng->get_checkpoint_size();
-        std::vector<char> data(static_cast<std::size_t>(h.checkpoint_bytes));
-        if (!eng->get_checkpoint(data)) throw std::runtime_error("cannot read Gaussian-Mersenne engine checkpoint");
-        {
-            File f(new_path.string(), "wb");
-            if (!f.write(reinterpret_cast<const char*>(&h), sizeof(h)) ||
-                !f.write(data.data(), data.size())) {
-                throw std::runtime_error("cannot write Gaussian-Mersenne checkpoint");
-            }
-            f.write_crc32();
-        }
-        std::error_code ec;
-        std::filesystem::remove(old_path, ec);
-        if (std::filesystem::exists(checkpoint_path)) std::filesystem::rename(checkpoint_path, old_path, ec);
-        ec.clear();
-        std::filesystem::rename(new_path, checkpoint_path, ec);
-        if (ec) throw std::runtime_error("cannot atomically install Gaussian-Mersenne checkpoint: " + ec.message());
+    // A checkpoint that cannot be written (full or read-only disk) is a warning, not the
+    // end of a long run: the previous checkpoint, if any, is kept.  Returns true when saved.
+    auto save_checkpoint = [&](std::uint64_t next, double elapsed) -> bool {
+        return core::gm_factor_ckpt::guarded_save(checkpoint_path, [&]() {
+            eng->sync();
+            GmCheckpointHeader h{};
+            std::copy(GM_CHECKPOINT_MAGIC.begin(), GM_CHECKPOINT_MAGIC.end(), h.magic);
+            h.version = GM_CHECKPOINT_VERSION;
+            h.p = p;
+            h.lift_exponent = lift_exponent;
+            h.base = selected.base;
+            h.chi = chi;
+            h.prp_only = static_cast<std::uint32_t>(prp_only);
+            h.safe_replay = static_cast<std::uint32_t>(options.gm_safe_replay);
+            h.next_operation = next;
+            h.total_operations = total_ops;
+            h.elapsed_seconds = elapsed;
+            h.checkpoint_bytes = eng->get_checkpoint_size();
+            std::vector<char> data(static_cast<std::size_t>(h.checkpoint_bytes));
+            if (!eng->get_checkpoint(data)) throw std::runtime_error("cannot read Gaussian-Mersenne engine checkpoint");
+            core::gm_factor_ckpt::write_checkpoint_blob(checkpoint_path, &h, sizeof(h), data);
+        });
     };
 
     std::uint64_t next_op = 0;
@@ -745,8 +735,12 @@ int App::runGaussianMersenne() {
 
     while (next_op < total_ops) {
         if (core::algo::interrupted) {
-            save_checkpoint(next_op, elapsed_now());
-            std::cout << "Interrupted; checkpoint saved at operation " << next_op << ".\n";
+            if (save_checkpoint(next_op, elapsed_now())) {
+                std::cout << "Interrupted; checkpoint saved at operation " << next_op << ".\n";
+            } else {
+                std::cout << "Interrupted; the checkpoint could not be saved, so a rerun resumes "
+                             "from the last good one.\n";
+            }
             return 0;
         }
 
@@ -804,8 +798,9 @@ int App::runGaussianMersenne() {
             last_display = now;
         }
         if (now - last_backup >= std::chrono::seconds(options.backup_interval)) {
-            save_checkpoint(next_op, elapsed_now());
-            std::cout << "[GM checkpoint] saved at operation " << next_op << ".\n";
+            if (save_checkpoint(next_op, elapsed_now())) {
+                std::cout << "[GM checkpoint] saved at operation " << next_op << ".\n";
+            }
             last_backup = now;
         }
     }
