@@ -221,19 +221,26 @@ static void testHttp() {
 
     std::string body;
     // The attack: point -worktodo at another file, then append to it after the restart.
-    check(post("/api/save-settings", "-d 0 -worktodo /home/user/.bashrc", &body) == 400 &&
-              body.find("-worktodo") != std::string::npos,
-          "save-settings refuses -worktodo with a message naming it: " + body);
+    {
+        const bool r = post("/api/save-settings", "-d 0 -worktodo /home/user/.bashrc", &body) == 400 &&
+              body.find("-worktodo") != std::string::npos;
+        check(r, "save-settings refuses -worktodo with a message naming it: " + body);
+    }
     check(readAll(cfgPath) == handWritten, "refused save leaves the file unchanged");
-    check(post("/api/save-settings", "-d 0\n--f=/tmp/evil -kernelpath /tmp/k.cl -config /tmp/x.cfg -host 0.0.0.0", &body) == 400 &&
+    {
+        const bool r = post("/api/save-settings", "-d 0\n--f=/tmp/evil -kernelpath /tmp/k.cl -config /tmp/x.cfg -host 0.0.0.0", &body) == 400 &&
               body.find("-config") != std::string::npos && body.find("-f") != std::string::npos &&
-              body.find("-host") != std::string::npos && body.find("-kernelpath") != std::string::npos,
-          "save-settings lists every refused option: " + body);
+              body.find("-host") != std::string::npos && body.find("-kernelpath") != std::string::npos;
+        check(r, "save-settings lists every refused option: " + body);
+    }
     check(post("/api/save-settings", std::string("-worktodo\0x /etc/passwd", 23), &body) == 400, "save-settings refuses NUL");
     check(post("/api/save-settings", std::string(util::kMaxGuiSettingsBytes + 1, 'a'), &body) == 400, "save-settings refuses oversized text");
     check(readAll(cfgPath) == handWritten, "file still unchanged");
 
-    check(get("/api/load-settings", &body) == 200 && body == "-d 0 -t 600\n", "load-settings omits path options: " + body);
+    {
+        const bool r = get("/api/load-settings", &body) == 200 && body == "-d 0 -t 600\n";
+        check(r, "load-settings omits path options: " + body);
+    }
     check(post("/api/save-settings", body + "-t 300 -password hunter2\n") == 200, "save-settings accepts the edited text");
     const std::string saved = readAll(cfgPath);
     check(saved.find(util::guiSettingsMarker()) != std::string::npos, "saved file has the GUI marker");
@@ -245,9 +252,11 @@ static void testHttp() {
     const auto loaded = util::readConfigArgsFromText(readAll(cfgPath));
     check(joined(loaded.ignored) == "-worktodo /home/user/.bashrc", "loader ignores a path option below the marker");
 
-    check(get("/api/paths", &body) == 200 && body.find("\"worktodo\":\"gui_paths_worktodo.txt\"") != std::string::npos &&
-              body.find("/srv/prmers-save") != std::string::npos && body.find("/opt/prmers/kernels/prmers.cl") != std::string::npos,
-          "paths endpoint reports the current paths: " + body);
+    {
+        const bool r = get("/api/paths", &body) == 200 && body.find("\"worktodo\":\"gui_paths_worktodo.txt\"") != std::string::npos &&
+              body.find("/srv/prmers-save") != std::string::npos && body.find("/opt/prmers/kernels/prmers.cl") != std::string::npos;
+        check(r, "paths endpoint reports the current paths: " + body);
+    }
     const std::string token = url.substr(url.find("token=") + 6);
     check(get("/?token=" + token, &body) == 200 && body.find("id=opt_wt") == std::string::npos &&
               body.find("id=opt_f ") == std::string::npos && body.find("id=opt_kpath") == std::string::npos &&
@@ -281,10 +290,16 @@ static void testHttp() {
         {std::string(8 * 1024 + 1, ' '), "an oversized body"},
         {"PRP=1,2," + std::string(1100, '7') + ",-1", "an overlong line"},
     };
-    for (const auto& b : bad) check(post("/api/append-worktodo", b.body, &body) == 400, std::string("append refuses ") + b.what + ": " + body);
+    for (const auto& b : bad) {
+        const bool r = post("/api/append-worktodo", b.body, &body) == 400;
+        check(r, std::string("append refuses ") + b.what + ": " + body);
+    }
     std::string many;
     for (int i = 0; i < 65; ++i) many += "PRP=1,2,127,-1\n";
-    check(post("/api/append-worktodo", many, &body) == 400, "append refuses more than 64 lines: " + body);
+    {
+        const bool r = post("/api/append-worktodo", many, &body) == 400;
+        check(r, "append refuses more than 64 lines: " + body);
+    }
     check(nSubmitted() == before, "nothing refused reached the worktodo");
 
     server.stop();
@@ -306,7 +321,8 @@ static void testHttp() {
         g_auth = "X-PrMers-Token: " + u2.substr(u2.find("token=") + 6) + "\r\n";
         const bool writable = ::access("ro", W_OK) == 0;   // root ignores the mode
         if (!writable) {
-            check(post("/api/save-settings", "-d 1", &body) == 500, "save into a read-only directory reports failure: " + body);
+            const bool r = post("/api/save-settings", "-d 1", &body) == 500;
+            check(r, "save into a read-only directory reports failure: " + body);
             check(readAll("ro/settings.cfg") == "-f /keep\n", "old settings file intact after a failed save");
             check(!fs::exists("ro/settings.cfg.gui-tmp"), "no temporary file left behind");
         } else {
