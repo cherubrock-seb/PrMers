@@ -152,6 +152,9 @@ for driver in marin legacy; do
               mv "$W"/s1/m_"$M".ckpt* .
           fi
           mv "$W/s1/$M" "./$M"
+          # A residue only power 4 needs is gone: the resumed run must look in
+          # both places to find that power 3 is still possible.
+          rm -f "./$M/proof/2782"
           if [ "$driver" = legacy ]; then F="$W/s1"; else F="$W/s2"; fi
           $RUN timeout 300 "$BIN" "$M" -prp -proof 4 "${flag[@]}" -t 1 -d "$DEVICE" -noask -f "$F" > second.log 2>&1
           grep -q 'Resuming from' second.log || bad "$driver mid-run: did not resume"
@@ -162,7 +165,8 @@ for driver in marin legacy; do
               ls "$F"/m_"$M".ckpt* > /dev/null 2>&1 && bad "marin mid-run: checkpoint left under -f"
           fi
           verified second.log "$driver mid-run resume"
-          [ -s "$F/proof/$M-4.proof" ] || bad "$driver mid-run: no proof under -f"
+          grep -q 'proof of power 3 (instead of 4)' second.log || bad "$driver mid-run: power not lowered to 3"
+          [ -s "$F/proof/$M-3.proof" ] || bad "$driver mid-run: no power 3 proof under -f"
           [ ! -e "$M" ] || bad "$driver mid-run: old residues left"
           [ ! -e "$F/$M" ] || bad "$driver mid-run: residues under -f left"
           [ ! -e proof ] && [ ! -e proof-tmp ] || bad "$driver mid-run: proof written to the working directory"
