@@ -6,8 +6,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE="${1:-0}"
-P="${2:-9689}"
-Q="${3:-42737}"
+# With no exponent given, work up through a ladder of exponents (LL: Mersenne
+# primes; Wagstaff: Wagstaff PRP exponents) until one runs long enough, on this
+# device, to be interrupted part way.
+if [ -n "${2:-}" ]; then LL_LADDER=("$2"); else LL_LADDER=(9689 19937 44497 110503 216091 756839); fi
+if [ -n "${3:-}" ]; then WAG_LADDER=("$3"); else WAG_LADDER=(10501 14479 42737 83339 138937 267017 374321); fi
 WORK="$(mktemp -d)"
 RUN="${PRMERS_TEST_RUN_PREFIX:-}"
 
@@ -18,29 +21,52 @@ cd "$WORK"
 ln -s "$ROOT/kernels" kernels
 export AEVUM_CARRY_WMUL=1 AEVUM_AUTOTUNE=off
 
-# Interrupt early to leave an LL-UNSAFE checkpoint on disk.
-saved=""
-for delay in 2 3 4 5 6; do
-    rm -f llunsafe_m_*.ckpt* interrupt.log
-    set +e
-    $RUN timeout -s INT "$delay" "$ROOT/prmers" "$P" -llunsafe -engine-marin -d "$DEVICE" -noask -f "$WORK" > interrupt.log 2>&1
-    set -e
-    saved="$(sed -n 's/.*state saved at iteration \([0-9][0-9]*\).*/\1/p' interrupt.log | tail -n 1)"
-    if [ -n "$saved" ] && [ "$saved" != "0" ] && [ -f "llunsafe_m_$P.ckpt" ]; then break; fi
-    saved=""
+# interrupt_run <dir> <ckpt> <prmers args...>
+# Start prmers in <dir> with a 1 s backup interval and send it SIGINT as soon as
+# its first periodic backup is on disk, so the interrupt always lands part way
+# through the run, whatever the device speed.  Returns 0 only if the run reports
+# the interrupt with a non-zero iteration and <ckpt> exists; returns 1 if the run
+# finished first (the exponent is too small for this device) or the interrupt
+# did not leave a checkpoint.
+interrupt_run() {
+    local dir="$1" ckpt="$2" pid saved; shift 2
+    rm -rf "$dir"; mkdir -p "$dir"; ln -s "$ROOT/kernels" "$dir/kernels"
+    ( cd "$dir" && exec $RUN timeout --signal=INT --kill-after=10s 600 "$ROOT/prmers" "$@" \
+        -t 1 -engine-marin -d "$DEVICE" -noask -f "$dir" > interrupt.log 2>&1 ) &
+    pid=$!
+    until grep -Eq 'Backup point done at iter \+ 1=[0-9]+ done' "$dir/interrupt.log" 2>/dev/null; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.01
+    done
+    kill -INT "$pid" 2>/dev/null || true
+    wait "$pid" || true
+    saved="$(sed -n 's/.*state saved at iteration \([0-9][0-9]*\).*/\1/p' "$dir/interrupt.log" | tail -n 1)"
+    [ -n "$saved" ] && [ "$saved" != "0" ] && [ -f "$dir/$ckpt" ] || return 1
+    echo "$saved" > "$dir/saved"
+}
+
+# Interrupt a run to leave an LL-UNSAFE checkpoint on disk.
+n=0
+for P in "${LL_LADDER[@]}"; do
+    n=$((n + 1))
+    if interrupt_run "$WORK/ll$n" "llunsafe_m_$P.ckpt" "$P" -llunsafe; then break; fi
+    echo "LL-UNSAFE M$P was not interrupted part way (the run finished first); trying a larger exponent" >&2
+    P=""
 done
-if [ -z "$saved" ]; then
+if [ -z "$P" ]; then
     echo "FAIL: no LL-UNSAFE checkpoint after interrupt"
-    cat interrupt.log
+    cat "$WORK/ll$n/interrupt.log"
     exit 1
 fi
-echo "LL_CHECKPOINT | saved=$saved"
+cd "$WORK/ll$n"
+saved="$(cat saved)"
+echo "LL_CHECKPOINT | exponent=$P saved=$saved"
 
 # Stand-in for the PRP checkpoint of the same exponent.
 echo "unrelated prp checkpoint" > "m_$P.ckpt"
 
 set +e
-$RUN timeout 120 "$ROOT/prmers" "$P" -llunsafe -engine-marin -d "$DEVICE" -noask -f "$WORK" > resume.log 2>&1
+$RUN timeout 900 "$ROOT/prmers" "$P" -llunsafe -engine-marin -d "$DEVICE" -noask -f "$PWD" > resume.log 2>&1
 rc=$?
 set -e
 echo "RESUME_RC=$rc"
@@ -58,23 +84,21 @@ fi
 echo "LLUNSAFE_CHECKPOINT_CLEANUP=PASS"
 
 # Wagstaff: verdict recorded, checkpoint removed.
-saved=""
-for delay in 4 5 6 7; do
-    rm -f wagstaff_m_*.ckpt* interrupt.log
-    set +e
-    $RUN timeout -s INT "$delay" "$ROOT/prmers" "$Q" -wagstaff -engine-marin -d "$DEVICE" -noask -f "$WORK" > interrupt.log 2>&1
-    set -e
-    saved="$(sed -n 's/.*state saved at iteration \([0-9][0-9]*\).*/\1/p' interrupt.log | tail -n 1)"
-    if [ -n "$saved" ] && [ "$saved" != "0" ] && [ -f "wagstaff_m_$((2 * Q)).ckpt" ]; then break; fi
-    saved=""
+n=0
+for Q in "${WAG_LADDER[@]}"; do
+    n=$((n + 1))
+    if interrupt_run "$WORK/wag$n" "wagstaff_m_$((2 * Q)).ckpt" "$Q" -wagstaff; then break; fi
+    echo "Wagstaff $Q was not interrupted part way (the run finished first); trying a larger exponent" >&2
+    Q=""
 done
-if [ -z "$saved" ]; then
+if [ -z "$Q" ]; then
     echo "FAIL: no Wagstaff checkpoint after interrupt"
-    cat interrupt.log
+    cat "$WORK/wag$n/interrupt.log"
     exit 1
 fi
+cd "$WORK/wag$n"
 set +e
-$RUN timeout 120 "$ROOT/prmers" "$Q" -wagstaff -engine-marin -d "$DEVICE" -noask -f "$WORK" > wagstaff.log 2>&1
+$RUN timeout 900 "$ROOT/prmers" "$Q" -wagstaff -engine-marin -d "$DEVICE" -noask -f "$PWD" > wagstaff.log 2>&1
 rc=$?
 set -e
 echo "WAGSTAFF_RC=$rc"
