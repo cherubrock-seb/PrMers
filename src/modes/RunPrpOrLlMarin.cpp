@@ -6,6 +6,7 @@
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
+#include "core/ProofLocation.hpp"
 #include "math/Carry.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
@@ -151,7 +152,24 @@ int App::runPrpOrLlMarin()
     if (options.wagstaff) ck << "wagstaff_";
     if (options.mode == "ll") ck << "llunsafe_";
     ck << "m_" << p << ".ckpt";
-    const std::string ckpt_file = ck.str();
+    // The checkpoint is kept under -f, with the other state of the run. Older
+    // versions kept it in the working directory whatever -f said: a resumed run
+    // that finds none under -f reads that one (ckpt_legacy_name) and removes it
+    // once its own is written.
+    const std::string ckpt_name = ck.str();
+    const std::filesystem::path ckpt_dir =
+        options.save_path.empty() ? std::filesystem::path(".") : std::filesystem::path(options.save_path);
+    const bool ckpt_dir_is_cwd = core::ProofLocation::samePlace(ckpt_dir, ".");
+    const std::string ckpt_file = ckpt_dir_is_cwd ? ckpt_name : (ckpt_dir / ckpt_name).string();
+    bool ckpt_legacy_pending = false;
+    auto remove_legacy_ckpt = [&]() {
+        if (!ckpt_legacy_pending) return;
+        std::error_code ec;
+        std::filesystem::remove(ckpt_name, ec);
+        std::filesystem::remove(ckpt_name + ".old", ec);
+        std::filesystem::remove(ckpt_name + ".new", ec);
+        ckpt_legacy_pending = false;
+    };
     const uint32_t checkpoint_mode = options.mode == "prp" ? 1u : 2u;
     const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
@@ -219,6 +237,10 @@ int App::runPrpOrLlMarin()
 
     auto save_ckpt = [&](uint32_t i, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        if (!ckpt_dir_is_cwd) {
+            std::error_code dir_ec;
+            std::filesystem::create_directories(ckpt_dir, dir_ec);
+        }
         auto write_new = [&]() -> bool {
             File f(newf, "wb");
  if (!f.exists()) return false;
@@ -249,7 +271,8 @@ int App::runPrpOrLlMarin()
         std::remove(oldf.c_str());
         struct stat s;
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file.c_str());
+        if (std::rename(newf.c_str(), ckpt_file.c_str()) == 0)
+            remove_legacy_ckpt();
     };
 
     const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5, RBASE = 6, RTMP=7;
@@ -257,6 +280,20 @@ int App::runPrpOrLlMarin()
     bool ckpt_has_good = false; uint32_t ckpt_good = 0;
     int r = read_ckpt(ckpt_file, ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
+    if (r != 0 && !ckpt_dir_is_cwd &&
+        !std::filesystem::exists(ckpt_file) && !std::filesystem::exists(ckpt_file + ".old")) {
+        // Nothing under -f: the checkpoint of an older version, in the working directory.
+        int rl = read_ckpt(ckpt_name, ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
+        if (rl < 0) rl = read_ckpt(ckpt_name + ".old", ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
+        if (rl == 0) {
+            r = 0;
+            ckpt_legacy_pending = true;
+            const std::string msg = "[Checkpoint] No checkpoint under " + ckpt_dir.string() +
+                                    "; using " + ckpt_name + " from the working directory (an older version kept it there).";
+            std::cout << msg << std::endl;
+            if (guiServer_) guiServer_->appendLog(msg);
+        }
+    }
     if (r != 0) saved_block = 0;
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
@@ -1048,6 +1085,7 @@ int App::runPrpOrLlMarin()
         std::filesystem::remove(ckpt_file, ec);
         std::filesystem::remove(ckpt_file + ".old", ec);
         std::filesystem::remove(ckpt_file + ".new", ec);
+        remove_legacy_ckpt();
         backupManager.clearState();
     }
     const auto residueAction = ProofSetMarin::residueAction(

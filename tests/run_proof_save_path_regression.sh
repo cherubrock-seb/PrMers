@@ -38,6 +38,7 @@ prmers() {
 no_proof_files() {
     local where="$1" what="$2"
     [ ! -e "$where/proof" ] && [ ! -e "$where/proof-tmp" ] && [ ! -e "$where/$P" ] \
+        && ! ls "$where"/m_"$P".ckpt* > /dev/null 2>&1 \
         || bad "$what: proof files or residues appeared in $where: $(cd "$where" && ls -d proof proof-tmp "$P" 2>/dev/null | tr '\n' ' ')"
 }
 has_proof() {
@@ -143,11 +144,23 @@ for driver in marin legacy; do
       if [ -z "$(ls -A "$W/s1/$M/proof" 2>/dev/null)" ] || ! grep -q 'state saved at iteration' first.log; then
           echo "SKIP: $driver mid-run resume (no residues before the interrupt)"
       else
+          if [ "$driver" = marin ]; then
+              # The default driver keeps its checkpoint under -f too.
+              [ -e "$W/s1/m_$M.ckpt" ] || bad "marin mid-run: checkpoint not under -f"
+              ls m_"$M".ckpt* > /dev/null 2>&1 && bad "marin mid-run: checkpoint written to the working directory"
+              # Put it where an older version kept it, to be resumed from there.
+              mv "$W"/s1/m_"$M".ckpt* .
+          fi
           mv "$W/s1/$M" "./$M"
           if [ "$driver" = legacy ]; then F="$W/s1"; else F="$W/s2"; fi
           $RUN timeout 300 "$BIN" "$M" -prp -proof 4 "${flag[@]}" -t 1 -d "$DEVICE" -noask -f "$F" > second.log 2>&1
           grep -q 'Resuming from' second.log || bad "$driver mid-run: did not resume"
           [ "$(grep -c 'old location' second.log)" = 1 ] || bad "$driver mid-run: no one-line note about the old location"
+          if [ "$driver" = marin ]; then
+              grep -q 'No checkpoint under .*; using m_.*from the working directory' second.log || bad "marin mid-run: no note about the old checkpoint"
+              ls m_"$M".ckpt* > /dev/null 2>&1 && bad "marin mid-run: old checkpoint left in the working directory"
+              ls "$F"/m_"$M".ckpt* > /dev/null 2>&1 && bad "marin mid-run: checkpoint left under -f"
+          fi
           verified second.log "$driver mid-run resume"
           [ -s "$F/proof/$M-4.proof" ] || bad "$driver mid-run: no proof under -f"
           [ ! -e "$M" ] || bad "$driver mid-run: old residues left"
