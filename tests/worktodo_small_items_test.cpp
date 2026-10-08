@@ -13,6 +13,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -24,6 +25,8 @@ static void expect(bool ok, const char* what) {
         ++failures;
     }
 }
+
+static void expect(bool ok, const std::string& what) { expect(ok, what.c_str()); }
 
 static void write(const fs::path& p, const std::string& text) {
     std::ofstream out(p);
@@ -67,6 +70,62 @@ int main() {
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "Pfactor with bounds is pending");
         write(wt, "PRP=1,2,29,-1,76,2,3,5,\"233,1103,2089\"\n");
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "cofactor PRP is pending");
+
+        // Malformed lines of every supported keyword: hasPendingEntry must agree with parse(). A line
+        // parse() cannot turn into an entry (garbage, a bad exponent, missing fields) is not pending,
+        // for the same reason as above.
+        const std::vector<std::string> malformed = {
+            "PRP=garbage",
+            "PRP=1,2,abc,-1",
+            "PRP=1,2,,-1",
+            "PRP=1,2,127",
+            "PRPDC=garbage",
+            "PRPDC=1,2,abc,-1",
+            "Test=garbage",
+            "Test=1,2,abc,-1",
+            "DoubleCheck=garbage",
+            "DoubleCheck=abc",
+            "DoubleCheck=N/A,abc,70,1",
+            "DoubleCheck=",
+            "Pminus1=garbage",
+            "Pminus1=1,2,abc,-1,100000,1000000",
+            "Pminus1=1,2,127,-1,abc,1000000",
+            "Pfactor=garbage",
+            "Pfactor=N/A,1,2,abc,-1,77,1",
+            "Pfactor=N/A,1,2,127,-1,abc,1",
+            "ECM2=garbage",
+            "ECM2=1,2,abc,-1,1000,10000,1",
+            "ECM2=1,2,127,-1,abc,10000,1",
+            "GMPRP=garbage",
+            "GMPROTH=garbage",
+            "GMTEST=garbage",
+            "GMPMINUS1=garbage",
+            "GMPM1=garbage",
+            "GMECM=garbage",
+            "GMCHAIN=garbage",
+            "GMCAMPAIGN=garbage",
+            "PRP=",
+        };
+        for (const std::string& line : malformed) {
+            write(wt, line + "\n");
+            bool pending = true;
+            bool parsed = true;
+            try {
+                pending = io::WorktodoParser::hasPendingEntry(wt.string());
+                parsed = io::WorktodoParser(wt.string()).parse().has_value();
+            } catch (const std::exception& e) {
+                expect(false, "malformed line must not throw: " + line + " (" + e.what() + ")");
+                continue;
+            }
+            expect(!parsed, "parse() yields no entry for: " + line);
+            expect(!pending, "malformed supported-keyword line is not pending: " + line);
+        }
+
+        // A malformed line before a runnable one does not hide it, and the answer follows parse().
+        write(wt, "PRP=garbage\nDoubleCheck=bad\nECM2=1,2,abc,-1,1000,10000,1\nPRP=1,2,521,-1\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "runnable line after malformed ones is pending");
+        write(wt, "PRP=1,2,521,-1\nPRP=garbage\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "runnable line before a malformed one is pending");
     }
 
     // PRP residue type: Prime95 order is k,b,n,c,tf,tests_saved,base,residue_type.
