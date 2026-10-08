@@ -153,6 +153,10 @@ test-proof-marin:
 	bash tests/test_proof_marin_padding.sh
 	python3 tests/proof_marin_source_regression_test.py
 
+.PHONY: test-prp-marin-ckpt-verified-state
+test-prp-marin-ckpt-verified-state:
+	python3 tests/prp_marin_ckpt_verified_state_source_test.py
+
 test-ecm-torsion:
 	bash tests/test_ecm_torsion_curves.sh
 

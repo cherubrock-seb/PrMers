@@ -157,14 +157,26 @@ int App::runPrpOrLlMarin()
 
     // Version 3 adds the Gerbicz-Li block size after the elapsed time; it is written only when
     // the block size differs from sqrt(p), the size of earlier versions, which version 2 implies.
+    // Version 4 (written whenever Gerbicz-Li checking is on) always carries the block size (0 means
+    // sqrt(p)) followed by goodIter, the iteration of the verified state held in R4/R5.  R0/R1 are
+    // the state at the saved iteration, which may be past the last full check and so unverified.
+    // Older files do not record goodIter, so their R4/R5 cannot be placed in the iteration sequence.
+    // While the restore point is still the never-verified state of such a file, saves keep the old
+    // format (version 3, or 2 for sqrt(p)): writing version 4 would record that state as verified, and
+    // a restart would then skip the early check and the hint about the old file.
+    const bool gl_active = options.mode == "prp" && options.gerbiczli;
     uint32_t ckpt_block = 0;
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint32_t& block)->int{
+    uint64_t goodIter = 0;
+    // True while R4/R5 hold the state of an older checkpoint that has not passed a full check yet.
+    bool restore_point_unverified = false;
+    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint32_t& block,
+                         bool& has_good, uint32_t& good)->int{
         File f(file);
         if (!f.exists()) return -1;
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
         if (rp != p) return -2;
-        if (version > 3) return -2;
+        if (version > 4) return -2;
         if (version >= 2) {
             uint32_t saved_mode = 0, saved_backend = 0;
             if (!f.read(reinterpret_cast<char*>(&saved_mode), sizeof(saved_mode))) return -2;
@@ -186,7 +198,17 @@ int App::runPrpOrLlMarin()
         if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
         block = 0;
-        if (version >= 3 && (!f.read(reinterpret_cast<char*>(&block), sizeof(block)) || block < 2)) return -2;
+        has_good = false;
+        good = 0;
+        if (version >= 3) {
+            if (!f.read(reinterpret_cast<char*>(&block), sizeof(block))) return -2;
+            if (block < 2 && !(version >= 4 && block == 0)) return -2;
+        }
+        if (version >= 4) {
+            if (!f.read(reinterpret_cast<char*>(&good), sizeof(good))) return -2;
+            if (good > ri) return -2;
+            has_good = true;
+        }
         const size_t cksz = eng->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
@@ -199,15 +221,20 @@ int App::runPrpOrLlMarin()
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         auto write_new = [&]() -> bool {
             File f(newf, "wb");
-            if (!f.exists()) return false;
-            int version = ckpt_block ? 3 : 2;
-            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return false;
-            if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return false;
-            if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return false;
-            if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return false;
-            if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return false;
-            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return false;
-            if (ckpt_block && !f.write(reinterpret_cast<const char*>(&ckpt_block), sizeof(ckpt_block))) return false;
+ if (!f.exists()) return false;
+ const bool record_good = gl_active && !restore_point_unverified;
+ int version = record_good ? 4 : (ckpt_block ? 3 : 2);
+ if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return false;
+ if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return false;
+ if (!f.write(reinterpret_cast<const char*>(&checkpoint_mode), sizeof(checkpoint_mode))) return false;
+ if (!f.write(reinterpret_cast<const char*>(&checkpoint_backend), sizeof(checkpoint_backend))) return false;
+ if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return false;
+ if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return false;
+ if ((ckpt_block || version >= 4) && !f.write(reinterpret_cast<const char*>(&ckpt_block), sizeof(ckpt_block))) return false;
+ if (version >= 4) {
+ const uint32_t good = static_cast<uint32_t>(goodIter);
+ if (!f.write(reinterpret_cast<const char*>(&good), sizeof(good))) return false;
+ }
             const size_t cksz = eng->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!eng->get_checkpoint(data)) return false;
@@ -227,8 +254,9 @@ int App::runPrpOrLlMarin()
 
     const size_t R0 = 0, R1 = 1, R2 = 2, R3 = 3, R4 = 4, R5 = 5, RBASE = 6, RTMP=7;
     uint32_t ri = 0; double restored_time = 0; uint32_t saved_block = 0;
-    int r = read_ckpt(ckpt_file, ri, restored_time, saved_block);
-    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time, saved_block);
+    bool ckpt_has_good = false; uint32_t ckpt_good = 0;
+    int r = read_ckpt(ckpt_file, ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
+    if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, restored_time, saved_block, ckpt_has_good, ckpt_good);
     if (r != 0) saved_block = 0;
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
@@ -245,8 +273,23 @@ int App::runPrpOrLlMarin()
         eng->set(R0, (options.mode == "prp") ? 3 : 4);
     }
 
-    eng->copy(R4, R0);//Last correct state
-    eng->copy(R5, R1);//Last correct bufd
+    // R4/R5 hold the last verified state.  A fresh start, or a file that does not record
+    // goodIter, has no better candidate than the state just loaded.  A version 4 file keeps
+    // its own R4/R5 and goodIter: R0/R1 may have been saved after the last full check, so the
+    // next check must be able to roll back past them instead of blessing them.
+    const bool resumed_verified_state = (r == 0 && ckpt_has_good && gl_active);
+    const bool resumed_unverified_legacy = (r == 0 && !ckpt_has_good && gl_active);
+    if (resumed_verified_state) {
+        goodIter = ckpt_good;
+        if (goodIter < ri) {
+            std::cout << "[Gerbicz Li] Checkpoint at iteration " << ri << " is past the last verified iteration "
+                      << goodIter << "; it will be checked at the next full check." << std::endl;
+        }
+    } else {
+        eng->copy(R4, R0);//Last correct state
+        eng->copy(R5, R1);//Last correct bufd
+        goodIter = ri;
+    }
     eng->set(RBASE, 3);
     eng->set_multiplicand(RTMP, RBASE);
     logger.logStart(options);
@@ -264,15 +307,12 @@ int App::runPrpOrLlMarin()
         totalIters /= 2;
     }
 
-    // R4/R5 hold the last verified state.  Immediately after resume
-    // that is exactly the checkpoint state at iteration ri.
-    uint64_t goodIter = ri;
-
     // Random corruption should disappear after restoring R4/R5.
     // Repeating the same failure three times indicates a deterministic
     // bad transform/plan, so do not loop forever.
     uint32_t gl_failure_streak = 0;
     constexpr uint32_t gl_failure_limit = 3;
+    restore_point_unverified = resumed_unverified_legacy;
 
     uint64_t L = options.exponent;
     // Gerbicz-Li block size B. A full check costs B squarings and each block one multiplication,
@@ -296,6 +336,16 @@ int App::runPrpOrLlMarin()
         : checkpasslevel_auto;
     if(checkpasslevel==0)
         checkpasslevel=1;
+    if (resumed_verified_state && ri > goodIter && ri < totalIters && totalIters > 0) {
+        // Count the block boundaries since the last full check so that a run which is
+        // interrupted often still reaches its next check on schedule.
+        const uint64_t hi = (totalIters - 1 - goodIter) / B;
+        const uint64_t lo = (totalIters - ri - 1) / B;
+        checkpass = std::min<uint64_t>(hi - lo, checkpasslevel - 1);
+    } else if (resumed_unverified_legacy) {
+        // R0/R1 of an older checkpoint were never verified: check at the first block boundary.
+        checkpass = checkpasslevel - 1;
+    }
     if (options.mode == "prp" && options.gerbiczli) {
         std::ostringstream oss;
         oss << "[Gerbicz Li] block size " << B << ", full check every " << B * checkpasslevel << " iterations";
@@ -447,7 +497,12 @@ int App::runPrpOrLlMarin()
                                 " times in a row from verified iteration " +
                                 std::to_string(goodIter) +
                                 "; retrying the same state will not help. "
-                                "Try -engine-marin or another -aevum-fft plan.";
+                                "Try -engine-marin or another -aevum-fft plan." +
+                                (restore_point_unverified
+                                     ? std::string(" The checkpoint resumed from was written by an older version "
+                                                   "and was never verified; if it is corrupt, delete ") + ckpt_file +
+                                       " to restart from iteration 0."
+                                     : std::string());
 
                             std::cout << "[Gerbicz Li] " << reason << "\n";
                             if (guiServer_) guiServer_->appendLog(
@@ -480,6 +535,7 @@ int App::runPrpOrLlMarin()
                         eng->copy(R5, R1);//Last correct bufd
                         goodIter = iter + 1;
                         gl_failure_streak = 0;
+                        restore_point_unverified = false;
                         //cl_event postEvt;
                     }
             }
