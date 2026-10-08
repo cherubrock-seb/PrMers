@@ -1,6 +1,8 @@
 #pragma once
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -55,5 +57,17 @@ inline void execSelf(const std::vector<std::string>& args) {
     execvp(argv[0], argv.data());
 }
 #endif
+
+// Exit status of a process that had work left (more worktodo entries, an appended GUI entry) but could
+// not restart itself. Distinct from the 0/1 a finished test returns, so a wrapper script or service
+// manager can tell "queue finished" from "queue stalled".
+constexpr int kRestartFailedExitCode = 3;
+
+// Terminate after a restart attempt failed and was reported. Like a successful exec, this skips static
+// destructors (the caller may be the GUI's HTTP thread); buffered output is flushed first.
+[[noreturn]] inline void exitRestartFailed() {
+    std::fflush(nullptr);
+    std::_Exit(kRestartFailedExitCode);
+}
 
 } // namespace util

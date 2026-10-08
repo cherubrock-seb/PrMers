@@ -26,4 +26,14 @@ out="$(cd "$BUILD/cwd" && PATH="$BUILD/bin:$PATH" prmers-restart-test)"
 out="$(cd "$BUILD" && ./bin/prmers-restart-test)"
 [ "$out" = "RESTART_OK" ] || { echo "FAIL (relative invocation): $out"; exit 1; }
 
+# A restart that cannot exec must end the process with the dedicated status, not return to the
+# caller (which would exit with the test result and look like a finished queue).
+rc=0
+"$BUILD/bin/prmers-restart-test" fail 2>/dev/null || rc=$?
+[ "$rc" = "3" ] || { echo "FAIL (failed exec exits with $rc, expected 3)"; exit 1; }
+
+# restart_self() must go through that path after its exec attempt fails.
+grep -q 'util::exitRestartFailed();' "$ROOT/include/core/AlgoUtils.hpp" \
+  || { echo "FAIL (restart_self does not exit after a failed restart)"; exit 1; }
+
 echo "self exe restart test passed"
