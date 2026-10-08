@@ -5,7 +5,12 @@
 #include "Buffer.h"
 #include "FFTConfig.h"
 
+#include <cctype>
+#include <cerrno>
+#include <cstdlib>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 
 using TrigBuf = Buffer<double2>;
 using TrigPtr = shared_ptr<TrigBuf>;
@@ -23,11 +28,41 @@ public:
   }
 };
 
+// The supported TAIL_TRIGS / TAIL_TRIGS31 / TAIL_TRIGS32 / TAIL_TRIGS61 values are 0, 1 and 2 (see tailutil.cl and
+// the genSmallTrigCombo* generators; the GF31/GF61 code treats every value >= 1 alike).  The kernels and the trig
+// table generators disagree about anything else (the FP64/FP32 kernels read the table for 3 while the generators
+// compute from scratch), so a value outside the range is refused before the kernels are built or a table is made.
+constexpr int MAX_TAIL_TRIGS = 2;
+
+inline u32 checkTailTrigs(const std::string& key, long v) {
+  if (v < 0 || v > MAX_TAIL_TRIGS) {
+    throw std::runtime_error("Invalid " + key + "=" + std::to_string(v) + ": must be 0.." + std::to_string(MAX_TAIL_TRIGS));
+  }
+  return u32(v);
+}
+
+// Parse the text of a TAIL_TRIGS* -use value strictly: the whole text must be an integer in 0..MAX_TAIL_TRIGS.
+inline u32 parseTailTrigs(const std::string& key, const std::string& text) {
+  char* end = nullptr;
+  errno = 0;
+  const long v = std::strtol(text.c_str(), &end, 10);
+  if (text.empty() || std::isspace(static_cast<unsigned char>(text[0])) || end == text.c_str() || *end != '\0' || errno == ERANGE) {
+    throw std::runtime_error("Invalid " + key + "='" + text + "': expected an integer 0.." + std::to_string(MAX_TAIL_TRIGS));
+  }
+  return checkTailTrigs(key, v);
+}
+
 // Key of the small/middle trig caches.  Each field is one "is this number type in use" flag and that type's
 // TAIL_TRIGS setting, and they need separate bits: added together, a type in use with TAIL_TRIGS=n is
 // indistinguishable from that type unused with TAIL_TRIGS=n+1, and a TAIL_TRIGS of 3 or more carries into the
 // neighbouring field.  Two Gpus sharing a cache could then be handed each other's tables (silently wrong twiddles).
-inline u32 trigKeyField(bool inUse, u32 tailTrigs) { return (u32(inUse) << 3) | (tailTrigs & 7u); }
+// A type that is not in use has no table, so its setting does not take part in the key.  A value outside the
+// supported range is an error, never truncated: masking it into the field would make e.g. 0 and 8 share a key.
+inline u32 trigKeyField(bool inUse, u32 tailTrigs) {
+  if (!inUse) return 0;
+  if (tailTrigs > u32(MAX_TAIL_TRIGS)) throw std::out_of_range("TAIL_TRIGS value " + std::to_string(tailTrigs) + " is outside 0.." + std::to_string(MAX_TAIL_TRIGS));
+  return 8u | tailTrigs;
+}
 inline u32 trigKeyPart(bool b, u32 tt, bool b31, u32 tt31, bool b32, u32 tt32, bool b61, u32 tt61, bool tailSingleWide) {
   return (((((trigKeyField(b, tt) << 4) | trigKeyField(b31, tt31)) << 4 | trigKeyField(b32, tt32)) << 4 | trigKeyField(b61, tt61)) << 1) | u32(tailSingleWide);
 }
