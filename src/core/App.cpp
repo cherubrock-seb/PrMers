@@ -1012,9 +1012,11 @@ int App::run() {
         cfg.results_path = (std::filesystem::path(options.save_path.empty() ? "." : options.save_path) / "results.txt").string();
         static std::atomic<bool> gui_alive{true};
         auto submitFn = [this](const std::string& line){
-            std::ofstream out(this->options.worktodo_path, std::ios::app);
-            out << line << "\n";
-            out.close();
+            if (!io::WorktodoParser::appendLine(this->options.worktodo_path, line)) {
+                std::cerr << "Failed to append to " << this->options.worktodo_path << "\n";
+                if (guiServer_) guiServer_->appendLog("Failed to append to " + this->options.worktodo_path);
+                return;
+            }
             std::cout << "worktodo appended\n";
             if (guiServer_) guiServer_->stop();
             restart_self(argc_, argv_);

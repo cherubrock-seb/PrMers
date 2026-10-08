@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <vector>
 #include <optional>
+#include <mutex>
 #include <limits>
 #include <cctype>
 #include <algorithm>
@@ -18,6 +19,13 @@
 #include <system_error>
 
 namespace io {
+
+// Serialises every in-process rewrite of a worktodo file: removeProcessedLine() (main thread) reads the
+// file and renames a filtered copy over it, which would drop a line appended by the GUI thread in between.
+static std::mutex& worktodoFileMutex() {
+    static std::mutex m;
+    return m;
+}
 
 WorktodoParser::WorktodoParser(const std::string& filename)
   : filename_(filename)
@@ -636,7 +644,31 @@ continue;
     return std::nullopt;
 }
 
+bool WorktodoParser::appendLine(const std::string& path, const std::string& line) {
+    std::lock_guard<std::mutex> lock(worktodoFileMutex());
+    bool needNewline = false;
+    {
+        std::ifstream in(path, std::ios::binary | std::ios::ate);
+        if (in.is_open()) {
+            const std::streamoff size = in.tellg();
+            if (size > 0) {
+                in.seekg(-1, std::ios::end);
+                char last = '\n';
+                in.get(last);
+                needNewline = (last != '\n');
+            }
+        }
+    }
+    std::ofstream out(path, std::ios::app);
+    if (!out) return false;
+    if (needNewline) out << '\n';
+    out << line << '\n';
+    out.close();
+    return static_cast<bool>(out);
+}
+
 bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
+    std::lock_guard<std::mutex> lock(worktodoFileMutex());
     std::ifstream inFile(filename_);
     std::ofstream tempFile(filename_ + ".tmp");
     std::ofstream saveFile("worktodo_save.txt", std::ios::app);

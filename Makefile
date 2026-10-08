@@ -180,6 +180,10 @@ test-worktodo-pminus1-factors:
 test-worktodo-quoted-factors:
 	bash tests/test_worktodo_quoted_factors.sh
 
+.PHONY: test-worktodo-append
+test-worktodo-append:
+	bash tests/test_worktodo_append.sh
+
 test-marin-ll-radix5: all
 	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
