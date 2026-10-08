@@ -27,7 +27,8 @@ static void closeSocket(socket_t s) { ::close(s); }
 static int g_port = 0;
 
 // Send a raw request and return the HTTP status code (0 if the connection was closed without a reply).
-static int request(const std::string& raw, std::string* bodyOut = nullptr) {
+// A non-empty `tail` is sent 300 ms after `raw`, like a client whose request arrives in two segments.
+static int request(const std::string& raw, std::string* bodyOut = nullptr, const std::string& tail = std::string()) {
     socket_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     sockaddr_in a{};
     a.sin_family = AF_INET;
@@ -39,6 +40,15 @@ static int request(const std::string& raw, std::string* bodyOut = nullptr) {
         const int n = send(s, raw.data() + off, static_cast<int>(raw.size() - off), 0);
         if (n <= 0) break;
         off += static_cast<size_t>(n);
+    }
+    if (!tail.empty()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        size_t toff = 0;
+        while (toff < tail.size()) {
+            const int n = send(s, tail.data() + toff, static_cast<int>(tail.size() - toff), 0);
+            if (n <= 0) break;
+            toff += static_cast<size_t>(n);
+        }
     }
     std::string resp;
     char buf[4096];
@@ -114,6 +124,13 @@ int main() {
     expect(request("POST /api/save-settings HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(g_port) + "\r\n" + auth +
                    "Content-Length: -1\r\n\r\n"), 400, "negative Content-Length");
     expect(request("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Junk: " + std::string(20000, 'a') + "\r\n\r\n"), 431, "oversized headers");
+
+    // A request whose bytes arrive late must not be dropped: on macOS/BSD the accepted socket used to
+    // inherit O_NONBLOCK from the listener, so the first recv() failed with EAGAIN.
+    expect(request("GET /api/state HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(g_port) + "\r\n", nullptr,
+                   auth + "\r\n"), 200, "headers sent in two segments");
+    expect(request("POST /api/append-worktodo HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(g_port) + "\r\n" + auth +
+                   "Content-Length: 14\r\n\r\n", nullptr, "PRP=1,2,127,-1"), 200, "body sent in a second segment");
 
     server.stop();
     std::remove("gui_http_settings.cfg");
