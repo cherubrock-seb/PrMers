@@ -350,6 +350,11 @@ test-pm1-extend-stage2-rerun: all
 test-pm1-external-stage2-interrupt:
 	bash tests/pm1_external_stage2_interrupt_test.sh
 
+.PHONY: test-pm1-p95-windows-interrupt
+
+test-pm1-p95-windows-interrupt:
+	bash tests/pm1_p95_windows_interrupt_test.sh
+
 test-pm1-prime95-interrupted-state: all
 	bash tests/pm1_prime95_interrupted_state_test.sh $${PRMERS_TEST_DEVICE:-0}
 

@@ -18,6 +18,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 extern char** environ;
+#else
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 namespace core {
@@ -137,6 +142,45 @@ inline int pm1RunShellInterruptible(const std::string& script,
         if (tick) tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+}
+#else
+/// Windows counterpart of pm1RunShellInterruptible: waits for an already started process, polling
+/// every 100 ms, and reports through `interrupted` whether `stop` (the process-wide interrupt flag)
+/// was set while it ran.  A Ctrl-C typed in the console reaches Prime95 as well and ends it, but
+/// nothing tells the wait that the process ended *because of* the interrupt, so the flag is the
+/// only sign; it is also checked once more after the process has exited, because the interrupt may
+/// arrive between the last poll and the exit.  Windows has no SIGTERM to send, so a process that
+/// is still running `grace_seconds` after the interrupt was seen is terminated.  `tick` is called
+/// on every poll.  Returns the exit code, or -1 if the wait failed or the code is unavailable.
+inline int pm1WaitProcessInterruptible(HANDLE process,
+                                       const std::atomic<bool>& stop,
+                                       const std::function<void()>& tick,
+                                       bool& interrupted,
+                                       int grace_seconds = 120) {
+    interrupted = false;
+    bool stop_seen = false;
+    bool killed = false;
+    auto stop_at = std::chrono::steady_clock::now();
+    for (;;) {
+        const DWORD w = WaitForSingleObject(process, 100);
+        if (w == WAIT_OBJECT_0) break;
+        if (w != WAIT_TIMEOUT) return -1;
+        if (stop.load(std::memory_order_relaxed)) {
+            interrupted = true;
+            if (!stop_seen) {
+                stop_seen = true;
+                stop_at = std::chrono::steady_clock::now();
+            } else if (!killed &&
+                       std::chrono::steady_clock::now() - stop_at > std::chrono::seconds(grace_seconds)) {
+                TerminateProcess(process, 1);
+                killed = true;
+            }
+        }
+        if (tick) tick();
+    }
+    if (stop.load(std::memory_order_relaxed)) interrupted = true;
+    DWORD code = 0;
+    return GetExitCodeProcess(process, &code) ? static_cast<int>(code) : -1;
 }
 #endif
 

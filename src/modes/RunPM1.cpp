@@ -388,8 +388,12 @@ static std::string p95_shell_quote_posix(const std::string& s) {
 #ifdef _WIN32
 // Run "<exe> -d" in <dir> with stdout/stderr redirected to <log> and wait for it. No shell is
 // involved, so the paths only need CommandLineToArgvW-style quoting. Returns the exit code, or -1
-// if the process could not be started.
-static int p95_run_windows_process(const fs::path& exe, const fs::path& dir, const fs::path& log) {
+// if the process could not be started. `interrupted` reports whether the interrupt flag `stop` was set
+// while it ran (see core::pm1WaitProcessInterruptible); `tick` is called while waiting.
+static int p95_run_windows_process(const fs::path& exe, const fs::path& dir, const fs::path& log,
+                                   const std::atomic<bool>& stop, const std::function<void()>& tick,
+                                   bool& interrupted) {
+    interrupted = false;
     SECURITY_ATTRIBUTES sa;
     std::memset(&sa, 0, sizeof(sa));
     sa.nLength = sizeof(sa);
@@ -422,9 +426,7 @@ static int p95_run_windows_process(const fs::path& exe, const fs::path& dir, con
 
     int rc = -1;
     if (CreateProcessW(exe_w.c_str(), cmdline.data(), nullptr, nullptr, TRUE, 0, nullptr, cwd_w.c_str(), &si, &pi)) {
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        DWORD code = 0;
-        rc = GetExitCodeProcess(pi.hProcess, &code) ? static_cast<int>(code) : -1;
+        rc = core::pm1WaitProcessInterruptible(pi.hProcess, stop, tick, interrupted);
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
@@ -630,16 +632,11 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
     };
 
 #ifdef _WIN32
-    auto future_rc = std::async(std::launch::async, [p95_exe, p95_dir, log_file = p95_dir / log_filename]() {
-        return p95_run_windows_process(p95_exe, p95_dir, log_file);
-    });
-    for (;;) {
-        if (future_rc.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
-            result.exit_code = future_rc.get();
-            break;
-        }
-        show_progress();
-    }
+    // Same contract as the POSIX runner below: the interrupt flag is polled while Prime95 runs and
+    // result.interrupted is set when it was raised.
+    bool run_interrupted = false;
+    result.exit_code = p95_run_windows_process(p95_exe, p95_dir, log_path, interrupted, show_progress, run_interrupted);
+    result.interrupted = run_interrupted;
 #else
     // `exec` makes the shell become Prime95, so the signals sent below reach it.
     std::ostringstream shell;
