@@ -8,6 +8,7 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcmTorsionCurves.hpp"
+#include "math/EcmKnownFactors.hpp"
 #include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
@@ -288,14 +289,13 @@ int App::runECMMarin()
         wrote_result = true;
     };
 
-    auto is_known = [&](const mpz_class& g)->bool{
-        for (auto &s: options.knownFactors){
-            if (s.empty()) continue;
-            mpz_class f; if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
-            if (f < 0) f = -f;
-            if (f > 1 && g == f) return true;
-        }
-        return false;
+    // True when `g` brings nothing new: it is 1 or a product of factors already known
+    // (user-supplied or found by an earlier curve of this run), and then `g` is left as
+    // it was.  Otherwise `g` is reduced in place to the part the known factors do not
+    // explain, which is what must be reported.  The engine keeps working modulo the full
+    // number, so a later curve routinely finds products such as p1*p2 after p1 was reported.
+    auto is_known = [&](mpz_class& g)->bool{
+        return ecm_known::strip(g, options.knownFactors);
     };
 
     size_t transform_size_once = 0;
@@ -1820,7 +1820,8 @@ int App::runECMMarin()
             const uint32_t MAX_S2_CHUNK_BITS = compute_s2_chunk_bits(transform_size_once);
             const uint64_t total_s2_iters = std::max<uint64_t>(1ULL, s2_total_iters_precomputed);
 
-            auto publish_stage2_factor = [&](const mpz_class& gg)->int {
+            auto publish_stage2_factor = [&](const mpz_class& found_gcd)->int {
+                mpz_class gg = found_gcd;
                 bool known = is_known(gg);
                 std::cout << "[ECM] Curve " << (c+1) << "/" << curves
                           << (known ? " | known factor=" : " | factor=") << gg.get_str() << std::endl;

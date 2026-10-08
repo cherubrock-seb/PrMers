@@ -8,6 +8,7 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcMod4.hpp"
+#include "math/EcmKnownFactors.hpp"
 #include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
@@ -877,15 +878,13 @@ int App::runECMMarinTwistedEdwards()
         wrote_result = true;
     };
 
-    auto is_known = [&](const mpz_class& g)->bool{
-        for (auto &s: options.knownFactors){
-            if (s.empty()) continue;
-            mpz_class f;
-            if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
-            if (f < 0) f = -f;
-            if (f > 1 && g == f) return true;
-        }
-        return false;
+    // True when `g` brings nothing new: it is 1 or a product of factors already known
+    // (user-supplied or found by an earlier curve of this run), and then `g` is left as
+    // it was.  Otherwise `g` is reduced in place to the part the known factors do not
+    // explain, which is what must be reported.  The engine keeps working modulo the full
+    // number, so a later curve routinely finds products such as p1*p2 after p1 was reported.
+    auto is_known = [&](mpz_class& g)->bool{
+        return ecm_known::strip(g, options.knownFactors);
     };
 
     auto publish_json = [&](){
@@ -3465,8 +3464,8 @@ int App::runECMMarinTwistedEdwards()
             }
 
             if (found) {
-                bool known = is_known(result_factor > 1 ? result_factor : g);
-                const mpz_class& gf = (result_factor > 1 ? result_factor : g);
+                mpz_class gf = (result_factor > 1 ? result_factor : g);
+                bool known = is_known(gf);
 
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                          <<(known?" | known factor=":" | factor=")<<gf.get_str()<<std::endl;
@@ -3482,7 +3481,7 @@ int App::runECMMarinTwistedEdwards()
                 fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
 
                 if (!known) {
-                    if (!(result_factor > 1)) result_factor = gf;
+                    result_factor = gf;
                     result_status = "found";
                     curves_tested_for_found = c+1;
                     options.curves_tested_for_found = (uint32_t)(c+1);
@@ -3548,7 +3547,8 @@ int App::runECMMarinTwistedEdwards()
             uint64_t last2_done_bits = done_bits_est;
             double ema_ips_stage2 = 0.0;
 
-            auto publish_stage2_factor = [&](const mpz_class& gg)->int {
+            auto publish_stage2_factor = [&](const mpz_class& found_gcd)->int {
+                mpz_class gg = found_gcd;
                 bool known = is_known(gg);
                 std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gg.get_str() << std::endl;
                 if (guiServer_) {
