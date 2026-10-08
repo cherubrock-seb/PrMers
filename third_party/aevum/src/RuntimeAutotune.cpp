@@ -35,6 +35,40 @@ bool parseBool(const std::string& s, bool& value) {
   return false;
 }
 
+// Optional ninth field: "deferred:" followed by the comma-separated plans
+// tried so far.  ("complete" is accepted too; a record without the field is
+// complete.)
+std::string formatState(const Record& record) {
+  std::string state = "deferred:";
+  for (std::size_t i = 0; i < record.tried.size(); ++i) {
+    if (i) state += ',';
+    state += record.tried[i];
+  }
+  return state;
+}
+
+bool parseState(const std::string& state, Record& record) {
+  if (state == "complete") {
+    record.complete = true;
+    record.tried.clear();
+    return true;
+  }
+  const std::string prefix = "deferred:";
+  if (state.compare(0, prefix.size(), prefix) != 0) return false;
+  record.complete = false;
+  record.tried.clear();
+  std::size_t start = prefix.size();
+  while (start < state.size()) {
+    const std::size_t comma = state.find(',', start);
+    const std::string plan = state.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+    if (plan.empty()) return false;
+    record.tried.push_back(plan);
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return true;
+}
+
 std::vector<std::string> splitTabs(const std::string& line) {
   std::vector<std::string> out;
   std::size_t start = 0;
@@ -126,7 +160,8 @@ std::optional<Record> load(const std::filesystem::path& path, const std::string&
   while (std::getline(in, line)) {
     if (line.empty() || line[0] == '#') continue;
     const auto f = splitTabs(line);
-    if (f.size() != 8 || f[0] != "1") continue;
+    // Eight fields: a complete record.  Nine: the ninth is the search state.
+    if ((f.size() != 8 && f.size() != 9) || f[0] != "1") continue;
     if (f[1] != key) continue;
     try {
       Record r;
@@ -138,6 +173,7 @@ std::optional<Record> load(const std::filesystem::path& path, const std::string&
       r.tune_ms = std::stoull(f[6]);
       r.created_unix = std::stoull(f[7]);
       if (!(r.plan_speedup > 0.0) || !(r.implementation_speedup > 0.0)) continue;
+      if (f.size() == 9 && !parseState(f[8], r)) continue;
       return r;
     } catch (...) {
       // Corrupt records are input data. Ignore them and trigger a safe retune.
@@ -182,7 +218,10 @@ void storeAtomic(const std::filesystem::path& path, const Record& record) {
         << '\t' << std::setprecision(8) << record.plan_speedup
         << '\t' << std::setprecision(8) << record.implementation_speedup
         << '\t' << record.tune_ms
-        << '\t' << record.created_unix << '\n';
+        << '\t' << record.created_unix;
+    // Complete records keep the original eight fields.
+    if (!record.complete) out << '\t' << clean(formatState(record));
+    out << '\n';
     out.flush();
     if (!out) throw std::runtime_error("cannot flush Aevum autotune cache");
   }

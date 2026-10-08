@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <stdexcept>
 
 using cl_queue = cl_command_queue;
 
@@ -54,6 +55,19 @@ class Context;
 std::string getUUID(int seqId);
 
 std::string errMes(int err);
+
+// An OpenCL call that returned an error status (thrown by check()).
+class gpu_error : public std::runtime_error {
+public:
+  const int err;
+
+  gpu_error(int err, std::string_view mes) : std::runtime_error(errMes(err) + " " + std::string(mes)), err(err) {}
+
+  gpu_error(int err, const char *file, int line, const char *func, std::string_view mes)
+    : gpu_error(err, std::string(mes) + " at " + file + ":" + std::to_string(line) + " " + func) {
+  }
+};
+
 void check(int err, const char *file, int line, const char *func, string_view mes);
 
 #define CHECK1(err) check(err, __FILE__, __LINE__, __func__, #err)
