@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # PRP end of job, both drivers: result first, then the worktodo entry, then the
-# checkpoint / loop state and the proof residues. The worktodo update is made to
-# fail (worktodo_save.txt is a directory) after the result has been saved. The
-# saved state and the residues must survive, so that the next start, which runs
-# the entry again, resumes at the end. Once the update can succeed, the entry is
-# retired and everything is removed.
+# checkpoint / loop state and the proof residues. First the result write and then
+# the worktodo update are made to fail; each time the saved state and the residues
+# must survive, so that the next start, which runs the entry again, resumes at the
+# end. Once both succeed, the entry is retired and everything is removed.
 # usage: run_prp_worktodo_retire_failure.sh <device> [exponent]
 set -euo pipefail
 
@@ -22,9 +21,25 @@ check_driver() {
         cd "$work"
         ln -s "$ROOT/kernels" kernels
         echo "PRP=1,2,$P,-1" > worktodo.txt
-        mkdir worktodo_save.txt
 
-        # -t 1 saves the state every second, so some exists when the test ends.
+        # 1. The result cannot be saved (results.txt is a directory): the entry,
+        # the state and the residues stay. -t 1 saves the state every second.
+        mkdir results.txt
+        set +e
+        $RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -prp -proof 2 -t 1 "$@" -d "$DEVICE" -noask -f "$work" > nosave.log 2>&1
+        rc=$?
+        set -e
+        echo "$name: SAVE_FAILURE_RUN_RC=$rc"
+        grep -q "PRP=1,2,$P,-1" worktodo.txt || { echo "FAIL($name): entry removed although the result was not saved"; exit 1; }
+        [ -f "$state" ] || { echo "FAIL($name): $state deleted although the result was not saved"; cat nosave.log; exit 1; }
+        [ -n "$(ls -A "$P/proof" 2>/dev/null)" ] || { echo "FAIL($name): residues deleted although the result was not saved"; exit 1; }
+        grep -q 'Result could not be saved; keeping' nosave.log || { echo "FAIL($name): no notice that the state is kept"; cat nosave.log; exit 1; }
+        echo "$name: SAVE_FAILURE_KEEPS_STATE=PASS"
+        rmdir results.txt
+
+        # 2. The result is saved but the worktodo update fails (worktodo_save.txt
+        # is a directory): the entry, the state and the residues stay.
+        mkdir worktodo_save.txt
         set +e
         $RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -prp -proof 2 -t 1 "$@" -d "$DEVICE" -noask -f "$work" > fail.log 2>&1
         rc=$?
@@ -39,6 +54,7 @@ check_driver() {
         grep -q 'worktodo entry could not be removed' fail.log || { echo "FAIL($name): no notice that the residues are kept"; cat fail.log; exit 1; }
         echo "$name: RETIRE_FAILURE_KEEPS_STATE=PASS"
 
+        # 3. Both succeed: the entry is retired and everything removed.
         rmdir worktodo_save.txt
         set +e
         $RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -prp -proof 2 -t 1 "$@" -d "$DEVICE" -noask -f "$work" > ok.log 2>&1
