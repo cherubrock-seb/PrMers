@@ -422,3 +422,6 @@ test-ecm-random-words: ; bash tests/ecm_random_words_test.sh
 .PHONY: test-ecm-resume-seed-factor
 test-ecm-resume-seed-factor: all
 	bash tests/ecm_resume_seed_factor_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-ecm-stage2-zero-z
+test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
