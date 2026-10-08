@@ -638,13 +638,13 @@ int App::runPrpOrLlMarin()
 
     }
 
-    // Save the finished (and, with Gerbicz-Li, verified) state.  If the result
-    // cannot be saved below, the checkpoint is kept, and this one lets the rerun
+    // Save the finished (and, with Gerbicz-Li, verified) state, for PRP, Wagstaff and LL alike.
+    // If the result cannot be saved below, the checkpoint is kept, and this one lets the rerun
     // resume at the end instead of redoing everything since the last periodic
     // backup.  It is removed together with the other checkpoints once the result
     // is saved.  The engine is released before the proof is made, so this has to
     // happen now.
-    if (options.mode == "prp" && !(r == 0 && ri == totalIters)) {
+    if (!(r == 0 && ri == totalIters)) {
         const double final_elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
         save_ckpt(static_cast<uint32_t>(totalIters), final_elapsed);
     }

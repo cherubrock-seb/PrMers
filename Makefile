@@ -514,6 +514,10 @@ test-legacy-wagstaff-result: all
 test-worktodo-retire-cleanup: all
 	bash tests/run_worktodo_retire_failure_cleanup.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-final-checkpoint
+test-final-checkpoint: all
+	bash tests/run_final_checkpoint_at_completion.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:
