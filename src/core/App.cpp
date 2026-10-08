@@ -528,7 +528,15 @@ App::App(int argc, char** argv)
 
 
     if (!o.gui) {
-        o.exponent = askExponentInteractively();
+        // The prompt answer replaces the (absent) command-line exponent after CliParser has
+        // doubled it for -wagstaff and checked the limits, so do both here as well.
+        const uint64_t answer = askExponentInteractively();
+        o.exponent = o.wagstaff ? 2 * answer : answer;
+        if (const std::string limitError = io::exponentLimitError(o.exponent, o.wagstaff);
+            !limitError.empty()) {
+            std::cerr << limitError << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
     }
     o.mode = "prp";
     //std::exit(-1);

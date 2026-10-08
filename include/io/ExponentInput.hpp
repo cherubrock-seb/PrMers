@@ -15,8 +15,8 @@ constexpr uint64_t kMaxExponent = 5650242869ULL;
 constexpr uint64_t kMaxEngineExponent = std::numeric_limits<uint32_t>::max();
 
 // Empty when `exponent` (the exponent actually run, i.e. after any -wagstaff doubling) is within
-// both limits, otherwise the error message to print. The command line and the -wagstaff worktodo
-// path both go through this so they accept and reject the same values.
+// both limits, otherwise the error message to print. The command line, the -wagstaff worktodo path
+// and the interactive prompt all go through this so they accept and reject the same values.
 inline std::string exponentLimitError(uint64_t exponent, bool wagstaff = false) {
     const std::string suffix = wagstaff ? " (twice the requested Wagstaff exponent)" : "";
     if (exponent > kMaxExponent)
