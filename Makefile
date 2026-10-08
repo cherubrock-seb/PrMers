@@ -513,3 +513,9 @@ test-ecm-resume-seed-factor: all
 
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
+
+.PHONY: test-ecm-prime95-handoff
+test-ecm-prime95-handoff: ; bash tests/ecm_prime95_handoff_test.sh
+
+.PHONY: test-ecm-prime95-handoff-resume
+test-ecm-prime95-handoff-resume: ; bash tests/ecm_prime95_handoff_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
