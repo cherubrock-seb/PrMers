@@ -163,6 +163,10 @@ inline void restart_self(int argc, char* argv[]) {
         args.erase(args.begin() + 1);
     }
 
+    // The relaunched program reuses the GUI access token (so an open browser tab keeps working). It is
+    // only in the environment from here until the relaunch has happened, never while running, so
+    // Prime95 and shell commands started earlier or later do not inherit it.
+    if (auto g = ui::WebGuiServer::instance()) g->exportTokenForRestart();
 #ifdef _WIN32
     // Quote for CommandLineToArgvW / the C runtime: embedded quotes, backslashes before a quote
     // and trailing backslashes are escaped, empty arguments become "".
@@ -174,6 +178,7 @@ inline void restart_self(int argc, char* argv[]) {
         CloseHandle(pi.hThread);
         exit(0);
     } else {
+        ui::WebGuiServer::clearTokenEnv();
         std::cerr << "Failed to restart program (CreateProcess failed)" << std::endl;
         if (auto g = ui::WebGuiServer::instance()) g->appendLog("Failed to restart program (CreateProcess failed)");
         util::exitRestartFailed();
@@ -189,7 +194,10 @@ inline void restart_self(int argc, char* argv[]) {
         g->appendLog(oss.str());
     }
     util::execSelf(args);
-    const std::string err = std::string("Failed to restart program (exec failed: ") + std::strerror(errno) + ")";
+    const int exec_errno = errno;
+    ui::WebGuiServer::clearTokenEnv();
+    errno = exec_errno;
+    const std::string err =std::string("Failed to restart program (exec failed: ") + std::strerror(errno) + ")";
     std::cerr << err << std::endl;
     if (auto g = ui::WebGuiServer::instance()) g->appendLog(err);
     // Returning would let the caller exit with the test's own status (0 for prime, 1 for composite),
