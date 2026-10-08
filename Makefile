@@ -342,6 +342,11 @@ test-llsafe-error-recovery: all
 test-legacy-prp-resume: all
 bash tests/run_legacy_prp_resume_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-marin-ocl-exec-errors
+
+test-marin-ocl-exec-errors:
+	bash tests/test_marin_ocl_exec_errors_device.sh $(MARIN_TEST_DEVICE)
+
 .PHONY: test-legacy-program-small
 
 test-legacy-program-small:
