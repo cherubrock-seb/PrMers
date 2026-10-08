@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# The result line of an external Prime95 stage 2 must be taken at face value:
-#  - the B2 Prime95 reports is the bound recorded, not the one requested;
+# The result line of an external Prime95 stage 2 is trusted only where it is
+# plausible:
+#  - the B2 Prime95 reports is the bound recorded, not the one requested, when
+#    it lies between B1 and the request;
+#  - a B2 that is zero or not above B1 invalidates the result (the internal
+#    stage 2 runs instead) and is never recorded;
+#  - a B2 beyond the request is not claimed;
 #  - every factor in "factors" is recorded, not only the first.
 # A stub "mprime" stands in for Prime95: it only copies a canned
 # results.json.txt, so no Prime95 install is needed.  M113 has the factors
@@ -42,5 +47,27 @@ grep -aq 'P-1 factor stage 2 found: 23279' "$WORK/two/run.log" || fail "two: fir
 grep -aq 'P-1 factor stage 2 found: 65993' "$WORK/two/run.log" || fail "two: second factor missing"
 grep -aq '"factors":\[[^]]*23279[^]]*\]' "$WORK/two/results.txt" || fail "two: results.txt lacks 23279"
 grep -aq '"factors":\[[^]]*65993[^]]*\]' "$WORK/two/results.txt" || fail "two: results.txt lacks 65993"
+
+# 3. A reported B2 of 0, B1 or less than B1 is impossible: it must not become
+# the recorded bound in any result, file or JSON.  The internal stage 2 runs
+# for the requested B2 instead.
+for bad in 0 3 4; do
+  run_case "bad$bad" "{\"status\":\"NF\", \"exponent\":113, \"worktype\":\"P-1\", \"b1\":4, \"b2\":$bad, \"d\":30}"
+  log="$WORK/bad$bad/run.log"
+  grep -aq "Prime95 Stage2 error: result reports B2=$bad," "$log" || fail "bad$bad: invalid B2 not rejected"
+  if grep -aq "reached B2=$bad" "$log"; then fail "bad$bad: invalid B2 adopted"; fi
+  if grep -aq "until B2 = $bad\$" "$log"; then fail "bad$bad: invalid B2 reported"; fi
+  if ls "$WORK/bad$bad"/stage2_result_B2_"$bad"_p_113.txt >/dev/null 2>&1; then fail "bad$bad: result file for B2=$bad"; fi
+  if grep -aq "\"b2\":$bad[^0-9]" "$WORK/bad$bad/results.txt" 2>/dev/null; then fail "bad$bad: results.txt records b2=$bad"; fi
+  if ls "$WORK/bad$bad"/*stage2_ext* >/dev/null 2>&1; then fail "bad$bad: external-stage-2 JSON written"; fi
+  ls "$WORK/bad$bad"/stage2*_result_B2_2141_p_113.txt >/dev/null || fail "bad$bad: internal stage 2 did not produce the B2=2141 result"
+done
+
+# 4. Prime95 claims more than was requested: keep the requested bound.
+run_case big '{"status":"NF", "exponent":113, "worktype":"P-1", "b1":4, "b2":99999999, "d":30}'
+grep -aq 'reported B2=99999999 beyond the requested B2=2141' "$WORK/big/run.log" || fail "big: no warning"
+grep -aq 'No factor P-1 (stage 2) until B2 = 2141' "$WORK/big/run.log" || fail "big: B2 not kept at 2141"
+grep -aq '"b2":2141' "$WORK/big/results.txt" || fail "big: results.txt does not record b2=2141"
+if grep -aq '99999999' "$WORK/big/results.txt"; then fail "big: unrequested B2 recorded"; fi
 
 echo "pm1 Prime95 stage-2 result test passed"

@@ -6311,14 +6311,36 @@ int App::runPM1Marin() {
             return false;
         }
 
-        // Report the bound Prime95 really searched, not the one requested.
-        if (rr.b2_reported && rr.b2_reached != options.B2) {
-            std::ostringstream msg;
-            msg << "[PM1] Prime95 Stage2 reached B2=" << rr.b2_reached
-                << " instead of the requested B2=" << options.B2
-                << "; the result is reported for B2=" << rr.b2_reached;
-            p95_log(msg.str());
-            options.B2 = rr.b2_reached;
+        // The reported B2 comes from outside this process: take it only when it
+        // is a plausible Stage 2 bound for this task.  A bound that does not
+        // exceed B1 (or the requested B2 start) cannot describe a Stage 2 run
+        // and makes the whole result untrustworthy, so fall back to the
+        // internal Stage 2.  A bound beyond the request is not claimed: only
+        // the requested B2 was asked for, so it is kept.  A bound below the
+        // request is reported as reached.
+        if (rr.b2_reported) {
+            const uint64_t lowest = std::max<uint64_t>(options.B1, options.B2Start);
+            if (rr.b2_reached <= lowest) {
+                std::ostringstream msg;
+                msg << "[PM1] Prime95 Stage2 error: result reports B2=" << rr.b2_reached
+                    << ", which is not above " << lowest << "; ignoring the result";
+                p95_log(msg.str());
+                return false;
+            }
+            if (rr.b2_reached > options.B2) {
+                std::ostringstream msg;
+                msg << "[PM1] Prime95 Stage2 reported B2=" << rr.b2_reached
+                    << " beyond the requested B2=" << options.B2
+                    << "; the result is reported for B2=" << options.B2;
+                p95_log(msg.str());
+            } else if (rr.b2_reached != options.B2) {
+                std::ostringstream msg;
+                msg << "[PM1] Prime95 Stage2 reached B2=" << rr.b2_reached
+                    << " instead of the requested B2=" << options.B2
+                    << "; the result is reported for B2=" << rr.b2_reached;
+                p95_log(msg.str());
+                options.B2 = rr.b2_reached;
+            }
         }
 
         std::vector<std::string> new_factors;
