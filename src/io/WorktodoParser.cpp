@@ -160,7 +160,29 @@ static bool collectKnownFactors(const std::vector<std::string>& parts, size_t fi
     return true;
 }
 
+// A GMTF= line (Gaussian trial factoring) is run by the pre-parser in main(), not by parse(), and
+// only when it is the first actionable line (the same rule as tryRunGaussianTrialFactor). Without
+// counting it here, a PRP, P-1 or ECM entry finished in front of a GMTF line reports "no more
+// entries" and exits instead of restarting into it.
+static bool firstActionableLineIsGmtf(const std::string& filename) {
+    std::ifstream file(filename);
+    std::string line;
+    while (std::getline(file, line)) {
+        trim_inplace(line);
+        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+        if (line.size() < 5) return false;
+        std::string head = line.substr(0, 5);
+        std::transform(head.begin(), head.end(), head.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+        if (head != "GMTF=") return false;
+        const auto fields = std::count(line.begin() + 5, line.end(), ',') + 1;
+        return fields >= 3 && fields <= 6;
+    }
+    return false;
+}
+
 bool WorktodoParser::hasPendingEntry(const std::string& filename) {
+    if (firstActionableLineIsGmtf(filename)) return true;
     WorktodoParser parser(filename);
     parser.quiet_ = true;
     return parser.parse().has_value();

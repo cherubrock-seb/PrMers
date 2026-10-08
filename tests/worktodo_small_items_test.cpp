@@ -56,6 +56,23 @@ int main() {
         write(wt, "GMCHAIN=45951761,100000,1000000,2000,0,2,1000000,262144,proth,BOTH\n");
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "GM entry is pending");
 
+        // A GMTF line is run by the Gaussian trial-factoring pre-parser, and only from the top.
+        write(wt, "GMTF=1009,20,24\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "GMTF line on top is pending");
+        write(wt, "# c\n  gmtf=1009,20,24,BOTH,65536,1000\n");
+        expect(io::WorktodoParser::hasPendingEntry(wt.string()), "indented lower-case GMTF is pending");
+        write(wt, "GMTF=1009,20\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "GMTF with too few fields is not pending");
+        write(wt, "GMTF=1009,20,24,BOTH,65536,1000,9\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "GMTF with too many fields is not pending");
+        write(wt, "GMTF=\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "empty GMTF is not pending");
+        write(wt, "GMTF\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()), "GMTF without '=' is not pending");
+        write(wt, "Pfactor=N/A,1,2,127,-1,70,0\nGMTF=1009,20,24\n");
+        expect(!io::WorktodoParser::hasPendingEntry(wt.string()),
+               "a GMTF line behind an unrunnable line is not on top, so not pending");
+
         // A line with a supported keyword that parse() skips is not pending work: the restart would
         // find no entry and land in the interactive prompt (or, under -gui, run exponent 0).
         write(wt, "PRP=1,2,127,-1PRP=1,2,521,-1\n");
