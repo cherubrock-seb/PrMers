@@ -474,6 +474,10 @@ test-llunsafe-checkpoint-cleanup: all
 test-legacy-wagstaff-result: all
 	bash tests/run_legacy_wagstaff_result.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-worktodo-retire-cleanup
+test-worktodo-retire-cleanup: all
+	bash tests/run_worktodo_retire_failure_cleanup.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-marin-exact-sub
 
 test-marin-exact-sub:
