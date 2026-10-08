@@ -15,7 +15,7 @@ if grep -A5 "makeTransformBufVector" "$ROOT/src/Gpu.cpp" | grep -q "&queue, N"; 
   exit 1
 fi
 
-grep -q "TOTAL_DATA_SIZE(fft, WIDTH, fft.shape.middle, SMALL_H, in_place, pad_size)" "$ROOT/src/Gpu.cpp"
+grep -q "TOTAL_DATA_SIZE(fft, dataElements())" "$ROOT/src/Gpu.cpp"
 grep -q "bits_per_word < fft.minBpw()" "$ROOT/src/FFTConfig.cpp"
 grep -q "multiply_small" "$ROOT/src/EngineApi.cpp"
 grep -q "small_factor_scratch_" "$ROOT/src/EngineApi.cpp"
