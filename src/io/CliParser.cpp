@@ -996,10 +996,8 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     // P-1 stage 1 limits: refuse a B1 / -maxe the stage-1 exponent cannot represent
     // instead of running and resuming from a wrong position.  The same check runs
     // again in App::run for bounds that come from worktodo.txt.
-    if (opts.mode == "pm1" || opts.mode == "gm-pm1") {
-        const bool unchunked = opts.mode == "gm-pm1" || !opts.marin || opts.torus ||
-                               (opts.B1old > 0 && opts.B1 > opts.B1old);
-        const std::string err = core::pm1ckpt::limitError(opts.B1, opts.mode == "gm-pm1" ? 0 : opts.B1old, opts.max_e_bits, opts.exponent, unchunked);
+    {
+        const std::string err = core::pm1ckpt::optionsLimitError(opts);
         if (!err.empty()) {
             std::cerr << "Error: " << err << std::endl;
             std::exit(EXIT_FAILURE);

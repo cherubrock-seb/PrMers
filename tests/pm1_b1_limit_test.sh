@@ -38,6 +38,8 @@ refused legacy_big_b1   'can build in one piece'               269 -pm1 -b1 5000
 refused torus_big_b1    'can build in one piece'               269 -pm1 -b1 50000000000 -torus
 refused ext_big_b1      'extending from -b1old 1000'           269 -pm1 -b1 50000000000 -b1old 1000
 refused gm_big_b1       'can build in one piece'               269 -gm-pm1 -b1 50000000000
+refused ulm_big_b2     'ultra-low-memory stage 2 (B2)'        269 -pm1 -b1 1000 -b2 50000000000 -pm1-lowmem -pm1-ultralowmem
+refused big_tbits       '-tbits 99999999999999 is too large'   269 -pm1 -b1 1000 -tbits 99999999999999
 
 # --- worktodo.txt (bounds that bypass the command-line check) ---
 printf 'Pminus1=1,2,269,-1,50000000000,0\n' >worktodo.txt

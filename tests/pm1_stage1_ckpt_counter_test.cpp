@@ -181,32 +181,104 @@ int main(int argc, char** argv) {
     }
     CHECK(!readFile(g_dir + "/does-not-exist.ckpt", P).ok);
 
-    // 5. Limits.
+    // 5. Limits for a 64-bit bit index (Linux/macOS), whatever platform this runs on.
     const uint64_t u32 = 4294967296ULL;
     const uint64_t defMaxe = 268435456ULL;
     // Default chunked Marin stage 1 accepts B1 around and beyond 2^32.
-    CHECK(pc::limitError(u32 - 1, 0, defMaxe, 269, false).empty());
-    CHECK(pc::limitError(u32, 0, defMaxe, 269, false).empty());
-    CHECK(pc::limitError(u32 + 1, 0, defMaxe, 269, false).empty());
-    CHECK(pc::limitError(100000000000ULL, 0, defMaxe, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(u32 - 1, 0, defMaxe, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(u32, 0, defMaxe, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(u32 + 1, 0, defMaxe, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(100000000000ULL, 0, defMaxe, 269, false).empty());
     // Chunk size beyond the supported one, also when the multiplication overflowed.
-    CHECK(pc::limitError(1000, 0, pc::maxEBits(), 269, false).empty());
-    CHECK(!pc::limitError(1000, 0, pc::maxEBits() + 1, 269, false).empty());
-    CHECK(!pc::limitError(1000, 0, 0xFFFFFFFFFFFFFFFFULL, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(1000, 0, pc::maxEBitsFor<uint64_t>(), 269, false).empty());
+    CHECK(!pc::limitError<uint64_t>(1000, 0, pc::maxEBitsFor<uint64_t>() + 1, 269, false).empty());
+    CHECK(!pc::limitError<uint64_t>(1000, 0, 0xFFFFFFFFFFFFFFFFULL, 269, false).empty());
     // B1 above the sanity bound.
-    CHECK(pc::limitError(pc::kMaxB1, 0, defMaxe, 269, false).empty());
-    CHECK(!pc::limitError(pc::kMaxB1 + 1, 0, defMaxe, 269, false).empty());
-    CHECK(!pc::limitError(0xFFFFFFFFFFFFFFFFULL, 0, defMaxe, 269, false).empty());
+    CHECK(pc::limitError<uint64_t>(pc::maxB1For<uint64_t>(), 0, defMaxe, 269, false).empty());
+    CHECK(!pc::limitError<uint64_t>(pc::maxB1For<uint64_t>() + 1, 0, defMaxe, 269, false).empty());
+    CHECK(!pc::limitError<uint64_t>(0xFFFFFFFFFFFFFFFFULL, 0, defMaxe, 269, false).empty());
     // Whole-E paths (legacy, -torus, -b1old extension, Gaussian-Mersenne): E must fit.
-    CHECK(pc::limitError(u32, 0, defMaxe, 269, true).empty());        // ~6.2e9 bits
-    CHECK(!pc::limitError(50000000000ULL, 0, defMaxe, 269, true).empty());  // ~7.2e10 bits
+    CHECK(pc::limitError<uint64_t>(u32, 0, defMaxe, 269, true).empty());        // ~6.2e9 bits
+    CHECK(!pc::limitError<uint64_t>(50000000000ULL, 0, defMaxe, 269, true).empty());  // ~7.2e10 bits
     // An extension only builds the delta.
-    CHECK(pc::limitError(50000000000ULL, 49000000000ULL, defMaxe, 269, true).empty());
-    CHECK(!pc::limitError(50000000000ULL, 1000, defMaxe, 269, true).empty());
-    CHECK(!pc::limitError(50000000000ULL, 0, defMaxe, 269, true).empty());
+    CHECK(pc::limitError<uint64_t>(50000000000ULL, 49000000000ULL, defMaxe, 269, true).empty());
+    CHECK(!pc::limitError<uint64_t>(50000000000ULL, 1000, defMaxe, 269, true).empty());
+    CHECK(!pc::limitError<uint64_t>(50000000000ULL, 0, defMaxe, 269, true).empty());
     // The message names the problem.
-    CHECK(pc::limitError(50000000000ULL, 0, defMaxe, 269, true).find("B1=50000000000") != std::string::npos);
-    CHECK(pc::limitError(1000, 0, 0xFFFFFFFFFFFFFFFFULL, 269, false).find("-maxe") != std::string::npos);
+    CHECK(pc::limitError<uint64_t>(50000000000ULL, 0, defMaxe, 269, true).find("B1=50000000000") != std::string::npos);
+    CHECK(pc::limitError<uint64_t>(1000, 0, 0xFFFFFFFFFFFFFFFFULL, 269, false).find("-maxe") != std::string::npos);
+
+    // 6. The same bounds for a 32-bit bit index (Windows: unsigned long / mp_bitcnt_t
+    //    is 32 bits), computed by instantiating the checks on uint32_t.
+    {
+        using I32 = uint32_t;
+        CHECK(pc::maxEBitsFor<I32>() == (1ULL << 31));
+        CHECK(pc::maxEBitsFor<uint64_t>() == (1ULL << 36));
+        CHECK(pc::maxEBitsFor<unsigned long>() == pc::maxEBits());
+        CHECK(pc::maxEBits() == (sizeof(unsigned long) >= 8 ? (1ULL << 36) : (1ULL << 31)));
+        CHECK(pc::kMaxB1 == (sizeof(unsigned long) >= 8 ? (1ULL << 62) : 4294967295ULL));
+        // the default instantiation is the platform's unsigned long
+        CHECK(pc::limitError(4294967296ULL, 0, 268435456ULL, 269, false).empty() == (sizeof(unsigned long) >= 8));
+        CHECK(pc::maxB1For<I32>() == 4294967295ULL);
+        CHECK(pc::maxB1For<uint64_t>() == (1ULL << 62));
+        const uint64_t defMaxe32 = 268435456ULL;              // 2^28 bits: fine in 32 bits
+        CHECK(pc::limitError<I32>(4294967295ULL, 0, defMaxe32, 269, false).empty());
+        CHECK(!pc::limitError<I32>(4294967296ULL, 0, defMaxe32, 269, false).empty());
+        CHECK(pc::limitError<I32>(4294967296ULL, 0, defMaxe32, 269, false).find("too large") != std::string::npos);
+        CHECK(pc::limitError<I32>(1000, 0, 1ULL << 31, 269, false).empty());
+        CHECK(!pc::limitError<I32>(1000, 0, (1ULL << 31) + 1, 269, false).empty());
+        CHECK(!pc::limitError<I32>(1000, 0, 1ULL << 32, 269, false).empty());   // index would wrap
+        // Whole-E paths: 1.4e9 -> ~2.02e9 bits fits, 1.5e9 -> ~2.16e9 bits does not.
+        CHECK(pc::limitError<I32>(1400000000ULL, 0, defMaxe32, 269, true).empty());
+        CHECK(!pc::limitError<I32>(1500000000ULL, 0, defMaxe32, 269, true).empty());
+        CHECK(pc::limitError<I32>(1500000000ULL, 0, defMaxe32, 269, true).find("2147483648 bits") != std::string::npos);
+        // the same B1 is fine with a 64-bit index
+        CHECK(pc::limitError<uint64_t>(1500000000ULL, 0, defMaxe32, 269, true).empty());
+        // an extension only needs the delta to fit
+        CHECK(pc::limitError<I32>(3600000000ULL, 2000000000ULL, defMaxe32, 269, true).find("exponent") != std::string::npos);
+        CHECK(pc::limitError<I32>(3000000000ULL, 2900000000ULL, defMaxe32, 269, true).empty());
+        // -tbits
+        CHECK(pc::tbitsError<I32>(1ULL << 31).empty());
+        CHECK(!pc::tbitsError<I32>((1ULL << 31) + 1).empty());
+        CHECK(pc::tbitsError<uint64_t>(1ULL << 36).empty());
+        CHECK(!pc::tbitsError<uint64_t>((1ULL << 36) + 1).empty());
+        CHECK(pc::tbitsError<uint64_t>(1ULL << 36).empty());
+    }
+
+    // 7. Option-level check (all the paths that index E), with a stand-in for CliOptions.
+    {
+        struct Opts {
+            std::string mode = "pm1";
+            bool marin = true, torus = false, pm1_lowmem = false, pm1_ultralowmem = false;
+            uint64_t B1 = 1000, B1old = 0, B2 = 0, max_e_bits = 268435456ULL, exponent = 269, tbits = 500000;
+        };
+        auto err = [](const Opts& o) { return pc::optionsLimitError<uint64_t>(o); };
+        auto err32 = [](const Opts& o) { return pc::optionsLimitError<uint32_t>(o); };
+        Opts o;
+        CHECK(err(o).empty());
+        o.B1 = 4294967296ULL; CHECK(err(o).empty()); CHECK(!err32(o).empty());
+        Opts legacy = o; legacy.B1 = 50000000000ULL; legacy.marin = false; CHECK(!err(legacy).empty());
+        Opts torus = o; torus.B1 = 50000000000ULL; torus.torus = true; CHECK(!err(torus).empty());
+        Opts ext = o; ext.B1 = 50000000000ULL; ext.B1old = 1000; CHECK(!err(ext).empty());
+        ext.B1old = 49999000000ULL; CHECK(err(ext).empty());
+        Opts gm = o; gm.mode = "gm-pm1"; gm.B1 = 50000000000ULL; gm.B1old = 49999000000ULL; CHECK(!err(gm).empty());
+        // ultra-low-memory stage 2 builds E(B1)*Q up to B2 in one piece
+        Opts ulm; ulm.B1 = 1000; ulm.B2 = 50000000000ULL;
+        CHECK(err(ulm).empty());
+        ulm.pm1_lowmem = ulm.pm1_ultralowmem = true;
+        CHECK(!err(ulm).empty());
+        CHECK(err(ulm).find("ultra-low-memory") != std::string::npos);
+        ulm.B2 = 1000000;
+        CHECK(err(ulm).empty());
+        // 32-bit index: B2 = 1.5e9 already overflows the product exponent
+        ulm.B2 = 1500000000ULL; CHECK(!err32(ulm).empty()); CHECK(err(ulm).empty());
+        Opts tb; tb.tbits = (1ULL << 36) + 1; CHECK(!err(tb).empty());
+        tb.tbits = 1ULL << 36; CHECK(err(tb).empty());
+        tb.tbits = 1ULL << 31; CHECK(err32(tb).empty());
+        tb.tbits = (1ULL << 31) + 1; CHECK(!err32(tb).empty()); CHECK(err(tb).empty());
+        // other modes are not checked
+        Opts prp = o; prp.mode = "prp"; prp.B1 = 0xFFFFFFFFFFFFFFFFULL; prp.tbits = 0xFFFFFFFFFFFFFFFFULL; CHECK(err(prp).empty());
+    }
 
     std::cout.rdbuf(savedCout);
     if (failures) { std::cerr << failures << " check(s) failed\n"; return 1; }

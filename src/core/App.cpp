@@ -1148,11 +1148,8 @@ int App::run() {
     // P-1 stage 1 limits for bounds that did not come from the command line
     // (worktodo.txt, GUI).  A B1 or -maxe the stage-1 exponent cannot represent
     // would otherwise run and resume from a wrong position.
-    if (options.mode == "pm1" || options.mode == "gm-pm1") {
-        const bool unchunked = options.mode == "gm-pm1" || !options.marin || options.torus ||
-                               (options.B1old > 0 && options.B1 > options.B1old);
-        const std::string limitErr = core::pm1ckpt::limitError(options.B1, options.mode == "gm-pm1" ? 0 : options.B1old, options.max_e_bits,
-                                                               options.exponent, unchunked);
+    {
+        const std::string limitErr = core::pm1ckpt::optionsLimitError(options);
         if (!limitErr.empty()) {
             std::cerr << "Error: " << limitErr << std::endl;
             if (guiServer_) guiServer_->appendLog("Error: " + limitErr);
