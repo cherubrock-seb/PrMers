@@ -81,6 +81,16 @@ int main() {
     expectExponent("PRP=1,2,4294967295,-1", 4294967295U);
     expectExponent("PRP=1,2, 127 ,-1", 127U);
     expectExponent("PRP=1,2,00127,-1", 127U);
+
+    // Leading zeros do not count toward the value, however many there are.
+    expectExponent("PRP=1,2,00000000000000000127,-1", 127U);
+    expectExponent("PRP=1,2,000000004294967295,-1", 4294967295U);
+    expectExponent("Pminus1=1,2,00000000000000000127,-1,100000,1000000", 127U);
+    expectExponent("Pfactor=N/A,1,2,00000000004294967295,-1,77,1", 4294967295U);
+    expectExponent("ECM2=1,2,00000000000000000127,-1,1000,10000,1", 127U);
+    expectSkipped("PRP=1,2,00000004294967296,-1");  // 2^32 with leading zeros
+    expectSkipped("PRP=1,2,000000000000000000000,-1");
+    expectSkipped("PRP=1,2,99999999999999999999999,-1");
     expectExponent("Pminus1=1,2,4294967295,-1,100000,1000000", 4294967295U);
     expectExponent("Pfactor=N/A,1,2,4294967295,-1,77,1", 4294967295U);
     expectExponent("ECM2=1,2,4294967295,-1,1000,10000,1", 4294967295U);

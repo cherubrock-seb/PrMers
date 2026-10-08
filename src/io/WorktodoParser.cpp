@@ -94,13 +94,17 @@ static void trim_inplace(std::string& s){
 static bool parseExponentField(const std::string& raw, uint32_t& exponent) {
     std::string token = raw;
     trim_inplace(token);
-    if (token.empty() || token.size() > 10) return false;
+    if (token.empty()) return false;
+    // Leading zeros do not change the value, so the field length is not limited;
+    // the accumulated value is checked against the 32-bit range at every digit.
+    constexpr uint64_t kMax = std::numeric_limits<uint32_t>::max();
     uint64_t value = 0;
     for (char c : token) {
         if (!std::isdigit(static_cast<unsigned char>(c))) return false;
         value = value * 10 + static_cast<uint64_t>(c - '0');
+        if (value > kMax) return false;
     }
-    if (value == 0 || value > std::numeric_limits<uint32_t>::max()) return false;
+    if (value == 0) return false;
     exponent = static_cast<uint32_t>(value);
     return true;
 }
