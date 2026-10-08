@@ -789,12 +789,62 @@ int App::runLlSafeMarin()
     );
     Printer::finalReport(options, elapsed_time, json, is_prime);
 
+    // End of job, in this order: 1. save the result, 2. retire the worktodo
+    // entry, 3. only then delete the checkpoint. If 1 or 2 fails, the checkpoint
+    // is kept, so a rerun of the entry resumes at the end instead of from 0.
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, "llsafe", json);
-    wm.appendToResultsTxt(json);
+    bool resultSaved = wm.saveIndividualJson(options.exponent, "llsafe", json);
+    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
+    const bool retired = resultSaved && hasWorktodoEntry_ &&
+                         worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
 
-    delete_checkpoints(p, options.wagstaff, false, true);
+    if (resultSaved && (!hasWorktodoEntry_ || retired)) {
+        delete_checkpoints(p, options.wagstaff, false, true);
+    } else {
+        std::string msg = !resultSaved
+            ? "[LL-SAFE] Result could not be saved; keeping the checkpoint"
+            : "Failed to update " + options.worktodo_path + "; keeping the checkpoint";
+        if (hasWorktodoEntry_) msg += " and the entry in " + options.worktodo_path;
+        std::cerr << msg << "\n";
+        if (guiServer_) guiServer_->appendLog(msg + "\n");
+    }
     logger.logEnd(elapsed_time);
     delete eng;
+
+    if (hasWorktodoEntry_ && resultSaved) {
+        if (retired) {
+            std::cout << "Entry removed from " << options.worktodo_path
+                      << " and saved to worktodo_save.txt\n";
+            if (guiServer_) {
+                std::ostringstream oss;
+                oss << "Entry removed from " << options.worktodo_path
+                    << " and saved to worktodo_save.txt\n";
+                guiServer_->appendLog(oss.str());
+            }
+            std::ifstream f(options.worktodo_path);
+            std::string l;
+            bool more = false;
+            while (std::getline(f, l)) {
+                if (!l.empty() && l[0] != '#') { more = true; break; }
+            }
+            f.close();
+            if (more) {
+                std::cout << "Restarting for next entry in worktodo.txt\n";
+                if (guiServer_) guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
+                restart_self(argc_, argv_);
+            } else {
+                std::cout << "No more entries in worktodo.txt, exiting.\n";
+                if (guiServer_) guiServer_->appendLog("No more entries in worktodo.txt, exiting.\n");
+                if (!options.gui) {
+                    std::exit(0);
+                }
+            }
+        } else {
+            if (!options.gui) {
+                std::exit(-1);
+            }
+        }
+    }
+
     return is_prime ? 0 : 1;
 }
