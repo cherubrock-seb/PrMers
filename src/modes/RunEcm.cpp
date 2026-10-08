@@ -8,6 +8,8 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcmTorsionCurves.hpp"
+#include "math/EcmKnownFactors.hpp"
+#include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -212,9 +214,7 @@ int App::runECMMarin()
         return splitmix64_u64(x);
     };
     auto rnd_mpz_bits = [&](const mpz_class& N, uint64_t seed0, unsigned bits)->mpz_class{
-        mpz_class z = 0;
-        uint64_t s = seed0;
-        for (unsigned i=0;i<bits;i+=64){ z <<= 64; z += (unsigned long)splitmix64_step(s); }
+        mpz_class z = ecm_rng::random_mpz_bits(seed0, bits);
         z %= N; if (z <= 2) z += 3; return z;
     };
     auto fmt_hms = [&](double s)->string{ uint64_t u=(uint64_t)(s+0.5); uint64_t h=u/3600,m=(u%3600)/60,se=u%60; ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str(); };
@@ -289,14 +289,13 @@ int App::runECMMarin()
         wrote_result = true;
     };
 
-    auto is_known = [&](const mpz_class& g)->bool{
-        for (auto &s: options.knownFactors){
-            if (s.empty()) continue;
-            mpz_class f; if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
-            if (f < 0) f = -f;
-            if (f > 1 && g == f) return true;
-        }
-        return false;
+    // True when `g` brings nothing new: it is 1 or a product of factors already known
+    // (user-supplied or found by an earlier curve of this run), and then `g` is left as
+    // it was.  Otherwise `g` is reduced in place to the part the known factors do not
+    // explain, which is what must be reported.  The engine keeps working modulo the full
+    // number, so a later curve routinely finds products such as p1*p2 after p1 was reported.
+    auto is_known = [&](mpz_class& g)->bool{
+        return ecm_known::strip(g, options.knownFactors);
     };
 
     size_t transform_size_once = 0;
@@ -617,13 +616,18 @@ int App::runECMMarin()
         return false;
     };
 
-    if (!options.seed && !forceCurveSeed) {
+    // A single forced seed runs exactly one curve and never resumes from a probe.  A forced
+    // seed series (-seed with -K n and -ecm-continue-after-factor) has deterministic per-curve
+    // seeds, so it resumes at the first curve whose checkpoint carries the seed the series
+    // would use for that curve; a checkpoint from some other seed is not ours.
+    if (!options.seed && (!forceCurveSeed || forcedSeedSeries)) {
         for (uint64_t c = 0; c < curves; ++c) {
             const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
             const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
             uint64_t s = 0;
             if (try_probe_mont_ckpt(ckpt2, s) || try_probe_mont_ckpt(ckpt2 + ".old", s) ||
                 try_probe_mont_ckpt(ckpt_file, s) || try_probe_mont_ckpt(ckpt_file + ".old", s)) {
+                if (forcedSeedSeries && s != (c == 0 ? forcedCurveSeedValue : mix64(forcedCurveSeedValue, c))) continue;
                 resume_curve_idx = c;
                 resume_curve_seed = s;
                 have_resume_seed = true;
@@ -1807,7 +1811,8 @@ int App::runECMMarin()
             const uint32_t MAX_S2_CHUNK_BITS = compute_s2_chunk_bits(transform_size_once);
             const uint64_t total_s2_iters = std::max<uint64_t>(1ULL, s2_total_iters_precomputed);
 
-            auto publish_stage2_factor = [&](const mpz_class& gg)->int {
+            auto publish_stage2_factor = [&](const mpz_class& found_gcd)->int {
+                mpz_class gg = found_gcd;
                 bool known = is_known(gg);
                 std::cout << "[ECM] Curve " << (c+1) << "/" << curves
                           << (known ? " | known factor=" : " | factor=") << gg.get_str() << std::endl;
@@ -2199,6 +2204,9 @@ auto setup_stage2_base = [&]() -> int {
                 }
                 if (setup_rc == 1) continue;
                 if (setup_rc < 0) {
+                    std::error_code ec0;
+                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
                     delete eng;
                     continue;
                 }
@@ -2378,6 +2386,14 @@ auto setup_stage2_base = [&]() -> int {
                         break;
                     }
                     if (rz < 0) {
+                        // Z == 0 (mod N): every prime factor was hit in the same chunk, so
+                        // the curve cannot continue.  Drop its checkpoints (they would pin
+                        // every restart to this curve) and release the engine.
+                        std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 Z is 0 mod N, skipping curve\n";
+                        std::error_code ec0;
+                        fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
+                        fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                        delete eng;
                         next_curve_after_stage2 = true;
                         break;
                     }

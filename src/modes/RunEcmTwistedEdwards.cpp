@@ -8,6 +8,8 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcMod4.hpp"
+#include "math/EcmKnownFactors.hpp"
+#include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -796,12 +798,7 @@ int App::runECMMarinTwistedEdwards()
         return splitmix64_u64(x);
     };
     auto rnd_mpz_bits = [&](const mpz_class& N, uint64_t seed0, unsigned bits)->mpz_class{
-        mpz_class z = 0;
-        uint64_t s = seed0;
-        for (unsigned i=0;i<bits;i+=64){
-            z <<= 64;
-            z += (unsigned long)splitmix64_step(s);
-        }
+        mpz_class z = ecm_rng::random_mpz_bits(seed0, bits);
         z %= N;
         if (z <= 2) z += 3;
         return z;
@@ -871,15 +868,13 @@ int App::runECMMarinTwistedEdwards()
         wrote_result = true;
     };
 
-    auto is_known = [&](const mpz_class& g)->bool{
-        for (auto &s: options.knownFactors){
-            if (s.empty()) continue;
-            mpz_class f;
-            if (mpz_set_str(f.get_mpz_t(), s.c_str(), 0) != 0) continue;
-            if (f < 0) f = -f;
-            if (f > 1 && g == f) return true;
-        }
-        return false;
+    // True when `g` brings nothing new: it is 1 or a product of factors already known
+    // (user-supplied or found by an earlier curve of this run), and then `g` is left as
+    // it was.  Otherwise `g` is reduced in place to the part the known factors do not
+    // explain, which is what must be reported.  The engine keeps working modulo the full
+    // number, so a later curve routinely finds products such as p1*p2 after p1 was reported.
+    auto is_known = [&](mpz_class& g)->bool{
+        return ecm_known::strip(g, options.knownFactors);
     };
 
     auto publish_json = [&](){
@@ -1643,6 +1638,23 @@ int App::runECMMarinTwistedEdwards()
                     break;
                 }
             }
+        }
+    }
+
+    // A forced -seed names the curve to run.  A leftover checkpoint of another seed (an
+    // earlier run with a different -seed) must not take its place, so the probe result is
+    // kept only when it carries the seed this run would use for that curve index.
+    if (forceCurve && have_resume_seed) {
+        const uint64_t expected_seed = (forcedSeedSeries && resume_curve_idx != 0)
+            ? mix64(forcedCurveSeedValue, resume_curve_idx) : forcedCurveSeedValue;
+        if (resume_curve_seed != expected_seed) {
+            std::cout << "[ECM] Ignoring checkpoint of curve " << (resume_curve_idx + 1)
+                      << " made with seed " << resume_curve_seed << ": -seed "
+                      << forcedCurveSeedValue << " was requested" << std::endl;
+            resume_curve_idx   = 0;
+            resume_curve_seed  = 0;
+            have_resume_seed   = false;
+            have_resume_stage2 = false;
         }
     }
 
@@ -3433,8 +3445,8 @@ int App::runECMMarinTwistedEdwards()
             }
 
             if (found) {
-                bool known = is_known(result_factor > 1 ? result_factor : g);
-                const mpz_class& gf = (result_factor > 1 ? result_factor : g);
+                mpz_class gf = (result_factor > 1 ? result_factor : g);
+                bool known = is_known(gf);
 
                 std::cout<<"[ECM] Curve "<<(c+1)<<"/"<<curves
                          <<(known?" | known factor=":" | factor=")<<gf.get_str()<<std::endl;
@@ -3450,7 +3462,7 @@ int App::runECMMarinTwistedEdwards()
                 fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
 
                 if (!known) {
-                    if (!(result_factor > 1)) result_factor = gf;
+                    result_factor = gf;
                     result_status = "found";
                     curves_tested_for_found = c+1;
                     options.curves_tested_for_found = (uint32_t)(c+1);
@@ -3516,7 +3528,8 @@ int App::runECMMarinTwistedEdwards()
             uint64_t last2_done_bits = done_bits_est;
             double ema_ips_stage2 = 0.0;
 
-            auto publish_stage2_factor = [&](const mpz_class& gg)->int {
+            auto publish_stage2_factor = [&](const mpz_class& found_gcd)->int {
+                mpz_class gg = found_gcd;
                 bool known = is_known(gg);
                 std::cout << "[ECM] Curve " << (c+1) << "/" << curves << (known ? " | known factor=" : " | factor=") << gg.get_str() << std::endl;
                 if (guiServer_) {
