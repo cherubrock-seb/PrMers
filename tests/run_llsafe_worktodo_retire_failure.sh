@@ -9,7 +9,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE="${1:-0}"
-P="${2:-11213}"
+P="${2:-4423}"
 WORK="$(mktemp -d)"
 RUN="${PRMERS_TEST_RUN_PREFIX:-}"
 
@@ -24,10 +24,11 @@ CKPT="llsafe_m_$P.ckpt"
 echo "DoubleCheck=$P,70,1" > worktodo.txt
 
 # 1. The result cannot be saved (results.txt is a directory): the entry and the
-# checkpoint stay. -t 1 writes a checkpoint every second, so one exists at the end.
+# checkpoint stay. -t 0 writes a checkpoint at every iteration, so one exists at
+# the end however fast the device is.
 mkdir results.txt
 set +e
-$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 1 -d "$DEVICE" -noask -f "$WORK" > nosave.log 2>&1
+$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 0 -d "$DEVICE" -noask -f "$WORK" > nosave.log 2>&1
 rc=$?
 set -e
 echo "SAVE_FAILURE_RUN_RC=$rc"
@@ -41,7 +42,7 @@ rmdir results.txt
 # directory): the entry and the checkpoint stay.
 mkdir worktodo_save.txt
 set +e
-$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 1 -d "$DEVICE" -noask -f "$WORK" > fail.log 2>&1
+$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 0 -d "$DEVICE" -noask -f "$WORK" > fail.log 2>&1
 rc=$?
 set -e
 echo "RETIRE_FAILURE_RUN_RC=$rc"
@@ -56,7 +57,7 @@ echo "RETIRE_FAILURE_KEEPS_CHECKPOINT=PASS"
 # 3. Both succeed: the entry is retired and the checkpoint removed.
 rmdir worktodo_save.txt
 set +e
-$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 1 -d "$DEVICE" -noask -f "$WORK" > ok.log 2>&1
+$RUN timeout 300 "$ROOT/prmers" -worktodo worktodo.txt -t 0 -d "$DEVICE" -noask -f "$WORK" > ok.log 2>&1
 rc=$?
 set -e
 echo "RETRY_RUN_RC=$rc"
