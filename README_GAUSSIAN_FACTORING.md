@@ -281,7 +281,7 @@ GMCHAIN=p,pm1_B1,pm1_B2[,ecm_B1[,ecm_B2[,curves[,sieve_limit[,chunk_bits]]]]]
 
 `GMCHAIN` is conditional. It runs P-1 first, optionally ECM, and then the
 deterministic Proth test only if no factor was found. A completed line is
-removed from the active worktodo and appended to `worktodo_save.txt`. An
+removed from the active worktodo and appended to `worktodo_save.txt` in the same directory as the worktodo file. An
 interrupted or erroneous line remains first and resumes from its checkpoint.
 Comments beginning with `#` or `;` are preserved.
 

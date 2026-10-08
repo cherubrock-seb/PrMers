@@ -1496,7 +1496,7 @@ int App::runInner() {
         (rc == 0 || rc == 1)) {
         if (worktodoParser_ && worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Gaussian-Mersenne entry removed from "
-                      << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                      << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
             const bool pending = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
             if (pending) {
                 std::cout << "Restarting for next Gaussian-Mersenne worktodo entry.\n";

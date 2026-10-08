@@ -37,7 +37,7 @@ Gaussian-Mersenne record campaign
   sieve    : $SIEVE
 EOF
 
-# PrMers removes a completed line, archives it in worktodo_save.txt and re-execs
+# PrMers removes a completed line, archives it in worktodo_save.txt (next to the worktodo file) and re-execs
 # itself. An interrupted line stays first and resumes from its checkpoint.
 set +e
 ./prmers \

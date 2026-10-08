@@ -62,7 +62,13 @@ public:
     // is not glued onto the last one. Serialised with removeProcessedLine(), so an append cannot be lost to a
     // concurrent rewrite of the file. Returns false when the file cannot be written.
     static bool appendLine(const std::string& path, const std::string& line);
-    // Remove the line that was actually run (WorktodoEntry::rawLine) and archive it to worktodo_save.txt.
+    // Path of the archive of finished entries for a given worktodo file: "worktodo_save.txt" in the
+    // same directory as that worktodo file (the current directory when the path has no directory part).
+    static std::string archivePathFor(const std::string& worktodoPath);
+    std::string archivePath() const;
+    // Remove the line that was actually run (WorktodoEntry::rawLine) and archive it to archivePath().
+    // Returns false (leaving the worktodo file unchanged) with a message on stderr if either file
+    // cannot be written; the entry is never dropped without being archived.
     // parse() skips lines it cannot run, so "the first actionable line" is not necessarily that line.
     bool removeProcessedLine(const std::string& rawLine);
     // True when parse() would return an entry for this file: a dry run of parse() with no output.

@@ -1343,11 +1343,11 @@ int App::runPM1() {
      if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
             std::cout << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
             if (guiServer_) {
                                 std::ostringstream oss;
                                 oss  << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                       guiServer_->appendLog(oss.str());
             }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
@@ -1357,7 +1357,7 @@ int App::runPM1() {
                 if (guiServer_) {
                                 std::ostringstream oss;
                                 oss  << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                       guiServer_->appendLog(oss.str());
                 }
                 restart_self(argc_, argv_);
@@ -7515,8 +7515,8 @@ int App::runPM1Marin() {
         const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
         if (hasWorktodoEntry_ && resultSaved) {
                 if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
-                    std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-                    if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+                    std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
+                    if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n"; guiServer_->appendLog(oss.str()); }
                     bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
                     if (stopAfterResult) { /* stop requested: the next entry is not started */ } else if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
                     else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
@@ -8021,8 +8021,8 @@ int App::runPM1Marin() {
     const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
-            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+            std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
+            if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n"; guiServer_->appendLog(oss.str()); }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
             if (stopAfterResult) { /* stop requested: the next entry is not started */ } else if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
             else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
@@ -8564,8 +8564,8 @@ int App::runPM1Stage3Marin() {
     const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
     if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
-                std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
-                if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n"; guiServer_->appendLog(oss.str()); }
+                std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
+                if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n"; guiServer_->appendLog(oss.str()); }
                 bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
                 if (stopAfterResult) { /* stop requested: the next entry is not started */ } else if (more) { std::cout << "Restarting for next entry in worktodo.txt\n"; if (guiServer_) { std::ostringstream oss; oss << "Restarting for next entry in worktodo.txt\n"; guiServer_->appendLog(oss.str()); } restart_self(argc_, argv_); }
                 else { std::cout << "No more entries in worktodo.txt, exiting.\n"; if (guiServer_) { std::ostringstream oss; oss << "No more entries in worktodo.txt, exiting.\n"; guiServer_->appendLog(oss.str()); } if (!options.gui) {std::exit(0);} }
@@ -9163,10 +9163,10 @@ int App::runPM1Stage4Marin() {
     const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
     if (hasWorktodoEntry_ && resultSaved) {
         if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
-            std::cout << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+            std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
             if (guiServer_) {
                 std::ostringstream oss;
-                oss << "Entry removed from " << options.worktodo_path << " and saved to worktodo_save.txt\n";
+                oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                 guiServer_->appendLog(oss.str());
             }
 

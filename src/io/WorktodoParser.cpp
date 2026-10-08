@@ -712,23 +712,44 @@ bool WorktodoParser::appendLine(const std::string& path, const std::string& line
     return static_cast<bool>(out);
 }
 
+std::string WorktodoParser::archivePathFor(const std::string& worktodoPath) {
+    // The archive lives next to the worktodo file in use, not in the current directory. A worktodo
+    // path with no directory part ("worktodo.txt") resolves against the current directory, so the
+    // archive is "worktodo_save.txt" there, exactly as before.
+    const std::filesystem::path parent = std::filesystem::path(worktodoPath).parent_path();
+    if (parent.empty()) return "worktodo_save.txt";
+    return (parent / "worktodo_save.txt").string();
+}
+
+std::string WorktodoParser::archivePath() const {
+    return archivePathFor(filename_);
+}
+
 bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
     std::lock_guard<std::mutex> lock(worktodoFileMutex());
+    const std::string tmpPath = filename_ + ".tmp";
+    const std::string savePath = archivePath();
     std::ifstream inFile(filename_);
-    std::ofstream tempFile(filename_ + ".tmp");
-    std::ofstream saveFile("worktodo_save.txt", std::ios::app);
-    if (!inFile || !tempFile || !saveFile) return false;
-
+    if (!inFile) {
+        std::cerr << "Cannot read " << filename_ << "\n";
+        return false;
+    }
+    std::ofstream tempFile(tmpPath);
+    if (!tempFile) {
+        std::cerr << "Cannot write " << tmpPath << " (is the directory of " << filename_ << " writable?)\n";
+        return false;
+    }
     std::string expected = rawLine;
     trim_inplace(expected);
     std::string line;
+    std::string removedLine;
     bool removed = false;
     while (std::getline(inFile, line)) {
         std::string trimmed = line;
         trim_inplace(trimmed);
         if (!removed && trimmed == expected) {
             removed = true;
-            saveFile << line << "\n";
+            removedLine = line;
             continue;
         }
         tempFile << line << "\n";
@@ -736,18 +757,50 @@ bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
 
     inFile.close();
     tempFile.close();
-    saveFile.close();
     if (!removed) {
-        std::remove((filename_ + ".tmp").c_str());
+        std::remove(tmpPath.c_str());
         return false;
+    }
+    if (!tempFile) {
+        std::cerr << "Failed writing " << tmpPath << "; " << filename_ << " left unchanged\n";
+        std::remove(tmpPath.c_str());
+        return false;
+    }
+    // Archive first: if this fails the entry stays in the worktodo file and nothing is lost.
+    {
+        bool needNewline = false;
+        {
+            std::ifstream existing(savePath, std::ios::binary | std::ios::ate);
+            if (existing.is_open() && existing.tellg() > 0) {
+                existing.seekg(-1, std::ios::end);
+                char last = '\n';
+                existing.get(last);
+                needNewline = (last != '\n');   // a hand-edited archive: do not glue entries together
+            }
+        }
+        std::ofstream saveFile(savePath, std::ios::app);
+        if (!saveFile) {
+            std::cerr << "Cannot open " << savePath << " for appending; keeping the entry in " << filename_ << "\n";
+            std::remove(tmpPath.c_str());
+            return false;
+        }
+        if (needNewline) saveFile << '\n';
+        saveFile << removedLine << "\n";
+        saveFile.close();
+        if (!saveFile) {
+            std::cerr << "Failed writing to " << savePath << "; keeping the entry in " << filename_ << "\n";
+            std::remove(tmpPath.c_str());
+            return false;
+        }
     }
     // Replace in one step: filesystem::rename overwrites the destination
     // (atomically on POSIX), so a failure leaves the original worktodo intact
     // instead of having already deleted it.
     std::error_code ec;
-    std::filesystem::rename(filename_ + ".tmp", filename_, ec);
+    std::filesystem::rename(tmpPath, filename_, ec);
     if (ec) {
-        std::remove((filename_ + ".tmp").c_str());
+        std::cerr << "Cannot replace " << filename_ << ": " << ec.message() << "\n";
+        std::remove(tmpPath.c_str());
         return false;
     }
     return true;

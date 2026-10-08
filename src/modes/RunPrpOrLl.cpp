@@ -927,10 +927,10 @@ int App::runPrpOrLl() {
             if (hasWorktodoEntry_ && resultSaved) {
                 if (retired) {
                     std::cout << "Entry removed from " << options.worktodo_path
-                              << " and saved to worktodo_save.txt\n";
+                              << " and saved to " << worktodoParser_->archivePath() << "\n";
                     if (guiServer_)
                         guiServer_->appendLog("Entry removed from " + options.worktodo_path
-                                              + " and saved to worktodo_save.txt\n");
+                                              + " and saved to " + worktodoParser_->archivePath() + "\n");
                     if (stopped) {
                         // A stop was requested: the entry is retired, the next one is not started.
                     } else if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
@@ -1194,11 +1194,11 @@ int App::runPrpOrLl() {
     if (hasWorktodoEntry_ && resultSaved) {
         if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
             if (guiServer_) {
                                 std::ostringstream oss;
                                 oss << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                       guiServer_->appendLog(oss.str());
             }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
