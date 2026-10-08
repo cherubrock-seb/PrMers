@@ -16,6 +16,7 @@
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
 #include "core/Pm1Stage2External.hpp"
+#include "core/Pm1Checkpoint.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -1619,13 +1620,8 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
                 std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
                 delete e; return -3;
             }
-            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) { delete e; return -2; }
-            if (version != 3) { delete e; return -2; }
-            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) { delete e; return -2; }
-            if (rp != pexp) { delete e; return -2; }
-            uint32_t ri = 0; double et = 0.0;
-            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) { delete e; return -2; }
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) { delete e; return -2; }
+            uint64_t ri = 0; double et = 0.0;
+            if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) { delete e; return -2; }
 
             const size_t cksz = e->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -3821,13 +3817,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
                 return -3;
             }
-            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 3) return -2;
-            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-            if (rp != pexp) return -2;
-            uint32_t ri = 0; double et = 0.0;
-            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            uint64_t ri = 0; double et = 0.0;
+            if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) return -2;
             const size_t cksz = e->get_checkpoint_size();
             std::vector<char> data(cksz);
             if (!f.read(data.data(), cksz)) return -2;
@@ -4904,13 +4895,8 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
                 std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
                 return -3;
             }
-            int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-            if (version != 3) return -2;
-            uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-            if (rp != pexp) return -2;
-            uint32_t ri = 0; double et = 0.0;
-            if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-            if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+            uint64_t ri = 0; double et = 0.0;
+            if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) return -2;
 
             const size_t cksz = e->get_checkpoint_size();
             std::vector<char> data(cksz);
@@ -5692,13 +5678,8 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
             std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
             return -3;
         }
-        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 3) return -2;
-        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-        if (rp != pexp) return -2;
-        uint32_t ri = 0; double et = 0.0;
-        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        uint64_t ri = 0; double et = 0.0;
+        if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) return -2;
         const size_t cksz = e->get_checkpoint_size();
         std::vector<char> data(cksz);
         if (!f.read(data.data(), cksz)) return -2;
@@ -6505,13 +6486,13 @@ int App::runPM1Marin() {
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
     std::vector<char> ckpt_restore_data;
-    auto save_ckpt = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
+    auto save_ckpt = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-        { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
+        { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
         write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
     };
-    auto read_ckpt = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
+    auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
         if (!f.exists()) return -1;
         std::string backend_reason;
@@ -6528,12 +6509,7 @@ int App::runPM1Marin() {
                 return -3;
             }
         }
-        int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 3) return -2;
-        uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-        if (rp != p) return -2;
-        if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-        if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+        if (!core::pm1ckpt::readHeader(f, p, ri, et)) return -2;
         const size_t cksz = eng->get_checkpoint_size();
         // Only buffer the register image here; the caller loads it into the
         // engine once the whole file (CRC included) has been accepted.
@@ -6620,7 +6596,7 @@ int App::runPM1Marin() {
     uint64_t startPrime = 3;
     bool firstChunk = true;
     uint64_t processed_total_bits = 0;
-    uint32_t resumeI_ck = 0;
+    uint64_t resumeI_ck = 0;
     double restored_time = 0.0;
     uint64_t gl_checkpass_ck = 0, gl_blocks_since_check_ck = 0, gl_bits_in_block_ck = 0, gl_current_block_len_ck = 0, bits_in_chunk_ck = 0;
     uint8_t in_lot_ck = 0, firstChunk_ck = 1;
@@ -6633,7 +6609,7 @@ int App::runPM1Marin() {
     // has its own _ext.ckpt), so don't read it for that: H_old is already in RBASE.
     if (doExtend) {
         // Read into locals: the extension keeps its own chunk bookkeeping.
-        uint32_t ri = 0;
+        uint64_t ri = 0;
         double et = 0.0;
         uint64_t x_chk = 0, x_blks = 0, x_bib = 0, x_cbl = 0, x_chunk = 0, x_start = 0, x_processed = 0, x_bits = 0;
         uint8_t x_inlot = 0, x_first = 0;
@@ -6709,14 +6685,14 @@ int App::runPM1Marin() {
             const std::string ckpt_file_ext = ckext.str();
             std::vector<char> ckpt_ext_restore_data;
 
-            auto save_ckpt_ext = [&](uint32_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
+            auto save_ckpt_ext = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
                 const std::string oldf = ckpt_file_ext + ".old", newf = ckpt_file_ext + ".new";
-                { File f(newf, "wb"); int version = 3; if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return; if (!f.write(reinterpret_cast<const char*>(&p), sizeof(p))) return; if (!f.write(reinterpret_cast<const char*>(&i), sizeof(i))) return; if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
+                { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
                 std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file_ext, oldf, ec); fs::rename(ckpt_file_ext + ".new", ckpt_file_ext, ec); fs::remove(oldf, ec);
                 write_pm1_checkpoint_backend(ckpt_file_ext, eng);
             };
 
-            auto read_ckpt_ext = [&](const std::string& file, uint32_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
+            auto read_ckpt_ext = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
                 File f(file);
                 if (!f.exists()) return -1;
                 std::string backend_reason;
@@ -6724,12 +6700,7 @@ int App::runPM1Marin() {
                     std::cerr << "[PM1] Ignoring incompatible extension checkpoint " << file << ": " << backend_reason << "\n";
                     return -3;
                 }
-                int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-                if (version != 3) return -2;
-                uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-                if (rp != p) return -2;
-                if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                if (!core::pm1ckpt::readHeader(f, p, ri, et)) return -2;
                 const size_t cksz = eng->get_checkpoint_size();
                 // Buffered only: loading it here would overwrite RBASE (H_old)
                 // and RSTATE even when the caller then rejects the file.
@@ -6757,7 +6728,7 @@ int App::runPM1Marin() {
                 return 0;
             };
 
-            uint32_t resumeI_ext_ck = 0;
+            uint64_t resumeI_ext_ck = 0;
             double restored_time_ext = 0.0;
             uint64_t gl_checkpass_ext_ck = 0, gl_blocks_since_check_ext_ck = 0, gl_bits_in_block_ext_ck = 0, gl_current_block_len_ext_ck = 0, bits_in_chunk_ext_ck = 0;
             uint8_t in_lot_ext_ck = 0, firstChunk_ext_ck = 0;
@@ -6769,13 +6740,16 @@ int App::runPM1Marin() {
 
             int rr_ext = read_ckpt_ext(ckpt_file_ext, resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
             if (rr_ext < 0) rr_ext = read_ckpt_ext(ckpt_file_ext + ".old", resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
-            if (rr_ext == 0 && bits_in_chunk_ext_ck == (uint64_t)bits) {
+            if (rr_ext == 0 && bits_in_chunk_ext_ck == (uint64_t)bits && resumeI_ext_ck >= 1 && resumeI_ext_ck <= (uint64_t)bits) {
                 if (!eng->set_checkpoint(ckpt_ext_restore_data)) {
                     std::cerr << "[PM1] Cannot load extension checkpoint " << ckpt_file_ext << " into the engine\n";
                     delete eng;
                     return -1;
                 }
                 restored_ext = true;
+            } else if (rr_ext == 0 && bits_in_chunk_ext_ck == (uint64_t)bits) {
+                std::cout << "[PM1] Ignoring extension checkpoint " << ckpt_file_ext << ": its resume position "
+                          << resumeI_ext_ck << " is outside the extension's " << (uint64_t)bits << " bits\n";
             } else if (rr_ext == 0) {
                 std::cout << "[PM1] Ignoring extension checkpoint " << ckpt_file_ext << ": it covers "
                           << bits_in_chunk_ext_ck << " bits, this extension needs " << (uint64_t)bits << "\n";
@@ -6802,7 +6776,7 @@ int App::runPM1Marin() {
             uint64_t bits_in_block      = restored_ext ? gl_bits_in_block_ext_ck     : 0;
             uint64_t current_block_len  = restored_ext && gl_current_block_len_ext_ck
                                           ? gl_current_block_len_ext_ck
-                                          : (((uint64_t)(( (restored_ext ? resumeI_ext_ck : (uint32_t)bits ) - 1) % B)) + 1);
+                                          : (((uint64_t)(( (restored_ext ? resumeI_ext_ck : (uint64_t)bits ) - 1) % B)) + 1);
             mpz_class eacc              = restored_ext ? eacc_ext_ck : 0;
             mpz_class wbits             = restored_ext ? wbits_ext_ck : 0;
             uint64_t gl_checkpass       = restored_ext ? gl_checkpass_ext_ck : 0;
@@ -6853,7 +6827,7 @@ int App::runPM1Marin() {
                     auto now_int = std::chrono::high_resolution_clock::now();
                     double elapsed_ext = std::chrono::duration<double>(now_int - start_clock).count() + restored_time;
                     save_ckpt_ext(
-                        (uint32_t)lastIter_ext,
+                        lastIter_ext,
                         elapsed_ext,
                         gl_checkpass,
                         blocks_since_check,
@@ -6877,7 +6851,7 @@ int App::runPM1Marin() {
                     std::cout << "\nBackup point done at i=" << i << " start...." << std::endl;
                     double elapsed_ext = std::chrono::duration<double>(now - start_clock).count() + restored_time;
                     save_ckpt_ext(
-                        (uint32_t)lastIter_ext,
+                        lastIter_ext,
                         elapsed_ext,
                         gl_checkpass,
                         blocks_since_check,
@@ -7453,13 +7427,21 @@ int App::runPM1Marin() {
             }
             mp_bitcnt_t bits = mpz_sizeinbase(Echunk.get_mpz_t(), 2);
             if (bits == 0) break;
-            if (restored && bits_in_chunk_ck && bits_in_chunk_ck != (uint64_t)bits) {
+            if (restored && ((bits_in_chunk_ck && bits_in_chunk_ck != (uint64_t)bits) || resumeI_ck > (uint64_t)bits)) {
                 // A checkpoint without recorded B1/-maxe (written by an older
                 // version) that belongs to a different exponent E: its state
-                // is meaningless here.  Drop it and start stage 1 over.
-                std::cerr << "[PM1] Ignoring checkpoint " << ckpt_file << ": it covers a chunk of "
-                          << bits_in_chunk_ck << " bits but this run's chunk has " << bits
-                          << " bits (different B1 or -maxe); starting stage 1 from scratch\n";
+                // is meaningless here.  A bit counter beyond the chunk is
+                // equally unusable (resuming would square extra times).  Drop
+                // it and start stage 1 over.
+                if (resumeI_ck > (uint64_t)bits && (!bits_in_chunk_ck || bits_in_chunk_ck == (uint64_t)bits)) {
+                    std::cerr << "[PM1] Ignoring checkpoint " << ckpt_file << ": its resume position "
+                              << resumeI_ck << " is beyond this run's chunk of " << bits
+                              << " bits; starting stage 1 from scratch\n";
+                } else {
+                    std::cerr << "[PM1] Ignoring checkpoint " << ckpt_file << ": it covers a chunk of "
+                              << bits_in_chunk_ck << " bits but this run's chunk has " << bits
+                              << " bits (different B1 or -maxe); starting stage 1 from scratch\n";
+                }
                 restored = false;
                 chunkIndex = 0;
                 startPrime = 3;
@@ -7534,14 +7516,14 @@ int App::runPM1Marin() {
                 if (interrupted) {
                     std::cout << "\nInterrupted by user, state saved at iteration " << i << std::endl;
                     if (guiServer_) { std::ostringstream oss; oss << "\nInterrupted signal received\n "; guiServer_->appendLog(oss.str()); }
-                    save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
+                    save_ckpt(lastIter, std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
                     delete eng;
                     return 0;
                 }
                 auto now = std::chrono::high_resolution_clock::now();
                 if (std::chrono::duration_cast<std::chrono::seconds>(now - lastBackup).count() >= options.backup_interval) {
                     std::cout << "\nBackup point done at i=" << i << " start...." << std::endl;
-                    save_ckpt((uint32_t)lastIter, std::chrono::duration<double>(now - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
+                    save_ckpt(lastIter, std::chrono::duration<double>(now - start_clock).count() + restored_time, gl_checkpass, blocks_since_check, bits_in_block, current_block_len, in_lot ? 1 : 0, eacc, wbits, chunkIndex, startPrime, firstChunk ? 1 : 0, processed_total_bits + (bits - i), (uint64_t)bits);
                     std::cout << "\nBackup point done at i=" << i << " done...." << std::endl;
                     lastBackup = now;
                 }
@@ -8075,13 +8057,8 @@ int App::runPM1Stage3Marin() {
                     std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
                     return -3;
                 }
-                int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-                if (version != 3) return -2;
-                uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-                if (rp != pexp) return -2;
-                uint32_t ri = 0; double et = 0.0;
-                if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                uint64_t ri = 0; double et = 0.0;
+                if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) return -2;
                 const size_t cksz = e->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!f.read(data.data(), cksz)) return -2;
@@ -8629,13 +8606,8 @@ int App::runPM1Stage4Marin() {
                     std::cerr << "[PM1] Stage 1 checkpoint ignored: " << backend_reason << "\n";
                     return -3;
                 }
-                int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-                if (version != 3) return -2;
-                uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-                if (rp != pexp) return -2;
-                uint32_t ri = 0; double et = 0.0;
-                if (!f.read(reinterpret_cast<char*>(&ri), sizeof(ri))) return -2;
-                if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
+                uint64_t ri = 0; double et = 0.0;
+                if (!core::pm1ckpt::readHeader(f, pexp, ri, et)) return -2;
                 const size_t cksz = e->get_checkpoint_size();
                 std::vector<char> data(cksz);
                 if (!f.read(data.data(), cksz)) return -2;
