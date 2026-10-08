@@ -138,6 +138,44 @@ int main(int argc, char** argv) {
         CHECK(!fs::exists(fs::symlink_status(ckpt.string() + ".new")));
     }
 
+    // write_checkpoint_blob serves the other GM checkpoint formats (any fixed header
+    // followed by the engine state): same layout and CRC as File reads, same failure rules.
+    {
+        struct OtherHeader { char magic[8]; std::uint32_t version; std::uint32_t pad; std::uint64_t counter; };
+        OtherHeader oh{};
+        std::memcpy(oh.magic, "OTHERHDR", 8);
+        oh.version = 7;
+        oh.counter = 123456789ULL;
+        const fs::path other = dir / "other.ckpt";
+        gfc::write_checkpoint_blob(other, &oh, sizeof(oh), data1);
+        {
+            File f(other.string());
+            OtherHeader got{};
+            std::vector<char> back2(data1.size());
+            CHECK(f.exists() && f.read(reinterpret_cast<char*>(&got), sizeof(got)) &&
+                  f.read(back2.data(), back2.size()) && f.check_crc32());
+            CHECK(std::memcmp(&got, &oh, sizeof(oh)) == 0 && back2 == data1);
+        }
+        // Empty engine data is legal; a missing directory throws; /dev/full as .new throws and
+        // leaves the installed file alone.
+        gfc::write_checkpoint_blob(dir / "empty.ckpt", &oh, sizeof(oh), std::vector<char>());
+        CHECK(fs::file_size(dir / "empty.ckpt") == sizeof(oh) + sizeof(std::uint32_t));
+        bool blob_threw = false;
+        try { gfc::write_checkpoint_blob(dir / "no" / "such" / "o.ckpt", &oh, sizeof(oh), data1); }
+        catch (const std::exception&) { blob_threw = true; }
+        CHECK(blob_threw);
+        if (fs::exists("/dev/full")) {
+            const std::string kept = slurp(other);
+            fs::create_symlink("/dev/full", other.string() + ".new");
+            blob_threw = false;
+            try { gfc::write_checkpoint_blob(other, &oh, sizeof(oh), data2); }
+            catch (const std::exception&) { blob_threw = true; }
+            CHECK(blob_threw);
+            CHECK(slurp(other) == kept);
+            CHECK(!fs::exists(fs::symlink_status(other.string() + ".new")));
+        }
+    }
+
     fs::remove_all(dir);
     if (g_fail) return 1;
     std::cout << "gm factor checkpoint write-failure test passed\n";

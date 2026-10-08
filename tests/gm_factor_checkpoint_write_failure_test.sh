@@ -19,4 +19,11 @@ for f in src/modes/RunGaussianMersennePm1VTrace.cpp src/modes/RunGaussianMersenn
     echo "$f calls the throwing save_factor_checkpoint directly" >&2; exit 1
   fi
 done
+# The optimized ECM and NAF ECM drivers: only the wrappers may call their throwing writers.
+for pair in "src/modes/RunGaussianMersenneEcmOptimized.cpp:save_opt_checkpoint" "src/modes/RunGaussianMersenneEcmFast.cpp:save_naf_checkpoint"; do
+  f="${pair%%:*}"; fn="${pair##*:}"
+  if grep -n "$fn(" "$ROOT/$f" | grep -v "try_$fn(" | grep -v "^[0-9]*:void $fn(" | grep -v "^[0-9]*:        $fn(path"; then
+    echo "$f calls the throwing $fn directly" >&2; exit 1
+  fi
+done
 echo "gm factoring checkpoint source check passed"
