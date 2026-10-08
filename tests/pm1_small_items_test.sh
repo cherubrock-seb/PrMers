@@ -25,6 +25,26 @@ run() {
       -d "$DEVICE" --noask >>"$WORK/$dir/run.log" 2>&1 || true )
 }
 
+# run_until <dir> <marker> <timeout seconds> <prmers args...>
+# Start prmers in the background and send it SIGINT as soon as <marker> shows up
+# in its log, so the interrupt lands at the same point of the run whatever the
+# device speed.  The timeout only bounds a hung run.  Callers must check the log
+# for the interrupt message: if the run finished first, it never appears.
+run_until() {
+  local dir="$1" marker="$2" secs="$3" pid; shift 3
+  mkdir -p "$WORK/$dir"
+  [ -e "$WORK/$dir/kernels" ] || ln -s "$ROOT/kernels" "$WORK/$dir/kernels"
+  ( cd "$WORK/$dir" && exec timeout --signal=INT --kill-after=10s "$secs" "$ROOT/prmers" "$@" \
+      -d "$DEVICE" --noask >>"$WORK/$dir/run.log" 2>&1 ) &
+  pid=$!
+  until grep -aq -- "$marker" "$WORK/$dir/run.log" 2>/dev/null; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  kill -INT "$pid" 2>/dev/null || true
+  wait "$pid" || true
+}
+
 # 1. -nogcd-stage1, no stage 2: no result line.
 run nogcd 50 269 -pm1 -b1 2141 -nogcd-stage1
 grep -aq 'ordinary GCD skipped' "$WORK/nogcd/run.log" || fail "nogcd: stage 1 GCD was not skipped"
@@ -64,14 +84,24 @@ sed -i 's/X=0x\([0-9a-f]\)/X=0x1\1/' "$WORK/chk/resume_p269_B1_100.save"
 run chk 50 269 -pm1 -b1 200 -b1old 100
 grep -aq 'does not match the residue' "$WORK/chk/run.log" || fail "chk: corrupt .save was accepted"
 
-# 4. Stage-2 resume from the .old checkpoint (D=6 keeps the run slow enough to interrupt).
+# 4. Stage-2 resume from the .old checkpoint.  D=6 keeps stage 2 long.  The run
+# is interrupted as soon as the stage-2 loop starts; if a very fast device
+# finishes it before the signal lands, retry with ten times the B2.
 export PRMERS_PM1_CLASSIC_D=6
-A4=(677 -pm1 -b1 10 -b2 100000 -pm1-vtrace-off)
-run old 3 "${A4[@]}"
-grep -aq 'Stage 2 state saved at prime' "$WORK/old/run.log" || fail "old: stage 2 was not interrupted"
+B2=600000
+while :; do
+  rm -rf "$WORK/old"
+  A4=(677 -pm1 -b1 10 -b2 "$B2" -pm1-vtrace-off)
+  run_until old 'PM1-CLASSIC' 120 "${A4[@]}"
+  if grep -aq 'Stage 2 state saved at prime' "$WORK/old/run.log"; then break; fi
+  [ "$B2" -lt 60000000 ] || fail "old: stage 2 was not interrupted (B2=$B2)"
+  echo "old: B2=$B2 finished before the interrupt landed; retrying with a larger B2" >&2
+  B2=$((B2 * 10))
+done
+[ -e "$WORK/old/pm1_s2_m_677.ckpt" ] || fail "old: the interrupt left no stage-2 checkpoint"
 mv "$WORK/old/pm1_s2_m_677.ckpt" "$WORK/old/pm1_s2_m_677.ckpt.old"
 rm -f "$WORK/old/run.log"
-run old 50 "${A4[@]}"
+run old 600 "${A4[@]}"
 grep -aq 'Resuming Stage 2 from checkpoint' "$WORK/old/run.log" || fail "old: stage 2 did not resume from the .old checkpoint"
 grep -aq 'P-1 factor stage 2 found: 1943118631' "$WORK/old/run.log" || fail "old: resumed stage 2 missed the factor"
 
