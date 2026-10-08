@@ -38,6 +38,17 @@ if ls "$WORK"/nogcd2/*_stage1_result.json >/dev/null 2>&1; then fail "nogcd2: st
 if grep -aq '"b2":0[^0-9]' "$WORK/nogcd2/results.txt" 2>/dev/null; then fail "nogcd2: results.txt has a stage-1 result although no GCD was run"; fi
 grep -aq 'stage 2' "$WORK/nogcd2/run.log" || fail "nogcd2: stage 2 did not run"
 grep -aq '"b2":5000' "$WORK/nogcd2/results.txt" || fail "nogcd2: results.txt lacks the stage-2 result"
+# Running it again (stage-1 checkpoint present) and with a stage 2 that has no
+# prime to search must not produce a stage-1 result either.
+run nogcd2 50 269 -pm1 -b1 2141 -b2 5000 -nogcd-stage1
+if ls "$WORK"/nogcd2/*_stage1_result.json >/dev/null 2>&1; then fail "nogcd2 rerun: stage-1 result JSON written"; fi
+if grep -aq '"b2":0[^0-9]' "$WORK/nogcd2/results.txt" 2>/dev/null; then fail "nogcd2 rerun: results.txt has a stage-1 result"; fi
+run nogcd3 50 269 -pm1 -b1 2141 -b2 2142 -nogcd-stage1
+if ls "$WORK"/nogcd3/*_stage1_result.json >/dev/null 2>&1; then fail "nogcd3: stage-1 result JSON written"; fi
+if [ -s "$WORK/nogcd3/results.txt" ]; then fail "nogcd3: results.txt records a result although nothing was tested"; fi
+# A normal run (GCD enabled) still reports stage 1 as before.
+run gcd1 50 269 -pm1 -b1 100 -b2 5000
+ls "$WORK"/gcd1/*_stage1_result.json >/dev/null || fail "gcd1: stage-1 result JSON missing with the GCD enabled"
 
 # 2. -s3 must not fall through into stage 1.
 run s3 50 269 -pm1 -b1 100 -b2 100
