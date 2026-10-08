@@ -356,3 +356,13 @@ test-pfa9-lead-bridge-gpu: engine-lib
 test-prp-use: $(ENGINE_LIB)
 	$(CXX) -O2 -std=c++20 -Isrc tests/prp_use_test.cpp $(ENGINE_OBJS) $(OPENCL_LIBS) $(DL_LIBS) -o $(ENGINE_BIN)/prp-use-test
 	$(ENGINE_BIN)/prp-use-test
+
+# PR131 cumulative semantic integration
+SHUFL_PERMUTATION_TEST := build-tests/aevum-shufl-permutation-test
+.PHONY: test-shufl-permutation
+test-host: test-shufl-permutation
+test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
+	$(SHUFL_PERMUTATION_TEST)
+$(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@

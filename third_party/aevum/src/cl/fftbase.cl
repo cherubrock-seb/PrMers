@@ -58,8 +58,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i) { lds[(lowMe & 7) * (WG + 1) + (lowMe / 8) * 8 + i] = u[i]; }
       bar(WG);
-      if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * 8                     + ((lowMe / 8) & 7) * (WG + 1) + (lowMe & 7)]; }
-      else          for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * 32 + (lowMe / 64) * 8 + ((lowMe / 8) & 7) * (WG + 1) + (lowMe & 7)]; }
+      for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * (WG / 8) + (lowMe / 64) * 8 + ((lowMe / 8) & 7) * (WG + 1) + (lowMe & 7)]; }
       return;
     }
 
@@ -96,7 +95,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Pad 4 values after every row to eliminate bank conflicts.
     if (!force_default && f == 4 && RADIX == 4) {
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { lds[lowMe / 4 * (WG + 4) + i * 4 + (lowMe & 3)] = u[i]; }
+      for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 4) & 3) * (WG + 4) + (lowMe / 16) * 16 + i * 4 + (lowMe & 3)] = u[i]; }
       bar(WG);
       if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * 16                     +  (lowMe / 16)      * (WG + 4) + (lowMe & 15)]; }
       else          for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * 64 + (lowMe / 64) * 16 + ((lowMe / 16) & 3) * (WG + 4) + (lowMe & 15)]; }
@@ -126,7 +125,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     if (!force_default && f == 8 && RADIX == 8) {
       for (u32 i = 0; i < RADIX; ++i) { lds[i * WG + lowMe] = u[i]; }
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[lowMe / 8 * 64 + i * 8 + (lowMe & 7)]; }
+      for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[((lowMe / 8) & 7) * WG + (i * (WG / 64) + lowMe / 64) * 8 + (lowMe & 7)]; }
       return;
     }
 
@@ -135,7 +134,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Output to LDS in the order we expect to read.  In the example:  lds[0..63] = 0, 64, ... 192, 1, 65...   lds[64..127] = +16
     // Swizzle LDS blocks to eliminate bank conflicts.
     // Swizzle on the first 8 threads written to LDS (4 multiples of 1 and 2 multiples of 4) and the first 8 threads read from LDS (4 multiples of 64 and 2 multiples of 1).
-    if (!force_default && f == 1 && n == 4) {
+    if (!force_default && f == 1 && RADIX == 4) {
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i) { lds[(lowMe * 4 + i) ^ (lowMe & 7)] = u[i]; }
       bar(WG);
@@ -206,7 +205,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Input values are the output from previous shufl.  For example, WIDTH=512:  u[0] = 0, 64, ... 448, 1, 65...   u[1] = +8
     // Output to LDS in the order we expect to read.  In the example:  lds[0..63] = 0, 64, ... 448, 8, 72...   lds[64..127] = +1
     // Pad 8 values after every row to eliminate bank conflicts.
-    if (!force_default && f == 8 && RADIX == 8) {
+    if (!force_default && f == 8 && RADIX == 8 && (WG == 64 || WG == 512)) {
       bar(WG);
       if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { lds[ (lowMe / 8)      * (WG + 8)                     + i * 8 + (lowMe & 7)] = u[i].x; }
       else          for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 8) & 7) * (WG + 8) + (lowMe / 64) * 64 + i * 8 + (lowMe & 7)] = u[i].x; }
@@ -324,7 +323,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Output to LDS in the order we expect to read.  In the example:  lds[0..63] = 0, 64, ... 192, 16, 80...   lds[64..127] = +4
     // Swizzle LDS blocks to eliminate bank conflicts.
     // Swizzle on the first 16 threads written to LDS (4 multiples of 64 and 4 multiples of 1) and the first 16 threads read from LDS (4 multiples of 64 and 4 multiples of 16).
-    if (!force_default && f == 4 && n == RADIX) {
+    if (!force_default && f == 4 && RADIX == 4) {
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i) { lds[(lowMe / 4 * 16 + i * 4 + (lowMe & 3)) ^ (lowMe & 12)] = u[i].x; }
       bar(WG);
@@ -431,7 +430,7 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Input values are the output from previous shufl.  For example, WIDTH=512:  u[0] = 0, 64, ... 448, 1, 65...   u[1] = +8
     // Output to LDS in the order we expect to read.  In the example:  lds[0..63] = 0, 64, ... 448, 8, 72...   lds[64..127] = +1
     // Pad 8 values after every 64 values to eliminate bank conflicts.
-    if (!force_default && f == 8 && RADIX == 8) {
+    if (!force_default && f == 8 && RADIX == 8 && (WG == 64 || WG == 512)) {
       bar(WG);
       if (WG == 64) for (u32 i = 0; i < RADIX; ++i) { lds[ (lowMe / 8)      * (WG + 8)                     + i * 8 + (lowMe & 7)] = u[i]; }
       else          for (u32 i = 0; i < RADIX; ++i) { lds[((lowMe / 8) & 7) * (WG + 8) + (lowMe / 64) * 64 + i * 8 + (lowMe & 7)] = u[i]; }
@@ -560,9 +559,9 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 // AEVUM_GWOLT_SHUFL_FFT2_TYPED
 // Typed Aevum backport of gpuowl 6cf0dc fused shuffle + fft2.
-// Used only by SIZE=1K / RADIX=8 / f=8.
+// Used only by SIZE=1K / RADIX=8 / f=8, so it is only defined there: its SHUFL_BYTES checks must not reject other shapes.
 
-#if FFT_FP64
+#if FFT_FP64 && WG == 128 && RADIX == 8
 
 void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
                              u32 f, u32 numWG, u32 lowMe) {
@@ -621,7 +620,7 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
 #endif
 
 
-#if FFT_FP32
+#if FFT_FP32 && WG == 128 && RADIX == 8
 
 void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
                              u32 f, u32 numWG, u32 lowMe) {
@@ -653,7 +652,7 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
 #endif
 
 
-#if NTT_GF31
+#if NTT_GF31 && WG == 128 && RADIX == 8
 
 void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
                              u32 f, u32 numWG, u32 lowMe) {
@@ -718,7 +717,7 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
 #endif
 
 
-#if NTT_GF61
+#if NTT_GF61 && WG == 128 && RADIX == 8
 
 void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
                              u32 f, u32 numWG, u32 lowMe) {
