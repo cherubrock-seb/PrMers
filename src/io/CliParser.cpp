@@ -21,6 +21,8 @@
  * This code is released as free software.
  */
 #include "io/CliParser.hpp"
+#include "io/MersFileName.hpp"
+#include "io/ExponentInput.hpp"
 #include "util/StringUtils.hpp"
 #include <iostream>
 #include <algorithm>
@@ -900,15 +902,12 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         else if (std::strcmp(argv[i], "-filemers") == 0 && i + 1 < argc) {
             opts.filemers = argv[++i];
             std::string fname = std::filesystem::path(opts.filemers).filename().string();
-            size_t pos_pm = fname.find("pm1");
-            size_t pos_dot = fname.rfind('.');
-            if (pos_pm == std::string::npos || pos_dot == std::string::npos || pos_pm >= pos_dot){
+            uint32_t p = 0;
+            uint64_t fileB1 = 0;
+            if (!parseMersFileName(fname, p, fileB1)) {
                 std::cerr << "Invalid filename format, expected <p>pm<B1>.mers\n";
                 std::exit(EXIT_FAILURE);
             }
-            std::string p_str  = fname.substr(0, pos_pm);
-
-            uint32_t p  = std::stoul(p_str);
             opts.exportmers = true;
             opts.exponent = p;
         }
@@ -971,7 +970,7 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         std::cerr << "Error: No exponent provided.\n";
         std::exit(EXIT_FAILURE);
     }*/
-    constexpr uint64_t MAX_EXPONENT = 5650242869UL;
+    constexpr uint64_t MAX_EXPONENT = kMaxExponent;
     if (opts.exponent > MAX_EXPONENT) {
         std::cerr << "Error: Exponent must be <= " << MAX_EXPONENT
                   << ". Given: " << opts.exponent << std::endl;

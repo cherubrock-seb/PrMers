@@ -1,0 +1,29 @@
+// io/ExponentInput.hpp
+#pragma once
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <string>
+
+namespace io {
+
+// Largest exponent PrMers accepts (command line and interactive prompt alike).
+constexpr uint64_t kMaxExponent = 5650242869ULL;
+
+// Parse an exponent typed at the interactive prompt: plain decimal digits (surrounding blanks allowed)
+// with 2 <= value <= kMaxExponent. A negative, zero, garbage or oversized answer is rejected instead of
+// wrapping to an enormous unsigned value that would ask for an impossible transform size.
+inline bool parseExponentAnswer(const std::string& text, uint64_t& exponent) {
+    const size_t a = text.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return false;
+    const size_t b = text.find_last_not_of(" \t\r\n");
+    const std::string s = text.substr(a, b - a + 1);
+    if (s.size() > 19 || !std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
+        return false;
+    const unsigned long long v = std::stoull(s);
+    if (v < 2 || v > kMaxExponent) return false;
+    exponent = v;
+    return true;
+}
+
+} // namespace io

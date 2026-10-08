@@ -133,6 +133,27 @@ int main() {
                    "Content-Length: 14\r\n\r\n", nullptr, "PRP=1,2,127,-1"), 200, "body sent in a second segment");
 
     server.stop();
+
+    // A port that is already in use: start() must report the failure (it used to return silently, and
+    // the caller printed a URL nothing was listening on).
+    {
+        socket_t busy = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        a.sin_port = 0;
+        if (bind(busy, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0 || listen(busy, 1) != 0)
+            throw std::runtime_error("could not occupy a port");
+        socklen_t alen = sizeof(a);
+        getsockname(busy, reinterpret_cast<sockaddr*>(&a), &alen);
+        ui::WebGuiConfig clashCfg = cfg;
+        clashCfg.port = ntohs(a.sin_port);
+        ui::WebGuiServer clash(clashCfg, [](const std::string&) {});
+        if (clash.start()) throw std::runtime_error("start() on a busy port reported success");
+        std::cout << "  start() on a busy port reports failure\n";
+        closeSocket(busy);
+    }
+
     std::remove("gui_http_settings.cfg");
     std::remove("gui_http_results.txt");
     std::cout << "Web GUI HTTP test passed\n";
