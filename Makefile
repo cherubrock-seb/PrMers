@@ -173,6 +173,11 @@ test-marin-ibdwt-bound:
 	bash tests/test_marin_ibdwt_size_bound.sh
 	bash tests/test_marin_ibdwt_wrap_device.sh $(MARIN_TEST_DEVICE)
 
+# Marin host arithmetic helpers (include/marin/arith.h) against exact references, and their range checks.
+.PHONY: test-marin-arith-host
+test-marin-arith-host:
+	bash tests/test_marin_arith_host.sh
+
 # Marin with the split root/weight kernel ABI forced: PRP and GMP prefix checks (OpenCL device, libgmp).
 test-marin-split-aux:
 	bash tests/test_marin_split_aux_prp_device.sh $(MARIN_TEST_DEVICE)

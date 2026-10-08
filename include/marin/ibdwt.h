@@ -152,6 +152,10 @@ public:
 	{
 		uint64 * const w = &weight[0];
 
+		// The n-th root of two below needs n | (p - 1) / 192; otherwise the integer division silently
+		// builds weights of the wrong order. n must also fit the 32-bit digit arithmetic.
+		if (n == 0 || n > 0xFFFFFFFFull || ((MOD_P - 1) / 192) % n != 0) throw std::invalid_argument("weights_widths: unsupported transform size");
+
 		// n-th root of two
 		const uint64 nr2 = mod_pow(554, (MOD_P - 1) / 192 / n);
 
@@ -168,7 +172,7 @@ public:
 
 			// bit position for digit[i] is ceil(qj / n)
 			const uint32 c = ceil_qj_n - ceil_qjm1_n;
-			if ((c != q_n) && (c != q_n + 1)) throw;
+			if ((c != q_n) && (c != q_n + 1)) throw std::logic_error("weights_widths: inconsistent digit width");
 			width[j - 1] = uint8(c);
 
 			if (j == n) break;
