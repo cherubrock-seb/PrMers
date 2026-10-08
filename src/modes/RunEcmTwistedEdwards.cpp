@@ -8,6 +8,7 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcMod4.hpp"
+#include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -806,12 +807,7 @@ int App::runECMMarinTwistedEdwards()
         return splitmix64_u64(x);
     };
     auto rnd_mpz_bits = [&](const mpz_class& N, uint64_t seed0, unsigned bits)->mpz_class{
-        mpz_class z = 0;
-        uint64_t s = seed0;
-        for (unsigned i=0;i<bits;i+=64){
-            z <<= 64;
-            z += (unsigned long)splitmix64_step(s);
-        }
+        mpz_class z = ecm_rng::random_mpz_bits(seed0, bits);
         z %= N;
         if (z <= 2) z += 3;
         return z;

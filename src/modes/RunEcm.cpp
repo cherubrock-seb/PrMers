@@ -8,6 +8,7 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "math/EcmTorsionCurves.hpp"
+#include "math/EcmRandom.hpp"
 #include "util/GmpUtils.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
@@ -212,9 +213,7 @@ int App::runECMMarin()
         return splitmix64_u64(x);
     };
     auto rnd_mpz_bits = [&](const mpz_class& N, uint64_t seed0, unsigned bits)->mpz_class{
-        mpz_class z = 0;
-        uint64_t s = seed0;
-        for (unsigned i=0;i<bits;i+=64){ z <<= 64; z += (unsigned long)splitmix64_step(s); }
+        mpz_class z = ecm_rng::random_mpz_bits(seed0, bits);
         z %= N; if (z <= 2) z += 3; return z;
     };
     auto fmt_hms = [&](double s)->string{ uint64_t u=(uint64_t)(s+0.5); uint64_t h=u/3600,m=(u%3600)/60,se=u%60; ostringstream ss; ss<<h<<"h "<<m<<"m "<<se<<"s"; return ss.str(); };
