@@ -154,7 +154,8 @@ void printUsage(const char* progName) {
     std::cout << "  -aevum               : Strictly force Aevum; exit with an error when no supported Aevum plan is available" << std::endl;
     std::cout << "  -engine-marin        : Force the Marin engine::Reg backend" << std::endl;
     std::cout << "  -aevum-auto          : Explicitly select automatic Marin/Aevum mode (macOS still defaults to Marin unless -aevum is used)" << std::endl;
-    std::cout << "  -marin               : Legacy internal PrMers NTT path (not supported with -llunsafe)" << std::endl;
+    std::cout << "  -marin               : Legacy internal PrMers NTT path (Lucas-Lehmer on it is rejected, from -llunsafe and from worktodo, unless -allow-unvalidated-legacy-ll is given)" << std::endl;
+    std::cout << "  -allow-unvalidated-legacy-ll : Let -marin run Lucas-Lehmer (command line or worktodo) although that path is not validated for LL; a warning is printed" << std::endl;
     std::cout << "  -aevum-fft <spec>    : Force an Aevum plan; pfa9:4 is capacity-adaptive, pfa9full:4 forces all three planes" << std::endl;
     std::cout << "  -pfa9-type4          : Force type-4 policy; automatically elides redundant FP32 when exact FFT3161 is sufficient" << std::endl;
     std::cout << "  -pfa9-type4-full     : Diagnostic only: force full FP32+GF31+GF61 PFA9 plan" << std::endl;
@@ -715,6 +716,9 @@ CliOptions CliParser::parse(int argc, char** argv ) {
             opts.aevum = false;
             opts.aevum_auto = false;
             opts.force_engine_marin = false;
+        }
+        else if (std::strcmp(argv[i], "-allow-unvalidated-legacy-ll") == 0) {
+            opts.allow_unvalidated_legacy_ll = true;
         }
         else if (std::strcmp(argv[i], "-engine-marin") == 0 || std::strcmp(argv[i], "-backend-marin") == 0) {
             opts.marin = true;

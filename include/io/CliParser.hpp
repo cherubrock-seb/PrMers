@@ -49,6 +49,7 @@ struct CliOptions {
     bool aevum = false;
     bool aevum_auto = true;
     bool force_engine_marin = false;
+    bool allow_unvalidated_legacy_ll = false; // -allow-unvalidated-legacy-ll: let -marin run Lucas-Lehmer
     std::string aevum_fft_spec = "";
     bool aevum_fft_spec_explicit = false;
     int aevum_pfa_radix = -1;             // -1=auto, 0=disabled, 3, 7, or 9
