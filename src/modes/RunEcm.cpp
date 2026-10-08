@@ -1122,7 +1122,17 @@ int App::runECMMarin()
         };
 
         uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
-        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0); }
+        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0);
+            if (!resume_stage2) {
+                // A checkpoint that was rejected part-way through (truncated or damaged) must not
+                // leave its position behind: stage 2 would start in the middle of the prime list.
+                s2_idx = 0; s2_cnt = 0; s2_et = 0.0;
+                resume_stage2_in_chunk = false;
+                resume_s2_chunk_start = 0; resume_s2_chunk_end = 0;
+                resume_s2_chunk_bits = 0; resume_s2_steps_done = 0;
+                have_s2_base_cache = false;
+            }
+        }
 
         std::cout << "[ECM] curve_seed=" << curve_seed << std::endl;
         options.curve_seed = curve_seed;
