@@ -93,6 +93,17 @@ static void testValidator() {
     check(accepted("-build \"-cl-fast-relaxed-math\""), "accepts -build (not a path option)");
     check(accepted("-fft 1 -filemersx"), "does not match option prefixes");
     check(accepted(""), "accepts empty text");
+    // The saved options are followed by the rest of the command line: no trailing option without its value.
+    check(refused("-d 0 -user", "-user"), "refuses a trailing -user");
+    check(refused("-d 0 -t\n\n# comment\n", "-t"), "refuses a trailing -t before blank lines and a comment");
+    check(refused("-d", "-d"), "refuses a lone value option");
+    check(refused("-d 0 -gm-tf 70", "-gm-tf 70"), "refuses -gm-tf with one of its two values");
+    check(refused("-d 0 --gm-tf", "--gm-tf"), "refuses a trailing --gm-tf");
+    check(refused("-d 0 -pfa", "-pfa=auto"), "refuses a trailing -pfa (would take a following 3/7/9)");
+    check(refused("-d 0 -pfa-auto"), "refuses a trailing -pfa-auto");
+    check(accepted("-d 0 -pfa=auto -gm-tf 70 71 -user me"), "accepts complete trailing options");
+    check(accepted("-pfa -d 0"), "accepts -pfa followed by another option");
+    check(accepted("-d 0 -password"), "a trailing -password is stripped, not refused");
     std::string cleaned;
     check(accepted("-d 0 -password hunter2 -t 60\n# comment\n\n-user me -password\nsecret\n", &cleaned) &&
               cleaned == "-d 0 -t 60\n-user me\n",
@@ -114,9 +125,21 @@ static void testLoader() {
     check(args(M + std::string("-worktodo\0z /x -d 3\n", 20)) == "-d 3", "GUI section: NUL-suffixed option ignored");
     check(args("-d 0 -f\n" + M + "/etc -t 1\n") == "-d 0 /etc -t 1",
           "hand-written -f without a value cannot take it from the GUI section");
-    check(args("-user\n" + M + "-d 0\n") == "-user -d 0", "a non-path dangling option is left alone");
+    check(args("-user\n" + M + "-d 0\n") == "-d 0", "a dangling non-path option above the marker does not take the GUI's token");
     check(args(M + "-d 1\n" + M + "-f /x\n") == "-d 1", "a second marker does not end the GUI section");
     check(args("-d 0\r\n" + util::guiSettingsMarker() + "\r\n-f /x\r\n-t 9\r\n") == "-d 0 -t 9", "CRLF file");
+    // Settings never take a value from what follows them (the command line, or the GUI section).
+    check(args("-d 0 -user\n") == "-d 0", "no marker: trailing -user dropped");
+    check(args("-d 0 -user -t\n") == "-d 0", "no marker: -user -t at the end both dropped");
+    check(args("-gm-tf 70\n") == "", "no marker: -gm-tf with one value dropped");
+    check(args("-gm-tf 70 71\n") == "-gm-tf 70 71", "complete -gm-tf kept");
+    check(args("-d 0 -pfa\n") == "-d 0 -pfa=auto", "trailing -pfa becomes -pfa=auto");
+    check(args("-pfa 3\n") == "-pfa 3", "-pfa 3 kept");
+    check(args("-d 0 -user\n" + M + "-t 5\n") == "-d 0 -t 5", "hand part: trailing -user does not take the GUI's -t");
+    check(args("-d 0\n" + M + "-t 5 -computer\n") == "-d 0 -t 5", "GUI section: trailing -computer dropped");
+    check(args("-d 0\n" + M + "-t 5 -computer # x\n\n") == "-d 0 -t 5", "GUI section: trailing option before a comment dropped");
+    check(joined(util::readConfigArgsFromText("-d 0 -user\n" + M + "-t 5 -b1\n").dangling) == "-user -b1",
+          "dropped value options are reported");
     const auto r = util::readConfigArgsFromText(M + "-f /x -d 1\n");
     check(joined(r.ignored) == "-f /x", "ignored options are reported");
 }
@@ -235,6 +258,10 @@ static void testHttp() {
     }
     check(post("/api/save-settings", std::string("-worktodo\0x /etc/passwd", 23), &body) == 400, "save-settings refuses NUL");
     check(post("/api/save-settings", std::string(util::kMaxGuiSettingsBytes + 1, 'a'), &body) == 400, "save-settings refuses oversized text");
+    {
+        const bool r = post("/api/save-settings", "-d 0 -t 60 -user", &body) == 400 && body.find("-user") != std::string::npos;
+        check(r, "save-settings refuses a trailing option without its value: " + body);
+    }
     check(readAll(cfgPath) == handWritten, "file still unchanged");
 
     {

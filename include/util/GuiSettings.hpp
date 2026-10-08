@@ -105,9 +105,63 @@ inline bool lockedOptionConsumesNext(const std::string& token, const GuiLockedOp
     return o.takesValue && token.find('=') == std::string::npos;
 }
 
+// Options that take the following token(s) as their value, in the exact spellings the option parsers
+// (CliParser, the Gaussian TF reader) accept. tests/gui_settings_arity_source_test.py keeps this list
+// in step with those parsers.
+// BEGIN VALUE OPTIONS
+inline const std::set<std::string>& oneValueOptions() {
+    static const std::set<std::string> k = {
+        "--b2start", "--gm-base", "--gm-factor-chunk-bits", "--gm-family", "--gm-replay-block", "--gm-sieve",
+        "--gm-tf-chunk", "--gm-tf-sieve",
+        "--pm1-vtrace-baby-batch", "--pm1-vtrace-d", "--pm1-vtrace-deep-d", "--pm1-vtrace-max-batches",
+        "--pm1-vtrace-max-regs", "--pm1-vtrace-pair95-l", "--pm1-vtrace-product-tree-width",
+        "--s2from", "--stage2start",
+        "-K", "-aevum-fft", "-b1", "-b1old", "-b2", "-b2start", "-b3", "-b4", "-brent", "-c", "-checklevel",
+        "-chunk256", "-computer", "-config", "-d", "-ecm_check_interval", "-ecm_progress_ms", "-enqueue_max",
+        "-erroriter", "-f", "-factors", "-filemers", "-glblock", "-gm-base", "-gm-factor-chunk-bits",
+        "-gm-family", "-gm-replay-block", "-gm-sieve", "-gm-tf-chunk", "-gm-tf-sieve", "-host", "-http",
+        "-iterforce", "-iterforce2", "-kernelpath", "-l1", "-l2", "-l3", "-l5", "-llsafeb", "-maxe", "-memlim",
+        "-nmax", "-p95path", "-password", "-pm1-vtrace-baby-batch", "-pm1-vtrace-d", "-pm1-vtrace-deep-d",
+        "-pm1-vtrace-max-batches", "-pm1-vtrace-max-regs", "-pm1-vtrace-pair95-l",
+        "-pm1-vtrace-product-tree-width", "-proof", "-res64_display_interval", "-s2from", "-seed", "-sigma",
+        "-stage2start", "-t", "-tbits", "-user", "-vtrace-baby-batch", "-vtrace-d", "-vtrace-deep-d",
+        "-vtrace-max-batches", "-vtrace-max-regs", "-vtrace-pair95-l", "-vtrace-product-tree-width",
+        "-worktodo",
+    };
+    return k;
+}
+inline const std::set<std::string>& twoValueOptions() {
+    static const std::set<std::string> k = {"-gm-tf", "--gm-tf"};
+    return k;
+}
+// Take a value only when the next token is 3, 7 or 9 (otherwise they mean "auto").
+inline const std::set<std::string>& optionalValueOptions() {
+    static const std::set<std::string> k = {"-pfa", "-pfa-auto"};
+    return k;
+}
+// END VALUE OPTIONS
+
+// Settings tokens are spliced into the command line where "-config <file>" stood, so an option at the
+// very end that is still waiting for its value would take the next command-line argument instead.
+// Make the tokens self-contained: drop such options (into `dropped`), and turn a trailing -pfa or
+// -pfa-auto (value optional) into the equivalent -pfa=auto.
+inline void makeSelfContained(std::vector<std::string>& args, std::vector<std::string>& dropped) {
+    std::size_t n = args.size();
+    for (;;) {
+        if (n == 0) break;
+        if (oneValueOptions().count(args[n - 1]) || twoValueOptions().count(args[n - 1])) { n -= 1; continue; }
+        if (n >= 2 && twoValueOptions().count(args[n - 2])) { n -= 2; continue; }
+        if (optionalValueOptions().count(args[n - 1])) args[n - 1] = "-pfa=auto";
+        break;
+    }
+    dropped.insert(dropped.end(), args.begin() + static_cast<std::ptrdiff_t>(n), args.end());
+    args.resize(n);
+}
+
 struct ConfigArgs {
     std::vector<std::string> args;      // tokens for the option parser
     std::vector<std::string> ignored;   // locked options (and values) dropped from the GUI section
+    std::vector<std::string> dangling;  // options dropped because their value would come from outside
 };
 
 // Read a settings file the way PrMers applies it: every token above the GUI marker; below it,
@@ -120,6 +174,8 @@ inline ConfigArgs readConfigArgs(std::istream& in) {
     while (std::getline(in, line)) {
         if (!gui && isGuiSettingsMarker(line)) {
             gui = true;
+            // The hand-written part must not take a value from the GUI section either.
+            makeSelfContained(out.args, out.dangling);
             // A hand-written locked option left without a value must not take its value from the GUI.
             if (!out.args.empty()) {
                 const GuiLockedOption* o = guiLockedOption(out.args.back());
@@ -141,6 +197,7 @@ inline ConfigArgs readConfigArgs(std::istream& in) {
             out.args.push_back(tok);
         }
     }
+    makeSelfContained(out.args, out.dangling);
     return out;
 }
 
@@ -260,6 +317,22 @@ inline std::string checkGuiSettingsText(const std::string& body, std::string& cl
             kept += tok;
         }
         if (!kept.empty()) cleaned += kept + "\n";
+    }
+    // The saved options are followed by the rest of the command line, so they must not end with an
+    // option still waiting for its value.
+    std::vector<std::string> toks, dropped;
+    for (const std::string& line : detail::splitLines(cleaned))
+        for (auto& t : configLineTokens(line)) toks.push_back(t);
+    const bool trailingPfa = !toks.empty() && optionalValueOptions().count(toks.back());
+    makeSelfContained(toks, dropped);
+    if (!dropped.empty() || trailingPfa) {
+        cleaned.clear();
+        std::string what;
+        for (const auto& d : dropped) what += (what.empty() ? "" : " ") + d;
+        if (trailingPfa) what = "-pfa";
+        return "The settings end with " + what + ", which is missing its value (it would take the next "
+               "command-line argument). Add the value" +
+               std::string(trailingPfa ? ", or write -pfa=auto." : " or remove the option.");
     }
     return std::string();
 }

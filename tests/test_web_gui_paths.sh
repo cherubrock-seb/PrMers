@@ -24,3 +24,4 @@ fi
   "${GMP_LIBS[@]}" \
   -o "$BUILD/web_gui_paths_test"
 cd "$BUILD" && ./web_gui_paths_test
+python3 "$ROOT/tests/gui_settings_arity_source_test.py"

@@ -90,6 +90,15 @@ inline static std::vector<std::string> parseConfigFile(const std::string& config
 
     auto read = util::readConfigArgs(config);
     args = std::move(read.args);
+    if (!read.dangling.empty()) {
+        std::ostringstream oss;
+        oss << "Warning: ignoring options in the settings file that are missing their value:";
+        for (const auto& t : read.dangling) oss << ' ' << t;
+        oss << " (an option at the end of the file, or just above the GUI marker line, never takes its value"
+               " from what follows)";
+        std::cerr << oss.str() << std::endl;
+        if (auto g = ui::WebGuiServer::instance()) g->appendLog(oss.str());
+    }
     if (!read.ignored.empty()) {
         std::ostringstream oss;
         oss << "Warning: ignoring options written by the GUI that set a path or the GUI's network address:";
