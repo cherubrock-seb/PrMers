@@ -125,6 +125,11 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
         const auto& tw   = pre.twiddlesRadix4();
         const auto& i_tw = pre.invTwiddlesRadix4();
 
+        // The radix-4 twiddle tables hold 3 * n/5 (or 3 * n) words, so a transform of 4 words has only 12
+        // entries while the defines below read up to index 17. Those values are not used by such a small
+        // transform: define them as 0 instead of reading past the end of the vector.
+        auto at = [](const std::vector<uint64_t>& v, size_t i) -> uint64_t { return i < v.size() ? v[i] : 0; };
+
         /*if (tw.size()  <= idx8+1 || 
             i_tw.size() <= idx8+1) 
         {
@@ -133,38 +138,38 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
         }*/
 
         ss 
-        << " -DW12_01_X=" << tw[idx6] 
-        << " -DW12_01_Y=" << tw[idx6+1]
-        << " -DW15_01_X=" << tw[idx7]
-        << " -DW15_01_Y=" << tw[idx7+1]
-        << " -DW15_2_X="  << tw[idx8]
-        << " -DW15_2_Y="  << tw[idx8+1]
+        << " -DW12_01_X=" << at(tw, idx6) 
+        << " -DW12_01_Y=" << at(tw, idx6+1)
+        << " -DW15_01_X=" << at(tw, idx7)
+        << " -DW15_01_Y=" << at(tw, idx7+1)
+        << " -DW15_2_X="  << at(tw, idx8)
+        << " -DW15_2_Y="  << at(tw, idx8+1)
 
-        << " -DWI12_01_X=" << i_tw[idx6] 
-        << " -DWI12_01_Y=" << i_tw[idx6+1]
-        << " -DWI15_01_X=" << i_tw[idx7]
-        << " -DWI15_01_Y=" << i_tw[idx7+1]
-        << " -DWI15_2_X="  << i_tw[idx8]
-        << " -DWI15_2_Y="  << i_tw[idx8+1]
-        << " -DW6="  << tw[6]
-        << " -DW7="  << tw[7]
-        << " -DW10="  << tw[10]
-        << " -DWI6="  << i_tw[6]
-        << " -DWI7="  << i_tw[7]
-        << " -DWI8="  << i_tw[8]
-        << " -DW1_01_Y="    << tw[idx1]
-        << " -DW1_01_X="    << tw[idx2]
-        << " -DW1_02_X="    << tw[idx3]
-        << " -DW1_2_X="     << tw[idx3]
-        << " -DW1_01_Y_2="  << tw[idx2]
-        << " -DW1_2_Y="     << tw[idx3]
+        << " -DWI12_01_X=" << at(i_tw, idx6) 
+        << " -DWI12_01_Y=" << at(i_tw, idx6+1)
+        << " -DWI15_01_X=" << at(i_tw, idx7)
+        << " -DWI15_01_Y=" << at(i_tw, idx7+1)
+        << " -DWI15_2_X="  << at(i_tw, idx8)
+        << " -DWI15_2_Y="  << at(i_tw, idx8+1)
+        << " -DW6="  << at(tw, 6)
+        << " -DW7="  << at(tw, 7)
+        << " -DW10="  << at(tw, 10)
+        << " -DWI6="  << at(i_tw, 6)
+        << " -DWI7="  << at(i_tw, 7)
+        << " -DWI8="  << at(i_tw, 8)
+        << " -DW1_01_Y="    << at(tw, idx1)
+        << " -DW1_01_X="    << at(tw, idx2)
+        << " -DW1_02_X="    << at(tw, idx3)
+        << " -DW1_2_X="     << at(tw, idx3)
+        << " -DW1_01_Y_2="  << at(tw, idx2)
+        << " -DW1_2_Y="     << at(tw, idx3)
 
-        << " -DWI4_01_Y="   << i_tw[idx4]
-        << " -DWI4_01_X="   << i_tw[idx5]
-        << " -DWI4_02_X="   << i_tw[idx6]
-        << " -DWI4_2_X="    << i_tw[idx6]
-        << " -DWI4_01_Y_2=" << i_tw[idx5]
-        << " -DWI4_2_Y="    << i_tw[idx6];
+        << " -DWI4_01_Y="   << at(i_tw, idx4)
+        << " -DWI4_01_X="   << at(i_tw, idx5)
+        << " -DWI4_02_X="   << at(i_tw, idx6)
+        << " -DWI4_2_X="    << at(i_tw, idx6)
+        << " -DWI4_01_Y_2=" << at(i_tw, idx5)
+        << " -DWI4_2_Y="    << at(i_tw, idx6);
 
     }
     catch (const std::out_of_range& e) {
