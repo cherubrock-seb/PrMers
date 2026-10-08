@@ -137,6 +137,10 @@ test-gui-state:
 test-gui-http:
 	bash tests/test_web_gui_http.sh
 
+.PHONY: test-gui-paths
+test-gui-paths:
+	bash tests/test_web_gui_paths.sh
+
 test-win-cmdline:
 	bash tests/test_win_cmdline_quote.sh
 

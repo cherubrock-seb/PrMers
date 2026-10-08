@@ -24,6 +24,7 @@
 #include "aevum/EngineAevum.hpp"
 #include "modes/GaussianTrialFactor.hpp"
 #include "util/LogRedact.hpp"
+#include "util/GuiSettings.hpp"
 #include <fstream>
 #include <streambuf>
 #include <iostream>
@@ -100,13 +101,9 @@ std::vector<std::string> effectiveArguments(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "-config" && i + 1 < argc) {
+            // Same reading as App's parseConfigFile (GUI-written path options are ignored).
             std::ifstream cfg(argv[++i]);
-            std::string line;
-            while (std::getline(cfg, line)) {
-                std::istringstream iss(line);
-                std::string token;
-                while (iss >> token) out.push_back(token);
-            }
+            for (auto& token : util::readConfigArgs(cfg).args) out.push_back(std::move(token));
         } else {
             out.push_back(arg);
         }

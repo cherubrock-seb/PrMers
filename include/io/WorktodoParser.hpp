@@ -42,6 +42,10 @@ class WorktodoParser {
 public:
     explicit WorktodoParser(const std::string& filename);
     std::optional<WorktodoEntry> parse();
+    // True when `line` alone is an entry parse() would run (the check the GUI applies before appending a
+    // line to worktodo). Comments, blank lines, unsupported keywords and malformed entries are rejected,
+    // and so is any text containing a line break.
+    static bool isValidEntryLine(const std::string& line);
     // Append one line to a worktodo file (the GUI "Append & Run" path). If the file does not end in a
     // newline (hand-written files and many editors leave none), start a new line first so the new entry
     // is not glued onto the last one. Serialised with removeProcessedLine(), so an append cannot be lost to a
@@ -59,6 +63,7 @@ public:
 private:
     std::string filename_;
     bool quiet_ = false;   // dry run: parse() prints nothing
+    const std::string* text_ = nullptr;   // isValidEntryLine(): parse this text instead of the file
 };
 
 } // namespace io

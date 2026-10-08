@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <random>
+#include "util/GuiSettings.hpp"
 #include "util/Redact.hpp"
 
 #ifdef _WIN32
@@ -42,6 +43,10 @@ static constexpr size_t kMaxHeaderBytes = 16 * 1024;
 static constexpr size_t kMaxBodyBytes = 1024 * 1024;
 static constexpr int kMaxConnections = 32;
 static constexpr int kSocketTimeoutSeconds = 10;
+// /api/append-worktodo limits: a few entries per request, each a normal worktodo line.
+static constexpr size_t kMaxAppendBytes = 8 * 1024;
+static constexpr size_t kMaxAppendLines = 64;
+static constexpr size_t kMaxAppendLineBytes = 1024;
 
 static bool validToken(const std::string& t) {
     if (t.size() < 16 || t.size() > 128) return false;
@@ -563,18 +568,19 @@ void WebGuiServer::serveOne(int fd) {
         resp = httpOk("text/plain; charset=utf-8", handleLoadSettings());
     } else if (method == "GET" && route == "/api/load-worktodo") {
         resp = httpOk("text/plain; charset=utf-8", handleLoadWorktodo());
+    } else if (method == "GET" && route == "/api/paths") {
+        resp = httpOk("application/json", handlePathsJson());
     } else if (method == "POST" && route == "/api/save-settings") {
-        bool ok = handleSaveSettings(body);
-        resp = ok ? httpOk("application/json", "{\"ok\":true}") : httpBadRequest("write-failed");
+        int status = 400;
+        const std::string err = handleSaveSettings(body, status);
+        resp = err.empty() ? httpOk("application/json", "{\"ok\":true}") : httpError(status, err);
     } else if (method == "POST" && route == "/api/append-worktodo") {
-        std::string line = body;
-        size_t p = line.find_first_not_of("\r\n ");
-        if (p != std::string::npos) line = line.substr(p);
-        while (!line.empty() && (line.back()=='\r' || line.back()=='\n')) line.pop_back();
-        if (line.empty()) {
-            resp = httpBadRequest("empty");
+        std::string lines;
+        const std::string err = checkWorktodoAppend(body, lines);
+        if (!err.empty()) {
+            resp = httpBadRequest(err);
         } else {
-            if (onSubmit_) onSubmit_(line);
+            if (onSubmit_) onSubmit_(lines);
             resp = httpOk("application/json", "{\"ok\":true}");
         }
     } else if (method == "POST" && route == "/api/stop") {
@@ -662,20 +668,94 @@ std::string WebGuiServer::readFile(const std::string& path) {
     return ss.str();
 }
 
-bool WebGuiServer::writeFile(const std::string& path, const std::string& data) {
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-    if (!f.is_open()) return false;
-    f.write(data.data(), (std::streamsize)data.size());
-    return (bool)f;
+// Write a sibling temporary file and rename it over `path`, so a failed write (full disk, I/O error)
+// leaves the old file intact instead of a truncated one. A symlink is followed: its target is replaced.
+bool WebGuiServer::writeFileReplacing(const std::string& path, const std::string& data) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path target = path;
+    if (fs::is_symlink(target, ec)) {
+        const fs::path resolved = fs::canonical(target, ec);
+        if (ec) return false;
+        target = resolved;
+    }
+    const fs::path tmp = target.string() + ".gui-tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f.is_open()) return false;
+        f.write(data.data(), (std::streamsize)data.size());
+        f.close();
+        if (!f) { fs::remove(tmp, ec); return false; }
+    }
+    fs::rename(tmp, target, ec);
+    if (ec) { std::error_code ec2; fs::remove(tmp, ec2); return false; }
+    return true;
 }
 
 std::string WebGuiServer::handleLoadSettings() {
-    return util::redactSecretText(readFile(cfg_.config_path));
+    // Only the part the GUI may edit: path and network options are shown read-only (/api/paths).
+    return util::redactSecretText(util::guiEditableSettings(readFile(cfg_.config_path)));
 }
 
-bool WebGuiServer::handleSaveSettings(const std::string& body) {
-    // Never persist a PrimeNet password from the browser (submission is not wired up anyway).
-    return writeFile(cfg_.config_path, util::stripSecretText(body));
+std::string WebGuiServer::handleSaveSettings(const std::string& body, int& status) {
+    // The GUI must not be able to change where PrMers reads or writes files (worktodo, save directory,
+    // kernels, the settings file itself) or where the GUI listens: a token holder could otherwise point
+    // -worktodo at any file and append to it. Such options are refused here, the hand-written part of the
+    // file is carried over unchanged, and the loader ignores them below the GUI marker line anyway.
+    // A PrimeNet password is never stored from the browser either.
+    std::string cleaned;
+    const std::string err = util::checkGuiSettingsText(body, cleaned);
+    if (!err.empty()) { status = 400; return err; }
+    std::lock_guard<std::mutex> lk(settingsMtx_);
+    const std::string content = util::composeGuiSettingsFile(readFile(cfg_.config_path), cleaned);
+    if (!writeFileReplacing(cfg_.config_path, content)) {
+        status = 500;
+        return "Could not write the settings file.";
+    }
+    return std::string();
+}
+
+std::string WebGuiServer::checkWorktodoAppend(const std::string& body, std::string& lines) const {
+    lines.clear();
+    if (body.size() > kMaxAppendBytes)
+        return "Worktodo text is too long (limit " + std::to_string(kMaxAppendBytes) + " bytes).";
+    size_t count = 0, lineNo = 0, pos = 0;
+    while (pos <= body.size()) {
+        size_t eol = body.find('\n', pos);
+        if (eol == std::string::npos) eol = body.size();
+        std::string line = body.substr(pos, eol - pos);
+        pos = eol + 1;
+        ++lineNo;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        for (char ch : line) {
+            const unsigned char c = static_cast<unsigned char>(ch);
+            if (c < 0x20 || c > 0x7e)
+                return "Line " + std::to_string(lineNo) + " contains a control or non-ASCII character.";
+        }
+        const size_t a = line.find_first_not_of(' ');
+        if (a == std::string::npos) continue;                  // blank line
+        line = line.substr(a, line.find_last_not_of(' ') - a + 1);
+        if (line.size() > kMaxAppendLineBytes)
+            return "Line " + std::to_string(lineNo) + " is too long.";
+        if (++count > kMaxAppendLines)
+            return "Too many lines (limit " + std::to_string(kMaxAppendLines) + ").";
+        if (!cfg_.worktodo_line_ok || !cfg_.worktodo_line_ok(line))
+            return "Line " + std::to_string(lineNo) + " is not a supported worktodo entry: " + line;
+        if (!lines.empty()) lines += '\n';
+        lines += line;
+    }
+    if (lines.empty()) return "empty";
+    return std::string();
+}
+
+std::string WebGuiServer::handlePathsJson() const {
+    std::ostringstream oss;
+    oss << "{\"worktodo\":\"" << jsonEscape(cfg_.worktodo_path) << "\","
+        << "\"settings\":\"" << jsonEscape(cfg_.config_path) << "\","
+        << "\"results\":\"" << jsonEscape(cfg_.results_path) << "\","
+        << "\"save\":\"" << jsonEscape(cfg_.save_path) << "\","
+        << "\"kernel\":\"" << jsonEscape(cfg_.kernel_path) << "\"}";
+    return oss.str();
 }
 
 std::string WebGuiServer::handleLoadWorktodo() {
@@ -762,6 +842,7 @@ std::string WebGuiServer::htmlPage() {
 "<button id=buildwt>Build line</button>"
 "<button id=appendrun>Append & Run</button>"
 "</div>"
+"<div class=muted id=wtmsg style='margin-top:8px'></div>"
 "<textarea id=wt class=mono style='margin-top:8px;height:140px' placeholder='PRP=1,2,p,-1'></textarea>"
 "</div>"
 "<div class=card>"
@@ -779,9 +860,7 @@ std::string WebGuiServer::htmlPage() {
 "<div><label>Computation backend</label><select id=opt_backend><option value=auto>Auto (recommended)</option><option value=aevum>Force Aevum</option><option value=marin>Force Marin engine::Reg</option><option value=internal>Internal PrMers NTT</option></select></div>"
 "<div><label>Forced Aevum FFT3161 plan</label><input id=opt_afft type=text placeholder='auto or 1:1K:8:256'></div>"
 "<div><label>Backup interval (s)</label><input id=opt_t type=number value=120></div>"
-"<div><label>Save path</label><input id=opt_f type=text value='.'></div>"
 "<div><label>Enqueue max</label><input id=opt_eq type=number value=0></div>"
-"<div><label>Kernel path</label><input id=opt_kpath type=text value='ocl/kernel.cl'></div>"
 "<div><label>Build options</label><input id=opt_build type=text placeholder=''></div>"
 "<div><label>Proof power (0..12)</label><input id=opt_proof type=number min=0 max=12 value=0></div>"
 "<div><label>Res64 display interval</label><input id=opt_r64i type=number value=100000></div>"
@@ -791,8 +870,6 @@ std::string WebGuiServer::htmlPage() {
 "<div><label>LL-safe block</label><input id=opt_llb type=number value=0></div>"
 "<div><label>Local size r2</label><input id=opt_l1 type=number value=0></div>"
 "<div><label>Local size r5</label><input id=opt_l5 type=number value=0></div>"
-"<div><label>Worktodo path</label><input id=opt_wt type=text value='./worktodo.txt'></div>"
-"<div><label>Output dir</label><input id=opt_out type=text value='.'></div>"
 "<div><label>User</label><input id=opt_user type=text></div>"
 "<div><label>Computer</label><input id=opt_comp type=text></div>"
 "<div><label>Submit</label><select id=opt_submit><option value=0>No</option><option value=1>Yes</option></select></div>"
@@ -805,8 +882,19 @@ std::string WebGuiServer::htmlPage() {
 "<button id=savesettings>Save settings.cfg</button>"
 "<button id=loadsettings>Load settings.cfg</button>"
 "</div>"
-"<textarea id=settingstxt class=mono style='margin-top:8px;height:160px' placeholder='-d 0 -prp -t 120 -f . ...'></textarea>"
+"<div class=muted id=settingsmsg style='margin-top:8px'></div>"
+"<textarea id=settingstxt class=mono style='margin-top:8px;height:160px' placeholder='-d 0 -prp -t 120 ...'></textarea>"
 "</div>"
+"<div class=card>"
+"<div style='font-weight:600;margin-bottom:8px'>Paths</div>"
+"<div class=muted style='margin-bottom:8px'>Read-only here. Set them on the command line (-worktodo, -f, -kernelpath, -config) or by editing the settings file by hand, above the GUI marker line.</div>"
+"<div class=backend-grid>"
+"<div class=kv><div class=k>Worktodo</div><div class='v mono' id=path_worktodo>—</div></div>"
+"<div class=kv><div class=k>Settings file</div><div class='v mono' id=path_settings>—</div></div>"
+"<div class=kv><div class=k>Save directory</div><div class='v mono' id=path_save>—</div></div>"
+"<div class=kv><div class=k>Results</div><div class='v mono' id=path_results>—</div></div>"
+"<div class=kv><div class=k>Kernel</div><div class='v mono' id=path_kernel>—</div></div>"
+"</div></div>"
 "</div>"
 "<script>"
 "const TOKEN='" + token_ + "';"
@@ -843,17 +931,19 @@ std::string WebGuiServer::htmlPage() {
 "$('#stop').onclick=async()=>{try{await api('/api/stop',{method:'POST'});}catch(e){}};"
 "function buildWorktodo(){const m=$('#mode').value;const p=parseInt($('#exp').value||'0');const b1=$('#b1').value.trim();const b2=$('#b2').value.trim();const curves=Math.max(1,parseInt($('#curves').value||'1'));const factors=($('#factors').value||'').split(',').map(s=>s.trim()).filter(Boolean);const basert=($('#basert').value||'').split(',').map(s=>s.trim()).filter(Boolean);let line='';if(m==='prp'){line=`PRP=1,2,${p},-1`;if(basert.length===2)line+=`,0,0,`+basert[0]+`,`+basert[1];if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}else if(m==='ll'){line=`Test=1,2,${p},-1`;}else if(m==='llsafe2'){line=`DoubleCheck=1,2,${p},-1`;}else if(m==='pm1'){let B1=(b1||'0');let B2=(b2||'0');line=`Pminus1=1,2,${p},-1,${B1},${B2}`;if(factors.length)line+=`,`+factors.map(s=>`\"${s}\"`).join(',');}else if(m==='ecm'){let B1=(b1||'0');let B2=(b2||'0');line=`ECM2=1,2,${p},-1,${B1},${B2},${curves}`;if(factors.length)line+=`,\"`+factors.join(',')+`\"`;}return line;}"
 "$('#buildwt').onclick=()=>{$('#wt').value=buildWorktodo();};"
-"$('#appendrun').onclick=async()=>{const t=$('#wt').value;try{await api('/api/append-worktodo',{method:'POST',headers:{'Content-Type':'text/plain'},body:t});}catch(e){}};"
-"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe2'?'-llsafe2':m==='ecm'?'-ecm':'-pm1');const be=$('#opt_backend').value;const afft=($('#opt_afft').value||'').trim();if(be==='aevum'){parts.push('-aevum');if(afft)parts.push('-aevum-fft',afft);}else if(be==='marin')parts.push('-engine-marin');else if(be==='internal')parts.push('-marin');else parts.push('-aevum-auto');if(m==='pm1'||m==='ecm'){const b1=($('#b1').value||'').trim();const b2=($('#b2').value||'').trim();if(b1)parts.push('-b1',b1);if(b2)parts.push('-b2',b2);}if(m==='ecm'){const cv=Math.max(1,parseInt($('#curves').value||'1'));parts.push('-K',String(cv));}const t=$('#opt_t').value;if(t)parts.push('-t',t);const f=$('#opt_f').value;if(f)parts.push('-f',f);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const kp=$('#opt_kpath').value;if(kp)parts.push('-kernelpath',kp);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wt=$('#opt_wt').value;if(wt)parts.push('-worktodo',wt);const out=$('#opt_out').value;if(out)parts.push('-output',out);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
+"$('#appendrun').onclick=async()=>{await postText('/api/append-worktodo',$('#wt').value,$('#wtmsg'),'Appended.');};"
+"function genSettings(){const parts=[];const d=$('#opt_d').value;parts.push('-d',d);const m=$('#mode').value;parts.push(m==='prp'?'-prp':m==='ll'?'-ll':m==='llsafe2'?'-llsafe2':m==='ecm'?'-ecm':'-pm1');const be=$('#opt_backend').value;const afft=($('#opt_afft').value||'').trim();if(be==='aevum'){parts.push('-aevum');if(afft)parts.push('-aevum-fft',afft);}else if(be==='marin')parts.push('-engine-marin');else if(be==='internal')parts.push('-marin');else parts.push('-aevum-auto');if(m==='pm1'||m==='ecm'){const b1=($('#b1').value||'').trim();const b2=($('#b2').value||'').trim();if(b1)parts.push('-b1',b1);if(b2)parts.push('-b2',b2);}if(m==='ecm'){const cv=Math.max(1,parseInt($('#curves').value||'1'));parts.push('-K',String(cv));}const t=$('#opt_t').value;if(t)parts.push('-t',t);const l1=$('#opt_l1').value;if(l1&&parseInt(l1))parts.push('-l1',l1);const l5=$('#opt_l5').value;if(l5&&parseInt(l5))parts.push('-l5',l5);const eq=$('#opt_eq').value;if(eq&&parseInt(eq))parts.push('-enqueue_max',eq);const bo=$('#opt_build').value;if(bo)parts.push('-build',`\"${bo}\"`);const proof=$('#opt_proof').value;if(proof!==''&&proof!==null)parts.push('-proof',proof);const r64=$('#opt_r64i').value;if(r64&&parseInt(r64)>=0)parts.push('-res64_display_interval',r64);const err=$('#opt_err').value;if(err&&parseInt(err))parts.push('-erroriter',err);const iff=$('#opt_if').value;if(iff&&parseInt(iff))parts.push('-iterforce',iff);const iff2=$('#opt_if2').value;if(iff2&&parseInt(iff2))parts.push('-iterforce2',iff2);const llb=$('#opt_llb').value;if(llb&&parseInt(llb))parts.push('-llsafeb',llb);const wag=$('#opt_wag').value;if(wag==='1')parts.push('-wagstaff');const th=$('#opt_th').value;if(th==='1')parts.push('-throttle_low');const sub=$('#opt_submit').value;if(sub==='1')parts.push('-submit');const na=$('#opt_noask').value;if(na==='1')parts.push('--noask');const user=$('#opt_user').value;if(user)parts.push('-user',user);const comp=$('#opt_comp').value;if(comp)parts.push('-computer',comp);return parts.join(' ');} "
 "$('#gensettings').onclick=()=>{$('#settingstxt').value=genSettings();};"
-"$('#savesettings').onclick=async()=>{const txt=$('#settingstxt').value;await api('/api/save-settings',{method:'POST',headers:{'Content-Type':'text/plain'},body:txt});};"
+"async function postText(u,t,msgEl,okText){msgEl.textContent='';try{const r=await api(u,{method:'POST',headers:{'Content-Type':'text/plain'},body:t});let j={};try{j=await r.json();}catch(e){}msgEl.textContent=r.ok?okText:('Error: '+(j.error||('HTTP '+r.status)));return r.ok;}catch(e){msgEl.textContent='Error: '+e;return false;}}"
+"$('#savesettings').onclick=async()=>{await postText('/api/save-settings',$('#settingstxt').value,$('#settingsmsg'),'Saved; used from the next start.');};"
 "$('#loadsettings').onclick=async()=>{const r=await api('/api/load-settings');const t=await r.text();$('#settingstxt').value=t;};"
 "async function refreshResults(){const n=parseInt($('#reslimit').value||'50');const p=$('#respath').value||'';const r=await api('/api/results?limit='+n+(p?('&path='+encodeURIComponent(p)):''));const j=await r.json();const html=(j.lines||[]).map(x=>{let o=null;try{o=JSON.parse(x);}catch(e){}if(!o)return x;const ts=o.timestamp||'';const st=o.status||'';const wt=o.worktype||o.program?.name||'';const e=o.exponent||'';const r64=o.res64||'';return `[${ts}] ${st} e=${e} ${wt} res64=${r64}`;}).join('\\n');$('#reslist').textContent=html;}"
 "$('#refreshres').onclick=refreshResults;"
 "function updateExpLink(){const e=$('#exp').value||'';const u=e?('https://www.mersenne.ca/exponent/'+e):'https://www.mersenne.ca';$('#expopen').href=u;}"
 "$('#exp').addEventListener('input',updateExpLink);updateExpLink();"
 "async function loadWorktodo(){try{const r=await api('/api/load-worktodo');const t=await r.text();if(t)$('#wt').value=t;}catch(e){}}"
-"(async()=>{try{const r=await api('/api/load-settings');const t=await r.text();if(t)$('#settingstxt').value=t;}catch(e){};refreshResults();loadWorktodo();})();"
+"async function loadPaths(){try{const r=await api('/api/paths');const j=await r.json();for(const k of ['worktodo','settings','save','results','kernel']){$('#path_'+k).textContent=j[k]||'—';}}catch(e){}}"
+"(async()=>{loadPaths();try{const r=await api('/api/load-settings');const t=await r.text();if(t)$('#settingstxt').value=t;}catch(e){};refreshResults();loadWorktodo();})();"
 "</script>"
 "</body></html>";
 }
@@ -883,7 +973,7 @@ std::string WebGuiServer::httpBadRequest(const std::string& msg) {
 std::string WebGuiServer::httpError(int code, const std::string& msg) {
     const char* reason = code == 400 ? "Bad Request" : code == 401 ? "Unauthorized" : code == 403 ? "Forbidden"
                        : code == 413 ? "Payload Too Large" : code == 431 ? "Request Header Fields Too Large"
-                       : "Error";
+                       : code == 500 ? "Internal Server Error" : "Error";
     std::string body = "{\"error\":\"" + jsonEscape(msg) + "\"}";
     std::ostringstream oss;
     oss << "HTTP/1.1 " << code << " " << reason << "\r\n";

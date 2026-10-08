@@ -1010,6 +1010,10 @@ int App::run() {
        // std::cout << "host : " << cfg.bind_host << "\n";
         cfg.lanipv4 = options.ipv4;
         cfg.worktodo_path = options.worktodo_path;
+        cfg.save_path = options.save_path.empty() ? "." : options.save_path;
+        cfg.kernel_path = options.kernel_path;
+        cfg.worktodo_line_ok = [](const std::string& line) { return io::WorktodoParser::isValidEntryLine(line); };
+
         cfg.config_path = options.config_path.empty() ? "./settings.cfg" : options.config_path;
         cfg.results_path = (std::filesystem::path(options.save_path.empty() ? "." : options.save_path) / "results.txt").string();
         static std::atomic<bool> gui_alive{true};
