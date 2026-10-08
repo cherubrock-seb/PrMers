@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parents[1]
 host = (root / "src/modes/RunGaussianTrialFactor.cpp").read_text()
 
 # The checkpoint is written with the found factors and read back on resume.
-assert "saveCheckpoint(checkpoint, nextK, found)" in host
+assert "trySaveCheckpoint(checkpoint, nextK, found)" in host
 assert "const std::vector<FoundFactor>& found" in host
 assert "found = saved->found;" in host
 assert "struct TfCheckpoint" in host
