@@ -1665,6 +1665,23 @@ int App::runECMMarinTwistedEdwards()
         }
     }
 
+    // A forced -seed names the curve to run.  A leftover checkpoint of another seed (an
+    // earlier run with a different -seed) must not take its place, so the probe result is
+    // kept only when it carries the seed this run would use for that curve index.
+    if (forceCurve && have_resume_seed) {
+        const uint64_t expected_seed = (forcedSeedSeries && resume_curve_idx != 0)
+            ? mix64(forcedCurveSeedValue, resume_curve_idx) : forcedCurveSeedValue;
+        if (resume_curve_seed != expected_seed) {
+            std::cout << "[ECM] Ignoring checkpoint of curve " << (resume_curve_idx + 1)
+                      << " made with seed " << resume_curve_seed << ": -seed "
+                      << forcedCurveSeedValue << " was requested" << std::endl;
+            resume_curve_idx   = 0;
+            resume_curve_seed  = 0;
+            have_resume_seed   = false;
+            have_resume_stage2 = false;
+        }
+    }
+
     auto now_ns = (uint64_t)duration_cast<nanoseconds>(high_resolution_clock::now().time_since_epoch()).count();
 
     uint64_t base_seed;
