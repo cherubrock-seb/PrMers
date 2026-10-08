@@ -66,7 +66,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -167,6 +167,10 @@ test-prp-marin-ckpt-verified-state:
 
 test-ecm-torsion:
 	bash tests/test_ecm_torsion_curves.sh
+
+# Needs an OpenCL device; PRMERS_BIN overrides ./prmers.
+test-ecm-mont-stage2-resume:
+	python3 tests/ecm_mont_stage2_resume_test.py
 
 # Marin transform-size bound: exact 128-bit check and OpenCL/GMP device check.
 test-marin-ibdwt-bound:
