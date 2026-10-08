@@ -5569,7 +5569,13 @@ int App::runPM1Stage2MarinNKVersion() {
     const size_t RSTATE=0, RACC=1, RTMP=2, RPOW=3, RDIFF=4, RONE=5;
     size_t regCount = 6 + (size_t)K + 1 + (size_t)nmax;
 
-    engine* eng_s1 = engine::create_gpu(pexp, 11, (size_t)options.device_id, options.debug);
+    // The stage-1 checkpoint holds every register of the stage-1 engine, so the
+    // engine that reads it must have the same register count as stage 1 used
+    // (1 or 3 for the low-memory stage 1, 11 otherwise; a -b1old extension
+    // can differ). Start with the likely count and try the others if the
+    // checkpoint does not fit.
+    const size_t s1Regs = (options.pm1_lowmem && options.pm1_ultralowmem) ? 1u : (options.pm1_lowmem ? 3u : 11u);
+    engine* eng_s1 = engine::create_gpu(pexp, s1Regs, (size_t)options.device_id, options.debug);
     std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
     auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
         File f(file);
@@ -5606,6 +5612,16 @@ int App::runPM1Stage2MarinNKVersion() {
     };
     int rr = read_ckpt_s1(eng_s1, ck.str());
     if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
+    if (rr != 0 && (File(ck.str()).exists() || File(ck.str() + ".old").exists())) {
+        for (const size_t alt : {size_t(11), size_t(3), size_t(2), size_t(1)}) {
+            if (alt == s1Regs) continue;
+            delete eng_s1;
+            eng_s1 = engine::create_gpu(pexp, alt, (size_t)options.device_id, options.debug);
+            rr = read_ckpt_s1(eng_s1, ck.str());
+            if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
+            if (rr == 0) break;
+        }
+    }
     if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return -2; }
     mpz_t H; mpz_init(H); eng_s1->get_mpz(H, (engine::Reg)0); delete eng_s1;
 
@@ -7626,27 +7642,32 @@ int App::runPM1Marin() {
       (!newStage1FactorFound || options.pm1_continue_stage2_after_factor)){
         {
             std::cout << "P-1 STAGE 2 IN **** n^K variant  n=" << options.nmax << " K=" << options.K << "******\n";
-    
-            const double elapsed_time_ck =
-                std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
-                + restored_time;
 
-            save_ckpt(
-                0,                 // i
-                elapsed_time_ck,   // et
-                0,                 // chk
-                0,                 // blks
-                0,                 // bib
-                0,                 // cbl
-                0,                 // inlot
-                mpz_class(0),      // ceacc
-                mpz_class(0),      // cwbits
-                chunkIndex,        // chunkIdx
-                startPrime,        // startP
-                firstChunk ? 1 : 0,// first
-                processed_total_bits, // processedBits
-                0                  // bitsInChunk
-            );
+            // With a requested B2 the classic Stage 2 above already saved the
+            // Stage-1 checkpoint and then released the Stage-1 engine, so there
+            // is nothing left to save (and no engine to read it from).
+            if (eng != nullptr) {
+                const double elapsed_time_ck =
+                    std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
+                    + restored_time;
+
+                save_ckpt(
+                    0,                 // i
+                    elapsed_time_ck,   // et
+                    0,                 // chk
+                    0,                 // blks
+                    0,                 // bib
+                    0,                 // cbl
+                    0,                 // inlot
+                    mpz_class(0),      // ceacc
+                    mpz_class(0),      // cwbits
+                    chunkIndex,        // chunkIdx
+                    startPrime,        // startP
+                    firstChunk ? 1 : 0,// first
+                    processed_total_bits, // processedBits
+                    0                  // bitsInChunk
+                );
+            }
         }
         //options.B2 = 214439;
         if (eng != nullptr) {
