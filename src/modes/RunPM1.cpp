@@ -1016,6 +1016,15 @@ int App::runPM1() {
     mp_bitcnt_t bits = mpz_sizeinbase(E.get_mpz_t(), 2);
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
     uint64_t resumeIter = backupManager.loadState(x);
+    if (resumeIter > static_cast<uint64_t>(bits)) {
+        // The loop file holds a position beyond this E (a damaged file, or one
+        // left by a run with another B1): resuming would apply the loaded state
+        // to bits that do not exist.  Start over.
+        std::cerr << "Warning: the saved loop position " << resumeIter << " is beyond the "
+                  << bits << " bits of E; ignoring it and starting stage 1 from the beginning\n";
+        x.assign(x.size(), 0ULL);
+        resumeIter = 0;
+    }
     if(resumeIter==0){
         x[0] = 1ULL;
         resumeIter = bits;

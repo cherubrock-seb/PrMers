@@ -618,3 +618,7 @@ test-pm1-ckpt-v3-resume: all
 
 test-pm1-b1-limit: all
 	bash tests/pm1_b1_limit_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-pm1-legacy-loop-bound
+test-pm1-legacy-loop-bound: all
+	bash tests/pm1_legacy_loop_bound_test.sh $${PRMERS_TEST_DEVICE:-0}
