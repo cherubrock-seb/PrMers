@@ -5,6 +5,8 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -58,6 +60,41 @@ int main() {
         std::ostream os(&buf);
         os << "Progress: 50%\r" << std::flush;
         expectEq(file.str(), "Progress: 50%\r", "partial line flushed");
+    }
+
+    // Threads writing at once (std::cout is written by the progress spinner and the main loop alike):
+    // no line may be lost, torn or crash the buffer. Each line is one operator<< call plus a flush.
+    {
+        std::ostringstream file;
+        constexpr int kThreads = 4, kLines = 3000;
+        {
+            util::TokenRedactingBuf buf(file.rdbuf());
+            std::vector<std::thread> threads;
+            for (int t = 0; t < kThreads; ++t)
+                threads.emplace_back([&buf, t] {
+                    std::ostream os(&buf);
+                    for (int i = 0; i < kLines; ++i) {
+                        os << "thread " << t << " line " << i << " end" << std::endl;
+                        os << "\rProgress " << t << " " << i << "%" << std::flush;
+                    }
+                });
+            for (auto& th : threads) th.join();
+        }
+        // Fragments of different lines may interleave (that is what unsynchronised stdout does too), but
+        // nothing may be lost: the byte and line counts are exact.
+        size_t want = 0;
+        for (int t = 0; t < kThreads; ++t)
+            for (int i = 0; i < kLines; ++i)
+                want += std::string("thread " + std::to_string(t) + " line " + std::to_string(i) + " end\n").size() +
+                        std::string("\rProgress " + std::to_string(t) + " " + std::to_string(i) + "%").size();
+        const std::string out = file.str();
+        size_t newlines = 0;
+        for (char c : out) newlines += (c == '\n');
+        if (newlines != static_cast<size_t>(kThreads) * kLines || out.size() != want) {
+            std::cerr << "FAIL concurrent writers: " << newlines << " lines / " << out.size()
+                      << " bytes, expected " << static_cast<size_t>(kThreads) * kLines << " / " << want << "\n";
+            ++failures;
+        }
     }
 
     if (failures != 0) {
