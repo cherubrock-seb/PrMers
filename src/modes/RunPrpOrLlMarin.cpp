@@ -523,6 +523,10 @@ int App::runPrpOrLlMarin()
         is_prp_prime = digit.equal_to(9);
     }
     words = pack_words_from_eng_digits(digit, p);
+    if (options.mode == "ll" && is_prp_prime && digit.equal_to_Mp()) {
+        // The verdict accepts both representations of zero; report the canonical one.
+        std::fill(words.begin(), words.end(), 0u);
+    }
 
     std::string res64_hex;
     std::string res2048_hex;

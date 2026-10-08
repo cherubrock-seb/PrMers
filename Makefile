@@ -234,6 +234,10 @@ test-final-carry-digit0:
 test-worktodo-small-items:
 	bash tests/test_worktodo_small_items.sh
 
+.PHONY: test-ll-unsafe-zero-residue
+test-ll-unsafe-zero-residue:
+	python3 tests/ll_unsafe_zero_residue_source_test.py
+
 test-marin-invalid-device:
 	mkdir -p tests/build-marin-invalid-device
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
