@@ -837,12 +837,7 @@ int App::runECMMarinTwistedEdwards()
 
     mpz_class N = (mpz_class(1) << p) - 1;
 
-#ifdef SIGINT
-    std::signal(SIGINT, handle_sigint);
-#endif
-#ifdef SIGTERM
-    std::signal(SIGTERM, handle_sigint);
-#endif
+    core::algo::install_stop_handlers();   // SIGINT, SIGTERM, SIGHUP / console events
 #ifdef SIGQUIT
     std::signal(SIGQUIT, handle_sigint);
 #endif

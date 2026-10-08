@@ -20,6 +20,7 @@
  * This code is released as free software. 
  */
 #include "core/App.hpp"
+#include "core/InheritedSignals.hpp"
 #include "io/CliParser.hpp"
 #include "aevum/EngineAevum.hpp"
 #include "modes/GaussianTrialFactor.hpp"
@@ -165,6 +166,7 @@ int validateCompatibilityBeforeApp(int argc, char** argv) {
 } // namespace
 
 int main(int argc, char** argv) {
+    core::algo::note_inherited_signals();   // before any OpenCL runtime can touch the signal dispositions
     LogTee _tee("prmers.log");
     try {
         if (const auto tf = core::tryRunGaussianTrialFactor(argc, argv)) return *tf;
