@@ -17,6 +17,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/EcmPrime95Handoff.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -230,6 +231,9 @@ struct Prime95Stage2Task {
 struct Prime95Stage2TaskResult {
     uint64_t curve_idx = 0;
     bool success = false;
+    // The run was stopped (interrupt or shutdown) before Prime95 reported a
+    // result.  Not an error: the curve stays pending for the next run.
+    bool interrupted = false;
     bool factor_found = false;
     bool known_factor = false;
     std::string factor;
@@ -532,7 +536,8 @@ static void p95_close_windows_process_handles(PROCESS_INFORMATION& pi) {
 
 static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
                                                    const fs::path& p95_exe,
-                                                   const Prime95Stage2Task& task) {
+                                                   const Prime95Stage2Task& task,
+                                                   const std::function<bool()>& should_stop) {
     Prime95Stage2TaskResult result;
     result.curve_idx = task.curve_idx;
 
@@ -615,6 +620,14 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
         if (p95_read_last_non_empty_line(results_file, result.json_line)) {
             // keep the latest JSON line if it already exists
         }
+        if (should_stop()) {
+            TerminateProcess(pi.hProcess, 1);
+            WaitForSingleObject(pi.hProcess, 5000);
+            p95_close_windows_process_handles(pi);
+            restore_prime_txt();
+            result.interrupted = true;
+            return result;
+        }
 
         const DWORD wait_rc = WaitForSingleObject(pi.hProcess, 250);
         if (wait_rc == WAIT_OBJECT_0) {
@@ -660,16 +673,28 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
     }
     p95_close_windows_process_handles(pi);
 #else
+    // posix_spawn + waitpid instead of std::system(): system() ignores SIGINT in
+    // this process while the child runs, which disabled Ctrl-C for the whole
+    // Prime95 stage 2.  "exec" lets the stop signal reach Prime95 itself.
     std::ostringstream shell;
     shell << "cd " << p95_shell_quote_posix(p95_dir.string())
-          << " && " << p95_shell_quote_posix(p95_exe.string())
+          << " && exec " << p95_shell_quote_posix(p95_exe.string())
           << " -d > " << p95_shell_quote_posix((p95_dir / task.log_filename).string()) << " 2>&1";
-    const std::string cmd = std::string("sh -lc ") + p95_shell_quote_posix(shell.str());
 
-    int rc = std::system(cmd.c_str());
+    bool stopped = false;
+    int rc = core::ecmRunShellInterruptible(shell.str(), should_stop, stopped);
     if (rc == -1) result.exit_code = -1;
     else if (WIFEXITED(rc)) result.exit_code = WEXITSTATUS(rc);
     else result.exit_code = rc;
+    if (stopped) {
+        // Use a result Prime95 managed to write before it stopped; otherwise
+        // the curve stays pending and is handed to Prime95 again next run.
+        if (!p95_read_last_non_empty_line(results_file, result.json_line)) {
+            restore_prime_txt();
+            result.interrupted = true;
+            return result;
+        }
+    }
 #endif
 
     for (int attempt = 0; attempt < 200 && result.json_line.empty(); ++attempt) {
@@ -699,13 +724,13 @@ static Prime95Stage2TaskResult p95_run_stage2_task(const fs::path& p95_dir,
         return result;
     }
 
+    const core::EcmPrime95Outcome outcome = core::ecmClassifyPrime95Result(status, factor);
     result.factor = factor;
-    result.factor_found = (!factor.empty()) || (status == "F");
-    result.known_factor = result.factor_found && !factor.empty() && p95_is_known_factor_string(factor, task.known_factors);
-    result.success = (status == "NF") || (status == "F");
-
-    if (!result.success && result.error.empty()) {
-        result.error = "Prime95 returned an unsupported status: " + status;
+    result.factor_found = outcome.factor_found;
+    result.known_factor = result.factor_found && p95_is_known_factor_string(factor, task.known_factors);
+    result.success = outcome.ok;
+    if (!outcome.ok) {
+        result.error = outcome.error + " | curve " + std::to_string(task.curve_idx + 1) + " | result=" + result.json_line;
     }
     return result;
 }
@@ -949,9 +974,19 @@ int App::runECMMarinTwistedEdwards()
     fs::path p95_exe;
     std::deque<Prime95Stage2Task> p95_pending_tasks;
     std::optional<Prime95Stage2Task> p95_active_task;
+    // Set when this function returns: the background Prime95 run is stopped
+    // instead of the std::async future's destructor waiting for a whole stage 2.
+    // Declared before the future so it outlives the worker thread.
+    std::atomic<bool> p95_cancel{false};
     std::future<Prime95Stage2TaskResult> p95_future;
     bool p95_future_active = false;
+    struct P95CancelOnExit {
+        std::atomic<bool>& cancel;
+        ~P95CancelOnExit() { cancel.store(true, std::memory_order_relaxed); }
+    } p95_cancel_on_exit{p95_cancel};
     std::string p95_background_error;
+    // Curves whose stage 2 is owed to Prime95 from an earlier run (pending markers).
+    std::set<uint64_t> p95_recovered_curves;
 
     auto p95_log = [&](const std::string& msg)->void {
         std::cout << msg << std::endl;
@@ -961,6 +996,8 @@ int App::runECMMarinTwistedEdwards()
     auto p95_finalize_background_stop = [&](engine* eng_or_null)->int {
         if (!p95_background_error.empty()) {
             p95_log(std::string("[ECM] Prime95 Stage2 background error: ") + p95_background_error);
+            p95_log("[ECM] Curves handed to Prime95 without a result keep their pending marker "
+                    "(resume_p*.p95.pending) and are handed to Prime95 again by the next run.");
             if (eng_or_null) delete eng_or_null;
             return 1;
         }
@@ -973,12 +1010,15 @@ int App::runECMMarinTwistedEdwards()
             if (eng_or_null) delete eng_or_null;
             return 0;
         }
+        std::cout << "[ECM] Interrupt received — exiting without publishing a final result." << std::endl;
         if (eng_or_null) delete eng_or_null;
         return 0;
     };
 
     auto p95_start_next_task = [&]() -> void {
         if (!p95_stage2_enabled || p95_future_active || p95_pending_tasks.empty()) return;
+        // Stopping: leave the queue alone; the curves keep their pending markers.
+        if (interrupted.load(std::memory_order_relaxed) || p95_cancel.load(std::memory_order_relaxed)) return;
         p95_active_task = p95_pending_tasks.front();
         p95_pending_tasks.pop_front();
         Prime95Stage2Task task = *p95_active_task;
@@ -988,18 +1028,31 @@ int App::runECMMarinTwistedEdwards()
             << " | log=" << (p95_dir / task.log_filename).string()
             << " | resume=" << (p95_dir / task.resume_filename).string();
         p95_log(oss.str());
-        p95_future = std::async(std::launch::async, [p95_dir, p95_exe, task]() {
-            return p95_run_stage2_task(p95_dir, p95_exe, task);
+        std::atomic<bool>* cancel = &p95_cancel;
+        p95_future = std::async(std::launch::async, [p95_dir, p95_exe, task, cancel]() {
+            return p95_run_stage2_task(p95_dir, p95_exe, task, [cancel]() {
+                return interrupted.load(std::memory_order_relaxed) || cancel->load(std::memory_order_relaxed);
+            });
         });
         p95_future_active = true;
     };
 
     auto p95_handle_finished_task = [&](const Prime95Stage2TaskResult& rr)->bool {
+        if (rr.interrupted) {
+            std::ostringstream oss;
+            oss << "[ECM] Prime95 Stage2 for curve " << (rr.curve_idx + 1)
+                << " stopped before a result; it stays pending for the next run";
+            p95_log(oss.str());
+            interrupted.store(true, std::memory_order_relaxed);
+            return true;
+        }
         if (!rr.error.empty()) {
             p95_background_error = rr.error;
             interrupted.store(true, std::memory_order_relaxed);
             return true;
         }
+        // Prime95 searched the range: the curve no longer owes its stage 2.
+        if (p95_active_task.has_value()) core::ecmRemovePrime95Pending(p95_active_task->resume_src_path);
 
         std::ostringstream oss;
         oss << "[ECM] Prime95 Stage2 background done | curve=" << (rr.curve_idx + 1)
@@ -1064,6 +1117,9 @@ int App::runECMMarinTwistedEdwards()
             }
         }
         if (!p95_future_active) p95_start_next_task();
+        // Interrupted with curves still queued: nothing will run them in this
+        // process, so stop instead of waiting for them.
+        if (!p95_future_active && !p95_pending_tasks.empty() && interrupted.load(std::memory_order_relaxed)) return true;
         return false;
     };
 
@@ -1080,6 +1136,22 @@ int App::runECMMarinTwistedEdwards()
         wt << "ECMSTAGE2=N/A,1,2," << p << ",-1,\"" << resume_filename << "\"," << B2;
         if (!known_csv.empty()) {
             wt << ",\"" << known_csv << "\"";
+        }
+
+        // Record the handoff on disk before the caller drops the stage-1
+        // checkpoint, so the curve's stage 2 survives an interrupt or a failure.
+        core::EcmPrime95Pending pending;
+        pending.p = p;
+        pending.b1 = B1;
+        pending.curve_idx = curve_idx;
+        pending.resume_path = curve_resume_path;
+        pending.sigma_hex = curve_sigma_hex;
+        pending.curve_seed = curve_seed_for_task;
+        pending.base_seed = base_seed_for_task;
+        if (!core::ecmWritePrime95Pending(pending)) {
+            p95_log(std::string("[ECM] Cannot write Prime95 pending marker '") +
+                    core::ecmPrime95PendingMarkerPath(curve_resume_path) + "'");
+            return false;
         }
 
         Prime95Stage2Task task;
@@ -1683,6 +1755,59 @@ int App::runECMMarinTwistedEdwards()
         start_curve = resume_curve_idx;
     }
 
+    // Curves an earlier run handed to Prime95 without getting a result back:
+    // their stage-1 state lives only in the per-curve resume file, so hand them
+    // to Prime95 again before any new curve.
+    {
+        std::vector<std::string> unreadable;
+        const std::vector<core::EcmPrime95Pending> pending =
+            core::ecmFindPrime95Pending(fs::path("."), (uint64_t)p, (uint64_t)B1, &unreadable);
+        if (!pending.empty() || !unreadable.empty()) {
+            // A marker that cannot be read still says a curve owes its Stage2.
+            std::vector<std::string> unusable;
+            for (const std::string& m : unreadable) unusable.push_back(m + " (unreadable or inconsistent)");
+            if (!p95_stage2_enabled) {
+                for (const auto& e : pending) unusable.push_back(core::ecmPrime95PendingMarkerPath(e.resume_path));
+                if (!pending.empty()) {
+                    p95_log("[ECM] Earlier runs handed the Stage2 of " + std::to_string(pending.size()) +
+                            " curve(s) to Prime95 without a result, and Prime95 Stage2 is not available in this run.");
+                }
+            } else {
+                for (const auto& e : pending) {
+                    std::error_code ec;
+                    if (!fs::is_regular_file(e.resume_path, ec)) {
+                        unusable.push_back(core::ecmPrime95PendingMarkerPath(e.resume_path) +
+                                           " (resume file " + e.resume_path + " is missing)");
+                    }
+                }
+            }
+            if (unusable.empty()) {
+                for (const auto& e : pending) {
+                    p95_log("[ECM] Curve " + std::to_string(e.curve_idx + 1) +
+                            " | Stage2 still owed by an earlier Prime95 handoff, handing it to Prime95 again");
+                    if (!p95_enqueue_curve(e.curve_idx, e.resume_path, e.sigma_hex, e.curve_seed, e.base_seed)) {
+                        unusable.push_back(core::ecmPrime95PendingMarkerPath(e.resume_path));
+                        break;
+                    }
+                    p95_recovered_curves.insert(e.curve_idx);
+                }
+            }
+            if (!unusable.empty()) {
+                // The stage-1 result of these curves is not available to the
+                // internal Stage2, so a "no factor" through B2 cannot be claimed.
+                for (const std::string& m : unusable) p95_log("[ECM]   pending: " + m);
+                p95_log("[ECM] Rerun with -p95stage2 -p95path <dir> to finish them, or delete the "
+                        "pending markers to discard those curves. No result written.");
+                return 1;
+            }
+            // Curves before the first one with a checkpoint are done or pending;
+            // without any checkpoint, continue after the last pending curve.
+            if (!have_resume_seed && !have_resume_stage2 && !p95_recovered_curves.empty()) {
+                start_curve = std::max<uint64_t>(start_curve, *p95_recovered_curves.rbegin() + 1);
+            }
+        }
+    }
+
     for (uint64_t c = start_curve; c < curves; ++c)
 
     {
@@ -1701,6 +1826,8 @@ int App::runECMMarinTwistedEdwards()
             std::cout << "[ECM] Interrupt received — exiting without publishing a final result." << std::endl;
             return 0;
         }
+        // Stage 1 of this curve is done and its Stage2 is queued for Prime95.
+        if (p95_recovered_curves.count(c)) continue;
 
         engine* eng = engine::create_gpu(p, static_cast<size_t>(51), static_cast<size_t>(options.device_id), verbose);
         if (!eng) {
@@ -3488,19 +3615,21 @@ int App::runECMMarinTwistedEdwards()
 
 
         if (p95_stage2_enabled && B2 > B1 && !resume_stage2 && !curve_p95_resume_path.empty()) {
-            if (p95_poll_background(false)) {
-                return p95_finalize_background_stop(eng);
-            }
-            std::error_code ecq;
-            fs::remove(ckpt_file, ecq); fs::remove(ckpt_file + ".old", ecq); fs::remove(ckpt_file + ".new", ecq);
+            // Enqueue first: it writes the pending marker, and only then is the
+            // stage-1 checkpoint dropped, so the curve is never without state.
             if (!p95_enqueue_curve(c, curve_p95_resume_path, options.sigma_hex, options.curve_seed, options.base_seed)) {
                 p95_log(std::string("[ECM] Curve ") + std::to_string(c + 1) + "/" + std::to_string(curves) + " | Prime95 Stage2 enqueue failed, falling back to internal Stage2");
             } else {
+                std::error_code ecq;
+                fs::remove(ckpt_file, ecq); fs::remove(ckpt_file + ".old", ecq); fs::remove(ckpt_file + ".new", ecq);
                 std::ostringstream fin;
                 fin << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 delegated to Prime95 background";
                 std::cout << fin.str() << std::endl;
                 if (guiServer_) guiServer_->appendLog(fin.str());
                 delete eng;
+                if (p95_poll_background(false)) {
+                    return p95_finalize_background_stop(nullptr);
+                }
                 continue;
             }
         }
@@ -3868,10 +3997,11 @@ int App::runECMMarinTwistedEdwards()
             { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
         }
 
+        // The curve is complete: drop its checkpoint before a background stop can return.
+        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         if (p95_stage2_enabled && p95_poll_background(false)) {
             return p95_finalize_background_stop(eng);
         }
-        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
     }
