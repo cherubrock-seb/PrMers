@@ -23,17 +23,59 @@ namespace core::gm_chain_progress {
 
 inline const char* magic() { return "PRMERS-GM-CHAIN 1"; }
 
-// Tokens recorded for `key`: "<FAMILY> <phase>" for a finished phase and
-// "<FAMILY> done <rc>" for a finished family.  Empty if the file is missing,
-// damaged or belongs to another job.
+// A progress file is a few short lines; anything larger is not ours.
+inline constexpr std::uintmax_t max_file_bytes() { return 1u << 20; }
+
+inline bool valid_family(const std::string& family) { return family == "GM" || family == "GQ"; }
+
+// The only tokens this code ever writes: "<FAMILY> pm1", "<FAMILY> ecm" for a
+// finished phase and "<FAMILY> done <rc>" for a finished family.  The chain
+// records a family only when it was not interrupted and the pipeline returned
+// 0 or 1; rc 2 (error) is never persisted, so rc is exactly one of "0" and "1".
+// The match is exact: no sign, no leading zeros, no whitespace, no trailing
+// characters.
+inline bool valid_token(const std::string& t) {
+    if (t.size() < 4 || t[2] != ' ' || !valid_family(t.substr(0, 2))) return false;
+    const std::string rest = t.substr(3);
+    return rest == "pm1" || rest == "ecm" || rest == "done 0" || rest == "done 1";
+}
+
+// Return code recorded by `token` if it is a well-formed finished-family token
+// for `family`, otherwise nullopt.
+inline std::optional<int> parse_family_rc(const std::string& token, const std::string& family) {
+    if (!valid_family(family) || !valid_token(token)) return std::nullopt;
+    const std::string prefix = family + " done ";
+    if (token.size() != prefix.size() + 1 || token.compare(0, prefix.size(), prefix) != 0)
+        return std::nullopt;
+    return token.back() - '0';
+}
+
+// Tokens recorded for `key`.  Empty if the file is missing, damaged or belongs
+// to another job.  A file with any line that is not a well-formed token, an
+// unterminated (possibly truncated) last line, or two different results for
+// one family is treated as damaged as a whole, so the chain redoes the work
+// rather than trusting a partly corrupt record.  Duplicate identical lines are
+// collapsed.
 inline std::vector<std::string> load(const std::filesystem::path& file, const std::string& key) {
     std::vector<std::string> tokens;
-    std::ifstream in(file);
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(file, ec);
+    if (ec || size > max_file_bytes()) return tokens;
+    std::ifstream in(file, std::ios::binary);
     std::string head, stored_key, line;
-    if (!std::getline(in, head) || head != magic()) return tokens;
-    if (!std::getline(in, stored_key) || stored_key != key) return tokens;
+    if (!std::getline(in, head) || in.eof() || head != magic()) return tokens;
+    if (!std::getline(in, stored_key) || in.eof() || stored_key != key) return tokens;
+    std::string done_gm, done_gq;
     while (std::getline(in, line)) {
-        if (!line.empty()) tokens.push_back(line);
+        if (in.eof() || !valid_token(line)) return {};   // truncated or malformed
+        if (line.compare(3, 4, "done") == 0) {
+            std::string& seen = line[1] == 'M' ? done_gm : done_gq;
+            if (!seen.empty() && seen != line) return {};  // contradictory results
+            seen = line;
+        }
+        bool dup = false;
+        for (const auto& t : tokens) if (t == line) { dup = true; break; }
+        if (!dup) tokens.push_back(line);
     }
     return tokens;
 }
@@ -75,18 +117,19 @@ public:
         return false;
     }
 
-    // Return code of a family recorded as finished.
+    // Return code of a family recorded as finished (0 or 1), if any.
     std::optional<int> family_rc(const std::string& family) const {
-        const std::string prefix = family + " done ";
         for (const auto& t : tokens_) {
-            if (t.compare(0, prefix.size(), prefix) != 0) continue;
-            try { return std::stoi(t.substr(prefix.size())); } catch (...) { return std::nullopt; }
+            if (const auto rc = parse_family_rc(t, family)) return rc;
         }
         return std::nullopt;
     }
 
+    // Records a well-formed token; anything else (for example a done token for
+    // rc 2) is ignored, as is a second result for an already finished family.
     void mark(const std::string& token) {
-        if (has(token)) return;
+        if (!valid_token(token) || has(token)) return;
+        if (token.compare(3, 4, "done") == 0 && family_rc(token.substr(0, 2))) return;
         tokens_.push_back(token);
         save(file_, key_, tokens_);
     }

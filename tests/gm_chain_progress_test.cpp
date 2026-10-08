@@ -3,12 +3,31 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <string>
+#include <system_error>
 
 namespace gp = core::gm_chain_progress;
 namespace fs = std::filesystem;
 
 #define CHECK(c) do { if (!(c)) { std::cerr << "FAIL line " << __LINE__ << ": " #c "\n"; return 1; } } while (0)
+
+namespace {
+
+const std::string kMagic = "PRMERS-GM-CHAIN 1";
+
+void write_raw(const fs::path& f, const std::string& content) {
+    std::ofstream out(f, std::ios::binary | std::ios::trunc);
+    out << content;
+}
+
+// A progress file for `key` whose token section is `body` (written verbatim).
+std::string file_with(const std::string& key, const std::string& body) {
+    return kMagic + "\n" + key + "\n" + body;
+}
+
+} // namespace
 
 int main() {
     const fs::path dir = fs::temp_directory_path() / "prmers_gm_chain_progress_test";
@@ -49,6 +68,151 @@ int main() {
         done.clear();
         CHECK(!fs::exists(f));
         CHECK(!gp::Progress(f, key).has(gp::phase_token("GM", "pm1")));
+    }
+
+
+    // Hostile input.  Every body below is written verbatim after a valid header
+    // and key; a malformed record must never yield a finished family.
+    {
+        const std::string k = "job";
+        auto rc_of = [&](const std::string& body) {
+            write_raw(f, file_with(k, body));
+            return gp::Progress(f, k).family_rc("GM");
+        };
+        auto tokens_of = [&](const std::string& body) {
+            write_raw(f, file_with(k, body));
+            return gp::load(f, k);
+        };
+
+        // Trailing junk after the result must not resume as a finished family.
+        CHECK(!rc_of("GM done 1junk\n").has_value());
+        CHECK(!rc_of("GM done 0junk\n").has_value());
+
+        // Well-formed results.
+        CHECK(rc_of("GM done 0\n").value_or(-1) == 0);
+        CHECK(rc_of("GM done 1\n").value_or(-1) == 1);
+        CHECK(rc_of("GM pm1\nGM ecm\nGM done 1\n").value_or(-1) == 1);
+        CHECK(rc_of("GM done 1\nGM done 1\n").value_or(-1) == 1);   // identical duplicate
+        CHECK(tokens_of("GM pm1\nGM pm1\n").size() == 1);
+        CHECK(!rc_of("GQ done 1\n").has_value());                    // other family
+        CHECK(rc_of("").has_value() == false);
+
+        // Malformed completed-family tokens.
+        const char* bad_done[] = {
+            "GM done 1junk\n", "GM done 1 \n", "GM done  1\n", "GM done 1\r\n",
+            "GM done \n", "GM done\n", "GM done \n", "GM done -0\n", "GM done -1\n",
+            "GM done +1\n", "GM done 01\n", "GM done 00\n", "GM done 0x1\n", "GM done 1.0\n",
+            "GM done 1e0\n", "GM done 2\n", "GM done 3\n", "GM done 10\n", "GM done 255\n",
+            "GM done 4294967296\n", "GM done 4294967297\n", "GM done 2147483648\n",
+            "GM done 99999999999999999999999999\n", "GM  done 1\n", " GM done 1\n",
+            "GM done 1\t\n", "GM done\t1\n", "gm done 1\n", "GM DONE 1\n", "GM Done 1\n",
+            "GMdone 1\n", "GM done 1 1\n", "GM done a\n", "GM done \xef\xbc\x91\n",
+        };
+        for (const char* body : bad_done) {
+            if (rc_of(body).has_value()) {
+                std::cerr << "FAIL: accepted malformed token: " << body;
+                return 1;
+            }
+            CHECK(tokens_of(body).empty());
+        }
+        {
+            std::string with_nul = "GM done 1";
+            with_nul.push_back('\0');
+            with_nul += "\n";
+            CHECK(!rc_of(with_nul).has_value());
+        }
+
+        // Unknown families, phases and stray lines make the whole record damaged.
+        CHECK(tokens_of("XX pm1\n").empty());
+        CHECK(tokens_of("GM pm1\nXX pm1\n").empty());
+        CHECK(tokens_of("GM pm2\n").empty());
+        CHECK(tokens_of("GM proth\n").empty());
+        CHECK(tokens_of("GM\n").empty());
+        CHECK(tokens_of("GM \n").empty());
+        CHECK(tokens_of("GM pm1 \n").empty());
+        CHECK(tokens_of("BOTH done 1\n").empty());
+        CHECK(tokens_of("GM pm1\n\nGM ecm\n").empty());            // empty line inside
+        CHECK(tokens_of("GM pm1\n\n").empty());                     // empty trailing line
+        CHECK(!rc_of("GM done 1\ngarbage\n").has_value());          // good line then junk
+        CHECK(!rc_of("garbage\nGM done 1\n").has_value());
+        CHECK(!rc_of("GM done 1\nGM done 0\n").has_value());        // contradictory results
+        CHECK(!rc_of("GM done 0\nGM done 1\n").has_value());
+
+        // CRLF file (foreign or mangled): header, key and tokens all fail.
+        write_raw(f, kMagic + "\r\n" + k + "\r\nGM done 1\r\n");
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, kMagic + "\n" + k + "\r\nGM done 1\n");
+        CHECK(gp::load(f, k).empty());
+
+        // Truncated file: last line has no newline, or the header/key is cut.
+        CHECK(!rc_of("GM done 1").has_value());
+        CHECK(tokens_of("GM pm1\nGM ec").empty());
+        CHECK(tokens_of("GM pm1\nGM ecm").empty());
+        write_raw(f, kMagic);
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, kMagic + "\n");
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, kMagic + "\n" + k);                              // key cut, no newline
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, kMagic.substr(0, 10));
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, "");
+        CHECK(gp::load(f, k).empty());
+
+        // Wrong version / foreign header / wrong key.
+        write_raw(f, "PRMERS-GM-CHAIN 2\n" + k + "\nGM done 1\n");
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, "something else\n" + k + "\nGM done 1\n");
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, file_with("job2", "GM done 1\n"));
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, file_with("job ", "GM done 1\n"));
+        CHECK(gp::load(f, k).empty());
+
+        // Oversized file is ignored rather than read.
+        write_raw(f, file_with(k, std::string(2u << 20, 'A') + "\n"));
+        CHECK(gp::load(f, k).empty());
+        write_raw(f, file_with(k, "GM pm1\n" + std::string(2u << 20, ' ')));
+        CHECK(gp::load(f, k).empty());
+
+        // A directory or a missing file in place of the record.
+        fs::remove(f);
+        fs::create_directory(f);
+        CHECK(gp::load(f, k).empty());
+        fs::remove(f);
+        CHECK(gp::load(f, k).empty());
+
+        // A damaged record does not poison later progress: marking rewrites it.
+        write_raw(f, file_with(k, "GM done 1junk\n"));
+        {
+            gp::Progress p(f, k);
+            CHECK(!p.family_rc("GM").has_value());
+            p.mark(gp::phase_token("GM", "pm1"));
+        }
+        {
+            gp::Progress p(f, k);
+            CHECK(p.has(gp::phase_token("GM", "pm1")));
+            CHECK(!p.family_rc("GM").has_value());
+        }
+        fs::remove(f);
+
+        // Only legitimate tokens are ever persisted.
+        {
+            gp::Progress p(f, k);
+            p.mark(gp::done_token("GM", 2));         // error / interrupted result
+            p.mark(gp::done_token("GM", -1));
+            p.mark(gp::done_token("GM", 7));
+            p.mark(gp::phase_token("XX", "pm1"));
+            p.mark(gp::phase_token("GM", "proth"));
+            p.mark("GM done 1junk");
+            p.mark("");
+            CHECK(!fs::exists(f));                    // nothing valid, nothing written
+            p.mark(gp::done_token("GM", 1));
+            p.mark(gp::done_token("GM", 0));          // second result is ignored
+            CHECK(p.family_rc("GM").value_or(-1) == 1);
+        }
+        CHECK(gp::Progress(f, k).family_rc("GM").value_or(-1) == 1);
+        fs::remove(f);
     }
 
     fs::remove_all(dir);
