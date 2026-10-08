@@ -433,6 +433,10 @@ test-error-check-retry:
 test-llsafe-error-recovery: all
 	bash tests/run_llsafe_error_recovery_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
+.PHONY: test-prp-worktodo-retire
+test-prp-worktodo-retire: all
+	bash tests/run_prp_worktodo_retire_failure.sh $${AEVUM_TEST_DEVICE:-0}
+
 
 .PHONY: test-legacy-prp-resume
 test-legacy-prp-resume: all

@@ -170,11 +170,13 @@ void ProofSetMarin::clearResidues(uint32_t E) {
 
 ProofSetMarin::ResidueAction ProofSetMarin::residueAction(
     bool isPrp, bool wagstaff, bool proofRequested, bool proofCompleted,
-    bool resultSaved) {
+    bool resultSaved, bool entryRetired) {
   if (!isPrp || wagstaff)
     return ResidueAction::NotApplicable;
   if (!resultSaved)
     return ResidueAction::KeepResultNotSaved;
+  if (!entryRetired)
+    return ResidueAction::KeepEntryNotRetired;
   if (proofRequested && !proofCompleted)
     return ResidueAction::KeepProofFailed;
   return ResidueAction::Clear;
@@ -189,6 +191,9 @@ std::string ProofSetMarin::residuesKeptMessage(uint32_t E, ResidueAction action)
   switch (action) {
     case ResidueAction::KeepResultNotSaved:
       why = "the result could not be saved, so the test will be rerun";
+      break;
+    case ResidueAction::KeepEntryNotRetired:
+      why = "the worktodo entry could not be removed, so the test will be rerun";
       break;
     case ResidueAction::KeepProofFailed:
       why = "no verified proof was made, so a later run can retry it";

@@ -44,19 +44,21 @@ public:
     static void clearResidues(uint32_t E);
 
     // What to do with the residues once a PRP test has finished. They are
-    // deleted only when the result is saved and any requested proof has been
-    // made (and verified, unless -noverify); otherwise they are kept, because
-    // a failed or interrupted proof can still be retried from them and a
-    // result that could not be saved needs a rerun.
+    // deleted only when the result is saved, the worktodo entry (if any) is
+    // retired and any requested proof has been made (and verified, unless
+    // -noverify); otherwise they are kept, because a failed or interrupted
+    // proof can still be retried from them, and a result that could not be
+    // saved or an entry still in the worktodo means the test is run again.
     enum class ResidueAction {
         NotApplicable,       // not a Mersenne PRP test: nothing to do
         Clear,
         KeepResultNotSaved,
+        KeepEntryNotRetired,
         KeepProofFailed
     };
     static ResidueAction residueAction(bool isPrp, bool wagstaff,
                                        bool proofRequested, bool proofCompleted,
-                                       bool resultSaved);
+                                       bool resultSaved, bool entryRetired);
     // Message for the two Keep actions: where the residues are and that they
     // can be deleted by hand.
     static std::string residuesKeptMessage(uint32_t E, ResidueAction action);

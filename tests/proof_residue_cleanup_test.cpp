@@ -76,23 +76,30 @@ int main() {
     }
 
     // When the residues may be deleted: only once the result is saved and any
-    // requested proof was made; never for LL or Wagstaff.
+    // requested proof was made and the worktodo entry (if any) is retired;
+    // never for LL or Wagstaff.
     {
         using A = core::ProofSetMarin::ResidueAction;
         auto act = core::ProofSetMarin::residueAction;
-        //                 prp    wag    wanted done   saved
-        expect(act(true,  false, true,  true,  true)  == A::Clear, "proof made: clear");
-        expect(act(true,  false, false, false, true)  == A::Clear, "proofs disabled: clear");
-        expect(act(true,  false, true,  false, true)  == A::KeepProofFailed,
+        //                 prp    wag    wanted done   saved  retired
+        expect(act(true,  false, true,  true,  true, true)  == A::Clear, "proof made: clear");
+        expect(act(true,  false, false, false, true, true)  == A::Clear, "proofs disabled: clear");
+        expect(act(true,  false, true,  false, true, true)  == A::KeepProofFailed,
                "proof failed or did not verify: keep");
-        expect(act(true,  false, true,  true,  false) == A::KeepResultNotSaved,
+        expect(act(true,  false, true,  true,  false, true) == A::KeepResultNotSaved,
                "result not saved: keep");
-        expect(act(true,  false, false, false, false) == A::KeepResultNotSaved,
+        expect(act(true,  false, false, false, false, true) == A::KeepResultNotSaved,
                "result not saved without proof: keep");
-        expect(act(true,  false, true,  false, false) == A::KeepResultNotSaved,
+        expect(act(true,  false, true,  false, false, true) == A::KeepResultNotSaved,
                "result not saved and proof failed: keep");
-        expect(act(false, false, true,  true,  true)  == A::NotApplicable, "LL: untouched");
-        expect(act(true,  true,  true,  true,  true)  == A::NotApplicable, "Wagstaff: untouched");
+        expect(act(true,  false, true,  true,  true, false) == A::KeepEntryNotRetired,
+               "result saved but worktodo entry not removed: keep");
+        expect(act(true,  false, false, false, true, false) == A::KeepEntryNotRetired,
+               "entry not removed without proof: keep");
+        expect(act(true,  false, true,  true,  false, false) == A::KeepResultNotSaved,
+               "result not saved, entry kept: keep");
+        expect(act(false, false, true,  true,  true, true)  == A::NotApplicable, "LL: untouched");
+        expect(act(true,  true,  true,  true,  true, true)  == A::NotApplicable, "Wagstaff: untouched");
     }
 
     // The message says where the residues are and that they can be deleted.
@@ -110,6 +117,11 @@ int main() {
         expect(proofMsg.find("retry") != std::string::npos, "proof message gives the reason");
         expect(saveMsg.find(where) != std::string::npos, "save message names the directory");
         expect(saveMsg.find("could not be saved") != std::string::npos, "save message gives the reason");
+        const std::string entryMsg =
+            core::ProofSetMarin::residuesKeptMessage(E, A::KeepEntryNotRetired);
+        expect(entryMsg.find(where) != std::string::npos, "entry message names the directory");
+        expect(entryMsg.find("worktodo entry could not be removed") != std::string::npos,
+               "entry message gives the reason");
         expect(core::ProofSetMarin::residuesKeptMessage(E, A::Clear).empty(), "no message when clearing");
     }
 

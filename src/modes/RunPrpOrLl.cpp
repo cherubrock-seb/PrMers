@@ -1072,13 +1072,18 @@ int App::runPrpOrLl() {
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    // Keep the loop state and the proof residues unless the result is safely
-    // on disk: a rerun then resumes at the end instead of starting from 0.
-    if (resultSaved)
+    // End of job, in this order: 1. save the result, 2. retire the worktodo
+    // entry, 3. only then delete the loop state and the proof residues. If 1
+    // or 2 fails they are kept: the test is then run again, and resumes at
+    // the end instead of from 0.
+    const bool retired = resultSaved && hasWorktodoEntry_ &&
+                         worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
+    const bool entryRetired = !hasWorktodoEntry_ || retired;
+    if (resultSaved && entryRetired)
         backupManager.clearState();
     const auto residueAction = ProofSetMarin::residueAction(
         options.mode == "prp", options.wagstaff, proofRequested,
-        proofCompleted, resultSaved);
+        proofCompleted, resultSaved, entryRetired);
     if (residueAction == ProofSetMarin::ResidueAction::Clear) {
         // The proof (if any) is written and the test is over: the residues
         // are of no further use and take about 10-18 GB at the wavefront.
@@ -1091,13 +1096,17 @@ int App::runPrpOrLl() {
             guiServer_->appendLog(msg);
     }
 
-    if (!resultSaved) {
-        std::cerr << "Result could not be saved; keeping the saved state"
-                  << (hasWorktodoEntry_ ? std::string(" and the entry in ") + options.worktodo_path : std::string())
-                  << "\n";
+    if (!resultSaved || !entryRetired) {
+        const std::string msg =
+            (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
+            + "; keeping the saved state"
+            + (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string());
+        std::cerr << msg << "\n";
+        if (guiServer_)
+            guiServer_->appendLog(msg + "\n");
     }
     if (hasWorktodoEntry_ && resultSaved) {
-        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+        if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
                       << " and saved to worktodo_save.txt\n";
             if (guiServer_) {
@@ -1124,12 +1133,6 @@ int App::runPrpOrLl() {
                 }
             }
         } else {
-            std::cerr << "Failed to update " << options.worktodo_path << "\n";
-            if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "Failed to update " << options.worktodo_path << "\n";
-                      guiServer_->appendLog(oss.str());
-            }
             if (!options.gui) {
                 std::exit(-1);
             }
