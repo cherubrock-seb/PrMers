@@ -13,7 +13,7 @@ end of the job (no timing involved):
           do with the entry;
   retire  on entry to rename(worktodo*): the stop arrives while the entry is being retired, i.e. between the
           result save and the restart for the next entry.
-For every mode that retires a worktodo entry (PRP on the Marin and legacy backends, LL-unsafe, Wagstaff on both,
+For every mode that retires a worktodo entry (PRP on the Marin and legacy backends, LL-SAFE, LL-unsafe, Wagstaff on both,
 P-1 stage 1 only and stage 1 + 2, ECM Montgomery and Edwards, GMTF) it checks:
   - exit code 1,
   - the job's result is recorded exactly once (results.txt lines, or the per-job json file for GMTF),
@@ -52,6 +52,8 @@ CASES = [
          ["4423prp.*", "m_4423.ckpt*"]),
     case("ll-unsafe", "Test=4423,70,1", "Test=9689,70,1", ["-t", "0", "-engine-marin"],
          ["llunsafe_m_4423.ckpt*"]),
+    case("ll-safe", "DoubleCheck=4423,70,1", "DoubleCheck=9689,70,1", ["-t", "0"],
+         ["llsafe_m_4423.ckpt*"]),
     case("wagstaff-marin", "PRP=1,2,11614,-1", "PRP=1,2,21002,-1", ["-t", "0", "-wagstaff", "-engine-marin"],
          ["wagstaff_m_11614.ckpt*"]),
     case("wagstaff-legacy", "PRP=1,2,11614,-1", "PRP=1,2,21002,-1", ["-t", "0", "-wagstaff", "-marin"],
