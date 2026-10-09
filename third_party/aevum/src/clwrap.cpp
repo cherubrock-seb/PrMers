@@ -53,19 +53,29 @@ static string callName(string_view mes) {
   return string(mes);
 }
 
+// errMes() plus, for the CUDA backend, the driver error behind the status it returned.
+static string codeText(int err) {
+  string code = errMes(err);
+#ifdef CUDA_BACKEND
+  if (const char *cuda = aevumCudaLastError()) { code += " [CUDA "s + cuda + "]"; }
+#endif
+  return code;
+}
+
 string describeError(int err, string_view mes, const char *file, int line, const char *func, gpulost::Phase phase) {
+  const string code = codeText(err);
   switch (gpulost::classify(err, phase)) {
-    case gpulost::Kind::DeviceLost: return gpulost::lost_message(errMes(err), callName(mes));
-    case gpulost::Kind::OutOfMemory: return gpulost::oom_message(errMes(err), callName(mes));
+    case gpulost::Kind::DeviceLost: return gpulost::lost_message(code, callName(mes));
+    case gpulost::Kind::OutOfMemory: return gpulost::oom_message(code, callName(mes));
     case gpulost::Kind::Other: break;
   }
-  string text = errMes(err) + " " + string(mes);
+  string text = code + " " + string(mes);
   if (file) { text += " at "s + file + ":" + to_string(line) + " " + func; }
   return text;
 }
 
 gpu_alloc_error::gpu_alloc_error(int err, size_t size)
-  : text(gpulost::oom_message(errMes(err), "clCreateBuffer of "s + to_string((size + (1u << 20) - 1) >> 20) + " MB")) {}
+  : text(gpulost::oom_message(codeText(err), "clCreateBuffer of "s + to_string((size + (1u << 20) - 1) >> 20) + " MB")) {}
 
 void check(int err, const char *file, int line, const char *func, string_view mes, gpulost::Phase phase) {
   if (err != CL_SUCCESS) {

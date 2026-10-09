@@ -63,6 +63,11 @@ assert "throw gpu_alloc_error(err, size)" in clwrap and "throw bad_alloc{}" not 
 for fn in ("clEnqueueReadBuffer", "clEnqueueWriteBuffer", "clEnqueueCopyBuffer", "clEnqueueFillBuffer", "clFinish", "clFlush"):
     assert re.search(r"CHECK1\(%s\(" % fn, clwrap), fn
 
+# 4b. The CUDA backend must not turn every failure into CL_OUT_OF_RESOURCES (a lost GPU at run time).
+cuda = read("third_party/aevum/src/cuda/clwrap_cuda.cpp")
+assert "CL_OUT_OF_RESOURCES" not in cuda, "the CUDA backend maps results through cuda_error_map"
+assert cuda.count("clStatusFromCu(r)") >= 9 and "cuda_error_map::toClStatus" in cuda
+
 # 5. The plugin's message reaches the host as the lost-GPU exception, and the GUI log gets it.
 engine = read("src/aevum/EngineAevum.cpp")
 assert "is_lost_message(detail)" in body_of(engine, "[[noreturn]] void fail(", "void require(")

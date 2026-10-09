@@ -415,6 +415,15 @@ test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
 $(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
+CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
+.PHONY: test-cuda-error-map
+test-host: test-cuda-error-map
+test-cuda-error-map: $(CUDA_ERROR_MAP_TEST)
+	$(CUDA_ERROR_MAP_TEST)
+$(CUDA_ERROR_MAP_TEST): tests/cuda_error_map_test.cpp src/cuda/CudaErrorMap.h src/GpuLost.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_error_map_test.cpp -o $@
 # PR132 cumulative semantic integration
 STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 .PHONY: test-pr132-small-items test-stats-slot
