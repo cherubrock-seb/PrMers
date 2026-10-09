@@ -69,6 +69,8 @@ public:
     // Blank lines, '#' and ';' comments, unsupported keywords and lines parse() rejects (malformed
     // fields, a Pfactor with no bounded P-1 work, invalid known factors, glued entries) do not count,
     // so "restart for the next entry" is only taken when the restarted process will find one.
+    // A GMTF= line counts when it is the first actionable line: the Gaussian trial-factoring
+    // pre-parser runs it on the restart.
     static bool hasPendingEntry(const std::string& filename);
     // Take the lock appendLine()/removeProcessedLine() hold while they write. restart_self holds it
     // through the exec, so a GUI append on another thread is never cut off half-written (a truncated

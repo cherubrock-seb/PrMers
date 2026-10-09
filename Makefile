@@ -210,6 +210,10 @@ test-worktodo-append:
 test-wagstaff-worktodo:
 	bash tests/test_wagstaff_worktodo.sh
 
+.PHONY: test-gaussian-tf-preparser
+test-gaussian-tf-preparser:
+	bash tests/test_gaussian_tf_preparser.sh
+
 test-marin-ll-radix5: all
 	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
