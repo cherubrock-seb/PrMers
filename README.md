@@ -688,6 +688,9 @@ PrMers can read GIMPS-style `worktodo.txt` assignments.
 ./prmers -worktodo ./worktodo.txt
 ```
 
+A finished entry is removed from the worktodo file and appended to `worktodo_save.txt` in the same
+directory as that worktodo file (the current directory when `-worktodo` has no directory part).
+
 ### PRP format
 
 ```text

@@ -818,11 +818,11 @@ int App::runLlSafeMarin()
     if (hasWorktodoEntry_ && resultSaved) {
         if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
+                      << " and saved to " << worktodoParser_->archivePath() << "\n";
             if (guiServer_) {
                 std::ostringstream oss;
                 oss << "Entry removed from " << options.worktodo_path
-                    << " and saved to worktodo_save.txt\n";
+                    << " and saved to " << worktodoParser_->archivePath() << "\n";
                 guiServer_->appendLog(oss.str());
             }
             if (stopped) {

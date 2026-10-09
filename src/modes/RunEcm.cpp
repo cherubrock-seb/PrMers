@@ -322,11 +322,11 @@ int App::runECMMarin()
         if (hasWorktodoEntry_ && resultSaved) {
             if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
                 std::cout << "Entry removed from " << options.worktodo_path
-                        << " and saved to worktodo_save.txt\n";
+                        << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                 if (guiServer_) {
                     std::ostringstream oss;
                     oss  << "Entry removed from " << options.worktodo_path
-                        << " and saved to worktodo_save.txt\n";
+                        << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                     guiServer_->appendLog(oss.str());
                 }
                 bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
@@ -336,7 +336,7 @@ int App::runECMMarin()
                     if (guiServer_) {
                         std::ostringstream oss;
                         oss  << "Entry removed from " << options.worktodo_path
-                            << " and saved to worktodo_save.txt\n";
+                            << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                         guiServer_->appendLog(oss.str());
                     }
                     restart_self(argc_, argv_);

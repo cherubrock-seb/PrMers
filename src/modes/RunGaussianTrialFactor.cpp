@@ -842,7 +842,7 @@ std::optional<int> tryRunGaussianTrialFactor(int argc, char** argv) {
             return 2;
         }
         std::cout << "GMTF entry removed from " << worktodo->worktodoPath.string()
-                  << " and saved to worktodo_save.txt\n";
+                  << " and saved to " << parser.archivePath() << "\n";
         // A stop that arrived once the result was written (rc == 0 means the entry finished) does
         // not leave the entry queued, which would write the result again on the next run: the line
         // is archived above, only the restart is skipped, and the process exits 1.

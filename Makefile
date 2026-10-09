@@ -214,6 +214,15 @@ test-wagstaff-worktodo:
 test-gaussian-tf-preparser:
 	bash tests/test_gaussian_tf_preparser.sh
 
+.PHONY: test-worktodo-archive-dir
+test-worktodo-archive-dir:
+	bash tests/test_worktodo_archive_dir.sh
+
+# Runs prmers (-worktodo in another directory); needs a device, PoCL is enough.
+.PHONY: test-worktodo-archive-dir-run
+test-worktodo-archive-dir-run: all
+	bash tests/worktodo_archive_dir_run_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-marin-ll-radix5: all
 	bash tests/run_marin_ll_radix5_regression.sh $${AEVUM_TEST_DEVICE:-0}
 
