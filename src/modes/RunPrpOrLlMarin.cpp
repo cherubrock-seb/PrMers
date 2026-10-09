@@ -1075,6 +1075,13 @@ int App::runPrpOrLlMarin()
     bool resultSaved = wm.saveIndividualJson(options.wagstaff ? options.exponent / 2 : options.exponent,
                                              options.wagstaff ? "wagstaff" : options.mode, json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
+    // A stop that arrives once the result is saved does not stop the bookkeeping: the
+    // entry is retired and the state deleted as after a normal finish, so the next
+    // run does not repeat the test and write its result a second time. The stop
+    // only skips the restart for the next entry, and the process exits 1. A stop
+    // that arrived before the result was saved never gets here (the test returns
+    // with its checkpoint and entry kept).
+    const bool stopped = core::algo::stop_after_result(resultSaved);
     const bool retired = resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
     const bool entryRetired = !hasWorktodoEntry_ || retired;
@@ -1124,7 +1131,9 @@ int App::runPrpOrLlMarin()
                 guiServer_->appendLog(oss.str());
             }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
-            if (more) {
+            if (stopped) {
+                // A stop was requested: the entry is retired, the next one is not started.
+            } else if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
                 if (guiServer_) {
                     std::ostringstream oss;
@@ -1144,7 +1153,7 @@ int App::runPrpOrLlMarin()
                 }
             }
         } else {
-            if (!options.gui) {
+            if (!options.gui && !stopped) {
                 std::exit(-1);
             }
         }

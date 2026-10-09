@@ -908,6 +908,9 @@ int App::runPrpOrLl() {
             io::WorktodoManager wm(options);
             bool resultSaved = wm.saveIndividualJson(options.exponent / 2, "wagstaff", wagstaffJson);
             resultSaved = wm.appendToResultsTxt(wagstaffJson) && resultSaved;
+            // A stop that arrives once the result is saved does not stop the bookkeeping; it only
+            // skips the restart for the next entry (the process then exits 1).
+            const bool stopped = core::algo::stop_after_result(resultSaved);
             const bool retired = resultSaved && hasWorktodoEntry_ &&
                                  worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
             if (resultSaved && (!hasWorktodoEntry_ || retired)) {
@@ -928,9 +931,11 @@ int App::runPrpOrLl() {
                     if (guiServer_)
                         guiServer_->appendLog("Entry removed from " + options.worktodo_path
                                               + " and saved to worktodo_save.txt\n");
-                    // The same test as the other endings: a line the parser would skip
-                    // (blank, malformed) is not a pending entry.
-                    if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
+                    if (stopped) {
+                        // A stop was requested: the entry is retired, the next one is not started.
+                    } else if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
+                        // The same test as the other endings: a line the parser would skip
+                        // (blank, malformed) is not a pending entry.
                         std::cout << "Restarting for next entry in worktodo.txt\n";
                         if (guiServer_)
                             guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
@@ -942,7 +947,7 @@ int App::runPrpOrLl() {
                         if (!options.gui) std::exit(0);
                     }
                 } else {
-                    if (!options.gui) std::exit(-1);
+                    if (!options.gui && !stopped) std::exit(-1);
                 }
             }
 
@@ -1150,6 +1155,13 @@ int App::runPrpOrLl() {
     // entry, 3. only then delete the loop state and the proof residues. If 1
     // or 2 fails they are kept: the test is then run again, and resumes at
     // the end instead of from 0.
+    // A stop that arrives once the result is saved does not stop the bookkeeping: the
+    // entry is retired and the state deleted as after a normal finish, so the next
+    // run does not repeat the test and write its result a second time. The stop
+    // only skips the restart for the next entry, and the process exits 1. A stop
+    // that arrived before the result was saved never gets here (the test returns
+    // with its checkpoint and entry kept).
+    const bool stopped = core::algo::stop_after_result(resultSaved);
     const bool retired = resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
     const bool entryRetired = !hasWorktodoEntry_ || retired;
@@ -1191,7 +1203,9 @@ int App::runPrpOrLl() {
             }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
 
-            if (more) {
+            if (stopped) {
+                // A stop was requested: the entry is retired, the next one is not started.
+            } else if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
                 if (guiServer_)
                     guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
@@ -1203,7 +1217,7 @@ int App::runPrpOrLl() {
                 }
             }
         } else {
-            if (!options.gui) {
+            if (!options.gui && !stopped) {
                 std::exit(-1);
             }
         }

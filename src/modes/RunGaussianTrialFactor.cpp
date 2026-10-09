@@ -783,11 +783,16 @@ std::optional<int> tryRunGaussianTrialFactor(int argc, char** argv) {
         }
         std::cout << "GMTF entry removed from " << worktodo->worktodoPath.string()
                   << " and saved to worktodo_save.txt\n";
+        // A stop that arrived once the result was written (rc == 0 means the entry finished) does
+        // not leave the entry queued, which would write the result again on the next run: the line
+        // is archived above, only the restart is skipped, and the process exits 1.
+        if (core::algo::stop_after_result(true)) return core::kExitInterrupted;
         if (hasPendingWorktodoLine(worktodo->worktodoPath)) {
             std::cout << "Restarting for next worktodo entry.\n";
-            core::algo::restart_self(argc, argv);
+            core::algo::restart_self(argc, argv);   // returns only when a stop was requested first
         }
-        return 0;
+        // This path does not go through App::run, so the stop mapping is done here.
+        return core::algo::stop_requested_any() ? core::kExitInterrupted : 0;
     }
     return std::nullopt;
 }

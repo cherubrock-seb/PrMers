@@ -795,6 +795,10 @@ int App::runLlSafeMarin()
     io::WorktodoManager wm(options);
     bool resultSaved = wm.saveIndividualJson(options.exponent, "llsafe", json);
     resultSaved = wm.appendToResultsTxt(json) && resultSaved;
+    // A stop that arrives once the result is saved does not stop the bookkeeping: the
+    // entry is retired and the checkpoint deleted as after a normal finish. It only
+    // skips the restart for the next entry, and the process exits 1.
+    const bool stopped = core::algo::stop_after_result(resultSaved);
     const bool retired = resultSaved && hasWorktodoEntry_ &&
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
 
@@ -821,14 +825,11 @@ int App::runLlSafeMarin()
                     << " and saved to worktodo_save.txt\n";
                 guiServer_->appendLog(oss.str());
             }
-            std::ifstream f(options.worktodo_path);
-            std::string l;
-            bool more = false;
-            while (std::getline(f, l)) {
-                if (!l.empty() && l[0] != '#') { more = true; break; }
-            }
-            f.close();
-            if (more) {
+            if (stopped) {
+                // A stop was requested: the entry is retired, the next one is not started.
+            } else if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
+                // The same test as the other endings: a line the parser would skip
+                // (blank, ';' comment, malformed) is not a pending entry.
                 std::cout << "Restarting for next entry in worktodo.txt\n";
                 if (guiServer_) guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
                 restart_self(argc_, argv_);
@@ -840,7 +841,7 @@ int App::runLlSafeMarin()
                 }
             }
         } else {
-            if (!options.gui) {
+            if (!options.gui && !stopped) {
                 std::exit(-1);
             }
         }

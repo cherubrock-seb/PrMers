@@ -10,6 +10,7 @@
 //   - Commit first: the stop side ends the process at once (stop_or_exit), so the relaunch that
 //                   was about to happen never does. A Stop after the exec reaches the new process.
 #include <atomic>
+#include "core/ExitCodes.hpp"
 #include <cstdlib>
 #if !defined(_WIN32)
 # include <unistd.h>
@@ -87,7 +88,7 @@ inline void stop_or_exit(StopRestartGate& gate = g_stop_restart_gate) noexcept {
     ssize_t r = ::write(2, msg, sizeof msg - 1);
     (void)r;
 #endif
-    std::_Exit(0);
+    std::_Exit(kExitInterrupted);   // the run was stopped: same code as any other stopped run
 }
 
 } // namespace core

@@ -6,7 +6,7 @@ enough), wait until it is computing, then send SIGINT, SIGTERM and SIGHUP in thr
 check that all three behave the same:
   - the process stops on its own within the time limit (before: SIGTERM/SIGHUP killed it at once with
     no checkpoint, or - in modes that now catch it - would be ignored),
-  - the exit code is the one SIGINT gives,
+  - the exit code is 1 (core::kExitInterrupted), the same for all three signals,
   - the mode saved a checkpoint (where it has one),
   - with a worktodo queue: the interrupted entry is still first in worktodo.txt, was not archived and the
     next entry did not start.
@@ -28,6 +28,8 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+EXPECTED = 1   # core::kExitInterrupted: what a stopped run exits with, whichever signal stopped it
+
 # name, argv (after -d DEVICE --noask), worktodo lines (or None), marker regex in the log,
 # checkpoint globs (one must match)
 CASES = [
@@ -46,6 +48,8 @@ CASES = [
     ("gmtf-direct", ["-gm-tf", "40", "62", "-gm-family", "BOTH", "15317251"], None, r"progress", ["*.checkpoint"]),
     ("bench", ["-bench"], None, r"\[1/\d+\] TS=", []),
     ("worktodo-prp", [], ["PRP=N/A,1,2,110503,-1,70,0", "PRP=N/A,1,2,9941,-1,70,0"], r"Progress", ["m_110503.ckpt"]),
+    # P-1 stopped in stage 2: the entry must stay queued (it used to be archived as if stage 2 had finished)
+    ("worktodo-pm1-stage2", [], ["Pminus1=1,2,20011,-1,2000,4000000000", "PRP=N/A,1,2,9941,-1,70,0"], r"V-trace baby window", ["pm1_s2_*_m_20011.ckpt"]),
     ("worktodo-gmtf", [], ["GMTF=15317251,40,62,BOTH", "PRP=N/A,1,2,9941,-1,70,0"], r"progress", ["*.checkpoint"]),
     ("gmchain-both-ecm", [], ["GMCHAIN=1279,2000,20000,1000,10000,8,0,0,factor,BOTH", "PRP=N/A,1,2,9941,-1,70,0"],
      r"Gaussian pair ECM factoring", ["gq_ecm_p1279_c0_stage*.ckpt"]),
@@ -132,6 +136,8 @@ def run_case(prmers, device, sig, case, root):
     problems = []
     if rc < 0:
         problems.append(f"killed by signal {-rc} instead of stopping cleanly")
+    elif rc != EXPECTED:
+        problems.append(f"exit code {rc}, expected {EXPECTED}")
     if ckpts and not any(glob.glob(os.path.join(work, c)) for c in ckpts):
         problems.append(f"no checkpoint matching {ckpts}")
     if worktodo:
@@ -154,14 +160,11 @@ def run_mode(prmers, device, sigs, case, root):
         results[sig] = (rc, problems)
     out = []
     ok = True
-    ref = results[sigs[0]][0]
     for sig in sigs:
         rc, problems = results[sig]
         if rc is None and not problems:
             out.append((name, sig, True, "SKIPPED: no usable GPU-type OpenCL device"))
             continue
-        if sig != sigs[0] and rc != ref:
-            problems = problems + [f"exit code {rc}, SIGINT gave {ref}"]
         out.append((name, sig, not problems, "; ".join(problems) or f"rc={rc}"))
     return out
 
@@ -192,6 +195,8 @@ def run_p95(prmers, device, case, root, sig):
         problems.append("Prime95 never received SIGTERM")
     if rc < 0:
         problems.append(f"killed by signal {-rc}")
+    elif rc != EXPECTED:
+        problems.append(f"exit code {rc}, expected {EXPECTED}")
     with open(log_path, errors="replace") as f:
         text = f.read()
     if "did not produce results.json.txt" in text:

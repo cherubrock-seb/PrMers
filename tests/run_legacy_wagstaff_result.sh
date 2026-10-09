@@ -31,16 +31,17 @@ grep -q '"worktype":"Wagstaff-PRP"' results.txt
 grep -q '"status":"P"' results.txt
 echo "LEGACY_WAGSTAFF_CLI=PASS"
 
-# 2. Worktodo entry (it holds the exponent of the PRP, 2 * Q): retired after the verdict.
+# 2. Worktodo entry: like the command line it holds Q (-wagstaff doubles a worktodo PRP exponent too);
+# the entry is retired after the verdict.
 rm -f results.txt "${Q}_wagstaff_result.json" worktodo_save.txt
-printf 'PRP=1,2,%s,-1\n' "$((2 * Q))" > worktodo.txt
+printf 'PRP=1,2,%s,-1\n' "$Q" > worktodo.txt
 set +e
 $RUN timeout 120 "$ROOT/prmers" -wagstaff -marin -d "$DEVICE" -noask -f "$WORK" -worktodo worktodo.txt > wt.log 2>&1
 rc=$?
 set -e
 echo "WORKTODO_RC=$rc"
-grep -q 'Wagstaff PRP confirmed' wt.log
-grep -q "PRP=1,2,$((2 * Q)),-1" worktodo_save.txt || { echo "FAIL: entry not archived"; cat wt.log; exit 1; }
+grep -q 'Wagstaff PRP confirmed' wt.log || { echo "FAIL: the worktodo run did not test (2^$Q+1)/3"; cat wt.log; exit 1; }
+grep -q "PRP=1,2,$Q,-1" worktodo_save.txt || { echo "FAIL: entry not archived"; cat wt.log; exit 1; }
 if grep -q 'PRP=' worktodo.txt; then
     echo "FAIL: entry still in worktodo.txt"
     exit 1

@@ -41,8 +41,9 @@ namespace core {
 /// checkpoint and the worktodo line must be kept so the job can be resumed.
 enum class Pm1Stage2Result { Found, NotFound, Interrupted, Error };
 
-/// Process exit status for a stand-alone stage 2 run: 0 for a factor or an
-/// interrupted run (like stage 1), 1 for no factor, 2 for an error.
+/// Result code of a stand-alone stage 2 run: 0 for a factor, 1 for no factor, 2 for an
+/// error. An interrupted run is only reported through the stop bit: App::run() turns
+/// it into core::kExitInterrupted (core/ExitCodes.hpp) whatever this returns.
 inline int pm1Stage2ExitCode(Pm1Stage2Result r) {
     switch (r) {
         case Pm1Stage2Result::Found:       return 0;
@@ -83,7 +84,8 @@ public:
     int runMemtestOpenCL();
     int runECMMarin();
     int runECMMarinTwistedEdwards();
-    int run();
+    int run();       // runInner(), with the exit code of a stopped run (see core/ExitCodes.hpp)
+    int runInner();
     void tuneIterforce();
     double measureIps(uint64_t testIterforce, uint64_t testIters);
     int runGpuBenchmarkMarin();

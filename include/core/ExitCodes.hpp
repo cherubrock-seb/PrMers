@@ -3,8 +3,11 @@
 //
 //   0    the requested work finished
 //   1    the run was stopped by the user (SIGINT / Ctrl-C, or SIGTERM / SIGHUP, which stop a run the
-//        same way) before it finished. The checkpoint was saved and the worktodo entry is still
-//        queued, so the same command line resumes where it stopped. Memtest and P-1 stage 2 already
+//        same way). If the work was not finished, the checkpoint was saved and the worktodo entry is
+//        still queued, so the same command line resumes where it stopped. A stop that arrives after
+//        the result was saved does not stop the bookkeeping (entry retired, state deleted, as after
+//        a normal finish); only the restart for the next worktodo entry is skipped, and the code is
+//        still 1: the run was stopped, but its work is recorded. Memtest and P-1 stage 2 already
 //        used 1 for a stopped run.
 //        1 is also the Gaussian-Mersenne "composite / no factor" result code, so an exit status of 1
 //        does not say by itself which of the two happened: check the log or the results file.

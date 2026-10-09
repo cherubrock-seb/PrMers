@@ -298,6 +298,22 @@ test-final-carry-digit0:
 test-stop-signal-cli: all
 	python3 tests/stop_signal_cli_test.py ./prmers $${PRMERS_TEST_DEVICE:-0}
 
+# A stopped run (Ctrl-C) exits 1 in every mode: host mapping check, then the per-mode run on a device.
+.PHONY: test-exit-codes test-interrupt-exit-code
+test-exit-codes:
+	mkdir -p tests/build-exit-codes
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude tests/exit_codes_test.cpp -o tests/build-exit-codes/exit-codes-test
+	tests/build-exit-codes/exit-codes-test
+	rm -rf tests/build-exit-codes
+
+test-interrupt-exit-code: all
+	python3 tests/interrupt_exit_code_test.py ./prmers $${PRMERS_TEST_DEVICE:-0} INT
+
+# A stop that lands after the result was saved still retires the entry and deletes the state (needs gdb; skips without it).
+.PHONY: test-stop-after-result
+test-stop-after-result: all
+	python3 tests/stop_after_result_test.py ./prmers $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-worktodo-small-items
 test-worktodo-small-items:
 	bash tests/test_worktodo_small_items.sh
