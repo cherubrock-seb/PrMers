@@ -3724,6 +3724,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     uint64_t s2B1=0, s2B2=0, s2D=0;
     bool compactS2Loaded = false;
     int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
+    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
     if (usePair95 && resumed_s2) {
         std::cout << "[PM1-VTRACE-PAIR95] existing Stage 2 checkpoint ignored; "
@@ -4887,6 +4888,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     uint64_t s2B1=0, s2B2=0, s2D=0;
 
     int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
+    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
 
     if (!resumed_s2) {
@@ -5872,7 +5874,23 @@ static bool load_pm1_s1_from_save(const std::string& path,
 
     if (hexX.empty()) return false;
 
-    mpz_set_str(X_out.get_mpz_t(), hexX.c_str(), 16);
+    if (mpz_set_str(X_out.get_mpz_t(), hexX.c_str(), 16) != 0) return false;
+
+    // GMP-ECM resume lines carry a CHECKSUM over (B1, N, X); reject a file whose
+    // residue was damaged.  Lines without the field (older writers) are accepted.
+    const size_t iChk = txt.find("CHECKSUM=");
+    if (iChk != std::string::npos) {
+        const char* c = txt.c_str() + iChk + 9;
+        char* end = nullptr;
+        const unsigned long long stored = std::strtoull(c, &end, 10);
+        if (end == c) return false;
+        const uint32_t expect = core::algo::ecm_checksum_pminus1(B1_out, p_out, X_out);
+        if (stored != static_cast<unsigned long long>(expect)) {
+            std::cerr << "[PM1] " << path << ": CHECKSUM " << stored
+                      << " does not match the residue (expected " << expect << "); file ignored.\n";
+            return false;
+        }
+    }
     return true;
 }
 
@@ -7769,14 +7787,20 @@ int App::runPM1Marin() {
         }
     }
     uint64_t B2save = options.B2; 
-    options.B2 = 0;
-    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
-    std::cout << "Manual submission JSON:\n" << json << "\n";
-    io::WorktodoManager wm(options);
-    options.B2 = 0;
-    bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
-    resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-    options.B2 = B2save;
+    // With the stage-1 GCD skipped nothing was tested for a factor, so there
+    // is no stage-1 result to report, whether or not stage 2 follows; stage 2
+    // reports its own result.  Do not record a "no factor" line.
+    bool resultSaved = true;
+    if (!options.pm1_no_stage1_gcd) {
+        options.B2 = 0;
+        std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
+        std::cout << "Manual submission JSON:\n" << json << "\n";
+        io::WorktodoManager wm(options);
+        options.B2 = 0;
+        resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
+        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
+        options.B2 = B2save;
+    }
 
     // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
     const bool runRequestedStage2 = options.B2 > options.B1 &&
@@ -8005,13 +8029,13 @@ int App::runPM1Stage3Marin() {
             if (resumeSave.size() >= 5 &&
                 resumeSave.substr(resumeSave.size() - 5) == ".save")
             {
-                resumeP95 = resumeSave.substr(resumeSave.size() - 5) + ".p95";
+                resumeP95 = resumeSave.substr(0, resumeSave.size() - 5) + ".p95";
             }
             else if (resumeSave.size() >= 4 &&
                      resumeSave.substr(resumeSave.size() - 4) == ".p95")
             {
                 resumeP95  = resumeSave;
-                resumeSave = resumeSave.substr(resumeSave.size() - 4) + ".save";
+                resumeSave = resumeSave.substr(0, resumeSave.size() - 4) + ".save";
             }
             else {
                 resumeSave += ".save";

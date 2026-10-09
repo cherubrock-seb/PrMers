@@ -151,6 +151,12 @@ test-win-cmdline:
 test-pm1-bounds:
 	bash tests/test_pm1_bounds.sh
 
+test-pm1-p95-checksum:
+	bash tests/test_pm1_p95_checksum.sh
+
+test-pm1-small-items: all
+	bash tests/pm1_small_items_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-vtrace-small-b1:
 	python3 tests/pm1_vtrace_small_b1_test.py
 
