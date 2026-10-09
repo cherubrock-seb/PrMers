@@ -26,10 +26,21 @@ for POS in 99999 4294967301 18446744073709551615; do
   newdir "$d"
   cp "$WORK/ctl/269pm1$B1".* "$WORK/$d/"
   printf '%s' "$POS" >"$WORK/$d/269pm1$B1.loop"
+  # Without the manifest (".state"), as an earlier version left them: the bound check refuses it.
+  # With it, the edited .loop does not match the saved set, which is refused before.
+  rm -f "$WORK/$d/269pm1$B1".state*
   run "$d"
   grep -aq 'is beyond the .* bits of E; ignoring it' "$WORK/$d/run.log" || { echo "$d: position was not refused" >&2; exit 1; }
   grep -aq 'P-1 factor stage 1 found: 13822297' "$WORK/$d/run.log" || { echo "$d: factor not found after restart" >&2; exit 1; }
 done
+
+# An edited .loop with the manifest still there is not used either.
+newdir edited
+cp "$WORK/ctl/269pm1$B1".* "$WORK/edited/"
+printf '%s' 99999 >"$WORK/edited/269pm1$B1.loop"
+run edited
+grep -aq 'Resuming from iteration 99999' "$WORK/edited/run.log" && { echo "edited: resumed from an edited .loop" >&2; exit 1; }
+grep -aq 'P-1 factor stage 1 found: 13822297' "$WORK/edited/run.log" || { echo "edited: factor not found" >&2; exit 1; }
 
 # A genuine interruption resumes.
 newdir half
