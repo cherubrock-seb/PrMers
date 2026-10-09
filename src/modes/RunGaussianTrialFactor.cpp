@@ -1,6 +1,7 @@
 #include "modes/GaussianTrialFactor.hpp"
 
 #include "core/AlgoUtils.hpp"
+#include "core/ExitCodes.hpp"
 #include "core/Version.hpp"
 #include "io/WorktodoParser.hpp"
 #include "util/GuiSettings.hpp"
@@ -661,7 +662,12 @@ int runTrialFactor(const TfRequest& request) {
               << "  sieve primes   : <= " << request.sievePrime << '\n'
               << "  raw k chunk    : " << request.chunkSpan << '\n';
 
+    // Stop (SIGINT / SIGTERM / SIGHUP): finish the chunk in flight, keep the checkpoint written after it
+    // and leave without a result, so the same command (or worktodo line) resumes at nextK.
+    core::algo::install_stop_handlers();
+    bool stopped = false;
     while (nextK <= lastK && !targetSatisfied(request, found)) {
+        if (core::algo::stop_requested_any()) { stopped = true; break; }
         const std::uint64_t remaining = lastK - nextK + 1ULL;
         const std::uint64_t span = std::min(request.chunkSpan, remaining);
         const std::uint64_t chunkEnd = nextK + span - 1ULL;
@@ -739,6 +745,12 @@ int runTrialFactor(const TfRequest& request) {
         std::cout << "  progress       : " << std::fixed << std::setprecision(2)
                   << static_cast<double>(100.0L * completed / total) << "%"
                   << " | tested after sieve: " << testedCandidates << '\n';
+    }
+    if (stopped) {
+        std::cout << "\nInterrupted by user, Gaussian TF state saved at k=" << nextK << std::endl;
+        clReleaseKernel(kernel);
+        clReleaseProgram(program);
+        return core::kExitInterrupted;
     }
 
     const auto finished = std::chrono::steady_clock::now();

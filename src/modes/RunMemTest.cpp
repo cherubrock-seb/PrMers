@@ -50,6 +50,7 @@
 #include <filesystem>
 #include <set>
 #include "core/StopRestartGate.hpp"
+#include "core/InheritedSignals.hpp"
 
 using namespace core;
 using namespace std::chrono;
@@ -249,6 +250,9 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
 #ifdef SIGTERM
     std::signal(SIGTERM, onint);
 #endif
+#ifdef SIGHUP
+    if (std::signal(SIGHUP, onint) == SIG_IGN || core::algo::sighup_inherited_ignored()) std::signal(SIGHUP, SIG_IGN);   // nohup
+#endif
     bool interrupted = false;
     for (size_t bi = 0; bi < bufs.size() && !interrupted; ++bi) {
         cl_mem parent = bufs[bi];
@@ -273,7 +277,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
             addr_w_time += dur(t0,t1);
             total_write += sz; addr_bytes_w += sz;
             steps_done++; show("addr W", bi, sectors, s, -1, 0);
-            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
             err|=clSetKernelArg(k_a_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_a_r,1,sizeof(cl_ulong),&sz);
             err|=clSetKernelArg(k_a_r,2,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_a_r,3,sizeof(cl_mem),&err_addr);
             err|=clSetKernelArg(k_a_r,4,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_a_r,5,sizeof(cl_mem),&err_current);
@@ -295,7 +299,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                 for (size_t i=0;i<std::min<size_t>(ec,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({0,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
             }
             steps_done++; show("addr R", bi, sectors, s, -1, 0);
-            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
             zero_err();
             cl_ulong p1 = rnd64(); cl_ulong p2 = ~p1;
             err = clSetKernelArg(k_write,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_write,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_write,2,sizeof(cl_ulong),&p1);
@@ -306,7 +310,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
             inv_w_time += dur(t3,t4);
             total_write += sz; inv_bytes_w += sz;
             steps_done++; show("inv W", bi, sectors, s, -1, 0);
-            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
             for (int it=0; it<iters; ++it) {
                 auto trw0 = now();
                 err|=clSetKernelArg(k_rw,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_rw,1,sizeof(cl_ulong),&sz);
@@ -332,7 +336,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                 }
                 cl_ulong t = p1; p1 = p2; p2 = t;
                 steps_done++; if ((it & 7) == 7) show("inv RW", bi, sectors, s, it+1, iters);
-                if (stop_flag) { interrupted = true; break; }
+                if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
             }
             if (interrupted) { clReleaseMemObject(sub); break; }
             err|=clSetKernelArg(k_read,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_read,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_read,2,sizeof(cl_ulong),&p1);
@@ -356,7 +360,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                 for (size_t i=0;i<std::min<size_t>(ec2,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({1,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
             }
             steps_done++; show("inv R", bi, sectors, s, -1, 0);
-            if (stop_flag) { interrupted = true; clReleaseMemObject(sub); break; }
+            if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
             zero_err();
             cl_ulong mp1 = 0xAAAAAAAAAAAAAAAAull, mp2 = 0x5555555555555555ull;
             for (uint32_t offmod=0; offmod<MOD_SZ_HOST && !interrupted; ++offmod) {
@@ -368,7 +372,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                 mod_w_time += dur(t7,t8);
                 total_write += sz; mod_bytes_w += sz;
                 steps_done++; show("mod W", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
-                if (stop_flag) { interrupted = true; break; }
+                if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
                 err|=clSetKernelArg(k_m_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_r,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_r,2,sizeof(cl_uint),&offmod);
                 err|=clSetKernelArg(k_m_r,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_r,4,sizeof(cl_ulong),&mp2);
                 err|=clSetKernelArg(k_m_r,5,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_m_r,6,sizeof(cl_mem),&err_addr);
@@ -392,7 +396,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
                     zero_err();
                 }
                 steps_done++; show("mod R", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
-                if (stop_flag) { interrupted = true; break; }
+                if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
                 zero_err();
             }
             clReleaseMemObject(sub);

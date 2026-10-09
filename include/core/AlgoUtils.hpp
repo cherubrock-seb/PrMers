@@ -66,7 +66,21 @@ namespace fs = std::filesystem;
 namespace core::algo {
 
 extern std::atomic<bool> interrupted;
-void handle_sigint(int) noexcept;  
+void handle_sigint(int) noexcept;
+
+// Route every external stop request to handle_sigint, so SIGTERM and SIGHUP end a run exactly like
+// Ctrl-C (flag, checkpoint, clean exit):
+//   POSIX:   SIGINT, SIGTERM, SIGHUP. SIGHUP is left alone when it was inherited as ignored (nohup).
+//   Windows: Ctrl-C and Ctrl-Break as SIGINT; console close, logoff and shutdown as SIGTERM (the
+//            handler then holds the console thread for up to 5 s so the main thread can save
+//            before Windows ends the process).
+// Idempotent; call it once the process is past its interactive prompts (a prompt that waits on stdin
+// would otherwise survive a SIGTERM).
+void install_stop_handlers();
+
+// True once a stop was requested by any source (signal, console event, GUI Stop).
+bool stop_requested_any() noexcept;
+
 
 inline static std::vector<std::string> parseConfigFile(const std::string& config_path) {
     std::ifstream config(config_path);

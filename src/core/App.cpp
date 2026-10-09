@@ -23,6 +23,7 @@
 //#define CL_TARGET_OPENCL_VERSION 200
 #define NOMINMAX
 #include "core/App.hpp"
+#include "core/InheritedSignals.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmChainProgress.hpp"
 #include "core/QuickChecker.hpp"
@@ -707,7 +708,8 @@ App::App(int argc, char** argv)
         ensureProofGpuBackend();
     }
 
-    std::signal(SIGINT, handle_sigint);
+    // SIGINT, SIGTERM and SIGHUP (and the Windows console events) all stop the run the same way.
+    core::algo::install_stop_handlers();
 }
 
 
@@ -889,11 +891,18 @@ int App::runGpuBenchmarkMarin() {
     };
 
     auto old_handler = std::signal(SIGINT, prmers_bench_sigint);
+#ifdef SIGTERM
+    auto old_term_handler = std::signal(SIGTERM, prmers_bench_sigint);
+#endif
+#ifdef SIGHUP
+    auto old_hup_handler = std::signal(SIGHUP, prmers_bench_sigint);
+    if (old_hup_handler == SIG_IGN || core::algo::sighup_inherited_ignored()) std::signal(SIGHUP, SIG_IGN);   // nohup
+#endif
     const size_t R0 = 0, R1 = 1;
     double sum_time = 0.0;
 
     for (size_t ti = 0; ti < tasks.size(); ++ti) {
-        if (prmers_bench_stop) break;
+        if (prmers_bench_stop || core::algo::stop_requested_any()) break;
         uint32_t p = tasks[ti].p;
         engine* eng = nullptr;
         try { eng = engine::create_gpu(p, static_cast<size_t>(6), static_cast<size_t>(options.device_id), false/*, options.chunk256*/); } catch (...) { eng = nullptr; }
@@ -902,7 +911,7 @@ int App::runGpuBenchmarkMarin() {
         eng->set(R0, 3);
 
         uint32_t warm = 96;
-        for (uint32_t i = 0; i < warm && !prmers_bench_stop; ++i) eng->square_mul(R0);
+        for (uint32_t i = 0; i < warm && !prmers_bench_stop && !core::algo::stop_requested_any(); ++i) eng->square_mul(R0);
 
         uint32_t ts =  eng->get_size();
         double target = (ts >= 33554432u) ? 10.0 : (ts >= 8388608u ? 8.0 : (ts >= 2621440u ? 6.0 : 5.0));
@@ -912,7 +921,7 @@ int App::runGpuBenchmarkMarin() {
         double last_update = 0.0;
 
         for (;;) {
-            if (prmers_bench_stop) break;
+            if (prmers_bench_stop || core::algo::stop_requested_any()) break;
             eng->square_mul(R0);
             ++cnt;
             auto t1 = std::chrono::high_resolution_clock::now();
@@ -929,17 +938,23 @@ int App::runGpuBenchmarkMarin() {
         double elapsed = std::chrono::duration<double>(t1 - t0).count();
         sum_time += elapsed;
 
-        if (!prmers_bench_stop) {
+        if (!prmers_bench_stop && !core::algo::stop_requested_any()) {
             double ips = cnt / std::max(1e-9, elapsed);
             double eta_prp = (double)p / std::max(1e-9, ips);
             rows.push_back({ts, p, ips, eta_prp});
         }
 
         delete eng;
-        if (prmers_bench_stop) break;
+        if (prmers_bench_stop || core::algo::stop_requested_any()) break;
     }
 
     std::signal(SIGINT, old_handler);
+#ifdef SIGTERM
+    std::signal(SIGTERM, old_term_handler);
+#endif
+#ifdef SIGHUP
+    std::signal(SIGHUP, old_hup_handler);
+#endif
     std::cout << "\n";
     std::cout << "Transform  Exponent      Iter/s       PRP_ETA\n";
     if (guiServer_) {
@@ -1014,30 +1029,12 @@ namespace {
 #include <windows.h>
 #include <csignal>
 #include <cstdlib>
-static BOOL WINAPI prmers_ctrl_handler(DWORD type){
-    switch(type){
-        case CTRL_C_EVENT:
-        case CTRL_BREAK_EVENT: handle_signal(SIGINT); return TRUE;
-        case CTRL_CLOSE_EVENT:
-        case CTRL_LOGOFF_EVENT:
-        case CTRL_SHUTDOWN_EVENT: handle_signal(SIGTERM); return TRUE;
-        default: return FALSE;
-    }
-}
-static void install_signal_handlers() { SetConsoleCtrlHandler(prmers_ctrl_handler, TRUE); }
+static void install_signal_handlers() { core::algo::install_stop_handlers(); }
 #else
 #include <signal.h>
 static void install_signal_handlers() {
-    struct sigaction sa; sigemptyset(&sa.sa_mask); sa.sa_flags = 0; sa.sa_handler = handle_signal;
-#ifdef SIGINT
-    sigaction(SIGINT, &sa, nullptr);
-#endif
-#ifdef SIGTERM
-    sigaction(SIGTERM, &sa, nullptr);
-#endif
-#ifdef SIGHUP
-    sigaction(SIGHUP, &sa, nullptr);
-#endif
+    // The same SIGINT / SIGTERM / SIGHUP handling as the CLI modes (core::algo::install_stop_handlers).
+    core::algo::install_stop_handlers();
     struct sigaction ign; sigemptyset(&ign.sa_mask); ign.sa_flags = 0; ign.sa_handler = SIG_IGN;
 #ifdef SIGPIPE
     sigaction(SIGPIPE, &ign, nullptr);

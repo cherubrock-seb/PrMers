@@ -287,6 +287,11 @@ test-proof-fallback-power:
 test-final-carry-digit0:
 	bash tests/test_final_carry_digit0.sh
 
+# SIGTERM and SIGHUP stop a CLI run exactly like SIGINT in every mode (runs prmers; PoCL's CPU device is enough).
+.PHONY: test-stop-signal-cli
+test-stop-signal-cli: all
+	python3 tests/stop_signal_cli_test.py ./prmers $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-worktodo-small-items
 test-worktodo-small-items:
 	bash tests/test_worktodo_small_items.sh
