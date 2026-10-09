@@ -547,6 +547,11 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   if (isNvidiaGpu(id)) { defines += toDefine("NVIDIAGPU", 1); }
   if (isNvidiaGpu(id)) { defines += toDefine("CC", getNvidiaComputeCapability(id)); }
 
+  if (fft.carry32TooWide(E)) {
+    throw std::runtime_error("Explicit 32-bit carry spec " + fft.spec() + " cannot hold the carries at " +
+                             std::to_string(E / double(fft.size())) + " bits per word (limit " + std::to_string(fft.shape.carry32BPW()) +
+                             "); use carry :1 or omit the carry");
+  }
   if ((fft.carry == CARRY_AUTO && fft.shape.needsLargeCarry(E)) || (fft.carry == CARRY_64)) {
     if (doLog) { log("Using CARRY64\n"); }
     defines += toDefine("CARRY64", 1);

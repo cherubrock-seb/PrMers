@@ -291,7 +291,7 @@ void Tune::ctune() {
   }
 
   for (FFTShape shape : shapes) {
-    FFTConfig fft{shape, 101, CARRY_32};
+    FFTConfig fft{shape, 101, shape.fft_type == FFT64 ? CARRY_32 : CARRY_AUTO};   // explicit :0 is refused for NTTs at high bpw
     u64 exponent = primes.prevPrime(fft.maxExp());
     // log("tuning %10s with exponent %" PRIu64 "\n", fft.shape.spec().c_str(), exponent);
 

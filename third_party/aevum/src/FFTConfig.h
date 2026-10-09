@@ -127,6 +127,12 @@ public:
   float minBpw() const { return shape.minBpw(); }
   float maxBpw() const;
 
+  // A 32-bit carry is unsafe once EXP / NWORDS exceeds FFTShape::carry32BPW() (the empirically validated limit that
+  // CARRY_AUTO uses to switch to a 64-bit carry; any FFT/NTT type).  CARRY_AUTO never selects the 32-bit carry past it;
+  // only an explicit ":0" spec can.  carryutil.cl additionally fails the build at EXP / NWORDS >= 19, which is the
+  // hard limit of the carry32BPW() formula, so the same bound is part of this gate and the two never disagree.
+  bool carry32TooWide(u64 E) const { return carry == CARRY_32 && (shape.needsLargeCarry(E) || E / shape.size() >= 19); }
+
   bool knownUnsafeOrdinaryPrp(u64 exponent) const;
   FFTConfig promoteKnownUnsafeOrdinaryPrp(
       const Args& args, u64 exponent) const;
