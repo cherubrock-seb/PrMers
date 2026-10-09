@@ -101,14 +101,16 @@ check_case() {
 }
 
 fail=0
+# A -wagstaff worktodo entry holds q, like the command line; the state is named after 2q.
 W=$((2 * Q))
 check_case marin-prp           retire "PRP=1,2,$P,-1"  "$P"         "m_$P.ckpt*"           -prp -proof 0 -engine-marin || fail=1
 check_case marin-llunsafe      retire "Test=$P,70,1"   "$((P - 2))" "llunsafe_m_$P.ckpt*"  -engine-marin || fail=1
-check_case marin-wagstaff      retire "PRP=1,2,$W,-1"  "$Q"         "wagstaff_m_$W.ckpt*"  -wagstaff -engine-marin || fail=1
+check_case marin-wagstaff      retire "PRP=1,2,$Q,-1"  "$Q"         "wagstaff_m_$W.ckpt*"  -wagstaff -engine-marin || fail=1
 check_case legacy-prp          retire "PRP=1,2,$P,-1"  "$P"         "${P}prp.*"            -prp -proof 0 -marin || fail=1
 check_case legacy-prp-proof    retire "PRP=1,2,$P,-1"  "$P"         "${P}prp.*"            -prp -proof 2 -marin || fail=1
 check_case legacy-ll           retire "Test=$P,70,1"   "$((P - 2))" "${P}ll.*"             -marin || fail=1
-check_case legacy-wagstaff     retire "PRP=1,2,$W,-1"  "$Q"         "${W}prp_wagstaff.*"   -wagstaff -marin || fail=1
+check_case legacy-wagstaff     retire "PRP=1,2,$Q,-1"  "$Q"         "${W}prp_wagstaff.*"   -wagstaff -marin || fail=1
 check_case llsafe2             save   "-"              "$((P - 2))" "llsafe2_m_$P.ckpt*"   -llsafe2 -engine-marin || fail=1
 check_case llsafe              save   "-"              "$((P - 1))" "llsafe_m_$P.ckpt*"    -ll -engine-marin || fail=1
+check_case llsafe-worktodo     retire "DoubleCheck=$P,70,1" "$((P - 1))" "llsafe_m_$P.ckpt*"    || fail=1
 exit "$fail"
