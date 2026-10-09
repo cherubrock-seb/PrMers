@@ -88,7 +88,7 @@ inline std::string oom_message(const std::string& codeText, const std::string& w
     std::string m = "Out of GPU memory: ";
     m += what.empty() ? std::string("OpenCL call") : what;
     m += " failed with " + codeText +
-         ". The problem does not fit in the memory of this device; try a smaller exponent or free GPU memory.";
+         ". The problem does not fit in the available memory (device or host); try a smaller exponent or free memory.";
     return m;
 }
 
