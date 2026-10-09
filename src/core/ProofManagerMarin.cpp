@@ -21,6 +21,8 @@
  * This code is released as free software. 
  */
 #include "core/ProofManagerMarin.hpp"
+#include "core/ProofManager.hpp"
+#include "core/ProofVerifyCpu.hpp"
 #include "io/JsonBuilder.hpp"
 #include <vector>
 #include <iostream>
@@ -79,7 +81,7 @@ void ProofManagerMarin::checkpointMarin(engine::digit host, uint32_t iter)
 }
 
 
-std::filesystem::path ProofManagerMarin::proof() const {
+std::filesystem::path ProofManagerMarin::proof(bool verify) const {
     try {
         // Generate proof from collected checkpoints
         ProofMarin proof = proofSet_.computeProof();
@@ -107,6 +109,24 @@ std::filesystem::path ProofManagerMarin::proof() const {
         } catch (const std::exception& e) {
             std::filesystem::remove(tmpPath, ec);
             throw std::runtime_error(std::string("Proof file validation failed: ") + e.what());
+        }
+        // Verify the proof as written, as the GPU path does (unless -noverify): a proof that
+        // fails is discarded and no proof is reported. The PRP result is unaffected.
+        if (verify) {
+            std::string why;
+            bool ok = false;
+            try {
+                ok = verifyProofCpu(ProofMarin::load(tmpPath), exponent_, proofSet_.power, why, &std::cout);
+            } catch (const std::exception& e) {
+                why = e.what();
+            }
+            if (!ok) {
+                std::filesystem::remove(tmpPath, ec);
+                throw ProofVerificationError(
+                    "CPU proof for M" + std::to_string(exponent_) + " (power " +
+                    std::to_string(proofSet_.power) + ") failed verification (" + why +
+                    "); the proof file was discarded");
+            }
         }
         std::filesystem::remove(proofFilePath, ec);
         std::filesystem::rename(tmpPath, proofFilePath);

@@ -27,7 +27,9 @@ public:
                  const std::string& savePath = std::string());
     void checkpoint(cl_mem buf, uint32_t iter);    
     void checkpointMarin(engine::digit host, uint32_t iter);
-    std::filesystem::path proof() const;
+    // Make the proof on the CPU and, when verify is set, verify it (throws
+    // ProofVerificationError when it does not verify; the file is then removed).
+    std::filesystem::path proof(bool verify = true) const;
     bool shouldCheckpoint(uint32_t iter) const;
     // Power of the proof proof() writes: the one the checkpoints were saved for.
     uint32_t power() const { return proofSet_.power; }

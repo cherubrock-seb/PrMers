@@ -16,6 +16,7 @@
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
 #include <sys/stat.h>
+#include <cstdlib>
 #include <cstdio>
 #include <map>
 #include <future>
@@ -868,6 +869,13 @@ int App::runPrpOrLlMarin()
             std::string gpuProofError;
 
             try {
+                // Test hook: make the proof with the CPU fallback, as when the GPU
+                // proof backend is unavailable.
+                const char* forceCpu = std::getenv("PRMERS_TEST_FORCE_CPU_PROOF");
+                if (forceCpu && *forceCpu && std::string(forceCpu) != "0")
+                    throw std::runtime_error(
+                        "PRMERS_TEST_FORCE_CPU_PROOF is set");
+
                 ensureProofGpuBackend();
 
                 if (!buffers || !program || !kernels || !nttEngine)
@@ -912,8 +920,8 @@ int App::runPrpOrLlMarin()
                         break;
                     }
                     catch (const core::ProofVerificationError&) {
-                        // Not retried and not replaced by the unverified CPU
-                        // proof: handled by the outer catch.
+                        // Not retried and not replaced by the CPU proof:
+                        // handled by the outer catch.
                         throw;
                     }
                     catch (const std::exception& e) {
@@ -940,7 +948,7 @@ int App::runPrpOrLlMarin()
                     << "falling back to CPU GMP: "
                     << gpuProofError << std::endl;
 
-                proofFilePath = proofManagerMarin.proof();
+                proofFilePath = proofManagerMarin.proof(options.verify);
                 // The GPU retries above lowered options.proofPower; the CPU
                 // proof always uses the full power the checkpoints were saved
                 // for, and that is what the result JSON must report.

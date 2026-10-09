@@ -9,7 +9,7 @@ mgr = (ROOT / "include/core/ProofManagerMarin.hpp").read_text()
 # for, not at the lowered power the GPU retry loop left in options.proofPower.
 assert "uint32_t power() const" in mgr
 
-fallback = marin.index("proofFilePath = proofManagerMarin.proof();")
+fallback = marin.index("proofFilePath = proofManagerMarin.proof(options.verify);")
 tail = marin[fallback:fallback + 600]
 assert "options.proofPower = proofManagerMarin.power();" in tail
 
