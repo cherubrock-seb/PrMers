@@ -51,24 +51,44 @@ done
 echo ""
 echo "=== Extended P-1 factoring tests ==="
 
+# "args:expected lines separated by |". A line starting with ! must NOT appear.
+# Stage 2 runs the V-trace algorithm by default ("(stage 2 V-trace)" in the messages); the same cases
+# are repeated with -pm1-vtrace-off for the classic stage 2 ("(stage 2)"). A stage 1 factor ends the
+# run unless -pm1-continue-stage2-after-factor asks stage 2 to look for further factors; stage 2 then
+# reports only the factor it finds beyond the one stage 1 already found (the cases that used to expect the
+# product of both factors, e.g. 23671 * 13572264529177 = 321269073670148767 for M263).
 declare -a pm1_tests=(
   "269 -pm1 -b1 2141:P-1 factor stage 1 found: 13822297"
   "269 -pm1 -b1 192:No P-1 (stage 1) factor up to B1=192"
-  "269 -pm1 -b1 192 -b2 457:No factor P-1 (stage 2) until B2 = 457"
-  "269 -pm1 -b1 4 -b2 2141:>>>  Factor P-1 (stage 2) found : 13822297"
-  "263 -pm1 -b1 3527 -b2 16477:P-1 factor stage 1 found: 23671|>>>  Factor P-1 (stage 2) found : 321269073670148767"
-  "367 -pm1 -b1 11981 -b2 38971:P-1 factor stage 1 found: 646300400639|>>>  Factor P-1 (stage 2) found : 50500996776315830904406967"
-  "569 -pm1 -b1 9 -b2 677:>>>  Factor P-1 (stage 2) found : 55470673"
-  "1097 -pm1 -b1 3 -b2 709:>>>  Factor P-1 (stage 2) found : 4576661533441"
-  "2151 -pm1 -b1 256 -b2 4073:P-1 factor stage 1 found: 327405968242246366421788399|>>>  Factor P-1 (stage 2) found : 31810015665526476520196715312101168065463218256802641"
-  "4133 -pm1 -b1 23 -b2 2099:>>>  Factor P-1 (stage 2) found : 11173615097"
-  "44159 -pm1 -b1 23 -b2 31:No P-1 (stage 1) factor up to B1=23|>>>  Factor P-1 (stage 2) found : 1511297617"
-  "144139 -pm1 -b1 3 -b2 3583:No P-1 (stage 1) factor up to B1=3|>>>  Factor P-1 (stage 2) found : 3098700223"
-  "544139 -pm1 -b1 3 -b2 7:P-1 factor stage 1 found: 22853839|>>>  Factor P-1 (stage 2) found : 22853839"
-  "11544157 -pm1 -b1 19 -b2 101:No P-1 (stage 1) factor up to B1=19|>>>  Factor P-1 (stage 2) found : 44306474567"
+  "269 -pm1 -b1 192 -b2 457:No factor P-1 (stage 2 V-trace) until B2 = 457"
+  "269 -pm1 -b1 192 -b2 457 -pm1-vtrace-off:No factor P-1 (stage 2) until B2 = 457"
+  "269 -pm1 -b1 4 -b2 2141:>>>  Factor P-1 (stage 2 V-trace) found : 13822297"
+  "269 -pm1 -b1 4 -b2 2141 -pm1-vtrace-off:>>>  Factor P-1 (stage 2) found : 13822297"
+  "263 -pm1 -b1 3527 -b2 16477:P-1 factor stage 1 found: 23671|!Factor P-1 (stage 2"
+  "263 -pm1 -b1 3527 -b2 16477 -pm1-vtrace-off:P-1 factor stage 1 found: 23671|!Factor P-1 (stage 2"
+  "263 -pm1 -b1 3527 -b2 16477 -pm1-continue-stage2-after-factor:P-1 factor stage 1 found: 23671|>>>  Factor P-1 (stage 2 V-trace) found : 13572264529177"
+  "263 -pm1 -b1 3527 -b2 16477 -pm1-continue-stage2-after-factor -pm1-vtrace-off:P-1 factor stage 1 found: 23671|>>>  Factor P-1 (stage 2) found : 13572264529177"
+  "367 -pm1 -b1 11981 -b2 38971 -pm1-continue-stage2-after-factor:P-1 factor stage 1 found: 646300400639|>>>  Factor P-1 (stage 2 V-trace) found : 78138581882953"
+  "367 -pm1 -b1 11981 -b2 38971 -pm1-continue-stage2-after-factor -pm1-vtrace-off:P-1 factor stage 1 found: 646300400639|>>>  Factor P-1 (stage 2) found : 78138581882953"
+  "569 -pm1 -b1 9 -b2 677:>>>  Factor P-1 (stage 2 V-trace) found : 55470673"
+  "569 -pm1 -b1 9 -b2 677 -pm1-vtrace-off:>>>  Factor P-1 (stage 2) found : 55470673"
+  "1097 -pm1 -b1 3 -b2 709:>>>  Factor P-1 (stage 2 V-trace) found : 4576661533441"
+  "1097 -pm1 -b1 3 -b2 709 -pm1-vtrace-off:>>>  Factor P-1 (stage 2) found : 4576661533441"
+  "2151 -pm1 -b1 256 -b2 4073 -pm1-continue-stage2-after-factor:P-1 factor stage 1 found: 327405968242246366421788399|>>>  Factor P-1 (stage 2 V-trace) found : 97157714736557194203072959"
+  "2151 -pm1 -b1 256 -b2 4073 -pm1-continue-stage2-after-factor -pm1-vtrace-off:P-1 factor stage 1 found: 327405968242246366421788399|>>>  Factor P-1 (stage 2) found : 97157714736557194203072959"
+  "4133 -pm1 -b1 23 -b2 2099:>>>  Factor P-1 (stage 2 V-trace) found : 11173615097"
+  "4133 -pm1 -b1 23 -b2 2099 -pm1-vtrace-off:>>>  Factor P-1 (stage 2) found : 11173615097"
+  "44159 -pm1 -b1 23 -b2 31:No P-1 (stage 1) factor up to B1=23|>>>  Factor P-1 (stage 2 V-trace) found : 1511297617"
+  "44159 -pm1 -b1 23 -b2 31 -pm1-vtrace-off:No P-1 (stage 1) factor up to B1=23|>>>  Factor P-1 (stage 2) found : 1511297617"
+  "144139 -pm1 -b1 3 -b2 3583:No P-1 (stage 1) factor up to B1=3|>>>  Factor P-1 (stage 2 V-trace) found : 3098700223"
+  "144139 -pm1 -b1 3 -b2 3583 -pm1-vtrace-off:No P-1 (stage 1) factor up to B1=3|>>>  Factor P-1 (stage 2) found : 3098700223"
+  "544139 -pm1 -b1 3 -b2 7 -pm1-continue-stage2-after-factor:P-1 factor stage 1 found: 22853839|No factor P-1 (stage 2 V-trace) until B2 = 7"
+  "544139 -pm1 -b1 3 -b2 7 -pm1-continue-stage2-after-factor -pm1-vtrace-off:P-1 factor stage 1 found: 22853839|No factor P-1 (stage 2) until B2 = 7"
+  "11544157 -pm1 -b1 19 -b2 101:No P-1 (stage 1) factor up to B1=19|>>>  Factor P-1 (stage 2 V-trace) found : 44306474567"
+  "11544157 -pm1 -b1 19 -b2 101 -pm1-vtrace-off:No P-1 (stage 1) factor up to B1=19|>>>  Factor P-1 (stage 2) found : 44306474567"
 )
 
-
+pm1_failed=false
 for test in "${pm1_tests[@]}"; do
   IFS=':' read -r args expected <<< "$test"
   echo -n "Testing ./prmers $args ... "
@@ -77,15 +97,24 @@ for test in "${pm1_tests[@]}"; do
   valid=true
   IFS='|' read -ra expected_lines <<< "$expected"
   for expected_line in "${expected_lines[@]}"; do
-    if ! grep -qF "$expected_line" <<< "$output"; then
+    if [[ "$expected_line" == '!'* ]]; then
+      if grep -qF "${expected_line#!}" <<< "$output"; then
+        echo "❌ Unexpected '${expected_line#!}' (see logs/pm1_${args// /_}.log)"
+        valid=false
+        break
+      fi
+    elif ! grep -qF "$expected_line" <<< "$output"; then
       echo "❌ Missing '$expected_line' (see logs/pm1_${args// /_}.log)"
       valid=false
       break
     fi
   done
-  $valid && echo "✅"
+  if $valid; then echo "✅"; else pm1_failed=true; fi
 done
-
+if $pm1_failed; then
+  echo "❌ Some P-1 tests failed"
+  exit 1
+fi
 
 echo ""
 echo "=== Out-of-range exponent verification ==="
@@ -98,6 +127,22 @@ if [ $exit_code -eq 0 ]; then
     exit 1
 fi
 if grep -q "Error: Exponent must be <= 5650242869" "logs/bad_${p}.log"; then
+    echo "✅ Correctly rejected (see logs/bad_${p}.log)"
+else
+    echo "❌ Missing or wrong error message (see logs/bad_${p}.log)"
+    exit 1
+fi
+
+# Below the general limit but above what the engines (32-bit exponents) support.
+p=4294967296
+echo -n "Testing M${p} (should be rejected)… "
+./prmers "$p" --noask -prp > "logs/bad_${p}.log" 2>&1
+exit_code=$?
+if [ $exit_code -eq 0 ]; then
+    echo "❌ Unexpected success"
+    exit 1
+fi
+if grep -q "Error: Exponent must be <= 4294967295" "logs/bad_${p}.log"; then
     echo "✅ Correctly rejected (see logs/bad_${p}.log)"
 else
     echo "❌ Missing or wrong error message (see logs/bad_${p}.log)"
