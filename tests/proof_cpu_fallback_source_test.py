@@ -27,6 +27,9 @@ assert "cpuVerifyMaxSeconds()" in cpu
 assert cpu.index("verifyFallbackProof(") < cpu.index("rename(tmpPath, proofFilePath)")
 assert "throw ProofVerificationError(" in cpu
 assert "Status::Skipped" in cpu and "Warning: " in cpu
+# The skipped-verification warning also reaches the GUI log.
+skip = cpu[cpu.index("Status::Skipped"):][:300]
+assert "appendLog(" in skip
 marin = (ROOT / "src/modes/RunPrpOrLlMarin.cpp").read_text()
 assert "proofManagerMarin.proof(options.verify, gpuVerify)" in marin
 # The GPU verifier is the one the normal path uses (Proof::verify), and what

@@ -24,6 +24,7 @@
 #include "core/ProofManager.hpp"
 #include "core/ProofVerifyCpu.hpp"
 #include "io/JsonBuilder.hpp"
+#include "ui/WebGuiServer.hpp"
 #include <vector>
 #include <iostream>
 #include <stdexcept>
@@ -123,10 +124,12 @@ std::filesystem::path ProofManagerMarin::proof(bool verify, const GpuProofVerifi
                     std::to_string(proofSet_.power) + ") failed " + v.method + " verification (" +
                     v.message + "); the proof file was discarded");
             }
-            if (v.status == FallbackVerifyResult::Status::Skipped)
+            if (v.status == FallbackVerifyResult::Status::Skipped) {
                 std::cerr << "Warning: " << v.message << std::endl;
-            else
+                if (auto g = ui::WebGuiServer::instance()) g->appendLog("Warning: " + v.message + "\n");
+            } else {
                 std::cout << "CPU proof verified on the " << v.method << std::endl;
+            }
         }
         std::filesystem::remove(proofFilePath, ec);
         std::filesystem::rename(tmpPath, proofFilePath);
