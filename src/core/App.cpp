@@ -24,6 +24,7 @@
 #define NOMINMAX
 #include "core/App.hpp"
 #include "core/InheritedSignals.hpp"
+#include "core/LegacyLlGuard.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmChainProgress.hpp"
 #include "core/QuickChecker.hpp"
@@ -440,6 +441,7 @@ App::App(int argc, char** argv)
         c_argv.push_back(const_cast<char*>(s.c_str()));
     c_argv.push_back(nullptr);
     auto o = io::CliParser::parse(static_cast<int>(merged.size()), c_argv.data());
+    const std::string cliMode = o.mode;
     if (o.submit || !o.password.empty()) {
         std::cerr << "Warning: PrimeNet submission is not available in this build; "
                      "-submit and -password are ignored. Submit results manually." << std::endl;
@@ -561,6 +563,17 @@ App::App(int argc, char** argv)
     }
     o.mode = "prp";
     //std::exit(-1);
+    }
+    // The mode may have come from a worktodo LL entry (Test=), which the command-line check in main.cpp
+    // cannot see: apply the same rule here.
+    if (const std::string why = core::legacyLlRejection(o.mode, o.marin, o.allow_unvalidated_legacy_ll); !why.empty()) {
+        throw std::runtime_error(why + " (worktodo LL entry)");
+    }
+    // A command-line LL run was already warned about in main.cpp; only a mode taken from worktodo is new.
+    if (cliMode != "ll") {
+        if (const std::string warn = core::legacyLlWarning(o.mode, o.marin, o.allow_unvalidated_legacy_ll); !warn.empty()) {
+            std::cerr << warn << std::endl;
+        }
     }
     engine::gpu_workload workload = engine::gpu_workload::generic;
     if (o.mode == "prp" || o.mode == "gm-proth" || o.mode == "gm-prp") workload = engine::gpu_workload::prp;

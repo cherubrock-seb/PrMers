@@ -423,6 +423,11 @@ test-pm1-prime95-stage2-result: all
 test-backend-compat: all
 	bash tests/test_backend_compatibility_cli.sh
 
+.PHONY: test-worktodo-ll-marin-guard
+
+test-worktodo-ll-marin-guard: all
+	bash tests/test_worktodo_ll_marin_guard.sh
+
 test-aevum-auto-gpu: all
 	bash tests/run_aevum_auto_gpu_matrix.sh $${AEVUM_TEST_DEVICE:-0}
 

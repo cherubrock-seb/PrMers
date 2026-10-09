@@ -225,9 +225,12 @@ continues to choose Marin normally in that situation. For example, `M216091` is
 below the native FFT3161 range, while `M1362763` can be used to exercise the
 forced Aevum LL paths.
 
-The legacy internal NTT option `-marin` is rejected with `-llunsafe`, because
-that historical Lucas-Lehmer path is not validated. Use automatic mode,
-`-engine-marin`, or `-aevum`. The one-register `-pm1-ultralowmem` path remains
+The legacy internal NTT option `-marin` is rejected for Lucas-Lehmer, whether
+the LL run comes from `-llunsafe` or from a worktodo `Test=` entry, because
+that historical path is not validated. Use automatic mode, `-engine-marin`, or
+`-aevum`. To run it on purpose anyway (for example for regression testing), add
+`-allow-unvalidated-legacy-ll`, on the command line or in `settings.cfg`; a
+warning is printed. The one-register `-pm1-ultralowmem` path remains
 Marin-only and an explicit `-aevum` request is rejected before OpenCL and
 transform allocation.
 
@@ -310,6 +313,7 @@ Run the built-in help for the exact option list supported by your binary:
 | `-engine-marin` | Force the Marin `engine::Reg` backend |
 | `-aevum-auto` | Explicitly request the normal auto policy; macOS still keeps Marin unless `-aevum` is used |
 | `-marin` | Legacy option: use the internal PrMers NTT path |
+| `-allow-unvalidated-legacy-ll` | Let `-marin` run Lucas-Lehmer (command line or worktodo); that path is not validated for LL, so a warning is printed |
 
 Automatic Marin/Aevum selection is the default on Linux and Windows. macOS defaults to Marin; use `-aevum` for an explicit Aevum opt-in.
 

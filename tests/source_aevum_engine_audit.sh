@@ -91,7 +91,10 @@ echo 'Aevum engine routing, auto policy, GUI and safe factor audit passed'
 
 grep -q 'Forced Aevum request cannot be satisfied' "$ROOT/src/marin/gpu.cpp"
 grep -q 'validateCompatibilityBeforeApp' "$ROOT/src/main.cpp"
-grep -q -- '-llunsafe cannot use the legacy internal' "$ROOT/src/main.cpp"
+grep -q -- '-llunsafe cannot use the legacy internal' "$ROOT/include/core/LegacyLlGuard.hpp"
+grep -q 'core::legacyLlRejection(options.mode, options.marin' "$ROOT/src/main.cpp"
+grep -q 'core::legacyLlRejection(o.mode, o.marin' "$ROOT/src/core/App.cpp"
+grep -q -- '-allow-unvalidated-legacy-ll' "$ROOT/src/io/CliParser.cpp"
 grep -q -- '-pm1-ultralowmem is a Marin fast3-only' "$ROOT/src/main.cpp"
 
 grep -Fq 'writeIn(dst, makeWords(E, value));' "$ROOT/third_party/aevum/src/Gpu.cpp"

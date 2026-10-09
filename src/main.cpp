@@ -21,6 +21,7 @@
  */
 #include "core/App.hpp"
 #include "core/InheritedSignals.hpp"
+#include "core/LegacyLlGuard.hpp"
 #include "io/CliParser.hpp"
 #include "aevum/EngineAevum.hpp"
 #include "modes/GaussianTrialFactor.hpp"
@@ -136,12 +137,12 @@ int validateCompatibilityBeforeApp(int argc, char** argv) {
         return 2;
     }
 
-    if (options.mode == "ll" && !options.marin) {
-        std::cerr << "[Backend Compatibility] -llunsafe cannot use the legacy internal "
-                     "PrMers NTT backend selected by -marin because that path is not "
-                     "validated for Lucas-Lehmer. Use automatic mode, -engine-marin, "
-                     "or -aevum.\n";
+    if (const std::string why = core::legacyLlRejection(options.mode, options.marin, options.allow_unvalidated_legacy_ll); !why.empty()) {
+        std::cerr << why << "\n";
         return 2;
+    }
+    if (const std::string warn = core::legacyLlWarning(options.mode, options.marin, options.allow_unvalidated_legacy_ll); !warn.empty()) {
+        std::cerr << warn << "\n";
     }
 
     // A forced backend must be honest.  Resolve the native plan before App
