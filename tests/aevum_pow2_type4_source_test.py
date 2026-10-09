@@ -25,13 +25,19 @@ assert "PRMERS_VERSION" in version
 assert 'AEVUM_PFA_LEAD_BRIDGE' in engine
 assert 'fftPCarryB' in gpu
 
-# v100.08: gpuowl 1K radix-8 is compiled but cannot become the default.
+# NVIDIA 1K radix-8 production policy. Explicit 4/8 remains the override.
 assert 'AEVUM_RADIX1K' in fft_h
-assert 'aevumRadix8For1K()' in fft_h
+assert 'aevumSetDefaultRadix8For1K' in fft_h
+assert 'thread_local bool aevumDefaultRadix8For1K' in fft_h
 assert 'width == 1024 && !aevumRadix8For1K()' in fft_h
 assert 'height == 1024 && !aevumRadix8For1K()' in fft_h
 assert 'width == 256 ? 4 : 8' not in fft_h
 assert 'AEVUM_RADIX1K must be exactly 4 or 8' in engine
+assert 'aevumSetDefaultRadix8For1K(isNvidiaGpu(selected_device));' in engine
+assert 'NVIDIA device default' in engine
+assert 'explicit AEVUM_RADIX1K=4 override' in engine
+assert 'config.try_emplace("WMUL", "1")' in gpu
+assert 'fft.shape.width == 1024 && fft.shape.nW() == 4' in gpu
 assert 'radix1k=8 explicit-override' in backend
 assert 'radix1k=4 safe-default' in backend
 

@@ -1079,6 +1079,8 @@ public:
       throw std::runtime_error("AEVUM_RADIX1K must be exactly 4 or 8");
     }
 
+    aevumSetDefaultRadix8For1K(isNvidiaGpu(selected_device));
+
     context_ = std::make_unique<Context>(selected_device);
     cache_ = std::make_unique<TrigBufCache>(context_.get());
 
@@ -1443,13 +1445,18 @@ args_.flags["MULTI_Q"] = "1";
     if (verbose) {
       const bool uses_1k = fft.shape.width == 1024 || fft.shape.height == 1024;
       if (uses_1k) {
+        const bool radix8 = aevumRadix8For1K();
+        const bool explicit_radix = radix1k_env && *radix1k_env;
+        const char* source =
+            explicit_radix
+              ? (radix8 ? "explicit AEVUM_RADIX1K=8 override"
+                        : "explicit AEVUM_RADIX1K=4 override")
+              : (radix8 ? "NVIDIA device default"
+                        : "non-NVIDIA radix-4 default");
         log("Aevum 1K radix policy: radix-%u (%s).\n",
-            aevumRadix8For1K() ? 8u : 4u,
-            aevumRadix8For1K()
-              ? "explicit AEVUM_RADIX1K=8 override"
-              : "safe default; set AEVUM_RADIX1K=8 only for a measured tune");
+            radix8 ? 8u : 4u, source);
       } else {
-        log("Aevum 1K radix policy: not used by selected shape; default remains radix-4.\n");
+        log("Aevum 1K radix policy: not used by selected shape.\n");
       }
     }
 

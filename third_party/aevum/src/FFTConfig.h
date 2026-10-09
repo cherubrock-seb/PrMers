@@ -24,20 +24,30 @@ using KeyVal = std::pair<std::string, std::string>;
 
 enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53};
 
-// Safety policy for the gpuowl 6cf0dc 1K radix-8 path.
-// The path remains compiled in but is never enabled implicitly.
-// AEVUM_RADIX1K=8 is an explicit diagnostic/tune override.
-// Missing, empty, or AEVUM_RADIX1K=4 preserves historical radix-4.
+// Device-scoped policy for the gpuowl 6cf0dc 1K radix-8 path.
 //
-// The Apple staged pipelines in Gpu.cpp run their height/width FFT as generic radix passes (stage *= nH up to the group size, then a final
-// radix), which for a 1K side is 8 * 8 * 8 * 8 instead of the 8 * 8 * 16 the radix-8 kernels need.  They are only correct for radix 4, so
-// Apple never takes the radix-8 path (AEVUM_FORCE_RADIX4_1K lets a host test exercise the same rule on another platform).
+// Explicit AEVUM_RADIX1K=4/8 always wins. With no explicit override the
+// Engine API may select radix-8 for a validated device class. The implicit
+// default is thread-local so constructing an engine for another vendor resets
+// the policy before that engine resolves its FFT geometry.
+//
+// Apple staged pipelines in Gpu.cpp require radix-4, so Apple and the
+// AEVUM_FORCE_RADIX4_1K host-test mode always force the legacy path.
 #if defined(__APPLE__) || defined(AEVUM_FORCE_RADIX4_1K)
+inline void aevumSetDefaultRadix8For1K(bool) {}
 inline bool aevumRadix8For1K() { return false; }
 #else
+inline thread_local bool aevumDefaultRadix8For1K = false;
+
+inline void aevumSetDefaultRadix8For1K(bool enabled) {
+  aevumDefaultRadix8For1K = enabled;
+}
+
 inline bool aevumRadix8For1K() {
   const char* value = std::getenv("AEVUM_RADIX1K");
-  return value && value[0] == '8' && value[1] == '\0';
+  if (value && *value)
+    return value[0] == '8' && value[1] == '\0';
+  return aevumDefaultRadix8For1K;
 }
 #endif
 
