@@ -9,6 +9,7 @@
 #endif
 
 #include <cmath>
+#include <cstdint>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -38,7 +39,7 @@ public:
     std::size_t getWorkersCarry() const noexcept;
     cl_uint getTransformSize() const noexcept;
     int getLocalCarryPropagationDepth() const noexcept;
-    int getExponent() const noexcept;
+    uint64_t getExponent() const noexcept;
     bool isEvenExponent() const noexcept;
     cl_uint getWorkGroupCount() const noexcept;
     void computeOptimalSizes(std::size_t n, const std::vector<int>& digit_width_cpu, uint64_t p, bool debug = false, int localMaxSize = 0, int localMaxSize5 = 0);
@@ -74,7 +75,7 @@ private:
     std::size_t localSize5_;
     std::size_t workersCarry_;
     std::size_t localCarryPropagationDepth_{1};
-    int exponent_;
+    uint64_t exponent_;
     bool evenExponent_;
     bool debug_;
 

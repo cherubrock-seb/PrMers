@@ -486,7 +486,7 @@ std::size_t Context::getLocalSize5() const noexcept { return localSize5_; }
 std::size_t Context::getLocalSizeCarry() const noexcept { return localSizeCarry_; }
 std::size_t Context::getWorkersCarry() const noexcept { return workersCarry_; }
 int Context::getLocalCarryPropagationDepth() const noexcept { return localCarryPropagationDepth_; }
-int Context::getExponent() const noexcept { return exponent_; }
+uint64_t Context::getExponent() const noexcept { return exponent_; }
 
 cl_context Context::getContext() const noexcept { return context_; }
 cl_device_id Context::getDevice() const noexcept { return device_; }
