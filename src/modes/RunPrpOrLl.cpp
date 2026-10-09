@@ -848,7 +848,26 @@ int App::runPrpOrLl() {
          
         carry.handleFinalCarry(hostData,
                                precompute.getDigitWidth());
+        // The carried residue is the state of the finished test.  It is saved before the result
+        // is, so that if the result cannot be saved or the entry retired, the kept state resumes
+        // at the end and only the bookkeeping is redone.  A run that resumed at the end has run no
+        // iteration and already holds this state; saving it again would also record one iteration
+        // too many.
+        auto saveFinalState = [&]() {
+            if (!anyIterationRun) return;
+            backupManager.saveState(buffers->input, totalIters - 1);
+            backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+        };
         if (options.wagstaff) {
+            clEnqueueWriteBuffer(
+                context.getQueue(),
+                buffers->input,
+                CL_TRUE, 0,
+                hostData.size() * sizeof(uint64_t),
+                hostData.data(),
+                0, nullptr, nullptr
+            );
+            saveFinalState();
             spinner.displayProgress(
                 lastIter+1,
                 totalIters,
@@ -995,9 +1014,7 @@ int App::runPrpOrLl() {
                         res64_x, 
                         guiServer_ ? guiServer_.get() : nullptr
                     );
-        backupManager.saveState(buffers->input, lastIter);
-        backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
-        
+        saveFinalState();
                 
     }
     

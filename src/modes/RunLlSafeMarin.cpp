@@ -365,6 +365,14 @@ int App::runLlSafeMarinDoubling()
         }
     }
 
+    // Save the finished (and verified) state before the result is saved, so that if the result
+    // cannot be saved, the kept checkpoint resumes at the end instead of redoing everything since
+    // the last periodic backup.  A run that resumed at the end already holds this state.
+    if (!(r == 0 && ri == totalIters)) {
+        const double final_elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+        save_ckpt((uint32_t)totalIters, (uint32_t)itersave, final_elapsed);
+    }
+
     engine::digit dV(eng, RV);
     bool is_prime = (dV.equal_to(0) || dV.equal_to_Mp());
 
@@ -744,6 +752,15 @@ int App::runLlSafeMarin()
             checkpass = 0;
             errcheck_retry.passed();
         }
+    }
+
+    // Save the finished (and verified) state before the result is saved, so that if the result
+    // cannot be saved, the kept checkpoint resumes at the end instead of redoing everything since
+    // the last periodic backup.  RPREV, which holds the state before the last iteration, is part
+    // of it, and is changed below.  A run that resumed at the end already holds this state.
+    if (!(r == 0 && iter_done == totalIters)) {
+        const double final_elapsed = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count() + restored_time;
+        save_ckpt(totalIters, itersave, jsave, final_elapsed);
     }
 
     mpz_class Mp = (mpz_class(1) << p) - 1;

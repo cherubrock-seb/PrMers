@@ -70,9 +70,9 @@ assert "delete_checkpoints(p, options.wagstaff, false, false);" not in marin
 
 # The kept checkpoint must be the finished one: a final checkpoint is saved after
 # the loop and before the proof releases the engine, and not when the run resumed
-# from a checkpoint already at the end.
+# from a checkpoint already at the end. It is saved for every mode, LL included.
 full = (ROOT / "src/modes/RunPrpOrLlMarin.cpp").read_text()
-final_save = re.search(r"if \(options\.mode == \"prp\" && !\(r == 0 && ri == totalIters\)\) \{[^}]*save_ckpt\(static_cast<uint32_t>\(totalIters\)", full)
+final_save = re.search(r"if \(!\(r == 0 && ri == totalIters\)\) \{[^}]*save_ckpt\(static_cast<uint32_t>\(totalIters\)", full)
 assert final_save, "no final checkpoint after the last iteration"
 assert final_save.start() > full.index("for (uint64_t iter = resumeIter")
 assert final_save.start() < full.index("saveProofResidue(d, totalIters)")
