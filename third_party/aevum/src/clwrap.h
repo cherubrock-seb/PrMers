@@ -17,6 +17,9 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <new>
+
+#include "GpuLost.h"
 
 using cl_queue = cl_command_queue;
 
@@ -56,22 +59,44 @@ std::string getUUID(int seqId);
 
 std::string errMes(int err);
 
-// An OpenCL call that returned an error status (thrown by check()).
+// The user-facing text for an error status: a GPU that was reset or lost, an allocation that did not fit, or (any
+// other code) errMes() followed by the call and its location.  phase says whether the failed call allocates or
+// creates an object (gpulost::Phase::Create) or runs on the device (Run); see GpuLost.h for the rule.
+std::string describeError(int err, std::string_view mes, const char *file, int line, const char *func,
+                          gpulost::Phase phase);
+
+// An OpenCL call that returned an error status (thrown by check()).  what() is the clear message for a GPU that
+// was reset or lost (it starts with gpulost::kLostPrefix) or for an allocation failure.
 class gpu_error : public std::runtime_error {
 public:
   const int err;
+  const gpulost::Kind kind;
 
-  gpu_error(int err, std::string_view mes) : std::runtime_error(errMes(err) + " " + std::string(mes)), err(err) {}
+  gpu_error(int err, std::string_view mes, gpulost::Phase phase = gpulost::Phase::Run)
+    : std::runtime_error(describeError(err, mes, nullptr, 0, nullptr, phase)), err(err), kind(gpulost::classify(err, phase)) {}
 
-  gpu_error(int err, const char *file, int line, const char *func, std::string_view mes)
-    : gpu_error(err, std::string(mes) + " at " + file + ":" + std::to_string(line) + " " + func) {
-  }
+  gpu_error(int err, const char *file, int line, const char *func, std::string_view mes,
+            gpulost::Phase phase = gpulost::Phase::Run)
+    : std::runtime_error(describeError(err, mes, file, line, func, phase)), err(err), kind(gpulost::classify(err, phase)) {}
 };
 
-void check(int err, const char *file, int line, const char *func, string_view mes);
+// clCreateBuffer could not allocate: out of GPU memory.  A std::bad_alloc, so existing handlers keep working, with
+// a what() that says so (it used to read "std::bad_alloc").
+class gpu_alloc_error : public std::bad_alloc {
+  std::string text;
+public:
+  gpu_alloc_error(int err, size_t size);
+  const char *what() const noexcept override { return text.c_str(); }
+};
+
+void check(int err, const char *file, int line, const char *func, string_view mes,
+           gpulost::Phase phase = gpulost::Phase::Run);
 
 #define CHECK1(err) check(err, __FILE__, __LINE__, __func__, #err)
 #define CHECK2(err, mes) check(err, __FILE__, __LINE__, __func__, mes)
+// For an allocation or creation call (clCreateContext, clCreateBuffer, ...): CL_OUT_OF_RESOURCES then means the
+// device is out of memory rather than reset.
+#define CHECK_CREATE(err, mes) check(err, __FILE__, __LINE__, __func__, mes, gpulost::Phase::Create)
 
 vector<cl_device_id> getAllDeviceIDs();
 string getShortInfo(cl_device_id device);
@@ -115,7 +140,7 @@ void saveBinary(cl_program program, string_view fileName);
 
 template<typename T>
 void setArg(cl_kernel k, int pos, const T &value, const string& name) {
-  CHECK2(clSetKernelArg(k, pos, sizeof(value), &value), (name + '[' + to_string(pos) + "] size " + to_string(sizeof(value))).c_str());
+  CHECK2(clSetKernelArg(k, pos, sizeof(value), &value), ("clSetKernelArg " + name + '[' + to_string(pos) + "] size " + to_string(sizeof(value))).c_str());
 }
 
 /*

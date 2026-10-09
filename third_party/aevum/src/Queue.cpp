@@ -150,7 +150,7 @@ void Queue::waitForMarkerEvent() {
     // A negative status is the error code of a command that terminated abnormally.  It is terminal:
     // waiting for it to reach CL_COMPLETE would sleep for ever.  Report it like any other CL error,
     // so the worker fails instead of going quiet with the GPU idle.
-    if (status < 0) { CHECK1(status); }
+    if (status < 0) { CHECK2(status, "an enqueued command (event status)"); }
     // There are 4, 7, or 10 kernels per squaring.  Don't overestimate sleep time.  Divide by much more than the number of kernels.
     std::this_thread::sleep_for(std::chrono::microseconds(1 + queueCount * squareTime / squareKernels / 2));
   }

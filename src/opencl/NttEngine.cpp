@@ -238,8 +238,9 @@ static void executeKernelAndDisplay(cl_command_queue queue,
 
     if (err != CL_SUCCESS) {
         // Continuing would silently skip an NTT stage and corrupt the residue.
-        throw std::runtime_error("Kernel " + kernelName + ": clEnqueueNDRangeKernel failed: " +
-                                 util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (" + kernelName + ")",
+                           "Kernel " + kernelName + ": clEnqueueNDRangeKernel failed: " +
+                           util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
     }
     if (debug) {
         clFinish(queue);
@@ -413,7 +414,7 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for squaring");
+    if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for squaring");
     
     clEnqueueCopyBuffer(queue_, A, tmpA,
                         0, 0, limbBytes,
@@ -434,7 +435,7 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
 void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
     const cl_int err = clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("clEnqueueCopyBuffer failed with error " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueCopyBuffer", "clEnqueueCopyBuffer failed with error " + std::to_string(err));
     }
 }
 
@@ -450,7 +451,7 @@ void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBy
         &err
     );
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create temporary buffer: " + std::to_string(err));
     }
     copy(buffers_.input, temp, limbBytes);
    
@@ -482,7 +483,7 @@ void NttEngine::mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
         &err
     );
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create temporary buffer: " + std::to_string(err));
     }
     copy(A, temp, limbBytes);
    
@@ -503,7 +504,7 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for multiplication");
+    if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for multiplication");
 
     cl_mem tmpB = clCreateBuffer(ctx_.getContext(),
                                  CL_MEM_READ_WRITE,
@@ -512,7 +513,7 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
                                  &err);
     if (err != CL_SUCCESS) {
         clReleaseMemObject(tmpA);
-        throw std::runtime_error("Failed to create GPU buffer for multiplication");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for multiplication");
     }
 
     clEnqueueCopyBuffer(queue_, A, tmpA,
@@ -561,13 +562,13 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     
     cl_mem base_copy_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create base copy buffer");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create base copy buffer");
     }
     
     cl_mem accumulator_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     if (err != CL_SUCCESS) {
         clReleaseMemObject(base_copy_buf);
-        throw std::runtime_error("Failed to create accumulator buffer");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create accumulator buffer");
     }
     
     // Copy base to temporary buffer to preserve it

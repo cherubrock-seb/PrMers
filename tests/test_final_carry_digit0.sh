@@ -16,6 +16,7 @@ trap 'rm -rf "$BUILD"' EXIT
   -I"$ROOT/include" \
   "$ROOT/tests/final_carry_digit0_test.cpp" \
   "$ROOT/src/math/Carry.cpp" \
+  "$ROOT/src/util/OpenCLError.cpp" \
   -o "$BUILD/final-carry-digit0-test" \
   -lOpenCL -lgmpxx -lgmp
 

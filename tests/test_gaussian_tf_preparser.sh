@@ -35,6 +35,7 @@ fi
   "$ROOT/src/modes/RunGaussianTrialFactor.cpp" \
   "$ROOT/src/core/AlgoUtils.cpp" \
   "$ROOT/src/opencl/Context.cpp" \
+  "$ROOT/src/util/OpenCLError.cpp" \
   "$ROOT/src/io/WorktodoParser.cpp" \
   "$ROOT/src/util/StringUtils.cpp" \
   "$ROOT/src/math/Cofactor.cpp" \

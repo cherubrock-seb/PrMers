@@ -25,6 +25,7 @@
 #include <vector>
 #include <cmath>
 #include <cstring>
+#include "util/OpenCLError.hpp"
 #if defined(__APPLE__)
 #  include <OpenCL/cl_ext.h>
 #else
@@ -181,7 +182,7 @@ void Context::createContext() {
     cl_int err = CL_SUCCESS;
     context_ = clCreateContext(nullptr, 1, &device_, nullptr, nullptr, &err);
     if (err != CL_SUCCESS)
-        throw std::runtime_error("Failed to create OpenCL context");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateContext", "Failed to create OpenCL context");
 }
 
 void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active) {
@@ -271,7 +272,7 @@ void Context::createQueue(std::size_t enqueueMax, bool cl_queue_throttle_active)
             std::printf(">>> OpenCL queue created **WITHOUT** throttle hint\n");
     }
     if (err != CL_SUCCESS)
-        throw std::runtime_error("Failed to create command queue");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateCommandQueue", "Failed to create command queue");
 
     if (enqueueMax > 0) {
         queueSize_ = enqueueMax;

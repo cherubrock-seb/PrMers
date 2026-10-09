@@ -1,5 +1,6 @@
 #include "aevum/EngineAevum.hpp"
 #include "marin/engine.h"
+#include "util/GpuLost.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -552,6 +553,9 @@ private:
 
     [[noreturn]] void fail(const char* operation) const {
         const char* detail = api_.last_error ? api_.last_error() : nullptr;
+        // The plugin already worded a reset or lost GPU for the user: pass that message on as it is, as the
+        // exception type the other engines throw, instead of burying it under "Aevum <op> failed".
+        if (detail && util::gpulost::is_lost_message(detail)) throw util::gpulost::GpuLostError(detail);
         throw std::runtime_error(std::string("Aevum ") + operation + " failed" +
                                  (detail && *detail ? std::string(": ") + detail : std::string()));
     }

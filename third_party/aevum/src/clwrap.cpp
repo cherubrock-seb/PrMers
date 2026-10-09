@@ -41,15 +41,36 @@ array<string, 71> ERR_MES = {
 
 string errMes(int err) {
   string nb = " ("s + to_string(err) + ")";
-  string mes = (err <= 0 && err >= -70) ? ERR_MES[-err] : 
-    (err == -1001) ? "ICD_NOT_FOUND" : ""s;
+  const char *vendor = gpulost::vendor_name(err);
+  string mes = (err <= 0 && err >= -70) ? ERR_MES[-err] :
+    (err == -1001) ? "ICD_NOT_FOUND" : vendor ? vendor : ""s;
   return mes + nb;
 }
 
-void check(int err, const char *file, int line, const char *func, string_view mes) {  
+// The call's name for the message: CHECK1 stringifies the whole call, "clFinish(q)", of which only the name helps.
+static string callName(string_view mes) {
+  if (mes.substr(0, 2) == "cl") { mes = mes.substr(0, mes.find('(')); }
+  return string(mes);
+}
+
+string describeError(int err, string_view mes, const char *file, int line, const char *func, gpulost::Phase phase) {
+  switch (gpulost::classify(err, phase)) {
+    case gpulost::Kind::DeviceLost: return gpulost::lost_message(errMes(err), callName(mes));
+    case gpulost::Kind::OutOfMemory: return gpulost::oom_message(errMes(err), callName(mes));
+    case gpulost::Kind::Other: break;
+  }
+  string text = errMes(err) + " " + string(mes);
+  if (file) { text += " at "s + file + ":" + to_string(line) + " " + func; }
+  return text;
+}
+
+gpu_alloc_error::gpu_alloc_error(int err, size_t size)
+  : text(gpulost::oom_message(errMes(err), "clCreateBuffer of "s + to_string((size + (1u << 20) - 1) >> 20) + " MB")) {}
+
+void check(int err, const char *file, int line, const char *func, string_view mes, gpulost::Phase phase) {
   if (err != CL_SUCCESS) {
     // log("CL error %s (%d) %s\n", errMes(err).c_str(), err, mes.c_str());
-    throw gpu_error(err, file, line, func, mes);
+    throw gpu_error(err, file, line, func, mes, phase);
   }
 }
 
@@ -261,7 +282,7 @@ cl_device_id getDevice(u32 argsDeviceId) {
 cl_context createContext(cl_device_id id) {  
   int err;
   cl_context context = clCreateContext(NULL, 1, &id, NULL, NULL, &err);
-  CHECK2(err, "clCreateContext");
+  CHECK_CREATE(err, "clCreateContext");
   return context;
 }
 
@@ -286,7 +307,7 @@ Program loadSource(cl_context context, const string &source) {
   size_t size = source.size();
   int err = 0;
   cl_program program = clCreateProgramWithSource(context, 1, &ptr, &size, &err);
-  CHECK2(err, "clCreateProgramWithSource");
+  CHECK_CREATE(err, "clCreateProgramWithSource");
   return Program{program};
 }
 
@@ -386,16 +407,16 @@ cl_kernel loadKernel(cl_program program, const char *name) {
   int err;
   cl_kernel k = clCreateKernel(program, name, &err);
   if (err == CL_INVALID_KERNEL_NAME) { return nullptr; }
-  CHECK2(err, name);
+  CHECK_CREATE(err, ("clCreateKernel "s + name));
   return k;
 }
 
 cl_mem makeBuf_(cl_context context, unsigned kind, size_t size, const void *ptr) {
   int err;
   cl_mem buf = clCreateBuffer(context, kind, size, (void *) ptr, &err);
-  if (err == CL_OUT_OF_RESOURCES || err == CL_MEM_OBJECT_ALLOCATION_FAILURE) { throw bad_alloc{}; }
-  
-  CHECK2(err, "clCreateBuffer");
+  if (err == CL_OUT_OF_RESOURCES || err == CL_MEM_OBJECT_ALLOCATION_FAILURE) { throw gpu_alloc_error(err, size); }
+
+  CHECK_CREATE(err, "clCreateBuffer");
   return buf;
 }
 
@@ -411,7 +432,7 @@ cl_queue makeQueue(cl_device_id d, cl_context c, bool isProfile) {
 #else
   cl_queue q = clCreateCommandQueueWithProperties(c, d, props, &err);
 #endif
-  CHECK2(err, "clCreateCommandQueue");
+  CHECK_CREATE(err, "clCreateCommandQueue");
   return q;
 }
 
@@ -425,7 +446,7 @@ EventHolder run(cl_queue queue, cl_kernel kernel,
   cl_event event{};
   CHECK2(clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &workSize, &groupSize,
                                 waits.size(), waits.empty() ? 0 : waits.data(), genEvent ? &event : nullptr),
-         name.c_str());
+         ("clEnqueueNDRangeKernel "s + name).c_str());
   return genEvent ? EventHolder{event} : EventHolder{};
 }
 

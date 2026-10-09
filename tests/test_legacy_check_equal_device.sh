@@ -17,6 +17,7 @@ mkdir -p "$BUILD"
   -I"$ROOT/include" \
   "$ROOT/tests/legacy_check_equal_device_test.cpp" \
   "$ROOT/src/opencl/Kernels.cpp" \
+  "$ROOT/src/util/OpenCLError.cpp" \
   -o "$BUILD/legacy-check-equal-device-test" \
   -lOpenCL
 

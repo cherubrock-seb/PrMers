@@ -21,6 +21,8 @@
  */
 #include "util/OpenCLError.hpp"
 
+#include <stdexcept>
+
 namespace util {
 
 const char* getCLErrorString(cl_int err) {
@@ -80,8 +82,19 @@ const char* getCLErrorString(cl_int err) {
         case CL_INVALID_MIP_LEVEL:                  return "CL_INVALID_MIP_LEVEL";
         case CL_INVALID_GLOBAL_WORK_SIZE:           return "CL_INVALID_GLOBAL_WORK_SIZE";
         case CL_INVALID_PROPERTY:                   return "CL_INVALID_PROPERTY";
-        default:                                    return "UNKNOWN ERROR";
+        default: {
+            const char* vendor = gpulost::vendor_name(err);
+            return vendor ? vendor : "UNKNOWN ERROR";
+        }
     }
+}
+
+[[noreturn]] void throwClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
+    const gpulost::Kind kind = gpulost::classify(err, phase);
+    const std::string code = std::string(getCLErrorString(err)) + " (" + std::to_string(err) + ")";
+    if (kind == gpulost::Kind::DeviceLost) throw gpulost::GpuLostError(gpulost::lost_message(code, what));
+    if (kind == gpulost::Kind::OutOfMemory) throw std::runtime_error(gpulost::oom_message(code, what));
+    throw std::runtime_error(generic);
 }
 
 } // namespace util

@@ -43,6 +43,7 @@
 #else
 #include <CL/cl.h>
 #endif
+#include "util/OpenCLError.hpp"
 
 namespace core {
 
@@ -322,7 +323,7 @@ Proof ProofSet::computeProof(const GpuContext& gpu, uint32_t npower) const {
         bufferPool[i] = clCreateBuffer(cl_ctx, CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
         if (err != CL_SUCCESS) {
             for (uint32_t j = 0; j < i; ++j) clReleaseMemObject(bufferPool[j]);
-            throw std::runtime_error("Failed to create GPU buffer for proof computation");
+            util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for proof computation");
         }
     }
 
@@ -422,7 +423,7 @@ void GpuContext::write(cl_mem buffer, const std::vector<uint32_t>& data) const {
   
   cl_int err = clEnqueueWriteBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to upload data to GPU buffer");
+    util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueWriteBuffer", "Failed to upload data to GPU buffer");
   }
 }
 
@@ -431,7 +432,7 @@ std::vector<uint32_t> GpuContext::read(cl_mem buffer) const {
   std::vector<uint64_t> gpu_data(numWords);
   cl_int err = clEnqueueReadBuffer(ctx.getQueue(), buffer, CL_TRUE, 0, limbBytes, gpu_data.data(), 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to download data from GPU buffer");
+    util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueReadBuffer", "Failed to download data from GPU buffer");
   }
   
   return io::JsonBuilder::compactBits(gpu_data, digitWidth, exponent);

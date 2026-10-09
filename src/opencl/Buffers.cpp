@@ -23,6 +23,7 @@
 #include "opencl/Context.hpp"
 #include <iostream>
 #include <stdexcept>
+#include "util/OpenCLError.hpp"
 
 namespace opencl {
 
@@ -128,7 +129,7 @@ cl_mem Buffers::createBuffer(const prmers::ocl::Context&  ctx, cl_mem_flags flag
     cl_mem buf = clCreateBuffer(ctx.getContext(), flags, size, const_cast<void*>(ptr), &err);
     if (err != CL_SUCCESS) {
         std::cerr << "Failed to create buffer " << name << ": " << err << std::endl;
-        throw std::runtime_error("createBuffer " + name);
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer " + name, "createBuffer " + name);
     }
     return buf;
 }

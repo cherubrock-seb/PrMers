@@ -406,6 +406,15 @@ test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
 $(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# A reset or lost GPU is reported as such, an allocation failure as out of memory (host only, no device).
+GPU_LOST_ERROR_TEST := build-tests/aevum-gpu-lost-error-test
+.PHONY: test-gpu-lost-error
+test-host: test-gpu-lost-error
+test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
+	$(GPU_LOST_ERROR_TEST)
+$(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 # PR132 cumulative semantic integration
 STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 .PHONY: test-pr132-small-items test-stats-slot
