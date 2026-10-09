@@ -48,6 +48,8 @@ static constexpr size_t kMaxAppendBytes = 8 * 1024;
 static constexpr size_t kMaxAppendLines = 64;
 static constexpr size_t kMaxAppendLineBytes = 1024;
 
+static constexpr const char* kTokenEnv = "PRMERS_GUI_TOKEN";
+
 static bool validToken(const std::string& t) {
     if (t.size() < 16 || t.size() > 128) return false;
     for (char c : t) if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') return false;
@@ -120,12 +122,25 @@ WebGuiServer::WebGuiServer(const WebGuiConfig& cfg, SubmitFn onSubmit, StopFn on
 : cfg_(cfg), onSubmit_(std::move(onSubmit)), onStop_(std::move(onStop)) {
     // Reuse the token of the process we were restarted from (restart_self after "Append & Run"),
     // so an open browser tab keeps working; otherwise make a new one.
-    const char* inherited = std::getenv("PRMERS_GUI_TOKEN");
-    token_ = (inherited && validToken(inherited)) ? std::string(inherited) : makeToken();
+    const char* inherited = std::getenv(kTokenEnv);
+    const std::string inheritedToken = inherited ? std::string(inherited) : std::string();
+    token_ = validToken(inheritedToken) ? inheritedToken : makeToken();
+    // Take it out of the environment right away: every child process (Prime95, shell commands) would
+    // otherwise inherit the credential. exportTokenForRestart() puts it back just before a self restart.
+    clearTokenEnv();
+}
+void WebGuiServer::clearTokenEnv() {
 #ifdef _WIN32
-    _putenv_s("PRMERS_GUI_TOKEN", token_.c_str());
+    _putenv_s(kTokenEnv, "");
 #else
-    setenv("PRMERS_GUI_TOKEN", token_.c_str(), 1);
+    unsetenv(kTokenEnv);
+#endif
+}
+void WebGuiServer::exportTokenForRestart() const {
+#ifdef _WIN32
+    _putenv_s(kTokenEnv, token_.c_str());
+#else
+    setenv(kTokenEnv, token_.c_str(), 1);
 #endif
 }
 WebGuiServer::~WebGuiServer() { stop(); }

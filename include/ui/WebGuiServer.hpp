@@ -35,6 +35,12 @@ public:
     bool start();
     void stop();
     std::string url() const;
+    // The access token lives in PRMERS_GUI_TOKEN only while a restart of this program is being set up: a
+    // relaunch needs it so an open browser tab keeps working, but Prime95 and shell commands must not
+    // inherit it. restart_self() calls exportTokenForRestart() right before replacing the process and
+    // clearTokenEnv() if that fails.
+    void exportTokenForRestart() const;
+    static void clearTokenEnv();
     static std::shared_ptr<WebGuiServer> instance();
     static void setInstance(std::shared_ptr<WebGuiServer> s);
     void setStatus(const std::string& s);
@@ -75,7 +81,7 @@ private:
     int bound_port_ = 3131;
     std::string url_;
     // Per-run access token. Every /api/* request must carry it in X-PrMers-Token, and the page itself is
-    // only served for /?token=<token>. Inherited through PRMERS_GUI_TOKEN so a restart keeps it.
+    // only served for /?token=<token>. Handed to a restarted process through PRMERS_GUI_TOKEN (see exportTokenForRestart).
     std::string token_;
     std::atomic<int> active_connections_{0};
     void run();
