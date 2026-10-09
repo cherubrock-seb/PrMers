@@ -27,6 +27,8 @@ Please give feedback to the authors if improvement is realized. It is distribute
 #include <map>
 #include <algorithm>
 
+#include "util/GpuLost.hpp"
+
 // #define ocl_debug		1
 
 namespace ocl
@@ -91,7 +93,11 @@ private:
 			ocl_check(CL_INVALID_GLOBAL_WORK_SIZE);
 			ocl_check(CL_INVALID_PROPERTY);
 	#undef ocl_check
-			default: return "CL_UNKNOWN_ERROR";
+			default:
+			{
+				const char * const vendor = util::gpulost::vendor_name(res);
+				return (vendor != nullptr) ? vendor : "CL_UNKNOWN_ERROR";
+			}
 		}
 	}
 
@@ -102,15 +108,29 @@ protected:
 	}
 
 protected:
-	static void fatal(const cl_int res, const char * const ext = nullptr)
+	// phase says which kind of call returned res (see util/GpuLost.hpp): an allocation or creation call
+	// (Create) or anything that runs on the device (Run, the default).  A device that was reset or lost throws
+	// util::gpulost::GpuLostError, an allocation failure says it is out of memory, any other code keeps the
+	// plain "opencl error" text.
+	static void fatal(const cl_int res, const char * const ext = nullptr, const util::gpulost::Phase phase = util::gpulost::Phase::Run)
 	{
 		if (!error(res))
 		{
+			const util::gpulost::Kind kind = util::gpulost::classify(res, phase);
+			if (kind != util::gpulost::Kind::Other)
+			{
+				const std::string code = std::string(error_string(res)) + " (" + std::to_string(res) + ")";
+				const std::string what = (ext != nullptr) ? ext : "";
+				if (kind == util::gpulost::Kind::DeviceLost) throw util::gpulost::GpuLostError(util::gpulost::lost_message(code, what));
+				throw std::runtime_error(util::gpulost::oom_message(code, what));
+			}
 			std::ostringstream ss; ss << "opencl error: " << error_string(res);
 			if (ext != nullptr) ss << " (" << ext << ")";
 			throw std::runtime_error(ss.str());
 		}
 	}
+
+	static constexpr util::gpulost::Phase create_phase = util::gpulost::Phase::Create;
 };
 
 class platform : ocl_object
@@ -305,7 +325,7 @@ public:
 		const cl_context_properties context_properties[3] = { CL_CONTEXT_PLATFORM, (cl_context_properties)_platform, 0 };
 		cl_int err_cc;
 		_context = clCreateContext(context_properties, 1, &_device, nullptr, nullptr, &err_cc);
-		fatal(err_cc);
+		fatal(err_cc, "clCreateContext", create_phase);
 		// Create and validate each queue independently.  The old code reused
 		// the same error variable for both clCreateCommandQueue calls and only
 		// checked it after the second call.  On some CUDA OpenCL stacks this can
@@ -313,12 +333,12 @@ public:
 		// first buffer transfer then fails with CL_INVALID_COMMAND_QUEUE.
 		cl_int err_ccqF = CL_SUCCESS;
 		_queueF = clCreateCommandQueue(_context, _device, 0, &err_ccqF);
-		fatal(err_ccqF, "clCreateCommandQueue fast");
+		fatal(err_ccqF, "clCreateCommandQueue fast", create_phase);
 		if (_queueF == nullptr) fatal(CL_INVALID_COMMAND_QUEUE, "fast queue is null");
 
 		cl_int err_ccqP = CL_SUCCESS;
 		_queueP = clCreateCommandQueue(_context, _device, CL_QUEUE_PROFILING_ENABLE, &err_ccqP);
-		fatal(err_ccqP, "clCreateCommandQueue profiling");
+		fatal(err_ccqP, "clCreateCommandQueue profiling", create_phase);
 		if (_queueP == nullptr) fatal(CL_INVALID_COMMAND_QUEUE, "profiling queue is null");
 
 		_queue = _queueF;	// default queue is fast
@@ -329,8 +349,8 @@ public:
 public:
 	void finish_all_queues()
 	{
-		if (_queueF != nullptr) fatal(clFinish(_queueF));
-		if (_queueP != nullptr && _queueP != _queueF) fatal(clFinish(_queueP));
+		if (_queueF != nullptr) fatal(clFinish(_queueF), "clFinish");
+		if (_queueP != nullptr && _queueP != _queueF) fatal(clFinish(_queueP), "clFinish");
 	}
 
 	cl_ulong get_global_mem_size() const { return _global_mem_size; }
@@ -469,7 +489,7 @@ public:
 		const char * src[1]; src[0] = program_src.c_str();
 		cl_int err_cpws;
 		_program = clCreateProgramWithSource(_context, 1, src, nullptr, &err_cpws);
-		fatal(err_cpws);
+		fatal(err_cpws, "clCreateProgramWithSource", create_phase);
 
 		char pgm_options[1024];
 		strcpy(pgm_options, "");
@@ -499,7 +519,7 @@ public:
 			}
 		}
 
-		fatal(err);
+		fatal(err, "clBuildProgram", create_phase);
 
 #if defined(ocl_debug)
 		size_t bin_size; clGetProgramInfo(_program, CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &bin_size, nullptr);
@@ -526,7 +546,7 @@ private:
 	void _sync()
 	{
 		_sync_count = 0;
-		fatal(clFinish(_queue));
+		fatal(clFinish(_queue), "clFinish");
 	}
 
 public:
@@ -534,7 +554,7 @@ public:
 	{
 		cl_int err;
 		cl_mem mem = clCreateBuffer(_context, flags, size, nullptr, &err);
-		fatal(err);
+		fatal(err, "clCreateBuffer", create_phase);
 		if (clear && size != 0)
 		{
 			// Avoid allocating a gigantic host-side zero vector for MM31-sized
@@ -552,12 +572,14 @@ public:
 				for (size_t off = 0; off < size; off += CHUNK)
 				{
 					const size_t len = std::min(CHUNK, size - off);
-					fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, off, len, ptr.data(), 0, nullptr, nullptr));
+					fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, off, len, ptr.data(), 0, nullptr, nullptr), "clEnqueueWriteBuffer", create_phase);
 				}
 			}
 			else
 			{
-				fatal(clFinish(_queue));
+				// The zero-fill is the first use of the new buffer: a driver that allocates lazily reports a
+				// buffer that does not fit here, so it counts as part of the allocation.
+				fatal(clFinish(_queue), "clFinish", create_phase);
 			}
 		}
 		return mem;
@@ -580,21 +602,21 @@ protected:
 		char * const cptr = static_cast<char *>(ptr);
 		for (size_t i = 0; i < size; ++i) cptr[i] = char(std::rand());
 		_sync();
-		fatal(clEnqueueReadBuffer(_queue, mem, CL_TRUE, offset, size, ptr, 0, nullptr, nullptr));
+		fatal(clEnqueueReadBuffer(_queue, mem, CL_TRUE, offset, size, ptr, 0, nullptr, nullptr), "clEnqueueReadBuffer");
 	}
 
 protected:
 	void _write_buffer(cl_mem & mem, const void * const ptr, const size_t size, const size_t offset = 0)
 	{
 		_sync();
-		fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset, size, ptr, 0, nullptr, nullptr));
+		fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset, size, ptr, 0, nullptr, nullptr), "clEnqueueWriteBuffer");
 	}
 
 protected:
 	void _copy_buffer(cl_mem & dst, cl_mem & src, const size_t size, const size_t dst_offset = 0, const size_t src_offset = 0)
 	{
 		_sync();
-		fatal(clEnqueueCopyBuffer(_queue, src, dst, src_offset, dst_offset, size, 0, nullptr, nullptr));
+		fatal(clEnqueueCopyBuffer(_queue, src, dst, src_offset, dst_offset, size, 0, nullptr, nullptr), "clEnqueueCopyBuffer");
 	}
 
 protected:
@@ -611,12 +633,12 @@ protected:
 			for (size_t off = 0; off < size; off += CHUNK)
 			{
 				const size_t len = std::min(CHUNK, size - off);
-				fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset + off, len, ptr.data(), 0, nullptr, nullptr));
+				fatal(clEnqueueWriteBuffer(_queue, mem, CL_TRUE, offset + off, len, ptr.data(), 0, nullptr, nullptr), "clEnqueueWriteBuffer");
 			}
 		}
 		else
 		{
-			fatal(clFinish(_queue));
+			fatal(clFinish(_queue), "clFinish");
 		}
 	}
 
@@ -625,7 +647,7 @@ protected:
 	{
 		cl_int err;
 		cl_kernel kernel = clCreateKernel(_program, kernel_name, &err);
-		fatal(err, kernel_name);
+		fatal(err, kernel_name, create_phase);
 		_profile_map[kernel] = profile(kernel_name);
 		return kernel;
 	}
@@ -668,7 +690,7 @@ protected:
 		{
 			_sync();
 			cl_event evt;
-			fatal(clEnqueueNDRangeKernel(_queue, kernel, 1, nullptr, &global_worksize, (local_worksize == 0) ? nullptr : &local_worksize, 0, nullptr, &evt));
+			fatal(clEnqueueNDRangeKernel(_queue, kernel, 1, nullptr, &global_worksize, (local_worksize == 0) ? nullptr : &local_worksize, 0, nullptr, &evt), "clEnqueueNDRangeKernel");
 			cl_ulong dt = 0;
 			if (clWaitForEvents(1, &evt) == CL_SUCCESS)
 			{

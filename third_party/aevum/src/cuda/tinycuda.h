@@ -226,6 +226,10 @@ typedef union {
   struct { u32 type; char unused[17]; char bus; char device; char function; } pcie;
 } cl_device_topology_amd;
 
+// The CUDA driver result behind the last failed cl* call on this thread, for example
+// "CUDA_ERROR_ILLEGAL_ADDRESS (700)"; nullptr after a call that succeeded.  Defined in clwrap_cuda.cpp.
+const char* aevumCudaLastError();
+
 // Error codes
 #define CL_DEVICE_NOT_FOUND             -1
 #define CL_DEVICE_NOT_AVAILABLE         -2
@@ -243,6 +247,7 @@ typedef union {
 #define CL_INVALID_MEM_OBJECT           -38
 #define CL_INVALID_BINARY               -42
 #define CL_INVALID_BUILD_OPTIONS        -43
+#define CL_INVALID_OPERATION            -59
 #define CL_INVALID_PROGRAM              -44
 #define CL_INVALID_KERNEL_NAME          -46
 #define CL_INVALID_KERNEL               -48

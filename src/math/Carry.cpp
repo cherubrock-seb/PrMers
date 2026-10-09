@@ -25,6 +25,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <sstream>
+#include "util/OpenCLError.hpp"
 
 namespace math {
 
@@ -38,22 +39,22 @@ Carry::Carry(const prmers::ocl::Context& ctx, cl_command_queue queue, cl_program
     cl_int err;
     carryKernel_ = clCreateKernel(program, "kernel_carry", &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create kernel_carry");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateKernel (kernel_carry)", "Failed to create kernel_carry");
     }
 
     carryKernel2_ = clCreateKernel(program, "kernel_carry_2", &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create kernel_carry_2");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateKernel (kernel_carry_2)", "Failed to create kernel_carry_2");
     }
 
     carryKernel3_ = clCreateKernel(program, "kernel_carry_mul_base", &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create kernel_carry_mul_base");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateKernel (kernel_carry_mul_base)", "Failed to create kernel_carry_mul_base");
     }
 
     carryKernelMul3_ = clCreateKernel(program, "kernel_carry_mul_3", &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create kernel_carry_mul_3");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateKernel (kernel_carry_mul_3)", "Failed to create kernel_carry_mul_3");
     }
 }
 
@@ -70,13 +71,11 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
-    
     err = clEnqueueNDRangeKernel(queue_, carryKernel_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
         oss << "Failed to enqueue kernel_carry, error code: " << err;
-        throw std::runtime_error(oss.str());
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry)", oss.str());
     }
 
 
@@ -90,7 +89,7 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     }
     err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to enqueue kernel_carry_2");
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry_2)", "Failed to enqueue kernel_carry_2");
     }
 
     bool debug = false;
@@ -135,13 +134,11 @@ void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
-    
     err = clEnqueueNDRangeKernel(queue_, carryKernelMul3_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
         oss << "Failed to enqueue kernel_carry, error code: " << err;
-        throw std::runtime_error(oss.str());
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry)", oss.str());
     }
 
     err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
@@ -153,7 +150,7 @@ void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     }
     err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to enqueue kernel_carry_2");
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry_2)", "Failed to enqueue kernel_carry_2");
     }
 
     bool debug = false;
@@ -208,7 +205,7 @@ void Carry::carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t buf
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
         oss << "Failed to enqueue kernel_carry, error code: " << err;
-        throw std::runtime_error(oss.str());
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry)", oss.str());
     }
     err  = clSetKernelArg(carryKernel2_, 0, sizeof(cl_mem), &buffer);
     err |= clSetKernelArg(carryKernel2_, 1, sizeof(cl_mem), &blockCarryBuffer);
@@ -217,7 +214,7 @@ void Carry::carryGPU_mul_base(cl_mem buffer, cl_mem blockCarryBuffer, size_t buf
     }
     err = clEnqueueNDRangeKernel(queue_, carryKernel2_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt2*/);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to enqueue kernel_carry_2");
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (kernel_carry_2)", "Failed to enqueue kernel_carry_2");
     }
 
 }

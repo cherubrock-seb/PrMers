@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
+#include "util/OpenCLError.hpp"
 
 namespace opencl {
 
@@ -39,7 +40,7 @@ void Kernels::createKernel(const std::string& name) {
     cl_int err;
     cl_kernel kernel = clCreateKernel(program_, name.c_str(), &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create kernel: " + name);
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateKernel " + name, "Failed to create kernel: " + name);
     }
     kernels_[name] = kernel;
 }
@@ -83,7 +84,8 @@ void Kernels::runCheckEqual(cl_mem a, cl_mem b,
     cl_kernel k = getKernel("check_equal");
     auto check = [](cl_int err, const char* what) {
         if (err != CL_SUCCESS) {
-            throw std::runtime_error(std::string("check_equal: ") + what + " failed (" + std::to_string(err) + ")");
+            util::throwClError(err, util::gpulost::Phase::Run, std::string("check_equal ") + what,
+                               std::string("check_equal: ") + what + " failed (" + std::to_string(err) + ")");
         }
     };
     check(clSetKernelArg(k, 0, sizeof(cl_mem), &a), "clSetKernelArg(0)");

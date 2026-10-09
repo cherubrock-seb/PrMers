@@ -348,6 +348,16 @@ test-exit-codes:
 	tests/build-exit-codes/exit-codes-test
 	rm -rf tests/build-exit-codes
 
+# What a reset or lost GPU looks like to the user: classification, the Marin and legacy error paths with injected
+# statuses, and agreement with Aevum's copy of the table.  Host only, no OpenCL device is used.
+.PHONY: test-gpu-lost-message
+test-gpu-lost-message:
+	mkdir -p tests/build-gpu-lost-message
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -DGPU -Iinclude -Iinclude/marin tests/gpu_lost_message_test.cpp src/util/OpenCLError.cpp -o tests/build-gpu-lost-message/gpu-lost-message-test -lOpenCL
+	tests/build-gpu-lost-message/gpu-lost-message-test
+	python3 tests/gpu_lost_sources_test.py
+	rm -rf tests/build-gpu-lost-message
+
 test-interrupt-exit-code: all
 	python3 tests/interrupt_exit_code_test.py ./prmers $${PRMERS_TEST_DEVICE:-0} INT
 

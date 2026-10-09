@@ -21,6 +21,8 @@
  */
 #include "util/OpenCLError.hpp"
 
+#include <stdexcept>
+
 namespace util {
 
 const char* getCLErrorString(cl_int err) {
@@ -80,8 +82,32 @@ const char* getCLErrorString(cl_int err) {
         case CL_INVALID_MIP_LEVEL:                  return "CL_INVALID_MIP_LEVEL";
         case CL_INVALID_GLOBAL_WORK_SIZE:           return "CL_INVALID_GLOBAL_WORK_SIZE";
         case CL_INVALID_PROPERTY:                   return "CL_INVALID_PROPERTY";
-        default:                                    return "UNKNOWN ERROR";
+        default: {
+            const char* vendor = gpulost::vendor_name(err);
+            return vendor ? vendor : "UNKNOWN ERROR";
+        }
     }
+}
+
+std::string describeClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
+    const std::string code = std::string(getCLErrorString(err)) + " (" + std::to_string(err) + ")";
+    switch (gpulost::classify(err, phase)) {
+        case gpulost::Kind::DeviceLost: return gpulost::lost_message(code, what);
+        case gpulost::Kind::OutOfMemory: return gpulost::oom_message(code, what);
+        case gpulost::Kind::Other: break;
+    }
+    return generic;
+}
+
+std::string describeClAllocFailure(cl_int err, const std::string& name) {
+    return describeClError(err, gpulost::Phase::Create, "clCreateBuffer " + name,
+                           "Failed to allocate " + name + ": " + std::to_string(err));
+}
+
+[[noreturn]] void throwClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
+    const std::string message = describeClError(err, phase, what, generic);
+    if (gpulost::classify(err, phase) == gpulost::Kind::DeviceLost) throw gpulost::GpuLostError(message);
+    throw std::runtime_error(message);
 }
 
 } // namespace util

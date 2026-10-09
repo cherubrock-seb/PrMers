@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
 
@@ -61,7 +62,7 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
     cl_int err;
     program_ = clCreateProgramWithSource(context.getContext(), 1, &src, &length, &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create OpenCL program from source.");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateProgramWithSource", "Failed to create OpenCL program from source.");
     }
 
     // fetch all of our tuning parameters from Context
@@ -190,7 +191,7 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
     err = clBuildProgram(program_, 1, &device, buildOptions2.c_str(), nullptr, nullptr);
     if (err != CL_SUCCESS) {
         checkBuildError(program_, device);
-        throw std::runtime_error("Failed to build OpenCL program.");
+        util::throwClError(err, util::gpulost::Phase::Create, "clBuildProgram", "Failed to build OpenCL program.");
     }
     if(debug)
         std::cout << "OpenCL program built successfully from: " << filePath << std::endl;

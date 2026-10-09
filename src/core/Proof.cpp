@@ -42,6 +42,7 @@
 #else
 #include <CL/cl.h>
 #endif
+#include "util/OpenCLError.hpp"
 
 namespace core {
 
@@ -261,13 +262,13 @@ bool Proof::verify(const GpuContext& gpu, uint32_t npower) const {
   cl_int err;
   cl_mem bufA = clCreateBuffer(gpu.ctx.getContext(), CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to create GPU buffer A for verification");
+    util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer A for verification");
     return false;
   }
   
   cl_mem bufB = clCreateBuffer(gpu.ctx.getContext(), CL_MEM_READ_WRITE, gpu.limbBytes, nullptr, &err);
   if (err != CL_SUCCESS) {
-    throw std::runtime_error("Failed to create GPU buffer B for verification");
+    util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer B for verification");
     clReleaseMemObject(bufA);
     return false;
   }

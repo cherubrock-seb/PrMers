@@ -35,6 +35,8 @@
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
 #include "util/GmpUtils.hpp"
+#include "util/OpenCLError.hpp"
+#include "util/GpuLost.hpp"
 #include "io/WorktodoParser.hpp"
 #include "io/MersFileName.hpp"
 #include "io/ExponentInput.hpp"
@@ -284,7 +286,7 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
             x.size() * sizeof(uint64_t),
             x.data(), &err
         );
-        if (err != CL_SUCCESS) throw std::runtime_error("clCreateBuffer input failed");
+        if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "clCreateBuffer input failed");
     }
 
     math::Carry carry(
@@ -1085,7 +1087,15 @@ static bool file_non_empty(const std::string& p) {
 
 
 int App::run() {
-    const int rc = runInner();
+    int rc = 0;
+    try {
+        rc = runInner();
+    } catch (const util::gpulost::GpuLostError& e) {
+        // The GPU was reset or lost.  main() prints the message and exits as for any other error; the GUI log
+        // gets the same text, and the exception goes on unchanged.
+        if (guiServer_) guiServer_->appendLog(std::string("Error: ") + e.what());
+        throw;
+    }
     return core::exitCodeForRun(rc, core::algo::stop_requested_any(), options.gui);
 }
 

@@ -238,8 +238,9 @@ static void executeKernelAndDisplay(cl_command_queue queue,
 
     if (err != CL_SUCCESS) {
         // Continuing would silently skip an NTT stage and corrupt the residue.
-        throw std::runtime_error("Kernel " + kernelName + ": clEnqueueNDRangeKernel failed: " +
-                                 util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueNDRangeKernel (" + kernelName + ")",
+                           "Kernel " + kernelName + ": clEnqueueNDRangeKernel failed: " +
+                           util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
     }
     if (debug) {
         clFinish(queue);
@@ -413,28 +414,30 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for squaring");
+    if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for squaring");
     
-    clEnqueueCopyBuffer(queue_, A, tmpA,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    
-    forward_simple(tmpA, 0);
-    pointwiseMul(tmpA, tmpA);
-    inverse_simple(tmpA, 0);
-    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
-    
-    clEnqueueCopyBuffer(queue_, tmpA, A,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    
+    // A failed copy or stage must stop the run and must not leak the temporary: the proof code retries.
+    try {
+        copy(A, tmpA, limbBytes);
+
+        forward_simple(tmpA, 0);
+        pointwiseMul(tmpA, tmpA);
+        inverse_simple(tmpA, 0);
+        carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+
+        copy(tmpA, A, limbBytes);
+    } catch (...) {
+        clReleaseMemObject(tmpA);
+        throw;
+    }
+
     clReleaseMemObject(tmpA);
 }
 
 void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
     const cl_int err = clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("clEnqueueCopyBuffer failed with error " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueCopyBuffer", "clEnqueueCopyBuffer failed with error " + std::to_string(err));
     }
 }
 
@@ -450,7 +453,7 @@ void NttEngine::mulInPlace(cl_mem A, cl_mem B, math::Carry& carry, size_t limbBy
         &err
     );
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create temporary buffer: " + std::to_string(err));
     }
     copy(buffers_.input, temp, limbBytes);
    
@@ -482,7 +485,7 @@ void NttEngine::mulInPlace3(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
         &err
     );
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create temporary buffer: " + std::to_string(err));
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create temporary buffer: " + std::to_string(err));
     }
     copy(A, temp, limbBytes);
    
@@ -503,7 +506,7 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
                                  limbBytes,
                                  nullptr,
                                  &err);
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to create GPU buffer for multiplication");
+    if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for multiplication");
 
     cl_mem tmpB = clCreateBuffer(ctx_.getContext(),
                                  CL_MEM_READ_WRITE,
@@ -512,25 +515,25 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
                                  &err);
     if (err != CL_SUCCESS) {
         clReleaseMemObject(tmpA);
-        throw std::runtime_error("Failed to create GPU buffer for multiplication");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for multiplication");
     }
 
-    clEnqueueCopyBuffer(queue_, A, tmpA,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    clEnqueueCopyBuffer(queue_, B, tmpB,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
+    try {
+        copy(A, tmpA, limbBytes);
+        copy(B, tmpB, limbBytes);
 
-    forward_simple(tmpA, 0);
-    forward_simple(tmpB, 0);
-    pointwiseMul(tmpA, tmpB);
-    inverse_simple(tmpA, 0);
-    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+        forward_simple(tmpA, 0);
+        forward_simple(tmpB, 0);
+        pointwiseMul(tmpA, tmpB);
+        inverse_simple(tmpA, 0);
+        carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
 
-    clEnqueueCopyBuffer(queue_, tmpA, A,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
+        copy(tmpA, A, limbBytes);
+    } catch (...) {
+        clReleaseMemObject(tmpA);
+        clReleaseMemObject(tmpB);
+        throw;
+    }
 
     clReleaseMemObject(tmpA);
     clReleaseMemObject(tmpB);
@@ -538,12 +541,20 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
 
 // Modular exponentiation for Mersenne numbers: result = base^exp mod (2^E - 1)
 void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes) {
+    // Writes the host-side value 1 into a buffer; a failed write is an error, not a stale buffer.
+    auto writeOne = [&](cl_mem buf, const std::vector<uint64_t>& one, size_t bytes) {
+        const cl_int err = clEnqueueWriteBuffer(queue_, buf, CL_TRUE, 0, bytes, one.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueWriteBuffer",
+                               "clEnqueueWriteBuffer failed with error " + std::to_string(err));
+        }
+    };
     if (exp == 0) {
         // Set result to 1 - initialize result buffer with 1
         size_t numWords = limbBytes / sizeof(uint64_t);
         std::vector<uint64_t> one_data(numWords, 0);
         one_data[0] = 1;
-        clEnqueueWriteBuffer(queue_, result, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+        writeOne(result, one_data, limbBytes);
         return;
     }
     
@@ -561,13 +572,13 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     
     cl_mem base_copy_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     if (err != CL_SUCCESS) {
-        throw std::runtime_error("Failed to create base copy buffer");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create base copy buffer");
     }
     
     cl_mem accumulator_buf = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
     if (err != CL_SUCCESS) {
         clReleaseMemObject(base_copy_buf);
-        throw std::runtime_error("Failed to create accumulator buffer");
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create accumulator buffer");
     }
     
     // Copy base to temporary buffer to preserve it
@@ -577,10 +588,9 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     size_t numWords = limbBytes / sizeof(uint64_t);
     std::vector<uint64_t> one_data(numWords, 0);
     one_data[0] = 1;
-    clEnqueueWriteBuffer(queue_, accumulator_buf, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
-    
     // Binary exponentiation: result = base^exp mod (2^E - 1)
     try {
+        writeOne(accumulator_buf, one_data, limbBytes);
         while (exp > 0) {
             if (exp & 1) {
                 // accumulator = accumulator * base_copy mod (2^E - 1)
