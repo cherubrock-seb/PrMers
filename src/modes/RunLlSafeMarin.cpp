@@ -821,14 +821,9 @@ int App::runLlSafeMarin()
                     << " and saved to worktodo_save.txt\n";
                 guiServer_->appendLog(oss.str());
             }
-            std::ifstream f(options.worktodo_path);
-            std::string l;
-            bool more = false;
-            while (std::getline(f, l)) {
-                if (!l.empty() && l[0] != '#') { more = true; break; }
-            }
-            f.close();
-            if (more) {
+            // The same test as the other endings: a line the parser would skip
+            // (blank, ';' comment, malformed) is not a pending entry.
+            if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
                 if (guiServer_) guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
                 restart_self(argc_, argv_);
