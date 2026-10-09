@@ -33,6 +33,7 @@ fi
   "${GMP_CFLAGS[@]}" \
   "$ROOT/tests/gaussian_tf_preparser_test.cpp" \
   "$ROOT/src/modes/RunGaussianTrialFactor.cpp" \
+  "$ROOT/src/core/AlgoUtils.cpp" \
   "$ROOT/src/opencl/Context.cpp" \
   "$ROOT/src/io/WorktodoParser.cpp" \
   "$ROOT/src/util/StringUtils.cpp" \
