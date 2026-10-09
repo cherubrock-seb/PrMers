@@ -89,12 +89,25 @@ const char* getCLErrorString(cl_int err) {
     }
 }
 
-[[noreturn]] void throwClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
-    const gpulost::Kind kind = gpulost::classify(err, phase);
+std::string describeClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
     const std::string code = std::string(getCLErrorString(err)) + " (" + std::to_string(err) + ")";
-    if (kind == gpulost::Kind::DeviceLost) throw gpulost::GpuLostError(gpulost::lost_message(code, what));
-    if (kind == gpulost::Kind::OutOfMemory) throw std::runtime_error(gpulost::oom_message(code, what));
-    throw std::runtime_error(generic);
+    switch (gpulost::classify(err, phase)) {
+        case gpulost::Kind::DeviceLost: return gpulost::lost_message(code, what);
+        case gpulost::Kind::OutOfMemory: return gpulost::oom_message(code, what);
+        case gpulost::Kind::Other: break;
+    }
+    return generic;
+}
+
+std::string describeClAllocFailure(cl_int err, const std::string& name) {
+    return describeClError(err, gpulost::Phase::Create, "clCreateBuffer " + name,
+                           "Failed to allocate " + name + ": " + std::to_string(err));
+}
+
+[[noreturn]] void throwClError(cl_int err, gpulost::Phase phase, const std::string& what, const std::string& generic) {
+    const std::string message = describeClError(err, phase, what, generic);
+    if (gpulost::classify(err, phase) == gpulost::Kind::DeviceLost) throw gpulost::GpuLostError(message);
+    throw std::runtime_error(message);
 }
 
 } // namespace util

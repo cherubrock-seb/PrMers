@@ -161,6 +161,14 @@ int main()
 			if (want == Outcome::Generic) EXPECT(m == "caller text", "legacy " << r.code << ": generic must keep the caller's text: " << m);
 		}
 	}
+	// Setup-time allocation failures that report and exit (RunPrpOrLl.cpp) use the same wording.
+	{
+		const std::string m5 = util::describeClAllocFailure(-5, "bufd");
+		EXPECT(m5.rfind("Out of GPU memory", 0) == 0 && m5.find("bufd") != std::string::npos && m5.find("-5") != std::string::npos, "alloc failure -5 is out of memory: " << m5);
+		EXPECT(util::describeClAllocFailure(-4, "r2").rfind("Out of GPU memory", 0) == 0, "alloc failure -4 is out of memory");
+		EXPECT(util::describeClAllocFailure(-36, "save").rfind("GPU reset or lost", 0) == 0, "alloc failure -36 is a lost GPU");
+		EXPECT(util::describeClAllocFailure(-30, "outOkBuf") == "Failed to allocate outOkBuf: -30", "other codes keep the existing text");
+	}
 	EXPECT(std::string(util::getCLErrorString(-9999)) == "CL_NVIDIA_DRIVER_ERROR", "getCLErrorString names -9999");
 	EXPECT(std::string(util::getCLErrorString(-12345)) == "UNKNOWN ERROR", "getCLErrorString keeps UNKNOWN ERROR");
 	EXPECT(std::string(util::getCLErrorString(CL_OUT_OF_RESOURCES)) == "CL_OUT_OF_RESOURCES", "getCLErrorString still names -5");

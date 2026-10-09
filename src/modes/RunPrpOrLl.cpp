@@ -1,4 +1,5 @@
 #include "core/App.hpp"
+#include "util/OpenCLError.hpp"
 #include "core/AlgoUtils.hpp"
 #define NOMINMAX
 #include "core/App.hpp"
@@ -241,10 +242,10 @@ int App::runPrpOrLl() {
             hotsd.data(),  &err
         );
         if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate bufd: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "bufd") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate bufd: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "bufd") << std::endl;
                     guiServer_->appendLog(oss.str());
             }
             exit(1);
@@ -259,10 +260,10 @@ int App::runPrpOrLl() {
             hotsd.data(),  &err
         );
         if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate last_correct_bufd: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "last_correct_bufd") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate last_correct_bufd: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "last_correct_bufd") << std::endl;
                     guiServer_->appendLog(oss.str());
             }
             exit(1);
@@ -277,10 +278,10 @@ int App::runPrpOrLl() {
             hots3.data(),  &err
             );
             if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate r2: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "r2") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate r2: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "r2") << std::endl;
                     guiServer_->appendLog(oss.str());
             }
             exit(1);
@@ -294,10 +295,10 @@ int App::runPrpOrLl() {
             hots3.data(),  &err
             );
         if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate save: " << err << std::endl; 
+            std::cerr << util::describeClAllocFailure(err, "save") << std::endl; 
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate save: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "save") << std::endl;
                     guiServer_->appendLog(oss.str());
             }
             exit(1);
@@ -312,10 +313,10 @@ int App::runPrpOrLl() {
             hots3.data(),  &err
         );
         if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate last_correct_state: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "last_correct_state") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate last_correct_state: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "last_correct_state") << std::endl;
                     guiServer_->appendLog(oss.str());
             }
             exit(1);
@@ -381,10 +382,10 @@ int App::runPrpOrLl() {
    
     cl_mem outOkBuf  = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate outOkBuf: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "outOkBuf") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate outOkBuf: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "outOkBuf") << std::endl;
                     guiServer_->appendLog(oss.str());
                     return 0;
             }
@@ -392,10 +393,10 @@ int App::runPrpOrLl() {
     }
     cl_mem outIdxBuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
-            std::cerr << "Failed to allocate outIdxBuf: " << err << std::endl;
+            std::cerr << util::describeClAllocFailure(err, "outIdxBuf") << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
-                    oss << "Failed to allocate outIdxBuf: " << err << std::endl;
+                    oss << util::describeClAllocFailure(err, "outIdxBuf") << std::endl;
                     guiServer_->appendLog(oss.str());
                     return 0;
             }
