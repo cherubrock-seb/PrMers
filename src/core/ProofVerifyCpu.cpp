@@ -14,8 +14,11 @@
 #include <gmpxx.h>
 
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <iomanip>
 #include <ostream>
+#include <sstream>
 
 namespace core {
 
@@ -47,8 +50,8 @@ bool wellFormed(const std::vector<uint32_t>& w, uint32_t E) {
 
 } // namespace
 
-bool verifyProofCpu(const ProofMarin& proof, uint32_t expectedE, uint32_t expectedPower,
-                    std::string& why, std::ostream* log) {
+bool checkProofShape(const ProofMarin& proof, uint32_t expectedE, uint32_t expectedPower,
+                     std::string& why) {
     const uint32_t E = proof.E;
     const uint32_t power = static_cast<uint32_t>(proof.middles.size());
     if (E != expectedE) {
@@ -73,6 +76,14 @@ bool verifyProofCpu(const ProofMarin& proof, uint32_t expectedE, uint32_t expect
             return false;
         }
     }
+    return true;
+}
+
+bool verifyProofCpu(const ProofMarin& proof, uint32_t expectedE, uint32_t expectedPower,
+                    std::string& why, std::ostream* log) {
+    if (!checkProofShape(proof, expectedE, expectedPower, why)) return false;
+    const uint32_t E = proof.E;
+    const uint32_t power = static_cast<uint32_t>(proof.middles.size());
 
     using clock = std::chrono::steady_clock;
     const auto start = clock::now();
@@ -125,6 +136,114 @@ bool verifyProofCpu(const ProofMarin& proof, uint32_t expectedE, uint32_t expect
              << std::setprecision(2) << el << " s" << std::defaultfloat << std::endl;
     if (!ok) why = "the proof does not verify";
     return ok;
+}
+
+namespace {
+
+// Squaring-equivalents of one modular exponentiation by a 64-bit hash: 64
+// squarings and about 32 multiplications.
+constexpr double kExponentiationSquarings = 96.0;
+// Seconds of one squaring mod 2^E - 1 at E = 1M with GMP, and its growth with E.
+constexpr double kSquaringSecondsAt1M = 2.4e-3;
+constexpr double kSquaringSizeExponent = 1.17;
+
+} // namespace
+
+double cpuVerifyMaxSeconds() {
+    const char* v = std::getenv(kCpuVerifyMaxSecondsEnv);
+    if (v && *v) {
+        char* end = nullptr;
+        const double x = std::strtod(v, &end);
+        if (end != v && *end == '\0' && std::isfinite(x) && x >= 0.0) return x;
+    }
+    return kDefaultCpuVerifyMaxSeconds;
+}
+
+double estimateCpuVerifySeconds(uint32_t E, uint32_t power) {
+    const double span = std::ceil(static_cast<double>(E) / std::ldexp(1.0, static_cast<int>(power > 62 ? 62 : power)));
+    const double ops = span + 2.0 * kExponentiationSquarings * power + 4.0 * power;
+    const double perSquaring = kSquaringSecondsAt1M * std::pow(static_cast<double>(E) / 1.0e6, kSquaringSizeExponent);
+    return ops * perSquaring;
+}
+
+std::string formatDuration(double seconds) {
+    std::ostringstream o;
+    o << std::fixed;
+    if (seconds < 1.0) {
+        o << "under 1 s";
+    } else if (seconds < 90.0) {
+        o << std::setprecision(0) << seconds << " s";
+    } else if (seconds < 5400.0) {
+        o << std::setprecision(0) << seconds / 60.0 << " min";
+    } else if (seconds < 172800.0) {
+        o << std::setprecision(1) << seconds / 3600.0 << " h";
+    } else {
+        o << std::setprecision(1) << seconds / 86400.0 << " days";
+    }
+    return o.str();
+}
+
+FallbackVerifyResult verifyFallbackProof(const std::filesystem::path& file, uint32_t E, uint32_t power,
+                                         const GpuProofVerifier& gpuVerify, double cpuMaxSeconds,
+                                         std::ostream* log) {
+    using Status = FallbackVerifyResult::Status;
+    FallbackVerifyResult r;
+    r.estimatedCpuSeconds = estimateCpuVerifySeconds(E, power);
+
+    std::string gpuUnavailable = "no GPU verifier";
+    if (gpuVerify) {
+        // A proof of another exponent or power, or with a malformed residue, fails whatever
+        // the method (and must not reach the GPU check, which trusts the header).
+        try {
+            std::string why;
+            if (!checkProofShape(ProofMarin::load(file), E, power, why)) {
+                r.status = Status::Failed;
+                r.message = why;
+                return r;
+            }
+        } catch (const std::exception& e) {
+            r.status = Status::Failed;
+            r.message = e.what();
+            return r;
+        }
+        try {
+            if (log) *log << "Verifying the CPU proof of M" << E << " (power " << power << ") on the GPU" << std::endl;
+            const bool ok = gpuVerify(file);
+            r.method = "GPU";
+            r.status = ok ? Status::Verified : Status::Failed;
+            if (!ok) r.message = "the proof does not verify (GPU verification)";
+            return r;
+        } catch (const std::exception& e) {
+            gpuUnavailable = e.what();
+            if (log)
+                *log << "GPU verification of the CPU proof is unavailable (" << gpuUnavailable << ")" << std::endl;
+        }
+    }
+
+    if (r.estimatedCpuSeconds <= cpuMaxSeconds) {
+        r.method = "CPU";
+        try {
+            const ProofMarin proof = ProofMarin::load(file);
+            std::string why;
+            const bool ok = verifyProofCpu(proof, E, power, why, log);
+            r.status = ok ? Status::Verified : Status::Failed;
+            if (!ok) r.message = why;
+        } catch (const std::exception& e) {
+            r.status = Status::Failed;
+            r.message = e.what();
+        }
+        return r;
+    }
+
+    r.status = Status::Skipped;
+    r.message = "CPU fallback proof for M" + std::to_string(E) + " was not verified (GPU unavailable: " +
+                gpuUnavailable + "; CPU verification would take about " + formatDuration(r.estimatedCpuSeconds) + ", ";
+    if (cpuMaxSeconds <= 0.0)
+        r.message += std::string("and it is disabled by ") + kCpuVerifyMaxSecondsEnv + "=0";
+    else
+        r.message += "over the " + formatDuration(cpuMaxSeconds) + " limit set by " + kCpuVerifyMaxSecondsEnv;
+    r.message += "); the proof is kept";
+    return r;
 }
 
 } // namespace core

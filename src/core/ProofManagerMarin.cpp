@@ -81,7 +81,7 @@ void ProofManagerMarin::checkpointMarin(engine::digit host, uint32_t iter)
 }
 
 
-std::filesystem::path ProofManagerMarin::proof(bool verify) const {
+std::filesystem::path ProofManagerMarin::proof(bool verify, const GpuProofVerifier& gpuVerify) const {
     try {
         // Generate proof from collected checkpoints
         ProofMarin proof = proofSet_.computeProof();
@@ -111,22 +111,22 @@ std::filesystem::path ProofManagerMarin::proof(bool verify) const {
             throw std::runtime_error(std::string("Proof file validation failed: ") + e.what());
         }
         // Verify the proof as written, as the GPU path does (unless -noverify): a proof that
-        // fails is discarded and no proof is reported. The PRP result is unaffected.
+        // fails is discarded and no proof is reported. The PRP result is unaffected. The GPU
+        // verifies it when it can, the CPU when that is cheap, else it is kept unverified.
         if (verify) {
-            std::string why;
-            bool ok = false;
-            try {
-                ok = verifyProofCpu(ProofMarin::load(tmpPath), exponent_, proofSet_.power, why, &std::cout);
-            } catch (const std::exception& e) {
-                why = e.what();
-            }
-            if (!ok) {
+            const FallbackVerifyResult v = verifyFallbackProof(
+                tmpPath, exponent_, proofSet_.power, gpuVerify, cpuVerifyMaxSeconds(), &std::cout);
+            if (v.status == FallbackVerifyResult::Status::Failed) {
                 std::filesystem::remove(tmpPath, ec);
                 throw ProofVerificationError(
                     "CPU proof for M" + std::to_string(exponent_) + " (power " +
-                    std::to_string(proofSet_.power) + ") failed verification (" + why +
-                    "); the proof file was discarded");
+                    std::to_string(proofSet_.power) + ") failed " + v.method + " verification (" +
+                    v.message + "); the proof file was discarded");
             }
+            if (v.status == FallbackVerifyResult::Status::Skipped)
+                std::cerr << "Warning: " << v.message << std::endl;
+            else
+                std::cout << "CPU proof verified on the " << v.method << std::endl;
         }
         std::filesystem::remove(proofFilePath, ec);
         std::filesystem::rename(tmpPath, proofFilePath);

@@ -5,6 +5,7 @@
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
+#include "core/Proof.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "core/ProofLocation.hpp"
 #include "math/Carry.hpp"
@@ -948,7 +949,43 @@ int App::runPrpOrLlMarin()
                     << "falling back to CPU GMP: "
                     << gpuProofError << std::endl;
 
-                proofFilePath = proofManagerMarin.proof(options.verify);
+                // The CPU proof is verified with the GPU, as the GPU path verifies its
+                // proof, when the GPU can still do it: the fallback is usually taken when
+                // making the proof failed (memory, read-back), not because the device is
+                // gone. If it cannot, verifyFallbackProof verifies on the CPU when that is
+                // cheap, else keeps the proof unverified with a warning.
+                const core::GpuProofVerifier gpuVerify =
+                    [this](const std::filesystem::path& proofFile) -> bool {
+                        // Test hook: the GPU is unusable for the verification.
+                        const char* unusable = std::getenv("PRMERS_TEST_GPU_VERIFY_UNUSABLE");
+                        if (unusable && *unusable && std::string(unusable) != "0")
+                            throw std::runtime_error(
+                                "PRMERS_TEST_GPU_VERIFY_UNUSABLE is set");
+
+                        ensureProofGpuBackend();
+                        if (!buffers || !program || !kernels || !nttEngine)
+                            throw std::runtime_error(
+                                "PrMers GPU proof backend initialization incomplete");
+
+                        math::Carry carry(
+                            context,
+                            context.getQueue(),
+                            program->getProgram(),
+                            precompute.getN(),
+                            precompute.getDigitWidth(),
+                            buffers->digitWidthMaskBuf
+                        );
+                        core::GpuContext gpu(
+                            options.exponent,
+                            context,
+                            *nttEngine,
+                            carry,
+                            precompute.getDigitWidth(),
+                            static_cast<size_t>(precompute.getN()) * sizeof(uint64_t));
+                        return core::Proof::load(proofFile).verify(
+                            gpu, proofManagerMarin.power());
+                    };
+                proofFilePath = proofManagerMarin.proof(options.verify, gpuVerify);
                 // The GPU retries above lowered options.proofPower; the CPU
                 // proof always uses the full power the checkpoints were saved
                 // for, and that is what the result JSON must report.
