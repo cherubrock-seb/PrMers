@@ -25,4 +25,7 @@ assert "saveState(buffers->input, lastIter-1)" not in block, block
 assert "now - lastDisplay >= seconds(180)" not in body
 assert "now - lastBackup >= seconds(180)" in body
 assert "lastBackup = now;" in block, block
+# The save at the start records the position the loaded state resumes at (resumeIter), not one past it.
+assert "saveState(buffers->input, resumeIter - 1, &E)" in body
+assert "saveState(buffers->input, resumeIter,&E)" not in body
 print("legacy P-1 periodic save test passed")

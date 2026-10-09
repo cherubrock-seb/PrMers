@@ -1084,7 +1084,10 @@ int App::runPM1() {
 
     uint64_t startIter = resumeIter;
     uint64_t lastIter = resumeIter;
-    backupManager.saveState(buffers->input, resumeIter,&E);
+    // The loop resumes at the value .loop holds and saveState() records its argument plus one: the
+    // state as loaded resumes at resumeIter. Recording resumeIter + 1 made a run killed before its
+    // next save redo bit resumeIter of E on the resumed state.
+    backupManager.saveState(buffers->input, resumeIter - 1, &E);
     spinner.displayProgress(
                     bits-resumeIter,
                     bits,
