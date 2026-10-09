@@ -314,6 +314,14 @@ test-mersenne-reduce:
 test-proof-cpu-fallback:
 	python3 tests/proof_cpu_fallback_source_test.py
 
+.PHONY: test-proof-verify-cpu
+test-proof-verify-cpu:
+	bash tests/test_proof_verify_cpu.sh
+
+.PHONY: test-proof-cpu-fallback-verify
+test-proof-cpu-fallback-verify: all
+	bash tests/run_proof_cpu_fallback_verify.sh $${AEVUM_TEST_DEVICE:-0}
+
 test-proof-checkpoint-readback:
 	bash tests/test_proof_checkpoint_readback.sh
 
