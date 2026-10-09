@@ -64,6 +64,6 @@ check_case() {
 
 fail=0
 check_case llunsafe "Test=$P,70,1" "llunsafe_m_$P.ckpt" -engine-marin || fail=1
-check_case wagstaff "PRP=1,2,$((2 * Q)),-1" "wagstaff_m_$((2 * Q)).ckpt" -wagstaff -engine-marin || fail=1
-check_case legacy-wagstaff "PRP=1,2,$((2 * Q)),-1" "$((2 * Q))prp_wagstaff.loop" -wagstaff -marin || fail=1
+check_case wagstaff "PRP=1,2,$Q,-1" "wagstaff_m_$((2 * Q)).ckpt" -wagstaff -engine-marin || fail=1
+check_case legacy-wagstaff "PRP=1,2,$Q,-1" "$((2 * Q))prp_wagstaff.loop" -wagstaff -marin || fail=1
 exit "$fail"

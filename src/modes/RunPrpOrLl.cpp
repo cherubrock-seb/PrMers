@@ -913,28 +913,32 @@ int App::runPrpOrLl() {
             if (resultSaved && (!hasWorktodoEntry_ || retired)) {
                 backupManager.clearState();
             } else {
-                std::cerr << (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
-                          << "; keeping the saved state"
-                          << (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string())
-                          << "\n";
+                const std::string msg =
+                    (resultSaved ? "Failed to update " + options.worktodo_path : std::string("Result could not be saved"))
+                    + "; keeping the saved state"
+                    + (hasWorktodoEntry_ ? " and the entry in " + options.worktodo_path : std::string());
+                std::cerr << msg << "\n";
+                if (guiServer_)
+                    guiServer_->appendLog(msg + "\n");
             }
             if (hasWorktodoEntry_ && resultSaved) {
                 if (retired) {
                     std::cout << "Entry removed from " << options.worktodo_path
                               << " and saved to worktodo_save.txt\n";
-                    bool more = false;
-                    {
-                        std::ifstream f(options.worktodo_path);
-                        std::string l;
-                        while (std::getline(f, l)) {
-                            if (!l.empty() && l[0] != '#') { more = true; break; }
-                        }
-                    }
-                    if (more) {
+                    if (guiServer_)
+                        guiServer_->appendLog("Entry removed from " + options.worktodo_path
+                                              + " and saved to worktodo_save.txt\n");
+                    // The same test as the other endings: a line the parser would skip
+                    // (blank, malformed) is not a pending entry.
+                    if (io::WorktodoParser::hasPendingEntry(options.worktodo_path)) {
                         std::cout << "Restarting for next entry in worktodo.txt\n";
+                        if (guiServer_)
+                            guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
                         restart_self(argc_, argv_);
                     } else {
                         std::cout << "No more entries in worktodo.txt, exiting.\n";
+                        if (guiServer_)
+                            guiServer_->appendLog("No more entries in worktodo.txt, exiting.\n");
                         if (!options.gui) std::exit(0);
                     }
                 } else {
@@ -1189,12 +1193,8 @@ int App::runPrpOrLl() {
 
             if (more) {
                 std::cout << "Restarting for next entry in worktodo.txt\n";
-                if (guiServer_) {
-                                std::ostringstream oss;
-                                oss << "Entry removed from " << options.worktodo_path
-                      << " and saved to worktodo_save.txt\n";
-                      guiServer_->appendLog(oss.str());
-                }
+                if (guiServer_)
+                    guiServer_->appendLog("Restarting for next entry in worktodo.txt\n");
                 restart_self(argc_, argv_);
             } else {
                 std::cout << "No more entries in worktodo.txt, exiting.\n";
