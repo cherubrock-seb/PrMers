@@ -291,6 +291,15 @@ test-legacy-small-items:
 test-legacy-transform-size:
 	bash tests/test_legacy_transform_size.sh
 
+.PHONY: test-legacy-checkpoint-set
+
+test-legacy-checkpoint-set:
+	bash tests/test_legacy_checkpoint_set.sh
+
+.PHONY: test-legacy-checkpoint-mismatch
+test-legacy-checkpoint-mismatch: all
+	bash tests/run_legacy_checkpoint_mismatch.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-legacy-check-equal
 
 test-legacy-check-equal:

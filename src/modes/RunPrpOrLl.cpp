@@ -353,6 +353,17 @@ int App::runPrpOrLl() {
     if(jsave==0){
         jsave = totalIters - 1;
     }
+    // The state and, with Gerbicz-Li checking, its check buffers are saved as one set.
+    auto saveCheckpoint = [&](uint64_t savedIteration) {
+        if (buffers->bufd != nullptr && buffers->last_correct_state != nullptr &&
+            buffers->last_correct_bufd != nullptr) {
+            const core::BackupManager::GerbiczLiBuffers gl{
+                buffers->last_correct_state, buffers->bufd, buffers->last_correct_bufd, itersave, jsave};
+            backupManager.saveState(buffers->input, savedIteration, nullptr, &gl);
+        } else {
+            backupManager.saveState(buffers->input, savedIteration);
+        }
+    };
     if(checkpasslevel==0)
         checkpasslevel=1;
     if(options.wagstaff){
@@ -749,8 +760,7 @@ int App::runPrpOrLl() {
 
         if ((now - lastBackup >= seconds(options.backup_interval))) {
                 std::string res64_x;
-                backupManager.saveState(buffers->input, iter);
-                backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+                saveCheckpoint(iter);
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
@@ -813,8 +823,7 @@ int App::runPrpOrLl() {
         // interrupted before its first iteration the buffer is still at the resumed state, so
         // record one iteration less (0 on a fresh start, which loads as a fresh start).
         const uint64_t savedIter = anyIterationRun ? lastIter : lastIter - 1;
-        backupManager.saveState(buffers->input, savedIter);
-        backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+        saveCheckpoint(savedIter);
         
         std::cout << "\nInterrupted by user, state saved at iteration "
                   << lastIter << " last j = " << lastJ << std::endl;
@@ -855,8 +864,7 @@ int App::runPrpOrLl() {
         // too many.
         auto saveFinalState = [&]() {
             if (!anyIterationRun) return;
-            backupManager.saveState(buffers->input, totalIters - 1);
-            backupManager.saveGerbiczLiState(buffers->last_correct_state ,buffers->bufd,buffers->last_correct_bufd , itersave, jsave);
+            saveCheckpoint(totalIters - 1);
         };
         if (options.wagstaff) {
             clEnqueueWriteBuffer(

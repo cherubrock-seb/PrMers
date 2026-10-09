@@ -1077,11 +1077,17 @@ int App::runPM1() {
     timer2.start();
     auto startTime  = high_resolution_clock::now();
     auto lastDisplay = startTime;
+    // The periodic save has its own clock: lastDisplay is reset every 10 s, so a 180 s test
+    // against it never passed and stage 1 was saved only at the start, on an interrupt and at the end.
+    auto lastBackup = startTime;
     interrupted.store(false, std::memory_order_relaxed);
 
     uint64_t startIter = resumeIter;
     uint64_t lastIter = resumeIter;
-    backupManager.saveState(buffers->input, resumeIter,&E);
+    // The loop resumes at the value .loop holds and saveState() records its argument plus one: the
+    // state as loaded resumes at resumeIter. Recording resumeIter + 1 made a run killed before its
+    // next save redo bit resumeIter of E on the resumed state.
+    backupManager.saveState(buffers->input, resumeIter - 1, &E);
     spinner.displayProgress(
                     bits-resumeIter,
                     bits,
@@ -1141,12 +1147,13 @@ int App::runPM1() {
         }
         
         auto now = high_resolution_clock::now();
-        if ((((now - lastDisplay >= seconds(180)))) ) {
+        if (now - lastBackup >= seconds(180)) {
                     // Bit lastIter-1 has just been processed, so a resume must
                     // continue at loop value lastIter-1.  saveState() records
                     // its argument plus one (as in the interrupt save above,
                     // which runs before the bit is processed).
                     if (lastIter > 1) backupManager.saveState(buffers->input, lastIter-2);
+                    lastBackup = now;
         }
         if ((((now - lastDisplay >= seconds(10)))) ) {
                 std::string res64_x;
