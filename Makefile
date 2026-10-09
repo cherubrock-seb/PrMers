@@ -683,3 +683,17 @@ test-gm-chain-resume:
 	mkdir -p /tmp/prmers-gm-chain-resume-test
 	g++ -std=c++20 -Wall -Wextra -Iinclude tests/gm_chain_progress_test.cpp -o /tmp/prmers-gm-chain-resume-test/gm_chain_progress_test
 	/tmp/prmers-gm-chain-resume-test/gm_chain_progress_test
+
+.PHONY: test-pm1-ckpt-counter test-pm1-ckpt-v3-resume test-pm1-b1-limit
+test-pm1-ckpt-counter:
+	bash tests/test_pm1_stage1_ckpt_counter.sh
+
+test-pm1-ckpt-v3-resume: all
+	bash tests/pm1_stage1_ckpt_v3_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+test-pm1-b1-limit: all
+	bash tests/pm1_b1_limit_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-pm1-legacy-loop-bound
+test-pm1-legacy-loop-bound: all
+	bash tests/pm1_legacy_loop_bound_test.sh $${PRMERS_TEST_DEVICE:-0}

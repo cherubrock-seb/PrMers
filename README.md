@@ -295,7 +295,7 @@ Run the built-in help for the exact option list supported by your binary:
 | `-iterforce2 <n>` | Force queue synchronization in P-1 Stage 2 |
 | `-memtest` | Run GPU memory and stability test |
 | `-memlim <percent>` | Limit memory used by some precompute paths |
-| `-maxe <MiB>` | Maximum P-1 exponent chunk size in MiB |
+| `-maxe <MiB>` | Maximum P-1 exponent chunk size in MiB (at most 8192) |
 | `-res64_display_interval <n>` | Print Res64 every `n` iterations in Marin mode |
 
 ### Mode selection

@@ -25,6 +25,7 @@
 
 #include "core/GmFactorCheckpoint.hpp"
 #include "core/Version.hpp"
+#include "core/Pm1Checkpoint.hpp"
 #include "marin/engine.h"
 
 #include <gmpxx.h>
@@ -454,6 +455,16 @@ int App::runGaussianMersennePM1() {
 
     const std::uint64_t B1 = options.B1 != 0 ? options.B1 : 100000ULL;
     const std::uint64_t B2 = options.B2;
+
+    // Stage 1 builds the whole exponent in one piece (also in the legacy path
+    // below); refuse a B1 it cannot hold rather than fail or truncate later.
+    {
+        const std::string limitErr = core::pm1ckpt::limitError(B1, 0, 0, options.exponent, true);
+        if (!limitErr.empty()) {
+            std::cerr << "[GM-PM1] " << limitErr << "\n";
+            return 2;
+        }
+    }
 
     // Preserve explicit safe/legacy paths. CliOptions::resume is true by
     // default in PrMers, so it must NOT be used as a fresh-vs-resume signal.

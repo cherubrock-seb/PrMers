@@ -28,6 +28,7 @@
 #include "core/ExitCodes.hpp"
 #include "core/AlgoUtils.hpp"
 #include "core/GmChainProgress.hpp"
+#include "core/Pm1Checkpoint.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
@@ -1207,6 +1208,18 @@ int App::runInner() {
             guiServer_->appendLog("[Backend Compatibility] Forced Aevum rejected for P-1 ultra-low-memory.");
         }
         return 2;
+    }
+
+    // P-1 stage 1 limits for bounds that did not come from the command line
+    // (worktodo.txt, GUI).  A B1 or -maxe the stage-1 exponent cannot represent
+    // would otherwise run and resume from a wrong position.
+    {
+        const std::string limitErr = core::pm1ckpt::optionsLimitError(options);
+        if (!limitErr.empty()) {
+            std::cerr << "Error: " << limitErr << std::endl;
+            if (guiServer_) guiServer_->appendLog("Error: " + limitErr);
+            return 2;
+        }
     }
 
     int rc = 1;

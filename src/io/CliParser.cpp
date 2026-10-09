@@ -35,6 +35,7 @@
 #include <stdexcept>
 #include "opencl/Context.hpp"
 #include "core/Version.hpp"
+#include "core/Pm1Checkpoint.hpp"
 
 // Forward-declare the usage function (defined elsewhere, e.g. in your main host file)
 extern void printUsage(const char* progName);
@@ -175,7 +176,7 @@ void printUsage(const char* progName) {
     std::cout << "  -host <ip|0.0.0.0|localhost> : (Optional) Specify the HTTP host for the GUI server (default: 127.0.0.1)" << std::endl;
     std::cout << "  -ipv4                 : (Optional) Bind the GUI server to the first non-loopback IPv4 interface (reachable from your network)" << std::endl;
 
-    std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 -> 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib." << std::endl;
+    std::cout << "  -maxe <value>         : (Optional) Max bits for each E chunk (in MiB). If set to 0, defaults to 10000 bits. Example: -maxe 64 -> 64 MiB = 536870912 bits. By default if no -maxe you it is set to 32 Mib. At most 8192 MiB (2^36 bits)." << std::endl;
     std::cout << "  -memtest              : GPU Memory & Stability test (OpenCL)" << std::endl;
     std::cout << "  -memlim <percent>     : (Optional) Fraction percentage of memory used (used precompute stage 2 p-1)" << std::endl;
 
@@ -299,7 +300,12 @@ static bool parse_cli_tail_option(CliOptions& opts,
     }
     else if (std::strcmp(argv[i], "-maxe") == 0 && i + 1 < argc) {
         uint64_t mb = std::strtoull(argv[i + 1], nullptr, 10);
-        opts.max_e_bits = (mb == 0 ? 10000ULL : (mb << 23));
+        // MiB -> bits; a value whose bit count overflows is kept as "huge" so that
+        // the P-1 limit check below reports it instead of a wrapped small size.
+        opts.max_e_bits = (mb == 0 ? 10000ULL
+                          : (mb > (std::numeric_limits<uint64_t>::max() >> 23)
+                                 ? std::numeric_limits<uint64_t>::max()
+                                 : (mb << 23)));
         ++i;
     }
 
@@ -981,6 +987,17 @@ CliOptions CliParser::parse(int argc, char** argv ) {
     if (const std::string limitError = exponentLimitError(opts.exponent, opts.wagstaff); !limitError.empty()) {
         std::cerr << limitError << std::endl;
         std::exit(EXIT_FAILURE);
+    }
+
+    // P-1 stage 1 limits: refuse a B1 / -maxe the stage-1 exponent cannot represent
+    // instead of running and resuming from a wrong position.  The same check runs
+    // again in App::run for bounds that come from worktodo.txt.
+    {
+        const std::string err = core::pm1ckpt::optionsLimitError(opts);
+        if (!err.empty()) {
+            std::cerr << "Error: " << err << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
     }
 
     if (opts.kernel_path.empty()) {
