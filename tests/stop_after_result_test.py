@@ -54,9 +54,9 @@ CASES = [
          ["llunsafe_m_4423.ckpt*"]),
     case("ll-safe", "DoubleCheck=4423,70,1", "DoubleCheck=9689,70,1", ["-t", "0"],
          ["llsafe_m_4423.ckpt*"]),
-    case("wagstaff-marin", "PRP=1,2,11614,-1", "PRP=1,2,21002,-1", ["-t", "0", "-wagstaff", "-engine-marin"],
+    case("wagstaff-marin", "PRP=1,2,5807,-1", "PRP=1,2,10501,-1", ["-t", "0", "-wagstaff", "-engine-marin"],
          ["wagstaff_m_11614.ckpt*"]),
-    case("wagstaff-legacy", "PRP=1,2,11614,-1", "PRP=1,2,21002,-1", ["-t", "0", "-wagstaff", "-marin"],
+    case("wagstaff-legacy", "PRP=1,2,5807,-1", "PRP=1,2,10501,-1", ["-t", "0", "-wagstaff", "-marin"],
          ["11614prp_wagstaff.*"]),
     # P-1: stage 1 only, and stage 1 + 2 (two result lines per job; the stop waits for the second)
     case("pm1-stage1", "Pminus1=1,2,9941,-1,1000,0", "Pminus1=1,2,9689,-1,1000,0", [],
