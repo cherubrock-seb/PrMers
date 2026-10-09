@@ -6221,19 +6221,23 @@ int App::runPM1Marin() {
     //      only for the B1 delta.
     //   2) No automatic recompute fallback in this diagnostic path: P100 must run
     //      the true delta extension, otherwise -b1old has no value.
-    bool ultralowmem_delta_extend = doExtend && options.pm1_ultralowmem && options.pm1_lowmem;
-    bool ultralowmem_delta2_extend = ultralowmem_delta_extend && (std::getenv("PRMERS_PM1_MM31_DELTA2") != nullptr);
+    // -pm1-lowmem alone takes the same 3-register delta path: the extension loop only needs RSTATE, RBASE and
+    // RTMP and works with any backend. Only the 2-register variant and the fast3 recompute fallback are
+    // ultra-low-memory (Marin fast3) features.
+    bool ultralowmem_delta_extend = doExtend && options.pm1_lowmem;
+    const char* const lowmem_kind = options.pm1_ultralowmem ? "Ultra-low-memory" : "Low-memory";
+    bool ultralowmem_delta2_extend = ultralowmem_delta_extend && options.pm1_ultralowmem && (std::getenv("PRMERS_PM1_MM31_DELTA2") != nullptr);
     bool ultralowmem_fast3_recompute_extend = false;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
-        std::cout << "[PM1] Ultra-low-memory B1 extension requested: B1old="
+        std::cout << "[PM1] " << lowmem_kind << " B1 extension requested: B1old="
                   << B1_old << " -> B1=" << B1_new << "\n";
-        std::cout << "[PM1] Ultra-low-memory extension will run the true "
+        std::cout << "[PM1] " << lowmem_kind << " extension will run the true "
                   << "delta path H_old^Delta with " << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand, experimental)" : "3 GPU registers")
                   << "; v93 uses compact GPU weights, no fast3 recompute fallback by default.\n";
         if (guiServer_) {
             std::ostringstream oss;
-            oss << "[PM1] Ultra-low-memory B1 extension requested: B1old="
+            oss << "[PM1] " << lowmem_kind << " B1 extension requested: B1old="
                 << B1_old << " -> B1=" << B1_new
                 << "\n[PM1] Running true delta extension H_old^Delta with "
                 << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand, experimental)." : "3 GPU registers.")
@@ -6244,12 +6248,12 @@ int App::runPM1Marin() {
 
     const char* const arithmetic_backend = engine::configured_gpu_backend_name();
     std::cout << "[Backend " << arithmetic_backend << "] Start a P-1 factoring stage 1 up to B1="
-              << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
+              << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : (options.pm1_ultralowmem ? " (ULTRALOWMEM DELTA 3-REG)" : " (LOWMEM DELTA 3-REG)")) : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : ""))) << std::endl;
 
     if (guiServer_) {
         std::ostringstream oss;
         oss << "[Backend " << arithmetic_backend << "] Start a P-1 factoring stage 1 up to B1="
-            << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : " (ULTRALOWMEM DELTA 3-REG)") : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
+            << B1_new << (ultralowmem_delta_extend ? (ultralowmem_delta2_extend ? " (ULTRALOWMEM DELTA 2-REG SPLIT-AUX)" : (options.pm1_ultralowmem ? " (ULTRALOWMEM DELTA 3-REG)" : " (LOWMEM DELTA 3-REG)")) : (doExtend ? " (EXTEND mode)" : (ultralowmem_fast3_recompute_extend ? " (ULTRALOWMEM FAST3 RECOMPUTE)" : "")));
         guiServer_->appendLog(oss.str());
     }
 
@@ -6523,8 +6527,8 @@ int App::runPM1Marin() {
     bool pm1_lowmem_stage1 = options.pm1_lowmem && !doExtend;
     if (ultralowmem_delta_extend) {
         options.gerbiczli = false;
-        std::cout << "[PM1] Ultra-low-memory delta extension enabled: using " << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") << "; Gerbicz-Li disabled.\n";
-        if (guiServer_) guiServer_->appendLog(std::string("[PM1] Ultra-low-memory delta extension enabled: using ") + (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") + "; Gerbicz-Li disabled.\n");
+        std::cout << "[PM1] " << lowmem_kind << " delta extension enabled: using " << (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") << "; Gerbicz-Li disabled.\n";
+        if (guiServer_) guiServer_->appendLog(std::string("[PM1] ") + lowmem_kind + " delta extension enabled: using " + (ultralowmem_delta2_extend ? "2 GPU registers (persistent multiplicand)" : "3 GPU registers") + "; Gerbicz-Li disabled.\n");
     } else if (pm1_ultralowmem_stage1) {
         options.gerbiczli = false;
         std::cout << "[PM1] Ultra-low-memory Stage 1 enabled: using 1 GPU register; fast3-only path; Gerbicz-Li disabled.\n";
@@ -6562,7 +6566,7 @@ int App::runPM1Marin() {
     try {
         eng = engine::create_gpu(p, stage1RegCount, static_cast<size_t>(options.device_id), verbose);
     } catch (const std::exception& ex) {
-        if (!ultralowmem_delta_extend || std::getenv("PRMERS_PM1_ENABLE_FAST3_FALLBACK") == nullptr) throw;
+        if (!ultralowmem_delta_extend || !options.pm1_ultralowmem || std::getenv("PRMERS_PM1_ENABLE_FAST3_FALLBACK") == nullptr) throw;
         std::cerr << "[PM1] True-delta engine failed before start: " << ex.what() << "\n"
                   << "[PM1] PRMERS_PM1_ENABLE_FAST3_FALLBACK=1 is set, so falling back to 1-reg fast3 recompute.\n";
         ultralowmem_delta_extend = false;
