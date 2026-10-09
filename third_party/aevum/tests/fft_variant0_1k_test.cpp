@@ -69,7 +69,9 @@ static bool hasProgramScopeVariables(cl_device_id dev, cl_context ctx) {
   return clBuildProgram(probe.get(), 1, &dev, "-cl-std=CL3.0", nullptr, nullptr) == 0;
 }
 
-static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::string& dir, size_t W, int variantW) {
+enum class CaseResult { Pass, Fail, ResourceLimited };
+
+static CaseResult runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::string& dir, size_t W, int variantW) {
   Program prog = loadSource(ctx, HARNESS);
   // The reducedCosSin coefficients the host passes for every FP64 FFT: trigCoefs(FFTShape::size() / 4), where size() is
   // width * height * middle * 2 and height * middle is 512 here.
@@ -88,7 +90,7 @@ static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::str
     " -DTRIG_SIN=" + list(coefs.sinCoefs) + " -DTRIG_COS=" + list(coefs.cosCoefs);
   if (clBuildProgram(prog.get(), 1, &dev, opts.c_str(), nullptr, nullptr) != 0) {
     std::printf("FAIL: build\n%s\n", getBuildLog(prog.get(), dev).c_str());
-    return false;
+    return CaseResult::Fail;
   }
   int err = 0;
   cl_kernel k = clCreateKernel(prog.get(), "fftw", &err);
@@ -106,11 +108,34 @@ static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::str
   KernelHolder kHold{k}, mkHold{mk};
   std::unique_ptr<cl_mem> binHold{bin}, boutHold{bout}, btrigHold{btrig};
 
+  // CL_DEVICE_MAX_WORK_GROUP_SIZE is only a device ceiling.  A successfully
+  // built kernel can expose a smaller legal limit because of compiler/runtime
+  // resource constraints.  Apple Intel currently reports 1 for these
+  // synthetic kernels even though the device maximum is much larger.
+  //
+  // Keep this distinct from correctness: if either kernel cannot legally
+  // launch the exact geometry, report ResourceLimited.  Build failures and
+  // any executable DFT mismatch remain hard failures.
+  constexpr cl_kernel_work_group_info kKernelWorkGroupSize = 0x11B0;
+  size_t fftwMaxWg = 0, trigMaxWg = 0;
+  CHECK1(clGetKernelWorkGroupInfo(k, dev, kKernelWorkGroupSize,
+                                  sizeof(fftwMaxWg), &fftwMaxWg, nullptr));
+  CHECK1(clGetKernelWorkGroupInfo(mk, dev, kKernelWorkGroupSize,
+                                  sizeof(trigMaxWg), &trigMaxWg, nullptr));
+
+  const size_t wg = W / 8;
+  if ((fftwMaxWg != 0 && wg > fftwMaxWg) ||
+      (trigMaxWg != 0 && wg > trigMaxWg)) {
+    std::printf("width %4zu variant %d: resource-limited requested WG %zu, "
+                "fftw kernel limit %zu, mktrig kernel limit %zu\n",
+                W, variantW, wg, fftwMaxWg, trigMaxWg);
+    return CaseResult::ResourceLimited;
+  }
+
   std::vector<double> in(2 * N), out(2 * N);
   srand(4242);
   for (double& x : in) { x = double(rand()) / RAND_MAX * 2 - 1; }
   CHECK1(clEnqueueWriteBuffer(q, bin, 1, 0, N * 16, in.data(), 0, nullptr, nullptr));
-  size_t wg = W / 8;
   CHECK1(clSetKernelArg(mk, 0, sizeof btrig, &btrig));
   CHECK1(clEnqueueNDRangeKernel(q, mk, 1, nullptr, &wg, &wg, 0, nullptr, nullptr));
   CHECK1(clSetKernelArg(k, 0, sizeof bin, &bin));
@@ -148,7 +173,7 @@ static bool runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::str
   bool ok = unmatched == 0 && missing == 0;
   std::printf("width %4zu variant %d: %zu of %zu outputs match no DFT bin, %zu bins not hit exactly once, worst nearest-bin error %.3e  %s\n",
               W, variantW, unmatched, N, missing, worst, ok ? "ok" : "FAIL");
-  return ok;
+  return ok ? CaseResult::Pass : CaseResult::Fail;
 }
 
 int main(int argc, char** argv) {
@@ -166,13 +191,33 @@ int main(int argc, char** argv) {
 
   cl_context ctx = createContext(dev);
   cl_queue q = makeQueue(dev, ctx, false);
-  bool ok = runCase(dev, ctx, q, dir, 1024, 1);
+  bool ok = true;
+  unsigned executed = 0, resourceLimited = 0;
+
+  auto run = [&](size_t width, int variant) {
+    const CaseResult r = runCase(dev, ctx, q, dir, width, variant);
+    if (r == CaseResult::Pass) {
+      ++executed;
+    } else if (r == CaseResult::ResourceLimited) {
+      ++resourceLimited;
+    } else {
+      ok = false;
+    }
+  };
+
+  run(1024, 1);
   if (hasProgramScopeVariables(dev, ctx)) {
-    ok &= runCase(dev, ctx, q, dir, 512, 0);
-    ok &= runCase(dev, ctx, q, dir, 1024, 0);
+    run(512, 0);
+    run(1024, 0);
   } else {
     std::printf("SKIP: variant 0 cases need program-scope variables (OpenCL C 2.0/3.0)\n");
   }
+
+  std::printf("fft variant cases: %u executed, %u resource-limited\n",
+              executed, resourceLimited);
+  if (executed == 0 && resourceLimited != 0)
+    std::printf("NOTE: this runtime compiles the synthetic FFT harness but exposes no legal exact work-group geometry; executable DFT coverage remains provided by the other CI devices.\n");
+
   std::printf("%s\n", ok ? "ok" : "FAIL");
   return ok ? 0 : 1;
 }

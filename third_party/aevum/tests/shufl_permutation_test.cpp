@@ -5,6 +5,12 @@
 // The harness compiles the real fftwidth.cl for each (FFT type, width, SHUFL_BYTES_W, LDSPAD_W / LDSSWIZ_W), runs one work-group, fills
 // the memory just past the LDS_BYTES the kernels allocate with a sentinel, and checks both the permutation and the sentinel.
 //
+// A compiled kernel can have a stricter legal work-group limit than CL_DEVICE_MAX_WORK_GROUP_SIZE.  Some runtimes also reject a synthetic
+// geometry at build time for explicit local/shared-memory exhaustion.  Those two resource-limit cases are reported separately and are not
+// permutation failures.  Every executable geometry still runs the full permutation and LDS sentinel checks, while all unrelated build
+// errors remain hard failures.
+//
+// AEVUM_TEST_DEVICE optionally selects a device from getAllDeviceIDs(); default is device 0.
 // usage: shufl_permutation_test [cl-source-dir] [-v]   (default src/cl)   -v lists every case, not just failures
 
 #include "clwrap.h"
@@ -18,6 +24,15 @@
 
 static const char* HARNESS = R"CL(
 #include "base.cl"
+
+// Apple Intel OpenCL 1.2 treats the untyped M_SQRT1_2 literal as ambiguous
+// between the FP32 and FP64 X2ad overloads.  The FP32 transform requires the
+// float constant; all other arithmetic types retain base.cl's definition.
+#if FFT_FP32
+#undef M_SQRT1_2
+#define M_SQRT1_2 0.70710678118654752440f
+#endif
+
 #include "fftwidth.cl"
 
 #if FFT_FP64
@@ -70,7 +85,11 @@ static const char* typeName[] = {"FP64", "FP32", "GF31", "GF61"};
 
 struct Case { Type type; unsigned width, nw, bytes; int pad, swiz; };
 
-// One compiled program per case; returns number of failing sub-checks (or -1 for a build failure).
+static constexpr int RESOURCE_LIMITED = -2;
+
+// One compiled program per case; returns number of failing sub-checks,
+// -1 for a non-resource build failure, RESOURCE_LIMITED for a geometry that
+// this runtime explicitly cannot execute because of work-group or local memory.
 static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::string& dir, const Case& c, bool verbose, std::string& detail) {
   Program prog = loadSource(ctx, HARNESS);
   const unsigned WG = c.width / c.nw, R = c.nw;
@@ -85,6 +104,18 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   if (c.type == GF61) opts += " -DTAILTGF61=U2(1ul,1ul) -DDISTGF61=0ul -DDISTWTRIGGF61=0ul -DDISTMTRIGGF61=0ul -DDISTHTRIGGF61=0ul";
   if (clBuildProgram(prog.get(), 1, &dev, opts.c_str(), nullptr, nullptr) != 0) {
     std::string log = getBuildLog(prog.get(), dev);
+
+    // NVIDIA OpenCL/ptxas reports local-memory exhaustion here before a kernel
+    // object exists.  Keep this intentionally narrow: any unrelated compiler
+    // error remains a real test failure.
+    if (log.find("ptxas error") != std::string::npos &&
+        log.find("uses too much shared data") != std::string::npos) {
+      size_t e = log.find("ptxas error");
+      detail = "resource-limited build: " + log.substr(e, 180);
+      for (char& ch : detail) if (ch == '\n') ch = ' ';
+      return RESOURCE_LIMITED;
+    }
+
     size_t e = log.find("error:");
     detail = "build failed: " + (e == std::string::npos ? log.substr(0, 200) : log.substr(e, 160));
     for (char& ch : detail) if (ch == '\n') ch = ' ';
@@ -93,6 +124,37 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   int err = 0;
   cl_kernel k = clCreateKernel(prog.get(), "tshufl", &err);
   CHECK1(err);
+  KernelHolder kHold{k};
+
+  // Standard OpenCL selector values.  tinycl intentionally exposes only the
+  // subset production Aevum normally needs, so keep these test-local.
+  constexpr cl_kernel_work_group_info kKernelWorkGroupSize = 0x11B0;
+  constexpr cl_kernel_work_group_info kKernelLocalMemSize = 0x11B2;
+  constexpr cl_device_info kDeviceLocalMemSize = 0x1023;
+
+  size_t kernelMaxWg = 0;
+  u64 kernelLocal = 0;
+  u64 deviceLocal = 0;
+
+  CHECK1(clGetKernelWorkGroupInfo(k, dev, kKernelWorkGroupSize,
+                                  sizeof(kernelMaxWg), &kernelMaxWg, nullptr));
+  CHECK1(clGetKernelWorkGroupInfo(k, dev, kKernelLocalMemSize,
+                                  sizeof(kernelLocal), &kernelLocal, nullptr));
+  CHECK1(clGetDeviceInfo(dev, kDeviceLocalMemSize,
+                         sizeof(deviceLocal), &deviceLocal, nullptr));
+
+  if (kernelMaxWg != 0 && WG > kernelMaxWg) {
+    detail = "resource-limited: requested WG " + std::to_string(WG) +
+             " exceeds kernel-specific limit " + std::to_string(kernelMaxWg);
+    return RESOURCE_LIMITED;
+  }
+
+  if (deviceLocal != 0 && kernelLocal > deviceLocal) {
+    detail = "resource-limited: kernel local memory " + std::to_string(kernelLocal) +
+             " exceeds device local memory " + std::to_string(deviceLocal);
+    return RESOURCE_LIMITED;
+  }
+
   const size_t N = c.width;
   const size_t esz = (c.type == FP64 || c.type == GF61) ? 16 : 8;
   cl_mem bin = clCreateBuffer(ctx, CL_MEM_READ_WRITE, N * esz, nullptr, &err);
@@ -101,8 +163,7 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   CHECK1(err);
   cl_mem bbad = clCreateBuffer(ctx, CL_MEM_READ_WRITE, 4, nullptr, &err);
   CHECK1(err);
-  // Release the kernel and buffers when the case ends (a kernel keeps its program alive).
-  KernelHolder kHold{k};
+  // kHold above keeps the kernel/program alive.
   std::unique_ptr<cl_mem> binHold{bin}, boutHold{bout}, bbadHold{bbad};
 
   // Element (i, me) carries the code i * 1000 + me + 1 (component 0) and its negation / +7 (component 1).
@@ -198,7 +259,21 @@ int main(int argc, char** argv) {
   for (int a = 1; a < argc; ++a) { if (!strcmp(argv[a], "-v")) verbose = true; else dir = argv[a]; }
   vector<cl_device_id> devices = getAllDeviceIDs();
   if (devices.empty()) { std::printf("SKIP: no OpenCL device\n"); return 0; }
-  cl_device_id dev = devices[0];
+
+  unsigned deviceIndex = 0;
+  if (const char* e = std::getenv("AEVUM_TEST_DEVICE")) {
+    char* end = nullptr;
+    unsigned long parsed = std::strtoul(e, &end, 10);
+    if (end == e || *end != '\0' || parsed >= devices.size()) {
+      std::fprintf(stderr, "invalid AEVUM_TEST_DEVICE=%s; have %zu devices\n",
+                   e, devices.size());
+      return 2;
+    }
+    deviceIndex = static_cast<unsigned>(parsed);
+  }
+
+  cl_device_id dev = devices[deviceIndex];
+  std::printf("device %u: %s\n", deviceIndex, getDeviceName(dev).c_str());
   char ext[8192] = {};
   clGetDeviceInfo(dev, 0x1030 /* CL_DEVICE_EXTENSIONS */, sizeof(ext) - 1, ext, nullptr);
   const bool hasFp64 = std::string(ext).find("cl_khr_fp64") != std::string::npos;
@@ -211,7 +286,7 @@ int main(int argc, char** argv) {
   const Shape shapes[] = {{256, 4}, {512, 8}, {1024, 8}, {1024, 4}, {4096, 8}};
   struct Mode { int pad, swiz; };
   const Mode modes[] = {{0, 0}, {1, 0}, {0, 1}};
-  int total = 0, failed = 0, buildFailed = 0;
+  int total = 0, executed = 0, resourceLimited = 0, failed = 0, buildFailed = 0;
   for (Type t : {FP64, FP32, GF31, GF61}) {
     if ((t == FP64 || t == GF61) && !hasFp64 && t == FP64) continue;
     for (const Shape& s : shapes) {
@@ -224,14 +299,25 @@ int main(int argc, char** argv) {
           std::string detail;
           int r = runCase(dev, ctx, q, dir, c, verbose, detail);
           ++total;
-          if (r != 0) { ++failed; if (r < 0) ++buildFailed; }
+          if (r == RESOURCE_LIMITED) {
+            ++resourceLimited;
+          } else if (r < 0) {
+            ++failed;
+            ++buildFailed;
+          } else {
+            ++executed;
+            if (r != 0) ++failed;
+          }
           if (r != 0 || verbose)
             std::printf("%s width %4u radix %u SHUFL_BYTES=%2u LDSPAD=%d LDSSWIZ=%d: %s\n", typeName[t], s.width, s.nw, bytes, m.pad, m.swiz, detail.c_str());
         }
       }
     }
   }
-  std::printf("%d cases, %d failed (%d did not build)\n", total, failed, buildFailed);
+  std::printf("%d cases, %d executed, %d resource-limited, %d failed (%d did not build)\n",
+              total, executed, resourceLimited, failed, buildFailed);
+  if (executed == 0 && resourceLimited != 0)
+    std::printf("NOTE: this runtime compiled the matrix but exposes no legal synthetic SHUFL execution geometry; executable permutation coverage remains provided by the other CI devices.\n");
   std::printf("%s\n", failed ? "FAIL" : "ok");
   return failed ? 1 : 0;
 }
