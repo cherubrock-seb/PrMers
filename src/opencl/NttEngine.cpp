@@ -416,19 +416,21 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
                                  &err);
     if (err != CL_SUCCESS) util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for squaring");
     
-    clEnqueueCopyBuffer(queue_, A, tmpA,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    
-    forward_simple(tmpA, 0);
-    pointwiseMul(tmpA, tmpA);
-    inverse_simple(tmpA, 0);
-    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
-    
-    clEnqueueCopyBuffer(queue_, tmpA, A,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    
+    // A failed copy or stage must stop the run and must not leak the temporary: the proof code retries.
+    try {
+        copy(A, tmpA, limbBytes);
+
+        forward_simple(tmpA, 0);
+        pointwiseMul(tmpA, tmpA);
+        inverse_simple(tmpA, 0);
+        carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+
+        copy(tmpA, A, limbBytes);
+    } catch (...) {
+        clReleaseMemObject(tmpA);
+        throw;
+    }
+
     clReleaseMemObject(tmpA);
 }
 
@@ -516,22 +518,22 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
         util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer", "Failed to create GPU buffer for multiplication");
     }
 
-    clEnqueueCopyBuffer(queue_, A, tmpA,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
-    clEnqueueCopyBuffer(queue_, B, tmpB,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
+    try {
+        copy(A, tmpA, limbBytes);
+        copy(B, tmpB, limbBytes);
 
-    forward_simple(tmpA, 0);
-    forward_simple(tmpB, 0);
-    pointwiseMul(tmpA, tmpB);
-    inverse_simple(tmpA, 0);
-    carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+        forward_simple(tmpA, 0);
+        forward_simple(tmpB, 0);
+        pointwiseMul(tmpA, tmpB);
+        inverse_simple(tmpA, 0);
+        carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
 
-    clEnqueueCopyBuffer(queue_, tmpA, A,
-                        0, 0, limbBytes,
-                        0, nullptr, nullptr);
+        copy(tmpA, A, limbBytes);
+    } catch (...) {
+        clReleaseMemObject(tmpA);
+        clReleaseMemObject(tmpB);
+        throw;
+    }
 
     clReleaseMemObject(tmpA);
     clReleaseMemObject(tmpB);
@@ -539,12 +541,20 @@ void NttEngine::mulInPlace5(cl_mem A, cl_mem B, math::Carry& carry, size_t limbB
 
 // Modular exponentiation for Mersenne numbers: result = base^exp mod (2^E - 1)
 void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry& carry, size_t limbBytes) {
+    // Writes the host-side value 1 into a buffer; a failed write is an error, not a stale buffer.
+    auto writeOne = [&](cl_mem buf, const std::vector<uint64_t>& one, size_t bytes) {
+        const cl_int err = clEnqueueWriteBuffer(queue_, buf, CL_TRUE, 0, bytes, one.data(), 0, nullptr, nullptr);
+        if (err != CL_SUCCESS) {
+            util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueWriteBuffer",
+                               "clEnqueueWriteBuffer failed with error " + std::to_string(err));
+        }
+    };
     if (exp == 0) {
         // Set result to 1 - initialize result buffer with 1
         size_t numWords = limbBytes / sizeof(uint64_t);
         std::vector<uint64_t> one_data(numWords, 0);
         one_data[0] = 1;
-        clEnqueueWriteBuffer(queue_, result, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
+        writeOne(result, one_data, limbBytes);
         return;
     }
     
@@ -578,10 +588,9 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     size_t numWords = limbBytes / sizeof(uint64_t);
     std::vector<uint64_t> one_data(numWords, 0);
     one_data[0] = 1;
-    clEnqueueWriteBuffer(queue_, accumulator_buf, CL_TRUE, 0, limbBytes, one_data.data(), 0, nullptr, nullptr);
-    
     // Binary exponentiation: result = base^exp mod (2^E - 1)
     try {
+        writeOne(accumulator_buf, one_data, limbBytes);
         while (exp > 0) {
             if (exp & 1) {
                 // accumulator = accumulator * base_copy mod (2^E - 1)

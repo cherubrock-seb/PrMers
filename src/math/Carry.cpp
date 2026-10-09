@@ -71,8 +71,6 @@ void Carry::carryGPU(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
-    
     err = clEnqueueNDRangeKernel(queue_, carryKernel_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
@@ -136,8 +134,6 @@ void Carry::carryGPU3(cl_mem buffer, cl_mem blockCarryBuffer, size_t bufferSize)
     if (err != CL_SUCCESS) {
         throw std::runtime_error("Failed to set kernel_carry args");
     }
-    if (err != CL_SUCCESS) throw std::runtime_error("Failed to enqueue kernel_carry");
-    
     err = clEnqueueNDRangeKernel(queue_, carryKernelMul3_, 1, nullptr, &workersCarry, nullptr, 0, nullptr, nullptr/*&evt1*/);
     if (err != CL_SUCCESS) {
         std::ostringstream oss;
