@@ -8,6 +8,7 @@ cli = (ROOT / "src/io/CliParser.cpp").read_text()
 app = (ROOT / "src/core/App.cpp").read_text()
 bench = (ROOT / "src/core/Bench2.cpp").read_text()
 engine_h = (ROOT / "include/marin/engine.h").read_text()
+prp = (ROOT / "src/modes/RunPrpOrLlMarin.cpp").read_text()
 aevum_h = (ROOT / "include/aevum/EngineAevum.hpp").read_text()
 
 assert "bool bench = false;" in cli_h
@@ -52,6 +53,31 @@ for token in (
     '"NOT_COLLECTED_IN_TIMING_PHASE"',
 ):
     assert token in bench, token
+
+# Additive production-PRP timing keeps the validated square-hot-path metric.
+for token in (
+    "ProductionPrpTiming",
+    "measure_production_prp_timing",
+    "gerbicz_block",
+    "gerbicz_checkpasslevel",
+    "gerbicz_full_check_interval",
+    "gerbicz_boundary_us",
+    "gerbicz_full_check_us",
+    "gerbicz_amortized_us_per_iter",
+    "production_prp_us_per_iter",
+    "production_prp_iterations_per_second",
+    "production_prp_estimated_seconds",
+    "production_prp_probe_exact",
+    "bench2 production PRP Gerbicz probe mismatch",
+):
+    assert token in bench, token
+
+# Guard the production cadence source of truth against silent drift.
+assert "options.gl_block >= 2 ? options.gl_block : 1000" in prp
+assert "(1000 * desiredIntervalSeconds) / (double)B" in prp
+assert "eng->copy(R3, R1);" in prp
+assert "eng->set_multiplicand(R2, R0);" in prp
+assert "eng->mul(R1, R2);" in prp
 
 # Wide campaign grid and selector-boundary neighborhood.
 for p in (

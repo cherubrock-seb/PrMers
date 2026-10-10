@@ -45,8 +45,40 @@ steady-state median/min/max timing, dispersion, iterations/s, estimated full-PRP
 time, register/checkpoint memory, device/driver/runtime properties, PrMers
 version, source SHA and compiler metadata.
 
-Setup/JIT/backend probing is excluded from steady-state timing. Each timed batch
-ends with `engine::sync()`.
+The original `us_per_iter_*`, `iterations_per_second` and
+`estimated_full_prp_seconds` fields remain the validated square-hot-path metric.
+Setup/JIT/backend probing is excluded from that timing and each timed batch ends
+with `engine::sync()`.
+
+Bench2 also reports an additive production-PRP estimate:
+
+- `gerbicz_block`
+- `gerbicz_checkpasslevel`
+- `gerbicz_full_check_interval`
+- `gerbicz_boundary_us`
+- `gerbicz_full_check_us`
+- `gerbicz_amortized_us_per_iter`
+- `production_prp_us_per_iter`
+- `production_prp_iterations_per_second`
+- `production_prp_estimated_seconds`
+- `production_prp_probe_exact`
+
+This uses the current ordinary PRP schedule from `RunPrpOrLlMarin.cpp`. For a
+fresh default PRP in the campaign range, `B = 1000`; the cheap Gerbicz boundary
+occurs every 1000 arithmetic iterations and the full replay/readback check is
+amortized over 600000 iterations.
+
+The full-check timing probe constructs the real fresh PRP register state,
+advances to the first production boundary, executes the same boundary and
+replay/readback/modulo-compare operation sequence, and requires that comparison
+to pass. This is intentionally different from the older issue-36 timing helper,
+whose historical `B = floor(sqrt(p))` assumption no longer matches fresh
+production PRP defaults.
+
+Proof-residue writes, periodic checkpoint files, progress/UI logging and an
+explicit `-iterforce` synchronization policy remain separate components: their
+cadence is proof-, wall-clock- or user-configuration-dependent and they are not
+silently folded into the arithmetic estimate.
 
 ## Resume and interruption
 

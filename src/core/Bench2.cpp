@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+#include <gmpxx.h>
+
 #ifndef PRMERS_GIT_SHA
 #define PRMERS_GIT_SHA unknown
 #endif
@@ -85,6 +87,17 @@ struct Record {
     double dispersion_pct = 0.0;
     double iterations_per_second = 0.0;
     double estimated_full_prp_seconds = 0.0;
+
+    std::uint64_t gerbicz_block = 0;
+    std::uint64_t gerbicz_checkpasslevel = 0;
+    std::uint64_t gerbicz_full_check_interval = 0;
+    double gerbicz_boundary_us = 0.0;
+    double gerbicz_full_check_us = 0.0;
+    double gerbicz_amortized_us_per_iter = 0.0;
+    double production_prp_us_per_iter = 0.0;
+    double production_prp_iterations_per_second = 0.0;
+    double production_prp_estimated_seconds = 0.0;
+    bool production_prp_probe_exact = false;
 
     std::size_t register_bytes = 0;
     std::size_t checkpoint_bytes = 0;
@@ -312,6 +325,128 @@ double median(std::vector<double> values) {
     return (values[n / 2 - 1] + values[n / 2]) / 2.0;
 }
 
+struct ProductionPrpTiming {
+    std::uint64_t block = 0;
+    std::uint64_t checkpasslevel = 0;
+    std::uint64_t full_check_interval = 0;
+    double boundary_us = 0.0;
+    double full_check_us = 0.0;
+    double amortized_us_per_iter = 0.0;
+    double production_us_per_iter = 0.0;
+    double production_iterations_per_second = 0.0;
+    double production_estimated_seconds = 0.0;
+    bool exact = false;
+};
+
+ProductionPrpTiming measure_production_prp_timing(
+    engine& eng,
+    const std::uint32_t exponent,
+    const double square_us_per_iter) {
+    const engine::Reg R0 = 0, R1 = 1, R2 = 2, R3 = 3;
+    const engine::Reg R4 = 4, R5 = 5, RBASE = 6, RTMP = 7;
+
+    ProductionPrpTiming out;
+
+    const std::uint64_t legacy_B =
+        static_cast<std::uint64_t>(
+            std::sqrt(static_cast<double>(exponent)));
+    out.block = std::min<std::uint64_t>(1000u, legacy_B);
+    if (out.block == 0)
+        throw std::runtime_error(
+            "bench2 production PRP Gerbicz block is zero");
+
+    out.checkpasslevel =
+        static_cast<std::uint64_t>(
+            (1000.0 * 600.0) / static_cast<double>(out.block));
+    if (out.checkpasslevel == 0) out.checkpasslevel = 1;
+    out.full_check_interval = out.block * out.checkpasslevel;
+
+    // Exact fresh ordinary-PRP state.  Advancing by modB iterations reaches
+    // the first real production Gerbicz boundary; forcing a check there has
+    // the same replay/readback operation sequence as the periodic full check.
+    eng.set(R1, 1u);
+    eng.set(R0, 3u);
+    eng.copy(R4, R0);
+    eng.copy(R5, R1);
+    eng.set(RBASE, 3u);
+    eng.set_multiplicand(RTMP, RBASE);
+
+    const std::uint64_t modB =
+        exponent % out.block == 0 ? out.block : exponent % out.block;
+    for (std::uint64_t z = 0; z < modB; ++z)
+        eng.square_mul(R0);
+    eng.sync();
+
+    const auto boundary_begin = std::chrono::steady_clock::now();
+    eng.copy(R3, R1);
+    eng.set_multiplicand(R2, R0);
+    eng.mul(R1, R2);
+    eng.sync();
+    const auto boundary_end = std::chrono::steady_clock::now();
+
+    out.boundary_us =
+        std::chrono::duration<double, std::micro>(
+            boundary_end - boundary_begin).count();
+
+    const auto full_begin = std::chrono::steady_clock::now();
+
+    const std::uint64_t loop_count =
+        out.block > modB ? out.block - modB - 1 : 0;
+    for (std::uint64_t z = 0; z < loop_count; ++z)
+        eng.square_mul(R3);
+
+    if (exponent % out.block == 0)
+        eng.mul(R3, RTMP);
+    else
+        eng.square_mul(R3, 3u);
+
+    for (std::uint64_t z = 0; z < modB; ++z)
+        eng.square_mul(R3);
+
+    mpz_t z0, z1;
+    mpz_inits(z0, z1, nullptr);
+    eng.get_mpz(z0, R3);
+    eng.get_mpz(z1, R1);
+
+    const mpz_class Mp = (mpz_class(1) << exponent) - 1;
+    out.exact =
+        ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+
+    mpz_clears(z0, z1, nullptr);
+
+    if (!out.exact)
+        throw std::runtime_error(
+            "bench2 production PRP Gerbicz probe mismatch");
+
+    // Successful production-check path.
+    eng.copy(R4, R0);
+    eng.copy(R5, R1);
+    eng.sync();
+
+    const auto full_end = std::chrono::steady_clock::now();
+    out.full_check_us =
+        std::chrono::duration<double, std::micro>(
+            full_end - full_begin).count();
+
+    out.amortized_us_per_iter =
+        out.boundary_us / static_cast<double>(out.block) +
+        out.full_check_us /
+            static_cast<double>(out.full_check_interval);
+
+    out.production_us_per_iter =
+        square_us_per_iter + out.amortized_us_per_iter;
+
+    if (out.production_us_per_iter > 0.0) {
+        out.production_iterations_per_second =
+            1'000'000.0 / out.production_us_per_iter;
+        out.production_estimated_seconds =
+            out.production_us_per_iter *
+            static_cast<double>(exponent) / 1'000'000.0;
+    }
+
+    return out;
+}
+
 std::string csv_header() {
     return
         "schema_version,status,error,mode,exponent,device_index,"
@@ -323,6 +458,11 @@ std::string csv_header() {
         "timed_iterations_per_rep,repetitions,us_per_iter_median,"
         "us_per_iter_min,us_per_iter_max,dispersion_pct,iterations_per_second,"
         "estimated_full_prp_seconds,register_bytes,checkpoint_bytes,"
+        "gerbicz_block,gerbicz_checkpasslevel,gerbicz_full_check_interval,"
+        "gerbicz_boundary_us,gerbicz_full_check_us,"
+        "gerbicz_amortized_us_per_iter,production_prp_us_per_iter,"
+        "production_prp_iterations_per_second,"
+        "production_prp_estimated_seconds,production_prp_probe_exact,"
         "timing_scope,queue_sync,exactness_state,profile_state";
 }
 
@@ -389,6 +529,21 @@ std::string record_json(const Record& r, const ModeConfig& cfg) {
       << "\"estimated_full_prp_seconds\":" << r.estimated_full_prp_seconds << ","
       << "\"register_bytes\":" << r.register_bytes << ","
       << "\"checkpoint_bytes\":" << r.checkpoint_bytes << ","
+      << "\"gerbicz_block\":" << r.gerbicz_block << ","
+      << "\"gerbicz_checkpasslevel\":" << r.gerbicz_checkpasslevel << ","
+      << "\"gerbicz_full_check_interval\":" << r.gerbicz_full_check_interval << ","
+      << "\"gerbicz_boundary_us\":" << r.gerbicz_boundary_us << ","
+      << "\"gerbicz_full_check_us\":" << r.gerbicz_full_check_us << ","
+      << "\"gerbicz_amortized_us_per_iter\":"
+      << r.gerbicz_amortized_us_per_iter << ","
+      << "\"production_prp_us_per_iter\":"
+      << r.production_prp_us_per_iter << ","
+      << "\"production_prp_iterations_per_second\":"
+      << r.production_prp_iterations_per_second << ","
+      << "\"production_prp_estimated_seconds\":"
+      << r.production_prp_estimated_seconds << ","
+      << "\"production_prp_probe_exact\":"
+      << (r.production_prp_probe_exact ? "true" : "false") << ","
       << "\"timing_scope\":\"steady-state square hot path; setup/JIT/backend probe excluded\","
       << "\"queue_sync\":\"engine::sync after warmup and every timed batch\","
       << "\"exactness_state\":\"NOT_VALIDATED_IN_BENCH2_TIMING\","
@@ -447,6 +602,16 @@ std::string record_csv(const Record& r, const ModeConfig& cfg) {
       << r.estimated_full_prp_seconds << ','
       << r.register_bytes << ','
       << r.checkpoint_bytes << ','
+      << r.gerbicz_block << ','
+      << r.gerbicz_checkpasslevel << ','
+      << r.gerbicz_full_check_interval << ','
+      << r.gerbicz_boundary_us << ','
+      << r.gerbicz_full_check_us << ','
+      << r.gerbicz_amortized_us_per_iter << ','
+      << r.production_prp_us_per_iter << ','
+      << r.production_prp_iterations_per_second << ','
+      << r.production_prp_estimated_seconds << ','
+      << (r.production_prp_probe_exact ? 1 : 0) << ','
       << csv_escape("steady-state square hot path; setup/JIT/backend probe excluded") << ','
       << csv_escape("engine::sync after warmup and every timed batch") << ','
       << csv_escape("NOT_VALIDATED_IN_BENCH2_TIMING") << ','
@@ -474,7 +639,12 @@ std::string record_text(const Record& r, const ModeConfig& cfg) {
       << " max_us=" << r.us_max
       << " dispersion_pct=" << r.dispersion_pct
       << " iter_s=" << r.iterations_per_second
-      << " ETA=" << r.estimated_full_prp_seconds << "s";
+      << " ETA=" << r.estimated_full_prp_seconds << "s"
+      << " prod_us=" << r.production_prp_us_per_iter
+      << " prod_iter_s=" << r.production_prp_iterations_per_second
+      << " prod_ETA=" << r.production_prp_estimated_seconds << "s"
+      << " gl_B=" << r.gerbicz_block
+      << " gl_exact=" << (r.production_prp_probe_exact ? "yes" : "no");
     if (!r.error.empty()) o << " error=" << r.error;
     return o.str();
 }
@@ -704,6 +874,26 @@ Record benchmark_point(const std::uint32_t exponent,
             r.estimated_full_prp_seconds =
                 r.us_median * static_cast<double>(exponent) / 1'000'000.0;
         }
+
+        const ProductionPrpTiming production =
+            measure_production_prp_timing(
+                *eng, exponent, r.us_median);
+
+        r.gerbicz_block = production.block;
+        r.gerbicz_checkpasslevel = production.checkpasslevel;
+        r.gerbicz_full_check_interval =
+            production.full_check_interval;
+        r.gerbicz_boundary_us = production.boundary_us;
+        r.gerbicz_full_check_us = production.full_check_us;
+        r.gerbicz_amortized_us_per_iter =
+            production.amortized_us_per_iter;
+        r.production_prp_us_per_iter =
+            production.production_us_per_iter;
+        r.production_prp_iterations_per_second =
+            production.production_iterations_per_second;
+        r.production_prp_estimated_seconds =
+            production.production_estimated_seconds;
+        r.production_prp_probe_exact = production.exact;
     } catch (const std::exception& e) {
         if (g_stop) throw;
         r.status = "SKIPPED";
