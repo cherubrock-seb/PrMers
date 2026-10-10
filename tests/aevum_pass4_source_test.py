@@ -16,6 +16,8 @@ checks = {
     "persistent cache": "storeAtomic" in api and "cache hit workload=" in api,
     "bounded candidate set": "AEVUM_AUTOTUNE_MAX_CANDIDATES" in api and "AEVUM_AUTOTUNE_BUDGET_MS" in api,
     "exact differential gate": "WORD MISMATCH" in api and "reference != candidate" in api,
+    "PRP shape production confirmation": "confirmPrpPlanProduction" in api and "production-confirm candidate=" in api,
+    "PRP shape confirmation cache generation": "shape-confirm=prp-square-v1" in api,
     "PFA excluded from runtime selection": "if (fft.isPfa()) return std::nullopt" in api,
     "measured boundary seed": 'add("4:512:8:512:202")' in api,
     "prepared multiply retained-width primitive": "regMulPreparedStep" in gpu and "carryFused(buf1)" in gpu,
