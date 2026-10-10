@@ -324,6 +324,14 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   if (isNvidiaGpu(id) && fft.shape.width == 1024 && fft.shape.nW() == 4)
     config.try_emplace("WMUL", "1");
 
+ // Measured win on the ordinary paired M31/M61 1K:8:512 variant-202 geometry.
+ // Keep 512-wide shapes unchanged; explicit -use/per-FFT values retain priority.
+ if (fft.shape.fft_type == FFT3161 &&
+ fft.shape.width == 1024 &&
+ fft.shape.middle == 8 &&
+ fft.shape.height == 512 &&
+ fft.variant == 202)
+ config.try_emplace("LDSPAD_H", "0");
   // Default value for -use options that must also be parsed in C++ code
   tail_single_wide = 0, tail_single_kernel = 1;
   in_place = 0;
