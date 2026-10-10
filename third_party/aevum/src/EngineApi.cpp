@@ -514,6 +514,100 @@ PlanComparison comparePlans(uint32_t exponent,
   return out;
 }
 
+struct PlanProductionConfirmation {
+  bool exact = false;
+  bool keep = false;
+  double gain = 1.0;
+  double worst = 100.0;
+  unsigned wins = 0;
+  std::array<double,3> native_seconds{};
+  std::array<double,3> candidate_seconds{};
+};
+
+// comparePlans is intentionally cheap and short, so it remains the first
+// exactness/ROE/ranking stage.  A positive PRP shape decision needs a second,
+// production-length confirmation before it may replace the native plan.  This
+// uses the same retained-width square path as Runtime::square_mul(reg,1):
+// 64 warmup squares, then paired 256-square timings in alternating order.
+PlanProductionConfirmation confirmPrpPlanProduction(
+    uint32_t exponent,
+    size_t register_count,
+    GpuCommon shared,
+    const std::string& device_name,
+    const FFTConfig& native_fft,
+    const FFTConfig& candidate_fft,
+    double min_gain) {
+  auto native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
+  auto candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
+  const RegPaths native_paths =
+      productionRegPaths(*native_gpu, native_fft, device_name);
+  const RegPaths candidate_paths =
+      productionRegPaths(*candidate_gpu, candidate_fft, device_name);
+
+  const u32 count = static_cast<u32>(std::max<size_t>(register_count, 1));
+  auto native_regs = native_gpu->makeBufVector(count);
+  auto candidate_regs = candidate_gpu->makeBufVector(count);
+  const Words seed = deterministicResidue(exponent, 0x12345678u);
+
+  auto reset = [&](Gpu& gpu, std::vector<Buffer<Word>>& regs) {
+    gpu.regWrite(regs[0], seed);
+    gpu.regSync();
+  };
+  auto sequence = [&](Gpu& gpu, const RegPaths& paths,
+                      std::vector<Buffer<Word>>& regs, unsigned units) {
+    runPlanSequence(
+        gpu, aevum_autotune::Workload::Prp, paths, regs[0], nullptr, units);
+    gpu.regSync();
+  };
+
+  // Compile/warm the exact production square path before measurement and
+  // re-check words at the same boundary.
+  reset(*native_gpu, native_regs);
+  reset(*candidate_gpu, candidate_regs);
+  sequence(*native_gpu, native_paths, native_regs, 64);
+  sequence(*candidate_gpu, candidate_paths, candidate_regs, 64);
+  if (native_gpu->regRead(native_regs[0]) !=
+      candidate_gpu->regRead(candidate_regs[0]))
+    return {};
+
+  auto timed = [&](Gpu& gpu, const RegPaths& paths,
+                   std::vector<Buffer<Word>>& regs) {
+    reset(gpu, regs);
+    const auto begin = std::chrono::steady_clock::now();
+    sequence(gpu, paths, regs, 256);
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - begin).count();
+    return std::make_pair(seconds, gpu.regRead(regs[0]));
+  };
+
+  PlanProductionConfirmation out;
+  for (unsigned repeat = 0; repeat < 3; ++repeat) {
+    std::pair<double,Words> native_sample, candidate_sample;
+    if (repeat & 1u) {
+      candidate_sample = timed(*candidate_gpu, candidate_paths, candidate_regs);
+      native_sample = timed(*native_gpu, native_paths, native_regs);
+    } else {
+      native_sample = timed(*native_gpu, native_paths, native_regs);
+      candidate_sample = timed(*candidate_gpu, candidate_paths, candidate_regs);
+    }
+
+    if (native_sample.second != candidate_sample.second) return out;
+
+    out.native_seconds[repeat] = native_sample.first;
+    out.candidate_seconds[repeat] = candidate_sample.first;
+    const double pair_gain = native_sample.first / candidate_sample.first;
+    out.wins += pair_gain >= 1.02;
+    out.worst = std::min(out.worst, pair_gain);
+  }
+
+  out.exact = true;
+  out.gain = median3(out.native_seconds) / median3(out.candidate_seconds);
+  out.keep = out.gain >= std::max(min_gain, 1.03) &&
+             out.wins >= 2 &&
+             out.worst >= 0.985;
+  return out;
+}
+
 struct BridgeComparison {
   bool exact = false;
   double canonical_seconds = 0.0;
@@ -1237,6 +1331,11 @@ args_.flags["MULTI_Q"] = "1";
             << ";safe=1;clean=1;roe-gate=1";
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
+      // v1 shape-cache entries were decided by the short comparePlans metric.
+      // PRP entries carrying this marker have passed the production-length
+      // confirmation gate below, so older positive cache records cannot bypass it.
+      if (workload_ == aevum_autotune::Workload::Prp)
+        flags << ";shape-confirm=prp-square-v1";
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,
                                               workload_, register_count_, exponent_, flags.str());
 
@@ -1401,6 +1500,61 @@ args_.flags["MULTI_Q"] = "1";
             break;
           }
         }
+
+        // The short comparePlans timing is only a ranker.  Hardware evidence
+        // at p145 showed +21.8% and +5.3% synthetic winners that measured
+        // +0.1% and -6.7% respectively through the production square path.
+        // Confirm the single best non-native PRP shape before selecting or
+        // persisting it; any marginal, noisy, mismatched, or failed result
+        // conservatively retains the native plan.
+        if (workload_ == aevum_autotune::Workload::Prp &&
+            best_spec != native_fft.spec() &&
+            best_speedup >= threshold) {
+          try {
+            const auto best_fft =
+                admissiblePlan(args_, exponent_, best_spec);
+            if (!best_fft)
+              throw std::runtime_error("best PRP shape became inadmissible");
+            if (!tune) tune.emplace(selected_device, shared_);
+
+            const auto confirm = confirmPrpPlanProduction(
+                exponent_, register_count_, tune->shared, device_name,
+                native_fft, *best_fft, threshold);
+
+            if (verbose) {
+              log("Aevum autotune: production-confirm candidate=%s exact=%d "
+                  "median_gain=%.5fx worst=%.5fx wins=%u/3 keep=%d "
+                  "native_s=%.6f,%.6f,%.6f candidate_s=%.6f,%.6f,%.6f.\n",
+                  best_spec.c_str(), confirm.exact ? 1 : 0,
+                  confirm.gain, confirm.worst, confirm.wins,
+                  confirm.keep ? 1 : 0,
+                  confirm.native_seconds[0], confirm.native_seconds[1],
+                  confirm.native_seconds[2],
+                  confirm.candidate_seconds[0], confirm.candidate_seconds[1],
+                  confirm.candidate_seconds[2]);
+            }
+
+            if (confirm.exact && confirm.keep) {
+              best_speedup = confirm.gain;
+            } else {
+              best_spec = native_fft.spec();
+              best_speedup = 1.0;
+            }
+          } catch (const std::exception& e) {
+            if (verbose)
+              log("Aevum autotune: production-confirm fallback=native reason=%s.\n",
+                  e.what());
+            best_spec = native_fft.spec();
+            best_speedup = 1.0;
+          } catch (...) {
+            if (verbose)
+              log("Aevum autotune: production-confirm fallback=native "
+                  "reason=engine-exception.\n");
+            best_spec = native_fft.spec();
+            best_speedup = 1.0;
+          }
+        }
+
         tune.reset();
         plan_search_tried.assign(tried.begin(), tried.end());
         std::sort(plan_search_tried.begin(), plan_search_tried.end());
