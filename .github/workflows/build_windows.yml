@@ -336,9 +336,10 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.99-pass5-prp-max`
-            - Standalone Aevum source SHA: `a59c52bfe6a4e7d1eb243776bea2c42f7a1c02a7`
-            - Aevum v0.3.99 release gate: exact-SHA CI and Linux/Windows/macOS package preflight PASS; annotated release tag, platform assets and SHA256 checksums verified before this PrMers release.
+            - Standalone Aevum tag: `v0.3.100-pass5-prp-max`
+            - Standalone Aevum source SHA: `6db2d68f8eeb1a0b959c8d7a6212c58ccd14251e`
+            - Aevum v0.3.100 release gate: exact-SHA workflow PASS on Linux, Windows, macOS x86_64 and macOS arm64; annotated release tag, all 9 release assets, per-asset SHA256 files, SHA256SUMS and package SOURCE_INFO verified before this PrMers release.
+            - PRP factor-3 capacity safety: production-standard Bench2 passed exact Gerbicz validation 40/40 across RTX 3080 and Radeon VII; p82589933 promotes from the unsafe 2M transform to a 4M plan on both GPUs, and targeted Radeon timing repeats accepted the release timing gate.
             - NVIDIA 1K automatic radix-8 policy: RTX 3080 exact fixed-plan validation improved sustained PRP throughput by +4.481% at p=210000017 and +4.558% at p=219999919 versus the validated radix-4 fallback; Radeon VII retains radix-4 and passed exact non-regression validation.
             - Scoped 1K height LDS padding policy: LDSPAD_H=0 applies only to `1:1K:8:512:202`; exact paired validation measured +0.344% at p=210000017 and +0.805% at p=219999919 on RTX 3080, plus +3.287% at p=210000017 on Radeon VII.
             - GPU smoke harness correctness: vendored Aevum smoke now uses valid `-proof 1`; committed smoke passed on RTX 3080 and Radeon VII.
