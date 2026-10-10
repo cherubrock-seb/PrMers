@@ -85,8 +85,13 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.98-pass5-prp-max`
-            - Standalone Aevum source SHA: `5fd8f40079a10c5e11460e3f2b7dff7c60e041f4`
+            - Standalone Aevum tag: `v0.3.99-pass5-prp-max`
+            - Standalone Aevum source SHA: `a59c52bfe6a4e7d1eb243776bea2c42f7a1c02a7`
+            - Aevum v0.3.99 release gate: exact-SHA CI and Linux/Windows/macOS package preflight PASS; annotated release tag, platform assets and SHA256 checksums verified before this PrMers release.
+            - NVIDIA 1K automatic radix-8 policy: RTX 3080 exact fixed-plan validation improved sustained PRP throughput by +4.481% at p=210000017 and +4.558% at p=219999919 versus the validated radix-4 fallback; Radeon VII retains radix-4 and passed exact non-regression validation.
+            - Scoped 1K height LDS padding policy: LDSPAD_H=0 applies only to `1:1K:8:512:202`; exact paired validation measured +0.344% at p=210000017 and +0.805% at p=219999919 on RTX 3080, plus +3.287% at p=210000017 on Radeon VII.
+            - GPU smoke harness correctness: vendored Aevum smoke now uses valid `-proof 1`; committed smoke passed on RTX 3080 and Radeon VII.
+            - Windows checkpoint portability: Marin failed-file cleanup preserves regular-file safety using the MSVC `_S_IFMT/_S_IFREG` path; Linux failure tests and MinGW header compilation passed, and the exact Windows release preflight passed after one unrelated transient MSYS2 mirror retry.
             - PFA7 fftP gather KEEP: RTX 3080 fixed-plan median +0.631%; Radeon VII -0.121% within no-regression tolerance; PFA3/PFA9 exact and generated fftP unchanged.
             - NVIDIA PFA WIDTH512 kfftWGF61 chain-tabmul specialization: RTX 3080 fixed-plan median +0.544% PFA7 and +0.655% PFA9 full iteration; kfftWGF61 +3.78%; Radeon VII generated kernel content remains byte-identical to stock and exact.
             - NVIDIA PFA ZEROHACK_H=0 tail/height policy: RTX 3080 fixed-plan full iteration +0.131% PFA3, +0.079% PFA7, +0.151% PFA9 with 20/20 paired blocks winning; Radeon VII retains the existing ZEROHACK_H default and remains exact on PFA3/PFA7/PFA9.
@@ -94,7 +99,7 @@ jobs:
             - NVIDIA PFA GF31 fftW canonical scatter recurrence: RTX 3080 confirmation +0.070% PFA3, +0.142% PFA7 and +0.187% PFA9 with 36/36 paired wins; six additional range exponents added 36/36 wins with radix aggregate gains of +0.071% PFA3, +0.143% PFA7 and +0.175% PFA9; Radeon retains the production scatter.
             - NVIDIA PFA7/PFA9 GF61 fftW canonical scatter recurrence: RTX 3080 confirmation +0.113% PFA7 and +0.158% PFA9 with 24/24 paired wins; four additional range exponents added 24/24 wins with aggregate +0.098% PFA7 and +0.155% PFA9; Radeon and RTX PFA3 retain the production scatter.
             - NVIDIA PFA9 GF61 middle-out inverse-normalization fusion: RTX 3080 central confirmation +0.059% with 20/20 paired wins, range validation +0.058% with 12/12 wins, and integration confirmation +0.052% with 6/6 wins; JIT resources improved from 70 to 66 registers and from 1498 to 1290 PTX instructions with zero local memory and unchanged 7-block/SM occupancy; Radeon PFA9 exact 10000 passed and GF61 middle-out binaries remained byte-identical to stock.
-            - NVIDIA PFA7 GF61 middle-out inverse-normalization prescale: RTX 3080 central fixed-plan geomean +0.0213% with 10/12 wins and range aggregate +0.0255% with 10/12 wins; JIT resources improved from 72 to 70 registers and from 1381 to 1225 PTX instructions with zero local memory and unchanged 7-block/SM occupancy; Radeon VII PFA7 GF61 middle-out remained byte-identical and exact 10000; standalone Aevum v0.3.98 passed PFA7 exact 10000 and PFA9 regression exact 5000 on both RTX 3080 and Radeon VII.
+            - NVIDIA PFA7 GF61 middle-out inverse-normalization prescale: RTX 3080 central fixed-plan geomean +0.0213% with 10/12 wins and range aggregate +0.0255% with 10/12 wins; JIT resources improved from 72 to 70 registers and from 1381 to 1225 PTX instructions with zero local memory and unchanged 7-block/SM occupancy; Radeon VII PFA7 GF61 middle-out remained byte-identical and exact 10000; historical standalone Aevum v0.3.98 passed PFA7 exact 10000 and PFA9 regression exact 5000 on both RTX 3080 and Radeon VII.
             - CUDA ZEROHACK_W is selected empirically after plan selection using exact cached mini-benchmarking; RTX 3080 validated W0 while AMD/OpenCL behavior remains unchanged.
             - PrMers wide-digit Aevum adapter correctness validated on Radeon VII at p=19121591 with fixed plan 1:256:4:256:101.
             - Supported release architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64.
