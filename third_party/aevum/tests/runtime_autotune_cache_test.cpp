@@ -88,8 +88,14 @@ int main() {
   set_env("AEVUM_AUTOTUNE", nullptr);
 
   set_env("AEVUM_TUNE_DIR", nullptr); assert(!hasManualPlanOverrideEnvironment());
-  set_env("AEVUM_TUNE_DIR", "/tmp/manual-tune"); assert(hasManualPlanOverrideEnvironment());
+  set_env("AEVUM_TUNE_DIR", "/tmp/pinned-tune-root");
+  assert(!hasManualPlanOverrideEnvironment());
   set_env("AEVUM_TUNE_DIR", nullptr);
+
+  set_env("AEVUM_RADIX1K", "8");
+  assert(hasManualPlanOverrideEnvironment());
+  set_env("AEVUM_RADIX1K", nullptr);
+  assert(!hasManualPlanOverrideEnvironment());
 
   std::filesystem::remove(tmp, ec);
   std::cout << "runtime_autotune_cache_test: OK\n";

@@ -54,7 +54,9 @@ std::optional<Record> load(const std::filesystem::path& path, const std::string&
 void storeAtomic(const std::filesystem::path& path, const Record& record);
 
 // Environment variables which directly choose an FFT/tuning implementation.
-// AUTOTUNE controls/cache paths are intentionally not blockers.
+// AUTOTUNE controls/cache paths and AEVUM_TUNE_DIR are intentionally not
+// blockers: AEVUM_TUNE_DIR chooses where tuning data is read from, not an
+// unsafe plan by itself.
 bool hasManualPlanOverrideEnvironment();
 
 } // namespace aevum_autotune

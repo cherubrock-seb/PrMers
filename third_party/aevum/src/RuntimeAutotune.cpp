@@ -247,8 +247,8 @@ void storeAtomic(const std::filesystem::path& path, const Record& record) {
 
 bool hasManualPlanOverrideEnvironment() {
   static const char* names[] = {
-    "AEVUM_TUNE_DIR", "AEVUM_GB202_TUNE", "AEVUM_RADIX1K",
-    "AEVUM_TYPE4_MULTI_Q", "AEVUM_PFA_USE", "AEVUM_GF61_LIMB32",
+    "AEVUM_GB202_TUNE", "AEVUM_RADIX1K", "AEVUM_TYPE4_MULTI_Q",
+    "AEVUM_PFA_USE", "AEVUM_GF61_LIMB32",
     "AEVUM_CARRY_WMUL", "AEVUM_PRP_MIDDLE1", "AEVUM_REG_LEAD_CACHE",
     "PRMERS_AEVUM_PRP_FFT", "PRMERS_AEVUM_LL_FFT", "PRMERS_AEVUM_PM1_FFT",
     "PRMERS_AEVUM_ECM_FFT"

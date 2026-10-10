@@ -111,8 +111,9 @@ double positiveEnvDouble(const char* name, double fallback, double lo, double hi
   return std::max(lo, std::min(hi, v));
 }
 
-bool pm1Factor3Workload(aevum_autotune::Workload workload) {
-  return workload == aevum_autotune::Workload::Pm1 ||
+bool factor3CapacityWorkload(aevum_autotune::Workload workload) {
+  return workload == aevum_autotune::Workload::Prp ||
+         workload == aevum_autotune::Workload::Pm1 ||
          workload == aevum_autotune::Workload::Pm1Lowmem ||
          workload == aevum_autotune::Workload::Pm1Ultralowmem;
 }
@@ -183,7 +184,7 @@ bool usableTuneEntry(const Args& args,
         tuned.fft.knownUnsafeOrdinaryPrp(exponent))
       continue;
 
-    if (pm1Factor3Workload(workload) &&
+    if (factor3CapacityWorkload(workload) &&
         !factor3CapacitySafe(args, exponent, tuned.fft)) continue;
     return true;
   }
@@ -220,7 +221,7 @@ std::vector<std::string> autotuneCandidates(const Args& args,
         fft->knownUnsafeOrdinaryPrp(exponent))
       return;
 
-    if (pm1Factor3Workload(workload) &&
+    if (factor3CapacityWorkload(workload) &&
         !factor3CapacitySafe(args, exponent, *fft)) return;
     const std::string normalized = fft->spec();
     if (seen.insert(normalized).second) candidates.push_back(normalized);
@@ -1205,7 +1206,7 @@ args_.flags["MULTI_Q"] = "1";
     if (!explicit_fft_spec &&
         !manual_plan_env &&
         !gb202_profile &&
-        pm1Factor3Workload(workload_) &&
+        factor3CapacityWorkload(workload_) &&
         !factor3CapacitySafe(args_, exponent_, native_fft)) {
       const std::string unsafe_spec = native_fft.spec();
       const double unsafe_bpw =
@@ -1215,7 +1216,7 @@ args_.flags["MULTI_Q"] = "1";
           promoteToFactor3SafePlan(args_, exponent_, native_fft);
 
       if (verbose) {
-        log("Aevum P-1 factor-3 capacity guard: "
+        log("Aevum PRP/P-1 factor-3 capacity guard: "
             "%s rejected at %.2f bpw; promoted to %s "
             "(+log2(3) arithmetic headroom).\n",
             unsafe_spec.c_str(),
@@ -1246,7 +1247,7 @@ args_.flags["MULTI_Q"] = "1";
           const bool cached_usable = cached_fft &&
               !(workload_ == aevum_autotune::Workload::Prp &&
                 cached_fft->knownUnsafeOrdinaryPrp(exponent_)) &&
-              (!pm1Factor3Workload(workload_) ||
+              (!factor3CapacityWorkload(workload_) ||
                factor3CapacitySafe(args_, exponent_, *cached_fft));
           if (cached_usable && !cached_record->complete) {
             // An earlier run ran out of time (or hit an engine error) before

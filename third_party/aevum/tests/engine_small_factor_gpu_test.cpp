@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -34,8 +35,12 @@ int main(int argc, char** argv) {
     if (!lib) throw std::runtime_error(dlerror());
 
     using create_t = aevum_engine_handle (*)(uint32_t, size_t, uint32_t, int, const char*, const char*);
+    using create_ex_t = aevum_engine_handle (*)(uint32_t, size_t, uint32_t, int, const char*, const char*, uint32_t);
     using destroy_t = void (*)(aevum_engine_handle);
     using words_t = size_t (*)(aevum_engine_handle);
+    using transform_t = size_t (*)(aevum_engine_handle);
+    using plan_t = int (*)(aevum_engine_handle, char*, size_t);
+    using sync_t = int (*)(aevum_engine_handle);
     using set_t = int (*)(aevum_engine_handle, size_t, uint32_t);
     using prepare_t = int (*)(aevum_engine_handle, size_t, size_t);
     using square_t = int (*)(aevum_engine_handle, size_t, uint32_t);
@@ -44,8 +49,12 @@ int main(int argc, char** argv) {
     using error_t = const char* (*)();
 
     const auto create = load_symbol<create_t>(lib, "aevum_engine_create");
+    const auto create_ex = load_symbol<create_ex_t>(lib, "aevum_engine_create_ex");
     const auto destroy = load_symbol<destroy_t>(lib, "aevum_engine_destroy");
     const auto word_count = load_symbol<words_t>(lib, "aevum_engine_word_count");
+    const auto transform_size = load_symbol<transform_t>(lib, "aevum_engine_transform_size");
+    const auto plan_spec = load_symbol<plan_t>(lib, "aevum_engine_plan_spec");
+    const auto sync = load_symbol<sync_t>(lib, "aevum_engine_sync");
     const auto set_u32 = load_symbol<set_t>(lib, "aevum_engine_set_u32");
     const auto prepare = load_symbol<prepare_t>(lib, "aevum_engine_prepare");
     const auto square_mul = load_symbol<square_t>(lib, "aevum_engine_square_mul");
@@ -71,6 +80,45 @@ int main(int argc, char** argv) {
             throw std::runtime_error(last_error());
         }
         check_small(words, 70, "mul factor 2");
+    } catch (...) {
+        destroy(handle);
+        dlclose(lib);
+        throw;
+    }
+
+    destroy(handle);
+
+    // Ordinary production PRP also executes square_mul(..., 3) in its
+    // Gerbicz full-check replay. M82589933 reproduces the selector boundary
+    // where the old PRP AUTO path admitted a 2M transform with insufficient
+    // factor-3 arithmetic headroom.
+    handle = create_ex(
+        82589933u, 8, device, 1, "", tune_dir, AEVUM_WORKLOAD_PRP);
+    if (!handle) throw std::runtime_error(last_error());
+
+    try {
+        const size_t transform = transform_size(handle);
+        std::array<char, 96> plan{};
+        if (!plan_spec(handle, plan.data(), plan.size()))
+            throw std::runtime_error("PRP active plan unavailable");
+        if (transform <= 2097152u)
+            throw std::runtime_error(
+                "PRP factor-3 capacity guard did not promote the unsafe 2M plan");
+
+        std::vector<uint32_t> words(word_count(handle));
+        if (!set_u32(handle, 0, 3) ||
+            !square_mul(handle, 0, 3) ||
+            !sync(handle) ||
+            !get_words(handle, 0, words.data(), words.size())) {
+            throw std::runtime_error(last_error());
+        }
+        check_small(words, 27, "PRP Gerbicz square_mul factor 3");
+
+        std::cout << "Aevum PRP factor-3 capacity"
+                  << " exponent=82589933"
+                  << " transform=" << transform
+                  << " plan=" << plan.data()
+                  << std::endl;
     } catch (...) {
         destroy(handle);
         dlclose(lib);
