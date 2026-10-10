@@ -55,6 +55,11 @@ struct CliOptions {
     int aevum_pfa_radix = -1;             // -1=auto, 0=disabled, 3, 7, or 9
     bool aevum_pfa_off = false;            // keep the stock power-of-two Aevum plan
     bool bench = false;
+    // Production-faithful PRP selector benchmark. Kept separate from -bench.
+    bool bench2 = false;
+    std::string bench2_mode = "quick";
+    std::string bench2_output = "bench2-results";
+    bool bench2_resume = true;
     bool profiling = false;
     bool debug = false;
     bool verify = true;

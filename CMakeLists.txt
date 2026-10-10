@@ -6,6 +6,17 @@ endif()
 
 project(PrMers LANGUAGES CXX)
 
+execute_process(
+  COMMAND git rev-parse HEAD
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+  OUTPUT_VARIABLE PRMERS_GIT_SHA
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(NOT PRMERS_GIT_SHA)
+  set(PRMERS_GIT_SHA "unknown")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -48,6 +59,7 @@ target_compile_options(prmers PRIVATE
 
 target_compile_definitions(prmers PRIVATE
   GPU
+  PRMERS_GIT_SHA=${PRMERS_GIT_SHA}
   AEVUM_ENGINE_DEFAULT_LIB=\"/usr/local/lib/prmers/libaevum_engine.so\"
   AEVUM_ENGINE_DEFAULT_TUNE_DIR=\"/usr/local/share/prmers/aevum\"
   $<$<PLATFORM_ID:Windows>:KERNEL_PATH=\"./kernels/\">

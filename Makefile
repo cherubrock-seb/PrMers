@@ -10,10 +10,12 @@ DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.13-gm-vtrace-aevum-r1)
+GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 PACKAGE := prmers-$(VERSION)
 
 WARN        := -Wall -Wextra -Wsign-conversion
 CPPFLAGS    := -I$(INC_DIR) -I$(INC_DIR)/marin -DGPU -DAEVUM_ENGINE_DEFAULT_LIB=\"$(PREFIX)/lib/prmers/libaevum_engine.so\" -DAEVUM_ENGINE_DEFAULT_TUNE_DIR=\"$(PREFIX)/share/prmers/aevum\"
+CPPFLAGS    += -DPRMERS_GIT_SHA=$(GIT_SHA)
 MARCH       := native
 ifeq ($(UNAME_S),Darwin)
   OPT := -O3 -ffinite-math-only -mcpu=native
@@ -751,3 +753,7 @@ test-pm1-b1-limit: all
 .PHONY: test-pm1-legacy-loop-bound
 test-pm1-legacy-loop-bound: all
 	bash tests/pm1_legacy_loop_bound_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-bench2-source
+test-bench2-source:
+	python3 tests/bench2_source_test.py
