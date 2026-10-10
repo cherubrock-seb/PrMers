@@ -70,7 +70,15 @@ public:
 			}
 			_cfile = nullptr;
 			struct stat st;
-			if (_failed && _truncating && stat(_filename.c_str(), &st) == 0 && S_ISREG(st.st_mode)) std::remove(_filename.c_str());
+			if (_failed && _truncating && stat(_filename.c_str(), &st) == 0)
+			{
+#ifdef _WIN32
+				const bool regular_file = (st.st_mode & _S_IFMT) == _S_IFREG;
+#else
+				const bool regular_file = S_ISREG(st.st_mode);
+#endif
+				if (regular_file) std::remove(_filename.c_str());
+			}
 		}
 		return !_failed;
 	}
