@@ -23,6 +23,7 @@
 //#define CL_TARGET_OPENCL_VERSION 200
 #define NOMINMAX
 #include "core/App.hpp"
+#include "core/Bench2.hpp"
 #include "core/InheritedSignals.hpp"
 #include "core/LegacyLlGuard.hpp"
 #include "core/ExitCodes.hpp"
@@ -1166,7 +1167,7 @@ int App::runInner() {
             // No GUI: carry on headless if there is work, otherwise there is nothing left to wait for
             // (the idle loop below can only be ended through the GUI or a signal).
             std::cerr << "The GUI could not be started." << std::endl;
- if (!hasWorktodoEntry_ && options.exponent == 0 && !options.bench && options.filemers.empty()) {
+ if (!hasWorktodoEntry_ && options.exponent == 0 && !options.bench && !options.bench2 && options.filemers.empty()) {
                 std::cerr << "Nothing to run and no GUI; exiting." << std::endl;
                 return 1;
             }
@@ -1188,7 +1189,7 @@ int App::runInner() {
         // malformed entries) with no exponent given. Running with exponent 0 would only fail; wait for
         // "Append & Run" instead. Only wait when the GUI actually started.
         if (guiServer_ && (!file_non_empty(cfg.worktodo_path) || (!hasWorktodoEntry_ && options.exponent == 0 &&
-                                                       !options.bench && options.filemers.empty()))) {
+                                                       !options.bench && !options.bench2 && options.filemers.empty()))) {
             if (file_non_empty(cfg.worktodo_path)) {
                 std::cout << "No runnable entry in " << cfg.worktodo_path << "; waiting for a new entry.\n";
                 guiServer_->appendLog("No runnable entry in " + cfg.worktodo_path + "; waiting for a new entry.");
@@ -1485,6 +1486,9 @@ int App::runInner() {
         }
     } else if (options.exportmers) {
         rc = exportResumeFromMersFile(options.filemers, "");
+        ran = true;
+    } else if (options.bench2) {
+        rc = core::bench2::run(options);
         ran = true;
     } else if (options.bench) {
         rc = runGpuBenchmarkMarin();
