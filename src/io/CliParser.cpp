@@ -175,6 +175,7 @@ void printUsage(const char* progName) {
     std::cout << "  -bench3              : Compare production AUTO against bounded legal FFT/PFA alternatives" << std::endl;
     std::cout << "  -bench3-mode <mode>  : quick, standard, dense, or full (default: quick)" << std::endl;
     std::cout << "  -bench3-out <path>   : Bench3 output directory (default: bench3-results)" << std::endl;
+    std::cout << "  -bench3-plan-timeout <seconds> : Maximum wall time for one isolated Bench3 plan (default: 300, 0 disables)" << std::endl;
     std::cout << "  -bench3-no-resume    : Clear/replace completed bench3 point records instead of resuming" << std::endl;
    // std::cout << "  -chunk256 <1..4>     : (Optional) cap for CHUNK256; lower can help on Radeon VII/GCN (default: auto)" << std::endl;
     std::cout << "  -filemers <path>     : (Optional) Export .mers file to GMP-ECM .save format using stored state" << std::endl;
@@ -897,6 +898,41 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-bench3-no-resume") == 0) {
             opts.bench3_resume = false;
+        }
+        else if (std::strcmp(argv[i], "-bench3-plan-timeout") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-plan-timeout requires seconds");
+            const auto value = std::strtoull(argv[++i], nullptr, 10);
+            if (value > static_cast<unsigned long long>(std::numeric_limits<uint32_t>::max()))
+                throw std::invalid_argument("-bench3-plan-timeout is too large");
+            opts.bench3_plan_timeout_sec = static_cast<uint32_t>(value);
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker") == 0) {
+            opts.bench3 = true;
+            opts.bench3_worker = true;
+            opts.exponent = 127;
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker-exp") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-worker-exp requires an exponent");
+            const auto value = std::strtoull(argv[++i], nullptr, 10);
+            if (value == 0 || value > static_cast<unsigned long long>(std::numeric_limits<uint32_t>::max()))
+                throw std::invalid_argument("-bench3-worker-exp is invalid");
+            opts.bench3_worker_exponent = static_cast<uint32_t>(value);
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker-index") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-worker-index requires an index");
+            opts.bench3_worker_index = std::strtoull(argv[++i], nullptr, 10);
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker-request") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-worker-request requires a request");
+            opts.bench3_worker_request = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker-plan") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-worker-plan requires a plan");
+            opts.bench3_worker_resolved_plan = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-bench3-worker-partial") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-worker-partial requires a path");
+            opts.bench3_worker_partial_dir = argv[++i];
         }
         else if (std::strcmp(argv[i], "-gui") == 0) {
             opts.gui = true;

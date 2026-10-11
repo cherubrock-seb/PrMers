@@ -5,13 +5,17 @@
 #include "io/CliParser.hpp"
 #include "marin/engine.h"
 #include "opencl/Context.hpp"
+#include "util/SelfExe.hpp"
+#include "util/WinCmdLine.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -21,9 +25,23 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gmpxx.h>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
 
 #ifndef PRMERS_GIT_SHA
 #define PRMERS_GIT_SHA unknown
@@ -35,6 +53,7 @@ namespace core::bench3 {
 namespace {
 
 constexpr const char* kSchemaVersion = "bench3.v1";
+constexpr const char* kPlanCheckpointVersion = "bench3.plan.v1";
 constexpr std::size_t kPrpRegisterCount = 8;
 volatile std::sig_atomic_t g_stop = 0;
 
@@ -351,11 +370,26 @@ PlanResult measure_plan(std::uint32_t exponent,
                         const mpz_class* auto_residue,
                         mpz_class* measured_residue) {
     PlanResult r;
+    const auto plan_begin = std::chrono::steady_clock::now();
+    const auto progress = [&](const std::string& phase) {
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - plan_begin).count();
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3)
+             << "BENCH3_PROGRESS p=" << exponent
+             << " request=" << request
+             << " phase=" << phase
+             << " plan=" << (resolved_plan.empty() ? "AUTO" : resolved_plan)
+             << " elapsed_s=" << elapsed;
+        std::cout << line.str() << std::endl;
+    };
+
     r.auto_baseline = auto_baseline;
     r.request = request;
     r.resolved_plan = resolved_plan;
 
     const auto setup_begin = std::chrono::steady_clock::now();
+    progress("setup_begin");
     try {
         if (auto_baseline) {
             engine::configure_gpu_backend(
@@ -369,6 +403,7 @@ PlanResult measure_plan(std::uint32_t exponent,
             engine::create_gpu(exponent, kPrpRegisterCount, device_index, false));
         if (!eng) throw std::runtime_error("engine::create_gpu returned null");
         eng->sync();
+        progress("setup_done");
 
         r.setup_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - setup_begin).count();
@@ -387,28 +422,34 @@ PlanResult measure_plan(std::uint32_t exponent,
             r.active_plan = "marin-native";
         }
 
+        progress("exact_begin");
         const mpz_class residue = exact_residue(*eng, cfg.exact_iterations);
         r.residue_hash = residue_hash(residue);
         if (measured_residue) *measured_residue = residue;
+        progress("exact_done");
 
         r.exact_match = auto_baseline ||
                         (auto_residue != nullptr && residue == *auto_residue);
         if (!r.exact_match) {
             r.status = "EXACT_MISMATCH";
             r.error = "full deterministic residue differs from AUTO";
+            progress("exact_mismatch");
             return r;
         }
 
+        progress("warmup_begin");
         eng->set(0, 3u);
         for (std::size_t i = 0; i < cfg.warmup; ++i) {
             if (g_stop) throw std::runtime_error("bench3 interrupted");
             eng->square_mul(0);
         }
         eng->sync();
+        progress("warmup_done");
 
         std::vector<double> samples;
         samples.reserve(cfg.repetitions);
         for (std::size_t rep = 0; rep < cfg.repetitions; ++rep) {
+            progress("timing_rep_" + std::to_string(rep + 1) + "_begin");
             eng->set(0, 3u);
             eng->sync();
             const auto begin = std::chrono::steady_clock::now();
@@ -421,18 +462,22 @@ PlanResult measure_plan(std::uint32_t exponent,
             samples.push_back(
                 std::chrono::duration<double, std::micro>(end - begin).count() /
                 static_cast<double>(cfg.timed_iterations));
+            progress("timing_rep_" + std::to_string(rep + 1) + "_done");
         }
 
         r.us_median = median(samples);
         r.us_min = *std::min_element(samples.begin(), samples.end());
         r.us_max = *std::max_element(samples.begin(), samples.end());
 
+        progress("production_probe_begin");
         const ProductionTiming prod =
             production_timing(*eng, exponent, r.us_median);
         r.production_probe_exact = prod.exact;
         r.production_us_per_iter = prod.production_us_per_iter;
+        progress("production_probe_done");
     } catch (const std::exception& e) {
         if (g_stop) throw;
+        progress("error");
         const std::string detail = e.what();
         if (!auto_baseline &&
             detail.find("small-factor capacity exceeded") != std::string::npos) {
@@ -468,32 +513,583 @@ std::vector<std::string> candidate_requests() {
     };
 }
 
+std::string checkpoint_context(std::uint32_t exponent,
+                               std::size_t device_index,
+                               const ModeConfig& cfg) {
+    const DeviceInfo info = device_info(device_index);
+    std::ostringstream o;
+    o << kSchemaVersion << '|'
+      << PRMERS_STRINGIFY(PRMERS_GIT_SHA) << '|'
+      << cfg.name << '|'
+      << exponent << '|'
+      << device_index << '|'
+      << info.vendor << '|'
+      << info.name << '|'
+      << info.driver << '|'
+      << info.runtime << '|'
+      << cfg.warmup << '|'
+      << cfg.timed_iterations << '|'
+      << cfg.repetitions << '|'
+      << cfg.exact_iterations;
+    return o.str();
+}
+
+std::filesystem::path partial_point_path(const std::filesystem::path& root,
+                                         std::size_t device,
+                                         std::uint32_t exponent) {
+    std::ostringstream name;
+    name << "d" << device << "_p" << std::setw(10) << std::setfill('0')
+         << exponent;
+    return root / name.str();
+}
+
+std::filesystem::path plan_checkpoint_path(const std::filesystem::path& dir,
+                                           std::size_t index) {
+    std::ostringstream name;
+    name << "plan_" << std::setw(2) << std::setfill('0') << index << ".state";
+    return dir / name.str();
+}
+
+void atomic_write_plan_checkpoint(const std::filesystem::path& path,
+                                  const std::string& context,
+                                  const PlanResult& r) {
+    std::filesystem::create_directories(path.parent_path());
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot create Bench3 plan checkpoint");
+        out << kPlanCheckpointVersion << '\n'
+            << std::quoted(context) << '\n'
+            << std::quoted(r.status) << '\n'
+            << std::quoted(r.error) << '\n'
+            << std::quoted(r.request) << '\n'
+            << std::quoted(r.resolved_plan) << '\n'
+            << std::quoted(r.active_plan) << '\n'
+            << std::quoted(r.backend) << '\n'
+            << std::quoted(r.residue_hash) << '\n'
+            << r.auto_baseline << ' ' << r.legal << ' ' << r.duplicate << ' '
+            << r.exact_match << ' ' << r.production_probe_exact << '\n'
+            << r.transform_words << '\n'
+            << std::setprecision(17)
+            << r.transform_mwords << ' ' << r.bpw << ' ' << r.setup_ms << ' '
+            << r.us_median << ' ' << r.us_min << ' ' << r.us_max << ' '
+            << r.production_us_per_iter << '\n';
+        out.flush();
+        if (!out) throw std::runtime_error("cannot flush Bench3 plan checkpoint");
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot publish Bench3 plan checkpoint");
+    }
+}
+
+bool read_plan_checkpoint(const std::filesystem::path& path,
+                          const std::string& expected_context,
+                          PlanResult& r) {
+    std::ifstream in(path);
+    if (!in) return false;
+
+    std::string version;
+    if (!std::getline(in, version) || version != kPlanCheckpointVersion)
+        return false;
+
+    std::string context;
+    if (!(in >> std::quoted(context)) || context != expected_context)
+        return false;
+
+    PlanResult loaded;
+    if (!(in >> std::quoted(loaded.status)
+             >> std::quoted(loaded.error)
+             >> std::quoted(loaded.request)
+             >> std::quoted(loaded.resolved_plan)
+             >> std::quoted(loaded.active_plan)
+             >> std::quoted(loaded.backend)
+             >> std::quoted(loaded.residue_hash)
+             >> loaded.auto_baseline
+             >> loaded.legal
+             >> loaded.duplicate
+             >> loaded.exact_match
+             >> loaded.production_probe_exact
+             >> loaded.transform_words
+             >> loaded.transform_mwords
+             >> loaded.bpw
+             >> loaded.setup_ms
+             >> loaded.us_median
+             >> loaded.us_min
+             >> loaded.us_max
+             >> loaded.production_us_per_iter))
+        return false;
+
+    if (loaded.status == "ERROR" || loaded.status == "TIMEOUT")
+        return false;
+    r = std::move(loaded);
+    return true;
+}
+
+void atomic_write_mpz(const std::filesystem::path& path,
+                      const mpz_class& value) {
+    std::filesystem::create_directories(path.parent_path());
+    auto tmp = path;
+    tmp += ".tmp";
+    const std::string tmp_name = tmp.string();
+    std::FILE* out = std::fopen(tmp_name.c_str(), "wb");
+    if (!out) throw std::runtime_error("cannot create Bench3 AUTO residue checkpoint");
+
+    const std::size_t bytes = mpz_out_raw(out, value.get_mpz_t());
+    const int flush_rc = std::fflush(out);
+    const int close_rc = std::fclose(out);
+    if (bytes == 0 || flush_rc != 0 || close_rc != 0) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot write Bench3 AUTO residue checkpoint");
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot publish Bench3 AUTO residue checkpoint");
+    }
+}
+
+bool read_mpz_checkpoint(const std::filesystem::path& path,
+                         mpz_class& value) {
+    const std::string name = path.string();
+    std::FILE* in = std::fopen(name.c_str(), "rb");
+    if (!in) return false;
+    const std::size_t bytes = mpz_inp_raw(value.get_mpz_t(), in);
+    const int trailing = std::fgetc(in);
+    const bool ok = bytes != 0 && trailing == EOF && std::ferror(in) == 0;
+    std::fclose(in);
+    return ok;
+}
+
+void checkpoint_plan(const std::filesystem::path& partial_dir,
+                     const std::string& context,
+                     std::size_t index,
+                     std::uint32_t exponent,
+                     const PlanResult& row) {
+    if (row.status == "ERROR") return;
+    const auto path = plan_checkpoint_path(partial_dir, index);
+    atomic_write_plan_checkpoint(path, context, row);
+    std::cout << "BENCH3_PLAN_CHECKPOINT p=" << exponent
+              << " index=" << index
+              << " request=" << row.request
+              << " status=" << row.status
+              << " path=" << path.string() << std::endl;
+}
+
+struct PlanWorkerProcessResult {
+    bool timed_out = false;
+    bool interrupted = false;
+    int exit_code = -1;
+    std::string error;
+};
+
+std::string bench3_self_executable() {
+#ifdef _WIN32
+    std::vector<char> path(32768, '\0');
+    const DWORD n = GetModuleFileNameA(
+        nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (n == 0 || n >= path.size()) return {};
+    return std::string(path.data(), n);
+#else
+    return util::selfExecutablePath();
+#endif
+}
+
+std::vector<std::string> worker_arguments(
+        const ModeConfig& cfg,
+        std::size_t device_index,
+        std::uint32_t exponent,
+        std::size_t plan_index,
+        const std::string& request,
+        const std::string& resolved_plan,
+        const std::filesystem::path& partial_dir) {
+    const std::string exe = bench3_self_executable();
+    if (exe.empty()) throw std::runtime_error("cannot determine Bench3 worker executable");
+
+    std::vector<std::string> args{
+        exe,
+        "-bench3",
+        "-bench3-mode", cfg.name,
+        "-d", std::to_string(device_index),
+        "-bench3-worker",
+        "-bench3-worker-exp", std::to_string(exponent),
+        "-bench3-worker-index", std::to_string(plan_index),
+        "-bench3-worker-request", request,
+        "-bench3-worker-partial", partial_dir.string()
+    };
+    if (!resolved_plan.empty()) {
+        args.push_back("-bench3-worker-plan");
+        args.push_back(resolved_plan);
+    }
+    return args;
+}
+
+#ifndef _WIN32
+void terminate_posix_worker(pid_t pid) {
+    if (pid <= 0) return;
+    ::kill(pid, SIGTERM);
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        int status = 0;
+        const pid_t waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid || waited < 0) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    ::kill(pid, SIGKILL);
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+}
+#endif
+
+PlanWorkerProcessResult run_plan_worker_process(
+        const io::CliOptions& options,
+        const ModeConfig& cfg,
+        std::size_t device_index,
+        std::uint32_t exponent,
+        std::size_t plan_index,
+        const std::string& request,
+        const std::string& resolved_plan,
+        const std::filesystem::path& partial_dir) {
+    PlanWorkerProcessResult result;
+    const auto args = worker_arguments(
+        cfg, device_index, exponent, plan_index,
+        request, resolved_plan, partial_dir);
+    const auto started = std::chrono::steady_clock::now();
+
+    std::cout << "BENCH3_PLAN_WORKER_START p=" << exponent
+              << " index=" << plan_index
+              << " request=" << request
+              << " plan=" << (resolved_plan.empty() ? "AUTO" : resolved_plan)
+              << " timeout_s=" << options.bench3_plan_timeout_sec
+              << std::endl;
+
+#ifdef _WIN32
+    std::string command = util::winCommandLine(args);
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessA(
+            args.front().c_str(),
+            command.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &si,
+            &pi)) {
+        result.error = "CreateProcess failed with error " +
+                       std::to_string(static_cast<unsigned long>(GetLastError()));
+        return result;
+    }
+    CloseHandle(pi.hThread);
+
+    for (;;) {
+        const DWORD wait_rc = WaitForSingleObject(pi.hProcess, 100);
+        if (wait_rc == WAIT_OBJECT_0) break;
+        if (wait_rc != WAIT_TIMEOUT) {
+            result.error = "WaitForSingleObject failed with error " +
+                           std::to_string(static_cast<unsigned long>(GetLastError()));
+            TerminateProcess(pi.hProcess, 125);
+            WaitForSingleObject(pi.hProcess, 5000);
+            break;
+        }
+
+        if (g_stop) {
+            result.interrupted = true;
+            TerminateProcess(pi.hProcess, 130);
+            WaitForSingleObject(pi.hProcess, 5000);
+            break;
+        }
+
+        if (options.bench3_plan_timeout_sec != 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - started).count();
+            if (elapsed >= options.bench3_plan_timeout_sec) {
+                result.timed_out = true;
+                TerminateProcess(pi.hProcess, 124);
+                WaitForSingleObject(pi.hProcess, 5000);
+                break;
+            }
+        }
+    }
+
+    DWORD exit_code = 0;
+    if (GetExitCodeProcess(pi.hProcess, &exit_code))
+        result.exit_code = static_cast<int>(exit_code);
+    else if (result.error.empty())
+        result.error = "GetExitCodeProcess failed";
+    CloseHandle(pi.hProcess);
+#else
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto& arg : args)
+        argv.push_back(const_cast<char*>(arg.c_str()));
+    argv.push_back(nullptr);
+
+    pid_t pid = -1;
+    const int spawn_rc = posix_spawn(
+        &pid, args.front().c_str(), nullptr, nullptr, argv.data(), environ);
+    if (spawn_rc != 0) {
+        result.error = std::string("posix_spawn failed: ") + std::strerror(spawn_rc);
+        return result;
+    }
+
+    int status = 0;
+    for (;;) {
+        const pid_t waited = waitpid(pid, &status, WNOHANG);
+        if (waited == pid) {
+            if (WIFEXITED(status)) result.exit_code = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) result.exit_code = 128 + WTERMSIG(status);
+            else result.exit_code = 125;
+            break;
+        }
+        if (waited < 0) {
+            if (errno == EINTR) continue;
+            result.error = std::string("waitpid failed: ") + std::strerror(errno);
+            terminate_posix_worker(pid);
+            break;
+        }
+
+        if (g_stop) {
+            result.interrupted = true;
+            terminate_posix_worker(pid);
+            result.exit_code = 130;
+            break;
+        }
+
+        if (options.bench3_plan_timeout_sec != 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - started).count();
+            if (elapsed >= options.bench3_plan_timeout_sec) {
+                result.timed_out = true;
+                terminate_posix_worker(pid);
+                result.exit_code = 124;
+                break;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+#endif
+
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - started).count();
+    std::cout << std::fixed << std::setprecision(3)
+              << "BENCH3_PLAN_WORKER_EXIT p=" << exponent
+              << " index=" << plan_index
+              << " request=" << request
+              << " exit_code=" << result.exit_code
+              << " timeout=" << (result.timed_out ? "yes" : "no")
+              << " interrupted=" << (result.interrupted ? "yes" : "no")
+              << " elapsed_s=" << elapsed
+              << std::endl;
+    return result;
+}
+
+int run_plan_worker(const io::CliOptions& options,
+                    const ModeConfig& cfg,
+                    std::size_t device_index) {
+    if (!options.bench3_worker ||
+        options.bench3_worker_exponent == 0 ||
+        options.bench3_worker_request.empty() ||
+        options.bench3_worker_partial_dir.empty()) {
+        std::cerr << "invalid internal Bench3 worker request\n";
+        return 2;
+    }
+
+    const auto exponent = options.bench3_worker_exponent;
+    const auto plan_index =
+        static_cast<std::size_t>(options.bench3_worker_index);
+    const auto partial_dir =
+        std::filesystem::path(options.bench3_worker_partial_dir);
+    const std::string context =
+        checkpoint_context(exponent, device_index, cfg);
+
+    std::cout << "BENCH3_WORKER p=" << exponent
+              << " index=" << plan_index
+              << " request=" << options.bench3_worker_request
+              << " plan=" << (options.bench3_worker_resolved_plan.empty()
+                                  ? "AUTO"
+                                  : options.bench3_worker_resolved_plan)
+              << std::endl;
+
+    PlanResult row;
+    if (options.bench3_worker_request == "AUTO") {
+        mpz_class auto_residue;
+        row = measure_plan(
+            exponent, device_index, cfg, true, "AUTO", "",
+            nullptr, &auto_residue);
+        if (row.status == "PASS")
+            atomic_write_mpz(partial_dir / "auto-residue.raw", auto_residue);
+    } else {
+        mpz_class auto_residue;
+        if (!read_mpz_checkpoint(
+                partial_dir / "auto-residue.raw", auto_residue)) {
+            std::cerr << "Bench3 worker cannot read authoritative AUTO residue\n";
+            return 3;
+        }
+        row = measure_plan(
+            exponent, device_index, cfg, false,
+            options.bench3_worker_request,
+            options.bench3_worker_resolved_plan,
+            &auto_residue, nullptr);
+    }
+
+    checkpoint_plan(
+        partial_dir, context, plan_index, exponent, row);
+    std::cout << "BENCH3_WORKER_RESULT p=" << exponent
+              << " index=" << plan_index
+              << " request=" << row.request
+              << " status=" << row.status
+              << std::endl;
+    return row.status == "ERROR" ? 4 : 0;
+}
+
+PlanResult measure_plan_isolated(
+        const io::CliOptions& options,
+        const ModeConfig& cfg,
+        std::size_t device_index,
+        std::uint32_t exponent,
+        std::size_t plan_index,
+        const std::string& request,
+        const std::string& resolved_plan,
+        const std::filesystem::path& partial_dir) {
+    const std::string context =
+        checkpoint_context(exponent, device_index, cfg);
+    const auto checkpoint =
+        plan_checkpoint_path(partial_dir, plan_index);
+
+    const PlanWorkerProcessResult process = run_plan_worker_process(
+        options, cfg, device_index, exponent, plan_index,
+        request, resolved_plan, partial_dir);
+
+    if (process.interrupted)
+        throw std::runtime_error("bench3 interrupted");
+
+    if (process.timed_out) {
+        PlanResult row;
+        row.status = "TIMEOUT";
+        row.error = "isolated plan exceeded " +
+                    std::to_string(options.bench3_plan_timeout_sec) +
+                    " seconds";
+        row.request = request;
+        row.resolved_plan = resolved_plan;
+        row.active_plan = resolved_plan;
+        row.auto_baseline = request == "AUTO";
+        checkpoint_plan(
+            partial_dir, context, plan_index, exponent, row);
+        std::cout << "BENCH3_PLAN_TIMEOUT p=" << exponent
+                  << " index=" << plan_index
+                  << " request=" << request
+                  << " timeout_s=" << options.bench3_plan_timeout_sec
+                  << std::endl;
+        return row;
+    }
+
+    if (!process.error.empty() || process.exit_code != 0) {
+        PlanResult row;
+        row.status = "ERROR";
+        row.request = request;
+        row.resolved_plan = resolved_plan;
+        row.active_plan = resolved_plan;
+        row.auto_baseline = request == "AUTO";
+        row.error = !process.error.empty()
+            ? process.error
+            : "isolated plan worker exited with code " +
+              std::to_string(process.exit_code);
+        return row;
+    }
+
+    PlanResult row;
+    if (!read_plan_checkpoint(checkpoint, context, row)) {
+        row.status = "ERROR";
+        row.request = request;
+        row.resolved_plan = resolved_plan;
+        row.active_plan = resolved_plan;
+        row.auto_baseline = request == "AUTO";
+        row.error = "isolated plan worker exited without a valid checkpoint";
+    }
+    return row;
+}
+
 PointResult benchmark_point(std::uint32_t exponent,
                             std::size_t device_index,
                             const DeviceInfo& info,
-                            const ModeConfig& cfg) {
+                            const ModeConfig& cfg,
+                            const io::CliOptions& options,
+                            const std::filesystem::path& partial_dir) {
     PointResult point;
     point.exponent = exponent;
     point.device_index = device_index;
     point.device = info;
 
-    mpz_class auto_residue;
-    PlanResult baseline = measure_plan(
-        exponent, device_index, cfg, true, "AUTO", "", nullptr, &auto_residue);
-    point.plans.push_back(baseline);
+    const std::string context = checkpoint_context(exponent, device_index, cfg);
+    const auto auto_plan_path = plan_checkpoint_path(partial_dir, 0);
+    const auto auto_residue_path = partial_dir / "auto-residue.raw";
 
+    mpz_class auto_residue;
+    PlanResult baseline;
+    bool resumed_baseline =
+        read_plan_checkpoint(auto_plan_path, context, baseline) &&
+        baseline.status == "PASS" &&
+        baseline.auto_baseline &&
+        baseline.request == "AUTO" &&
+        read_mpz_checkpoint(auto_residue_path, auto_residue);
+
+    if (resumed_baseline) {
+        std::cout << "BENCH3_PLAN_RESUME p=" << exponent
+                  << " index=0 request=AUTO status=" << baseline.status
+                  << std::endl;
+    } else {
+        baseline = measure_plan_isolated(
+            options, cfg, device_index, exponent, 0,
+            "AUTO", "", partial_dir);
+        if (baseline.status == "PASS" &&
+            !read_mpz_checkpoint(auto_residue_path, auto_residue)) {
+            baseline.status = "ERROR";
+            baseline.error = "AUTO worker checkpoint is missing its exact residue";
+        }
+    }
+
+    point.plans.push_back(baseline);
     if (baseline.status != "PASS") return point;
 
     std::set<std::string> seen;
     seen.insert(baseline.active_plan);
 
-    for (const std::string& request : candidate_requests()) {
+    const auto requests = candidate_requests();
+    for (std::size_t request_index = 0; request_index < requests.size(); ++request_index) {
         if (g_stop) throw std::runtime_error("bench3 interrupted");
+
+        const std::string& request = requests[request_index];
+        const std::size_t plan_index = request_index + 1;
+        const auto checkpoint = plan_checkpoint_path(partial_dir, plan_index);
+
+        PlanResult row;
+        if (read_plan_checkpoint(checkpoint, context, row) &&
+            row.request == request) {
+            std::cout << "BENCH3_PLAN_RESUME p=" << exponent
+                      << " index=" << plan_index
+                      << " request=" << request
+                      << " status=" << row.status << std::endl;
+            if (!row.resolved_plan.empty() && row.status != "SKIPPED_DUPLICATE")
+                seen.insert(row.resolved_plan);
+            point.plans.push_back(row);
+            continue;
+        }
 
         std::size_t transform = 0;
         std::string resolved;
         std::string reason;
-        PlanResult row;
         row.request = request;
         row.auto_baseline = false;
 
@@ -502,6 +1098,7 @@ PointResult benchmark_point(std::uint32_t exponent,
             row.status = "SKIPPED_ILLEGAL";
             row.legal = false;
             row.error = reason.empty() ? "Aevum resolver rejected plan" : reason;
+            checkpoint_plan(partial_dir, context, plan_index, exponent, row);
             point.plans.push_back(row);
             continue;
         }
@@ -512,21 +1109,26 @@ PointResult benchmark_point(std::uint32_t exponent,
             row.duplicate = true;
             row.active_plan = resolved;
             row.transform_words = transform;
+            checkpoint_plan(partial_dir, context, plan_index, exponent, row);
             point.plans.push_back(row);
             continue;
         }
         seen.insert(resolved);
 
-        mpz_class candidate_residue;
-        row = measure_plan(
-            exponent, device_index, cfg, false, request, resolved,
-            &auto_residue, &candidate_residue);
+        row = measure_plan_isolated(
+            options, cfg, device_index, exponent, plan_index,
+            request, resolved, partial_dir);
         point.plans.push_back(row);
     }
 
     const double auto_us = point.plans.front().production_us_per_iter;
     double best = auto_us;
     std::size_t best_index = 0;
+
+    for (auto& row : point.plans) {
+        row.best_exact = false;
+        row.delta_vs_auto_pct = 0.0;
+    }
 
     for (std::size_t i = 0; i < point.plans.size(); ++i) {
         auto& row = point.plans[i];
@@ -769,10 +1371,20 @@ int run(const io::CliOptions& options) {
             ? std::filesystem::path("bench3-results")
             : std::filesystem::path(options.bench3_output);
     const auto record_dir = out_dir / "records";
+    const auto partial_root = out_dir / "partial";
+
+    std::signal(SIGINT, signal_handler);
+#ifdef SIGTERM
+    std::signal(SIGTERM, signal_handler);
+#endif
+
+    if (options.bench3_worker)
+        return run_plan_worker(options, cfg, device_index);
 
     if (!options.bench3_resume) {
         std::error_code ec;
         std::filesystem::remove_all(record_dir, ec);
+        std::filesystem::remove_all(partial_root, ec);
         std::filesystem::remove(out_dir / "bench3.jsonl", ec);
         std::filesystem::remove(out_dir / "bench3.json", ec);
         std::filesystem::remove(out_dir / "bench3.csv", ec);
@@ -787,12 +1399,8 @@ int run(const io::CliOptions& options) {
               << " GPU=\"" << info.vendor << ' ' << info.name << "\""
               << " points=" << cfg.exponents.size()
               << " resume=" << (options.bench3_resume ? "on" : "off")
+              << " plan_timeout_s=" << options.bench3_plan_timeout_sec
               << " out=" << out_dir.string() << '\n';
-
-    std::signal(SIGINT, signal_handler);
-#ifdef SIGTERM
-    std::signal(SIGTERM, signal_handler);
-#endif
 
     for (std::size_t i = 0; i < cfg.exponents.size(); ++i) {
         if (g_stop) {
@@ -802,7 +1410,11 @@ int run(const io::CliOptions& options) {
 
         const auto exponent = cfg.exponents[i];
         const auto path = record_path(record_dir, device_index, exponent);
+        const auto partial_dir =
+            partial_point_path(partial_root, device_index, exponent);
         if (options.bench3_resume && std::filesystem::exists(path)) {
+            std::error_code ec;
+            std::filesystem::remove_all(partial_dir, ec);
             std::cout << "BENCH3_RESUME_SKIP [" << (i + 1) << '/'
                       << cfg.exponents.size() << "] p=" << exponent << '\n';
             continue;
@@ -814,7 +1426,8 @@ int run(const io::CliOptions& options) {
 
         PointResult point;
         try {
-            point = benchmark_point(exponent, device_index, info, cfg);
+            point = benchmark_point(
+                exponent, device_index, info, cfg, options, partial_dir);
         } catch (const std::exception& e) {
             if (g_stop) {
                 rebuild_outputs(out_dir, record_dir, cfg, device_index);
@@ -831,8 +1444,54 @@ int run(const io::CliOptions& options) {
             text.push_back(row_text(exponent, row));
         }
 
-        atomic_write_record(path, point_json(point, cfg), csv, text);
-        rebuild_outputs(out_dir, record_dir, cfg, device_index);
+        const bool retryable_point = std::any_of(
+            point.plans.begin(), point.plans.end(),
+            [](const PlanResult& row) {
+                return row.status == "TIMEOUT" || row.status == "ERROR";
+            });
+
+        if (retryable_point) {
+            std::filesystem::create_directories(partial_dir);
+
+            replace_file(
+                partial_dir / "point-status.json",
+                point_json(point, cfg) + "\n");
+
+            {
+                std::ostringstream partial_csv;
+                partial_csv << csv_header() << '\n';
+                for (const auto& row : csv) partial_csv << row << '\n';
+                replace_file(
+                    partial_dir / "point-status.csv",
+                    partial_csv.str());
+            }
+            {
+                std::ostringstream partial_text;
+                partial_text << "PrMers -bench3 partial point"
+                             << " schema=" << kSchemaVersion
+                             << " mode=" << cfg.name
+                             << " device=" << device_index
+                             << " exponent=" << exponent << '\n';
+                for (const auto& row : text) partial_text << row << '\n';
+                replace_file(
+                    partial_dir / "point-status.txt",
+                    partial_text.str());
+            }
+
+            rebuild_outputs(out_dir, record_dir, cfg, device_index);
+            std::cout << "BENCH3_POINT_PARTIAL p=" << exponent
+                      << " retryable=yes"
+                      << " path=" << partial_dir.string()
+                      << std::endl;
+        } else {
+            atomic_write_record(path, point_json(point, cfg), csv, text);
+            rebuild_outputs(out_dir, record_dir, cfg, device_index);
+            {
+                std::error_code ec;
+                std::filesystem::remove_all(partial_dir, ec);
+            }
+        }
+
         for (const auto& row : text) std::cout << row << '\n';
     }
 
