@@ -516,12 +516,17 @@ std::vector<std::string> candidate_requests() {
 std::string checkpoint_context(std::uint32_t exponent,
                                std::size_t device_index,
                                const ModeConfig& cfg) {
+    const DeviceInfo info = device_info(device_index);
     std::ostringstream o;
     o << kSchemaVersion << '|'
       << PRMERS_STRINGIFY(PRMERS_GIT_SHA) << '|'
       << cfg.name << '|'
       << exponent << '|'
       << device_index << '|'
+      << info.vendor << '|'
+      << info.name << '|'
+      << info.driver << '|'
+      << info.runtime << '|'
       << cfg.warmup << '|'
       << cfg.timed_iterations << '|'
       << cfg.repetitions << '|'
