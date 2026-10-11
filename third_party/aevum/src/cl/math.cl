@@ -102,6 +102,7 @@ typedef struct { unsigned __int128 x; } u128;
 i128 OVERLOAD make_i128(i64 hi, u64 lo) { i128 val; val.x = ((__int128)hi << 64) | lo; return val; }
 i128 OVERLOAD make_i128(u64 hi, u64 lo) { i128 val; val.x = ((__int128)hi << 64) | lo; return val; }
 u64 i128_lo64(i128 val) { return val.x; }
+u64 i128_hi64(i128 val) { return val.x >> 64; }
 u64 i128_shrlo64(i128 val, u32 bits) { return val.x >> bits; }
 i128 OVERLOAD i128_masklo64(i128 a, u64 m) { i128 val; val.x = a.x & (((__int128)0xFFFFFFFFFFFFFFFFULL << 64) | m); return val; }
 i128 OVERLOAD add(i128 a, i128 b) { i128 val; val.x = a.x + b.x; return val; }
@@ -120,6 +121,7 @@ typedef struct { u64 hi64; u64 lo64; } u128;
 i128 OVERLOAD make_i128(i64 hi, u64 lo) { i128 val; val.hi64 = hi; val.lo64 = lo; return val; }
 i128 OVERLOAD make_i128(u64 hi, u64 lo) { i128 val; val.hi64 = hi; val.lo64 = lo; return val; }
 u64 i128_lo64(i128 val) { return val.lo64; }
+u64 i128_hi64(i128 val) { return val.hi64; }
 u64 i128_shrlo64(i128 val, u32 bits) { return (val.hi64 << (64 - bits)) | (val.lo64 >> bits); }
 i128 OVERLOAD i128_masklo64(i128 a, u64 m) { i128 val; val.lo64 = a.lo64 & m; val.hi64 = a.hi64; return val; }
 i128 OVERLOAD add(i128 a, i128 b) { i128 val; val.lo64 = a.lo64 + b.lo64; val.hi64 = a.hi64 + b.hi64 + (val.lo64 < a.lo64); return val; }
