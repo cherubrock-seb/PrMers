@@ -433,8 +433,18 @@ PlanResult measure_plan(std::uint32_t exponent,
         r.production_us_per_iter = prod.production_us_per_iter;
     } catch (const std::exception& e) {
         if (g_stop) throw;
-        r.status = "ERROR";
-        r.error = e.what();
+        const std::string detail = e.what();
+        if (!auto_baseline &&
+            detail.find("small-factor capacity exceeded") != std::string::npos) {
+            r.status = "SKIPPED_ILLEGAL";
+            r.legal = false;
+            r.production_probe_exact = false;
+            r.production_us_per_iter = 0.0;
+            r.error = "PRP factor-safe rejection: " + detail;
+        } else {
+            r.status = "ERROR";
+            r.error = detail;
+        }
         r.setup_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - setup_begin).count();
     }
