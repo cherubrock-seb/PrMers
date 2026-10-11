@@ -9,9 +9,30 @@ bench = (ROOT / "src/core/Bench3.cpp").read_text()
 bench_h = (ROOT / "include/core/Bench3.hpp").read_text()
 docs = (ROOT / "docs/GPU_BENCHMARKS.md").read_text()
 
-for token in ("bool bench3 = false;", "bench3_mode", "bench3_output", "bench3_resume"):
+for token in (
+    "bool bench3 = false;",
+    "bench3_mode",
+    "bench3_output",
+    "bench3_resume",
+    "bench3_plan_timeout_sec",
+    "bench3_worker",
+    "bench3_worker_exponent",
+    "bench3_worker_request",
+):
     assert token in hpp
-for token in ('"-bench3"', '"-bench3-mode"', '"-bench3-out"', '"-bench3-no-resume"'):
+for token in (
+    '"-bench3"',
+    '"-bench3-mode"',
+    '"-bench3-out"',
+    '"-bench3-plan-timeout"',
+    '"-bench3-no-resume"',
+    '"-bench3-worker"',
+    '"-bench3-worker-exp"',
+    '"-bench3-worker-index"',
+    '"-bench3-worker-request"',
+    '"-bench3-worker-plan"',
+    '"-bench3-worker-partial"',
+):
     assert token in cli
 assert '#include "core/Bench3.hpp"' in app
 assert "core::bench3::run(options)" in app
@@ -49,6 +70,16 @@ assert "BENCH3_PLAN_RESUME" in bench
 assert "auto-residue.raw" in bench
 assert "mpz_out_raw" in bench and "mpz_inp_raw" in bench
 assert "partial_point_path" in bench
+assert "run_plan_worker_process" in bench
+assert "measure_plan_isolated" in bench
+assert "BENCH3_PLAN_WORKER_START" in bench
+assert "BENCH3_PLAN_WORKER_EXIT" in bench
+assert "BENCH3_PLAN_TIMEOUT" in bench
+assert 'row.status = "TIMEOUT"' in bench
+assert "CreateProcessA" in bench
+assert "posix_spawn" in bench
+assert "TerminateProcess" in bench
+assert "SIGKILL" in bench
 assert "int run(const io::CliOptions& options);" in bench_h
 assert "## `-bench3`" in docs
 print("bench3 source regression: PASS")
