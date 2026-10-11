@@ -80,6 +80,12 @@ assert "CreateProcessA" in bench
 assert "posix_spawn" in bench
 assert "TerminateProcess" in bench
 assert "SIGKILL" in bench
+assert 'loaded.status == "ERROR" || loaded.status == "TIMEOUT"' in bench
+assert "BENCH3_POINT_PARTIAL" in bench
+assert "point-status.json" in bench
+assert "point-status.csv" in bench
+assert "point-status.txt" in bench
+assert 'row.status == "TIMEOUT" || row.status == "ERROR"' in bench
 assert "int run(const io::CliOptions& options);" in bench_h
 assert "## `-bench3`" in docs
 print("bench3 source regression: PASS")
