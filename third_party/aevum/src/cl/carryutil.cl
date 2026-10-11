@@ -480,25 +480,27 @@ i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_
   // = (((nF2 << 31) - nF2) << 61) + ((n61 - nF2) << 31) - (n61 - nF2) + n31
   // = (((nF2 << 32) - nF2*2) << 60) + ((n61 - nF2) << 31) - (n61 - nF2) + n31
 
-  // Compute x = (n61 - nF2)
+  // gpuowl 8ecc2459 algebra, isolated from its later CARRY96 machinery.
+  // Since -(nF2 << 61) = -((nF2 << 30) << 31), combine the middle
+  // terms before shifting:
+  //   (nF2 << 92) + ((n61 - nF2 - (nF2 << 30)) << 31)
+  //   - (n61 - nF2) + n31
   i64 x = (i64)n61 - nF2;
-  // Compute y = ((n61 - nF2) << 31) + n31
-  i128 y = make_i128(x >> 33, (x << 31) | n31);
-  // Compute z = ((nF2 << 32) - nF2*2) << 60
-  i64 tmp = make_i64(nF2, 0) - (i64)(nF2 + nF2);
-  i128 z = make_i128(tmp >> 4, tmp << 60);
-
-  // Put the parts together
-  i128 v = sub(add(z, y), x);
+  i64 x2 = x - ((i64)nF2 << 30);
+#if !MUL3
+  i128 v = sub(make_i128((x2 >> 33) + ((i64)nF2 << 28),
+                         (x2 << 31) | n31), x);
+#else
+  // Tripling the two pieces is cheaper than tripling the full i128.
+  i64 x2_3 = x2 * 3;
+  i128 v = add(make_i128((x2_3 >> 33) + ((i64)(nF2 * 3) << 28),
+                         x2_3 << 31), ((i64)n31 - x) * 3);
+#endif
 
   // Optionally calculate roundoff error
   float roundoff = fabs(fma(uF2, 2.0194839183061857038255724444152e-28f, RNDVAL - uF2int));
   *maxROE = max(*maxROE, roundoff);
 
-  // Mul by 3 and add carry
-#if MUL3
-  v = add(v, add(v, v));
-#endif
   if (hasInCarry) v = add(v, inCarry);
   return v;
 }
