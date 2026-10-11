@@ -43,6 +43,12 @@ assert '"setup_begin"' in bench
 assert '"exact_begin"' in bench
 assert '"warmup_begin"' in bench
 assert '"production_probe_begin"' in bench
+assert "bench3.plan.v1" in bench
+assert "BENCH3_PLAN_CHECKPOINT" in bench
+assert "BENCH3_PLAN_RESUME" in bench
+assert "auto-residue.raw" in bench
+assert "mpz_out_raw" in bench and "mpz_inp_raw" in bench
+assert "partial_point_path" in bench
 assert "int run(const io::CliOptions& options);" in bench_h
 assert "## `-bench3`" in docs
 print("bench3 source regression: PASS")
