@@ -150,5 +150,27 @@ Completed exponent/device points are stored atomically in `records/`. Interrupte
 runs therefore resume without repeating completed points. Use
 `-bench3-no-resume` to clear the selected output's completed point records.
 
+Bench3 also checkpoints individual plans under the point's `partial/`
+directory. Each plan runs in an isolated worker process and emits flushed
+`BENCH3_PROGRESS` markers while setup, exactness, warmup, timing repetitions,
+and the production probe advance. Successful plan checkpoints can therefore be
+reused after an interruption without rerunning earlier plans. The authoritative
+AUTO exact residue is persisted alongside the AUTO checkpoint so resumed
+alternatives are still compared against the same exact reference.
+
+Use `-bench3-plan-timeout N` to bound one isolated plan worker to `N` seconds.
+The default is 300 seconds; `0` disables the timeout. A timed-out plan is
+reported as `TIMEOUT`; worker/runtime failures are reported as `ERROR`.
+Either status keeps the exponent point partial and retryable rather than
+publishing a completed `records/` entry. On a normal resume, existing PASS
+checkpoints are reused while TIMEOUT and ERROR checkpoints are deliberately
+rerun.
+
+Plan checkpoint contexts are bound to the Bench3 schema and source SHA, mode,
+exponent, measurement counts, device index, OpenCL vendor/device name, driver
+version, and runtime version. A mismatch in any of those fields invalidates the
+checkpoint instead of reusing measurements from a different device mapping,
+driver, runtime, build, or benchmark configuration.
+
 Bench3 is a benchmark and classifier only. It does not rewrite production tune
 files or selector policy.
