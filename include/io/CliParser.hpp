@@ -60,6 +60,11 @@ struct CliOptions {
     std::string bench2_mode = "quick";
     std::string bench2_output = "bench2-results";
     bool bench2_resume = true;
+    // Public plan-comparison benchmark. Kept separate from -bench and -bench2.
+    bool bench3 = false;
+    std::string bench3_mode = "quick";
+    std::string bench3_output = "bench3-results";
+    bool bench3_resume = true;
     bool profiling = false;
     bool debug = false;
     bool verify = true;
