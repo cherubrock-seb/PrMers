@@ -65,6 +65,15 @@ struct CliOptions {
     std::string bench3_mode = "quick";
     std::string bench3_output = "bench3-results";
     bool bench3_resume = true;
+    uint32_t bench3_plan_timeout_sec = 300;
+    // Internal Bench3 subprocess worker controls. These are intentionally
+    // undocumented: the public parent process owns validation and lifecycle.
+    bool bench3_worker = false;
+    uint32_t bench3_worker_exponent = 0;
+    uint64_t bench3_worker_index = 0;
+    std::string bench3_worker_request;
+    std::string bench3_worker_resolved_plan;
+    std::string bench3_worker_partial_dir;
     bool profiling = false;
     bool debug = false;
     bool verify = true;
