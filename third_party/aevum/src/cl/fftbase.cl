@@ -401,6 +401,27 @@ void OVERLOAD shufl64_partial(local T2 *lds2, T2 *u, u32 f, u32 r, u32 numWG, u3
     local T *lds = (local T *) lds2;
     if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(T);
 
+#if LDSPAD
+    // gpuowl 6cf0dcdd: optimized first partial shuffle for SIZE=256 / RADIX=8.
+    // Only a radix-4 step was performed on u[8].
+    if (f == 1 && r == 4 && RADIX == 8) {
+      bar(WG);
+      for (u32 i = 0; i < RADIX; ++i)
+        lds[i / 2 * (2 * WG + 4) + (i % 2) * WG + lowMe] = u[i].x;
+      bar(WG);
+      for (u32 i = 0; i < RADIX; ++i)
+        u[i].x = lds[i * WG / 4 + (lowMe / 4) + (lowMe & 3) * (2 * WG + 4)];
+
+      bar(WG);
+      for (u32 i = 0; i < RADIX; ++i)
+        lds[i / 2 * (2 * WG + 4) + (i % 2) * WG + lowMe] = u[i].y;
+      bar(WG);
+      for (u32 i = 0; i < RADIX; ++i)
+        u[i].y = lds[i * WG / 4 + (lowMe / 4) + (lowMe & 3) * (2 * WG + 4)];
+      return;
+    }
+#endif
+
     bar(WG);
     for (u32 i = 0; i < RADIX; ++i)
       lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i].x;
