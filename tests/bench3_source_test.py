@@ -38,6 +38,11 @@ assert 'detail.find("workgroup size too large for kernel")' in bench
 assert 'r.error = "device workgroup-limit rejection: " + detail' in bench
 assert "bench3.json" in bench and "bench3.csv" in bench and "bench3.txt" in bench
 assert "BENCH3_RESUME_SKIP" in bench
+assert "BENCH3_PROGRESS p=" in bench
+assert '"setup_begin"' in bench
+assert '"exact_begin"' in bench
+assert '"warmup_begin"' in bench
+assert '"production_probe_begin"' in bench
 assert "int run(const io::CliOptions& options);" in bench_h
 assert "## `-bench3`" in docs
 print("bench3 source regression: PASS")
