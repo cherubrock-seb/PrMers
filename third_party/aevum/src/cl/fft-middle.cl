@@ -275,25 +275,24 @@ void OVERLOAD middleMul2(T2 *u, u32 x, u32 y, double factor, Trig trig) {
     }
 
 #elif MM2_CHAIN == 2
+    // gpuowl 734f42a: keep the compile-time trip count explicit so the compiler
+    // fully unrolls the loop and keeps u[] in registers at MIDDLE=8.
     T2 base, base_minus1, base_plus1;
-    for (u32 i = 1; ; i += 3) {
+    for (u32 i = 1; i <= MIDDLE; i += 3) {
       if (i-1 == MIDDLE-1) {
         base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
         WADD(i-1, base_minus1);
-        break;
       } else if (i == MIDDLE-1) {
         base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
         base = cmulFancy(base_minus1, w);
         WADD(i-1, base_minus1);
         WADD(i,   base);
-        break;
       } else {
         base = slowTrig_N(x * y + x * SMALL_HEIGHT * i, ND / MIDDLE * (i + 1)) * factor;
         cmul_a_by_fancyb_and_conjfancyb(&base_plus1, &base_minus1, base, w);
         WADD(i-1, base_minus1);
         WADD(i,   base);
         WADD(i+1, base_plus1);
-        if (i+1 == MIDDLE-1) break;
       }
     }
 #else
@@ -622,25 +621,23 @@ void OVERLOAD middleMul2(F2 *u, u32 x, u32 y, float factor, TrigFP32 trig) {
     }
 
 #elif MM2_CHAIN == 2
+    // gpuowl 734f42a: compile-time bounded loop for full unrolling/register residency.
     F2 base, base_minus1, base_plus1;
-    for (u32 i = 1; ; i += 3) {
+    for (u32 i = 1; i <= MIDDLE; i += 3) {
       if (i-1 == MIDDLE-1) {
         base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
         WADD(i-1, base_minus1);
-        break;
       } else if (i == MIDDLE-1) {
         base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
         base = cmulFancy(base_minus1, w);
         WADD(i-1, base_minus1);
         WADD(i,   base);
-        break;
       } else {
         base = slowTrig_N(x * y + x * SMALL_HEIGHT * i, ND / MIDDLE * (i + 1)) * factor;
         cmul_a_by_fancyb_and_conjfancyb(&base_plus1, &base_minus1, base, w);
         WADD(i-1, base_minus1);
         WADD(i,   base);
         WADD(i+1, base_plus1);
-        if (i+1 == MIDDLE-1) break;
       }
     }
 #else
