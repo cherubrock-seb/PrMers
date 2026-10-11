@@ -33,6 +33,12 @@ void OVERLOAD fft8(T2 *u) {
   SWAP(u[3], u[6]);
 }
 
+// Do two fft4s on eight FFT values. Required by the SIZE=256 / RADIX=8 path.
+void OVERLOAD fft8_4(T2 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+
 // For FUSE_WEIGHT_BUTTERFLY.  Same as fft8Core, but the caller has already performed the first butterfly's add/subs (fusing the forward weight multiply
 // via FMA, see carryfused.cl).  The per-pair post-rotations (u[5]/u[7] delayed by M_SQRT1_2, u[6] by mul_t4) have not been done, so they are done here.
 void OVERLOAD fft8Core_skip1(T2 *u) {
@@ -91,6 +97,12 @@ void OVERLOAD fft8(F2 *u) {
   SWAP(u[3], u[6]);
 }
 
+// Do two fft4s on eight FFT values. Required by the SIZE=256 / RADIX=8 path.
+void OVERLOAD fft8_4(F2 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+
 #endif
 
 
@@ -124,6 +136,12 @@ void OVERLOAD fft8(GF31 *u) {
   // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+}
+
+// Do two fft4s on eight FFT values. Required by the SIZE=256 / RADIX=8 path.
+void OVERLOAD fft8_4(GF31 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
 }
 
 #endif
@@ -175,6 +193,12 @@ void OVERLOAD fft8(GF61 *u) {
   // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+}
+
+// Do two fft4s on eight FFT values. Required by the SIZE=256 / RADIX=8 path.
+void OVERLOAD fft8_4(GF61 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
 }
 
 #endif
