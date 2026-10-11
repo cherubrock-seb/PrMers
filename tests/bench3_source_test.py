@@ -31,6 +31,9 @@ assert "engine::gpu_workload::prp" in bench
 assert "engine::create_gpu" in bench
 assert "exact_residue" in bench
 assert "production_timing" in bench
+assert 'detail.find("small-factor capacity exceeded")' in bench
+assert 'r.status = "SKIPPED_ILLEGAL"' in bench
+assert 'r.error = "PRP factor-safe rejection: " + detail' in bench
 assert "bench3.json" in bench and "bench3.csv" in bench and "bench3.txt" in bench
 assert "BENCH3_RESUME_SKIP" in bench
 assert "int run(const io::CliOptions& options);" in bench_h
