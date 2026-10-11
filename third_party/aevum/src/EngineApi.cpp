@@ -529,84 +529,7 @@ struct PlanProductionConfirmation {
 // production-length confirmation before it may replace the native plan.  This
 // uses the same retained-width square path as Runtime::square_mul(reg,1):
 // 64 warmup squares, then paired 256-square timings in alternating order.
-PlanProductionConfirmation confirmPrpPlanProduction(
-    uint32_t exponent,
-    size_t register_count,
-    GpuCommon shared,
-    const std::string& device_name,
-    const FFTConfig& native_fft,
-    const FFTConfig& candidate_fft,
-    double min_gain) {
-  auto native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
-  auto candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
-  const RegPaths native_paths =
-      productionRegPaths(*native_gpu, native_fft, device_name);
-  const RegPaths candidate_paths =
-      productionRegPaths(*candidate_gpu, candidate_fft, device_name);
 
-  const u32 count = static_cast<u32>(std::max<size_t>(register_count, 1));
-  auto native_regs = native_gpu->makeBufVector(count);
-  auto candidate_regs = candidate_gpu->makeBufVector(count);
-  const Words seed = deterministicResidue(exponent, 0x12345678u);
-
-  auto reset = [&](Gpu& gpu, std::vector<Buffer<Word>>& regs) {
-    gpu.regWrite(regs[0], seed);
-    gpu.regSync();
-  };
-  auto sequence = [&](Gpu& gpu, const RegPaths& paths,
-                      std::vector<Buffer<Word>>& regs, unsigned units) {
-    runPlanSequence(
-        gpu, aevum_autotune::Workload::Prp, paths, regs[0], nullptr, units);
-    gpu.regSync();
-  };
-
-  // Compile/warm the exact production square path before measurement and
-  // re-check words at the same boundary.
-  reset(*native_gpu, native_regs);
-  reset(*candidate_gpu, candidate_regs);
-  sequence(*native_gpu, native_paths, native_regs, 64);
-  sequence(*candidate_gpu, candidate_paths, candidate_regs, 64);
-  if (native_gpu->regRead(native_regs[0]) !=
-      candidate_gpu->regRead(candidate_regs[0]))
-    return {};
-
-  auto timed = [&](Gpu& gpu, const RegPaths& paths,
-                   std::vector<Buffer<Word>>& regs) {
-    reset(gpu, regs);
-    const auto begin = std::chrono::steady_clock::now();
-    sequence(gpu, paths, regs, 256);
-    const double seconds = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - begin).count();
-    return std::make_pair(seconds, gpu.regRead(regs[0]));
-  };
-
-  PlanProductionConfirmation out;
-  for (unsigned repeat = 0; repeat < 3; ++repeat) {
-    std::pair<double,Words> native_sample, candidate_sample;
-    if (repeat & 1u) {
-      candidate_sample = timed(*candidate_gpu, candidate_paths, candidate_regs);
-      native_sample = timed(*native_gpu, native_paths, native_regs);
-    } else {
-      native_sample = timed(*native_gpu, native_paths, native_regs);
-      candidate_sample = timed(*candidate_gpu, candidate_paths, candidate_regs);
-    }
-
-    if (native_sample.second != candidate_sample.second) return out;
-
-    out.native_seconds[repeat] = native_sample.first;
-    out.candidate_seconds[repeat] = candidate_sample.first;
-    const double pair_gain = native_sample.first / candidate_sample.first;
-    out.wins += pair_gain >= 1.02;
-    out.worst = std::min(out.worst, pair_gain);
-  }
-
-  out.exact = true;
-  out.gain = median3(out.native_seconds) / median3(out.candidate_seconds);
-  out.keep = out.gain >= std::max(min_gain, 1.03) &&
-             out.wins >= 2 &&
-             out.worst >= 0.985;
-  return out;
-}
 
 struct BridgeComparison {
   bool exact = false;
@@ -762,6 +685,60 @@ private:
   bool pending_ = false;
   bool pending_lead_ = false;
 };
+
+PlanProductionConfirmation confirmPrpPlanProduction(
+    uint32_t exponent,
+    size_t register_count,
+    GpuCommon shared,
+    const FFTConfig& native_fft,
+    const FFTConfig& candidate_fft,
+    double min_gain) {
+  PrpUseProbe native_probe(exponent, register_count, shared, native_fft, {});
+  PrpUseProbe candidate_probe(exponent, register_count, shared, candidate_fft, {});
+  const Words seed = deterministicResidue(exponent, 0x12345678u);
+
+  native_probe.reset(seed);
+  candidate_probe.reset(seed);
+  native_probe.sequence(64);
+  candidate_probe.sequence(64);
+  if (native_probe.read() != candidate_probe.read()) return {};
+
+  auto timed = [&](PrpUseProbe& probe) {
+    probe.reset(seed);
+    const auto begin = std::chrono::steady_clock::now();
+    probe.sequence(256);
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - begin).count();
+    return std::make_pair(seconds, probe.read());
+  };
+
+  PlanProductionConfirmation out;
+  for (unsigned repeat = 0; repeat < 3; ++repeat) {
+    std::pair<double,Words> native_sample, candidate_sample;
+    if (repeat & 1u) {
+      candidate_sample = timed(candidate_probe);
+      native_sample = timed(native_probe);
+    } else {
+      native_sample = timed(native_probe);
+      candidate_sample = timed(candidate_probe);
+    }
+
+    if (native_sample.second != candidate_sample.second) return out;
+
+    out.native_seconds[repeat] = native_sample.first;
+    out.candidate_seconds[repeat] = candidate_sample.first;
+    const double pair_gain = native_sample.first / candidate_sample.first;
+    out.wins += pair_gain >= 1.02;
+    out.worst = std::min(out.worst, pair_gain);
+  }
+
+  out.exact = true;
+  out.gain = median3(out.native_seconds) / median3(out.candidate_seconds);
+  out.keep = out.gain >= std::max(min_gain, 1.03) &&
+             out.wins >= 2 &&
+             out.worst >= 0.985;
+  return out;
+}
 
 // PRP use selection is deliberately downstream of all shape selection paths.
 std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon shared,
@@ -1515,10 +1492,8 @@ args_.flags["MULTI_Q"] = "1";
                 admissiblePlan(args_, exponent_, best_spec);
             if (!best_fft)
               throw std::runtime_error("best PRP shape became inadmissible");
-            if (!tune) tune.emplace(selected_device, shared_);
-
             const auto confirm = confirmPrpPlanProduction(
-                exponent_, register_count_, tune->shared, device_name,
+                exponent_, register_count_, shared_,
                 native_fft, *best_fft, threshold);
 
             if (verbose) {
