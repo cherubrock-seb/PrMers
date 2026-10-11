@@ -620,7 +620,8 @@ bool read_plan_checkpoint(const std::filesystem::path& path,
              >> loaded.production_us_per_iter))
         return false;
 
-    if (loaded.status == "ERROR") return false;
+    if (loaded.status == "ERROR" || loaded.status == "TIMEOUT")
+        return false;
     r = std::move(loaded);
     return true;
 }
@@ -1438,12 +1439,54 @@ int run(const io::CliOptions& options) {
             text.push_back(row_text(exponent, row));
         }
 
-        atomic_write_record(path, point_json(point, cfg), csv, text);
-        rebuild_outputs(out_dir, record_dir, cfg, device_index);
-        {
-            std::error_code ec;
-            std::filesystem::remove_all(partial_dir, ec);
+        const bool retryable_point = std::any_of(
+            point.plans.begin(), point.plans.end(),
+            [](const PlanResult& row) {
+                return row.status == "TIMEOUT" || row.status == "ERROR";
+            });
+
+        if (retryable_point) {
+            std::filesystem::create_directories(partial_dir);
+
+            replace_file(
+                partial_dir / "point-status.json",
+                point_json(point, cfg) + "\n");
+
+            {
+                std::ostringstream partial_csv;
+                partial_csv << csv_header() << '\n';
+                for (const auto& row : csv) partial_csv << row << '\n';
+                replace_file(
+                    partial_dir / "point-status.csv",
+                    partial_csv.str());
+            }
+            {
+                std::ostringstream partial_text;
+                partial_text << "PrMers -bench3 partial point"
+                             << " schema=" << kSchemaVersion
+                             << " mode=" << cfg.name
+                             << " device=" << device_index
+                             << " exponent=" << exponent << '\n';
+                for (const auto& row : text) partial_text << row << '\n';
+                replace_file(
+                    partial_dir / "point-status.txt",
+                    partial_text.str());
+            }
+
+            rebuild_outputs(out_dir, record_dir, cfg, device_index);
+            std::cout << "BENCH3_POINT_PARTIAL p=" << exponent
+                      << " retryable=yes"
+                      << " path=" << partial_dir.string()
+                      << std::endl;
+        } else {
+            atomic_write_record(path, point_json(point, cfg), csv, text);
+            rebuild_outputs(out_dir, record_dir, cfg, device_index);
+            {
+                std::error_code ec;
+                std::filesystem::remove_all(partial_dir, ec);
+            }
         }
+
         for (const auto& row : text) std::cout << row << '\n';
     }
 
