@@ -102,5 +102,53 @@ The next bench2 tranche adds architecture-specific resource/profiler adapters
 (NVIDIA PTX/SASS/ptxas where supported and AMD ROCm/code-object metrics), while
 keeping profiler runs separate from throughput measurement.
 
-Bench3 will later enumerate legal alternative production plans, perform explicit
-exactness classification and report AUTO-versus-best deltas.
+Bench3 is delivered below as the public AUTO-versus-legal-plan benchmark.
+
+
+## `-bench3`
+
+`-bench3` is the public production-plan comparison benchmark. It starts from
+the exact production AUTO backend/selector result and compares it with a bounded
+set of legal explicit Aevum alternatives:
+
+- power-of-two only: `pow2:auto`;
+- native PFA auto: `pfa:auto`;
+- PFA3: `pfa:3`;
+- validated fixed PFA7: `pfa7:1:512:7:512:202`;
+- PFA9: `pfa:9`.
+
+Every explicit request is first passed through the Aevum resolver. Unsupported
+plans are reported as `SKIPPED_ILLEGAL`, and concrete plans already represented
+by AUTO or another request are reported as `SKIPPED_DUPLICATE`.
+
+Bench3 performs a deterministic full-residue comparison against AUTO before a
+candidate is timed. A candidate with a different full residue is classified
+`EXACT_MISMATCH` and is not accepted as a performance result. The output stores
+a stable residue fingerprint together with the explicit exact-match flag.
+
+Steady-state square timing uses the same engine API as production and each
+timed batch is synchronized. Bench3 then adds the same production PRP Gerbicz
+boundary/replay timing model used by Bench2. `delta_vs_auto_pct` is based on the
+production-representative per-iteration estimate; positive values are faster
+than production AUTO.
+
+### Modes and resume
+
+`-bench3-mode quick|standard|dense|full`
+
+Quick and standard deliberately use bounded exponent grids so a public Bench3
+run remains practical. Dense/full expand coverage and repetitions.
+
+Use `-bench3-out PATH`. Bench3 writes:
+
+- `bench3.txt`
+- `bench3.json`
+- `bench3.jsonl`
+- `bench3.csv`
+
+Completed exponent/device points are stored atomically in `records/`. Interrupted
+runs therefore resume without repeating completed points. Use
+`-bench3-no-resume` to clear the selected output's completed point records.
+
+Bench3 is a benchmark and classifier only. It does not rewrite production tune
+files or selector policy.
