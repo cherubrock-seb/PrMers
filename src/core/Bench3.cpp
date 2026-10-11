@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -35,6 +36,7 @@ namespace core::bench3 {
 namespace {
 
 constexpr const char* kSchemaVersion = "bench3.v1";
+constexpr const char* kPlanCheckpointVersion = "bench3.plan.v1";
 constexpr std::size_t kPrpRegisterCount = 8;
 volatile std::sig_atomic_t g_stop = 0;
 
@@ -494,32 +496,238 @@ std::vector<std::string> candidate_requests() {
     };
 }
 
+std::string checkpoint_context(std::uint32_t exponent,
+                               std::size_t device_index,
+                               const ModeConfig& cfg) {
+    std::ostringstream o;
+    o << kSchemaVersion << '|'
+      << PRMERS_STRINGIFY(PRMERS_GIT_SHA) << '|'
+      << cfg.name << '|'
+      << exponent << '|'
+      << device_index << '|'
+      << cfg.warmup << '|'
+      << cfg.timed_iterations << '|'
+      << cfg.repetitions << '|'
+      << cfg.exact_iterations;
+    return o.str();
+}
+
+std::filesystem::path partial_point_path(const std::filesystem::path& root,
+                                         std::size_t device,
+                                         std::uint32_t exponent) {
+    std::ostringstream name;
+    name << "d" << device << "_p" << std::setw(10) << std::setfill('0')
+         << exponent;
+    return root / name.str();
+}
+
+std::filesystem::path plan_checkpoint_path(const std::filesystem::path& dir,
+                                           std::size_t index) {
+    std::ostringstream name;
+    name << "plan_" << std::setw(2) << std::setfill('0') << index << ".state";
+    return dir / name.str();
+}
+
+void atomic_write_plan_checkpoint(const std::filesystem::path& path,
+                                  const std::string& context,
+                                  const PlanResult& r) {
+    std::filesystem::create_directories(path.parent_path());
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot create Bench3 plan checkpoint");
+        out << kPlanCheckpointVersion << '\n'
+            << std::quoted(context) << '\n'
+            << std::quoted(r.status) << '\n'
+            << std::quoted(r.error) << '\n'
+            << std::quoted(r.request) << '\n'
+            << std::quoted(r.resolved_plan) << '\n'
+            << std::quoted(r.active_plan) << '\n'
+            << std::quoted(r.backend) << '\n'
+            << std::quoted(r.residue_hash) << '\n'
+            << r.auto_baseline << ' ' << r.legal << ' ' << r.duplicate << ' '
+            << r.exact_match << ' ' << r.production_probe_exact << '\n'
+            << r.transform_words << '\n'
+            << std::setprecision(17)
+            << r.transform_mwords << ' ' << r.bpw << ' ' << r.setup_ms << ' '
+            << r.us_median << ' ' << r.us_min << ' ' << r.us_max << ' '
+            << r.production_us_per_iter << '\n';
+        out.flush();
+        if (!out) throw std::runtime_error("cannot flush Bench3 plan checkpoint");
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot publish Bench3 plan checkpoint");
+    }
+}
+
+bool read_plan_checkpoint(const std::filesystem::path& path,
+                          const std::string& expected_context,
+                          PlanResult& r) {
+    std::ifstream in(path);
+    if (!in) return false;
+
+    std::string version;
+    if (!std::getline(in, version) || version != kPlanCheckpointVersion)
+        return false;
+
+    std::string context;
+    if (!(in >> std::quoted(context)) || context != expected_context)
+        return false;
+
+    PlanResult loaded;
+    if (!(in >> std::quoted(loaded.status)
+             >> std::quoted(loaded.error)
+             >> std::quoted(loaded.request)
+             >> std::quoted(loaded.resolved_plan)
+             >> std::quoted(loaded.active_plan)
+             >> std::quoted(loaded.backend)
+             >> std::quoted(loaded.residue_hash)
+             >> loaded.auto_baseline
+             >> loaded.legal
+             >> loaded.duplicate
+             >> loaded.exact_match
+             >> loaded.production_probe_exact
+             >> loaded.transform_words
+             >> loaded.transform_mwords
+             >> loaded.bpw
+             >> loaded.setup_ms
+             >> loaded.us_median
+             >> loaded.us_min
+             >> loaded.us_max
+             >> loaded.production_us_per_iter))
+        return false;
+
+    if (loaded.status == "ERROR") return false;
+    r = std::move(loaded);
+    return true;
+}
+
+void atomic_write_mpz(const std::filesystem::path& path,
+                      const mpz_class& value) {
+    std::filesystem::create_directories(path.parent_path());
+    auto tmp = path;
+    tmp += ".tmp";
+    const std::string tmp_name = tmp.string();
+    std::FILE* out = std::fopen(tmp_name.c_str(), "wb");
+    if (!out) throw std::runtime_error("cannot create Bench3 AUTO residue checkpoint");
+
+    const std::size_t bytes = mpz_out_raw(out, value.get_mpz_t());
+    const int flush_rc = std::fflush(out);
+    const int close_rc = std::fclose(out);
+    if (bytes == 0 || flush_rc != 0 || close_rc != 0) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot write Bench3 AUTO residue checkpoint");
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp);
+        throw std::runtime_error("cannot publish Bench3 AUTO residue checkpoint");
+    }
+}
+
+bool read_mpz_checkpoint(const std::filesystem::path& path,
+                         mpz_class& value) {
+    const std::string name = path.string();
+    std::FILE* in = std::fopen(name.c_str(), "rb");
+    if (!in) return false;
+    const std::size_t bytes = mpz_inp_raw(value.get_mpz_t(), in);
+    const int trailing = std::fgetc(in);
+    const bool ok = bytes != 0 && trailing == EOF && std::ferror(in) == 0;
+    std::fclose(in);
+    return ok;
+}
+
+void checkpoint_plan(const std::filesystem::path& partial_dir,
+                     const std::string& context,
+                     std::size_t index,
+                     std::uint32_t exponent,
+                     const PlanResult& row) {
+    if (row.status == "ERROR") return;
+    const auto path = plan_checkpoint_path(partial_dir, index);
+    atomic_write_plan_checkpoint(path, context, row);
+    std::cout << "BENCH3_PLAN_CHECKPOINT p=" << exponent
+              << " index=" << index
+              << " request=" << row.request
+              << " status=" << row.status
+              << " path=" << path.string() << std::endl;
+}
+
 PointResult benchmark_point(std::uint32_t exponent,
                             std::size_t device_index,
                             const DeviceInfo& info,
-                            const ModeConfig& cfg) {
+                            const ModeConfig& cfg,
+                            const std::filesystem::path& partial_dir) {
     PointResult point;
     point.exponent = exponent;
     point.device_index = device_index;
     point.device = info;
 
-    mpz_class auto_residue;
-    PlanResult baseline = measure_plan(
-        exponent, device_index, cfg, true, "AUTO", "", nullptr, &auto_residue);
-    point.plans.push_back(baseline);
+    const std::string context = checkpoint_context(exponent, device_index, cfg);
+    const auto auto_plan_path = plan_checkpoint_path(partial_dir, 0);
+    const auto auto_residue_path = partial_dir / "auto-residue.raw";
 
+    mpz_class auto_residue;
+    PlanResult baseline;
+    bool resumed_baseline =
+        read_plan_checkpoint(auto_plan_path, context, baseline) &&
+        baseline.status == "PASS" &&
+        baseline.auto_baseline &&
+        baseline.request == "AUTO" &&
+        read_mpz_checkpoint(auto_residue_path, auto_residue);
+
+    if (resumed_baseline) {
+        std::cout << "BENCH3_PLAN_RESUME p=" << exponent
+                  << " index=0 request=AUTO status=" << baseline.status
+                  << std::endl;
+    } else {
+        baseline = measure_plan(
+            exponent, device_index, cfg, true, "AUTO", "", nullptr, &auto_residue);
+        if (baseline.status == "PASS") {
+            atomic_write_mpz(auto_residue_path, auto_residue);
+            checkpoint_plan(partial_dir, context, 0, exponent, baseline);
+        }
+    }
+
+    point.plans.push_back(baseline);
     if (baseline.status != "PASS") return point;
 
     std::set<std::string> seen;
     seen.insert(baseline.active_plan);
 
-    for (const std::string& request : candidate_requests()) {
+    const auto requests = candidate_requests();
+    for (std::size_t request_index = 0; request_index < requests.size(); ++request_index) {
         if (g_stop) throw std::runtime_error("bench3 interrupted");
+
+        const std::string& request = requests[request_index];
+        const std::size_t plan_index = request_index + 1;
+        const auto checkpoint = plan_checkpoint_path(partial_dir, plan_index);
+
+        PlanResult row;
+        if (read_plan_checkpoint(checkpoint, context, row) &&
+            row.request == request) {
+            std::cout << "BENCH3_PLAN_RESUME p=" << exponent
+                      << " index=" << plan_index
+                      << " request=" << request
+                      << " status=" << row.status << std::endl;
+            if (!row.resolved_plan.empty() && row.status != "SKIPPED_DUPLICATE")
+                seen.insert(row.resolved_plan);
+            point.plans.push_back(row);
+            continue;
+        }
 
         std::size_t transform = 0;
         std::string resolved;
         std::string reason;
-        PlanResult row;
         row.request = request;
         row.auto_baseline = false;
 
@@ -528,6 +736,7 @@ PointResult benchmark_point(std::uint32_t exponent,
             row.status = "SKIPPED_ILLEGAL";
             row.legal = false;
             row.error = reason.empty() ? "Aevum resolver rejected plan" : reason;
+            checkpoint_plan(partial_dir, context, plan_index, exponent, row);
             point.plans.push_back(row);
             continue;
         }
@@ -538,6 +747,7 @@ PointResult benchmark_point(std::uint32_t exponent,
             row.duplicate = true;
             row.active_plan = resolved;
             row.transform_words = transform;
+            checkpoint_plan(partial_dir, context, plan_index, exponent, row);
             point.plans.push_back(row);
             continue;
         }
@@ -547,12 +757,18 @@ PointResult benchmark_point(std::uint32_t exponent,
         row = measure_plan(
             exponent, device_index, cfg, false, request, resolved,
             &auto_residue, &candidate_residue);
+        checkpoint_plan(partial_dir, context, plan_index, exponent, row);
         point.plans.push_back(row);
     }
 
     const double auto_us = point.plans.front().production_us_per_iter;
     double best = auto_us;
     std::size_t best_index = 0;
+
+    for (auto& row : point.plans) {
+        row.best_exact = false;
+        row.delta_vs_auto_pct = 0.0;
+    }
 
     for (std::size_t i = 0; i < point.plans.size(); ++i) {
         auto& row = point.plans[i];
@@ -795,10 +1011,12 @@ int run(const io::CliOptions& options) {
             ? std::filesystem::path("bench3-results")
             : std::filesystem::path(options.bench3_output);
     const auto record_dir = out_dir / "records";
+    const auto partial_root = out_dir / "partial";
 
     if (!options.bench3_resume) {
         std::error_code ec;
         std::filesystem::remove_all(record_dir, ec);
+        std::filesystem::remove_all(partial_root, ec);
         std::filesystem::remove(out_dir / "bench3.jsonl", ec);
         std::filesystem::remove(out_dir / "bench3.json", ec);
         std::filesystem::remove(out_dir / "bench3.csv", ec);
@@ -828,7 +1046,11 @@ int run(const io::CliOptions& options) {
 
         const auto exponent = cfg.exponents[i];
         const auto path = record_path(record_dir, device_index, exponent);
+        const auto partial_dir =
+            partial_point_path(partial_root, device_index, exponent);
         if (options.bench3_resume && std::filesystem::exists(path)) {
+            std::error_code ec;
+            std::filesystem::remove_all(partial_dir, ec);
             std::cout << "BENCH3_RESUME_SKIP [" << (i + 1) << '/'
                       << cfg.exponents.size() << "] p=" << exponent << '\n';
             continue;
@@ -840,7 +1062,8 @@ int run(const io::CliOptions& options) {
 
         PointResult point;
         try {
-            point = benchmark_point(exponent, device_index, info, cfg);
+            point = benchmark_point(
+                exponent, device_index, info, cfg, partial_dir);
         } catch (const std::exception& e) {
             if (g_stop) {
                 rebuild_outputs(out_dir, record_dir, cfg, device_index);
@@ -859,6 +1082,10 @@ int run(const io::CliOptions& options) {
 
         atomic_write_record(path, point_json(point, cfg), csv, text);
         rebuild_outputs(out_dir, record_dir, cfg, device_index);
+        {
+            std::error_code ec;
+            std::filesystem::remove_all(partial_dir, ec);
+        }
         for (const auto& row : text) std::cout << row << '\n';
     }
 
