@@ -13,7 +13,7 @@ for flag in ("-gm-proth", "-gm-prp", "-gm-safe", "-gm-sieve", "-gm-base", "-gm-f
 assert "runGaussianMersenne" in app
 assert "gaussian_mersenne = false" in hpp
 assert 'o.mode == "prp" || o.mode == "gm-proth" || o.mode == "gm-prp"' in app
-assert "if (!o.gaussian_mersenne)" in app
+assert "if (!o.gaussian_mersenne && !o.bench && !o.bench2 && !o.bench3)" in app
 
 # Gaussian code must not modify Aevum kernels or unrelated embedded sources.
 # v100.13 deliberately changes only EngineApi.cpp to add a generic
