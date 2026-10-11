@@ -65,6 +65,11 @@ assert '"exact_begin"' in bench
 assert '"warmup_begin"' in bench
 assert '"production_probe_begin"' in bench
 assert "bench3.plan.v1" in bench
+assert "const DeviceInfo info = device_info(device_index);" in bench
+assert "info.vendor" in bench
+assert "info.name" in bench
+assert "info.driver" in bench
+assert "info.runtime" in bench
 assert "BENCH3_PLAN_CHECKPOINT" in bench
 assert "BENCH3_PLAN_RESUME" in bench
 assert "auto-residue.raw" in bench
