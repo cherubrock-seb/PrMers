@@ -375,6 +375,93 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     for (u32 i = 0; i < RADIX; ++i) { int4 tmp = as_int4(u[i]); tmp.w = lds[i * WG + lowMe]; u[i] = as_double2(tmp); }
   }
 }
+// Partial-radix shuffle used by the SIZE=256 / RADIX=8 path after fft8_4.
+// This is the generic 6cf0dcdd indexing adapted to Aevum's typed shufl64 helper.
+// Existing full-radix shuffles remain unchanged.
+void OVERLOAD shufl64_partial(local T2 *lds2, T2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(r == 4);
+
+  u32 mask = f - 1;
+  assert((mask & (mask + 1)) == 0);
+
+  if (SHUFL_BYTES == 16) {
+    local T2 *lds = (local T2 *) lds2;
+    if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(T2);
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i];
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i] = lds[i * WG + lowMe];
+  }
+
+  else if (SHUFL_BYTES == 8) {
+    local T *lds = (local T *) lds2;
+    if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(T);
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i].x;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i].x = lds[i * WG + lowMe];
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i].y;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i].y = lds[i * WG + lowMe];
+  }
+
+  else if (SHUFL_BYTES == 4) {
+    local int *lds = (local int *) lds2;
+    if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(int);
+
+    barFence(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = as_int4(u[i]).x;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i) {
+      int4 tmp = as_int4(u[i]);
+      tmp.x = lds[i * WG + lowMe];
+      u[i] = as_double2(tmp);
+    }
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = as_int4(u[i]).y;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i) {
+      int4 tmp = as_int4(u[i]);
+      tmp.y = lds[i * WG + lowMe];
+      u[i] = as_double2(tmp);
+    }
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = as_int4(u[i]).z;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i) {
+      int4 tmp = as_int4(u[i]);
+      tmp.z = lds[i * WG + lowMe];
+      u[i] = as_double2(tmp);
+    }
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = as_int4(u[i]).w;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i) {
+      int4 tmp = as_int4(u[i]);
+      tmp.w = lds[i * WG + lowMe];
+      u[i] = as_double2(tmp);
+    }
+  }
+}
+
 
 #endif
 
@@ -549,6 +636,47 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     for (u32 i = 0; i < RADIX; ++i) { lds[i * f + (lowMe & ~mask) * RADIX + (lowMe & mask)] = u[i].y; }
     bar(WG);
     for (u32 i = 0; i < RADIX; ++i) { u[i].y = lds[i * WG + lowMe]; }
+  }
+}
+
+// Partial-radix shuffle used by the SIZE=256 / RADIX=8 path after fft8_4.
+// This is the generic 6cf0dcdd indexing adapted to Aevum's typed shufl32 helper.
+void OVERLOAD shufl32_partial(local F2 *lds2, F2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  assert(RADIX == 8);
+  assert(r == 4);
+
+  u32 mask = f - 1;
+  assert((mask & (mask + 1)) == 0);
+
+  if (SHUFL_BYTES >= 8) {
+    local F2 *lds = (local F2 *) lds2;
+    if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(F2);
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i];
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i] = lds[i * WG + lowMe];
+  }
+
+  else if (SHUFL_BYTES == 4) {
+    local F *lds = (local F *) lds2;
+    if (numWG > 1) lds += ((u32) get_local_id(0) / WG) * LDS_BYTES / sizeof(F);
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i].x;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i].x = lds[i * WG + lowMe];
+
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      lds[i / (RADIX / r) * f + i % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask)] = u[i].y;
+    bar(WG);
+    for (u32 i = 0; i < RADIX; ++i)
+      u[i].y = lds[i * WG + lowMe];
   }
 }
 
@@ -837,6 +965,11 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
 
 void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl64(lds, u, f, numWG, lowMe);
+}
+
+void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  if (r == RADIX) shufl64(lds, u, f, numWG, lowMe);
+  else shufl64_partial(lds, u, f, r, numWG, lowMe);
 }
 
 void OVERLOAD chainMul4(T2 *u, T2 w) {
@@ -1679,6 +1812,11 @@ void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl32(lds, u, f, numWG, lowMe);
 }
 
+void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  if (r == RADIX) shufl32(lds, u, f, numWG, lowMe);
+  else shufl32_partial(lds, u, f, r, numWG, lowMe);
+}
+
 void OVERLOAD fft_RADIX(F2 *u) {
 #if RADIX == 4
   fft4(u);
@@ -2275,6 +2413,11 @@ void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe);
 }
 
+void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  if (r == RADIX) shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe);
+  else shufl32_partial((local F2 *) lds, (F2 *) u, f, r, numWG, lowMe);
+}
+
 void OVERLOAD fft_RADIX(GF31 *u) {
 #if RADIX == 4
   fft4(u);
@@ -2488,6 +2631,11 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
 void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl64((local T2 *) lds, (T2 *) u, f, numWG, lowMe);
+}
+
+void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  if (r == RADIX) shufl64((local T2 *) lds, (T2 *) u, f, numWG, lowMe);
+  else shufl64_partial((local T2 *) lds, (T2 *) u, f, r, numWG, lowMe);
 }
 
 void OVERLOAD fft_RADIX(GF61 *u) {
