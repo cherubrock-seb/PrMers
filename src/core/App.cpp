@@ -457,7 +457,9 @@ App::App(int argc, char** argv)
     // An explicit Gaussian-Mersenne command is self-contained and must not be
     // replaced by an unrelated default worktodo entry.
     std::optional<io::WorktodoEntry> worktodo_entry;
-    if (!o.gaussian_mersenne) worktodo_entry = wp.parse();
+    // Benchmarks are self-contained and must never consume worktodo.txt.
+    if (!o.gaussian_mersenne && !o.bench && !o.bench2 && !o.bench3)
+        worktodo_entry = wp.parse();
     if (auto e = worktodo_entry) {
         o.exponent     = e->exponent;
         if (o.wagstaff) {
@@ -550,7 +552,8 @@ App::App(int argc, char** argv)
     }
 
 
-    if (!hasWorktodoEntry_ && o.exponent == 0) {
+    if (!hasWorktodoEntry_ && o.exponent == 0 &&
+        !o.bench && !o.bench2 && !o.bench3) {
     std::cerr << "Error: no valid entry in " 
                 << o.worktodo_path
                 << " and no exponent provided on the command line\n";
@@ -1190,7 +1193,7 @@ int App::runInner() {
         // malformed entries) with no exponent given. Running with exponent 0 would only fail; wait for
         // "Append & Run" instead. Only wait when the GUI actually started.
         if (guiServer_ && (!file_non_empty(cfg.worktodo_path) || (!hasWorktodoEntry_ && options.exponent == 0 &&
-                                                       !options.bench && !options.bench2 && options.filemers.empty()))) {
+                                                       !options.bench && !options.bench2 && !options.bench3 && options.filemers.empty()))) {
             if (file_non_empty(cfg.worktodo_path)) {
                 std::cout << "No runnable entry in " << cfg.worktodo_path << "; waiting for a new entry.\n";
                 guiServer_->appendLog("No runnable entry in " + cfg.worktodo_path + "; waiting for a new entry.");
