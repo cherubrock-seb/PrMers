@@ -172,6 +172,10 @@ void printUsage(const char* progName) {
     std::cout << "  -bench2-mode <mode>  : quick, standard, dense, or full (default: quick)" << std::endl;
     std::cout << "  -bench2-out <path>   : Bench2 output directory (default: bench2-results)" << std::endl;
     std::cout << "  -bench2-no-resume    : Clear/replace completed bench2 point records instead of resuming" << std::endl;
+    std::cout << "  -bench3              : Compare production AUTO against bounded legal FFT/PFA alternatives" << std::endl;
+    std::cout << "  -bench3-mode <mode>  : quick, standard, dense, or full (default: quick)" << std::endl;
+    std::cout << "  -bench3-out <path>   : Bench3 output directory (default: bench3-results)" << std::endl;
+    std::cout << "  -bench3-no-resume    : Clear/replace completed bench3 point records instead of resuming" << std::endl;
    // std::cout << "  -chunk256 <1..4>     : (Optional) cap for CHUNK256; lower can help on Radeon VII/GCN (default: auto)" << std::endl;
     std::cout << "  -filemers <path>     : (Optional) Export .mers file to GMP-ECM .save format using stored state" << std::endl;
     //std::cout << "  -filep95 <path>      : (Optional) Export .mers file to Prime95 .p95 format using stored state" << std::endl;
@@ -878,6 +882,21 @@ CliOptions CliParser::parse(int argc, char** argv ) {
         }
         else if (std::strcmp(argv[i], "-bench2-no-resume") == 0) {
             opts.bench2_resume = false;
+        }
+        else if (std::strcmp(argv[i], "-bench3") == 0) {
+            opts.bench3 = true;
+            opts.exponent = 127;
+        }
+        else if (std::strcmp(argv[i], "-bench3-mode") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-mode requires quick, standard, dense, or full");
+            opts.bench3_mode = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-bench3-out") == 0) {
+            if (i + 1 >= argc) throw std::invalid_argument("-bench3-out requires a path");
+            opts.bench3_output = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "-bench3-no-resume") == 0) {
+            opts.bench3_resume = false;
         }
         else if (std::strcmp(argv[i], "-gui") == 0) {
             opts.gui = true;
