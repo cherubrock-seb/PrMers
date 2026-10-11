@@ -1,0 +1,833 @@
+#include "core/Bench3.hpp"
+
+#include "aevum/EngineAevum.hpp"
+#include "core/Version.hpp"
+#include "io/CliParser.hpp"
+#include "marin/engine.h"
+#include "opencl/Context.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <csignal>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <set>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include <gmpxx.h>
+
+#ifndef PRMERS_GIT_SHA
+#define PRMERS_GIT_SHA unknown
+#endif
+#define PRMERS_STRINGIFY_IMPL(value) #value
+#define PRMERS_STRINGIFY(value) PRMERS_STRINGIFY_IMPL(value)
+
+namespace core::bench3 {
+namespace {
+
+constexpr const char* kSchemaVersion = "bench3.v1";
+constexpr std::size_t kPrpRegisterCount = 8;
+volatile std::sig_atomic_t g_stop = 0;
+
+void signal_handler(int) { g_stop = 1; }
+
+struct ModeConfig {
+    std::string name;
+    std::size_t warmup = 0;
+    std::size_t timed_iterations = 0;
+    std::size_t repetitions = 0;
+    std::size_t exact_iterations = 0;
+    std::vector<std::uint32_t> exponents;
+};
+
+struct DeviceInfo {
+    std::string vendor = "unknown";
+    std::string name = "unknown";
+    std::string driver = "unknown";
+    std::string runtime = "unknown";
+    std::uint32_t compute_units = 0;
+    std::uint32_t clock_mhz = 0;
+    std::uint64_t global_mem_bytes = 0;
+    std::uint64_t local_mem_bytes = 0;
+    std::size_t max_workgroup = 0;
+};
+
+struct ProductionTiming {
+    std::uint64_t block = 0;
+    std::uint64_t checkpasslevel = 0;
+    std::uint64_t full_check_interval = 0;
+    double boundary_us = 0.0;
+    double full_check_us = 0.0;
+    double amortized_us_per_iter = 0.0;
+    double production_us_per_iter = 0.0;
+    bool exact = false;
+};
+
+struct PlanResult {
+    std::string status = "PASS";
+    std::string error;
+    std::string request;
+    std::string resolved_plan;
+    std::string active_plan;
+    std::string backend;
+    bool auto_baseline = false;
+    bool legal = true;
+    bool duplicate = false;
+    bool exact_match = false;
+    bool production_probe_exact = false;
+    bool best_exact = false;
+    std::string residue_hash;
+
+    std::size_t transform_words = 0;
+    double transform_mwords = 0.0;
+    double bpw = 0.0;
+    double setup_ms = 0.0;
+    double us_median = 0.0;
+    double us_min = 0.0;
+    double us_max = 0.0;
+    double production_us_per_iter = 0.0;
+    double delta_vs_auto_pct = 0.0;
+};
+
+struct PointResult {
+    std::uint32_t exponent = 0;
+    std::size_t device_index = 0;
+    DeviceInfo device;
+    std::vector<PlanResult> plans;
+};
+
+std::string json_escape(const std::string& value) {
+    std::ostringstream out;
+    for (unsigned char c : value) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    out << "\\u" << std::hex << std::setw(4)
+                        << std::setfill('0') << static_cast<unsigned>(c)
+                        << std::dec << std::setfill(' ');
+                } else {
+                    out << static_cast<char>(c);
+                }
+        }
+    }
+    return out.str();
+}
+
+std::string csv_escape(const std::string& value) {
+    if (value.find_first_of(",\"\r\n") == std::string::npos) return value;
+    std::string out = "\"";
+    for (char c : value) {
+        if (c == '"') out.push_back('"');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+std::string cl_string(cl_device_id device, cl_device_info what) {
+    std::size_t bytes = 0;
+    if (clGetDeviceInfo(device, what, 0, nullptr, &bytes) != CL_SUCCESS || bytes == 0)
+        return "unknown";
+    std::string value(bytes, '\0');
+    if (clGetDeviceInfo(device, what, bytes, value.data(), nullptr) != CL_SUCCESS)
+        return "unknown";
+    while (!value.empty() && value.back() == '\0') value.pop_back();
+    for (char& c : value)
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    return value;
+}
+
+template <typename T>
+T cl_scalar(cl_device_id device, cl_device_info what) {
+    T value{};
+    if (clGetDeviceInfo(device, what, sizeof(value), &value, nullptr) != CL_SUCCESS)
+        return T{};
+    return value;
+}
+
+DeviceInfo device_info(std::size_t device_index) {
+    cl_uint platform_count = 0;
+    if (clGetPlatformIDs(0, nullptr, &platform_count) != CL_SUCCESS || platform_count == 0)
+        throw std::runtime_error("No OpenCL platform found");
+
+    std::vector<cl_platform_id> platforms(platform_count);
+    clGetPlatformIDs(platform_count, platforms.data(), nullptr);
+
+    std::vector<cl_device_id> devices;
+    for (const auto platform : platforms) {
+        cl_uint count = 0;
+        if (clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, nullptr, &count) != CL_SUCCESS || count == 0)
+            continue;
+        const std::size_t old = devices.size();
+        devices.resize(old + count);
+        clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, count, devices.data() + old, nullptr);
+    }
+
+    if (device_index >= devices.size())
+        throw std::runtime_error("OpenCL GPU device index is out of range");
+
+    const auto d = devices[device_index];
+    DeviceInfo info;
+    info.vendor = cl_string(d, CL_DEVICE_VENDOR);
+    info.name = cl_string(d, CL_DEVICE_NAME);
+    info.driver = cl_string(d, CL_DRIVER_VERSION);
+    info.runtime = cl_string(d, CL_DEVICE_VERSION);
+    info.compute_units = cl_scalar<cl_uint>(d, CL_DEVICE_MAX_COMPUTE_UNITS);
+    info.clock_mhz = cl_scalar<cl_uint>(d, CL_DEVICE_MAX_CLOCK_FREQUENCY);
+    info.global_mem_bytes = static_cast<std::uint64_t>(cl_scalar<cl_ulong>(d, CL_DEVICE_GLOBAL_MEM_SIZE));
+    info.local_mem_bytes = static_cast<std::uint64_t>(cl_scalar<cl_ulong>(d, CL_DEVICE_LOCAL_MEM_SIZE));
+    info.max_workgroup = cl_scalar<std::size_t>(d, CL_DEVICE_MAX_WORK_GROUP_SIZE);
+    return info;
+}
+
+std::vector<std::uint32_t> full_grid() {
+    return {
+         37156667u, 58000003u, 77232917u, 82589933u, 100000007u,
+        130000007u, 145000007u, 150000007u, 160000003u, 170000003u,
+        175000003u, 180000017u, 196999969u, 197000003u, 200000033u,
+        210000017u, 220000013u, 250000013u, 300000007u, 400000009u,
+        500000003u, 600000001u
+    };
+}
+
+ModeConfig mode_config(const std::string& mode) {
+    if (mode == "quick")
+        return {"quick", 16, 64, 3, 64,
+                {145000007u, 170000003u, 197000003u, 210000017u, 500000003u}};
+    if (mode == "standard")
+        return {"standard", 24, 128, 3, 96,
+                {77232917u, 130000007u, 145000007u, 170000003u,
+                 196999969u, 197000003u, 210000017u, 220000013u,
+                 300000007u, 500000003u}};
+    if (mode == "dense")
+        return {"dense", 48, 256, 5, 128, full_grid()};
+    if (mode == "full")
+        return {"full", 96, 512, 7, 192, full_grid()};
+    throw std::runtime_error(
+        "invalid -bench3-mode '" + mode +
+        "' (expected quick, standard, dense or full)");
+}
+
+double median(std::vector<double> values) {
+    std::sort(values.begin(), values.end());
+    const std::size_t n = values.size();
+    if (n == 0) return 0.0;
+    if (n & 1u) return values[n / 2];
+    return (values[n / 2 - 1] + values[n / 2]) / 2.0;
+}
+
+std::string compiler_string() {
+#ifdef __clang__
+    return std::string("clang ") + __clang_version__;
+#elif defined(__GNUC__)
+    return std::string("gcc ") + __VERSION__;
+#elif defined(_MSC_VER)
+    return std::string("msvc ") + std::to_string(_MSC_VER);
+#else
+    return "unknown";
+#endif
+}
+
+std::string residue_hash(const mpz_class& value) {
+    const std::string text = value.get_str(16);
+    std::uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : text) {
+        h ^= c;
+        h *= 1099511628211ull;
+    }
+    std::ostringstream out;
+    out << std::hex << std::setw(16) << std::setfill('0') << h;
+    return out.str();
+}
+
+mpz_class exact_residue(engine& eng, std::size_t iterations) {
+    eng.set(0, 3u);
+    for (std::size_t i = 0; i < iterations; ++i) {
+        if (g_stop) throw std::runtime_error("bench3 interrupted");
+        eng.square_mul(0);
+    }
+    eng.sync();
+    mpz_t z;
+    mpz_init(z);
+    eng.get_mpz(z, 0);
+    mpz_class result(z);
+    mpz_clear(z);
+    return result;
+}
+
+ProductionTiming production_timing(engine& eng,
+                                   std::uint32_t exponent,
+                                   double square_us_per_iter) {
+    const engine::Reg R0 = 0, R1 = 1, R2 = 2, R3 = 3;
+    const engine::Reg R4 = 4, R5 = 5, RBASE = 6, RTMP = 7;
+
+    ProductionTiming out;
+    const std::uint64_t legacy_B =
+        static_cast<std::uint64_t>(std::sqrt(static_cast<double>(exponent)));
+    out.block = std::min<std::uint64_t>(1000u, legacy_B);
+    if (out.block == 0) throw std::runtime_error("bench3 Gerbicz block is zero");
+
+    out.checkpasslevel =
+        static_cast<std::uint64_t>((1000.0 * 600.0) / static_cast<double>(out.block));
+    if (out.checkpasslevel == 0) out.checkpasslevel = 1;
+    out.full_check_interval = out.block * out.checkpasslevel;
+
+    eng.set(R1, 1u);
+    eng.set(R0, 3u);
+    eng.copy(R4, R0);
+    eng.copy(R5, R1);
+    eng.set(RBASE, 3u);
+    eng.set_multiplicand(RTMP, RBASE);
+
+    const std::uint64_t modB = exponent % out.block == 0 ? out.block : exponent % out.block;
+    for (std::uint64_t z = 0; z < modB; ++z) eng.square_mul(R0);
+    eng.sync();
+
+    const auto boundary_begin = std::chrono::steady_clock::now();
+    eng.copy(R3, R1);
+    eng.set_multiplicand(R2, R0);
+    eng.mul(R1, R2);
+    eng.sync();
+    const auto boundary_end = std::chrono::steady_clock::now();
+
+    out.boundary_us =
+        std::chrono::duration<double, std::micro>(boundary_end - boundary_begin).count();
+
+    const auto full_begin = std::chrono::steady_clock::now();
+    const std::uint64_t loop_count = out.block > modB ? out.block - modB - 1 : 0;
+    for (std::uint64_t z = 0; z < loop_count; ++z) eng.square_mul(R3);
+
+    if (exponent % out.block == 0) eng.mul(R3, RTMP);
+    else eng.square_mul(R3, 3u);
+
+    for (std::uint64_t z = 0; z < modB; ++z) eng.square_mul(R3);
+
+    mpz_t z0, z1;
+    mpz_inits(z0, z1, nullptr);
+    eng.get_mpz(z0, R3);
+    eng.get_mpz(z1, R1);
+    const mpz_class Mp = (mpz_class(1) << exponent) - 1;
+    out.exact = ((mpz_class)z0 % Mp) == ((mpz_class)z1 % Mp);
+    mpz_clears(z0, z1, nullptr);
+    if (!out.exact) throw std::runtime_error("bench3 production PRP Gerbicz probe mismatch");
+
+    eng.copy(R4, R0);
+    eng.copy(R5, R1);
+    eng.sync();
+
+    const auto full_end = std::chrono::steady_clock::now();
+    out.full_check_us =
+        std::chrono::duration<double, std::micro>(full_end - full_begin).count();
+
+    out.amortized_us_per_iter =
+        out.boundary_us / static_cast<double>(out.block) +
+        out.full_check_us / static_cast<double>(out.full_check_interval);
+    out.production_us_per_iter = square_us_per_iter + out.amortized_us_per_iter;
+    return out;
+}
+
+PlanResult measure_plan(std::uint32_t exponent,
+                        std::size_t device_index,
+                        const ModeConfig& cfg,
+                        bool auto_baseline,
+                        const std::string& request,
+                        const std::string& resolved_plan,
+                        const mpz_class* auto_residue,
+                        mpz_class* measured_residue) {
+    PlanResult r;
+    r.auto_baseline = auto_baseline;
+    r.request = request;
+    r.resolved_plan = resolved_plan;
+
+    const auto setup_begin = std::chrono::steady_clock::now();
+    try {
+        if (auto_baseline) {
+            engine::configure_gpu_backend(
+                engine::gpu_backend::auto_select, "", engine::gpu_workload::prp);
+        } else {
+            engine::configure_gpu_backend(
+                engine::gpu_backend::aevum, resolved_plan, engine::gpu_workload::prp);
+        }
+
+        std::unique_ptr<engine> eng(
+            engine::create_gpu(exponent, kPrpRegisterCount, device_index, false));
+        if (!eng) throw std::runtime_error("engine::create_gpu returned null");
+        eng->sync();
+
+        r.setup_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - setup_begin).count();
+        r.backend = eng->is_aevum_backend() ? "Aevum" : "Marin";
+        r.transform_words = eng->get_size();
+        r.transform_mwords =
+            static_cast<double>(r.transform_words) / (1024.0 * 1024.0);
+        if (r.transform_words != 0)
+            r.bpw = static_cast<double>(exponent) /
+                    static_cast<double>(r.transform_words);
+
+        if (eng->is_aevum_backend()) {
+            r.active_plan = aevum_engine_active_plan(eng.get());
+            if (r.active_plan.empty()) r.active_plan = resolved_plan;
+        } else {
+            r.active_plan = "marin-native";
+        }
+
+        const mpz_class residue = exact_residue(*eng, cfg.exact_iterations);
+        r.residue_hash = residue_hash(residue);
+        if (measured_residue) *measured_residue = residue;
+
+        r.exact_match = auto_baseline ||
+                        (auto_residue != nullptr && residue == *auto_residue);
+        if (!r.exact_match) {
+            r.status = "EXACT_MISMATCH";
+            r.error = "full deterministic residue differs from AUTO";
+            return r;
+        }
+
+        eng->set(0, 3u);
+        for (std::size_t i = 0; i < cfg.warmup; ++i) {
+            if (g_stop) throw std::runtime_error("bench3 interrupted");
+            eng->square_mul(0);
+        }
+        eng->sync();
+
+        std::vector<double> samples;
+        samples.reserve(cfg.repetitions);
+        for (std::size_t rep = 0; rep < cfg.repetitions; ++rep) {
+            eng->set(0, 3u);
+            eng->sync();
+            const auto begin = std::chrono::steady_clock::now();
+            for (std::size_t i = 0; i < cfg.timed_iterations; ++i) {
+                if (g_stop) throw std::runtime_error("bench3 interrupted");
+                eng->square_mul(0);
+            }
+            eng->sync();
+            const auto end = std::chrono::steady_clock::now();
+            samples.push_back(
+                std::chrono::duration<double, std::micro>(end - begin).count() /
+                static_cast<double>(cfg.timed_iterations));
+        }
+
+        r.us_median = median(samples);
+        r.us_min = *std::min_element(samples.begin(), samples.end());
+        r.us_max = *std::max_element(samples.begin(), samples.end());
+
+        const ProductionTiming prod =
+            production_timing(*eng, exponent, r.us_median);
+        r.production_probe_exact = prod.exact;
+        r.production_us_per_iter = prod.production_us_per_iter;
+    } catch (const std::exception& e) {
+        if (g_stop) throw;
+        r.status = "ERROR";
+        r.error = e.what();
+        r.setup_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - setup_begin).count();
+    }
+    return r;
+}
+
+std::vector<std::string> candidate_requests() {
+    return {
+        "pow2:auto",
+        "pfa:auto",
+        "pfa:3",
+        "pfa7:1:512:7:512:202",
+        "pfa:9"
+    };
+}
+
+PointResult benchmark_point(std::uint32_t exponent,
+                            std::size_t device_index,
+                            const DeviceInfo& info,
+                            const ModeConfig& cfg) {
+    PointResult point;
+    point.exponent = exponent;
+    point.device_index = device_index;
+    point.device = info;
+
+    mpz_class auto_residue;
+    PlanResult baseline = measure_plan(
+        exponent, device_index, cfg, true, "AUTO", "", nullptr, &auto_residue);
+    point.plans.push_back(baseline);
+
+    if (baseline.status != "PASS") return point;
+
+    std::set<std::string> seen;
+    seen.insert(baseline.active_plan);
+
+    for (const std::string& request : candidate_requests()) {
+        if (g_stop) throw std::runtime_error("bench3 interrupted");
+
+        std::size_t transform = 0;
+        std::string resolved;
+        std::string reason;
+        PlanResult row;
+        row.request = request;
+        row.auto_baseline = false;
+
+        if (!aevum_engine_resolve_fft(
+                exponent, request, &transform, &resolved, &reason)) {
+            row.status = "SKIPPED_ILLEGAL";
+            row.legal = false;
+            row.error = reason.empty() ? "Aevum resolver rejected plan" : reason;
+            point.plans.push_back(row);
+            continue;
+        }
+
+        row.resolved_plan = resolved;
+        if (seen.count(resolved) != 0) {
+            row.status = "SKIPPED_DUPLICATE";
+            row.duplicate = true;
+            row.active_plan = resolved;
+            row.transform_words = transform;
+            point.plans.push_back(row);
+            continue;
+        }
+        seen.insert(resolved);
+
+        mpz_class candidate_residue;
+        row = measure_plan(
+            exponent, device_index, cfg, false, request, resolved,
+            &auto_residue, &candidate_residue);
+        point.plans.push_back(row);
+    }
+
+    const double auto_us = point.plans.front().production_us_per_iter;
+    double best = auto_us;
+    std::size_t best_index = 0;
+
+    for (std::size_t i = 0; i < point.plans.size(); ++i) {
+        auto& row = point.plans[i];
+        if (row.status == "PASS" && row.exact_match &&
+            row.production_probe_exact && row.production_us_per_iter > 0.0) {
+            if (auto_us > 0.0)
+                row.delta_vs_auto_pct =
+                    100.0 * (auto_us / row.production_us_per_iter - 1.0);
+            if (row.production_us_per_iter < best) {
+                best = row.production_us_per_iter;
+                best_index = i;
+            }
+        }
+    }
+    point.plans[best_index].best_exact = true;
+    return point;
+}
+
+std::string row_json(const PlanResult& r) {
+    std::ostringstream o;
+    o << std::setprecision(12)
+      << "{"
+      << "\"status\":\"" << json_escape(r.status) << "\","
+      << "\"error\":\"" << json_escape(r.error) << "\","
+      << "\"request\":\"" << json_escape(r.request) << "\","
+      << "\"resolved_plan\":\"" << json_escape(r.resolved_plan) << "\","
+      << "\"active_plan\":\"" << json_escape(r.active_plan) << "\","
+      << "\"backend\":\"" << json_escape(r.backend) << "\","
+      << "\"auto_baseline\":" << (r.auto_baseline ? "true" : "false") << ","
+      << "\"legal\":" << (r.legal ? "true" : "false") << ","
+      << "\"duplicate\":" << (r.duplicate ? "true" : "false") << ","
+      << "\"exact_match\":" << (r.exact_match ? "true" : "false") << ","
+      << "\"production_probe_exact\":" << (r.production_probe_exact ? "true" : "false") << ","
+      << "\"best_exact\":" << (r.best_exact ? "true" : "false") << ","
+      << "\"residue_hash\":\"" << json_escape(r.residue_hash) << "\","
+      << "\"transform_words\":" << r.transform_words << ","
+      << "\"transform_mwords\":" << r.transform_mwords << ","
+      << "\"bpw\":" << r.bpw << ","
+      << "\"setup_ms\":" << r.setup_ms << ","
+      << "\"us_per_iter_median\":" << r.us_median << ","
+      << "\"us_per_iter_min\":" << r.us_min << ","
+      << "\"us_per_iter_max\":" << r.us_max << ","
+      << "\"production_prp_us_per_iter\":" << r.production_us_per_iter << ","
+      << "\"delta_vs_auto_pct\":" << r.delta_vs_auto_pct
+      << "}";
+    return o.str();
+}
+
+std::string point_json(const PointResult& p, const ModeConfig& cfg) {
+    std::ostringstream o;
+    o << std::setprecision(12)
+      << "{"
+      << "\"schema_version\":\"" << kSchemaVersion << "\","
+      << "\"record_type\":\"bench3_point\","
+      << "\"mode\":\"" << json_escape(cfg.name) << "\","
+      << "\"exponent\":" << p.exponent << ","
+      << "\"device_index\":" << p.device_index << ","
+      << "\"device_vendor\":\"" << json_escape(p.device.vendor) << "\","
+      << "\"device_name\":\"" << json_escape(p.device.name) << "\","
+      << "\"driver_version\":\"" << json_escape(p.device.driver) << "\","
+      << "\"runtime_version\":\"" << json_escape(p.device.runtime) << "\","
+      << "\"prmers_version\":\"" << json_escape(core::PRMERS_VERSION) << "\","
+      << "\"source_sha\":\"" << json_escape(PRMERS_STRINGIFY(PRMERS_GIT_SHA)) << "\","
+      << "\"compiler\":\"" << json_escape(compiler_string()) << "\","
+      << "\"warmup_iterations\":" << cfg.warmup << ","
+      << "\"timed_iterations_per_rep\":" << cfg.timed_iterations << ","
+      << "\"repetitions\":" << cfg.repetitions << ","
+      << "\"exact_iterations\":" << cfg.exact_iterations << ","
+      << "\"plans\":[";
+    for (std::size_t i = 0; i < p.plans.size(); ++i) {
+        if (i) o << ',';
+        o << row_json(p.plans[i]);
+    }
+    o << "]}";
+    return o.str();
+}
+
+std::string csv_header() {
+    return "schema_version,mode,exponent,device_index,device_vendor,device_name,"
+           "status,error,request,resolved_plan,active_plan,backend,auto_baseline,"
+           "legal,duplicate,exact_match,production_probe_exact,best_exact,residue_hash,"
+           "transform_words,transform_mwords,bpw,setup_ms,us_per_iter_median,"
+           "us_per_iter_min,us_per_iter_max,production_prp_us_per_iter,delta_vs_auto_pct";
+}
+
+std::string row_csv(const PointResult& p, const PlanResult& r, const ModeConfig& cfg) {
+    std::ostringstream o;
+    o << std::setprecision(12)
+      << kSchemaVersion << ',' << csv_escape(cfg.name) << ','
+      << p.exponent << ',' << p.device_index << ','
+      << csv_escape(p.device.vendor) << ',' << csv_escape(p.device.name) << ','
+      << csv_escape(r.status) << ',' << csv_escape(r.error) << ','
+      << csv_escape(r.request) << ',' << csv_escape(r.resolved_plan) << ','
+      << csv_escape(r.active_plan) << ',' << csv_escape(r.backend) << ','
+      << (r.auto_baseline ? 1 : 0) << ',' << (r.legal ? 1 : 0) << ','
+      << (r.duplicate ? 1 : 0) << ',' << (r.exact_match ? 1 : 0) << ','
+      << (r.production_probe_exact ? 1 : 0) << ',' << (r.best_exact ? 1 : 0) << ','
+      << csv_escape(r.residue_hash) << ',' << r.transform_words << ','
+      << r.transform_mwords << ',' << r.bpw << ',' << r.setup_ms << ','
+      << r.us_median << ',' << r.us_min << ',' << r.us_max << ','
+      << r.production_us_per_iter << ',' << r.delta_vs_auto_pct;
+    return o.str();
+}
+
+std::string row_text(std::uint32_t exponent, const PlanResult& r) {
+    std::ostringstream o;
+    o << std::fixed << std::setprecision(3)
+      << "BENCH3 p=" << exponent
+      << " request=" << r.request
+      << " status=" << r.status
+      << " backend=" << (r.backend.empty() ? "n/a" : r.backend)
+      << " plan=" << (r.active_plan.empty() ? r.resolved_plan : r.active_plan)
+      << " exact=" << (r.exact_match ? "yes" : "no")
+      << " prod_exact=" << (r.production_probe_exact ? "yes" : "no")
+      << " median_us=" << r.us_median
+      << " prod_us=" << r.production_us_per_iter
+      << " delta_auto_pct=" << r.delta_vs_auto_pct
+      << " best=" << (r.best_exact ? "yes" : "no")
+      << " residue=" << (r.residue_hash.empty() ? "n/a" : r.residue_hash);
+    if (!r.error.empty()) o << " error=" << r.error;
+    return o.str();
+}
+
+std::filesystem::path record_path(const std::filesystem::path& dir,
+                                  std::size_t device,
+                                  std::uint32_t exponent) {
+    std::ostringstream name;
+    name << "d" << device << "_p" << std::setw(10) << std::setfill('0')
+         << exponent << ".record";
+    return dir / name.str();
+}
+
+void atomic_write_record(const std::filesystem::path& path,
+                         const std::string& json,
+                         const std::vector<std::string>& csv,
+                         const std::vector<std::string>& text) {
+    std::filesystem::create_directories(path.parent_path());
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot create bench3 record");
+        out << "JSON\t" << json << '\n';
+        for (const auto& row : csv) out << "CSV\t" << row << '\n';
+        for (const auto& row : text) out << "TEXT\t" << row << '\n';
+        out.flush();
+        if (!out) throw std::runtime_error("cannot flush bench3 record");
+    }
+    if (std::filesystem::exists(path)) {
+        std::filesystem::remove(tmp);
+        return;
+    }
+    std::filesystem::rename(tmp, path);
+}
+
+void replace_file(const std::filesystem::path& path, const std::string& content) {
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::trunc);
+        if (!out) throw std::runtime_error("cannot create " + tmp.string());
+        out << content;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) throw std::runtime_error("cannot replace " + path.string());
+}
+
+void rebuild_outputs(const std::filesystem::path& out_dir,
+                     const std::filesystem::path& record_dir,
+                     const ModeConfig& cfg,
+                     std::size_t device_index) {
+    std::vector<std::filesystem::path> files;
+    if (std::filesystem::exists(record_dir)) {
+        for (const auto& e : std::filesystem::directory_iterator(record_dir))
+            if (e.is_regular_file() && e.path().extension() == ".record")
+                files.push_back(e.path());
+    }
+    std::sort(files.begin(), files.end());
+
+    std::vector<std::string> json_rows, csv_rows, text_rows;
+    for (const auto& path : files) {
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("JSON\t", 0) == 0) json_rows.push_back(line.substr(5));
+            else if (line.rfind("CSV\t", 0) == 0) csv_rows.push_back(line.substr(4));
+            else if (line.rfind("TEXT\t", 0) == 0) text_rows.push_back(line.substr(5));
+        }
+    }
+
+    {
+        std::ostringstream o;
+        for (const auto& row : json_rows) o << row << '\n';
+        replace_file(out_dir / "bench3.jsonl", o.str());
+    }
+    {
+        std::ostringstream o;
+        o << "[\n";
+        for (std::size_t i = 0; i < json_rows.size(); ++i) {
+            o << "  " << json_rows[i];
+            if (i + 1 != json_rows.size()) o << ',';
+            o << '\n';
+        }
+        o << "]\n";
+        replace_file(out_dir / "bench3.json", o.str());
+    }
+    {
+        std::ostringstream o;
+        o << csv_header() << '\n';
+        for (const auto& row : csv_rows) o << row << '\n';
+        replace_file(out_dir / "bench3.csv", o.str());
+    }
+    {
+        std::ostringstream o;
+        o << "PrMers -bench3 schema=" << kSchemaVersion
+          << " mode=" << cfg.name
+          << " device=" << device_index
+          << " completed_points=" << json_rows.size() << '\n';
+        for (const auto& row : text_rows) o << row << '\n';
+        replace_file(out_dir / "bench3.txt", o.str());
+    }
+}
+
+} // namespace
+
+int run(const io::CliOptions& options) {
+    const ModeConfig cfg = mode_config(options.bench3_mode);
+    if (options.device_id < 0) {
+        std::cerr << "-bench3 requires a non-negative -d device index\n";
+        return 2;
+    }
+
+    const std::size_t device_index =
+        static_cast<std::size_t>(options.device_id);
+    const std::filesystem::path out_dir =
+        options.bench3_output.empty()
+            ? std::filesystem::path("bench3-results")
+            : std::filesystem::path(options.bench3_output);
+    const auto record_dir = out_dir / "records";
+
+    if (!options.bench3_resume) {
+        std::error_code ec;
+        std::filesystem::remove_all(record_dir, ec);
+        std::filesystem::remove(out_dir / "bench3.jsonl", ec);
+        std::filesystem::remove(out_dir / "bench3.json", ec);
+        std::filesystem::remove(out_dir / "bench3.csv", ec);
+        std::filesystem::remove(out_dir / "bench3.txt", ec);
+    }
+    std::filesystem::create_directories(record_dir);
+
+    const DeviceInfo info = device_info(device_index);
+    std::cout << "PrMers -bench3 schema=" << kSchemaVersion
+              << " mode=" << cfg.name
+              << " device=" << device_index
+              << " GPU=\"" << info.vendor << ' ' << info.name << "\""
+              << " points=" << cfg.exponents.size()
+              << " resume=" << (options.bench3_resume ? "on" : "off")
+              << " out=" << out_dir.string() << '\n';
+
+    std::signal(SIGINT, signal_handler);
+#ifdef SIGTERM
+    std::signal(SIGTERM, signal_handler);
+#endif
+
+    for (std::size_t i = 0; i < cfg.exponents.size(); ++i) {
+        if (g_stop) {
+            rebuild_outputs(out_dir, record_dir, cfg, device_index);
+            return 130;
+        }
+
+        const auto exponent = cfg.exponents[i];
+        const auto path = record_path(record_dir, device_index, exponent);
+        if (options.bench3_resume && std::filesystem::exists(path)) {
+            std::cout << "BENCH3_RESUME_SKIP [" << (i + 1) << '/'
+                      << cfg.exponents.size() << "] p=" << exponent << '\n';
+            continue;
+        }
+
+        std::cout << "BENCH3_POINT [" << (i + 1) << '/'
+                  << cfg.exponents.size() << "] p=" << exponent
+                  << " AUTO+bounded-alternatives" << std::endl;
+
+        PointResult point;
+        try {
+            point = benchmark_point(exponent, device_index, info, cfg);
+        } catch (const std::exception& e) {
+            if (g_stop) {
+                rebuild_outputs(out_dir, record_dir, cfg, device_index);
+                std::cerr << e.what() << "; completed Bench3 points remain resumable\n";
+                return 130;
+            }
+            throw;
+        }
+
+        std::vector<std::string> csv;
+        std::vector<std::string> text;
+        for (const auto& row : point.plans) {
+            csv.push_back(row_csv(point, row, cfg));
+            text.push_back(row_text(exponent, row));
+        }
+
+        atomic_write_record(path, point_json(point, cfg), csv, text);
+        rebuild_outputs(out_dir, record_dir, cfg, device_index);
+        for (const auto& row : text) std::cout << row << '\n';
+    }
+
+    rebuild_outputs(out_dir, record_dir, cfg, device_index);
+    std::cout << "BENCH3_COMPLETE schema=" << kSchemaVersion
+              << " mode=" << cfg.name
+              << " device=" << device_index
+              << " json=" << (out_dir / "bench3.json").string()
+              << " csv=" << (out_dir / "bench3.csv").string()
+              << " text=" << (out_dir / "bench3.txt").string()
+              << '\n';
+    return 0;
+}
+
+} // namespace core::bench3
