@@ -351,11 +351,26 @@ PlanResult measure_plan(std::uint32_t exponent,
                         const mpz_class* auto_residue,
                         mpz_class* measured_residue) {
     PlanResult r;
+    const auto plan_begin = std::chrono::steady_clock::now();
+    const auto progress = [&](const std::string& phase) {
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - plan_begin).count();
+        std::ostringstream line;
+        line << std::fixed << std::setprecision(3)
+             << "BENCH3_PROGRESS p=" << exponent
+             << " request=" << request
+             << " phase=" << phase
+             << " plan=" << (resolved_plan.empty() ? "AUTO" : resolved_plan)
+             << " elapsed_s=" << elapsed;
+        std::cout << line.str() << std::endl;
+    };
+
     r.auto_baseline = auto_baseline;
     r.request = request;
     r.resolved_plan = resolved_plan;
 
     const auto setup_begin = std::chrono::steady_clock::now();
+    progress("setup_begin");
     try {
         if (auto_baseline) {
             engine::configure_gpu_backend(
@@ -369,6 +384,7 @@ PlanResult measure_plan(std::uint32_t exponent,
             engine::create_gpu(exponent, kPrpRegisterCount, device_index, false));
         if (!eng) throw std::runtime_error("engine::create_gpu returned null");
         eng->sync();
+        progress("setup_done");
 
         r.setup_ms = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - setup_begin).count();
@@ -387,28 +403,34 @@ PlanResult measure_plan(std::uint32_t exponent,
             r.active_plan = "marin-native";
         }
 
+        progress("exact_begin");
         const mpz_class residue = exact_residue(*eng, cfg.exact_iterations);
         r.residue_hash = residue_hash(residue);
         if (measured_residue) *measured_residue = residue;
+        progress("exact_done");
 
         r.exact_match = auto_baseline ||
                         (auto_residue != nullptr && residue == *auto_residue);
         if (!r.exact_match) {
             r.status = "EXACT_MISMATCH";
             r.error = "full deterministic residue differs from AUTO";
+            progress("exact_mismatch");
             return r;
         }
 
+        progress("warmup_begin");
         eng->set(0, 3u);
         for (std::size_t i = 0; i < cfg.warmup; ++i) {
             if (g_stop) throw std::runtime_error("bench3 interrupted");
             eng->square_mul(0);
         }
         eng->sync();
+        progress("warmup_done");
 
         std::vector<double> samples;
         samples.reserve(cfg.repetitions);
         for (std::size_t rep = 0; rep < cfg.repetitions; ++rep) {
+            progress("timing_rep_" + std::to_string(rep + 1) + "_begin");
             eng->set(0, 3u);
             eng->sync();
             const auto begin = std::chrono::steady_clock::now();
@@ -421,18 +443,22 @@ PlanResult measure_plan(std::uint32_t exponent,
             samples.push_back(
                 std::chrono::duration<double, std::micro>(end - begin).count() /
                 static_cast<double>(cfg.timed_iterations));
+            progress("timing_rep_" + std::to_string(rep + 1) + "_done");
         }
 
         r.us_median = median(samples);
         r.us_min = *std::min_element(samples.begin(), samples.end());
         r.us_max = *std::max_element(samples.begin(), samples.end());
 
+        progress("production_probe_begin");
         const ProductionTiming prod =
             production_timing(*eng, exponent, r.us_median);
         r.production_probe_exact = prod.exact;
         r.production_us_per_iter = prod.production_us_per_iter;
+        progress("production_probe_done");
     } catch (const std::exception& e) {
         if (g_stop) throw;
+        progress("error");
         const std::string detail = e.what();
         if (!auto_baseline &&
             detail.find("small-factor capacity exceeded") != std::string::npos) {
