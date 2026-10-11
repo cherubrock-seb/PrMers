@@ -549,6 +549,73 @@ private:
   bool pending_lead_ = false;
 };
 
+struct PlanProductionConfirmation {
+  bool exact = false;
+  bool keep = false;
+  double gain = 1.0;
+  double worst = 100.0;
+  unsigned wins = 0;
+  std::array<double,3> native_seconds{};
+  std::array<double,3> candidate_seconds{};
+};
+
+// comparePlans remains the cheap first-stage shape ranker. A positive PRP
+// shape decision must also survive this production-faithful retained-width
+// square confirmation before it can replace the native plan.
+PlanProductionConfirmation confirmPrpPlanProduction(
+    uint32_t exponent,
+    size_t register_count,
+    GpuCommon shared,
+    const FFTConfig& native_fft,
+    const FFTConfig& candidate_fft,
+    double min_gain) {
+  PrpUseProbe native_probe(exponent, register_count, shared, native_fft, {});
+  PrpUseProbe candidate_probe(exponent, register_count, shared, candidate_fft, {});
+  const Words seed = deterministicResidue(exponent, 0x12345678u);
+
+  native_probe.reset(seed);
+  candidate_probe.reset(seed);
+  native_probe.sequence(64);
+  candidate_probe.sequence(64);
+  if (native_probe.read() != candidate_probe.read()) return {};
+
+  auto timed = [&](PrpUseProbe& probe) {
+    probe.reset(seed);
+    const auto begin = std::chrono::steady_clock::now();
+    probe.sequence(256);
+    const double seconds = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - begin).count();
+    return std::make_pair(seconds, probe.read());
+  };
+
+  PlanProductionConfirmation out;
+  for (unsigned repeat = 0; repeat < 3; ++repeat) {
+    std::pair<double,Words> native_sample, candidate_sample;
+    if (repeat & 1u) {
+      candidate_sample = timed(candidate_probe);
+      native_sample = timed(native_probe);
+    } else {
+      native_sample = timed(native_probe);
+      candidate_sample = timed(candidate_probe);
+    }
+
+    if (native_sample.second != candidate_sample.second) return out;
+
+    out.native_seconds[repeat] = native_sample.first;
+    out.candidate_seconds[repeat] = candidate_sample.first;
+    const double pair_gain = native_sample.first / candidate_sample.first;
+    out.wins += pair_gain >= 1.02;
+    out.worst = std::min(out.worst, pair_gain);
+  }
+
+  out.exact = true;
+  out.gain = median3(out.native_seconds) / median3(out.candidate_seconds);
+  out.keep = out.gain >= std::max(min_gain, 1.03) &&
+             out.wins >= 2 &&
+             out.worst >= 0.985;
+  return out;
+}
+
 // PRP use selection is deliberately downstream of all shape selection paths.
 std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon shared,
     const FFTConfig& fft, const std::string& identity, uint64_t shape_ms, bool shape_ran,
@@ -927,6 +994,10 @@ public:
             << ";safe=1;clean=1";
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
+      // Positive PRP shape-cache entries from this generation have passed the
+      // production-faithful retained-width square confirmation below.
+      if (workload_ == aevum_autotune::Workload::Prp)
+        flags << ";shape-confirm=prp-square-v1";
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,
                                               workload_, register_count_, exponent_, flags.str());
 
@@ -1028,6 +1099,52 @@ public:
             if (verbose) log("Aevum autotune: candidate=%s rejected (engine exception).\n", candidate_spec.c_str());
           }
         }
+        if (workload_ == aevum_autotune::Workload::Prp &&
+            best_spec != native_fft.spec() &&
+            best_speedup >= threshold) {
+          try {
+            const auto best_fft = admissiblePlan(args_, exponent_, best_spec);
+            if (!best_fft)
+              throw std::runtime_error("best PRP shape became inadmissible");
+
+            const auto confirm = confirmPrpPlanProduction(
+                exponent_, register_count_, shared_,
+                native_fft, *best_fft, threshold);
+
+            if (verbose) {
+              log("Aevum autotune: production-confirm candidate=%s exact=%d "
+                  "median_gain=%.5fx worst=%.5fx wins=%u/3 keep=%d "
+                  "native_s=%.6f,%.6f,%.6f candidate_s=%.6f,%.6f,%.6f.\n",
+                  best_spec.c_str(), confirm.exact ? 1 : 0,
+                  confirm.gain, confirm.worst, confirm.wins,
+                  confirm.keep ? 1 : 0,
+                  confirm.native_seconds[0], confirm.native_seconds[1],
+                  confirm.native_seconds[2],
+                  confirm.candidate_seconds[0], confirm.candidate_seconds[1],
+                  confirm.candidate_seconds[2]);
+            }
+
+            if (confirm.exact && confirm.keep) {
+              best_speedup = confirm.gain;
+            } else {
+              best_spec = native_fft.spec();
+              best_speedup = 1.0;
+            }
+          } catch (const std::exception& e) {
+            if (verbose)
+              log("Aevum autotune: production-confirm fallback=native reason=%s.\n",
+                  e.what());
+            best_spec = native_fft.spec();
+            best_speedup = 1.0;
+          } catch (...) {
+            if (verbose)
+              log("Aevum autotune: production-confirm fallback=native "
+                  "reason=engine-exception.\n");
+            best_spec = native_fft.spec();
+            best_speedup = 1.0;
+          }
+        }
+
         if (best_speedup >= threshold) {
           selected_spec = best_spec;
           autotune_plan_speedup = best_speedup;
