@@ -998,6 +998,15 @@ never elides FP32 unless the exact two-prime capacity test passes.
 
 ## Benchmarks
 
+- `-bench` runs the original benchmark across supported NTT transform sizes; its behavior is unchanged.
+- `-bench2` benchmarks the production PRP path with automatic backend and FFT-plan selection. It supports `quick` (default), `standard`, `dense`, and `full` modes, resumes completed points, and writes text, JSON, JSONL, and CSV results.
+
+```bash
+./prmers -bench2 -bench2-mode quick -d 0
+```
+
+Use `-bench2-out <path>` to choose the output directory. See [GPU benchmarks](docs/GPU_BENCHMARKS.md) for details.
+
 Performance depends on GPU, clocks, power limits, OpenCL driver, thermal behavior and PrMers version. Treat the following values as rough guidance.
 
 Mersenne Forum discussion:
