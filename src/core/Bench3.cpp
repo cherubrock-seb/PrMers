@@ -441,6 +441,13 @@ PlanResult measure_plan(std::uint32_t exponent,
             r.production_probe_exact = false;
             r.production_us_per_iter = 0.0;
             r.error = "PRP factor-safe rejection: " + detail;
+        } else if (!auto_baseline &&
+                   detail.find("workgroup size too large for kernel") != std::string::npos) {
+            r.status = "SKIPPED_ILLEGAL";
+            r.legal = false;
+            r.production_probe_exact = false;
+            r.production_us_per_iter = 0.0;
+            r.error = "device workgroup-limit rejection: " + detail;
         } else {
             r.status = "ERROR";
             r.error = detail;
