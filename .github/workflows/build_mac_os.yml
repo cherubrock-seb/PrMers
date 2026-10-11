@@ -265,6 +265,8 @@ jobs:
           set -euo pipefail
           make test-gm
           make test-aevum-host MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          make test-bench2-source
+          make test-bench3-source
           make test-aevum-source
           make test-backend-compat
           make -C third_party/aevum test-engine-api MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
@@ -433,6 +435,7 @@ jobs:
             - Standalone Aevum tag: `v0.3.101-pass5-prp-max`
             - Standalone Aevum source SHA: `71e1b9819a7041c7f83889dd51e36ba2f1b3fa58`
             - Aevum v0.3.101 release gate: exact-SHA workflow PASS on Linux, Windows, macOS x86_64 and macOS arm64; annotated release tag, all 9 release assets, per-asset SHA256 files, SHA256SUMS and package SOURCE_INFO verified before this PrMers release.
+            - Bench3 public AUTO-versus-legal-plan benchmark: quick validation passed on Radeon VII and RTX 3080 with five resumable exponent points per GPU, zero residue mismatches, zero benchmark errors after device-specific illegal-plan classification, and exact production-PRP probes; Bench3 does not mutate selector or tune policy.
             - Bench2 production benchmark and PRP shape confirmation: Bench2/profile CLI, source gates and documentation are included; the vendored production confirmation is aligned with standalone Aevum v0.3.101. Public p145 validation retained native 1:1K:8:256:101 on Radeon VII and selected 1:512:8:512:202 on RTX 3080 with median +5.555%, worst +5.411%, 3/3 pair wins and keep=1; both GPUs passed exact cache replay with identical residue hash.
             - PRP factor-3 capacity safety: production-standard Bench2 passed exact Gerbicz validation 40/40 across RTX 3080 and Radeon VII; p82589933 promotes from the unsafe 2M transform to a 4M plan on both GPUs, and targeted Radeon timing repeats accepted the release timing gate.
             - NVIDIA 1K automatic radix-8 policy: RTX 3080 exact fixed-plan validation improved sustained PRP throughput by +4.481% at p=210000017 and +4.558% at p=219999919 versus the validated radix-4 fallback; Radeon VII retains radix-4 and passed exact non-regression validation.
