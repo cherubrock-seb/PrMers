@@ -24,6 +24,7 @@
 #define NOMINMAX
 #include "core/App.hpp"
 #include "core/Bench2.hpp"
+#include "core/Bench3.hpp"
 #include "core/InheritedSignals.hpp"
 #include "core/LegacyLlGuard.hpp"
 #include "core/ExitCodes.hpp"
@@ -1167,7 +1168,7 @@ int App::runInner() {
             // No GUI: carry on headless if there is work, otherwise there is nothing left to wait for
             // (the idle loop below can only be ended through the GUI or a signal).
             std::cerr << "The GUI could not be started." << std::endl;
- if (!hasWorktodoEntry_ && options.exponent == 0 && !options.bench && !options.bench2 && options.filemers.empty()) {
+ if (!hasWorktodoEntry_ && options.exponent == 0 && !options.bench && !options.bench2 && !options.bench3 && options.filemers.empty()) {
                 std::cerr << "Nothing to run and no GUI; exiting." << std::endl;
                 return 1;
             }
@@ -1489,6 +1490,9 @@ int App::runInner() {
         ran = true;
     } else if (options.bench2) {
         rc = core::bench2::run(options);
+        ran = true;
+    } else if (options.bench3) {
+        rc = core::bench3::run(options);
         ran = true;
     } else if (options.bench) {
         rc = runGpuBenchmarkMarin();
