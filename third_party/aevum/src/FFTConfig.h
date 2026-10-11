@@ -51,6 +51,23 @@ inline bool aevumRadix8For1K() {
 }
 #endif
 
+// Experimental, opt-in port of gpuowl 5593eaae's radix-8-at-256 geometry.
+// Default behavior remains radix-4.  Keep width and height independently
+// selectable so fixed-plan A/B tests can isolate one axis at a time.
+#if defined(__APPLE__)
+inline bool aevumRadix8For256Width() { return false; }
+inline bool aevumRadix8For256Height() { return false; }
+#else
+inline bool aevumRadix8For256Width() {
+  const char* value = std::getenv("AEVUM_RADIX256_W");
+  return value && value[0] == '8' && value[1] == '\0';
+}
+inline bool aevumRadix8For256Height() {
+  const char* value = std::getenv("AEVUM_RADIX256_H");
+  return value && value[0] == '8' && value[1] == '\0';
+}
+#endif
+
 class FFTShape {
 public:
   static std::vector<FFTShape> allShapes(u32 from=0, u32 to = -1);
@@ -69,10 +86,12 @@ public:
 
   u32 size() const { return width * height * middle * 2; }
   u32 nW() const {
-    return (width == 256 || (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+    return ((width == 256 && !aevumRadix8For256Width()) ||
+            (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
   }
   u32 nH() const {
-    return (height == 256 || (height == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+    return ((height == 256 && !aevumRadix8For256Height()) ||
+            (height == 1024 && !aevumRadix8For1K())) ? 4 : 8;
   }
 
   float minBpw() const { return fft_type != FFT32 ? 3.0f : 1.0f; }
