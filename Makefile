@@ -757,3 +757,7 @@ test-pm1-legacy-loop-bound: all
 .PHONY: test-bench2-source
 test-bench2-source:
 	python3 tests/bench2_source_test.py
+
+.PHONY: test-bench3-source
+test-bench3-source:
+	python3 tests/bench3_source_test.py
