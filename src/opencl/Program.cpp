@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include <cstdlib>
 #include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
@@ -95,6 +96,13 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
 
     std::ostringstream ss;
     ss << buildOptions;
+    const char* carryMaskWord = std::getenv("PRMERS_CARRY_MASK_WORD_V1");
+    if (carryMaskWord && std::string(carryMaskWord) == "1") {
+        ss << " -DPRMERS_CARRY_MASK_WORD_V1=1";
+        if (debug)
+            std::cout << "Legacy carry mask-word experiment requested; active for depths 4/8/16/32/64."
+                      << std::endl;
+    }
     ss 
       << " -DDIGIT_WIDTH_VALUE_1=" << pre.getDigitWidthValue1()
       << " -DDIGIT_WIDTH_VALUE_2=" << pre.getDigitWidthValue2()
