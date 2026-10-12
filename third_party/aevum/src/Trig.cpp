@@ -91,28 +91,31 @@ TrigCoefs trigCoefs(u32 n) {
   throw "Trig tab not found";
 }
 
-// FP32 slowTrig correction from upstream GPUOwl 2d071c9.
+/*
+
+FP32 slowTrig correction from upstream GPUOwl 2d071c9.
+Keep polynomial coefficients as normal floats by scaling k exactly into
+[0,2) and applying only the matching power-of-two scale to coefficients.
+*/
 TrigCoefsFP32 trigCoefsFP32(u32 n) {
-  auto [mid, twos] = splitTwos(n);
-  assert(twos >= 1 && (twos & (twos - 1)) == 0 && (twos % 4 == 0));
-  assert(mid % 2 == 1);
-  assert(mid <= 15 || (mid % 625 == 0 && mid / 625 <= 13));
+auto [mid, twos] = splitTwos(n);
+assert(twos >= 1 && (twos & (twos - 1)) == 0 && (twos % 4 == 0));
+assert(mid % 2 == 1);
+assert(mid <= 15 || (mid % 625 == 0 && mid / 625 <= 13));
 
-  for (u32 i = 0; i < MUL_TAB.size(); ++i) {
-    if (MUL_TAB[i] % mid == 0) {
-      int q = 0;
-      while ((2u << q) <= MUL_TAB[i]) ++q;
-      const double pow2q = std::ldexp(1.0, q);
-      const double scale =
-          double(MUL_TAB[i] / mid) / (twos / 4) / pow2q;
-      return {
-          scale,
-          scaleSin(SIN[i], pow2q),
-          scaleCos(COS[i], pow2q)
-      };
-    }
-  }
+for (u32 i = 0; i < MUL_TAB.size(); ++i) {
+if (MUL_TAB[i] % mid == 0) {
+int q = 0;
+while ((2u << q) <= MUL_TAB[i]) ++q;
+double const pow2q = ldexp(1.0, q);
+double const scale =
+double(MUL_TAB[i] / mid) / (twos / 4) / pow2q;
+return {scale,
+scaleSin(SIN[i], pow2q),
+scaleCos(COS[i], pow2q)};
+}
+}
 
-  log("Trig tab not found for %u (%u * %u)\n", n, mid, twos);
-  throw "Trig tab not found";
+log("Trig tab not found for %u (%u * %u)\n", n, mid, twos);
+throw "Trig tab not found";
 }

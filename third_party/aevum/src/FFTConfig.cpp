@@ -760,22 +760,21 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
-    const bool explicit_fft3261 =
-        fft.shape.fft_type == FFT3261 &&
-        fft3261_env &&
-        fft3261_env[0] == '1' &&
-        fft3261_env[1] == '\0';
-    const bool supported_aevum_type =
-        fft.shape.fft_type == FFT64 ||
-        fft.shape.fft_type == FFT3161 ||
-        fft.shape.fft_type == FFT323161 ||
-        explicit_fft3261;
-    if (!supported_aevum_type && !apple_diagnostic_plane) {
-      log("Aevum accepts FFT type 0, type 1, or type 4; "
-          "experimental explicit type 2 requires AEVUM_EXPERIMENT_FFT3261=1.\n");
-      throw "Aevum FFT type";
-    }
+const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
+const bool explicit_fft3261 =
+fft.shape.fft_type == FFT3261 &&
+fft3261_env &&
+fft3261_env[0] == '1' &&
+fft3261_env[1] == '\0';
+const bool supported_aevum_type =
+fft.shape.fft_type == FFT64 ||
+fft.shape.fft_type == FFT3161 ||
+fft.shape.fft_type == FFT323161 ||
+explicit_fft3261;
+if (!supported_aevum_type && !apple_diagnostic_plane) {
+log("Aevum accepts FFT type 0, type 1, or type 4; experimental explicit type 2 requires AEVUM_EXPERIMENT_FFT3261=1.\n");
+throw "Aevum FFT type";
+}
 #if defined(__APPLE__)
     if (apple_diagnostic_plane) {
       log("Apple Aevum diagnostic: explicit single-plane FFT type %d enabled.\n",

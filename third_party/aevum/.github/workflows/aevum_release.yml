@@ -1,0 +1,642 @@
+name: Aevum standalone release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact commit SHA or tag to preflight; empty uses the workflow ref
+        required: false
+        default: ""
+        type: string
+  push:
+    branches:
+      - 'cherub-preflight/aevum-release-pipeline-v1'
+    tags:
+      - 'v0.*'
+
+permissions:
+  contents: read
+
+env:
+  AEVUM_DIR: .
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Install OpenCL build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ocl-icd-opencl-dev pocl-opencl-icd
+
+      - name: Build and test standalone Aevum
+        run: |
+          set -eux
+          make -C "$AEVUM_DIR" test-host
+          make -C "$AEVUM_DIR" -j "$(nproc)" engine-lib
+          make -C "$AEVUM_DIR" test-engine-api
+          make -C "$AEVUM_DIR" -j "$(nproc)"
+          "$AEVUM_DIR/build-release/aevum" -h
+
+      - name: Package Linux standalone Aevum
+        run: |
+          set -eux
+          VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' "$AEVUM_DIR/Makefile")"
+          NAME="Aevum-${VERSION}-linux-x86_64"
+          STAGE="dist/$NAME"
+          mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
+          cp "$AEVUM_DIR/build-release/aevum" "$STAGE/bin/"
+          cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$STAGE/lib/"
+          cp "$AEVUM_DIR/src/EngineApi.h" "$STAGE/include/"
+          cp "$AEVUM_DIR/README.md" "$STAGE/"
+          cp "$AEVUM_DIR/LICENSE" "$STAGE/"
+          cp "$AEVUM_DIR/UPSTREAM.md" "$STAGE/"
+          cp "$AEVUM_DIR/MODIFICATIONS.md" "$STAGE/"
+          cp "$AEVUM_DIR/tune.txt" "$STAGE/"
+          {
+            echo "repository=${GITHUB_REPOSITORY}"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "source_tree=$(git rev-parse HEAD^{tree})"
+            echo "aevum_version=${VERSION}"
+          } > "$STAGE/SOURCE_INFO.txt"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "$NAME"
+          (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-linux-x86_64
+          path: |
+            dist/Aevum-*.tar.gz
+            dist/Aevum-*.tar.gz.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up MSYS2 UCRT64 for standalone Aevum
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            diffutils
+            python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-opencl-headers
+            mingw-w64-ucrt-x86_64-opencl-icd
+
+      - name: Build and run type4 PFA9 host test
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR"
+          mkdir -p build-tests
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc tests/type4_pfa9_plan_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp tests/type4_args_splituses_stub.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/CycleFile.cpp src/timeutil.cpp -o build-tests/aevum-type4-pfa9-plan-test
+          build-tests/aevum-type4-pfa9-plan-test
+
+      - name: Build host test binary - monolithic source
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test
+
+      - name: Build host test binary - GF arithmetic
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-host-gf-test
+
+      - name: Build host test binary - compact state
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-state-compact-test
+
+      - name: Build host test binary - OpenCL standard
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
+
+      - name: Build host test binary - runtime autotune cache
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-runtime-autotune-cache-test
+
+      - name: "Host test: monolithic source"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-opencl-monolithic-source-test
+
+      - name: "Host test: OpenCL 1.2 syntax"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/opencl12_syntax_test.sh
+
+      - name: "Host test: pow2 type4 OpenCL syntax"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/pow2_type4_opencl_syntax.sh
+
+      - name: "Host test: PFA9 lead bridge source"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/pfa9_lead_bridge_source_test.py
+
+      - name: "Host test: Apple OpenCL 1.2 kernel matrix"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/apple_opencl12_kernel_matrix_syntax.sh
+
+      - name: "Host test: Apple GF61 ffthin staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_ffthin_staging_test.py
+
+      - name: "Host test: Apple GF31 width staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf31_width_staging_test.py
+
+      - name: "Host test: Apple fused FFTP"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_fused_fftp_test.py
+
+      - name: "Host test: Apple GF61 scalar mapping"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_scalar_mapping_test.py
+
+      - name: "Host test: Apple GF61 width staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_width_staging_test.py
+
+      - name: "Host test: Apple GF61 middlein staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middlein_staging_test.py
+
+      - name: "Host test: Apple GF61 restrict alias"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middlein_restrict_alias_test.py
+
+      - name: "Host test: Apple GF61 tail two-kernel policy"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tail_two_kernel_policy_test.py
+
+      - name: "Host test: Apple GF61 tailzero staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tailzero_staging_test.py
+
+      - name: "Host test: Apple GF61 maintail staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_maintail_staging_test.py
+
+      - name: "Host test: Apple GF61 FFTW staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_fftw_staging_test.py
+
+      - name: "Host test: Apple GF61 tailmul staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_tailmul_staging_test.py
+
+      - name: "Host test: Apple prepared tailmullow staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_prepared_tailmullow_staging_test.py
+
+      - name: "Host test: Apple GF61 middleout staging"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_gf61_middleout_staging_test.py
+
+      - name: "Host test: Apple readchecked double sync"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_readchecked_double_sync_test.py
+
+      - name: "Host test: Apple queue marker flush"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_queue_marker_flush_test.py
+
+      - name: "Host test: Apple generic mul safety"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_generic_mul_safety_test.py
+
+      - name: "Host test: Apple global transpose"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_global_transpose_test.py
+
+      - name: "Host test: Apple canonical set u32"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/apple_canonical_set_u32_test.py
+
+      - name: "Host test: source audit"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && bash tests/source_audit.sh
+
+      - name: "Host test: GPU init order"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/gpu_init_order_test.py
+
+      - name: "Host test: engine lead cache"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/engine_lead_cache_test.py
+
+      - name: "Host test: native tune compatibility"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && python3 tests/native_tune_compat_source_test.py
+
+      - name: "Host test binary: GF arithmetic"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-host-gf-test
+
+      - name: "Host test binary: compact state"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-state-compact-test
+
+      - name: "Host test binary: OpenCL standard"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-opencl-standard-test
+
+      - name: "Host test binary: type4 PFA9 plan"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-type4-pfa9-plan-test
+
+      - name: "Host test binary: runtime autotune cache"
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR" && build-tests/aevum-runtime-autotune-cache-test
+
+      - name: Build standalone Aevum DLL
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" clean
+          make -C "$AEVUM_DIR" engine-lib -j"$(nproc)" \
+            CXX=g++ \
+            DL_LIBS= \
+            ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
+      - name: Test standalone Aevum DLL exports
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          DLL="$AEVUM_DIR/build-engine/aevum_engine.dll"
+          cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$DLL"
+          test -s "$DLL"
+          DEPS="$(objdump -p "$DLL" | sed -n 's/^[[:space:]]*DLL Name: //p')"
+          echo "Aevum DLL dependencies:"
+          printf '%s\n' "$DEPS"
+          if printf '%s\n' "$DEPS" | grep -Eqi '^libstdc\+\+-6\.dll$|^libgcc_s_.*\.dll$'; then
+            echo "Unexpected dynamic GCC runtime dependency"
+            exit 1
+          fi
+          cat > aevum-dll-smoke.cpp <<'CPP'
+          #ifndef NOMINMAX
+          #define NOMINMAX
+          #endif
+
+          #include <windows.h>
+
+          #include <cstddef>
+          #include <cstdint>
+          #include <iostream>
+          #include <stdexcept>
+          #include <string>
+
+          int main(int argc, char** argv) {
+            if (argc != 2) {
+              std::cerr << "Usage: aevum-dll-smoke <dll>\n";
+              return 2;
+            }
+
+            HMODULE library = LoadLibraryA(argv[1]);
+            if (!library) {
+              std::cerr << "LoadLibrary failed: " << GetLastError() << '\n';
+              return 3;
+            }
+
+            const char* symbols[] = {
+              "aevum_engine_version",
+              "aevum_engine_last_error",
+              "aevum_engine_resolve_fft",
+              "aevum_engine_create",
+              "aevum_engine_destroy",
+              "aevum_engine_transform_size",
+              "aevum_engine_word_count",
+              "aevum_engine_sync",
+              "aevum_engine_set_u32",
+              "aevum_engine_set_words",
+              "aevum_engine_get_words",
+              "aevum_engine_copy",
+              "aevum_engine_prepare",
+              "aevum_engine_square_mul",
+              "aevum_engine_mul",
+              "aevum_engine_add",
+              "aevum_engine_sub_reg",
+              "aevum_engine_sub_u32",
+              "aevum_engine_equal"
+            };
+
+            for (const char* symbol : symbols) {
+              if (!GetProcAddress(library, symbol)) {
+                std::cerr << "Missing export: " << symbol << '\n';
+                FreeLibrary(library);
+                return 4;
+              }
+            }
+
+            using version_fn = const char* (*)();
+            using error_fn = const char* (*)();
+            using resolve_fn =
+              int (*)(std::uint32_t, const char*, char*, std::size_t);
+
+            const auto version = reinterpret_cast<version_fn>(
+              GetProcAddress(library, "aevum_engine_version"));
+            const auto error = reinterpret_cast<error_fn>(
+              GetProcAddress(library, "aevum_engine_last_error"));
+            const auto resolve = reinterpret_cast<resolve_fn>(
+              GetProcAddress(library, "aevum_engine_resolve_fft"));
+
+            char spec[64]{};
+
+            if (!resolve(136279841u, nullptr, spec, sizeof(spec))) {
+              std::cerr << "FFT resolution failed: " << error() << '\n';
+              FreeLibrary(library);
+              return 5;
+            }
+
+            std::cout << "Aevum DLL loaded, version=" << version()
+                      << ", FFT=" << spec << '\n';
+
+            FreeLibrary(library);
+            return 0;
+          }
+          CPP
+
+          g++ -std=c++20 -O2 \
+            -static-libstdc++ -static-libgcc \
+            aevum-dll-smoke.cpp \
+            -o aevum-dll-smoke.exe
+
+          ./aevum-dll-smoke.exe "$DLL"
+
+          file "$DLL"
+
+          objdump -p "$DLL" > aevum-dll-objdump.txt
+
+          if ! grep -q 'aevum_engine_version' aevum-dll-objdump.txt; then
+            echo "::error::aevum_engine_version is absent from the DLL export table"
+            sed -n '/Export Table/,$p' aevum-dll-objdump.txt
+            exit 1
+          fi
+
+          echo "Aevum DLL export table validation passed."
+      - name: Build and test standalone Aevum CLI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" -j"$(nproc)"
+          "$AEVUM_DIR/build-release/aevum.exe" -h
+
+      - name: Package Windows standalone Aevum
+        shell: pwsh
+        run: |
+          $versionLine = Select-String -Path "$env:AEVUM_DIR/Makefile" -Pattern '^AEVUM_VERSION\s*\?=\s*(\S+)' | Select-Object -First 1
+          if (-not $versionLine) { throw "AEVUM_VERSION not found in Makefile" }
+          $version = $versionLine.Matches[0].Groups[1].Value
+          $name = "Aevum-$version-windows-x86_64"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force "$stage/bin", "$stage/lib", "$stage/include" | Out-Null
+          Copy-Item "$env:AEVUM_DIR/build-release/aevum.exe" "$stage/bin/"
+          $libs = Get-ChildItem "$env:AEVUM_DIR/build-engine" -File | Where-Object {
+            $_.Extension -in ".dll", ".so", ".dylib", ".lib", ".a"
+          }
+          if (-not $libs) { throw "No standalone Aevum engine library was produced" }
+          $libs | Copy-Item -Destination "$stage/lib/"
+          Copy-Item "$env:AEVUM_DIR/src/EngineApi.h" "$stage/include/"
+          Copy-Item "$env:AEVUM_DIR/README.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/LICENSE" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/UPSTREAM.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/MODIFICATIONS.md" "$stage/"
+          Copy-Item "$env:AEVUM_DIR/tune.txt" "$stage/"
+          $sourceSha = (git rev-parse HEAD).Trim()
+          $sourceTree = (git rev-parse 'HEAD^{tree}').Trim()
+          @(
+            "repository=$env:GITHUB_REPOSITORY"
+            "source_sha=$sourceSha"
+            "source_tree=$sourceTree"
+            "aevum_version=$version"
+          ) | Set-Content "$stage/SOURCE_INFO.txt"
+          Compress-Archive -Path "$stage" -DestinationPath "dist/$name.zip"
+          $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Set-Content "dist/$name.zip.sha256"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-windows-x86_64
+          path: |
+            dist/Aevum-*.zip
+            dist/Aevum-*.zip.sha256
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Build and test standalone Aevum
+        run: |
+          set -eux
+          make -C "$AEVUM_DIR" test-host
+          make -C "$AEVUM_DIR" -j "$(sysctl -n hw.ncpu)" engine-lib
+          make -C "$AEVUM_DIR" test-engine-api
+          bash "$AEVUM_DIR/tests/check_macos_minos.sh" \
+            "$MACOSX_DEPLOYMENT_TARGET" \
+            "$AEVUM_DIR/build-engine/libaevum_engine.so" \
+            "$AEVUM_DIR/build-tests/aevum-engine-api-load-test"
+          make -C "$AEVUM_DIR" -j "$(sysctl -n hw.ncpu)"
+          "$AEVUM_DIR/build-release/aevum" -h
+
+      - name: Package macOS standalone Aevum
+        run: |
+          set -eux
+          VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' "$AEVUM_DIR/Makefile")"
+          NAME="Aevum-${VERSION}-macos-${{ matrix.arch }}"
+          STAGE="dist/$NAME"
+          mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include"
+          cp "$AEVUM_DIR/build-release/aevum" "$STAGE/bin/"
+          cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$STAGE/lib/"
+          cp "$AEVUM_DIR/src/EngineApi.h" "$STAGE/include/"
+          cp "$AEVUM_DIR/README.md" "$STAGE/"
+          cp "$AEVUM_DIR/LICENSE" "$STAGE/"
+          cp "$AEVUM_DIR/UPSTREAM.md" "$STAGE/"
+          cp "$AEVUM_DIR/MODIFICATIONS.md" "$STAGE/"
+          cp "$AEVUM_DIR/tune.txt" "$STAGE/"
+          {
+            echo "repository=${GITHUB_REPOSITORY}"
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "source_tree=$(git rev-parse HEAD^{tree})"
+            echo "aevum_version=${VERSION}"
+          } > "$STAGE/SOURCE_INFO.txt"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "$NAME"
+          (cd dist && shasum -a 256 "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+
+      - name: Upload macOS package
+        uses: actions/upload-artifact@v4
+        with:
+          name: aevum-macos-${{ matrix.arch }}
+          path: |
+            dist/Aevum-*.tar.gz
+            dist/Aevum-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish standalone Aevum release
+    if: startsWith(github.ref, 'refs/tags/v0.')
+    needs:
+      - linux
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout exact release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Require immutable annotated tag
+        run: |
+          set -eux
+          test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
+
+      - name: Download all platform packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aevum-*
+          path: release-dist
+          merge-multiple: true
+
+      - name: Build release checksum manifest and notes
+        run: |
+          set -eux
+          cd release-dist
+          sha256sum Aevum-*.tar.gz Aevum-*.zip > SHA256SUMS
+          cd ..
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          SOURCE_TREE="$(git rev-parse HEAD^{tree})"
+          AEVUM_VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' Makefile)"
+          CHANGE="$(git log -1 --format=%s)"
+          {
+            echo "# Standalone Aevum ${AEVUM_VERSION}"
+            echo
+            echo "- Release tag: \`${GITHUB_REF_NAME}\`"
+            echo "- Aevum source SHA: \`${SOURCE_SHA}\`"
+            echo "- Aevum source tree SHA: \`${SOURCE_TREE}\`"
+            echo "- Workflow run: \`${GITHUB_RUN_ID}\`"
+            echo "- Architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64"
+            echo "- Repository topology: standalone aevum-engine repository."
+            echo "- Tagged Aevum change: ${CHANGE}"
+            echo
+            echo "Correctness gates include the Aevum host tests and standalone engine API loader test on every release platform."
+            echo "Performance behavior is the behavior of the exact tagged Aevum source; no release-time tuning override is applied."
+          } > RELEASE_NOTES.md
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            release-dist/Aevum-*.tar.gz
+            release-dist/Aevum-*.zip
+            release-dist/Aevum-*.sha256
+            release-dist/SHA256SUMS

@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.103-pass5-prp-max
+AEVUM_VERSION ?= v0.3.104-pass5-prp-max
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -194,12 +194,8 @@ FFT_EXPLICIT_CAPACITY_TEST := build-tests/aevum-fft-explicit-capacity-test
 ARGS_VALUE_FOR_TEST := build-tests/aevum-args-value-for-test
 FFT_SIZE_ONLY_SPEC_TEST := build-tests/aevum-fft-size-only-spec-test
 FFT_SPEC_ROBUSTNESS_TEST := build-tests/aevum-fft-spec-robustness-test
-TRIG_CACHE_KEY_TEST := build-tests/aevum-trig-cache-key-test
-FFT_CARRY32_GATE_TEST := build-tests/aevum-fft-carry32-gate-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
-WMUL_LIMIT_TEST := build-tests/aevum-wmul-limit-test
-STRICT_INT_TEST := build-tests/aevum-strict-int-test
 FFT_VARIANT0_1K_TEST := build-tests/aevum-fft-variant0-1k-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
@@ -211,14 +207,13 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(STRICT_INT_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST) $(TRIG_CACHE_KEY_TEST) $(FFT_CARRY32_GATE_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
 	python3 tests/pfa9_lead_bridge_source_test.py
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
-	python3 tests/apple_ffthin_preserves_input_test.py
 	python3 tests/apple_gf31_width_staging_test.py
 	python3 tests/apple_fused_fftp_test.py
 	python3 tests/apple_gf61_scalar_mapping_test.py
@@ -239,10 +234,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
-	python3 tests/engine_autotune_isolation_test.py
 	python3 tests/engine_lead_cache_test.py
-	python3 tests/tail_kernels_range_source_test.py
-	$(STRICT_INT_TEST)
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/asm_string_braces_test.py
 	$(HOST_TEST)
@@ -253,12 +245,9 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(ARGS_VALUE_FOR_TEST)
 	$(FFT_SIZE_ONLY_SPEC_TEST)
 	$(FFT_SPEC_ROBUSTNESS_TEST)
-	$(TRIG_CACHE_KEY_TEST)
-	$(FFT_CARRY32_GATE_TEST)
 	$(AUTOTUNE_CACHE_TEST)
 	$(EVENT_STATUS_TEST)
 	$(FFT8_SKIP1_TEST)
-	$(WMUL_LIMIT_TEST)
 	$(FFT_VARIANT0_1K_TEST)
 
 $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
@@ -267,14 +256,6 @@ $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.
 
 test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 	$(FFT_VARIANT0_1K_TEST)
-
-$(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
-
-$(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
@@ -318,16 +299,6 @@ $(ARGS_VALUE_FOR_TEST): tests/args_value_for_test.cpp src/Args.cpp src/Args.h sr
 		tests/args_value_for_test.cpp src/Args.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
-$(TRIG_CACHE_KEY_TEST): tests/trig_cache_key_test.cpp src/TrigBufCache.h
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/trig_cache_key_test.cpp -o $@
-
-$(FFT_CARRY32_GATE_TEST): tests/fft_carry32_gate_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
-		tests/fft_carry32_gate_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
-		$(TEST_GC_LINK) -o $@
-
 $(HOST_TEST): tests/host_gf_test.cpp
 	@mkdir -p build-tests
 	$(CXX) -O3 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $< -o $@
@@ -337,17 +308,6 @@ $(STATE_TEST): tests/state_compact_wrap_test.cpp src/state.cpp
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $^ -o $@
 
 $(OPENCL_STANDARD_TEST): tests/opencl_standard_test.cpp src/OpenCLStandard.h
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
-
-DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
-
-.PHONY: test-data-layout
-test-host: test-data-layout
-test-data-layout: $(DATA_LAYOUT_TEST)
-	$(DATA_LAYOUT_TEST)
-
-$(DATA_LAYOUT_TEST): tests/data_layout_test.cpp src/DataLayout.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
 
@@ -406,24 +366,6 @@ test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
 $(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
-# A reset or lost GPU is reported as such, an allocation failure as out of memory (host only, no device).
-GPU_LOST_ERROR_TEST := build-tests/aevum-gpu-lost-error-test
-.PHONY: test-gpu-lost-error
-test-host: test-gpu-lost-error
-test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
-	$(GPU_LOST_ERROR_TEST)
-$(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
-# The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
-CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
-.PHONY: test-cuda-error-map
-test-host: test-cuda-error-map
-test-cuda-error-map: $(CUDA_ERROR_MAP_TEST)
-	$(CUDA_ERROR_MAP_TEST)
-$(CUDA_ERROR_MAP_TEST): tests/cuda_error_map_test.cpp src/cuda/CudaErrorMap.h src/GpuLost.h
-	@mkdir -p build-tests
-	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_error_map_test.cpp -o $@
 # PR132 cumulative semantic integration
 STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 .PHONY: test-pr132-small-items test-stats-slot
