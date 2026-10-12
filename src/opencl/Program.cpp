@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include <cstdlib>
 #include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
@@ -95,6 +96,14 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
 
     std::ostringstream ss;
     ss << buildOptions;
+    // Experimental legacy carry path; absent or any value other than exactly 1
+    // leaves both the JIT options and the production helper unchanged.
+    if (const char* straightCarry = std::getenv("PRMERS_CARRY_STRAIGHT_V1")) {
+        if (std::string(straightCarry) == "1") {
+            ss << " -DPRMERS_CARRY_STRAIGHT_V1=1";
+            std::cerr << "[experimental] PRMERS_CARRY_STRAIGHT_V1=1 (legacy OpenCL carry)\n";
+        }
+    }
     ss 
       << " -DDIGIT_WIDTH_VALUE_1=" << pre.getDigitWidthValue1()
       << " -DDIGIT_WIDTH_VALUE_2=" << pre.getDigitWidthValue2()
