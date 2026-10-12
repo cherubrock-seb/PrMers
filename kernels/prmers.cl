@@ -159,7 +159,30 @@ inline ulong digit_adc(ulong lhs, int digit_width, __private ulong *carry) {
     return res;
 }
 
+#ifndef PRMERS_CARRY_STRAIGHT_V1
+#define PRMERS_CARRY_STRAIGHT_V1 0
+#endif
+
 inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict carry) {
+#if PRMERS_CARRY_STRAIGHT_V1 == 1
+    // Same four dependent unsigned additions, without digit-width pattern dispatch.
+    // Keep the production wraparound semantics; digit_adc adds different overflow handling.
+    ulong4 res;
+    ulong c = *carry;
+    ulong s = lhs.s0 + c;
+    res.s0 = s & ((1UL << digit_width.s0) - 1UL);
+    c = s >> digit_width.s0;
+    s = lhs.s1 + c;
+    res.s1 = s & ((1UL << digit_width.s1) - 1UL);
+    c = s >> digit_width.s1;
+    s = lhs.s2 + c;
+    res.s2 = s & ((1UL << digit_width.s2) - 1UL);
+    c = s >> digit_width.s2;
+    s = lhs.s3 + c;
+    res.s3 = s & ((1UL << digit_width.s3) - 1UL);
+    *carry = s >> digit_width.s3;
+    return res;
+#else
     ulong4 res;
     ulong c = *carry;
     
@@ -270,6 +293,7 @@ inline ulong4 digit_adc4(ulong4 lhs, int4 digit_width, __private ulong *restrict
     }
 
     return res;
+#endif
 }
 
 inline ulong4 digit_adc4_last(ulong4 a,int4 w,__private ulong*restrict k){
