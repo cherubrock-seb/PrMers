@@ -457,6 +457,25 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
       }
     }
 
+    // Validated production Type2 window. Keep it narrower than the
+    // established Type1 4M window. The factor-3 margin protects production
+    // PRP square_mul(...,3), not merely square-only capacity.
+    constexpr u64 kPrpType2MinExponent = 130000000u;
+    constexpr u64 kPrpType2MaxExponent = 137000003u;
+    if (E >= kPrpType2MinExponent && E <= kPrpType2MaxExponent) {
+      FFTConfig type2{
+          FFTShape{FFT3261, 512u, 8u, 512u}, 202u, CARRY_AUTO};
+      const double bits_per_word = E / double(type2.size());
+      const double factor3_safe_bpw =
+          type2.maxBpw() * args.fftOverdrive - std::log2(3.0);
+      if (bits_per_word >= type2.minBpw() &&
+          bits_per_word <= factor3_safe_bpw) {
+        log("Aevum native PRP Type2 FFT: %s for exponent %" PRIu64 "\n",
+            type2.spec().c_str(), E);
+        return type2;
+      }
+    }
+
     // Radeon VII high-range PRP measurements show the 8M 1K/radix-8 shape
     // materially faster than generic AUTO. Runtime enters this internal alias
     // only for AMD OpenCL devices. Preserve generic AUTO's variant/capacity.
@@ -737,9 +756,20 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
- const bool supported_aevum_type = fft.shape.fft_type == FFT64 || fft.shape.fft_type == FFT3161 || fft.shape.fft_type == FFT323161;
+    const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
+    const bool explicit_fft3261 =
+        fft.shape.fft_type == FFT3261 &&
+        fft3261_env &&
+        fft3261_env[0] == '1' &&
+        fft3261_env[1] == '\0';
+    const bool supported_aevum_type =
+        fft.shape.fft_type == FFT64 ||
+        fft.shape.fft_type == FFT3161 ||
+        fft.shape.fft_type == FFT323161 ||
+        explicit_fft3261;
     if (!supported_aevum_type && !apple_diagnostic_plane) {
-      log("Aevum accepts FFT type 0, type 1, or type 4 (power-of-two or explicit PFA3/PFA7/PFA9).\n");
+      log("Aevum accepts FFT type 0, type 1, or type 4; "
+          "experimental explicit type 2 requires AEVUM_EXPERIMENT_FFT3261=1.\n");
       throw "Aevum FFT type";
     }
 #if defined(__APPLE__)

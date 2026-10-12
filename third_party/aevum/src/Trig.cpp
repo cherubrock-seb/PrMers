@@ -4,6 +4,7 @@
 #include "log.h"
 
 #include <cassert>
+#include <cmath>
 
 using namespace std;
 
@@ -86,6 +87,32 @@ TrigCoefs trigCoefs(u32 n) {
       return {MUL_TAB[i] / mid, scaleSin(SIN[i], scale), scaleCos(COS[i], scale)};
     }
   }
+  log("Trig tab not found for %u (%u * %u)\n", n, mid, twos);
+  throw "Trig tab not found";
+}
+
+// FP32 slowTrig correction from upstream GPUOwl 2d071c9.
+TrigCoefsFP32 trigCoefsFP32(u32 n) {
+  auto [mid, twos] = splitTwos(n);
+  assert(twos >= 1 && (twos & (twos - 1)) == 0 && (twos % 4 == 0));
+  assert(mid % 2 == 1);
+  assert(mid <= 15 || (mid % 625 == 0 && mid / 625 <= 13));
+
+  for (u32 i = 0; i < MUL_TAB.size(); ++i) {
+    if (MUL_TAB[i] % mid == 0) {
+      int q = 0;
+      while ((2u << q) <= MUL_TAB[i]) ++q;
+      const double pow2q = std::ldexp(1.0, q);
+      const double scale =
+          double(MUL_TAB[i] / mid) / (twos / 4) / pow2q;
+      return {
+          scale,
+          scaleSin(SIN[i], pow2q),
+          scaleCos(COS[i], pow2q)
+      };
+    }
+  }
+
   log("Trig tab not found for %u (%u * %u)\n", n, mid, twos);
   throw "Trig tab not found";
 }

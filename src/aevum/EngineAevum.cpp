@@ -307,7 +307,7 @@ public:
         }
         const char* radix1k_env = std::getenv("AEVUM_RADIX1K");
         const bool radix1k_8 = radix1k_env && std::string(radix1k_env) == "8";
-        std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT323161"
+        std::cout << "[Backend Aevum] engine::Reg adapter active, FFT3161/FFT3261/FFT323161"
                   << " | transform=" << transform_size_
                   << " | requested-plan=" << (fft_spec.empty() ? "plugin-auto" : fft_spec)
                   << " | plan=" << (plan_spec_.empty() ? "unknown" : plan_spec_)
@@ -604,9 +604,9 @@ std::size_t transform_size_from_spec(const std::string& spec) {
     std::size_t offset = 0;
     if (!fields.empty() && (fields[0] == "pfa3" || fields[0] == "pfa7" || fields[0] == "pfa9" || fields[0] == "pfa9fast" || fields[0] == "pfa9full")) offset = 1;
     const bool supported_type = fields.size() >= offset + 4 &&
-                                (fields[offset] == "1" || fields[offset] == "4");
+                                (fields[offset] == "1" || fields[offset] == "2" || fields[offset] == "4");
     if (!supported_type)
-        throw std::runtime_error("invalid Aevum FFT3161/FFT323161 spec");
+        throw std::runtime_error("invalid Aevum FFT3161/FFT3261/FFT323161 spec");
     const std::size_t width = parse_fft_dimension(fields[offset + 1]);
     const std::size_t middle = parse_fft_dimension(fields[offset + 2]);
     const std::size_t height = parse_fft_dimension(fields[offset + 3]);

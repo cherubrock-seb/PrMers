@@ -34,6 +34,7 @@ struct PolicyProfile {
 
 const char* plan_family(const std::string& spec) {
     if (spec.rfind("4:", 0) == 0) return "Type4 FFT323161";
+    if (spec.rfind("2:", 0) == 0) return "Type2 FFT3261";
     if (spec.rfind("pfa9:", 0) == 0) return "PFA9";
     if (spec.rfind("pfa7:", 0) == 0) return "PFA7";
     if (spec.rfind("pfa3:", 0) == 0) return "PFA3";
