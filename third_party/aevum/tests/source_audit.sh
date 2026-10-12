@@ -9,6 +9,7 @@ grep -q 'Aevum auto FFT:' "$ROOT/src/FFTConfig.cpp"
 grep -q 'pfa9full:' "$ROOT/src/FFTConfig.cpp"
 grep -q 'radix == 9 ? 202u : 101u' "$ROOT/src/FFTConfig.cpp"
 grep -q 'AEVUM_TYPE4_MULTI_Q' "$ROOT/src/EngineApi.cpp"
+python3 "$ROOT/tests/type2_prp_auto_source_test.py"
 ! grep -q 'vector<TuneEntry> tunes = TuneEntry::readTuneFile(args)' "$ROOT/src/FFTConfig.cpp"
 if grep -A5 "makeTransformBufVector" "$ROOT/src/Gpu.cpp" | grep -q "&queue, N"; then
   echo "Prepared transform buffers still use the integer buffer size" >&2

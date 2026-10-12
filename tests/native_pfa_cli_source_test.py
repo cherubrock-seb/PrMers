@@ -19,7 +19,7 @@ policy=(root/'src/aevum/AutoPolicy.cpp').read_text()
 assert 'spec.rfind("pfa7:", 0)' in policy
 fft=(root/'third_party/aevum/src/FFTConfig.cpp').read_text()
 assert 'spec == "pfa:auto" || spec == "pfa:3" || spec == "pfa:9"' in fft
-assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
+assert 'fields[offset] == "1" || fields[offset] == "2" || fields[offset] == "4"' in adapter
 assert 'Aevum FFT323161 requires explicit pfa9' not in adapter
 assert '4:512:8:512:202' in (root/'README_POW2_TYPE4_LEAD_CACHE.md').read_text()
 for p in root.rglob('*'):

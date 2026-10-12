@@ -10,7 +10,7 @@ app = (root / "src/core/App.cpp").read_text()
 backend = (root / "src/marin/gpu.cpp").read_text()
 version = (root / "include/core/Version.hpp").read_text()
 
-assert 'fields[offset] == "1" || fields[offset] == "4"' in adapter
+assert 'fields[offset] == "1" || fields[offset] == "2" || fields[offset] == "4"' in adapter
 assert 'requires explicit pfa9' not in adapter
 assert 'pending_reg_ = index;' in engine
 assert 'AEVUM_REG_LEAD_CACHE' in engine

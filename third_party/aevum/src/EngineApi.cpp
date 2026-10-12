@@ -635,6 +635,12 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
       report("tune-entry",normalize(entry.use));return entry.use;
     }
   }
+  if (fft.shape.fft_type == FFT3261) {
+    auto use = parse("INPLACE=1,TAIL_TRIGS=0");
+    report("type2-prp-auto", normalize(use));
+    return use;
+  }
+
   const auto control=mode();
   bool manual_kernel=false;
   for(const char* name:{"AEVUM_PFA_USE","AEVUM_RADIX1K","AEVUM_TYPE4_MULTI_Q","AEVUM_CARRY_WMUL",
@@ -908,6 +914,15 @@ public:
     shared_.background = &background_;
 
     std::string spec = fft_spec ? fft_spec : "";
+    const bool native_type2_prp_auto =
+        spec.empty() &&
+        workload_ == aevum_autotune::Workload::Prp &&
+        exponent_ >= 130000000u &&
+        exponent_ <= 137000003u;
+    if (native_type2_prp_auto) {
+      spec = "native-prp:auto";
+    }
+    const bool pseudo_auto_spec = spec == "native-prp:auto";
     const bool explicit_fft_spec = !spec.empty();
     const auto autotune_mode = aevum_autotune::modeFromEnvironment();
     const auto autotune_cache_path = aevum_autotune::cachePath();
@@ -1216,10 +1231,23 @@ public:
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
-                                      fft.shape.fft_type == FFT323161;
+    const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
+    const bool explicit_fft3261 =
+        fft.shape.fft_type == FFT3261 &&
+        explicit_fft_spec &&
+        !pseudo_auto_spec &&
+        fft3261_env &&
+        fft3261_env[0] == '1' &&
+        fft3261_env[1] == '\0';
+    const bool supported_aevum_type =
+        fft.shape.fft_type == FFT3161 ||
+        fft.shape.fft_type == FFT323161 ||
+        (fft.shape.fft_type == FFT3261 && pseudo_auto_spec) ||
+        explicit_fft3261;
     if (!supported_aevum_type && !apple_diagnostic_plane)
-      throw std::runtime_error("Aevum engine requires FFT3161 or FFT323161");
+      throw std::runtime_error(
+          "Aevum engine requires FFT3161 or FFT323161; "
+          "explicit FFT3261 requires AEVUM_EXPERIMENT_FFT3261=1");
 #if defined(__APPLE__)
     if (verbose && apple_diagnostic_plane) {
       log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",
