@@ -592,7 +592,8 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     // The base transform in a multiply is read-only. Retain it for the square
     // that immediately follows a nonfinal set bit in right-to-left exponentiation.
     const char* reuseForwardOption = std::getenv("PRMERS_POW_REUSE_FORWARD_V1");
-    const bool reuseForward = reuseForwardOption && std::string(reuseForwardOption) == "1";
+    const bool reuseForward = reuseForwardOption &&
+                              reuseForwardOption[0] == '1' && reuseForwardOption[1] == '\0';
     auto multiplyAndSquare = [&]() {
         cl_int allocErr;
         cl_mem tmpA = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE,
