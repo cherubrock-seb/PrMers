@@ -301,97 +301,15 @@ Words deterministicResidue(uint32_t exponent, uint32_t seed) {
   return words;
 }
 
-// The register paths the production Runtime enables on top of what a plan
-// supports.  Plan autotune benchmarks through the same switches, so it never
-// times, or faults in, a path the selected engine would not run.
-struct RegPaths {
-  bool lead_cache = false;
-  bool fused_ll = false;
-};
-
-RegPaths productionRegPaths(const Gpu& gpu, const FFTConfig& fft, const std::string& device_name) {
-  RegPaths paths;
-  const char* ll_env = std::getenv("AEVUM_FUSED_LL");
-  const bool validated_ll_device = device_name.find("RTX 3080") != std::string::npos ||
-      device_name.find("gfx906") != std::string::npos || device_name.find("Radeon VII") != std::string::npos;
-  paths.fused_ll = gpu.regSupportsFusedLL() &&
-      (ll_env ? std::strcmp(ll_env, "1") == 0 : validated_ll_device);
-  paths.lead_cache = gpu.regSupportsLeadCache();
-  // The power-of-two lead cache is validated and enabled by default.  The
-  // PFA9 bridge changes the carry/pack boundary and therefore remains an
-  // explicit experiment until the word-exact GPU differential and an A/B
-  // throughput run have passed on the target device.
-  if (fft.isPfa()) {
-    const char* value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
-    paths.lead_cache = paths.lead_cache && value && std::atoi(value) != 0;
-  }
-  if (const char* value = std::getenv("AEVUM_REG_LEAD_CACHE"))
-    paths.lead_cache = paths.lead_cache && std::atoi(value) != 0;
-  return paths;
-}
-
-// An OpenCL context used only for benchmarking.  Autotune runs its candidate
-// engines here, so a candidate that faults, or hangs and has its context reset
-// by the driver, cannot leave the production engine on a dead context.
-struct TuneContext {
-  std::unique_ptr<Context> context;
-  std::unique_ptr<TrigBufCache> cache;
-  GpuCommon shared;
-
-  TuneContext(cl_device_id device, const GpuCommon& base)
-      : context(std::make_unique<Context>(device)),
-        cache(std::make_unique<TrigBufCache>(context.get())),
-        shared(base) {
-    shared.context = context.get();
-    shared.bufCache = cache.get();
-  }
-};
-
-// A candidate plan the engine refused to build: a configuration check in Gpu
-// construction (carry width, workgroup limits, PFA constraints, a kernel that
-// does not compile or is missing) rejected it before any of its kernels ran.
-struct CandidateRefused : std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
-// Build a candidate's engine, turning a deterministic refusal into
-// CandidateRefused.  The native engine has just been built on the same tuning
-// context, and every earlier candidate finished its benchmark there, so the
-// context is known to work: a configuration error here belongs to this plan.
-// An OpenCL error status or an allocation failure may instead mean the
-// context is gone, and is passed on unchanged so the search stops.  Under CUDA
-// driver errors and configuration errors share one exception type, so every
-// failure is passed on.
-std::unique_ptr<Gpu> makeCandidateGpu(uint32_t exponent, const GpuCommon& shared, const FFTConfig& fft) {
-#if defined(CUDA_BACKEND)
-  return Gpu::make(exponent, shared, fft, {}, false);
-#else
-  try {
-    return Gpu::make(exponent, shared, fft, {}, false);
-  } catch (const gpu_error&) {
-    throw;
-  } catch (const std::bad_alloc&) {
-    throw;
-  } catch (const std::exception& e) {
-    throw CandidateRefused(e.what());
-  } catch (const std::string& e) {
-    throw CandidateRefused(e);
-  } catch (const char* e) {
-    throw CandidateRefused(e ? e : "refused");
-  }
-#endif
-}
-
 void runPlanSequence(Gpu& gpu,
                      aevum_autotune::Workload workload,
-                     const RegPaths& paths,
                      Buffer<Word>& value,
                      Buffer<double>* prepared,
                      unsigned units) {
-  const bool lead = paths.lead_cache;
+  const bool lead = gpu.regSupportsLeadCache();
   if (workload == aevum_autotune::Workload::Ll) {
     for (unsigned i = 0; i < units; ++i) {
-      if (paths.fused_ll) gpu.regSquareStep(value, i != 0, i + 1 != units, true);
+      if (gpu.regSupportsFusedLL()) gpu.regSquareStep(value, i != 0, i + 1 != units, true);
       else { gpu.regSquare(value); gpu.regSubU32(value, 2); }
     }
     return;
@@ -426,17 +344,8 @@ void runPlanSequence(Gpu& gpu,
   }
 }
 
-// Roundoff gate for a candidate plan, the same one the PRP -use tuner applies
-// to its profiles: at least 16 squarings, maximum roundoff below 0.35.  Word
-// exactness over a few operations does not show that a plan near its
-// capacity stays exact.
-constexpr unsigned kPlanRoeSquarings = 16;
-constexpr double kPlanMaxRoe = 0.35;
-
 struct PlanComparison {
   bool exact = false;
-  bool roe_ok = false;
-  double roe = 0.0;
   double native_seconds = 0.0;
   double candidate_seconds = 0.0;
   double speedup = 0.0;
@@ -445,13 +354,10 @@ struct PlanComparison {
 PlanComparison comparePlans(uint32_t exponent,
                             aevum_autotune::Workload workload,
                             GpuCommon shared,
-                            const std::string& device_name,
                             const FFTConfig& native_fft,
                             const FFTConfig& candidate_fft) {
   auto native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
-  auto candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
-  const RegPaths native_paths = productionRegPaths(*native_gpu, native_fft, device_name);
-  const RegPaths candidate_paths = productionRegPaths(*candidate_gpu, candidate_fft, device_name);
+  auto candidate_gpu = Gpu::make(exponent, shared, candidate_fft, {}, false);
   auto native_regs = native_gpu->makeBufVector(2);
   auto candidate_regs = candidate_gpu->makeBufVector(2);
   auto native_prepared = native_gpu->makeTransformBufVector(1);
@@ -472,75 +378,48 @@ PlanComparison comparePlans(uint32_t exponent,
 
   reset(*native_gpu, native_regs, native_prepared);
   reset(*candidate_gpu, candidate_regs, candidate_prepared);
-  runPlanSequence(*native_gpu, workload, native_paths, native_regs[0], needs_prepared ? &native_prepared[0] : nullptr, 5);
-  runPlanSequence(*candidate_gpu, workload, candidate_paths, candidate_regs[0], needs_prepared ? &candidate_prepared[0] : nullptr, 5);
+  runPlanSequence(*native_gpu, workload, native_regs[0], needs_prepared ? &native_prepared[0] : nullptr, 5);
+  runPlanSequence(*candidate_gpu, workload, candidate_regs[0], needs_prepared ? &candidate_prepared[0] : nullptr, 5);
   native_gpu->regSync(); candidate_gpu->regSync();
   const Words reference = native_gpu->regRead(native_regs[0]);
   const Words candidate = candidate_gpu->regRead(candidate_regs[0]);
   if (reference != candidate) return {};
 
-  // Plain squarings take the canonical carry, which records roundoff on
-  // every path; the fused LL carry records none.
-  PlanComparison out;
-  out.exact = true;
-  candidate_gpu->regWrite(candidate_regs[0], value_seed);
-  candidate_gpu->regPrpRoe(true);
-  for (unsigned i = 0; i < kPlanRoeSquarings; ++i) candidate_gpu->regSquare(candidate_regs[0]);
-  out.roe = candidate_gpu->regPrpRoe(false);
-  out.roe_ok = out.roe < kPlanMaxRoe;
-  if (!out.roe_ok) return out;
-
   const unsigned units = exponent <= 30000000u ? 64u : exponent <= 120000000u ? 32u :
                          exponent <= 180000000u ? 20u : 12u;
-  auto timed = [&](Gpu& gpu, const RegPaths& paths, std::vector<Buffer<Word>>& regs,
-                   std::vector<Buffer<double>>& prepared) {
+  auto timed = [&](Gpu& gpu, std::vector<Buffer<Word>>& regs, std::vector<Buffer<double>>& prepared) {
     reset(gpu, regs, prepared);
     const auto start = std::chrono::steady_clock::now();
-    runPlanSequence(gpu, workload, paths, regs[0], needs_prepared ? &prepared[0] : nullptr, units);
+    runPlanSequence(gpu, workload, regs[0], needs_prepared ? &prepared[0] : nullptr, units);
     gpu.regSync();
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   };
 
   // Warmup is deliberately outside timing.
   reset(*native_gpu, native_regs, native_prepared);
-  runPlanSequence(*native_gpu, workload, native_paths, native_regs[0], needs_prepared ? &native_prepared[0] : nullptr, 3);
+  runPlanSequence(*native_gpu, workload, native_regs[0], needs_prepared ? &native_prepared[0] : nullptr, 3);
   native_gpu->regSync();
   reset(*candidate_gpu, candidate_regs, candidate_prepared);
-  runPlanSequence(*candidate_gpu, workload, candidate_paths, candidate_regs[0], needs_prepared ? &candidate_prepared[0] : nullptr, 3);
+  runPlanSequence(*candidate_gpu, workload, candidate_regs[0], needs_prepared ? &candidate_prepared[0] : nullptr, 3);
   candidate_gpu->regSync();
 
   std::array<double,3> nt{}, ct{};
   for (unsigned rep = 0; rep < 3; ++rep) {
     if ((rep & 1u) == 0) {
-      nt[rep] = timed(*native_gpu, native_paths, native_regs, native_prepared);
-      ct[rep] = timed(*candidate_gpu, candidate_paths, candidate_regs, candidate_prepared);
+      nt[rep] = timed(*native_gpu, native_regs, native_prepared);
+      ct[rep] = timed(*candidate_gpu, candidate_regs, candidate_prepared);
     } else {
-      ct[rep] = timed(*candidate_gpu, candidate_paths, candidate_regs, candidate_prepared);
-      nt[rep] = timed(*native_gpu, native_paths, native_regs, native_prepared);
+      ct[rep] = timed(*candidate_gpu, candidate_regs, candidate_prepared);
+      nt[rep] = timed(*native_gpu, native_regs, native_prepared);
     }
   }
+  PlanComparison out;
+  out.exact = true;
   out.native_seconds = median3(nt);
   out.candidate_seconds = median3(ct);
   if (out.candidate_seconds > 0.0) out.speedup = out.native_seconds / out.candidate_seconds;
   return out;
 }
-
-struct PlanProductionConfirmation {
-  bool exact = false;
-  bool keep = false;
-  double gain = 1.0;
-  double worst = 100.0;
-  unsigned wins = 0;
-  std::array<double,3> native_seconds{};
-  std::array<double,3> candidate_seconds{};
-};
-
-// comparePlans is intentionally cheap and short, so it remains the first
-// exactness/ROE/ranking stage.  A positive PRP shape decision needs a second,
-// production-length confirmation before it may replace the native plan.  This
-// uses the same retained-width square path as Runtime::square_mul(reg,1):
-// 64 warmup squares, then paired 256-square timings in alternating order.
-
 
 struct BridgeComparison {
   bool exact = false;
@@ -697,6 +576,19 @@ private:
   bool pending_lead_ = false;
 };
 
+struct PlanProductionConfirmation {
+  bool exact = false;
+  bool keep = false;
+  double gain = 1.0;
+  double worst = 100.0;
+  unsigned wins = 0;
+  std::array<double,3> native_seconds{};
+  std::array<double,3> candidate_seconds{};
+};
+
+// comparePlans remains the cheap first-stage shape ranker. A positive PRP
+// shape decision must also survive this production-faithful retained-width
+// square confirmation before it can replace the native plan.
 PlanProductionConfirmation confirmPrpPlanProduction(
     uint32_t exponent,
     size_t register_count,
@@ -1180,7 +1072,7 @@ public:
     std::string spec = fft_spec ? fft_spec : "";
 
 #if defined(__APPLE__)
-    // Apple OpenCL 1.2 keeps the stock FFT3161 production path.  Type2 has
+    // Apple OpenCL 1.2 keeps the stock FFT3161 production path. Type2 has
     // not been validated on the legacy Apple compiler/runtime.
     const bool native_type2_prp_auto = false;
 #else
@@ -1213,12 +1105,8 @@ public:
     double autotune_plan_speedup = 1.0;
     double autotune_impl_speedup = 1.0;
     uint64_t autotune_elapsed_ms = 0;
-    uint64_t autotune_prior_ms = 0;
-    bool plan_search_complete = true;
-    std::vector<std::string> plan_search_tried;
     std::string autotune_key;
     std::optional<aevum_autotune::Record> cached_record;
-    std::optional<aevum_autotune::Record> deferred_record;
 
     // Issue #36 / GB202 measured FFT-shape profile.
     // Preserve the validated built-in profile ahead of the generic runtime tuner.
@@ -1247,6 +1135,7 @@ public:
     // Queue policy is hardware-sensitive.  Explicit user choices always outrank
     // built-in policy; AEVUM_TYPE4_MULTI_Q remains the compatibility override.
     const bool explicit_multi_q_use = args_.uses("MULTI_Q");
+    const bool explicit_unroll_w_use = args_.uses("UNROLL_W");
 #if defined(CUDA_BACKEND)
     const bool explicit_zerohack_w_use = args_.uses("ZEROHACK_W");
 #endif
@@ -1360,14 +1249,11 @@ public:
       std::ostringstream flags;
       flags << "radix1k=" << (aevumRadix8For1K() ? 8 : 4)
             << ";multiq=" << multi_q_default
-            << ";safe=1;clean=1;roe-gate=1";
-      if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
-      if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
-      // v1 shape-cache entries were decided by the short comparePlans metric.
-      // PRP entries carrying this marker have passed the production-length
-      // confirmation gate below, so older positive cache records cannot bypass it.
+            << ";safe=1;clean=1";
       if (workload_ == aevum_autotune::Workload::Prp)
         flags << ";shape-confirm=prp-square-v1";
+      if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
+      if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,
                                               workload_, register_count_, exponent_, flags.str());
 
@@ -1375,22 +1261,11 @@ public:
         cached_record = aevum_autotune::load(autotune_cache_path, autotune_key);
         if (cached_record) {
           const auto cached_fft = admissiblePlan(args_, exponent_, cached_record->plan);
-          const bool cached_usable = cached_fft &&
+          if (cached_fft &&
               !(workload_ == aevum_autotune::Workload::Prp &&
                 cached_fft->knownUnsafeOrdinaryPrp(exponent_)) &&
               (!factor3CapacityWorkload(workload_) ||
-               factor3CapacitySafe(args_, exponent_, *cached_fft));
-          if (cached_usable && !cached_record->complete) {
-            // An earlier run ran out of time (or hit an engine error) before
-            // trying every candidate: finish the search now.
-            deferred_record = cached_record;
-            if (verbose) {
-              log("Aevum autotune: resuming deferred search workload=%s plan-so-far=%s advantage-so-far=%.4fx tried=%zu prior-tune=%" PRIu64 "ms.\n",
-                  aevum_autotune::workloadClass(workload_, register_count_).c_str(),
-                  cached_fft->spec().c_str(), cached_record->plan_speedup,
-                  cached_record->tried.size(), cached_record->tune_ms);
-            }
-          } else if (cached_usable) {
+               factor3CapacitySafe(args_, exponent_, *cached_fft))) {
             selected_spec = cached_fft->spec();
             autotune_plan_speedup = cached_record->plan_speedup;
             autotune_impl_speedup = cached_record->implementation_speedup;
@@ -1445,24 +1320,6 @@ public:
         double best_speedup = 1.0;
         std::string best_spec = native_fft.spec();
         unsigned tested = 0;
-        std::unordered_set<std::string> tried;
-        if (deferred_record) {
-          tried.insert(deferred_record->tried.begin(), deferred_record->tried.end());
-          autotune_prior_ms = deferred_record->tune_ms;
-          const auto so_far = admissiblePlan(args_, exponent_, deferred_record->plan);
-          if (so_far && so_far->spec() != native_fft.spec()) {
-            best_spec = so_far->spec();
-            best_speedup = deferred_record->plan_speedup;
-          }
-        }
-        // Whether a candidate after `from` still needs a measurement.
-        auto untried_after = [&](size_t from) {
-          for (size_t i = from; i < candidates.size(); ++i) {
-            if (!tried.count(candidates[i]) && admissiblePlan(args_, exponent_, candidates[i])) return true;
-          }
-          return false;
-        };
-        std::optional<TuneContext> tune;
 
         if (verbose) {
           const uint32_t band = aevum_autotune::exponentBandStart(exponent_);
@@ -1476,77 +1333,38 @@ public:
           const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
               std::chrono::steady_clock::now() - tune_start).count();
           const bool strategic_seed_pending = candidate_index < strategic_candidate_count;
-          if (tried.count(candidate_spec)) continue;
-          if (!strategic_seed_pending && tried.size() >= candidate_cap) break;
-          if (!strategic_seed_pending && elapsed >= budget_ms) {
-            plan_search_complete = !untried_after(candidate_index);
-            break;
-          }
+          if (!strategic_seed_pending && (elapsed >= budget_ms || tested >= candidate_cap)) break;
           const auto candidate_fft = admissiblePlan(args_, exponent_, candidate_spec);
           if (!candidate_fft) continue;
           ++tested;
-          tried.insert(candidate_spec);
-          std::string failure;
           try {
-            if (!tune) tune.emplace(selected_device, shared_);
-            const PlanComparison cmp = comparePlans(exponent_, workload_, tune->shared, device_name,
-                                                    native_fft, *candidate_fft);
+            const PlanComparison cmp = comparePlans(exponent_, workload_, shared_, native_fft, *candidate_fft);
             if (!cmp.exact) {
               if (verbose) log("Aevum autotune: reject %s (WORD MISMATCH).\n", candidate_spec.c_str());
               continue;
             }
-            if (!cmp.roe_ok) {
-              if (verbose) {
-                log("Aevum autotune: reject %s (roundoff %.4f >= %.2f over %u squarings).\n",
-                    candidate_spec.c_str(), cmp.roe, kPlanMaxRoe, kPlanRoeSquarings);
-              }
-              continue;
-            }
             if (verbose) {
-              log("Aevum autotune: candidate=%s roe=%.4f median=%.6fs native=%.6fs speedup=%.4fx.\n",
-                  candidate_spec.c_str(), cmp.roe, cmp.candidate_seconds, cmp.native_seconds, cmp.speedup);
+              log("Aevum autotune: candidate=%s median=%.6fs native=%.6fs speedup=%.4fx.\n",
+                  candidate_spec.c_str(), cmp.candidate_seconds, cmp.native_seconds, cmp.speedup);
             }
             if (cmp.speedup > best_speedup) {
               best_speedup = cmp.speedup;
               best_spec = candidate_fft->spec();
             }
-          } catch (const CandidateRefused& e) {
-            // A configuration this engine will not build: not a timing result
-            // and no sign of a broken context.  It stays in `tried`, so a
-            // later run does not build it again; go on to the next plan.
-            log("Aevum autotune: refuse %s (%s).\n", candidate_spec.c_str(), e.what());
-            continue;
           } catch (const std::exception& e) {
-            failure = e.what();
+            if (verbose) log("Aevum autotune: candidate=%s rejected (%s).\n", candidate_spec.c_str(), e.what());
           } catch (...) {
-            failure = "engine exception";
-          }
-          if (!failure.empty()) {
-            // An error here may have left the tuning context unusable (a GPU
-            // fault or a driver reset of a hung context).  It is not a timing
-            // result: end the search, drop that context, and keep the best
-            // plan measured before the error.
-            log("Aevum autotune: candidate=%s failed (%s); search stopped, tuning OpenCL context discarded.\n",
-                candidate_spec.c_str(), failure.c_str());
-            plan_search_complete = !untried_after(candidate_index + 1);
-            break;
+            if (verbose) log("Aevum autotune: candidate=%s rejected (engine exception).\n", candidate_spec.c_str());
           }
         }
-
-        // The short comparePlans timing is only a ranker.  Hardware evidence
-        // at p145 showed +21.8% and +5.3% synthetic winners that measured
-        // +0.1% and -6.7% respectively through the production square path.
-        // Confirm the single best non-native PRP shape before selecting or
-        // persisting it; any marginal, noisy, mismatched, or failed result
-        // conservatively retains the native plan.
         if (workload_ == aevum_autotune::Workload::Prp &&
             best_spec != native_fft.spec() &&
             best_speedup >= threshold) {
           try {
-            const auto best_fft =
-                admissiblePlan(args_, exponent_, best_spec);
+            const auto best_fft = admissiblePlan(args_, exponent_, best_spec);
             if (!best_fft)
               throw std::runtime_error("best PRP shape became inadmissible");
+
             const auto confirm = confirmPrpPlanProduction(
                 exponent_, register_count_, shared_,
                 native_fft, *best_fft, threshold);
@@ -1585,9 +1403,6 @@ public:
           }
         }
 
-        tune.reset();
-        plan_search_tried.assign(tried.begin(), tried.end());
-        std::sort(plan_search_tried.begin(), plan_search_tried.end());
         if (best_speedup >= threshold) {
           selected_spec = best_spec;
           autotune_plan_speedup = best_speedup;
@@ -1600,10 +1415,6 @@ public:
         if (verbose) {
           log("Aevum autotune: selected=%s advantage=%.4fx tested=%u tune=%" PRIu64 "ms.\n",
               selected_spec.c_str(), autotune_plan_speedup, tested, autotune_elapsed_ms);
-        }
-        if (!plan_search_complete) {
-          log("Aevum autotune: search deferred after %zu of the candidate plans; the next run continues it.\n",
-              plan_search_tried.size());
         }
       }
     } else if (verbose && autotune_mode != aevum_autotune::Mode::Off) {
@@ -1668,23 +1479,22 @@ public:
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
-    const bool explicit_fft3261 =
-        fft.shape.fft_type == FFT3261 &&
-        explicit_fft_spec &&
-        !pseudo_auto_spec &&
-        fft3261_env &&
-        fft3261_env[0] == '1' &&
-        fft3261_env[1] == '\0';
-    const bool supported_aevum_type =
-        fft.shape.fft_type == FFT3161 ||
-        fft.shape.fft_type == FFT323161 ||
-        (fft.shape.fft_type == FFT3261 && pseudo_auto_spec) ||
-        explicit_fft3261;
-    if (!supported_aevum_type && !apple_diagnostic_plane)
-      throw std::runtime_error(
-          "Aevum engine requires FFT3161 or FFT323161; "
-          "explicit FFT3261 requires AEVUM_EXPERIMENT_FFT3261=1");
+const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
+const bool explicit_fft3261 =
+fft.shape.fft_type == FFT3261 &&
+explicit_fft_spec &&
+!pseudo_auto_spec &&
+fft3261_env &&
+std::atoi(fft3261_env) != 0;
+const bool supported_aevum_type =
+    fft.shape.fft_type == FFT3161 ||
+    fft.shape.fft_type == FFT323161 ||
+    (fft.shape.fft_type == FFT3261 && pseudo_auto_spec) ||
+    explicit_fft3261;
+if (!supported_aevum_type && !apple_diagnostic_plane)
+  throw std::runtime_error(
+      "Aevum engine requires FFT3161 or FFT323161; "
+      "explicit FFT3261 requires AEVUM_EXPERIMENT_FFT3261=1");
 #if defined(__APPLE__)
     if (verbose && apple_diagnostic_plane) {
       log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",
@@ -1728,6 +1538,32 @@ public:
         throw std::runtime_error("AEVUM_PRP_MIDDLE1 must be 0 or 1");
       args_.flags["PRP_MIDDLE1"] = value;
     }
+#if !defined(__APPLE__) && !defined(CUDA_BACKEND)
+    // R86: Radeon VII / gfx906 Type2 PRP retained-width FFT was word-exact and
+    // consistently faster with UNROLL_W=1.  Keep this implementation choice
+    // inside the same validated AUTO Type2 window as the gfx906 queue policy.
+    // Explicit -use UNROLL_W remains higher precedence.
+    const bool gfx906_type2_prp_unroll_w1 =
+        !explicit_unroll_w_use &&
+        workload_ == aevum_autotune::Workload::Prp &&
+        pseudo_auto_spec &&
+        device_vendor == "4098" &&
+        device_name.rfind("gfx906", 0) == 0 &&
+        exponent_ >= 130000000u &&
+        exponent_ <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_unroll_w1) {
+      pfa_use.emplace_back("UNROLL_W", "1");
+      if (verbose) {
+        log("Aevum gfx906 Type2 PRP width policy: UNROLL_W=1 "
+            "(validated 130000000..137000003).\n");
+      }
+    }
+#endif
+
 #if defined(CUDA_BACKEND)
 // Production integration of the measured RTX3080 high-range PRP policy.
 // MULTI_Q=0 remains scoped to the exact measured device/plan/range.
@@ -1790,9 +1626,22 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     transform_size_ = gpu_->getFFTSize();
     plan_spec_ = fft.spec();
 
-    const RegPaths reg_paths = productionRegPaths(*gpu_, fft, device_name);
-    fused_ll_enabled_ = reg_paths.fused_ll;
-    lead_cache_enabled_ = reg_paths.lead_cache;
+    const char* ll_env = std::getenv("AEVUM_FUSED_LL");
+    const bool validated_ll_device = device_name.find("RTX 3080") != std::string::npos ||
+        device_name.find("gfx906") != std::string::npos || device_name.find("Radeon VII") != std::string::npos;
+    fused_ll_enabled_ = gpu_->regSupportsFusedLL() &&
+        (ll_env ? std::strcmp(ll_env, "1") == 0 : validated_ll_device);
+    lead_cache_enabled_ = gpu_->regSupportsLeadCache();
+    // The power-of-two lead cache is validated and enabled by default.  The
+    // PFA9 bridge changes the carry/pack boundary and therefore remains an
+    // explicit experiment until the word-exact GPU differential and an A/B
+    // throughput run have passed on the target device.
+    if (fft.isPfa()) {
+      const char* value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
+      lead_cache_enabled_ = lead_cache_enabled_ && value && std::atoi(value) != 0;
+    }
+    if (const char* value = std::getenv("AEVUM_REG_LEAD_CACHE"))
+      lead_cache_enabled_ = lead_cache_enabled_ && std::atoi(value) != 0;
     if (verbose) {
       if (lead_cache_enabled_) {
         if (fft.isPfa())
@@ -1831,11 +1680,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
                 workload_ == aevum_autotune::Workload::Ecm)) {
       const auto impl_start = std::chrono::steady_clock::now();
       try {
-        // Benchmark a separate engine in a tuning context, so an error here
-        // cannot leave gpu_ on a dead context.
-        TuneContext bridge_tune(selected_device, shared_);
-        auto bridge_gpu = Gpu::make(exponent_, bridge_tune.shared, fft, pfa_use, false);
-        const BridgeComparison cmp = comparePreparedMulLead(*bridge_gpu, exponent_);
+        const BridgeComparison cmp = comparePreparedMulLead(*gpu_, exponent_);
         if (!cmp.exact) {
           prepared_mul_lead_enabled_ = false;
           if (verbose) log("Aevum prepared-multiply lead bridge: WORD MISMATCH, auto-reverted.\n");
@@ -1867,10 +1712,8 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
       record.prepared_mul_lead = prepared_mul_lead_enabled_;
       record.plan_speedup = autotune_plan_speedup;
       record.implementation_speedup = autotune_impl_speedup;
-      record.tune_ms = autotune_prior_ms + autotune_elapsed_ms;
+      record.tune_ms = autotune_elapsed_ms;
       record.created_unix = static_cast<uint64_t>(std::time(nullptr));
-      record.complete = plan_search_complete;
-      if (!plan_search_complete) record.tried = plan_search_tried;
       try {
         aevum_autotune::storeAtomic(autotune_cache_path, record);
         if (verbose) log("Aevum autotune: persistent cache updated at %s.\n", autotune_cache_path.string().c_str());

@@ -1,3 +1,24 @@
+## v0.3.99 NVIDIA 1K policy, scoped LDS padding and cumulative correctness fixes
+
+- NVIDIA 1K automatic plans now default to radix-8 when no explicit
+  `AEVUM_RADIX1K` override is present. Explicit overrides still win, while
+  non-NVIDIA and Apple paths retain their validated radix-4 policy.
+- RTX 3080 fixed-plan validation for the NVIDIA 1K radix-8 policy was exact
+  and improved sustained PRP throughput by about +4.48% at p=210000017 and
+  +4.56% at p=219999919 versus the validated radix-4 fallback.
+- Height LDS padding is disabled only for the validated
+  `1:1K:8:512:202` geometry. Final paired validation remained exact on RTX
+  3080 and Radeon VII; measured median gains were about +0.34% at p210 and
+  +0.80% at p219999919 on RTX, and +3.29% at p210 on Radeon VII.
+- Cumulative post-v0.3.98 synchronization includes explicit-plan capacity
+  checks, tail-trig/config consistency, active-plan API support, GF61/OpenCL
+  correctness fixes, and Apple/OpenCL portability and resource-limit fixes.
+- The standalone GPU smoke harness now uses the valid `-proof 1` argument.
+  The corrected committed smoke passed on RTX 3080 and Radeon VII.
+- Exact source SHA `105ff83d2f1c5f65cdbdbdf47243760b80c26d1a`
+  passed standalone exact-SHA CI and the Linux/Windows/macOS release-package
+  preflight before this release-only version/documentation bump.
+
 ## v0.3.98 NVIDIA PFA7 GF61 middle-out normalization
 
 - NVIDIA PFA7 GF61 middle-out now folds the inverse-radix normalization

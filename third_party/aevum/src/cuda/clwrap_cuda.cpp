@@ -4,7 +4,6 @@
 
 #include "tinycuda.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
-#include "CudaErrorMap.h"
 
 #include <cstdio>
 #include <cstring>
@@ -31,21 +30,6 @@ static unordered_set<cl_mem> g_allocatedBuffers;
 
 // Global CUDA context — set once by clCreateContext, used to ensure current before CUDA calls
 static CUcontext g_cudaContext = nullptr;
-
-// The OpenCL-style status for a CUDA driver result.  Only a result that means a lost, reset or faulted device or
-// context maps to the status that reads as a lost GPU; an out-of-memory maps to the allocation status and anything
-// else to a generic one (see CudaErrorMap.h).  The CUDA error itself is kept for the message.
-static thread_local char g_lastCuError[96];
-
-static int clStatusFromCu(CUresult r) {
-  if (r == CUDA_SUCCESS) { g_lastCuError[0] = 0; return CL_SUCCESS; }
-  const char* name = nullptr;
-  if (cuGetErrorName(r, &name) != CUDA_SUCCESS) name = nullptr;
-  snprintf(g_lastCuError, sizeof(g_lastCuError), "%s (%d)", name ? name : "CUDA error", (int) r);
-  return cuda_error_map::toClStatus((int) r);
-}
-
-const char* aevumCudaLastError() { return g_lastCuError[0] ? g_lastCuError : nullptr; }
 
 static void ensureContextCurrent() {
   if (g_cudaContext) {
@@ -117,7 +101,7 @@ cl_context clCreateContext(const intptr_t*, unsigned nDevices, const cl_device_i
 #endif
   if (r != CUDA_SUCCESS) {
     delete ctx;
-    if (err) *err = clStatusFromCu(r);
+    if (err) *err = CL_OUT_OF_RESOURCES;
     return nullptr;
   }
   g_cudaContext = ctx->ctx;  // Track for ensureContextCurrent()
@@ -630,7 +614,7 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
   CUresult r = cuMemAlloc(&buf->ptr, size);
   if (r != CUDA_SUCCESS) {
     delete buf;
-    if (err) *err = clStatusFromCu(r);
+    if (err) *err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
     return nullptr;
   }
   // Handle CL_MEM_COPY_HOST_PTR
@@ -674,7 +658,7 @@ cl_command_queue clCreateCommandQueueWithProperties(cl_context ctx, cl_device_id
   CUresult r = cuStreamCreate(&q->stream, CU_STREAM_NON_BLOCKING);
   if (r != CUDA_SUCCESS) {
     delete q;
-    if (err) *err = clStatusFromCu(r);
+    if (err) *err = CL_OUT_OF_RESOURCES;
     return nullptr;
   }
   if (err) *err = CL_SUCCESS;
@@ -712,7 +696,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
     CUresult r = cuLaunchKernel(k->func, numBlocks, 1, 1, ls, 1, 1, 0, q->stream, argPtrs, nullptr);
     cuEventRecord(ev->end, q->stream);
     *event = ev;
-    return clStatusFromCu(r);
+    return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
   }
   if (doProfile) {
     static std::map<std::string, double> kTime;
@@ -753,7 +737,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
       fprintf(stderr, "  TOTAL: %.1f ms\n===\n\n", totalMs);
     }
     if (event) *event = nullptr;
-    return clStatusFromCu(r);
+    return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
   }
 
   CUresult r = cuLaunchKernel(k->func, numBlocks, 1, 1, ls, 1, 1, 0, q->stream, argPtrs, nullptr);
@@ -764,7 +748,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   }
 
   if (event) *event = nullptr;
-  return clStatusFromCu(r);
+  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
 int clEnqueueReadBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
@@ -777,7 +761,7 @@ int clEnqueueReadBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
     r = cuStreamSynchronize(q->stream);
   }
   if (event) *event = nullptr;
-  return clStatusFromCu(r);
+  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
 int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
@@ -789,7 +773,7 @@ int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
     r = cuStreamSynchronize(q->stream);
   }
   if (event) *event = nullptr;
-  return clStatusFromCu(r);
+  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
 int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
@@ -797,7 +781,7 @@ int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
                          unsigned nWaits, const cl_event* waits, cl_event* event) {
   CUresult r = cuMemcpyDtoDAsync(dst->ptr + dstOffset, src->ptr + srcOffset, size, q->stream);
   if (event) *event = nullptr;
-  return clStatusFromCu(r);
+  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
 int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
@@ -817,7 +801,7 @@ int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
     r = cuMemsetD8Async(buf->ptr + offset, 0, size, q->stream);
   }
   if (event) *event = nullptr;
-  return clStatusFromCu(r);
+  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
 int clEnqueueMarkerWithWaitList(cl_command_queue q, unsigned nWaits, const cl_event* waits, cl_event* event) {
@@ -933,23 +917,6 @@ int clGetDeviceInfo(cl_device_id dev, cl_device_info info, size_t size, void* va
     int mhz = 0;
     cuDeviceGetAttribute(&mhz, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, dev->dev);
     unsigned int val = mhz / 1000;  // kHz to MHz
-    if (sizeRet) *sizeRet = sizeof(val);
-    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
-    break;
-  }
-  case CL_DEVICE_MAX_WORK_GROUP_SIZE: {
-    int threads = 0;
-    cuDeviceGetAttribute(&threads, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, dev->dev);
-    size_t val = threads;
-    if (sizeRet) *sizeRet = sizeof(val);
-    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
-    break;
-  }
-  case CL_DEVICE_LOCAL_MEM_SIZE: {
-    // Kernels declare their shared memory statically, which is limited to this (48KB) without an opt-in
-    int shared = 0;
-    cuDeviceGetAttribute(&shared, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, dev->dev);
-    u64 val = shared;
     if (sizeRet) *sizeRet = sizeof(val);
     if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
     break;
@@ -1085,14 +1052,6 @@ int clGetKernelWorkGroupInfo(cl_kernel k, cl_device_id dev, cl_kernel_work_group
     size_t wgs[3] = { (size_t)wgSize, 1, 1 };
     if (sizeRet) *sizeRet = sizeof(wgs);
     if (value && size >= sizeof(wgs)) memcpy(value, wgs, sizeof(wgs));
-  } else if (info == CL_KERNEL_WORK_GROUP_SIZE) {
-    // The largest block the compiled kernel can be launched with.  Register use can make this smaller than
-    // the __launch_bounds__ value (e.g. 768 for a 1024-thread carryFused).
-    int maxThreads = 0;
-    cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func);
-    size_t const val = maxThreads;
-    if (sizeRet) *sizeRet = sizeof(val);
-    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
   }
   return CL_SUCCESS;
 }

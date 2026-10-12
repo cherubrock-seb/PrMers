@@ -56,7 +56,7 @@ typedef GF61 V;
 #define GUARD 1024
 
 // mode 0: shufl(f = 1), mode 1: shufl(f = RADIX), mode 2: shufl(f = RADIX * RADIX), mode 3: shufl_and_fft2 (1K radix 8 only)
-KERNEL(G_W) tshufl(global V* out, global V* in, global int* bad, uint mode) {
+kernel void tshufl(global V* out, global V* in, global int* bad, uint mode) {
   local V lds[LDS_BYTES / sizeof(V) + GUARD];
   u32 me = get_local_id(0);
   const u32 n = LDS_BYTES / sizeof(V);

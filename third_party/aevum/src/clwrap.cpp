@@ -41,46 +41,26 @@ array<string, 71> ERR_MES = {
 
 string errMes(int err) {
   string nb = " ("s + to_string(err) + ")";
-  const char *vendor = gpulost::vendor_name(err);
-  string mes = (err <= 0 && err >= -70) ? ERR_MES[-err] :
-    (err == -1001) ? "ICD_NOT_FOUND" : vendor ? vendor : ""s;
+  string mes = (err <= 0 && err >= -70) ? ERR_MES[-err] : 
+    (err == -1001) ? "ICD_NOT_FOUND" : ""s;
   return mes + nb;
 }
 
-// The call's name for the message: CHECK1 stringifies the whole call, "clFinish(q)", of which only the name helps.
-static string callName(string_view mes) {
-  if (mes.substr(0, 2) == "cl") { mes = mes.substr(0, mes.find('(')); }
-  return string(mes);
-}
+class gpu_error : public std::runtime_error {
+public:
+  const int err;
+  
+  gpu_error(int err, string_view mes) : runtime_error(errMes(err) + " " + string(mes)), err(err) {}
 
-// errMes() plus, for the CUDA backend, the driver error behind the status it returned.
-static string codeText(int err) {
-  string code = errMes(err);
-#ifdef CUDA_BACKEND
-  if (const char *cuda = aevumCudaLastError()) { code += " [CUDA "s + cuda + "]"; }
-#endif
-  return code;
-}
-
-string describeError(int err, string_view mes, const char *file, int line, const char *func, gpulost::Phase phase) {
-  const string code = codeText(err);
-  switch (gpulost::classify(err, phase)) {
-    case gpulost::Kind::DeviceLost: return gpulost::lost_message(code, callName(mes));
-    case gpulost::Kind::OutOfMemory: return gpulost::oom_message(code, callName(mes));
-    case gpulost::Kind::Other: break;
+  gpu_error(int err, const char *file, int line, const char *func, string_view mes)
+    : gpu_error(err, string(mes) + " at " + file + ":" + to_string(line) + " " + func) {
   }
-  string text = code + " " + string(mes);
-  if (file) { text += " at "s + file + ":" + to_string(line) + " " + func; }
-  return text;
-}
+};
 
-gpu_alloc_error::gpu_alloc_error(int err, size_t size)
-  : text(gpulost::oom_message(codeText(err), "clCreateBuffer of "s + to_string((size + (1u << 20) - 1) >> 20) + " MB")) {}
-
-void check(int err, const char *file, int line, const char *func, string_view mes, gpulost::Phase phase) {
+void check(int err, const char *file, int line, const char *func, string_view mes) {  
   if (err != CL_SUCCESS) {
     // log("CL error %s (%d) %s\n", errMes(err).c_str(), err, mes.c_str());
-    throw gpu_error(err, file, line, func, mes, phase);
+    throw gpu_error(err, file, line, func, mes);
   }
 }
 
@@ -229,18 +209,6 @@ u32 getNvidiaComputeCapability(cl_device_id id) {
   return major * 100 + minor;
 }
 
-u32 getMaxWorkGroupSize(cl_device_id id) {
-  size_t size = 0;
-  GET_INFO(id, CL_DEVICE_MAX_WORK_GROUP_SIZE, size);
-  return u32(size);
-}
-
-u64 getLocalMemSize(cl_device_id id) {
-  u64 size = 0;
-  GET_INFO(id, CL_DEVICE_LOCAL_MEM_SIZE, size);
-  return size;
-}
-
 u32 getAmdWavefrontWidth(cl_device_id id) {
   try {
     u32 n = 0;
@@ -292,7 +260,7 @@ cl_device_id getDevice(u32 argsDeviceId) {
 cl_context createContext(cl_device_id id) {  
   int err;
   cl_context context = clCreateContext(NULL, 1, &id, NULL, NULL, &err);
-  CHECK_CREATE(err, "clCreateContext");
+  CHECK2(err, "clCreateContext");
   return context;
 }
 
@@ -317,7 +285,7 @@ Program loadSource(cl_context context, const string &source) {
   size_t size = source.size();
   int err = 0;
   cl_program program = clCreateProgramWithSource(context, 1, &ptr, &size, &err);
-  CHECK_CREATE(err, "clCreateProgramWithSource");
+  CHECK2(err, "clCreateProgramWithSource");
   return Program{program};
 }
 
@@ -417,16 +385,16 @@ cl_kernel loadKernel(cl_program program, const char *name) {
   int err;
   cl_kernel k = clCreateKernel(program, name, &err);
   if (err == CL_INVALID_KERNEL_NAME) { return nullptr; }
-  CHECK_CREATE(err, ("clCreateKernel "s + name));
+  CHECK2(err, name);
   return k;
 }
 
 cl_mem makeBuf_(cl_context context, unsigned kind, size_t size, const void *ptr) {
   int err;
   cl_mem buf = clCreateBuffer(context, kind, size, (void *) ptr, &err);
-  if (err == CL_OUT_OF_RESOURCES || err == CL_MEM_OBJECT_ALLOCATION_FAILURE) { throw gpu_alloc_error(err, size); }
-
-  CHECK_CREATE(err, "clCreateBuffer");
+  if (err == CL_OUT_OF_RESOURCES || err == CL_MEM_OBJECT_ALLOCATION_FAILURE) { throw bad_alloc{}; }
+  
+  CHECK2(err, "clCreateBuffer");
   return buf;
 }
 
@@ -442,7 +410,7 @@ cl_queue makeQueue(cl_device_id d, cl_context c, bool isProfile) {
 #else
   cl_queue q = clCreateCommandQueueWithProperties(c, d, props, &err);
 #endif
-  CHECK_CREATE(err, "clCreateCommandQueue");
+  CHECK2(err, "clCreateCommandQueue");
   return q;
 }
 
@@ -456,7 +424,7 @@ EventHolder run(cl_queue queue, cl_kernel kernel,
   cl_event event{};
   CHECK2(clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &workSize, &groupSize,
                                 waits.size(), waits.empty() ? 0 : waits.data(), genEvent ? &event : nullptr),
-         ("clEnqueueNDRangeKernel "s + name).c_str());
+         name.c_str());
   return genEvent ? EventHolder{event} : EventHolder{};
 }
 
@@ -523,13 +491,6 @@ int getWorkGroupSize(cl_kernel k, cl_device_id device, const char *name) {
   size_t size[3];
   CHECK2(clGetKernelWorkGroupInfo(k, device, CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(size), &size, NULL), name);
   return size[0];
-}
-
-// The largest workgroup this compiled kernel can be launched with (it can be less than the device maximum).
-int getKernelMaxWorkGroupSize(cl_kernel k, cl_device_id device, const char *name) {
-  size_t size = 0;
-  CHECK2(clGetKernelWorkGroupInfo(k, device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size), &size, nullptr), name);
-  return int(size);
 }
 
 std::string getKernelArgName(cl_kernel k, int pos) {
