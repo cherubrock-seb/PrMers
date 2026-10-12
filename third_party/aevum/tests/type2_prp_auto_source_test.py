@@ -26,11 +26,21 @@ assert "type2.maxBpw() * args.fftOverdrive - std::log2(3.0)" in fft
 assert "native_type2_prp_auto" in api
 assert 'spec = "native-prp:auto";' in api
 assert "fft.shape.fft_type == FFT3261 && pseudo_auto_spec" in api
+assert "validated_type2" in api
+assert "fft.shape.width == 512u" in api
+assert "fft.shape.middle == 8u" in api
+assert "fft.shape.height == 512u" in api
+assert "fft.variant == 202u" in api
+assert "#if defined(__APPLE__)" in api
+assert "const bool native_type2_prp_auto = false;" in api
 assert 'parse("INPLACE=1,TAIL_TRIGS=0")' in api
 assert 'report("type2-prp-auto"' in api
 
 assert "AEVUM_EXPERIMENT_FFT3261" in fft
 assert "AEVUM_EXPERIMENT_FFT3261" in api
+assert 'spec.rfind("2:", 0) == 0' in fft
+assert "Type2/Type4/PFA is disabled" in fft
+assert "#if !defined(__APPLE__)" in fft
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in fft
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in api
 

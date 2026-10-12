@@ -433,8 +433,10 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // path is supported, while the monolithic Type-4 and native-PFA pipelines
   // are not yet runtime-safe.  Reject explicit requests before kernel creation
   // instead of failing later with CL_INVALID_KERNEL.
-  if (spec.rfind("4:", 0) == 0 || spec.rfind("pfa", 0) == 0) {
-    throw runtime_error("Apple OpenCL 1.2 supports only stock FFT3161 Aevum plans; Type4/PFA is disabled");
+  if (spec.rfind("2:", 0) == 0 ||
+      spec.rfind("4:", 0) == 0 ||
+      spec.rfind("pfa", 0) == 0) {
+    throw runtime_error("Apple OpenCL 1.2 supports only stock FFT3161 Aevum plans; Type2/Type4/PFA is disabled");
   }
 #endif
   // PRP-native AUTO specialization for the measured 4M window.
@@ -457,6 +459,7 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
       }
     }
 
+#if !defined(__APPLE__)
     // Validated production Type2 window. Keep it narrower than the
     // established Type1 4M window. The factor-3 margin protects production
     // PRP square_mul(...,3), not merely square-only capacity.
@@ -475,6 +478,7 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
         return type2;
       }
     }
+#endif
 
     // Radeon VII high-range PRP measurements show the 8M 1K/radix-8 shape
     // materially faster than generic AUTO. Runtime enters this internal alias
