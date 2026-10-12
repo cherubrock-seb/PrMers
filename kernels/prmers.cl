@@ -292,6 +292,18 @@ inline ulong4 digit_adc4_last(ulong4 a,int4 w,__private ulong*restrict k){
 #ifndef LOCAL_PROPAGATION_DEPTH_DIV4_MIN
 #define LOCAL_PROPAGATION_DEPTH_DIV4_MIN 2
 #endif
+// Each supported carry block is aligned and wholly inside one packed mask word.
+#ifndef PRMERS_CARRY_MASK_WORD_V1
+#define PRMERS_CARRY_MASK_WORD_V1 0
+#endif
+#if PRMERS_CARRY_MASK_WORD_V1 && \
+    (LOCAL_PROPAGATION_DEPTH == 4 || LOCAL_PROPAGATION_DEPTH == 8 || \
+     LOCAL_PROPAGATION_DEPTH == 16 || LOCAL_PROPAGATION_DEPTH == 32 || LOCAL_PROPAGATION_DEPTH == 64)
+#define PRMERS_CARRY_MASK_WORD_ACTIVE 1
+#else
+#define PRMERS_CARRY_MASK_WORD_ACTIVE 0
+#endif
+
 #ifndef CARRY_WORKER
 #define CARRY_WORKER 1
 #endif
@@ -432,12 +444,16 @@ __kernel void kernel_carry(
     uint base = start >> 6;
     uint off  = start & 63;
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+    ulong merged = maskPacked[base] >> off;
+#else
     ulong lo = maskPacked[base + 0];
     ulong hi = maskPacked[base + 1];
 
     ulong sh     = (ulong)((64 - off) & 63);
     ulong nzmask = (ulong)0 - (ulong)(off != 0);
     ulong merged = (lo >> off) | ((hi << sh) & nzmask);
+#endif
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (uint i = start; i < end; i += 4) {
@@ -457,6 +473,9 @@ __kernel void kernel_carry(
         x_vec = digit_adc4(x_vec, sel, &carry);
         vstore4(x_vec, 0, x + i);
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+        merged >>= 4;
+#else
         sh = (ulong)0 - (off == 60);
         nzmask = maskPacked[base + 2];
 
@@ -466,6 +485,7 @@ __kernel void kernel_carry(
 
         off  = (off + 4) & 63;
         base += sh;
+#endif
     }
 
     carry_array[gid] = carry;
@@ -495,12 +515,16 @@ __kernel void kernel_carry_mul_3(
     uint base = start >> 6;
     uint off  = start & 63;
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+    ulong merged = maskPacked[base] >> off;
+#else
     ulong lo = maskPacked[base + 0];
     ulong hi = maskPacked[base + 1];
 
     ulong sh     = (ulong)((64 - off) & 63);
     ulong nzmask = (ulong)0 - (ulong)(off != 0);
     ulong merged = (lo >> off) | ((hi << sh) & nzmask);
+#endif
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4)
     for (uint i = start; i < end; i += 4) {
@@ -525,6 +549,9 @@ __kernel void kernel_carry_mul_3(
         carry = carry + 3UL * carry1;
         vstore4(x_vec, 0, x + i);
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+        merged >>= 4;
+#else
         uint wrap = (off + 4U) >> 6;
         ulong wrapMask = (ulong)0 - (ulong)wrap;
         uint off_next = (off + 4U) & 63U;
@@ -547,6 +574,7 @@ __kernel void kernel_carry_mul_3(
         base += wrap;
         lo   = lo_n;
         hi   = hi_n;
+#endif
     }
 
     carry_array[gid] = carry;
@@ -571,12 +599,16 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
     uint base = start >> 6;
     uint off  = start & 63;
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+    ulong merged = maskPacked[base] >> off;
+#else
     ulong lo = maskPacked[base + 0];
     ulong hi = maskPacked[base + 1];
 
     ulong sh     = (ulong)((64 - off) & 63);
     ulong nzmask = (ulong)0 - (ulong)(off != 0);
     ulong merged = (lo >> off) | ((hi << sh) & nzmask);
+#endif
 
     PRAGMA_UNROLL(LOCAL_PROPAGATION_DEPTH_DIV4_MIN)
     for (uint i = start; i < end; i += 4) {
@@ -596,6 +628,9 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
         vstore4(x_vec, 0, x + i);
         if (carry == 0) return;
 
+#if PRMERS_CARRY_MASK_WORD_ACTIVE
+        merged >>= 4;
+#else
         uint wrap = (off + 4U) >> 6;
         ulong wrapMask = (ulong)0 - (ulong)wrap;
         uint off_next = (off + 4U) & 63U;
@@ -617,6 +652,7 @@ __kernel void kernel_carry_2(__global ulong* restrict x,
         base += wrap;
         lo   = lo_n;
         hi   = hi_n;
+#endif
     }
 
     ulong4 x_vec = vload4(0, x + end);
