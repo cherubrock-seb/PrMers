@@ -1244,24 +1244,23 @@ public:
       }
     }
 
-    // Type4 plan candidates need the same production queue policy as the final
-    // engine.  Manual AEVUM_TYPE4_MULTI_Q is a higher-precedence override and
-    // causes the runtime tuner to be bypassed below.
+    // Queue policy is hardware-sensitive.  Explicit user choices always outrank
+    // built-in policy; AEVUM_TYPE4_MULTI_Q remains the compatibility override.
+    const bool explicit_multi_q_use = args_.uses("MULTI_Q");
 #if defined(CUDA_BACKEND)
-// Capture explicit -use choices before the internal Type4 queue default
-// mutates args_.flags. Explicit choices outrank the built-in CUDA profile.
-const bool explicit_multi_q_use = args_.uses("MULTI_Q");
-const bool explicit_zerohack_w_use = args_.uses("ZEROHACK_W");
+    const bool explicit_zerohack_w_use = args_.uses("ZEROHACK_W");
 #endif
 
+    const char* multi_q_env = std::getenv("AEVUM_TYPE4_MULTI_Q");
+    const bool explicit_multi_q_env = multi_q_env != nullptr;
     int multi_q_default = 1;
-    if (const char* value = std::getenv("AEVUM_TYPE4_MULTI_Q")) multi_q_default = std::atoi(value) != 0;
+    if (multi_q_env) multi_q_default = std::atoi(multi_q_env) != 0;
 #if defined(CUDA_BACKEND)
-if (multi_q_default && !explicit_multi_q_use)
-args_.flags["MULTI_Q"] = "1";
+    if (multi_q_default && !explicit_multi_q_use)
+      args_.flags["MULTI_Q"] = "1";
 #else
-if (multi_q_default)
-args_.flags["MULTI_Q"] = "1";
+    if (multi_q_default)
+      args_.flags["MULTI_Q"] = "1";
 #endif
 
     const bool manual_plan_env = aevum_autotune::hasManualPlanOverrideEnvironment();
@@ -1273,6 +1272,31 @@ args_.flags["MULTI_Q"] = "1";
         !compatible_tune_entry && workload_tunable;
 
     FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, spec);
+
+    // R54: Radeon VII/gfx906 Type2 PRP is materially faster with one queue.
+    // Six 4096-iteration counterbalanced pairs at M136279841 were exact and
+    // measured +4.2032% median / +4.3419% trimmed-mean, 6/6 wins.  The same
+    // change regressed RTX 3080 by ~1%, so this policy is deliberately scoped
+    // to gfx906, the validated Type2 AUTO exponent window, and PRP only.
+    //
+    // Explicit -use / AEVUM_TYPE4_MULTI_Q choices retain precedence.
+    const bool gfx906_type2_prp_multi_q0 =
+        !explicit_multi_q_use &&
+        !explicit_multi_q_env &&
+        workload_ == aevum_autotune::Workload::Prp &&
+        device_name.rfind("gfx906", 0) == 0 &&
+        exponent_ >= 130000000u &&
+        exponent_ <= 137000003u &&
+        native_fft.spec().rfind("2:", 0) == 0;
+
+    if (gfx906_type2_prp_multi_q0) {
+      args_.flags["MULTI_Q"] = "0";
+      multi_q_default = 0;
+      if (verbose) {
+        log("Aevum gfx906 Type2 PRP queue policy: MULTI_Q=0 "
+            "(validated 130000000..137000003).\\n");
+      }
+    }
 
     const bool pseudo_auto_spec =
         spec == "native-prp:auto" ||
