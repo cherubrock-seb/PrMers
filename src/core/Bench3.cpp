@@ -124,6 +124,10 @@ struct PointResult {
     std::vector<PlanResult> plans;
 };
 
+void write_plan_progress(const std::filesystem::path& path,
+                         const std::string& phase,
+                         double elapsed_s);
+
 std::string json_escape(const std::string& value) {
     std::ostringstream out;
     for (unsigned char c : value) {
