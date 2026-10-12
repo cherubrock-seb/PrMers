@@ -4,6 +4,10 @@ trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::${BASH_COMMAND}" >&2'
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 python3 "$ROOT/tests/aevum_apple_fused_tailsquare_test.py"
 python3 "$ROOT/tests/aevum_apple_fused_fftp_test.py"
+python3 "$ROOT/third_party/aevum/tests/type2_prp_auto_source_test.py"
+grep -q 'Type2 FFT3261' "$ROOT/src/aevum/AutoPolicy.cpp"
+grep -q 'FFT3161/FFT3261/FFT323161' "$ROOT/src/aevum/EngineAevum.cpp"
+grep -Fq 'fields[offset] == "1" || fields[offset] == "2" || fields[offset] == "4"' "$ROOT/src/aevum/EngineAevum.cpp"
 
 grep -q 'gpu_backend::aevum' "$ROOT/src/marin/gpu.cpp"
 grep -q 'gpu_backend::auto_select' "$ROOT/src/marin/gpu.cpp"
