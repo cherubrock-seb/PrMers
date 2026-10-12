@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include <cstdlib>
 #include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
@@ -95,6 +96,12 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
 
     std::ostringstream ss;
     ss << buildOptions;
+    const char* root8Shifts = std::getenv("PRMERS_NTT_ROOT8_SHIFTS_V1");
+    if (root8Shifts && root8Shifts[0] == '1' && root8Shifts[1] == '\0') {
+        ss << " -DPRMERS_NTT_ROOT8_SHIFTS_V1=1";
+        std::cout << "[EXPERIMENT] Legacy root-8 shift products requested; twiddle guard applies."
+                  << std::endl;
+    }
     ss 
       << " -DDIGIT_WIDTH_VALUE_1=" << pre.getDigitWidthValue1()
       << " -DDIGIT_WIDTH_VALUE_2=" << pre.getDigitWidthValue2()
