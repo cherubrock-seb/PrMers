@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include <cstdlib>
 #include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
@@ -95,6 +96,12 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
 
     std::ostringstream ss;
     ss << buildOptions;
+    const char* privateTile = std::getenv("PRMERS_NTT_PRIVATE_TILE_V1");
+    if (privateTile && privateTile[0] == '1' && privateTile[1] == '\0') {
+        ss << " -DPRMERS_NTT_PRIVATE_TILE_V1=1";
+        std::cout << "[EXPERIMENT] Legacy forward two-step NTT private tile enabled."
+                  << std::endl;
+    }
     ss 
       << " -DDIGIT_WIDTH_VALUE_1=" << pre.getDigitWidthValue1()
       << " -DDIGIT_WIDTH_VALUE_2=" << pre.getDigitWidthValue2()
