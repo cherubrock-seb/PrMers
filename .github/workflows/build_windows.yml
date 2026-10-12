@@ -338,10 +338,11 @@ jobs:
             PrMers production release built from immutable tag `${{ github.ref_name }}`.
             - PrMers source SHA: `${{ github.sha }}`
             - Workflow run: `${{ github.run_id }}`
-            - Standalone Aevum tag: `v0.3.102-pass5-prp-max`
-            - Standalone Aevum source SHA: `9db67c504bbd5877b4af0e44a538e1f0ca65e5f6`
+            - Standalone Aevum tag: `v0.3.103-pass5-prp-max`
+            - Standalone Aevum source SHA: `02bbffaee03480cf9d2cf2fe530c2a333c01930d`
             - Aevum v0.3.102 release gate: exact-SHA workflow PASS on Linux, Windows, macOS x86_64 and macOS arm64; annotated release tag, all 9 release assets, per-asset SHA256 files, SHA256SUMS and package SOURCE_INFO verified before this PrMers release.
             - Type2 p136 production AUTO: validated exponent window 130000000..137000003 selects `2:512:8:512:202` with `INPLACE=1,TAIL_TRIGS=0`; paired current-main validation measured +2.741% versus established Type1 on RTX 3080 and +6.092% on Radeon VII; standalone and vendored hardened paths were byte-exact against explicit Type2 and established Type1 at M136279841 with residue SHA256 `f7b3c1810cbd95b7fcfef6cbf614b45da2bc81e1a15a9ce5aef69d8d1a22fdfb`; Apple remains on stock FFT3161.
+            - gfx906 Type2 queue policy: production AUTO uses `MULTI_Q=0` only for gfx906 Type2 PRP in exponent window 130000000..137000003; R65 same-executable counterbalanced Bench3 measured +3.2467% median on the square path and +1.1945% median on the production estimate with 4/4 wins and exact identical residues; RTX retains `MULTI_Q=1`, and explicit user/environment overrides retain precedence.
             - Bench3 public AUTO-versus-legal-plan benchmark: quick validation passed on Radeon VII and RTX 3080 with five resumable exponent points per GPU, zero residue mismatches, zero benchmark errors after device-specific illegal-plan classification, and exact production-PRP probes; Bench3 does not mutate selector or tune policy.
             - Bench2 production benchmark and PRP shape confirmation: Bench2/profile CLI, source gates and documentation are included; the vendored production confirmation is aligned with standalone Aevum v0.3.102. Public p145 validation retained native 1:1K:8:256:101 on Radeon VII and selected 1:512:8:512:202 on RTX 3080 with median +5.555%, worst +5.411%, 3/3 pair wins and keep=1; both GPUs passed exact cache replay with identical residue hash.
             - PRP factor-3 capacity safety: production-standard Bench2 passed exact Gerbicz validation 40/40 across RTX 3080 and Radeon VII; p82589933 promotes from the unsafe 2M transform to a 4M plan on both GPUs, and targeted Radeon timing repeats accepted the release timing gate.
