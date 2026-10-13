@@ -683,6 +683,24 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_gf61_cmul_alt0)
       use.emplace_back("AEVUM_GF61_CMUL_ALT", "0");
 
+    // R79: PRPLL-derived non-temporal FFT loads are a small but consistent
+    // gfx906 Type2 PRP win. Eight counterbalanced 10k-iteration runs at
+    // M136279841 were word-exact; LOADS=1 improved the median from 1180.5 to
+    // 1170.0 us/iter with 4/4 paired wins. Keep the policy device/plan/range
+    // scoped and preserve explicit -use LOADS precedence.
+    const bool gfx906_type2_prp_loads1 =
+        !shared.args->uses("LOADS") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_loads1)
+      use.emplace_back("LOADS", "1");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }
