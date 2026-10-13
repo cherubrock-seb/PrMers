@@ -2,6 +2,14 @@
 
 #pragma once
 
+#ifndef AEVUM_GF61_MIDDLE_PAIRED
+#define AEVUM_GF61_MIDDLE_PAIRED 0
+#endif
+#if AEVUM_GF61_MIDDLE_PAIRED != 0 && AEVUM_GF61_MIDDLE_PAIRED != 1
+#error AEVUM_GF61_MIDDLE_PAIRED must be 0 or 1
+#endif
+
+
 // Access parts of a 64-bit value
 
 u32 OVERLOAD lo32(u64 x) { return (u32)x; }
@@ -1257,6 +1265,16 @@ GF61 OVERLOAD cmul(GF61 a, GF61 b) {
 // Square a root of unity complex number (the second version may be faster if the compiler optimizes the u128 squaring).
 //GF61 OVERLOAD csqTrig(GF61 a) { Z61 two_ay = a.y + a.y; return U2(modM61(1 + weakMul(two_ay, neg(a.y, 2))), mul(a.x, two_ay)); }
 GF61 OVERLOAD csqTrig(GF61 a) { Z61 ay_sq = weakMul(a.y, a.y, 2, 2); return U2(modM61(1 + neg(ay_sq + ay_sq, 4)), mul2(weakMul(a.x, a.y, 2, 2))); }
+
+// Woltman 951321ff: share four products between multiplication by b and
+// conjugate(b). Reduced unit roots make conjugate(b) the multiplicative inverse.
+#if AEVUM_GF61_MIDDLE_PAIRED && MIDDLE == 8 && !PFA_RADIX && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+void OVERLOAD aevum_middle_pair61(GF61 *res1, GF61 *res2, GF61 a, GF61 b) {
+  Z61 axbx = weakMul(a.x, b.x, 2, 2), ayby = weakMul(a.y, b.y, 2, 2), axby = weakMul(a.x, b.y, 2, 2), aybx = weakMul(a.y, b.x, 2, 2);
+  *res1 = U2(modM61(axbx + neg(ayby, 3)), modM61(axby + aybx));
+  *res2 = U2(modM61(axbx + ayby), modM61(aybx + neg(axby, 3)));
+}
+#endif
 
 // Cube w, a root of unity complex number, given w^2 and w
 GF61 OVERLOAD ccubeTrig(GF61 sq, GF61 w) { Z61 tmp = sq.y + sq.y; return U2(modM61(weakMul(tmp, neg(w.y, 2), 3, 3) + w.x), modM61(weakMul(tmp, w.x, 3, 2) + neg(w.y, 2))); }
