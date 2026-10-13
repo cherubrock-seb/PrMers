@@ -1967,13 +1967,18 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     if (weight_shift > 61) weight_shift -= 61;
   }
 
-  // Complete the first radix-8 butterfly while applying the parked high-half
-  // weights with FMA.  fft_WIDTH2 then skips exactly this first butterfly.
+  // Exact Type2 variant: preserve baseline FP32 rounding order.  Park only
+  // the high-half weights, materialize weight*word as an ordinary rounded
+  // FP32 multiply, then perform the first radix-2 X2 separately.  This keeps
+  // canonical integer semantics identical while still testing whether moving
+  // the work changes register scheduling or kernel cost.
   if (FUSE_WEIGHT_BUTTERFLY) {
     for (i32 i = 0; i < NW/2; ++i) {
       F2 parked_weights = uF2[i + NW/2];
-      uF2[i + NW/2] = U2((F) wu[i + NW/2].x, (F) wu[i + NW/2].y);
-      X2ad(uF2[i], uF2[i + NW/2], parked_weights);
+      uF2[i + NW/2] = U2(
+          parked_weights.x * (F) wu[i + NW/2].x,
+          parked_weights.y * (F) wu[i + NW/2].y);
+      X2(uF2[i], uF2[i + NW/2]);
     }
   }
 
