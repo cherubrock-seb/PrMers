@@ -165,30 +165,39 @@ int main(int argc, char** argv) {
         ++checked;
     }
 
-    auto timed = [&](bool enabled) {
-        std::vector<double> us;
-        us.reserve(static_cast<size_t>(batches));
-        for (int b = 0; b < batches; ++b) {
-            auto t0 = std::chrono::steady_clock::now();
-            run(enabled, denseExp, false, enabled ? on : off);
-            auto t1 = std::chrono::steady_clock::now();
-            us.push_back(std::chrono::duration<double,std::micro>(t1-t0).count());
-        }
-        return us;
+    auto timeOne = [&](bool enabled) {
+        auto t0 = std::chrono::steady_clock::now();
+        run(enabled, denseExp, false, enabled ? on : off);
+        auto t1 = std::chrono::steady_clock::now();
+        return std::chrono::duration<double,std::micro>(t1-t0).count();
     };
 
     // Untimed warmup on both paths.
     run(false, denseExp, false, off);
     run(true, denseExp, false, on);
 
-    auto baseUs = timed(false);
-    auto candUs = timed(true);
+    std::vector<double> baseUs, candUs;
+    baseUs.reserve(static_cast<size_t>(batches));
+    candUs.reserve(static_cast<size_t>(batches));
+    for (int b = 0; b < batches; ++b) {
+        if ((b & 1) == 0) {
+            baseUs.push_back(timeOne(false));
+            candUs.push_back(timeOne(true));
+        } else {
+            candUs.push_back(timeOne(true));
+            baseUs.push_back(timeOne(false));
+        }
+    }
     const double baseMed = median(baseUs);
     const double candMed = median(candUs);
 
     std::printf("P=%llu N=%zu CHECKED_EXPONENTS=%d\n",(unsigned long long)p,n,checked);
     std::printf("K1_EXACTNESS=PASS\n");
-    std::printf("BASE_MEDIAN_US=%.3f\n",baseMed);
+    std::printf("BASE_SAMPLES_US=");
+    for (size_t i=0;i<baseUs.size();++i) std::printf("%s%.3f",i?",":"",baseUs[i]);
+    std::printf("\nCAND_SAMPLES_US=");
+    for (size_t i=0;i<candUs.size();++i) std::printf("%s%.3f",i?",":"",candUs[i]);
+    std::printf("\nBASE_MEDIAN_US=%.3f\n",baseMed);
     std::printf("CAND_MEDIAN_US=%.3f\n",candMed);
     std::printf("CAND_OVER_BASE=%.6f\n",candMed/baseMed);
     std::printf("K1_POW_DEVICE_GATE=PASS\n");
