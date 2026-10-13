@@ -2147,8 +2147,10 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   // Preload trig values to hide global memory latencies.  As the preloads are used, the next set of trig values are preloaded.
   preload_tabMul8_trig(trig, preloads, 1, numWG, lowMe);
 
-  // Do first fft8, partial tabMul, and shufl.
-  fft8(u);
+  // Do first fft8, partial tabMul, and shufl.  When carryFused has
+  // already performed the first radix-2 layer with the weights, continue from
+  // that state only for WIDTH call #2.
+  if (FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH && callnum == 2) fft8_skip1(u); else fft8(u);
   partial_tabMul8(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
