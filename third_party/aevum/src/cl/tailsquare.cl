@@ -284,6 +284,19 @@ KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
   T2 trig = TOLOAD(&smallTrig[height_trigs + line_u*G_H*2 + me]);
 #endif
 
+#if AEVUM_GF61_LINE0_UNIFIED
+#if SINGLE_KERNEL
+  // Upstream-style common path: select only LDS addresses for normal pairs vs
+  // line 0 / H/2, then reuse pairSq's existing special handling.
+  revLineOrSelf(lds, u, line_u == 0);
+  pairSq(NH/2, u, u + NH/2, trig, line_u == 0);
+  revLineOrSelf(lds, u, line_u == 0);
+#else
+  revCrossLine(lds, u);
+  pairSq(NH/2, u, u + NH/2, trig, false);
+  revCrossLine(lds, u);
+#endif
+#else
 #if SINGLE_KERNEL
   // Line 0 and H/2 are special: they pair with themselves, line 0 is offseted by 1.
   if (line_u == 0) {
@@ -299,6 +312,7 @@ KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
     pairSq(NH/2, u, u + NH/2, trig, false);
     revCrossLine(lds, u);
   }
+#endif
 
   dependentLaunch();       // Next kernel will be fftMiddleOutFP64 which must dependentLaunchWait before reading data
 
