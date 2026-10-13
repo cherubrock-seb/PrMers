@@ -40,7 +40,7 @@ void spin() {
 #endif
 
 #if AMDGPU
-#define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
+#define CarryShuttleAccess(me,i) ((me) * 4 + (i)%4 + (i)/4 * 4*G_W) // Also generates global_load_dwordx4 instructions and unit stride when NW=8
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
 #else
 #define CarryShuttleAccess(me,i)        ((me) + (i) * G_W)                      // nVidia likes this unit stride better
