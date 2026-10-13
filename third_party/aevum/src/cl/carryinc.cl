@@ -2,9 +2,29 @@
 
 // This file is included with different definitions for iCARRY
 
+#ifndef AEVUM_TYPE2_FINAL_CARRY32
+#define AEVUM_TYPE2_FINAL_CARRY32 0
+#endif
+#if AEVUM_TYPE2_FINAL_CARRY32 != 0 && AEVUM_TYPE2_FINAL_CARRY32 != 1
+#error AEVUM_TYPE2_FINAL_CARRY32 must be 0 or 1
+#endif
+
 Word2 OVERLOAD carryFinal(Word2 u, iCARRY inCarry, bool b1) {
   iCARRY tmpCarry;
+#if FFT_TYPE == FFT3261 && AEVUM_TYPE2_FINAL_CARRY32 && EXP / NWORDS == 32 && WordSize == 8
+  // For Type2 at 32/33 bits per word, avoid the generic variable-width
+  // signed lowBits() path.  The signed high half of the balanced remainder
+  // is determined by bit31 of lo32 for a 32-bit word, or bit0 of hi32 for
+  // a 33-bit word.  This is exactly equivalent to carryStep(i64,i64*).
+  i64 x = u.x + inCarry;
+  i32 xlo = lo32(x);
+  i32 xhi = hi32(x);
+  i32 remHi32 = b1 ? ((i32)((u32)xhi << 31) >> 31) : (xlo >> 31);
+  u.x = as_long((int2)(xlo, remHi32));
+  tmpCarry = (i64)((xhi - remHi32) >> (u32)b1);
+#else
   u.x = carryStepSignedSloppy(u.x + inCarry, &tmpCarry, b1);
+#endif
   u.y += tmpCarry;
   return u;
 }
