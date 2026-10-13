@@ -2,6 +2,15 @@
 
 #pragma once
 
+#ifndef AEVUM_GF61_RADIX16_V2
+#define AEVUM_GF61_RADIX16_V2 0
+#endif
+#if AEVUM_GF61_RADIX16_V2 != 0 && AEVUM_GF61_RADIX16_V2 != 1
+#error AEVUM_GF61_RADIX16_V2 must be 0 or 1
+#endif
+#define AEVUM_GF61_RADIX16_ACTIVE (AEVUM_GF61_RADIX16_V2 && !AEVUM_GF61_LIMB32 && !PFA_RADIX)
+
+
 // Access parts of a 64-bit value
 
 u32 OVERLOAD lo32(u64 x) { return (u32)x; }
@@ -1325,6 +1334,19 @@ GF61 OVERLOAD mul_3t16(GF61 a) { return cmul(a, U2(1693317751237720973ULL, 22027
 GF61 OVERLOAD mul_5t16(GF61 a) { return cmul(a, U2(M61 - 1693317751237720973ULL, 22027337052962166ULL)); }
 GF61 OVERLOAD mul_7t16(GF61 a) { return cmul(a, U2(M61 - 22027337052962166ULL, 1693317751237720973ULL)); }
 GF61 OVERLOAD mul_9t16(GF61 a) { return cmul(a, U2(M61 - 22027337052962166ULL, M61 - 1693317751237720973ULL)); }
+#endif
+
+// Woltman 8b8d6c19: quick 16th-root product, native GF61 only.
+// For reduced positive inputs, the small shared Karatsuba product lets the
+// consumer fold the remaining signs and reductions into its butterflies.
+#if AEVUM_GF61_RADIX16_ACTIVE && !defined(AEVUM_APPLE_OPENCL12)
+GF61 aevum_mul_t16q(GF61 a) {
+  const Z61 c = 22027337052962166ULL;
+  const Z61 s = 1693317751237720973ULL;
+  u128 k = mul64(c, a.x + a.y);
+  return U2(weakModM61(mad64(a.y, M61 - s - c, k), 125),
+            weakModM61(mad64(a.x, s - c, k), 125));
+}
 #endif
 
 // Return a+b and a-b
