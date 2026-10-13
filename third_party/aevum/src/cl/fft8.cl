@@ -91,16 +91,9 @@ void OVERLOAD fft8(F2 *u) {
   SWAP(u[3], u[6]);
 }
 
-// Experimental Type2 FUSE_WEIGHT_BUTTERFLY continuation.
-//
-// carryFused has already materialized the high-half weighted FP32 values with
-// the same rounded multiplies as baseline and executed only fft8Core's first
-// radix-2 layer.  Continue with current Aevum's exact remaining factorization.
+// Experimental Type2 continuation after carryFused has executed the exact
+// first four operations of current Aevum fft8Core, including delayed rotations.
 void OVERLOAD fft8_skip1(F2 *u) {
-  u[5] = mul_t8_delayed(u[5]);
-  u[6] = mul_t4(u[6]);
-  u[7] = mul_3t8_delayed(u[7]);
-
   X2(u[0], u[2]);
   X2(u[1], u[3]); u[3] = mul_t4(u[3]);
   X2(u[0], u[1]);
