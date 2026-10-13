@@ -6,6 +6,7 @@
 #define VARIANT       FFT_VARIANT_W
 #define LDSPAD        LDSPAD_W
 #define LDSSWIZ       LDSSWIZ_W
+#define LDSSWIZ       LDSSWIZ_W
 #define SHUFL_BYTES   SHUFL_BYTES_W
 #define UNROLL        UNROLL_W
 #define SAVE_ONE_MUL  0          // Radeon VII weirdness where saving one mul in width variant 2 was slower
