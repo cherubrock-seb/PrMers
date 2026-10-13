@@ -3197,7 +3197,15 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
       assert(!doLL);
       fftW(buf3, buf1);
       carryA(out, buf3);
-      fftPCarryB(buf1, out);
+      if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 0)) {
+        // Profiling on RTX 3080 shows the lazy fused gather is substantially
+        // more expensive than the already-existing canonical carryB + fftP
+        // sequence.  Both produce the same retained width-transform state.
+        carryB(out);
+        fftP(buf1, out);
+      } else {
+        fftPCarryB(buf1, out);
+      }
     } else if (doLL) {
       carryFusedLL(buf1);
     } else {
