@@ -674,7 +674,11 @@ KERNEL(256) fftMiddleInGF61(P(T2) out, P(T2) in, Trig trig) {
   dependentLaunch();       // Next kernel will be tailSquareGF61 which must dependentLaunchWait before reading data
 
   // Transpose the x and y values
+#if MIDDLE_SHUFFLE_PIPELINE && MIDDLE == 8
+  local GF61 lds[1024];
+#else
   local GF61 lds[256];
+#endif
   middleShuffle(lds, u);
 
   writeMiddleInLine(in61 + zerohack, u, y, x);
