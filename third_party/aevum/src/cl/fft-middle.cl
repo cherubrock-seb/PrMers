@@ -1319,6 +1319,41 @@ void OVERLOAD middleShuffle(local GF61 *lds, GF61 *u) {
   u32 me = get_local_id(0);
   u32 y = me / 16;
   u32 x = me % 16;
+#if MIDDLE_SHUFFLE_PIPELINE && MIDDLE == 8
+  // Pipeline two registers at a time through two disjoint LDS ping-pong sets.
+  // While one pair is read after the transpose, the next pair is written to
+  // the other set.  This cuts the full-workgroup synchronization count from
+  // one barrier per middle register (8) to one per register pair (4).
+  const u32 inPos = x * 16 + (y ^ x);
+  const u32 outPos = y * 16 + (x ^ y);
+  local GF61 *set0 = lds;
+  local GF61 *set1 = lds + 512;
+
+  set0[inPos] = u[0];
+  set0[256 + inPos] = u[1];
+  bar();
+
+  u[0] = set0[outPos];
+  u[1] = set0[256 + outPos];
+  set1[inPos] = u[2];
+  set1[256 + inPos] = u[3];
+  bar();
+
+  u[2] = set1[outPos];
+  u[3] = set1[256 + outPos];
+  set0[inPos] = u[4];
+  set0[256 + inPos] = u[5];
+  bar();
+
+  u[4] = set0[outPos];
+  u[5] = set0[256 + outPos];
+  set1[inPos] = u[6];
+  set1[256 + inPos] = u[7];
+  bar();
+
+  u[6] = set1[outPos];
+  u[7] = set1[256 + outPos];
+#else
   for (int i = 0; i < MIDDLE; ++i) {
     lds[x * 16 + y ^ x] = u[i];         // Swizzling with XOR should reduce LDS bank conflicts, formerly "lds[x * 16 + y] = u[i];"
     bar();
@@ -1328,6 +1363,7 @@ void OVERLOAD middleShuffle(local GF61 *lds, GF61 *u) {
     bar();
     u[i] = lds[x * 16 + y ^ x];
   }
+#endif
 }
 
 #endif
