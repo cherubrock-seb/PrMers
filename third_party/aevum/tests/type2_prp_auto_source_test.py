@@ -8,6 +8,8 @@ gpu = Path("src/Gpu.cpp").read_text()
 trig_cpp = Path("src/Trig.cpp").read_text()
 trig_h = Path("src/Trig.h").read_text()
 trig_cl = Path("src/cl/trig.cl").read_text()
+use_options = Path("src/UseOptions.h").read_text()
+math_cl = Path("src/cl/math.cl").read_text()
 
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in api
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in fft
