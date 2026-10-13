@@ -982,7 +982,12 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
 void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_type) {
   GF61 a = *pa, b = *pb;
-  GF61 a2, b2, b2t2, ab, addin, c, d;
+  GF61 c, d;
+#if ENABLE_BETTER_ONEPAIRSQ
+  GF61 a2, b2, b2t2, ab, addin;
+#elif !AEVUM_GF61_PAIRSQ_REUSE
+  GF61 a2, b2t2;
+#endif
 
 // This code should be faster (saves at least one wide mul) but the CUDA compiler makes poorer decisions regarding register usage resulting in local memory usage
 #if ENABLE_BETTER_ONEPAIRSQ
@@ -1086,6 +1091,7 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
     c = modM61q(c, 2, 0);
     d = modM61q(d, 4, 5);
   }
+#endif
 #endif
   *pa = SWAP_XY(c), *pb = SWAP_XY(d);
 }
