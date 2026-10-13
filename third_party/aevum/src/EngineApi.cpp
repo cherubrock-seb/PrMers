@@ -664,6 +664,25 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   }
   if (fft.shape.fft_type == FFT3261) {
     auto use = parse("INPLACE=1,TAIL_TRIGS=0");
+    const std::string type2_device_name = openclDeviceName(shared.context->deviceId());
+    const std::string type2_device_vendor = openclVendorId(shared.context->deviceId());
+    // PR38: Radeon VII / gfx906 Type2 PRP middle-in GF61 is faster with the
+    // canonical three-product cmul path than with the historical middle-in ALT
+    // default. Keep this scoped to the validated Type2 PRP AUTO window and
+    // preserve explicit -use AEVUM_GF61_CMUL_ALT precedence.
+    const bool gfx906_type2_prp_gf61_cmul_alt0 =
+        !shared.args->uses("AEVUM_GF61_CMUL_ALT") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_gf61_cmul_alt0)
+      use.emplace_back("AEVUM_GF61_CMUL_ALT", "0");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }

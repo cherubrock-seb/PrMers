@@ -8,6 +8,8 @@ gpu = Path("src/Gpu.cpp").read_text()
 trig_cpp = Path("src/Trig.cpp").read_text()
 trig_h = Path("src/Trig.h").read_text()
 trig_cl = Path("src/cl/trig.cl").read_text()
+use_options = Path("src/UseOptions.h").read_text()
+math_cl = Path("src/cl/math.cl").read_text()
 
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in api
 assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in fft
@@ -69,5 +71,26 @@ assert "!fft.isPfa()" in unroll
 assert "fft.shape.fft_type == FFT3261" in unroll
 assert 'fft.spec() == "2:512:8:512:202"' in unroll
 assert 'pfa_use.emplace_back("UNROLL_W", "1")' in unroll
+
+# PR38 gfx906 Type2 middle-in GF61 cmul policy.
+assert '"AEVUM_GF61_CMUL_ALT"' in use_options
+assert 'shared.args->uses("AEVUM_GF61_CMUL_ALT")' in api
+marker = "const bool gfx906_type2_prp_gf61_cmul_alt0"
+start = api.index(marker)
+end = api.index('report("type2-prp-auto"', start)
+cmul = api[start:end]
+assert "type2_device_name" in cmul
+assert "type2_device_vendor" in cmul
+assert 'type2_device_vendor == "4098"' in cmul
+assert 'type2_device_name.rfind("gfx906", 0) == 0' in cmul
+assert "exponent >= 130000000u" in cmul
+assert "exponent <= 137000003u" in cmul
+assert "!fft.isPfa()" in cmul
+assert "fft.shape.fft_type == FFT3261" in cmul
+assert 'fft.spec() == "2:512:8:512:202"' in cmul
+assert 'use.emplace_back("AEVUM_GF61_CMUL_ALT", "0")' in cmul
+assert "canonical three-product cmul path" in api
+assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in api
+assert "#elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT" in math_cl
 
 print("Aevum production Type2 PRP AUTO source gate passed")
