@@ -701,6 +701,24 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_loads1)
       use.emplace_back("LOADS", "1");
 
+    // R99: gfx906 Type2 PRP benefits from the wave64 fast LDS barrier on top
+    // of the validated LOADS=1 profile. Eight counterbalanced 10k-iteration
+    // runs at M136279841 were word-exact; FAST_BARRIER=1 improved the median
+    // from 1175.0 to 1166.5 us/iter with 4/4 paired wins. Preserve explicit
+    // -use FAST_BARRIER precedence and keep the policy scoped to this plan.
+    const bool gfx906_type2_prp_fast_barrier1 =
+        !shared.args->uses("FAST_BARRIER") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_fast_barrier1)
+      use.emplace_back("FAST_BARRIER", "1");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }
