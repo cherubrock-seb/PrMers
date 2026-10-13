@@ -756,6 +756,10 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_middle_base_table2)
       use.emplace_back("AEVUM_GF61_MIDDLE_BASE_TABLE", "2");
 
+    if (!shared.args->uses("AEVUM_CARRY_WMUL") &&
+        std::getenv("AEVUM_CARRY_WMUL") == nullptr) {
+      use.emplace_back("AEVUM_CARRY_WMUL", "4");
+    }
     report("type2-prp-auto", normalize(use));
     return use;
   }
