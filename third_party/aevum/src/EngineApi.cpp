@@ -719,6 +719,25 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_fast_barrier1)
       use.emplace_back("FAST_BARRIER", "1");
 
+    // R164: reduce ROE statistics traffic to one global atomic per wave on
+    // gfx906 Type2 PRP. Eight counterbalanced 10k-iteration runs were exact
+    // at M136279841. The ROE carry kernel improved from a 381 us median to
+    // 369 us while total-time median improved from 1161.0 to 1159.5 us/iter
+    // with 3/4 paired wins. Preserve explicit -use precedence and keep the
+    // automatic policy restricted to the validated device/plan/range.
+    const bool gfx906_type2_prp_roe_subgroup_reduce1 =
+        !shared.args->uses("AEVUM_ROE_SUBGROUP_REDUCE") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_roe_subgroup_reduce1)
+      use.emplace_back("AEVUM_ROE_SUBGROUP_REDUCE", "1");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }
