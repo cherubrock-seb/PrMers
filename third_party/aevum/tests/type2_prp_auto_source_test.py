@@ -109,4 +109,21 @@ assert 'fft.spec() == "2:512:8:512:202"' in loads
 assert 'use.emplace_back("LOADS", "1")' in loads
 assert "explicit -use LOADS precedence" in api
 
+# R99 gfx906 Type2 fast-barrier policy.
+marker = "const bool gfx906_type2_prp_fast_barrier1"
+start = api.index(marker)
+end = api.index('report("type2-prp-auto"', start)
+fast_barrier = api[start:end]
+assert '!shared.args->uses("FAST_BARRIER")' in fast_barrier
+assert 'type2_device_vendor == "4098"' in fast_barrier
+assert 'type2_device_name.rfind("gfx906", 0) == 0' in fast_barrier
+assert "exponent >= 130000000u" in fast_barrier
+assert "exponent <= 137000003u" in fast_barrier
+assert "!fft.isPfa()" in fast_barrier
+assert "fft.shape.fft_type == FFT3261" in fast_barrier
+assert 'fft.spec() == "2:512:8:512:202"' in fast_barrier
+assert 'use.emplace_back("FAST_BARRIER", "1")' in fast_barrier
+assert "preserve explicit" in api
+assert "-use FAST_BARRIER precedence" in api
+
 print("Aevum production Type2 PRP AUTO source gate passed")
