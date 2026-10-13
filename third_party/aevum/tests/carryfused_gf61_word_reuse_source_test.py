@@ -9,6 +9,7 @@ assert src.count("#if !AEVUM_CARRY_REUSE_GF61_WU") == 2
 assert src.count("u61[i] = as_ulong2(carryWords);") == 2
 assert src.count("carryFinal(as_long2(u61[i]), carry[i], biglit0)") == 2
 assert src.count("Word2 carryWordsFinal = wu[i];") == 2
+assert "#endifSWAP_XY" not in src
 
 fft3261 = src.split("#elif FFT_TYPE == FFT3261", 1)[1].split("#elif FFT_TYPE == FFT3161", 1)[0]
 fft3161 = src.split("#elif FFT_TYPE == FFT3161", 1)[1].split("#elif FFT_TYPE == FFT323161", 1)[0]
