@@ -522,7 +522,16 @@ Word OVERLOAD carryStep(i96 x, i64 *outCarry, bool isBigWord) {
   return as_ulong((uint2)(i96_lo32(x), (u32)whi));
 #elif EXP / NWORDS == 32
   i32 whi = xtract32(i96_lo64(x), nBitsLess32) >> 31;
+#if AEVUM_CARRYSTEP32_FAST && (FFT_TYPE == FFT3161 || FFT_TYPE == FFT3261)
+  // For nBitsLess32==0/1, whi is the sign extension of the extracted high
+  // word and also matches the low-bit correction needed by the shifted
+  // 64-bit high half.  Assemble that shift from 32-bit pieces as in gpuowl's
+  // >=33-bpw path, avoiding the 64-bit subtract+variable shift on gfx906.
+  *outCarry = as_long((int2)(xtract32(i96_hi64(x), nBitsLess32),
+                             (i32)i96_hi32(x) >> nBitsLess32)) + (whi < 0);
+#else
   *outCarry = ((i64)i96_hi64(x) - (i64)whi) >> nBitsLess32;
+#endif
   return as_ulong((uint2)(i96_lo32(x), (u32)whi));
 #elif EXP / NWORDS == 31
   i32 w = lowBitsSafe32(i96_lo32(x), nBits);
