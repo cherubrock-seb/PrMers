@@ -143,6 +143,15 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 
 #if NTT_GF61
 
+#ifndef AEVUM_PFA7_FFTW_GF61_COALESCE
+#define AEVUM_PFA7_FFTW_GF61_COALESCE 0
+#endif
+
+#if AEVUM_PFA7_FFTW_GF61_COALESCE && \
+    !(PFA_RADIX == 7 && WIDTH == 512 && SMALL_HEIGHT == 512 && NW == 8 && G_W == 64)
+#error AEVUM_PFA7_FFTW_GF61_COALESCE requires pfa7 width=512 height=512 NW=8
+#endif
+
 KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   local GF61 lds[LDS_BYTES / sizeof(GF61)];
 
@@ -165,13 +174,49 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   const u32 firstBinaryPair = me * SMALL_HEIGHT + y;
   u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
   u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+#if AEVUM_PFA7_FFTW_GF61_COALESCE
+  local Z61 *scatter61 = (local Z61 *) lds;
+  const u32 evenBasePair =
+      pfaWCanonicalPairIndex(pfaWLogicalIndex(row, y * 2u)) & ~(WIDTH - 1u);
+  const u32 oddBasePair =
+      pfaWCanonicalPairIndex(pfaWLogicalIndex(row, y * 2u + 1u)) & ~(WIDTH - 1u);
+
+  bar(G_W);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 dstPair = pfaWCanonicalPairIndex(nEven);
+    scatter61[dstPair & (WIDTH - 1u)] = u[i].y;
+    nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
+  }
+  bar(G_W);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 x = i * G_W + me;
+    outScalar61[(evenBasePair + x) * 2u + 1u] = scatter61[x];
+  }
+
+  bar(G_W);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 dstPair = pfaWCanonicalPairIndex(nOdd);
+    scatter61[dstPair & (WIDTH - 1u)] = u[i].x;
+    nOdd += PFA_LOGICAL_STEP; if (nOdd >= NWORDS) nOdd -= NWORDS;
+  }
+  bar(G_W);
+#pragma unroll
+  for (u32 i = 0; i < NW; ++i) {
+    const u32 x = i * G_W + me;
+    outScalar61[(oddBasePair + x) * 2u] = scatter61[x];
+  }
+#else
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
     outScalar61[pfaWCanonicalPairIndex(nEven) * 2u + 1u] = u[i].y;
     outScalar61[pfaWCanonicalPairIndex(nOdd)  * 2u]      = u[i].x;
     nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
-    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
+    nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd -= NWORDS;
   }
+#endif
 #else
   out61 += WIDTH * g;
   write(G_W, NW, u, out61, 0);
