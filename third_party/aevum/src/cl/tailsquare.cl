@@ -11,6 +11,13 @@
 #include "tailutil.cl"
 #include "middle.cl"
 
+#ifndef AEVUM_GF61_TAIL_COMMON
+#define AEVUM_GF61_TAIL_COMMON 0
+#endif
+#if AEVUM_GF61_TAIL_COMMON != 0 && AEVUM_GF61_TAIL_COMMON != 1
+#error AEVUM_GF61_TAIL_COMMON must be 0 or 1
+#endif
+
 #if AEVUM_PRP_MIDDLE1
 #include "prp_middle1.cl"
 #define AEVUM_PRP_TRIG_ARG , Trig middleTrig
@@ -1834,20 +1841,28 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 #endif
 
 #if SINGLE_KERNEL
-  // Line 0 and H/2 are special: they pair with themselves, line 0 is offseted by 1.
+#if AEVUM_GF61_TAIL_COMMON
+  revLineOrSelf(lds, u, line_u == 0);
+  pairSq(NH/2, u, u + NH/2, trig, line_u == 0);
+  revLineOrSelf(lds, u, line_u == 0);
+#else
+  // Baseline special path.
   if (line_u == 0) {
     reverse2(lds, u);
     pairSq2_special(u, trig);
     reverse2(lds, u);
   }
   else {
-#else
-  if (1) {
-#endif
     revCrossLine(lds, u);
     pairSq(NH/2, u, u + NH/2, trig, false);
     revCrossLine(lds, u);
   }
+#endif
+#else
+  revCrossLine(lds, u);
+  pairSq(NH/2, u, u + NH/2, trig, false);
+  revCrossLine(lds, u);
+#endif
 
   dependentLaunch();       // Next kernel will be fftMiddleOutGF61 which must dependentLaunchWait before reading data
 
