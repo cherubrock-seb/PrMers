@@ -132,6 +132,11 @@ KERNEL(IN_WG) fftMiddleIn(P(T2) out, CP(T2) in, Trig trig) {
 
 KERNEL(IN_WG) fftMiddleInGF31(P(T2) out, CP(T2) in, Trig trig) {
   GF31 u[MIDDLE];
+#if AEVUM_TC_PFA7_GF31 || MIDDLE_IN_LDS_TRANSPOSE
+  // Tensor PFA7 uses one Z31 plane per work-item as warp-local staging.  The
+  // same allocation is reused by the existing post-transform LDS transpose.
+  local Z31 lds[IN_WG * MIDDLE];
+#endif
 
   CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
   P(GF31) out31 = (P(GF31)) (out + DISTGF31);
@@ -163,7 +168,11 @@ KERNEL(IN_WG) fftMiddleInGF31(P(T2) out, CP(T2) in, Trig trig) {
 
 #if PFA_RADIX
   pfaMiddleTwiddle(u, x, y, trig31);
+#if AEVUM_TC_PFA7_GF31
+  pfaDft7TensorGF31(u, 0u, lds);
+#else
   fft_MIDDLE(u);
+#endif
 #else
   middleMul2(u, x, y, trig31);
   fft_MIDDLE(u);
@@ -174,7 +183,6 @@ KERNEL(IN_WG) fftMiddleInGF31(P(T2) out, CP(T2) in, Trig trig) {
 
 #if MIDDLE_IN_LDS_TRANSPOSE
   // Transpose the x and y values
-  local Z31 lds[IN_WG / 2 * (MIDDLE <= 16 ? 2 * MIDDLE : MIDDLE)];
   middleShuffle(lds, u, IN_WG, IN_SIZEX);
   out31 += me;  // Threads write sequentially to memory since x and y values are already transposed
 #else
