@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <algorithm>
-#include <cstdlib>
 #ifndef CL_TARGET_OPENCL_VERSION
 #define CL_TARGET_OPENCL_VERSION 300
 #endif
@@ -589,13 +588,8 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     size_t numWords = limbBytes / sizeof(uint64_t);
     std::vector<uint64_t> one_data(numWords, 0);
     one_data[0] = 1;
-    // The multiply path transforms base_copy read-only.  For a nonfinal set
+    // The multiply path transforms base_copy read-only. For a nonfinal set
     // bit, retain that spectrum and square it directly instead of rebuilding it.
-    const char* reuseForwardOption = std::getenv("PRMERS_POW_REUSE_FORWARD_V1");
-    const bool reuseForward = reuseForwardOption &&
-                              reuseForwardOption[0] == '1' &&
-                              reuseForwardOption[1] == '\0';
-
     auto multiplyAndSquare = [&]() {
         cl_int allocErr = CL_SUCCESS;
         cl_mem tmpA = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE,
@@ -641,7 +635,7 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     try {
         writeOne(accumulator_buf, one_data, limbBytes);
         while (exp > 0) {
-            if (reuseForward && (exp & 1) && exp > 1) {
+            if ((exp & 1) && exp > 1) {
                 multiplyAndSquare();
                 exp >>= 1;
                 continue;
