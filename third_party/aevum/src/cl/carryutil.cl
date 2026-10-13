@@ -137,7 +137,10 @@ float OVERLOAD boundCarry(i64 c) { return ldexp(fabs((float) (i32) (c >> 8)), -2
 #if STATS || ROE
 void updateStats(global uint *bufROE, u32 posROE, float roundMax) {
   assert(roundMax >= 0);
-#if AEVUM_ROE_SUBGROUP_REDUCE && AMDGPU && defined(cl_khr_subgroups)
+#if AEVUM_ROE_SUBGROUP_REDUCE && AMDGPU
+#ifndef cl_khr_subgroups
+#error AEVUM_ROE_SUBGROUP_REDUCE requires cl_khr_subgroups
+#endif
   // roundMax is non-negative, so uint bit order matches float order exactly.
   // Reduce inside each hardware subgroup and issue one global atomic per wave
   // instead of one atomic per work-item.  This avoids the LDS allocation of
