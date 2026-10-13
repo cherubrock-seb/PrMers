@@ -157,6 +157,10 @@ KERNEL(OUT_WG) fftMiddleOut(P(T2) out, CP(T2) in, Trig trig) {
 
 KERNEL(OUT_WG) fftMiddleOutGF31(P(T2) out, CP(T2) in, Trig trig) {
   GF31 u[MIDDLE];
+#if AEVUM_TC_PFA7_GF31 || MIDDLE_OUT_LDS_TRANSPOSE
+  // Shared with the Tensor PFA7 staging path and the stock output transpose.
+  local Z31 lds[OUT_WG * MIDDLE];
+#endif
 
   CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
   P(GF31) out31 = (P(GF31)) (out + DISTGF31);
@@ -189,7 +193,12 @@ KERNEL(OUT_WG) fftMiddleOutGF31(P(T2) out, CP(T2) in, Trig trig) {
   readMiddleOutLine(u, in31, y, x);
 
 #if PFA_RADIX
+#if AEVUM_TC_PFA7_GF31
+  // The Tensor coefficient table includes the 1/7 inverse normalization.
+  pfaDft7TensorGF31(u, 1u, lds);
+#else
   ifft_MIDDLE(u);
+#endif
   pfaMiddleTwiddle(u, y, x, trig31);
 #else
   middleMul(u, x, trig31);
@@ -201,7 +210,6 @@ KERNEL(OUT_WG) fftMiddleOutGF31(P(T2) out, CP(T2) in, Trig trig) {
 
 #if MIDDLE_OUT_LDS_TRANSPOSE
   // Transpose the x and y values
-  local Z31 lds[OUT_WG / 2 * (MIDDLE <= 16 ? 2 * MIDDLE : MIDDLE)];
   middleShuffle(lds, u, OUT_WG, OUT_SIZEX);
   out31 += me;  // Threads write sequentially to memory since x and y values are already transposed
 #else
