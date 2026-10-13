@@ -903,7 +903,6 @@ void OVERLOAD middleMul(GF31 *u, u32 s, TrigGF31 trig) {
 
 #if !MIDDLE_CHAIN           // Read all trig values from memory
 
-#pragma unroll
   for (u32 k = 1; k < MIDDLE; ++k) {
     WADD(k, TFLOAD(&trig[s]));
     s += SMALL_HEIGHT;
@@ -1222,6 +1221,7 @@ void OVERLOAD middleMul(GF61 *u, u32 s, TrigGF61 trig) {
 
 #if !MIDDLE_CHAIN           // Read all trig values from memory
 
+#pragma unroll
   for (u32 k = 1; k < MIDDLE; ++k) {
     WADD(k, TFLOAD(&trig[s]));
     s += SMALL_HEIGHT;
