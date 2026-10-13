@@ -1780,7 +1780,13 @@ void OVERLOAD pairSq2_special(GF61 *u, GF61 base_squared) {
 }
 
 KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) {
+#if AEVUM_GF61_REVCROSS_PINGPONG
+  // Fresh compact scratch for the second cross: two halves of WG*(NH/2)
+  // GF61 values.  The normal FFT/revcross LDS remains at the start.
+  local GF61 lds[2 * LDS_BYTES / sizeof(GF61) + WG * NH];
+#else
   local GF61 lds[2 * LDS_BYTES / sizeof(GF61)];
+#endif
 
   CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
   P(GF61) out61 = (P(GF61)) (out + DISTGF61);
@@ -1846,7 +1852,11 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 #endif
     revCrossLine(lds, u);
     pairSq(NH/2, u, u + NH/2, trig, false);
+#if AEVUM_GF61_REVCROSS_PINGPONG
+    revCrossLineFresh(lds + 2 * LDS_BYTES / sizeof(GF61), u);
+#else
     revCrossLine(lds, u);
+#endif
   }
 
   dependentLaunch();       // Next kernel will be fftMiddleOutGF61 which must dependentLaunchWait before reading data
