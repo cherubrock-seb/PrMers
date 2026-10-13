@@ -63,7 +63,7 @@ assert "fft.shape.fft_type == FFT3261" in cmul
 assert 'fft.spec() == "2:512:8:512:202"' in cmul
 assert 'use.emplace_back("AEVUM_GF61_CMUL_ALT", "0")' in cmul
 assert "#elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT" in math_cl
-assert "canonical three-product cmul path" in cmul
-assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in cmul
+assert "canonical three-product cmul path" in api
+assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in api
 
 print("Aevum validated Type2 PRP AUTO source gate passed")
