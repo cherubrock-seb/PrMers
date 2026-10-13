@@ -93,4 +93,20 @@ assert "canonical three-product cmul path" in api
 assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in api
 assert "#elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT" in math_cl
 
+# R79 gfx906 Type2 non-temporal FFT-load policy.
+marker = "const bool gfx906_type2_prp_loads1"
+start = api.index(marker)
+end = api.index('report("type2-prp-auto"', start)
+loads = api[start:end]
+assert '!shared.args->uses("LOADS")' in loads
+assert 'type2_device_vendor == "4098"' in loads
+assert 'type2_device_name.rfind("gfx906", 0) == 0' in loads
+assert "exponent >= 130000000u" in loads
+assert "exponent <= 137000003u" in loads
+assert "!fft.isPfa()" in loads
+assert "fft.shape.fft_type == FFT3261" in loads
+assert 'fft.spec() == "2:512:8:512:202"' in loads
+assert 'use.emplace_back("LOADS", "1")' in loads
+assert "explicit -use LOADS precedence" in api
+
 print("Aevum production Type2 PRP AUTO source gate passed")
