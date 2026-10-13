@@ -1,4 +1,4 @@
-// Device differential/performance gate for PRMERS_POW_REUSE_FORWARD_V1.
+// Device correctness/performance regression gate for production proof forward reuse.
 #define CL_TARGET_OPENCL_VERSION 120
 #include "math/Precompute.hpp"
 #include "math/Carry.hpp"
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     cl_mem alias = clCreateBuffer(ctx.getContext(), CL_MEM_READ_WRITE, bytes, nullptr, &err);
     if (err != CL_SUCCESS) return 2;
 
-    std::vector<uint64_t> input(n, 0), off(n), on(n), aliasOut(n), baseAfter(n);
+    std::vector<uint64_t> input(n, 0), actual(n), aliasOut(n), baseAfter(n);
     input[0] = 3;
 
     auto write = [&](cl_mem b) {
@@ -106,9 +106,7 @@ int main(int argc, char** argv) {
     auto read = [&](cl_mem b, std::vector<uint64_t>& v) {
         if (clEnqueueReadBuffer(ctx.getQueue(), b, CL_TRUE, 0, bytes, v.data(), 0, nullptr, nullptr) != CL_SUCCESS) std::abort();
     };
-    auto run = [&](bool enabled, uint64_t e, bool aliased, std::vector<uint64_t>& dst) {
-        if (enabled) setenv("PRMERS_POW_REUSE_FORWARD_V1", "1", 1);
-        else unsetenv("PRMERS_POW_REUSE_FORWARD_V1");
+    auto run = [&](uint64_t e, bool aliased, std::vector<uint64_t>& dst) {
         if (aliased) {
             write(alias);
             ntt.powInPlace(alias, alias, e, carry, bytes);
@@ -139,15 +137,8 @@ int main(int argc, char** argv) {
 
     int checked = 0;
     for (uint64_t e : exps) {
-        run(false, e, false, off);
-        run(true, e, false, on);
-        if (off != on) {
-            size_t first = 0;
-            while (first < n && off[first] == on[first]) ++first;
-            std::printf("DISTINCT_MISMATCH exp=%llu first=%zu\n",(unsigned long long)e,first);
-            return 4;
-        }
-        words_to_mpz(got, on, pre.getDigitWidth());
+        run(e, false, actual);
+        words_to_mpz(got, actual, pre.getDigitWidth());
         mpz_set_ui(expected, 3);
         mpz_powm_ui(expected, expected, static_cast<unsigned long>(e), M);
         mpz_mod(got, got, M);
@@ -156,8 +147,8 @@ int main(int argc, char** argv) {
             return 5;
         }
         if (e == 3 || e == 7 || e == denseExp) {
-            run(true, e, true, aliasOut);
-            if (aliasOut != on) {
+            run(e, true, aliasOut);
+            if (aliasOut != actual) {
                 std::printf("ALIAS_MISMATCH exp=%llu\n",(unsigned long long)e);
                 return 6;
             }
@@ -165,42 +156,26 @@ int main(int argc, char** argv) {
         ++checked;
     }
 
-    auto timeOne = [&](bool enabled) {
+    auto timeOne = [&]() {
         auto t0 = std::chrono::steady_clock::now();
-        run(enabled, denseExp, false, enabled ? on : off);
+        run(denseExp, false, actual);
         auto t1 = std::chrono::steady_clock::now();
         return std::chrono::duration<double,std::micro>(t1-t0).count();
     };
 
-    // Untimed warmup on both paths.
-    run(false, denseExp, false, off);
-    run(true, denseExp, false, on);
+    run(denseExp, false, actual);
 
-    std::vector<double> baseUs, candUs;
-    baseUs.reserve(static_cast<size_t>(batches));
-    candUs.reserve(static_cast<size_t>(batches));
-    for (int b = 0; b < batches; ++b) {
-        if ((b & 1) == 0) {
-            baseUs.push_back(timeOne(false));
-            candUs.push_back(timeOne(true));
-        } else {
-            candUs.push_back(timeOne(true));
-            baseUs.push_back(timeOne(false));
-        }
-    }
-    const double baseMed = median(baseUs);
-    const double candMed = median(candUs);
+    std::vector<double> samples;
+    samples.reserve(static_cast<size_t>(batches));
+    for (int b = 0; b < batches; ++b) samples.push_back(timeOne());
+    const double med = median(samples);
 
     std::printf("P=%llu N=%zu CHECKED_EXPONENTS=%d\n",(unsigned long long)p,n,checked);
-    std::printf("K1_EXACTNESS=PASS\n");
-    std::printf("BASE_SAMPLES_US=");
-    for (size_t i=0;i<baseUs.size();++i) std::printf("%s%.3f",i?",":"",baseUs[i]);
-    std::printf("\nCAND_SAMPLES_US=");
-    for (size_t i=0;i<candUs.size();++i) std::printf("%s%.3f",i?",":"",candUs[i]);
-    std::printf("\nBASE_MEDIAN_US=%.3f\n",baseMed);
-    std::printf("CAND_MEDIAN_US=%.3f\n",candMed);
-    std::printf("CAND_OVER_BASE=%.6f\n",candMed/baseMed);
-    std::printf("K1_POW_DEVICE_GATE=PASS\n");
+    std::printf("K1_PRODUCTION_EXACTNESS=PASS\n");
+    std::printf("PROD_SAMPLES_US=");
+    for (size_t i=0;i<samples.size();++i) std::printf("%s%.3f",i?",":"",samples[i]);
+    std::printf("\nPROD_MEDIAN_US=%.3f\n",med);
+    std::printf("K1_PRODUCTION_DEVICE_GATE=PASS\n");
 
     mpz_clears(M, expected, got, nullptr);
     clReleaseMemObject(base);
