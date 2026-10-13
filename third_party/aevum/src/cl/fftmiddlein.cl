@@ -231,7 +231,7 @@ KERNEL(IN_WG) fftMiddleInGF61(P(T2) out, CP(T2) in, Trig trig) {
   pfaMiddleTwiddle(u, x, y, trig61);
   fft_MIDDLE(u);
 #else
-#if AEVUM_GF61_MIDDLE_BASE_TABLE
+#if AEVUM_GF61_MIDDLE_BASE_TABLE == 1 || AEVUM_GF61_MIDDLE_BASE_TABLE == 3
   middleMul2BaseTable(u, x, y, y * WIDTH + x, trig61);
 #else
   middleMul2(u, x, y, trig61);
@@ -670,7 +670,7 @@ KERNEL(256) fftMiddleInGF61(P(T2) out, P(T2) in, Trig trig) {
   pfaMiddleTwiddle(u, x, y, trig61);
   fft_MIDDLE(u);
 #else
-#if AEVUM_GF61_MIDDLE_BASE_TABLE
+#if AEVUM_GF61_MIDDLE_BASE_TABLE == 1 || AEVUM_GF61_MIDDLE_BASE_TABLE == 3
   middleMul2BaseTable(u, x, y, y * WIDTH + x, trig61);
 #else
   middleMul2(u, x, y, trig61);
