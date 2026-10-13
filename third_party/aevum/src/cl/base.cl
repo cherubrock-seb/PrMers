@@ -81,6 +81,17 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define HAS_PTX 0
 #endif
 
+// Scheduling experiment imported from gpuowl 079e8998.  OPAQUE preserves
+// the value while preventing the optimizer from keeping expressions based on
+// it live across an earlier FFT stage.
+#if HAS_ASM
+#define OPAQUE(x) __asm volatile("" : "+v"(x))
+#elif HAS_PTX
+#define OPAQUE(x) __asm volatile("" : "+r"(x))
+#else
+#define OPAQUE(x)
+#endif
+
 // Default is not adding -2 to results for LL
 #if !defined(LL)
 #define LL 0
@@ -191,6 +202,16 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #else
 #define UNROLL_H 1
 #endif
+#endif
+
+#if !defined(HOIST_W)
+#define HOIST_W 0
+#endif
+#if !defined(HOIST_H)
+#define HOIST_H 0
+#endif
+#if HOIST_W < 0 || HOIST_W > 2 || HOIST_H < 0 || HOIST_H > 2
+#error HOIST_W and HOIST_H must be between 0 and 2
 #endif
 
 #if !defined(ZEROHACK_W)
