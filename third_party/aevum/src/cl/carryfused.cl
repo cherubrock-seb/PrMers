@@ -1691,6 +1691,13 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
 #elif FFT_TYPE == FFT3261
 
+#ifndef AEVUM_TYPE2_CARRY_UF2_OVERLAY
+#define AEVUM_TYPE2_CARRY_UF2_OVERLAY 0
+#endif
+#if AEVUM_TYPE2_CARRY_UF2_OVERLAY != 0 && AEVUM_TYPE2_CARRY_UF2_OVERLAY != 1
+#error AEVUM_TYPE2_CARRY_UF2_OVERLAY must be 0 or 1
+#endif
+
 // The "carryFused" is equivalent to the sequence: fftW, carryA, carryB, fftPremul.
 // It uses "stairway forwarding" (forwarding carry data from one workgroup to the next)
 KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShuttle, P(u32) ready, Trig smallTrig,
@@ -1698,7 +1705,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   local GF61 lds61[WMUL * LDS_BYTES / sizeof(GF61)];
   local F2 *ldsF2 = (local F2 *) lds61;
 
+#if AEVUM_TYPE2_CARRY_UF2_OVERLAY
+  union {
+    F2 uF2[NW];
+    i64 carry[NW];
+  } type2CarryOverlay;
+#define uF2 type2CarryOverlay.uF2
+#define carry type2CarryOverlay.carry
+#else
   F2 uF2[NW];
+#endif
   GF61 u61[NW];
 
   u32 gr = get_group_id(0);
@@ -1760,7 +1776,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
+#if !AEVUM_TYPE2_CARRY_UF2_OVERLAY
   i64 carry[NW+1];
+#endif
 
   float roundMax = 0;
   float carryMax = 0;
@@ -1933,9 +1951,15 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
       }
 
       if (me == 0) {
+#if AEVUM_TYPE2_CARRY_UF2_OVERLAY
+        i64 rotatedCarry = carry[NW-1];
+        for (i32 i = NW-1; i; --i) { carry[i] = carry[i-1]; }
+        carry[0] = rotatedCarry;
+#else
         carry[NW] = carry[NW-1];
         for (i32 i = NW-1; i; --i) { carry[i] = carry[i-1]; }
         carry[0] = carry[NW];
+#endif
       }
     }
   }
@@ -1970,6 +1994,10 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   fft_WIDTH2(lds61, u61, smallTrig61, WMUL, lowMe);
   writeCarryFusedLine(u61, out61, line, lowMe);
+#if AEVUM_TYPE2_CARRY_UF2_OVERLAY
+#undef carry
+#undef uF2
+#endif
 }
 
 
