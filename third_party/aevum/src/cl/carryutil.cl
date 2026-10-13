@@ -514,6 +514,13 @@ error - missing weightAndCarryOne implementation
 #endif
 
 
+#ifndef AEVUM_TYPE2_CARRY32_FAST
+#define AEVUM_TYPE2_CARRY32_FAST 0
+#endif
+#if AEVUM_TYPE2_CARRY32_FAST != 0 && AEVUM_TYPE2_CARRY32_FAST != 1
+#error AEVUM_TYPE2_CARRY32_FAST must be 0 or 1
+#endif
+
 /************************************************************************/
 /*   Split a value + carryIn into a big-or-little word and a carryOut   */
 /************************************************************************/
@@ -536,7 +543,15 @@ Word OVERLOAD carryStep(i96 x, i64 *outCarry, bool isBigWord) {
   return as_ulong((uint2)(i96_lo32(x), (u32)whi));
 #elif EXP / NWORDS == 32
   i32 whi = xtract32(i96_lo64(x), nBitsLess32) >> 31;
+#if AEVUM_TYPE2_CARRY32_FAST && FFT_TYPE == FFT3261
+  // Here nBitsLess32 is 0 or 1 and whi is 0 or -1.  For the 33-bit
+  // case whi < 0 is exactly the low bit discarded by the arithmetic
+  // right shift, so (hi64 - whi) >> s == (hi64 >> s) + (whi < 0).
+  // This removes the 64-bit subtract from the Type2 carry path.
+  *outCarry = ((i64)i96_hi64(x) >> nBitsLess32) + (whi < 0);
+#else
   *outCarry = ((i64)i96_hi64(x) - (i64)whi) >> nBitsLess32;
+#endif
   return as_ulong((uint2)(i96_lo32(x), (u32)whi));
 #elif EXP / NWORDS == 31
   i32 w = lowBitsSafe32(i96_lo32(x), nBits);
