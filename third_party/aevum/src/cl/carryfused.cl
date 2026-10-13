@@ -1954,12 +1954,27 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
-    uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+    // Experimental Type2 fused-weight path: low-half values are weighted now;
+    // high-half weights are parked and consumed by the first radix-2 butterfly.
+    if (!FUSE_WEIGHT_BUTTERFLY || i < NW/2)
+      uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+    else
+      uF2[i] = U2(weight1, weight2);
     u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0), shl(make_Z61(wu[i].y), weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
     combo_counter += combo_bigstep;
     if (weight_shift > 61) weight_shift -= 61;
+  }
+
+  // Complete the first radix-8 butterfly while applying the parked high-half
+  // weights with FMA.  fft_WIDTH2 then skips exactly this first butterfly.
+  if (FUSE_WEIGHT_BUTTERFLY) {
+    for (i32 i = 0; i < NW/2; ++i) {
+      F2 parked_weights = uF2[i + NW/2];
+      uF2[i + NW/2] = U2((F) wu[i + NW/2].x, (F) wu[i + NW/2].y);
+      X2ad(uF2[i], uF2[i + NW/2], parked_weights);
+    }
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
