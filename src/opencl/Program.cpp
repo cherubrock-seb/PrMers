@@ -43,6 +43,7 @@
 #include <stdexcept>
 #include <filesystem>
 #include <algorithm>
+#include <cstdlib>
 #include "util/OpenCLError.hpp"
 
 namespace prmers::ocl {
@@ -93,6 +94,9 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
     const uint64_t modP = context.getExponent();
     cl_uint nTrans     = static_cast<cl_uint>(n);
 
+    const char* root8Env = std::getenv("PRMERS_NTT_ROOT8_SHIFTS_V1");
+    const bool root8Requested = root8Env && root8Env[0] == '1' && root8Env[1] == '\0';
+
     std::ostringstream ss;
     ss << buildOptions;
     ss 
@@ -126,10 +130,31 @@ Program::Program(const prmers::ocl::Context& context, cl_device_id device,
         const auto& tw   = pre.twiddlesRadix4();
         const auto& i_tw = pre.invTwiddlesRadix4();
 
+        constexpr uint64_t fieldP = 0xffffffff00000001ULL;
+        constexpr uint64_t root24Neg = fieldP - (1ULL << 24);
+        constexpr uint64_t root72 = (1ULL << 40) - (1ULL << 8);
+        constexpr uint64_t root72Neg = fieldP - root72;
+        constexpr uint64_t root48Neg = fieldP - (1ULL << 48);
+
         // The radix-4 twiddle tables hold 3 * n/5 (or 3 * n) words, so a transform of 4 words has only 12
         // entries while the defines below read up to index 17. Those values are not used by such a small
         // transform: define them as 0 instead of reading past the end of the vector.
         auto at = [](const std::vector<uint64_t>& v, size_t i) -> uint64_t { return i < v.size() ? v[i] : 0; };
+
+        const bool root8Active =
+            at(tw, idx7 + 1) == root24Neg &&
+            at(tw, idx8 + 1) == root72Neg &&
+            at(i_tw, idx8) == root48Neg &&
+            at(i_tw, idx7 + 1) == root72;
+
+        if (root8Requested) {
+            if (root8Active) {
+                ss << " -DPRMERS_NTT_ROOT8_SHIFTS_V1=1";
+                std::cout << "[EXPERIMENT] Legacy root-8 shift products ACTIVE." << std::endl;
+            } else {
+                std::cout << "[EXPERIMENT] Legacy root-8 shift products INACTIVE: twiddle guard mismatch." << std::endl;
+            }
+        }
 
         /*if (tw.size()  <= idx8+1 || 
             i_tw.size() <= idx8+1) 
