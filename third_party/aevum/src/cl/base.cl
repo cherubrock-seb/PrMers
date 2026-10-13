@@ -177,6 +177,10 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define MIDDLE_CHAIN 0
 #endif
 
+#if !defined(MIDDLE_SHUFFLE_PIPELINE)
+#define MIDDLE_SHUFFLE_PIPELINE 0
+#endif
+
 #if !defined(UNROLL_W)
 #if AMDGPU
 #define UNROLL_W 0
