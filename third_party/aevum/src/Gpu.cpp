@@ -287,6 +287,39 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_PFA_FUSED_INVERSE")) {
+    const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA_FUSED_INVERSE selections");
+    config["AEVUM_PFA_FUSED_INVERSE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
+      it != config.end() && it->second != "0" && it->second != "1")
+    throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE must be 0 or 1");
+
+  bool pfa3_fused_gfx906_default = false;
+  if (!config.count("AEVUM_PFA_FUSED_INVERSE") &&
+      fft.isPfa() && fft.pfa_radix == 3 && fft.shape.middle == 3 &&
+      fft.NTT_GF31 && fft.NTT_GF61 &&
+      getDeviceName(id).find("gfx906") != string::npos) {
+    config["AEVUM_PFA_FUSED_INVERSE"] = "1";
+    pfa3_fused_gfx906_default = true;
+  }
+
+  if (config.count("AEVUM_PFA_FUSED_INVERSE") && config.at("AEVUM_PFA_FUSED_INVERSE") == "1") {
+    if (fft.pfa_radix != 3 || fft.shape.middle != 3 || !fft.NTT_GF31 || !fft.NTT_GF61)
+      throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE requires a PFA3 GF31+GF61 plan");
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE does not support the Apple staged pipeline");
+#endif
+    if (doLog) {
+      if (pfa3_fused_gfx906_default)
+        log("Validated gfx906 PFA3 fused inverse default: plan=%s; set AEVUM_PFA_FUSED_INVERSE=0 to disable.\n", fft.spec().c_str());
+      else
+        log("AEVUM_PFA_FUSED_INVERSE=1: plan=%s PFA3 inverse NTT row twiddle.\n", fft.spec().c_str());
+    }
+  }
+
 #if defined(__APPLE__)
   // Keep the stock LDS transpose algorithms on Apple, but lower the middle
   // work-group pressure for the legacy OpenCL-to-Metal compiler. Explicit

@@ -1,6 +1,10 @@
 // Copyright (C) Mihai Preda and George Woltman
 
 #include "base.cl"
+#if AEVUM_PFA_FUSED_INVERSE && PFA_RADIX == 3
+#define AEVUM_PFA_MIDOUT_INV31 1431655765U
+#define AEVUM_PFA_MIDOUT_INV61 1537228672809129301UL
+#endif
 #if NVIDIAGPU && PFA_RADIX == 7 && NTT_GF61
 #define AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE 1
 #endif
