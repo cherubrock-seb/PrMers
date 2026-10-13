@@ -11,6 +11,7 @@ trig_h = (ROOT / "src/Trig.h").read_text()
 trig_cl = (ROOT / "src/cl/trig.cl").read_text()
 bpw = (ROOT / "src/fftbpw.h").read_text()
 prp_use = (ROOT / "src/PrpUseTune.cpp").read_text()
+use_options = (ROOT / "src/UseOptions.h").read_text()
 
 # Corrected FFT3261 prerequisite arithmetic/capacity from the validated branch.
 assert "TrigCoefsFP32" in trig_h
@@ -42,5 +43,25 @@ assert "AEVUM_EXPERIMENT_TYPE2_PRP_AUTO" not in api
 # Do not accidentally import unrelated PR #16 ancestry (LOADS=5 admission).
 assert "44444u" in prp_use
 assert "55555u" not in prp_use
+
+# PR38 gfx906 Type2 middle-in GF61 cmul policy.
+assert '"AEVUM_GF61_CMUL_ALT"' in use_options
+assert 'shared.args->uses("AEVUM_GF61_CMUL_ALT")' in api
+marker = "const bool gfx906_type2_prp_gf61_cmul_alt0"
+start = api.index(marker)
+end = api.index('report("type2-prp-auto"', start)
+cmul = api[start:end]
+assert "type2_device_name" in cmul
+assert "type2_device_vendor" in cmul
+assert 'type2_device_vendor == "4098"' in cmul
+assert 'type2_device_name.rfind("gfx906", 0) == 0' in cmul
+assert "exponent >= 130000000u" in cmul
+assert "exponent <= 137000003u" in cmul
+assert "!fft.isPfa()" in cmul
+assert "fft.shape.fft_type == FFT3261" in cmul
+assert 'fft.spec() == "2:512:8:512:202"' in cmul
+assert 'use.emplace_back("AEVUM_GF61_CMUL_ALT", "0")' in cmul
+assert "canonical three-product cmul path" in cmul
+assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in cmul
 
 print("Aevum validated Type2 PRP AUTO source gate passed")
