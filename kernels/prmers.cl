@@ -1265,8 +1265,12 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps(__global ulong* restrict x,
     const gid_t local_id = gid % m;
     uint k_first         = group * m * 4 + local_id;
 
+#if PRMERS_NTT_PRIVATE_TILE_V1
+    __private ulong local_x[16];
+#else
     __local ulong shared_mem[LOCAL_SIZE2 * 16];
     __local ulong* local_x = shared_mem + get_local_id(0) * 16;
+#endif
 
     uint write_index = 0;
     uint base        = 4 * (k_first - local_id) + local_id;
@@ -1439,6 +1443,12 @@ __kernel void kernel_ntt_radix4_inverse_mm_2steps_last(__global ulong* restrict 
         k_first     += m;
     }
 }
+
+// F2: the forward two-step kernel's intermediate tile has one owner.
+// Default off; no other FFT or carry kernel changes its storage.
+#ifndef PRMERS_NTT_PRIVATE_TILE_V1
+#define PRMERS_NTT_PRIVATE_TILE_V1 0
+#endif
 
 __kernel void kernel_ntt_radix4_mm_2steps(__global ulong* restrict x,
                                           __global ulong* restrict w,
