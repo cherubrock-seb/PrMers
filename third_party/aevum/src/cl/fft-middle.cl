@@ -946,10 +946,29 @@ void OVERLOAD middleMul2(GF31 *u, u32 x, u32 y, TrigGF31 trig) {
   GF31 base = cmul(TFLOAD(&trig2[desired_root % SMALL_HEIGHT]), TFLOAD(&trig1[desired_root / SMALL_HEIGHT]));
 
   WADD(0, base);
+#if AEVUM_GF61_MIDDLE_PAIRED && MIDDLE == 8 && !PFA_RADIX && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+  // Center the eight consecutive powers at base*w^4. Three paired products
+  // produce exponents (6,2), (7,1), (5,3), replacing a seven-deep recurrence.
+  // w is a binary root: w*conjugate(w)=1 in GF(M61^2).
+  const GF61 w2 = csqTrig(w);
+  const GF61 center = cmul(base, csqTrig(w2));
+  WADD(4, center);
+  GF61 hi, lo;
+  aevum_middle_pair61(&hi, &lo, center, w2);
+  WADD(6, hi);
+  WADD(2, lo);
+  aevum_middle_pair61(&hi, &lo, center, ccubeTrig(w2, w));
+  WADD(7, hi);
+  WADD(1, lo);
+  aevum_middle_pair61(&hi, &lo, center, w);
+  WADD(5, hi);
+  WADD(3, lo);
+#else
   for (u32 k = 1; k < MIDDLE; ++k) {
     base = cmul(base, w);
     WADD(k, base);
   }
+#endif
 }
 
 // Do a partial transpose during fftMiddleIn/Out
