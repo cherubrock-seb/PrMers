@@ -1954,12 +1954,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
-    // Experimental Type2 fused-weight path: low-half values are weighted now;
-    // high-half weights are parked and consumed by the first radix-2 butterfly.
-    if (!FUSE_WEIGHT_BUTTERFLY || i < NW/2)
-      uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
-    else
-      uF2[i] = U2(weight1, weight2);
+    // Preserve the production Type2 weighting expression exactly for every
+    // lane.  The experiment below moves only the first radix-8 layer.
+    uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
     u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0), shl(make_Z61(wu[i].y), weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
@@ -1967,19 +1964,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     if (weight_shift > 61) weight_shift -= 61;
   }
 
-  // Exact Type2 variant: preserve baseline FP32 rounding order.  Park only
-  // the high-half weights, materialize weight*word as an ordinary rounded
-  // FP32 multiply, then perform the first radix-2 X2 separately.  This keeps
-  // canonical integer semantics identical while still testing whether moving
-  // the work changes register scheduling or kernel cost.
+  // Exact Type2 movement experiment.  Reproduce fft8Core's entire first
+  // radix-2 layer here using the same helpers and already-weighted values.
+  // fft8_skip1 then continues immediately after these four operations.
   if (FUSE_WEIGHT_BUTTERFLY) {
-    for (i32 i = 0; i < NW/2; ++i) {
-      F2 parked_weights = uF2[i + NW/2];
-      uF2[i + NW/2] = U2(
-          parked_weights.x * (F) wu[i + NW/2].x,
-          parked_weights.y * (F) wu[i + NW/2].y);
-      X2(uF2[i], uF2[i + NW/2]);
-    }
+    X2(uF2[0], uF2[4]);
+    X2(uF2[1], uF2[5]);   uF2[5] = mul_t8_delayed(uF2[5]);
+    X2_mul_t4(uF2[2], uF2[6]);
+    X2(uF2[3], uF2[7]);   uF2[7] = mul_3t8_delayed(uF2[7]);
   }
 
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
