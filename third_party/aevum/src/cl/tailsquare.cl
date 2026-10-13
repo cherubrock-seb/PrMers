@@ -973,6 +973,13 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
 #if NTT_GF61
 
+#ifndef AEVUM_GF61_PAIRSQ_REUSE
+#define AEVUM_GF61_PAIRSQ_REUSE 0
+#endif
+#if AEVUM_GF61_PAIRSQ_REUSE != 0 && AEVUM_GF61_PAIRSQ_REUSE != 1
+#error AEVUM_GF61_PAIRSQ_REUSE must be 0 or 1
+#endif
+
 void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_type) {
   GF61 a = *pa, b = *pb;
   GF61 a2, b2, b2t2, ab, addin, c, d;
@@ -1018,10 +1025,23 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
   }
 #else
   X2conjb(a, b);                                // X2(a, conjugate(b))
+#if AEVUM_GF61_PAIRSQ_REUSE
+  // Compute 2ab before overwriting the transformed inputs, then reuse those
+  // two GF61 objects for a^2 and b^2*t^2.  This is algebraically identical
+  // to the stock ordering but shortens the peak live range in the hot Radeon
+  // VII tailSquareGF61 kernel.
+  d = cmul(a, b); d = d + d;                    // d = 2ab, d range is 0..2+
+  a = csqq(a, 2);                               // a = a^2, a.x range is 0..7+, a.y range is 0..2+
+  a.x = modM61(a.x);                            // a.x range is 0..1+, a.y range is 0..2+
+  b = cmul(csq(b), t_squared);                  // b = b^2 * t_squared, b range is 0..1+
+  a2 = a;
+  b2t2 = b;
+#else
   a2 = csqq(a, 2);                              // a2 = a^2, a2.x range is 0..7+, a2.y range is 0..2+
   a2.x = modM61(a2.x);                          // a2.x range is 0..1+, a2.y range is 0..2+
   b2t2 = cmul(csq(b), t_squared);               // b2t2 = b^2 * t_squared, b2t2 range is 0..1+
   d = cmul(a, b); d = d + d;                    // d = 2ab, d range is 0..2+
+#endif
   if (t_squared_type == 0) {                    // mul t_squared by 1
     c = subq(a2, b2t2);                         // c.x range is -1..2+, c.y range is -1-..3+
     X2q_conjb(&c, &d);                          // X2(c, d); d = conjugate(d); c.x range is -1-..4+, c.y range is -1-..5+, d.x range is -3-..2+, d.y range is -3-..3+
