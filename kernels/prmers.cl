@@ -1659,6 +1659,26 @@ __kernel void kernel_ntt_radix2(__global ulong* restrict x)
   #define WI15_2_X 0
 #endif
 
+#ifndef PRMERS_NTT_ROOT8_SHIFTS_V1
+#define PRMERS_NTT_ROOT8_SHIFTS_V1 0
+#endif
+#if PRMERS_NTT_ROOT8_SHIFTS_V1 && \
+    W15_01_Y == (MOD_P - (1UL << 24)) && \
+    W15_2_Y == (MOD_P - ((1UL << 40) - (1UL << 8))) && \
+    WI15_2_X == (MOD_P - (1UL << 48)) && \
+    WI15_01_Y == ((1UL << 40) - (1UL << 8))
+#define PRMERS_NTT_ROOT8_SHIFTS_ACTIVE 1
+#else
+#define PRMERS_NTT_ROOT8_SHIFTS_ACTIVE 0
+#endif
+
+#if PRMERS_NTT_ROOT8_SHIFTS_ACTIVE
+inline ulong prmersMul2Pow72(const ulong x) {
+    const ulong low24 = x & 0xffffffUL;
+    return modSub(low24 << 40, (low24 << 8) + (x >> 24));
+}
+#endif
+
 
 
 __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
@@ -1698,8 +1718,13 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
 
     localX[local_base_vec + 0].s1 = modAdd(a, b);
     localX[local_base_vec + 1].s1 = modMuli(modSub(a, b));
+#if PRMERS_NTT_ROOT8_SHIFTS_ACTIVE
+    localX[local_base_vec + 2].s1 = modMulPminus1(modMul2Pow24(modAdd(d, e)));
+    localX[local_base_vec + 3].s1 = modMulPminus1(prmersMul2Pow72(modSub(d, e)));
+#else
     localX[local_base_vec + 2].s1 = modMul(modAdd(d, e), W15_01_Y);
     localX[local_base_vec + 3].s1 = modMul(modSub(d, e), W15_2_Y);
+#endif
 
     #pragma unroll 4
     for (int i = 0; i < 4; i += 1) {
@@ -1727,10 +1752,18 @@ __kernel void kernel_ntt_radix4_radix2_square_radix2_radix4(
 
 
 
-    r =  modMul(localX[local_base_vec + 1].s1, WI15_2_X); 
+#if PRMERS_NTT_ROOT8_SHIFTS_ACTIVE
+    r = modMulPminus1(modMuli(localX[local_base_vec + 1].s1));
+#else
+    r = modMul(localX[local_base_vec + 1].s1, WI15_2_X);
+#endif
     rs0 = modAdd(localX[local_base_vec + 0].s1, r);
     rs1 = modSub(localX[local_base_vec + 0].s1, r);
-    r =  modMul(localX[local_base_vec + 2].s1, WI15_01_Y);
+#if PRMERS_NTT_ROOT8_SHIFTS_ACTIVE
+    r = prmersMul2Pow72(localX[local_base_vec + 2].s1);
+#else
+    r = modMul(localX[local_base_vec + 2].s1, WI15_01_Y);
+#endif
     rr = modMul2Pow24(localX[local_base_vec + 3].s1);
     rs2 = modAdd(r, rr);
     rs3 = modMuli(modSub(rr, r));
