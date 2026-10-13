@@ -201,6 +201,29 @@ void OVERLOAD revCrossLine(local T2* lds2, T2 *u) {
   }
 }
 
+
+// Variant for the second cross in the double-wide GF61 tail.  The scratch
+// region is fresh, so no barrier is required before writes.  One full
+// workgroup barrier still separates the cross-wave writes from reads.
+void OVERLOAD revCrossLineFresh(local T2* scratch, T2 *u) {
+  u32 me = get_local_id(0);
+  u32 lowMe = me % WG;
+  u32 revLowMe = WG - 1 - lowMe;
+
+  if (SHUFL_BYTES_H >= 8) {
+    const u32 halfStride = WG * (NH / 2);
+    local T2 *ldsOut = scratch;
+    local T2 *ldsIn = scratch;
+    if (me < WG) ldsOut += halfStride;
+    else ldsIn += halfStride;
+    for (u32 i = 0; i < NH/2; ++i) { ldsOut[WG * (NH/2 - 1 - i) + revLowMe] = u[i + NH/2]; }
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) { u[i + NH/2] = ldsIn[WG * i + lowMe]; }
+  } else {
+    revCrossLine(scratch, u);
+  }
+}
+
 #if 0    // Unused
 
 // Somewhat similar to reverseLine.
@@ -562,6 +585,10 @@ void OVERLOAD reverse2(local GF61 *lds, GF61 *u) {
 
 void OVERLOAD revCrossLine(local GF61* lds, GF61 *u) {
   revCrossLine((local T2 *) lds, (T2 *) u);
+}
+
+void OVERLOAD revCrossLineFresh(local GF61* lds, GF61 *u) {
+  revCrossLineFresh((local T2 *) lds, (T2 *) u);
 }
 
 #if 0    // Unused
