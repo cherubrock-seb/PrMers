@@ -842,6 +842,15 @@ vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width) {
     for (u32 k = 0; k < width; ++k)  { tab.push_back(root1GF61(root1mw, k)); }
     GF61 root1wmh = GF61::root_one(width * middle * smallH);
     for (u32 k = 0; k < smallH; ++k)  { tab.push_back(root1GF61(root1wmh, k)); }
+
+    // Direct middleMul2 base table.  Store row-major [y][x] so adjacent x
+    // lanes load adjacent GF61 values in both middle-in and middle-out.
+    // The value is exactly the stock base twiddle w_(W*M*H)^(x*y).
+    for (u32 y = 0; y < smallH; ++y) {
+      for (u32 x = 0; x < width; ++x) {
+        tab.push_back(root1GF61(root1wmh, x * y));
+      }
+    }
   }
   return tab;
 }
