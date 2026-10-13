@@ -942,7 +942,8 @@ public:
       spec = "native-prp:auto";
     }
     const bool pseudo_auto_spec = spec == "native-prp:auto";
-    const bool explicit_fft_spec = !spec.empty();
+    const bool explicit_fft_spec = !spec.empty() && !pseudo_auto_spec;
+    const std::string resolve_spec = pseudo_auto_spec ? "2:512:8:512:202" : spec;
     const auto autotune_mode = aevum_autotune::modeFromEnvironment();
     const auto autotune_cache_path = aevum_autotune::cachePath();
     bool autotune_cache_miss = false;
@@ -988,11 +989,11 @@ public:
     const bool compatible_tune_entry =
         spec.empty() && usableTuneEntry(args_, exponent_, workload_);
     const bool workload_tunable = workload_ != aevum_autotune::Workload::Pm1Ultralowmem;
-    const bool autotune_eligible = autotune_mode != aevum_autotune::Mode::Off &&
+    const bool autotune_eligible = !pseudo_auto_spec && autotune_mode != aevum_autotune::Mode::Off &&
         !explicit_fft_spec && !gb202_profile && !manual_plan_env &&
         !compatible_tune_entry && workload_tunable;
 
-    FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, spec);
+    FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, resolve_spec);
 
     if (!explicit_fft_spec &&
         !manual_plan_env &&
