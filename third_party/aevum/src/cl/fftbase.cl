@@ -1725,6 +1725,7 @@ void OVERLOAD chainMul(F2 *u, F2 w) {
 }
 
 void OVERLOAD tabMul(TrigFP32 trig, F2 *u, u32 f, u32 me) {
+  if (HOIST == 2) OPAQUE(me);
   u32 p = me & ~(f - 1);
 
 // This code uses chained complex multiplies which could be faster on GPUs with great mul throughput or poor memory bandwidth or caching.
@@ -2253,9 +2254,11 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   __attribute__((opencl_unroll_hint(1)))
 #endif
   for (u32 s = 1; s < WG; s *= RADIX) {
+    u32 me = lowMe;
+    if (HOIST >= 1) OPAQUE(me);
     fft_RADIX(u);
-    tabMul(trig, u, s, lowMe);
-    shufl(lds, u, s, numWG, lowMe);
+    tabMul(trig, u, s, me);
+    shufl(lds, u, s, numWG, me);
   }
   fft_RADIX(u);
 
@@ -2531,6 +2534,7 @@ void OVERLOAD chainMul(GF61 *u, GF61 w) {
 }
 
 void OVERLOAD tabMul(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
+  if (HOIST == 2) OPAQUE(me);
   u32 p = me & ~(f - 1);
 
 // This code uses chained complex multiplies which could be faster on GPUs with great mul throughput or poor memory bandwidth or caching.
@@ -2683,9 +2687,11 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
   __attribute__((opencl_unroll_hint(1)))
 #endif
   for (u32 s = 1; s < WG; s *= RADIX) {
+    u32 me = lowMe;
+    if (HOIST >= 1) OPAQUE(me);
     fft_RADIX(u);
-    tabMul(trig, u, s, lowMe);
-    shufl(lds, u, s, numWG, lowMe);
+    tabMul(trig, u, s, me);
+    shufl(lds, u, s, numWG, me);
   }
   fft_RADIX(u);
 
