@@ -10,5 +10,7 @@ assert "#ifndef AEVUM_GF61_CMUL_ALT" in midin
 assert "#define AEVUM_GF61_CMUL_ALT 1" in midin
 assert "#ifndef AEVUM_GF61_CMUL_ALT\n#define AEVUM_GF61_CMUL_ALT 1\n#endif\n#include \"base.cl\"" in midin
 assert "#define AEVUM_GF61_CMUL_ALT 1" not in midout
+math = Path("src/cl/math.cl").read_text()
+assert "#elif !AEVUM_GF61_CMUL_ALT" in math
 
 print("ok: middle-in GF61 cmul ALT remains default but is explicitly overrideable")
