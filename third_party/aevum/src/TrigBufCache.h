@@ -43,7 +43,7 @@ public:
   ~TrigBufCache();
 
   TrigPtr smallTrigCombo(Args *args, FFTConfig fft, const vector<KeyVal>& extraConf, u32 width, u32 middle, u32 height, u32 nH, bool tail_single_wide);
-  TrigPtr middleTrig(Args *args, FFTConfig fft, u32 SMALL_H, u32 MIDDLE, u32 W);
+  TrigPtr middleTrig(Args *args, FFTConfig fft, const vector<KeyVal>& extraConf, u32 SMALL_H, u32 MIDDLE, u32 W);
   TrigPtr smallTrig(Args *args, FFTConfig fft, const vector<KeyVal>& extraConf, u32 width, u32 nW, u32 middle, u32 height, u32 nH, bool tail_single_wide);
 };
 

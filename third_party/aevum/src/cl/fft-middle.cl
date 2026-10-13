@@ -1000,6 +1000,13 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 
 #if NTT_GF61
 
+#ifndef AEVUM_GF61_MIDDLE_BASE_TABLE
+#define AEVUM_GF61_MIDDLE_BASE_TABLE 0
+#endif
+#if AEVUM_GF61_MIDDLE_BASE_TABLE < 0 || AEVUM_GF61_MIDDLE_BASE_TABLE > 3
+#error AEVUM_GF61_MIDDLE_BASE_TABLE must be 0..3
+#endif
+
 #if PFA_RADIX
 GF61 OVERLOAD pfaMulScalar(GF61 a, Z61 s) { return U2(mul(a.x, s), mul(a.y, s)); }
 
@@ -1262,6 +1269,25 @@ void OVERLOAD middleMul2(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
   GF61 w = TFLOAD(&trig1[x]);                      // x / (MIDDLE * WIDTH)
   u32 desired_root = x * y;
   GF61 base = cmul(TFLOAD(&trig2[desired_root % SMALL_HEIGHT]), TFLOAD(&trig1[desired_root / SMALL_HEIGHT]));
+
+  WADD(0, base);
+  for (u32 k = 1; k < MIDDLE; ++k) {
+    base = cmul(base, w);
+    WADD(k, base);
+  }
+}
+
+void OVERLOAD middleMul2BaseTable(GF61 *u, u32 x, u32 y, u32 baseIndex, TrigGF61 trig) {
+  assert(x < WIDTH);
+  assert(y < SMALL_HEIGHT);
+  assert(baseIndex < WIDTH * SMALL_HEIGHT);
+
+  TrigGF61 trig1 = trig + SMALL_HEIGHT * (MIDDLE - 1);
+  if (WIDTH == SMALL_HEIGHT) trig1 = trig;
+  TrigGF61 trigBase = trig + SMALL_HEIGHT * (MIDDLE - 1) + WIDTH + SMALL_HEIGHT;
+
+  GF61 w = TFLOAD(&trig1[x]);
+  GF61 base = TFLOAD(&trigBase[baseIndex]);
 
   WADD(0, base);
   for (u32 k = 1; k < MIDDLE; ++k) {

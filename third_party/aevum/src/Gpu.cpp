@@ -1196,7 +1196,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
 #undef K
 
   bufTrigH{shared.bufCache->smallTrigCombo(shared.args, fft, extraConf, WIDTH, fft.shape.middle, SMALL_H, nH, tail_single_wide)},
-  bufTrigM{shared.bufCache->middleTrig(shared.args, fft, SMALL_H, BIG_H / SMALL_H, WIDTH)},
+  bufTrigM{shared.bufCache->middleTrig(shared.args, fft, extraConf, SMALL_H, BIG_H / SMALL_H, WIDTH)},
   bufTrigW{shared.bufCache->smallTrig(shared.args, fft, extraConf, WIDTH, nW, fft.shape.middle, SMALL_H, nH, tail_single_wide)},
 
   weights{genWeights(fft, E, WIDTH, BIG_H, nW, isNvidiaGpu(shared.context->deviceId()))},

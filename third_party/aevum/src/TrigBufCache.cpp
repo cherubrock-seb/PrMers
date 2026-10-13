@@ -831,7 +831,7 @@ vector<ulong2> genSmallTrigComboGF61(u32 tail_trigs, u32 width, u32 middle, u32 
   return tab;
 }
 
-vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width) {
+vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width, bool direct_base_table) {
   vector<ulong2> tab;
   { // MIDDLE=1 still needs width and width*height roots for middleMul2.
     GF61 root1hm = GF61::root_one(smallH * middle);
@@ -842,6 +842,16 @@ vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width) {
     for (u32 k = 0; k < width; ++k)  { tab.push_back(root1GF61(root1mw, k)); }
     GF61 root1wmh = GF61::root_one(width * middle * smallH);
     for (u32 k = 0; k < smallH; ++k)  { tab.push_back(root1GF61(root1wmh, k)); }
+
+    if (direct_base_table) {
+      // Direct middleMul2 base table. Store row-major [y][x].
+      // The value is exactly the stock base twiddle w_(W*M*H)^(x*y).
+      for (u32 y = 0; y < smallH; ++y) {
+        for (u32 x = 0; x < width; ++x) {
+          tab.push_back(root1GF61(root1wmh, x * y));
+        }
+      }
+    }
   }
   return tab;
 }
@@ -929,7 +939,7 @@ vector<double2> genSmallTrigCombo(Args *args, FFTConfig fft, const vector<KeyVal
   return tab;
 }
 
-vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) {
+vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width, bool gf61_direct_base_table) {
   vector<double2> tab;
   u32 tabsize;
 
@@ -962,8 +972,11 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width) 
   }
 
   if (fft.NTT_GF61) {
-    vector<ulong2> tab3 = genMiddleTrigGF61(smallH, fft.isPfa() ? 1u : middle, width);
-    tab3.resize(MIDDLETRIG_GF61_SIZE(width, middle, smallH));
+    vector<ulong2> tab3 = genMiddleTrigGF61(
+        smallH, fft.isPfa() ? 1u : middle, width, gf61_direct_base_table);
+    const size_t gf61_size = MIDDLETRIG_GF61_SIZE(width, middle, smallH) +
+        (gf61_direct_base_table ? size_t(width) * size_t(smallH) : 0u);
+    tab3.resize(gf61_size);
     // Append tab3 to tab
     tabsize = tab.size();
     tab.resize(tabsize + tab3.size());
@@ -1039,16 +1052,20 @@ TrigPtr TrigBufCache::smallTrigCombo(Args *args, FFTConfig fft, const vector<Key
   return p;
 }
 
-TrigPtr TrigBufCache::middleTrig(Args *args, FFTConfig fft, u32 SMALL_H, u32 MIDDLE, u32 width) {
+TrigPtr TrigBufCache::middleTrig(Args *args, FFTConfig fft, const vector<KeyVal>& extraConf, u32 SMALL_H, u32 MIDDLE, u32 width) {
   lock_guard lock{mut};
   auto& m = middle;
+  const bool gf61_direct_base_table =
+      args->valueFor("AEVUM_GF61_MIDDLE_BASE_TABLE", 0, fft.shape.spec(), extraConf) != 0;
   u32 key_part = make_key_part(fft.FFT_FP64, 0, fft.NTT_GF31, 0, fft.FFT_FP32, 0, fft.NTT_GF61, 0, 0);
+  key_part = key_part * 2u + (gf61_direct_base_table ? 1u : 0u);
   decay_t<decltype(m)>::key_type key{SMALL_H, MIDDLE, width, key_part};
 
   TrigPtr p{};
   auto it = m.find(key);
   if (it == m.end() || !(p = it->second.lock())) {
-    p = make_shared<TrigBuf>(context, genMiddleTrig(fft, SMALL_H, MIDDLE, width));
+    p = make_shared<TrigBuf>(context, genMiddleTrig(
+        fft, SMALL_H, MIDDLE, width, gf61_direct_base_table));
     m[key] = p;
     middleCache.add(p);
   }
