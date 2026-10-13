@@ -3,6 +3,10 @@
 #include "math.cl"
 #include "trig.cl"
 
+#if NTT_GF31 && PFA_RADIX == 7 && AEVUM_TC_PFA7_GF31
+#include "pfa7tensor.cl"
+#endif
+
 #if MIDDLE == 3
 #include "fft3.cl"
 #elif MIDDLE == 4
