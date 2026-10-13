@@ -3,6 +3,14 @@
 #include "math.cl"
 #include "trig.cl"
 
+#ifndef AEVUM_PFA7_CONV3
+#define AEVUM_PFA7_CONV3 0
+#endif
+#if AEVUM_PFA7_CONV3 != 0 && AEVUM_PFA7_CONV3 != 1
+#error AEVUM_PFA7_CONV3 must be 0 or 1
+#endif
+
+
 #if MIDDLE == 3
 #include "fft3.cl"
 #elif MIDDLE == 4
@@ -712,7 +720,38 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
 #if PFA_RADIX == 7
 // Correctness-first direct seven-point DFT.  Keep this simple until profiling
 // identifies the odd-axis transform as the dominant PFA7 cost.
+#if AEVUM_PFA7_CONV3 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+void OVERLOAD aevum_pfa7_conv3(GF31 a0, GF31 a1, GF31 a2,
+                              Z31 k0, Z31 k1, Z31 k2,
+                              GF31 *o0, GF31 *o1, GF31 *o2) {
+  GF31 f0, f1, f2;
+  pfaDft3(a0, a1, a2, (Z31)1513477735U, &f0, &f1, &f2);
+  f0 = pfaMulScalar(f0, k0);
+  f1 = pfaMulScalar(f1, k1);
+  f2 = pfaMulScalar(f2, k2);
+  pfaDft3(f0, f1, f2, (Z31)634005911U, o0, o1, o2);
+}
+#endif
+
 void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
+#if AEVUM_PFA7_CONV3 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+  const GF31 x0 = u[0];
+  const GF31 a1 = add(u[1], u[6]), a2 = add(u[2], u[5]), a3 = add(u[3], u[4]);
+  const GF31 b1 = sub(u[1], u[6]), b2 = sub(u[2], u[5]), b3 = sub(u[3], u[4]);
+  GF31 t1, t2, t3, q1, q3neg, q2;
+  aevum_pfa7_conv3(a1, a3, a2, (Z31)357913941U, (Z31)1280218834U, (Z31)651322123U, &t1, &t2, &t3);
+  const bool forward = w == (Z31)PFA7_ROOT31;
+  aevum_pfa7_conv3(b1, b2, neg(b3),
+      forward ? (Z31)1058022850U : (Z31)1089460797U,
+      forward ? (Z31)1457058326U : (Z31)690425321U,
+      forward ? (Z31)384686626U : (Z31)1762797021U,
+      &q1, &q3neg, &q2);
+  t1 = add(x0, t1); t2 = add(x0, t2); t3 = add(x0, t3);
+  u[0] = add(add(x0, a1), add(a2, a3));
+  u[1] = add(t1, q1); u[6] = sub(t1, q1);
+  u[2] = add(t2, q2); u[5] = sub(t2, q2);
+  u[3] = sub(t3, q3neg); u[4] = add(t3, q3neg);
+#else
  const Z31 c1 = (Z31)141971251U;
  const Z31 c2 = (Z31)405239506U;
  const Z31 c3 = (Z31)526531066U;
@@ -766,6 +805,8 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
  u[5] = sub(t2, q2);
  u[3] = add(t3, q3);
  u[4] = sub(t3, q3);
+
+#endif
 }
 #endif
 
@@ -1012,7 +1053,38 @@ void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61
 }
 
 #if PFA_RADIX == 7
+#if AEVUM_PFA7_CONV3 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+void OVERLOAD aevum_pfa7_conv3(GF61 a0, GF61 a1, GF61 a2,
+                              Z61 k0, Z61 k1, Z61 k2,
+                              GF61 *o0, GF61 *o1, GF61 *o2) {
+  GF61 f0, f1, f2;
+  pfaDft3(a0, a1, a2, (Z61)1669582390241348315UL, &f0, &f1, &f2);
+  f0 = pfaMulScalar(f0, k0);
+  f1 = pfaMulScalar(f1, k1);
+  f2 = pfaMulScalar(f2, k2);
+  pfaDft3(f0, f1, f2, (Z61)636260618972345635UL, o0, o1, o2);
+}
+#endif
+
 void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
+#if AEVUM_PFA7_CONV3 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+  const GF61 x0 = u[0];
+  const GF61 a1 = add(u[1], u[6]), a2 = add(u[2], u[5]), a3 = add(u[3], u[4]);
+  const GF61 b1 = sub(u[1], u[6]), b2 = sub(u[2], u[5]), b3 = sub(u[3], u[4]);
+  GF61 t1, t2, t3, q1, q3neg, q2;
+  aevum_pfa7_conv3(a1, a3, a2, (Z61)384307168202282325UL, (Z61)663496759292244735UL, (Z61)725870187969367005UL, &t1, &t2, &t3);
+  const bool forward = w == (Z61)PFA7_ROOT61;
+  aevum_pfa7_conv3(b1, b2, neg(b3),
+      forward ? (Z61)374686897387646219UL : (Z61)1931156111826047732UL,
+      forward ? (Z61)114776716184777852UL : (Z61)2191066293028916099UL,
+      forward ? (Z61)184020884141258433UL : (Z61)2121822125072435518UL,
+      &q1, &q3neg, &q2);
+  t1 = add(x0, t1); t2 = add(x0, t2); t3 = add(x0, t3);
+  u[0] = add(add(x0, a1), add(a2, a3));
+  u[1] = add(t1, q1); u[6] = sub(t1, q1);
+  u[2] = add(t2, q2); u[5] = sub(t2, q2);
+  u[3] = sub(t3, q3neg); u[4] = add(t3, q3neg);
+#else
  const Z61 c1 = (Z61)1773674115463894065UL;
  const Z61 c2 = (Z61)901087505085424499UL;
  const Z61 c3 = (Z61)784002893271222362UL;
@@ -1066,6 +1138,8 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
  u[5] = sub(t2, q2);
  u[3] = add(t3, q3);
  u[4] = sub(t3, q3);
+
+#endif
 }
 #endif
 
