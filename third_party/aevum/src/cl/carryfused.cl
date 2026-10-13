@@ -1819,7 +1819,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     Word2 carryWords = weightAndCarryPairSloppy(
 #else
     wu[i] = weightAndCarryPairSloppy(
-#endifSWAP_XY(uF2[i]), SWAP_XY(u61[i]), invWeight1, invWeight2, weight_shift0, weight_shift1,
+#endif
+                      SWAP_XY(uF2[i]), SWAP_XY(u61[i]), invWeight1, invWeight2, weight_shift0, weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
@@ -2114,7 +2115,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     Word2 carryWords = weightAndCarryPairSloppy(
 #else
     wu[i] = weightAndCarryPairSloppy(
-#endifSWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+#endif
+                      SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
