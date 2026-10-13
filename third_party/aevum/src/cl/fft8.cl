@@ -347,6 +347,55 @@ void OVERLOAD fft8_16a(GF61 *u) {
   SWAP(u[3], u[6]);
 }
 void OVERLOAD fft8_16b(GF61 *u) {
+#if AEVUM_GF61_RADIX16_ACTIVE && !defined(AEVUM_APPLE_OPENCL12)
+  // shufl_and_fft2 performed "quick" subtracts, u[0-7] are in range -1-..1+
+  X2qt4(&u[0], &u[4]);
+  X2qt4(&u[1], &u[5]);
+  X2qt4(&u[2], &u[6]);
+  X2qt4(&u[3], &u[7]);
+
+  u[0] = modM61q(u[0], 3);
+  u[1] = modM61q(u[1], 3);
+  u[2].x = optional_add((i64)u[2].x, 2*M61);
+  u[3] = modM61q(u[3], 3);
+  u[4] = modM61q(u[4], 3);
+  u[5] = modM61q(u[5], 3);
+  u[6].y = optional_add((i64)u[6].y, 2*M61);
+  u[7] = modM61q(u[7], 3);
+
+  u[1] = aevum_mul_t16q(u[1]);
+  u[2] = mul_t8q(u[2], 5);
+  u[3] = aevum_mul_t16q(U2(u[3].y, u[3].x));
+  X2q(&u[0], &u[2]);
+  X2q(&u[1], &u[3]);
+  GF61 s = u[1], d = u[3];
+  u[1] = U2(u[0].x - d.x, u[0].y - s.y);
+  u[0] = U2(u[0].x + d.x, u[0].y + s.y);
+  u[3] = U2(u[2].x + d.y, u[2].y - s.x);
+  u[2] = U2(u[2].x - d.y, u[2].y + s.x);
+  u[0] = modM61q(u[0], 2, 0);
+  u[1] = modM61q(u[1], 2, 4);
+  u[2] = modM61q(u[2], 3, 2);
+  u[3] = modM61q(u[3], 3, 4);
+
+  u[5] = aevum_mul_t16q(U2(u[5].y, u[5].x));
+  u[6] = mul_3t8q(u[6], 3);
+  u[7] = aevum_mul_t16q(u[7]);
+  X2q(&u[4], &u[6]);
+  X2q(&u[5], &u[7]);
+  s = u[5]; d = u[7];
+  u[5] = U2(u[4].x + s.x, u[4].y - d.y);
+  u[4] = U2(u[4].x - s.x, u[4].y + d.y);
+  u[7] = U2(u[6].x + s.y, u[6].y + d.x);
+  u[6] = U2(u[6].x - s.y, u[6].y - d.x);
+  u[4] = modM61q(u[4], 3, 2);
+  u[5] = modM61q(u[5], 0, 2);
+  u[6] = modM61q(u[6], 5, 3);
+  u[7] = modM61q(u[7], 2, 3);
+
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+#else
   // shufl_and_fft2 performed "quick" subtracts, u[0-7] are in range -1-..1+
   X2qt4(&u[0], &u[4]);            // -2..2+
   X2qt4(&u[1], &u[5]);
@@ -375,6 +424,8 @@ void OVERLOAD fft8_16b(GF61 *u) {
 
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+
+#endif
 }
 
 #endif
