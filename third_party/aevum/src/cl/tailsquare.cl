@@ -973,7 +973,56 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
 #if NTT_GF61
 
+#ifndef AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT
+#define AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT 0
+#endif
+#if AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT != 0 && AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT != 1
+#error AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT must be 0 or 1
+#endif
+
+#if AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT
+Z61 aevumTailUpstreamSubs(Z61 a, Z61 b, const u32 m61_count) {
+  return modM61(a + neg(b, m61_count));
+}
+
+void aevumTailUpstreamX2sConjb(
+    GF61 *a, GF61 *b, const u32 a_m61_count, const u32 b_m61_count) {
+  GF61 t = *a;
+  *a = add(t, *b);
+  b->x = aevumTailUpstreamSubs(t.x, b->x, b_m61_count);
+  b->y = aevumTailUpstreamSubs(b->y, t.y, a_m61_count);
+}
+#endif
+
 void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_type) {
+#if AEVUM_GF61_PAIRSQ_UPSTREAM_CURRENT
+  // Current upstream GPUOwl GF61 tail arithmetic.  Unlike the historical
+  // ENABLE_BETTER_ONEPAIRSQ path, this retains the two general cmuls and
+  // consolidates the final reductions into one bounded butterfly.
+  GF61 a = *pa, b = *pb;
+  GF61 c, d;
+
+  X2conjb(a, b);
+  GF61 a2 = csqq(a, 2);
+  GF61 b2t2 = cmul(csq(b), t_squared);
+
+  if (t_squared_type == 0)
+    c = U2(a2.x + neg(b2t2.x, 2), a2.y + neg(b2t2.y, 2));
+  if (t_squared_type == 1)
+    c = U2(a2.x + b2t2.y, a2.y + neg(b2t2.x, 2));
+  if (t_squared_type == 2)
+    c = a2 + b2t2;
+  if (t_squared_type == 3)
+    c = U2(a2.x + neg(b2t2.y, 2), a2.y + b2t2.x);
+
+  d = cmul(a, b);
+  d = d + d;
+  aevumTailUpstreamX2sConjb(&c, &d, 5, 3);
+
+  *pa = SWAP_XY(c);
+  *pb = SWAP_XY(d);
+#else
+
   GF61 a = *pa, b = *pb;
   GF61 a2, b2, b2t2, ab, addin, c, d;
 
@@ -1048,8 +1097,9 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
   }
 #endif
   *pa = SWAP_XY(c), *pb = SWAP_XY(d);
-}
 
+#endif
+}
 void OVERLOAD pairSq(u32 N, GF61 *u, GF61 *v, GF61 base_squared, bool special) {
   u32 me = get_local_id(0);
 
