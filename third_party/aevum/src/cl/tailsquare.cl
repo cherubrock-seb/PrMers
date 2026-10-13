@@ -11,6 +11,10 @@
 #include "tailutil.cl"
 #include "middle.cl"
 
+#if !defined(AEVUM_GF61_PAIRSQ_SPECIALIZED)
+#define AEVUM_GF61_PAIRSQ_SPECIALIZED 0
+#endif
+
 #if AEVUM_PRP_MIDDLE1
 #include "prp_middle1.cl"
 #define AEVUM_PRP_TRIG_ARG , Trig middleTrig
@@ -1050,6 +1054,48 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
   *pa = SWAP_XY(c), *pb = SWAP_XY(d);
 }
 
+#if AEVUM_GF61_PAIRSQ_SPECIALIZED
+// Current Type2 double-wide tailSquare only needs t_squared types 0 and 1.
+// Keep this experiment separate from the generic four-type helper so ROCm can
+// constant-fold the arithmetic and shorten live ranges around pair squaring.
+void OVERLOAD onePairSqType0(GF61* pa, GF61* pb, GF61 t_squared) {
+  GF61 a = *pa, b = *pb;
+  X2conjb(a, b);
+  GF61 a2 = csqq(a, 2);
+  a2.x = modM61(a2.x);
+  GF61 b2t2 = cmul(csq(b), t_squared);
+  GF61 d = cmul(a, b); d = d + d;
+  GF61 c = subq(a2, b2t2);
+  X2q_conjb(&c, &d);
+  c = modM61q(c, 2);
+  d = modM61q(d, 4);
+  *pa = SWAP_XY(c);
+  *pb = SWAP_XY(d);
+}
+
+void OVERLOAD onePairSqType1(GF61* pa, GF61* pb, GF61 t_squared) {
+  GF61 a = *pa, b = *pb;
+  X2conjb(a, b);
+  GF61 a2 = csqq(a, 2);
+  a2.x = modM61(a2.x);
+  GF61 b2t2 = cmul(csq(b), t_squared);
+  GF61 d = cmul(a, b); d = d + d;
+  GF61 c = subiq(a2, b2t2);
+  X2q_conjb(&c, &d);
+  c = modM61q(c, 0, 2);
+  d = modM61q(d, 4);
+  *pa = SWAP_XY(c);
+  *pb = SWAP_XY(d);
+}
+
+void OVERLOAD pairSqHalfSpecialized(GF61 *u, GF61 *v, GF61 base_squared) {
+  for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
+    onePairSqType0(&u[i], &v[i], base_squared);
+    onePairSqType1(&u[i + NH/4], &v[i + NH/4], base_squared);
+  }
+}
+#endif
+
 void OVERLOAD pairSq(u32 N, GF61 *u, GF61 *v, GF61 base_squared, bool special) {
   u32 me = get_local_id(0);
 
@@ -1845,7 +1891,11 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   if (1) {
 #endif
     revCrossLine(lds, u);
+#if AEVUM_GF61_PAIRSQ_SPECIALIZED
+    pairSqHalfSpecialized(u, u + NH/2, trig);
+#else
     pairSq(NH/2, u, u + NH/2, trig, false);
+#endif
     revCrossLine(lds, u);
   }
 
