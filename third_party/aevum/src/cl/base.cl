@@ -157,6 +157,13 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define LDSPAD_H 1
 #endif
 
+#if !defined(LDSSWIZ_W)
+#define LDSSWIZ_W 0
+#endif
+#if !defined(LDSSWIZ_H)
+#define LDSSWIZ_H 0
+#endif
+
 #if !defined(TABMUL_CHAIN)
 #define TABMUL_CHAIN 0
 #endif
