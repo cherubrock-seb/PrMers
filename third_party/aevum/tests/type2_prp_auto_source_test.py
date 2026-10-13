@@ -12,6 +12,7 @@ trig_cl = (ROOT / "src/cl/trig.cl").read_text()
 bpw = (ROOT / "src/fftbpw.h").read_text()
 prp_use = (ROOT / "src/PrpUseTune.cpp").read_text()
 use_options = (ROOT / "src/UseOptions.h").read_text()
+math_cl = (ROOT / "src/cl/math.cl").read_text()
 
 # Corrected FFT3261 prerequisite arithmetic/capacity from the validated branch.
 assert "TrigCoefsFP32" in trig_h
@@ -61,6 +62,7 @@ assert "!fft.isPfa()" in cmul
 assert "fft.shape.fft_type == FFT3261" in cmul
 assert 'fft.spec() == "2:512:8:512:202"' in cmul
 assert 'use.emplace_back("AEVUM_GF61_CMUL_ALT", "0")' in cmul
+assert "#elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT" in math_cl
 assert "canonical three-product cmul path" in cmul
 assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in cmul
 
