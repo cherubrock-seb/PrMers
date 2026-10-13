@@ -91,6 +91,27 @@ void OVERLOAD fft8(F2 *u) {
   SWAP(u[3], u[6]);
 }
 
+// FUSE_WEIGHT_BUTTERFLY: carryFused has already performed the first
+// pairwise radix-2 layer while applying the high-half weights with FMA.
+// Continue from the exact current Aevum fft8Core state after those X2s.
+void OVERLOAD fft8_skip1(F2 *u) {
+  u[5] = mul_t8_delayed(u[5]);
+  u[6] = mul_t4(u[6]);
+  u[7] = mul_3t8_delayed(u[7]);
+
+  // Exact current Aevum first-half fft4Core body.
+  X2(u[0], u[2]);
+  X2(u[1], u[3]); u[3] = mul_t4(u[3]);
+  X2(u[0], u[1]);
+  X2(u[2], u[3]);
+
+  fft4CoreSpecial(u + 4);
+
+  // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+
 #endif
 
 
