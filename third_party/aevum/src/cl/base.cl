@@ -213,6 +213,15 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define PFA_RADIX 0u
 #endif
 
+// Experimental NVIDIA Tensor Core implementation of the exact GF31 PFA7
+// odd-axis transform.  This is opt-in until GPU A/B validation promotes it.
+#ifndef AEVUM_TC_PFA7_GF31
+#define AEVUM_TC_PFA7_GF31 0
+#endif
+#if AEVUM_TC_PFA7_GF31 && (!NVIDIAGPU || HAS_PTX < 750 || PFA_RADIX != 7)
+#error AEVUM_TC_PFA7_GF31 requires NVIDIA sm_75+ and PFA_RADIX=7
+#endif
+
 #if PFA_RADIX
 #ifndef PFA_LOG2_ROOT_TWO31
 #error PFA_LOG2_ROOT_TWO31 must be supplied for mixed-radix transforms
