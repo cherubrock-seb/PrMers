@@ -25,6 +25,9 @@
 #if !defined(TAIL_KERNELS)
 #define TAIL_KERNELS    2                         // Default is double-wide tailSquare with two kernels
 #endif
+#if !defined(REV_CROSS_PAD_H)
+#define REV_CROSS_PAD_H 0                         // Experimental extra T2 elements between revCrossLine rows
+#endif
 #define SINGLE_WIDE    (TAIL_KERNELS < 2)         // Old single-wide tailSquare vs. new double-wide tailSquare
 #define SINGLE_KERNEL  ((TAIL_KERNELS & 1) == 0)  // TailSquare uses a single kernel vs. two kernels
 
@@ -175,14 +178,26 @@ void OVERLOAD revCrossLine(local T2* lds2, T2 *u) {
   u32 revLowMe = WG - 1 - lowMe;
 
   if (SHUFL_BYTES_H >= 8) {
+#if REV_CROSS_PAD_H
+#if !LDSPAD_H
+#error REV_CROSS_PAD_H requires LDSPAD_H
+#endif
+#if SHUFL_BYTES_H != 8
+#error REV_CROSS_PAD_H experiment currently supports SHUFL_BYTES_H=8 only
+#endif
+#if REV_CROSS_PAD_H > 8
+#error REV_CROSS_PAD_H exceeds validated LDS slack
+#endif
+#endif
     local T2 *ldsOut = lds2;
     local T2 *ldsIn = lds2;
     if (me < WG) ldsOut += LDS_BYTES / sizeof(T2);     // Crossing LDS halves
     else ldsIn += LDS_BYTES / sizeof(T2);               // Staying within LDS halves (just like shufl)
+    const u32 pitch = WG + REV_CROSS_PAD_H;
     bar();   // we need a full bar because we're crossing halves
-    for (u32 i = 0; i < NH/2; ++i) { ldsOut[WG * (NH/2 - 1 - i) + revLowMe] = u[i + NH/2]; }
+    for (u32 i = 0; i < NH/2; ++i) { ldsOut[pitch * (NH/2 - 1 - i) + revLowMe] = u[i + NH/2]; }
     bar();   // we need a full bar because we just crossed halves.  LDS reads are compatible with future shufl calls.
-    for (u32 i = 0; i < NH/2; ++i) { u[i + NH/2] = ldsIn[WG * i + lowMe]; }
+    for (u32 i = 0; i < NH/2; ++i) { u[i + NH/2] = ldsIn[pitch * i + lowMe]; }
   }
 
   else if (SHUFL_BYTES_H == 4) {
