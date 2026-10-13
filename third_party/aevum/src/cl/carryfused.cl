@@ -1738,7 +1738,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   readCarryFusedLine(in61, u61, line, lowMe);
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
 
+#if !AEVUM_CARRY_REUSE_GF61_WU
   Word2 wu[NW];
+#endif
   u32 me_frac_bits = fracBits(lowMe * H * 2);
 #if !NVIDIAGPU || CUDA_BACKEND
   F2 weights = fancyMul(TFLOAD(&THREAD_WEIGHTS[lowMe]), TSLOAD(&THREAD_WEIGHTS[G_W + line]));
@@ -1813,10 +1815,20 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Apply the inverse weights, optionally compute roundoff error, and convert to integer.  Also apply MUL3 here.
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
-    wu[i] = weightAndCarryPairSloppy(SWAP_XY(uF2[i]), SWAP_XY(u61[i]), invWeight1, invWeight2, weight_shift0, weight_shift1,
+#if AEVUM_CARRY_REUSE_GF61_WU
+    Word2 carryWords = weightAndCarryPairSloppy(
+#else
+    wu[i] = weightAndCarryPairSloppy(
+#endifSWAP_XY(uF2[i]), SWAP_XY(u61[i]), invWeight1, invWeight2, weight_shift0, weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#if AEVUM_CARRY_REUSE_GF61_WU
+    // u61[i] is dead after weightAndCarryPairSloppy has consumed it.
+    // GF61 is ulong2 and Word2 is long2: preserve the exact 128 payload bits
+    // in the same register slot until carryFinal consumes them.
+    u61[i] = as_ulong2(carryWords);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     combo_counter += combo_bigstep;
@@ -1953,9 +1965,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     u32 weight_shift1 = weight_shift;
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
+#if AEVUM_CARRY_REUSE_GF61_WU
+    Word2 carryWordsFinal = carryFinal(as_long2(u61[i]), carry[i], biglit0);
+#else
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
-    uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
-    u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0), shl(make_Z61(wu[i].y), weight_shift1));
+    Word2 carryWordsFinal = wu[i];
+#endif
+    uF2[i] = U2(weight1 * carryWordsFinal.x, weight2 * carryWordsFinal.y);
+    u61[i] = U2(shl(make_Z61(carryWordsFinal.x), weight_shift0), shl(make_Z61(carryWordsFinal.y), weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
     combo_counter += combo_bigstep;
@@ -2025,7 +2042,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   readCarryFusedLine(in61, u61, line, lowMe);
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
 
+#if !AEVUM_CARRY_REUSE_GF61_WU
   Word2 wu[NW];
+#endif
 
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
   i64 carry[NW+1];
@@ -2091,10 +2110,20 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Apply the inverse weights, optionally compute roundoff error, and convert to integer.  Also apply MUL3 here.
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
-    wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+#if AEVUM_CARRY_REUSE_GF61_WU
+    Word2 carryWords = weightAndCarryPairSloppy(
+#else
+    wu[i] = weightAndCarryPairSloppy(
+#endifSWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#if AEVUM_CARRY_REUSE_GF61_WU
+    // u61[i] is dead after weightAndCarryPairSloppy has consumed it.
+    // GF61 is ulong2 and Word2 is long2: preserve the exact 128 payload bits
+    // in the same register slot until carryFinal consumes them.
+    u61[i] = as_ulong2(carryWords);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
@@ -2235,9 +2264,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     u32 m61_weight_shift1 = m61_weight_shift;
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
+#if AEVUM_CARRY_REUSE_GF61_WU
+    Word2 carryWordsFinal = carryFinal(as_long2(u61[i]), carry[i], biglit0);
+#else
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
-    u31[i] = U2(shl(make_Z31(wu[i].x), m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
-    u61[i] = U2(shl(make_Z61(wu[i].x), m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
+    Word2 carryWordsFinal = wu[i];
+#endif
+    u31[i] = U2(shl(make_Z31(carryWordsFinal.x), m31_weight_shift0), shl(make_Z31(carryWordsFinal.y), m31_weight_shift1));
+    u61[i] = U2(shl(make_Z61(carryWordsFinal.x), m61_weight_shift0), shl(make_Z61(carryWordsFinal.y), m61_weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
