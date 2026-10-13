@@ -885,13 +885,24 @@ static inline Word pfaLoadCanonicalWord(CP(Word2) in, u32 logical) {
 static inline Word2 pfaLoadCanonicalPairCarried(CP(Word2) in, CP(CarryABM) carryIn, u32 pair) {
   const u32 x = pair / BIG_HEIGHT;
   const u32 line = pair - x * BIG_HEIGHT;
-  const u32 gx = x / G_W;
-  const u32 me = x - gx * G_W;
   const u32 gy = line / CARRY_LEN;
   const u32 within = line - gy * CARRY_LEN;
   const u32 HB = BIG_HEIGHT / CARRY_LEN;
+#if defined(AEVUM_PFA7_FAST_CARRY_INDEX) && AEVUM_PFA7_FAST_CARRY_INDEX && PFA_RADIX == 7
+  // Algebraic reduction of the stock carryB predecessor permutation.
+  // gx=x/G_W and me=x-gx*G_W imply G_W*gx+me=x, hence
+  // prev = gy + HB*x - 1 (mod HB*WIDTH).  Mapping prev back through
+  // carryIn[WIDTH*(prev%HB)+prev/HB] has only the gy==0 wrap case.
+  const u32 prevX = x ? x - 1u : WIDTH - 1u;
+  const u32 carryIndex = gy ? WIDTH * (gy - 1u) + x
+                            : WIDTH * (HB - 1u) + prevX;
+  CarryABM carry = carryIn[carryIndex];
+#else
+  const u32 gx = x / G_W;
+  const u32 me = x - gx * G_W;
   const u32 prev = (gy + HB * G_W * gx + HB * me + (HB * WIDTH - 1u)) % (HB * WIDTH);
   CarryABM carry = carryIn[WIDTH * (prev % HB) + prev / HB];
+#endif
   const u32 baseLine = gy * CARRY_LEN;
   const u32 firstWord = (x * BIG_HEIGHT + baseLine) * 2u;
   const u32 baseFrac = fracBits(firstWord) + FRAC_BPW_HI;
