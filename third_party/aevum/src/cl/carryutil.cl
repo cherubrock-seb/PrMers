@@ -137,12 +137,23 @@ float OVERLOAD boundCarry(i64 c) { return ldexp(fabs((float) (i32) (c >> 8)), -2
 #if STATS || ROE
 void updateStats(global uint *bufROE, u32 posROE, float roundMax) {
   assert(roundMax >= 0);
+#if AEVUM_ROE_SUBGROUP_REDUCE && AMDGPU && defined(cl_khr_subgroups)
+  // roundMax is non-negative, so uint bit order matches float order exactly.
+  // Reduce inside each hardware subgroup and issue one global atomic per wave
+  // instead of one atomic per work-item.  This avoids the LDS allocation of
+  // work_group_reduce_max while preserving the exact maximum.
+  u32 waveRound = sub_group_reduce_max(as_uint(roundMax));
+  if (get_sub_group_local_id() == 0) {
+    atomic_max(bufROE + posROE, waveRound);
+  }
+#else
   // work_group_reduce_max() allocates an additional 256Bytes LDS for a 64lane workgroup, so avoid it.
   // u32 groupRound = work_group_reduce_max(as_uint(roundMax));
   // if (get_local_id(0) == 0) { atomic_max(bufROE + posROE, groupRound); }
 
   // Do the reduction directly over global mem.
   atomic_max(bufROE + posROE, as_uint(roundMax));
+#endif
 }
 #endif
 
