@@ -645,7 +645,7 @@ KERNEL(256) fftMiddleOutGF61(P(T2) out, P(T2) in, Trig trig) {
   dependentLaunch();       // Next kernel will be carryfused which must dependentLaunchWait before reading data
 
   // Transpose the x and y values
-  local GF61 lds[256];
+  local GF61 lds[AEVUM_GF61_MIDDLE_LDS_VALUES];
   middleShuffle(lds, u);
 
   writeMiddleOutLine(out61, u, y, x);
