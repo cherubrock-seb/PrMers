@@ -1053,6 +1053,9 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
 void OVERLOAD pairSq(u32 N, GF61 *u, GF61 *v, GF61 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+  // Match current upstream PRPLL/GPUOwl: NH/4 is compile-time constant.
+  // Force unrolling so u[]/v[] indexing stays scalarized in the tail kernel.
+  #pragma unroll
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(mul2(foo(u[i])));
