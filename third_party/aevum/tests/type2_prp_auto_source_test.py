@@ -123,7 +123,7 @@ assert "!fft.isPfa()" in fast_barrier
 assert "fft.shape.fft_type == FFT3261" in fast_barrier
 assert 'fft.spec() == "2:512:8:512:202"' in fast_barrier
 assert 'use.emplace_back("FAST_BARRIER", "1")' in fast_barrier
-assert "explicit" in fast_barrier
-assert "-use FAST_BARRIER precedence" in fast_barrier
+assert "preserve explicit" in api
+assert "-use FAST_BARRIER precedence" in api
 
 print("Aevum production Type2 PRP AUTO source gate passed")
