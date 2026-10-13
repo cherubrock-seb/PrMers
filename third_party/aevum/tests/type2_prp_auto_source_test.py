@@ -31,8 +31,8 @@ assert "native_type2_prp_auto" in api
 assert 'spec = "native-prp:auto";' in api
 assert "fft.shape.fft_type == FFT3261 && pseudo_auto_spec" in api
 assert "const bool explicit_fft_spec = !spec.empty() && !pseudo_auto_spec;" in api
-assert 'const std::string resolve_spec = pseudo_auto_spec ? "2:512:8:512:202" : spec;' in api
-assert "FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, resolve_spec);" in api
+assert "const bool autotune_eligible = !pseudo_auto_spec && autotune_mode != aevum_autotune::Mode::Off" in api
+assert "FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, spec);" in api
 
 # Validated Type2 PRP-use profile is below manual/tune priority.
 assert 'parse("INPLACE=1,TAIL_TRIGS=0")' in api
