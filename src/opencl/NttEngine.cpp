@@ -588,10 +588,59 @@ void NttEngine::powInPlace(cl_mem result, cl_mem base, uint64_t exp, math::Carry
     size_t numWords = limbBytes / sizeof(uint64_t);
     std::vector<uint64_t> one_data(numWords, 0);
     one_data[0] = 1;
+    // The multiply path transforms base_copy read-only. For a nonfinal set
+    // bit, retain that spectrum and square it directly instead of rebuilding it.
+    auto multiplyAndSquare = [&]() {
+        cl_int allocErr = CL_SUCCESS;
+        cl_mem tmpA = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE,
+                                    limbBytes, nullptr, &allocErr);
+        if (allocErr != CL_SUCCESS)
+            util::throwClError(allocErr, util::gpulost::Phase::Create, "clCreateBuffer",
+                               "Failed to create multiply-square accumulator buffer");
+
+        cl_mem tmpB = clCreateBuffer(ctx_.getContext(), CL_MEM_READ_WRITE,
+                                    limbBytes, nullptr, &allocErr);
+        if (allocErr != CL_SUCCESS) {
+            clReleaseMemObject(tmpA);
+            util::throwClError(allocErr, util::gpulost::Phase::Create, "clCreateBuffer",
+                               "Failed to create multiply-square base buffer");
+        }
+
+        try {
+            copy(accumulator_buf, tmpA, limbBytes);
+            copy(base_copy_buf, tmpB, limbBytes);
+            forward_simple(tmpA, 0);
+            forward_simple(tmpB, 0);
+
+            pointwiseMul(tmpA, tmpB);
+            inverse_simple(tmpA, 0);
+            carry.carryGPU(tmpA, buffers_.blockCarryBuf, limbBytes);
+            copy(tmpA, accumulator_buf, limbBytes);
+
+            pointwiseMul(tmpB, tmpB);
+            inverse_simple(tmpB, 0);
+            carry.carryGPU(tmpB, buffers_.blockCarryBuf, limbBytes);
+            copy(tmpB, base_copy_buf, limbBytes);
+        } catch (...) {
+            clReleaseMemObject(tmpA);
+            clReleaseMemObject(tmpB);
+            throw;
+        }
+
+        clReleaseMemObject(tmpA);
+        clReleaseMemObject(tmpB);
+    };
+
     // Binary exponentiation: result = base^exp mod (2^E - 1)
     try {
         writeOne(accumulator_buf, one_data, limbBytes);
         while (exp > 0) {
+            if ((exp & 1) && exp > 1) {
+                multiplyAndSquare();
+                exp >>= 1;
+                continue;
+            }
+
             if (exp & 1) {
                 // accumulator = accumulator * base_copy mod (2^E - 1)
                 mulInPlace5(accumulator_buf, base_copy_buf, carry, limbBytes);
