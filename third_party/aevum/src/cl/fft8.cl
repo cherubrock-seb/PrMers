@@ -93,30 +93,20 @@ void OVERLOAD fft8(F2 *u) {
 
 // Experimental Type2 FUSE_WEIGHT_BUTTERFLY continuation.
 //
-// This must match the exact FP32 radix-8 factorization used by gpuowl parent
-// 515be869599484ccc101ed2598f2ab1af4afc62f, on which the fused-weight
-// transformation was validated.  Aevum's normal fft8 path remains unchanged.
-void aevum_fuse_fft4CoreSpecial_upstream(F2 *u) {
-  X2(u[0], u[2]);
-  X2t4_mul_t4(u[1], u[3]);
-  X2ad(u[0], u[1], (float) M_SQRT1_2);
-  X2ad(u[2], u[3], (float) M_SQRT1_2);
-}
-
+// carryFused has already materialized the high-half weighted FP32 values with
+// the same rounded multiplies as baseline and executed only fft8Core's first
+// radix-2 layer.  Continue with current Aevum's exact remaining factorization.
 void OVERLOAD fft8_skip1(F2 *u) {
-  // The first X2 layer was already done in carryFused with the weights fused.
   u[5] = mul_t8_delayed(u[5]);
   u[6] = mul_t4(u[6]);
-  u[7] = mul_t8_delayed(u[7]);
+  u[7] = mul_3t8_delayed(u[7]);
 
-  // Exact upstream-parent fft4Core body, inlined to retain Aevum's OpenCL
-  // overload-visibility workaround for variant 202.
   X2(u[0], u[2]);
   X2(u[1], u[3]); u[3] = mul_t4(u[3]);
   X2(u[0], u[1]);
   X2(u[2], u[3]);
 
-  aevum_fuse_fft4CoreSpecial_upstream(u + 4);
+  fft4CoreSpecial(u + 4);
 
   // revbin [0, 4, 2, 6, 1, 5, 3, 7] undo
   SWAP(u[1], u[4]);
