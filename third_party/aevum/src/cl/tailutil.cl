@@ -169,6 +169,52 @@ void OVERLOAD reverse2(local T2 *lds2, T2 *u) {
 }
 
 // This is used to reverse the second part of a line, and cross the reversed parts between the halves.
+// Unified double-wide GF61 tail permutation.  For normal line pairs it is
+// exactly revCrossLine; for line 0 / H/2 it is exactly reverse2 within each
+// half-workgroup.  Keeping one code path avoids sizing the whole kernel for
+// the separate line-zero branch.
+void OVERLOAD revLineOrSelf(local T2* lds2, T2 *u, bool line0) {
+  u32 me = get_local_id(0);
+  u32 lowMe = me % WG;
+  u32 myHalf = me / WG;
+  u32 outHalf = line0 ? myHalf : (myHalf ^ 1);
+  u32 off = line0 ? myHalf : 1;
+
+  if (SHUFL_BYTES_H >= 8) {
+    local T2 *ldsOut = lds2 + outHalf * (LDS_BYTES / sizeof(T2));
+    local T2 *ldsIn = lds2 + myHalf * (LDS_BYTES / sizeof(T2));
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      ldsOut[(WG * (NH/2 - 1 - i) + WG - lowMe - off) % (NH/2 * WG)] = u[i + NH/2];
+    }
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      u[i + NH/2] = ldsIn[WG * i + lowMe];
+    }
+  }
+
+  else if (SHUFL_BYTES_H == 4) {
+    local T *ldsOut = (local T *) lds2 + outHalf * (LDS_BYTES / sizeof(T));
+    local T *ldsIn = (local T *) lds2 + myHalf * (LDS_BYTES / sizeof(T));
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      ldsOut[(WG * (NH/2 - 1 - i) + WG - lowMe - off) % (NH/2 * WG)] = u[i + NH/2].x;
+    }
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      u[i + NH/2].x = ldsIn[WG * i + lowMe];
+    }
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      ldsOut[(WG * (NH/2 - 1 - i) + WG - lowMe - off) % (NH/2 * WG)] = u[i + NH/2].y;
+    }
+    bar();
+    for (u32 i = 0; i < NH/2; ++i) {
+      u[i + NH/2].y = ldsIn[WG * i + lowMe];
+    }
+  }
+}
+
 void OVERLOAD revCrossLine(local T2* lds2, T2 *u) {
   u32 me = get_local_id(0);
   u32 lowMe = me % WG;
@@ -562,6 +608,10 @@ void OVERLOAD reverse2(local GF61 *lds, GF61 *u) {
 
 void OVERLOAD revCrossLine(local GF61* lds, GF61 *u) {
   revCrossLine((local T2 *) lds, (T2 *) u);
+}
+
+void OVERLOAD revLineOrSelf(local GF61* lds, GF61 *u, bool line0) {
+  revLineOrSelf((local T2 *) lds, (T2 *) u, line0);
 }
 
 #if 0    // Unused
