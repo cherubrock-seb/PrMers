@@ -776,7 +776,7 @@ void OVERLOAD readCarryFusedLine(CP(GF61) in, GF61 *u, u32 line, u32 me) {
 //#define SIZEM   (MIDDLE * SIZEB + (1 - (MIDDLE & 1)) * 16)     // Pad 256 bytes if MIDDLE is even
 // Place middle rows after all width rows
 #define SIZEBLK   (SMALL_HEIGHT + 0)                           // No pad needed when swizzling
-#define SIZEW   (16 * SIZEBLK + 16)                            // Pad 256 bytes
+#define SIZEW   (16 * SIZEBLK + 32)                            // Pad 512 bytes
 #define SIZEM   (WIDTH / 16 * SIZEW + 16)                      // Pad 256 bytes
 #define SWIZ(a,m) ((m) ^ (a))                                  // Swizzle 16 rows (remove "^ (a)" to turn swizzling off)
 #else                                                          // AMD friendly padding
