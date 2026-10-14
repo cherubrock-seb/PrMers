@@ -2148,7 +2148,11 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   preload_tabMul8_trig(trig, preloads, 1, numWG, lowMe);
 
   // Do first fft8, partial tabMul, and shufl.
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+  if (DOING_WIDTH && callnum == 2) fft8_skip1(u); else fft8(u);
+#else
   fft8(u);
+#endif
   partial_tabMul8(partitioned_lds, trig, preloads, u, 1, numWG, lowMe);
   shufl(lds, u, 1, numWG, lowMe);
 
@@ -2253,7 +2257,11 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   __attribute__((opencl_unroll_hint(1)))
 #endif
   for (u32 s = 1; s < WG; s *= RADIX) {
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE && RADIX == 8
+    if (DOING_WIDTH && callnum == 2 && s == 1) fft8_skip1(u); else fft_RADIX(u);
+#else
     fft_RADIX(u);
+#endif
     tabMul(trig, u, s, lowMe);
     shufl(lds, u, s, numWG, lowMe);
   }
