@@ -64,7 +64,7 @@ F2 aevumRtx512Exchange32(F2 value, u32 lane) {
 // minor optimization would be to special case the first shufl call.
 void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
 
-#if AEVUM_RTX_512_HYBRID_EXCHANGE && NVIDIAGPU && WG == 64 && RADIX == 8
+#if AEVUM_RTX_512_HYBRID_EXCHANGE && NVIDIAGPU && WG == 64 && RADIX == 8 && SHUFL_BYTES >= 8
   if (f == 8) {
     // Two independent register/lane-bit swaps entirely within each warp.
     #pragma unroll
