@@ -28,6 +28,25 @@
 #define SINGLE_WIDE    (TAIL_KERNELS < 2)         // Old single-wide tailSquare vs. new double-wide tailSquare
 #define SINGLE_KERNEL  ((TAIL_KERNELS & 1) == 0)  // TailSquare uses a single kernel vs. two kernels
 
+// One-wave full-line reversal: exchange raw bits, then reverse register slots.
+// No floating conversion is permitted: GF61 wrappers share the T2 routine.
+#if AEVUM_AMD_REVERSELINE_PERMUTE && AMDGPU && WAVEFRONT == 64 && WG == 64
+#if !defined(__has_builtin) || !__has_builtin(__builtin_amdgcn_ds_bpermute)
+#error AEVUM_AMD_REVERSELINE_PERMUTE requires AMD ds_bpermute support
+#endif
+static inline uint aevumReverseLaneBits(uint bits) {
+  const uint source_byte = (63u - (uint)get_local_id(0)) * 4u;
+  return __builtin_amdgcn_ds_bpermute(source_byte, bits);
+}
+static inline uint2 aevumReverseLaneBits2(uint2 bits) {
+  return (uint2)(aevumReverseLaneBits(bits.x), aevumReverseLaneBits(bits.y));
+}
+static inline uint4 aevumReverseLaneBits4(uint4 bits) {
+  return (uint4)(aevumReverseLaneBits(bits.x), aevumReverseLaneBits(bits.y),
+                 aevumReverseLaneBits(bits.z), aevumReverseLaneBits(bits.w));
+}
+#endif
+
 // 64-bit implementations of reverse routines
 
 #if FFT_FP64 | NTT_GF61
@@ -82,6 +101,18 @@ void OVERLOAD reverse(local T2 *lds2, T2 *u, bool bump) {
 }
 
 void OVERLOAD reverseLine(local T2 *lds, T2 *u) {
+#if AEVUM_AMD_REVERSELINE_PERMUTE && AMDGPU && WAVEFRONT == 64 && WG == 64
+#pragma unroll
+  for (u32 i = 0; i < NH / 2; ++i) {
+    const u32 j = NH - 1u - i;
+    const uint4 lo = aevumReverseLaneBits4(as_uint4(u[i]));
+    const uint4 hi = aevumReverseLaneBits4(as_uint4(u[j]));
+    u[i] = as_double2(hi);
+    u[j] = as_double2(lo);
+  }
+  return;
+#endif
+
   u32 me = get_local_id(0);
   u32 revMe = WG - 1 - me;
 
@@ -316,6 +347,18 @@ void OVERLOAD reverse(local F2 *lds, F2 *u, bool bump) {
 }
 
 void OVERLOAD reverseLine(local F2 *lds, F2 *u) {
+#if AEVUM_AMD_REVERSELINE_PERMUTE && AMDGPU && WAVEFRONT == 64 && WG == 64
+#pragma unroll
+  for (u32 i = 0; i < NH / 2; ++i) {
+    const u32 j = NH - 1u - i;
+    const uint2 lo = aevumReverseLaneBits2(as_uint2(u[i]));
+    const uint2 hi = aevumReverseLaneBits2(as_uint2(u[j]));
+    u[i] = as_float2(hi);
+    u[j] = as_float2(lo);
+  }
+  return;
+#endif
+
   u32 me = get_local_id(0);
   u32 revMe = WG - 1 - me;
 
