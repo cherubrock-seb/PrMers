@@ -129,12 +129,30 @@ KERNEL(G_H) tailMul(P(T2) out, CP(T2) in, CP(T2) a, Trig smallTrig) {
 // Handle the final multiplication step on a pair of complex numbers.  Swap real and imaginary results for the inverse FFT.
 // We used to conjugate the results, but swapping real and imaginary can save some negations in carry propagation.
 
+
+#ifndef AEVUM_FP32_PAIR_KARATSUBA
+#define AEVUM_FP32_PAIR_KARATSUBA 0
+#endif
+#if AEVUM_FP32_PAIR_KARATSUBA != 0 && AEVUM_FP32_PAIR_KARATSUBA != 1
+#error AEVUM_FP32_PAIR_KARATSUBA must be 0 or 1
+#endif
+
 void OVERLOAD onePairMul(F2* pa, F2* pb, F2* pc, F2* pd, F2 t_squared) {
   F2 a = *pa, b = *pb, c = *pc, d = *pd;
   X2conjb(a, b);
   X2conjb(c, d);
+#if AEVUM_FP32_PAIR_KARATSUBA
+  // Same bilinear factorization as the GF31/GF61 pair: three products for
+  // ac, bd, ad+bc, plus the twiddle product. FP32 cancellation is a gate.
+  const F2 ac = cmul(a, c);
+  const F2 bd = cmul(b, d);
+  const F2 cross = (cmul(a + b, c + d) - ac) - bd;
+  *pa = cfma(bd, -t_squared, ac);
+  *pb = cross;
+#else
   *pa = cfma(a, c, cmul(cmul(b, d), -t_squared));
   *pb = cfma(b, c, cmul(a, d));
+#endif
   X2_conjb(*pa, *pb);
   *pa = SWAP_XY(*pa), *pb = SWAP_XY(*pb);
 }
