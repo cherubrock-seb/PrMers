@@ -492,6 +492,15 @@ test-pm1-lowmem-stage1-ckpt: all
 test-pm1-vtrace-low-prime: all
 	bash tests/pm1_vtrace_low_prime_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+# Interrupt the default (pair95 V-trace) stage 2 at several points, resume, compare with an uninterrupted run.
+.PHONY: test-pm1-vtrace-pair95-resume test-pm1-vtrace-ckpt-header
+test-pm1-vtrace-pair95-resume: all
+	bash tests/pm1_vtrace_pair95_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
+
+# Host-only: the pair95 stage-2 checkpoint header, its validation and the file rotation.
+test-pm1-vtrace-ckpt-header:
+	bash tests/test_pm1_vtrace_ckpt_header.sh
+
 test-pm1-prime95-stage2-result: all
 	bash tests/pm1_prime95_stage2_result_test.sh $${PRMERS_TEST_DEVICE:-0}
 

@@ -41,8 +41,10 @@ from concurrent.futures import ThreadPoolExecutor
 #   hook   what the "save" stop waits for: the path suffix of the fopen of the result file, and which of the
 #          opens of it is the one that ends the job (P-1 also records its stage 1 result in results.txt),
 #   count  how many lines results.txt gets per job, or None when the result is a per-job json file (GMTF).
-def case(name, a, b, flags, states, suffix="results.txt", nth=1, count=1):
-    return dict(name=name, a=a, b=b, flags=flags, states=states, suffix=suffix, nth=nth, count=count)
+#   expect text that must be in results.txt once the job is finished (e.g. a factor found by the job).
+def case(name, a, b, flags, states, suffix="results.txt", nth=1, count=1, expect=None):
+    return dict(name=name, a=a, b=b, flags=flags, states=states, suffix=suffix, nth=nth, count=count,
+                expect=expect)
 
 
 CASES = [
@@ -63,6 +65,9 @@ CASES = [
          ["pm1_m_9941*.ckpt*"]),
     case("pm1-stage2", "Pminus1=1,2,9941,-1,1000,20000", "Pminus1=1,2,9689,-1,1000,20000", [],
          ["pm1_m_9941*.ckpt*", "pm1_s2_*_m_9941*"], nth=2, count=2),
+    # stage 2 (default V-trace) finds a factor: the stop lands while its result line is written
+    case("pm1-stage2-factor", "Pminus1=1,2,677,-1,10,32500", "Pminus1=1,2,9689,-1,1000,20000", [],
+         ["pm1_m_677*.ckpt*", "pm1_s2_*_m_677*"], nth=2, count=2, expect='"factors":["1943118631"]'),
     case("ecm-montgomery", "ECM2=1,2,269,-1,2000,20000,1", "ECM2=1,2,277,-1,2000,20000,1", [],
          ["ecm_*_269_*.ckpt*", "ecm_*269*.ckpt*"]),
     case("ecm-edwards", "ECM2=1,2,269,-1,2000,20000,1", "ECM2=1,2,277,-1,2000,20000,1", ["-edwards"],
@@ -218,6 +223,8 @@ def run_case(prmers, device, hook_path, root, c, stopat):
     n = records(work, c)
     if n != (c["count"] or 1):
         problems.append(f"{n} result records, expected {c['count'] or 1}")
+    if c["expect"] and read(os.path.join(work, "results.txt")).count(c["expect"]) != 1:
+        problems.append(f"results.txt does not hold {c['expect']} exactly once")
     for g in c["states"]:
         left = glob.glob(os.path.join(work, g))
         if left:
