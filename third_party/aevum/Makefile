@@ -440,3 +440,15 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# fftMiddleOutGF61 direct base table (AEVUM_GF61_MIDDLE_BASE_TABLE) against the stock twiddles
+GF61_MIDDLE_BASE_TABLE_TEST := build-tests/aevum-gf61-middle-base-table-test
+GF61_MIDDLE_BASE_TABLE_SRCS := src/clwrap.cpp src/log.cpp src/TrigBufCache.cpp src/AllocTrac.cpp src/gpuid.cpp src/Args.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+.PHONY: test-gf61-middle-base-table
+test-host: test-gf61-middle-base-table
+test-gf61-middle-base-table: $(GF61_MIDDLE_BASE_TABLE_TEST)
+	$(GF61_MIDDLE_BASE_TABLE_TEST)
+
+$(GF61_MIDDLE_BASE_TABLE_TEST): tests/gf61_middle_base_table_kernel_test.cpp $(GF61_MIDDLE_BASE_TABLE_SRCS) src/TrigBufCache.h $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc tests/gf61_middle_base_table_kernel_test.cpp $(GF61_MIDDLE_BASE_TABLE_SRCS) $(TEST_GC_LINK) $(OPENCL_LIBS) -o $@
