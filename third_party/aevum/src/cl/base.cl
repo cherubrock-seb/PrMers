@@ -284,6 +284,16 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #error FUSE_WEIGHT_BUTTERFLY is only implemented for FFT_TYPE == FFT64
 #endif
 
+// Experimental Type2 forward weight/first-butterfly fusion.
+#ifndef AEVUM_FP32_WEIGHT_BUTTERFLY
+#define AEVUM_FP32_WEIGHT_BUTTERFLY 0
+#endif
+#if AEVUM_FP32_WEIGHT_BUTTERFLY != 0 && AEVUM_FP32_WEIGHT_BUTTERFLY != 1
+#error AEVUM_FP32_WEIGHT_BUTTERFLY must be 0 or 1
+#endif
+#define AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE \
+  (AEVUM_FP32_WEIGHT_BUTTERFLY && FFT_TYPE == FFT3261 && WIDTH == 512 && NW == 8)
+
 // Word and Word2 define the data type for FFT integers passed between the CPU and GPU.
 #if WordSize == 8
 typedef i64 Word;
