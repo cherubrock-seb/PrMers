@@ -93,6 +93,12 @@ assert "canonical three-product cmul path" in api
 assert "explicit -use AEVUM_GF61_CMUL_ALT precedence" in api
 assert "#elif !defined(AEVUM_GF61_CMUL_ALT) || !AEVUM_GF61_CMUL_ALT" in math_cl
 
+# R460: validated gfx906 Type2 carry batching must use the real WMUL key.
+assert '!shared.args->uses("WMUL")' in api
+assert 'std::getenv("AEVUM_CARRY_WMUL") == nullptr' in api
+assert 'use.emplace_back("WMUL", "4")' in api
+assert 'use.emplace_back("AEVUM_CARRY_WMUL", "4")' not in api
+
 # R79 gfx906 Type2 non-temporal FFT-load policy.
 marker = "const bool gfx906_type2_prp_loads1"
 start = api.index(marker)
