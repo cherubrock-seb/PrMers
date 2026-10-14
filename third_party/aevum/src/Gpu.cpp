@@ -286,6 +286,49 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
+    const auto it = config.find("AEVUM_PFA7_NUSS8");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_NUSS8 selections");
+    config["AEVUM_PFA7_NUSS8"] = value;
+  }
+
+  if (const auto it = config.find("AEVUM_PFA7_NUSS8");
+      it != config.end() && it->second != "0" && it->second != "1")
+    throw std::runtime_error("AEVUM_PFA7_NUSS8 must be 0 or 1");
+
+  const bool pfa7_nuss8_geometry =
+      fft.isPfa() &&
+      fft.pfa_radix == 7 &&
+      fft.shape.fft_type == FFT3161 &&
+      fft.shape.width == 512 &&
+      fft.shape.middle == 7 &&
+      fft.shape.height == 512 &&
+      fft.variant == 202;
+
+  bool pfa7_nuss8_gfx906_default = false;
+  if (!config.count("AEVUM_PFA7_NUSS8") &&
+      pfa7_nuss8_geometry &&
+      getDeviceName(id).rfind("gfx906", 0) == 0) {
+    config["AEVUM_PFA7_NUSS8"] = "1";
+    pfa7_nuss8_gfx906_default = true;
+  }
+
+  if (config.count("AEVUM_PFA7_NUSS8") &&
+      config.at("AEVUM_PFA7_NUSS8") == "1" &&
+      !pfa7_nuss8_geometry)
+    throw std::runtime_error(
+        "AEVUM_PFA7_NUSS8 requires pfa7:1:512:7:512:202");
+
+  if (doLog && config.count("AEVUM_PFA7_NUSS8") &&
+      config.at("AEVUM_PFA7_NUSS8") == "1") {
+    if (pfa7_nuss8_gfx906_default)
+      log("Validated gfx906 PFA7 NUSS8 default: plan=%s; set AEVUM_PFA7_NUSS8=0 to disable.\n",
+          fft.spec().c_str());
+    else
+      log("AEVUM_PFA7_NUSS8=1: plan=%s.\n", fft.spec().c_str());
+  }
+
 #if defined(__APPLE__)
   // Keep the stock LDS transpose algorithms on Apple, but lower the middle
   // work-group pressure for the legacy OpenCL-to-Metal compiler. Explicit

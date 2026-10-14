@@ -3,6 +3,16 @@
 #include "math.cl"
 #include "trig.cl"
 
+#ifndef AEVUM_PFA7_NUSS8
+#define AEVUM_PFA7_NUSS8 0
+#endif
+#if AEVUM_PFA7_NUSS8 != 0 && AEVUM_PFA7_NUSS8 != 1
+#error AEVUM_PFA7_NUSS8 must be 0 or 1
+#endif
+#if AEVUM_PFA7_NUSS8 && PFA_RADIX != 7
+#error AEVUM_PFA7_NUSS8 requires PFA7
+#endif
+
 #if MIDDLE == 3
 #include "fft3.cl"
 #elif MIDDLE == 4
@@ -682,7 +692,44 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
 #if PFA_RADIX == 7
 // Correctness-first direct seven-point DFT.  Keep this simple until profiling
 // identifies the odd-axis transform as the dominant PFA7 cost.
+#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+void OVERLOAD aevum_pfa7_nuss8(GF31 *u, Z31 w) {
+  const GF31 x0 = u[0];
+  const GF31 a1 = add(u[1], u[6]), a2 = add(u[2], u[5]), a3 = add(u[3], u[4]);
+  const GF31 b1 = sub(u[1], u[6]), b2 = sub(u[2], u[5]), b3 = sub(u[3], u[4]);
+  const GF31 total = add(add(a1, a2), a3);
+  const GF31 m2 = pfaMulScalar(sub(a1, a3), (Z31)215942690U);
+  const GF31 tc = add(pfaMulScalar(sub(a2, a3), (Z31)2100158082U), m2);
+  const GF31 mc = add(pfaMulScalar(sub(a2, a1), (Z31)168617125U), m2);
+  const GF31 center = add(x0, pfaMulScalar(total, (Z31)357913941U));
+  u[0] = add(x0, total);
+  u[1] = sub(center, tc);
+  u[2] = add(center, mc);
+  u[3] = sub(add(center, tc), mc);
+
+  const bool forward = w == (Z31)PFA7_ROOT31;
+  const GF31 m6 = pfaMulScalar(add(b3, b1),
+      forward ? (Z31)305738695U : (Z31)1841744952U);
+  const GF31 tq = add(pfaMulScalar(add(b2, b3),
+      forward ? (Z31)1858146229U : (Z31)289337418U), m6);
+  const GF31 sq = add(pfaMulScalar(sub(b1, b2),
+      forward ? (Z31)2131082370U : (Z31)16401277U), m6);
+  const GF31 q0 = pfaMulScalar(add(sub(b2, b3), b1),
+      forward ? (Z31)1058022850U : (Z31)1089460797U);
+  const GF31 q1 = sub(q0, tq), q2 = add(q0, sq), q3 = sub(sub(sq, q0), tq);
+  u[6] = sub(u[1], q1);
+  u[1] = add(u[1], q1);
+  u[5] = sub(u[2], q2);
+  u[2] = add(u[2], q2);
+  u[4] = sub(u[3], q3);
+  u[3] = add(u[3], q3);
+}
+#endif
+
 void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
+#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+  aevum_pfa7_nuss8(u, w);
+#else
  const Z31 c1 = (Z31)141971251U;
  const Z31 c2 = (Z31)405239506U;
  const Z31 c3 = (Z31)526531066U;
@@ -736,6 +783,7 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
  u[5] = sub(t2, q2);
  u[3] = add(t3, q3);
  u[4] = sub(t3, q3);
+#endif
 }
 #endif
 
@@ -953,7 +1001,44 @@ void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61
 }
 
 #if PFA_RADIX == 7
+#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+void OVERLOAD aevum_pfa7_nuss8(GF61 *u, Z61 w) {
+  const GF61 x0 = u[0];
+  const GF61 a1 = add(u[1], u[6]), a2 = add(u[2], u[5]), a3 = add(u[3], u[4]);
+  const GF61 b1 = sub(u[1], u[6]), b2 = sub(u[2], u[5]), b3 = sub(u[3], u[4]);
+  const GF61 total = add(add(a1, a2), a3);
+  const GF61 m2 = pfaMulScalar(sub(a1, a3), (Z61)916476061952082211UL);
+  const GF61 tc = add(pfaMulScalar(sub(a2, a3), (Z61)1789062672330551777UL), m2);
+  const GF61 mc = add(pfaMulScalar(sub(a2, a1), (Z61)399695725068940037UL), m2);
+  const GF61 center = add(x0, pfaMulScalar(total, (Z61)384307168202282325UL));
+  u[0] = add(x0, total);
+  u[1] = sub(center, tc);
+  u[2] = add(center, mc);
+  u[3] = sub(add(center, tc), mc);
+
+  const bool forward = w == (Z61)PFA7_ROOT61;
+  const GF61 m6 = pfaMulScalar(add(b3, b1),
+      forward ? (Z61)2007045408887657666UL : (Z61)298797600326036285UL);
+  const GF61 tq = add(pfaMulScalar(add(b2, b3),
+      forward ? (Z61)1848645854929387642UL : (Z61)457197154284306309UL), m6);
+  const GF61 sq = add(pfaMulScalar(sub(b1, b2),
+      forward ? (Z61)755994754610342594UL : (Z61)1549848254603351357UL), m6);
+  const GF61 q0 = pfaMulScalar(add(sub(b2, b3), b1),
+      forward ? (Z61)374686897387646219UL : (Z61)1931156111826047732UL);
+  const GF61 q1 = sub(q0, tq), q2 = add(q0, sq), q3 = sub(sub(sq, q0), tq);
+  u[6] = sub(u[1], q1);
+  u[1] = add(u[1], q1);
+  u[5] = sub(u[2], q2);
+  u[2] = add(u[2], q2);
+  u[4] = sub(u[3], q3);
+  u[3] = add(u[3], q3);
+}
+#endif
+
 void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
+#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+  aevum_pfa7_nuss8(u, w);
+#else
  const Z61 c1 = (Z61)1773674115463894065UL;
  const Z61 c2 = (Z61)901087505085424499UL;
  const Z61 c3 = (Z61)784002893271222362UL;
@@ -1007,6 +1092,7 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
  u[5] = sub(t2, q2);
  u[3] = add(t3, q3);
  u[4] = sub(t3, q3);
+#endif
 }
 #endif
 
