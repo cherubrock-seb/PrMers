@@ -28,6 +28,17 @@
 #define SINGLE_WIDE    (TAIL_KERNELS < 2)         // Old single-wide tailSquare vs. new double-wide tailSquare
 #define SINGLE_KERNEL  ((TAIL_KERNELS & 1) == 0)  // TailSquare uses a single kernel vs. two kernels
 
+// A complete WG32 line occupies one NVIDIA warp. Exchange raw words;
+// unions avoid floating conversions in GF31/GF61 overload wrappers.
+#if AEVUM_RTX_REVERSELINE_SHUFFLE && NVIDIAGPU && HAS_PTX >= 700 && WG == 32
+static inline uint aevumRtxReverseBits(uint bits) {
+  uint result;
+  __asm volatile("shfl.sync.bfly.b32 %0, %1, 31, 31, 0xffffffff;"
+                 : "=r"(result) : "r"(bits));
+  return result;
+}
+#endif
+
 // 64-bit implementations of reverse routines
 
 #if FFT_FP64 | NTT_GF61
@@ -82,6 +93,25 @@ void OVERLOAD reverse(local T2 *lds2, T2 *u, bool bump) {
 }
 
 void OVERLOAD reverseLine(local T2 *lds, T2 *u) {
+#if AEVUM_RTX_REVERSELINE_SHUFFLE && NVIDIAGPU && HAS_PTX >= 700 && WG == 32
+#pragma unroll
+  for (u32 i = 0; i < NH / 2; ++i) {
+    const u32 j = NH - 1u - i;
+    union { T2 value; uint bits[4]; } lo, hi;
+    lo.value = u[i];
+    hi.value = u[j];
+#pragma unroll
+    for (u32 component = 0; component < 4; ++component) {
+      lo.bits[component] = aevumRtxReverseBits(lo.bits[component]);
+      hi.bits[component] = aevumRtxReverseBits(hi.bits[component]);
+    }
+    // Capture both source slots before overwriting either destination.
+    u[i] = hi.value;
+    u[j] = lo.value;
+  }
+  return;
+#endif
+
   u32 me = get_local_id(0);
   u32 revMe = WG - 1 - me;
 
@@ -316,6 +346,25 @@ void OVERLOAD reverse(local F2 *lds, F2 *u, bool bump) {
 }
 
 void OVERLOAD reverseLine(local F2 *lds, F2 *u) {
+#if AEVUM_RTX_REVERSELINE_SHUFFLE && NVIDIAGPU && HAS_PTX >= 700 && WG == 32
+#pragma unroll
+  for (u32 i = 0; i < NH / 2; ++i) {
+    const u32 j = NH - 1u - i;
+    union { F2 value; uint bits[2]; } lo, hi;
+    lo.value = u[i];
+    hi.value = u[j];
+#pragma unroll
+    for (u32 component = 0; component < 2; ++component) {
+      lo.bits[component] = aevumRtxReverseBits(lo.bits[component]);
+      hi.bits[component] = aevumRtxReverseBits(hi.bits[component]);
+    }
+    // Capture both source slots before overwriting either destination.
+    u[i] = hi.value;
+    u[j] = lo.value;
+  }
+  return;
+#endif
+
   u32 me = get_local_id(0);
   u32 revMe = WG - 1 - me;
 
