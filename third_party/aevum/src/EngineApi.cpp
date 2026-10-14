@@ -656,6 +656,23 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_gf61_cmul_alt0)
       use.emplace_back("AEVUM_GF61_CMUL_ALT", "0");
 
+    // R455: lower-wide-multiply GF61 onePairSq is a validated gfx906 Type2
+    // PRP win. Four 8192-iteration candidate/baseline blocks at M136279841
+    // were byte-exact, improved mean engine time by 0.3101%, and improved
+    // ktailSquareGF61 by 0.7656%. Keep other devices/plans on the old path.
+    const bool gfx906_type2_prp_better_onepairsq1 =
+        !shared.args->uses("AEVUM_GF61_BETTER_ONEPAIRSQ") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_better_onepairsq1)
+      use.emplace_back("AEVUM_GF61_BETTER_ONEPAIRSQ", "1");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }
