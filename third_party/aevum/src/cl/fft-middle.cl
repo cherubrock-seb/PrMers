@@ -1256,7 +1256,31 @@ void OVERLOAD middleMul(GF61 *u, u32 s, TrigGF61 trig) {
 
 }
 
+
+#ifndef AEVUM_GF61_MIDDLE_FULL_TABLE
+#define AEVUM_GF61_MIDDLE_FULL_TABLE 0
+#endif
+#if AEVUM_GF61_MIDDLE_FULL_TABLE != 0 && AEVUM_GF61_MIDDLE_FULL_TABLE != 1
+#error AEVUM_GF61_MIDDLE_FULL_TABLE must be 0 or 1
+#endif
+#if AEVUM_GF61_MIDDLE_FULL_TABLE && (PFA_RADIX || WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 8)
+#error AEVUM_GF61_MIDDLE_FULL_TABLE requires non-PFA GF61 512:8:512
+#endif
+
+void middleMul2FullTableGF61(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
+  // Full planes follow the direct-base plane, including when its flag is 0.
+  TrigGF61 full = trig + SMALL_HEIGHT * (MIDDLE - 1) + WIDTH +
+                  SMALL_HEIGHT + WIDTH * SMALL_HEIGHT;
+#pragma unroll
+  for (u32 k = 0; k < MIDDLE; ++k)
+    WADD(k, TFLOAD(&full[k * WIDTH * SMALL_HEIGHT + y * WIDTH + x]));
+}
+
 void OVERLOAD middleMul2(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
+#if AEVUM_GF61_MIDDLE_FULL_TABLE && !defined(AEVUM_APPLE_OPENCL12) && !AEVUM_GF61_LIMB32
+  middleMul2FullTableGF61(u, x, y, trig);
+  return;
+#endif
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
 
@@ -1278,6 +1302,10 @@ void OVERLOAD middleMul2(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
 }
 
 void OVERLOAD middleMul2BaseTable(GF61 *u, u32 x, u32 y, u32 baseIndex, TrigGF61 trig) {
+#if AEVUM_GF61_MIDDLE_FULL_TABLE && !defined(AEVUM_APPLE_OPENCL12) && !AEVUM_GF61_LIMB32
+  middleMul2FullTableGF61(u, x, y, trig);
+  return;
+#endif
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
   assert(baseIndex < WIDTH * SMALL_HEIGHT);
