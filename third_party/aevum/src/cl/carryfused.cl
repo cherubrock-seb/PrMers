@@ -10,6 +10,9 @@
 #ifndef AEVUM_CARRY_SPLIT_FORWARD
 #define AEVUM_CARRY_SPLIT_FORWARD 0
 #endif
+#if AEVUM_CARRY_SPLIT_FORWARD != 0 && AEVUM_CARRY_SPLIT_FORWARD != 1
+#error AEVUM_CARRY_SPLIT_FORWARD must be 0 or 1
+#endif
 
 void spin() {
 #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_s_sleep)
