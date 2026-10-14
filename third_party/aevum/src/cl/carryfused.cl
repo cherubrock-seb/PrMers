@@ -6,6 +6,11 @@
 #include "weight.cl"
 #include "middle.cl"
 
+// Opt-in Type2 register-lifetime experiment; explicit zero preserves baseline.
+#ifndef AEVUM_CARRY_SPLIT_FORWARD
+#define AEVUM_CARRY_SPLIT_FORWARD 0
+#endif
+
 void spin() {
 #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_s_sleep)
   __builtin_amdgcn_s_sleep(0);
@@ -1955,7 +1960,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
     uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+#if !AEVUM_CARRY_SPLIT_FORWARD
     u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0), shl(make_Z61(wu[i].y), weight_shift1));
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     combo_counter += combo_bigstep;
@@ -1967,6 +1974,24 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   writeCarryFusedLine(uF2, outF2, line, lowMe);
 
   dependentLaunch();   // Next kernel will be fftMiddleInFP32
+
+#if AEVUM_CARRY_SPLIT_FORWARD
+  // The FP32 width transform and store are finished. Reconstruct the modular
+  // operand here so u61 does not span that transform's register-intensive body.
+  // Finalized wu remains the common integer source for both representations.
+  combo_counter = starting_combo_counter;
+#pragma unroll
+  for (i32 i = 0; i < NW; ++i) {
+    u32 weight_shift0 = weight_shift;
+    combo_counter += combo_step;
+    if (weight_shift > 61) weight_shift -= 61;
+    u32 weight_shift1 = weight_shift;
+    u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0),
+                shl(make_Z61(wu[i].y), weight_shift1));
+    combo_counter += combo_bigstep;
+    if (weight_shift > 61) weight_shift -= 61;
+  }
+#endif
 
   fft_WIDTH2(lds61, u61, smallTrig61, WMUL, lowMe);
   writeCarryFusedLine(u61, out61, line, lowMe);
