@@ -16,6 +16,38 @@
 #define LDS_BYTES     (WG * RADIX * SHUFL_BYTES)
 #endif
 
+// AEVUM_RTX_512_FIRST_EXCHANGE: f1 permutation is the composition of
+// reg/lane0..2 transpose followed by reg/lane3..5 transpose. Only the
+// last lane5 swap crosses a NVIDIA warp; its four values use LDS.
+#if AEVUM_RTX_512_FIRST_EXCHANGE && NVIDIAGPU && WG == 64 && RADIX == 8
+u32 aevumRtx512FirstExchangeWord(u32 value, u32 lane) {
+  u32 result;
+  __asm("shfl.sync.idx.b32 %0, %1, %2, 31, -1;"
+        : "=r"(result) : "r"(value), "r"(lane));
+  return result;
+}
+#if FFT_FP64 | NTT_GF61
+T2 aevumRtx512FirstExchange64(T2 value, u32 lane) {
+  union { T2 value; u32 words[4]; } bits;
+  bits.value = value;
+  #pragma unroll
+  for (u32 i = 0; i < 4; ++i)
+    bits.words[i] = aevumRtx512FirstExchangeWord(bits.words[i], lane);
+  return bits.value;
+}
+#endif
+#if FFT_FP32 | NTT_GF31
+F2 aevumRtx512FirstExchange32(F2 value, u32 lane) {
+  union { F2 value; u32 words[2]; } bits;
+  bits.value = value;
+  #pragma unroll
+  for (u32 i = 0; i < 2; ++i)
+    bits.words[i] = aevumRtx512FirstExchangeWord(bits.words[i], lane);
+  return bits.value;
+}
+#endif
+#endif
+
 #if FFT_FP64 | NTT_GF61
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs operating on 64-bit values using LDS_BYTES of LDS memory.
@@ -30,6 +62,54 @@
 // only bar(WG) required before next use.  ALSO NOTE: the first shufl call does not need to do bar(WG).  A relatively
 // minor optimization would be to special case the first shufl call.
 void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_RTX_512_FIRST_EXCHANGE && NVIDIAGPU && WG == 64 && RADIX == 8 && SHUFL_BYTES >= 8
+  if (f == 1) {
+
+    // First transpose register bits0..2 with lane bits0..2.
+    #pragma unroll
+    for (u32 bit = 1; bit < 8; bit <<= 1) {
+      const u32 partner = (lowMe ^ bit) & 31;
+      #pragma unroll
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const T2 lo = u[a], hi = u[a | bit];
+        const T2 xlo = aevumRtx512FirstExchange64(lo, partner);
+        const T2 xhi = aevumRtx512FirstExchange64(hi, partner);
+        u[a] = (lowMe & bit) ? xhi : lo;
+        u[a | bit] = (lowMe & bit) ? hi : xlo;
+      }
+    }
+    // Second transpose: lane3/4 in warp, then lane5 through LDS.
+    #pragma unroll
+    for (u32 bit = 1; bit <= 2; bit <<= 1) {
+      const u32 partner = (lowMe ^ (bit << 3)) & 31;
+      #pragma unroll
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const T2 lo = u[a], hi = u[a | bit];
+        const T2 xlo = aevumRtx512FirstExchange64(lo, partner);
+        const T2 xhi = aevumRtx512FirstExchange64(hi, partner);
+        u[a] = (lowMe & (bit << 3)) ? xhi : lo;
+        u[a | bit] = (lowMe & (bit << 3)) ? hi : xlo;
+      }
+    }
+    local T2 *lds = lds2;
+    if (numWG > 1)
+      lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T2);
+    const u32 upper = (lowMe >> 5) & 1;
+    // Only the four values that cross warp boundaries are written.
+    // Entry bar protects the previous exchange's unfinished LDS reads.
+    bar(WG);
+    #pragma unroll
+    for (u32 a = 0; a < 4; ++a)
+      lds[a * WG + lowMe] = u[a + (1 - upper) * 4];
+    bar(WG);
+    #pragma unroll
+    for (u32 a = 0; a < 4; ++a)
+      u[a + (1 - upper) * 4] = lds[a * WG + (lowMe ^ 32)];
+    // Following LDS users retain their existing entry bar(WG).
+    return;
+  }
+#endif
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
@@ -383,6 +463,54 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs using two 4-byte floats.
 void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_RTX_512_FIRST_EXCHANGE && NVIDIAGPU && WG == 64 && RADIX == 8
+  if (f == 1) {
+
+    // First transpose register bits0..2 with lane bits0..2.
+    #pragma unroll
+    for (u32 bit = 1; bit < 8; bit <<= 1) {
+      const u32 partner = (lowMe ^ bit) & 31;
+      #pragma unroll
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const F2 lo = u[a], hi = u[a | bit];
+        const F2 xlo = aevumRtx512FirstExchange32(lo, partner);
+        const F2 xhi = aevumRtx512FirstExchange32(hi, partner);
+        u[a] = (lowMe & bit) ? xhi : lo;
+        u[a | bit] = (lowMe & bit) ? hi : xlo;
+      }
+    }
+    // Second transpose: lane3/4 in warp, then lane5 through LDS.
+    #pragma unroll
+    for (u32 bit = 1; bit <= 2; bit <<= 1) {
+      const u32 partner = (lowMe ^ (bit << 3)) & 31;
+      #pragma unroll
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const F2 lo = u[a], hi = u[a | bit];
+        const F2 xlo = aevumRtx512FirstExchange32(lo, partner);
+        const F2 xhi = aevumRtx512FirstExchange32(hi, partner);
+        u[a] = (lowMe & (bit << 3)) ? xhi : lo;
+        u[a | bit] = (lowMe & (bit << 3)) ? hi : xlo;
+      }
+    }
+    local F2 *lds = lds2;
+    if (numWG > 1)
+      lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F2);
+    const u32 upper = (lowMe >> 5) & 1;
+    // Only the four values that cross warp boundaries are written.
+    // Entry bar protects the previous exchange's unfinished LDS reads.
+    bar(WG);
+    #pragma unroll
+    for (u32 a = 0; a < 4; ++a)
+      lds[a * WG + lowMe] = u[a + (1 - upper) * 4];
+    bar(WG);
+    #pragma unroll
+    for (u32 a = 0; a < 4; ++a)
+      u[a + (1 - upper) * 4] = lds[a * WG + (lowMe ^ 32)];
+    // Following LDS users retain their existing entry bar(WG).
+    return;
+  }
+#endif
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
