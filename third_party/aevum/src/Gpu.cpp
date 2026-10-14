@@ -287,6 +287,19 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
+    const auto it = config.find("AEVUM_PFA7_NUSS8");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_NUSS8 selections");
+    config["AEVUM_PFA7_NUSS8"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_NUSS8"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_NUSS8 must be 0 or 1");
+    if (it->second == "1" && (!fft.isPfa() || fft.pfa_radix != 7))
+      throw std::runtime_error("AEVUM_PFA7_NUSS8 requires a PFA7 plan");
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA_FUSED_INVERSE")) {
     const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
     if (it != config.end() && it->second != value)
