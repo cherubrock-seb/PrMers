@@ -442,6 +442,16 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
+  // Register keys are host-side controls, not source specialization macros.
+  // With opt-in profiles, avoid changing every kernel's code/cache identity
+  // when only one kernel's register bound changes.
+  if (const char* enabled = std::getenv("AEVUM_REGISTER_PROFILES");
+      enabled && std::strcmp(enabled, "1") == 0) {
+    for (auto it = config.begin(); it != config.end();) {
+      if (aevumRegisterUseKey(it->first) || it->first == "NOREG") it = config.erase(it);
+      else ++it;
+    }
+  }
   string defines = toDefine(config);
   if (doLog) { log("config: %s\n", defines.c_str()); }
 
@@ -767,7 +777,12 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
   int regs = 0;
   const char *use_override = "";
   // Allow command line to prefer the CUDA compiler's default number of registers
-  if (args.value("NOREG", 0)) return string("");
+  auto registerValue = [&](const string& key, int fallback) {
+    if (const auto it = registerProfile_.find(key); it != registerProfile_.end())
+      return it->second;
+    return args.value(key, fallback);
+  };
+  if (registerValue("NOREG", 0)) return string("");
   // Determine a kernel specific default maximum number of GPU registers (values set to -1 have not been tuned for best default value)
   switch (which_kernel) {
   case CARRYFUSED:         // Register usage depends on NW, the FFT/NTT type, and perhaps the long carry setting
@@ -895,7 +910,7 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
     break;
   }
   // Get the optional override register count
-  int override_regs = args.value(use_override, 0);
+  int override_regs = registerValue(use_override, 0);
   // If a specified override is small, use the count as a CUDA launch_bounds rather than a maximum register count
   if (override_regs && (override_regs > 0 && override_regs <= 16)) return string("-DCUDA_MIN_BLOCKS=") + to_string(override_regs) + " ";
   // If specified, override the default maximum register count
@@ -946,10 +961,40 @@ string Gpu::kernelDefines(enum WHICH_KERNEL_TYPE which_kernel) {
 #define ROE_SIZE 100000
 #define CARRY_SIZE 100000
 
+// GPU-local register profile: never mutate the shared Args used by workers
+// or neighboring plans. Precedence matches clDefines: extra, Args, per-FFT.
+static std::map<string, int> registerProfile(const Args& args, const FFTConfig& fft,
+                                            const vector<KeyVal>& extra) {
+  const char* enabled = std::getenv("AEVUM_REGISTER_PROFILES");
+  if (enabled && std::strcmp(enabled, "0") != 0 && std::strcmp(enabled, "1") != 0)
+    throw std::runtime_error("AEVUM_REGISTER_PROFILES must be 0 or 1");
+  if (!enabled || std::strcmp(enabled, "1") != 0) return {};
+  std::map<string, int> result;
+  auto apply = [&](const auto& values) {
+    for (const auto& [key, value] : values) {
+      if (!aevumRegisterUseKey(key) && key != "NOREG") continue;
+      size_t end = 0;
+      int n = 0;
+      try { n = std::stoi(value, &end); }
+      catch (...) { throw std::runtime_error("invalid CUDA register profile: " + key); }
+      if (end != value.size() ||
+          (key == "NOREG" ? (n != 0 && n != 1) : (n < -1 || n > 255)))
+        throw std::runtime_error("invalid CUDA register profile: " + key);
+      result.emplace(key, n);
+    }
+  };
+  apply(extra);
+  apply(args.flags);
+  if (const auto it = args.perFftConfig.find(fft.shape.spec()); it != args.perFftConfig.end())
+    apply(it->second);
+  return result;
+}
+
 Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, bool logFftSize) :
   shared(s),
   background{shared.background},
   args{*shared.args},
+  registerProfile_{registerProfile(args, fft, extraConf)},
   E(E),
   N(fft.shape.size()),
   fft(fft),
