@@ -287,6 +287,21 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // Experimental FP32-only radix-16 scheduling. Unset preserves production;
+  // validate both environment and -use spellings before emitting defines.
+  if (const char* value = std::getenv("AEVUM_FP32_RADIX16_SPLIT")) {
+    const auto it = config.find("AEVUM_FP32_RADIX16_SPLIT");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_FP32_RADIX16_SPLIT selections");
+    config["AEVUM_FP32_RADIX16_SPLIT"] = value;
+  }
+  if (const auto it = config.find("AEVUM_FP32_RADIX16_SPLIT");
+      it != config.end() && it->second != "0" && it->second != "1")
+    throw std::runtime_error("AEVUM_FP32_RADIX16_SPLIT must be 0 or 1");
+  if (config.count("AEVUM_FP32_RADIX16_SPLIT") &&
+      config.at("AEVUM_FP32_RADIX16_SPLIT") == "1" && !fft.FFT_FP32)
+    throw std::runtime_error("AEVUM_FP32_RADIX16_SPLIT requires an FP32 plan");
+
   if (const char* value = std::getenv("AEVUM_PFA_FUSED_INVERSE")) {
     const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
     if (it != config.end() && it->second != value)
