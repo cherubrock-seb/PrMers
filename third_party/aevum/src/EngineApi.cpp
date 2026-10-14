@@ -2006,6 +2006,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     if (prepared_buffers_.empty()) return;
     const size_t slot = acquire_prepared(dst);
     gpu_->regPrepare(prepared_buffers_[slot], reg(dst));
+    // The canonical source and destination represent the same operand after
+    // preparation. Keep both identities so preparing another copy can reuse it.
+    if (prepared_alias_reuse_enabled_ && dst != src) prepared_slots_[slot].regs.push_back(src);
   }
 
   void square_mul(size_t index, uint32_t factor) {
