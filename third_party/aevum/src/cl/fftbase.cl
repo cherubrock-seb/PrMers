@@ -16,6 +16,29 @@
 #define LDS_BYTES     (WG * RADIX * SHUFL_BYTES)
 #endif
 
+
+// AEVUM_RTX_WARP_EXCHANGE: register transpose for the last H/W256 exchange.
+// Swap each of three register-index bits with lane bits 2..4. This is the
+// same permutation as LDS[f*i + (lane & ~3)*8 + (lane & 3)] -> LDS[32*i+lane].
+#if AEVUM_RTX_WARP_EXCHANGE && NVIDIAGPU && WG == 32 && RADIX == 8
+u32 aevumWarpExchangeWord(u32 value, u32 lane) {
+  u32 result;
+  __asm("shfl.sync.idx.b32 %0, %1, %2, 31, -1;"
+        : "=r"(result) : "r"(value), "r"(lane));
+  return result;
+}
+uint2 aevumWarpExchangeBits(uint2 value, u32 lane) {
+  return (uint2)(aevumWarpExchangeWord(value.x, lane),
+                 aevumWarpExchangeWord(value.y, lane));
+}
+uint4 aevumWarpExchangeBits64(uint4 value, u32 lane) {
+  return (uint4)(aevumWarpExchangeWord(value.x, lane),
+                 aevumWarpExchangeWord(value.y, lane),
+                 aevumWarpExchangeWord(value.z, lane),
+                 aevumWarpExchangeWord(value.w, lane));
+}
+#endif
+
 #if FFT_FP64 | NTT_GF61
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs operating on 64-bit values using LDS_BYTES of LDS memory.
@@ -30,6 +53,23 @@
 // only bar(WG) required before next use.  ALSO NOTE: the first shufl call does not need to do bar(WG).  A relatively
 // minor optimization would be to special case the first shufl call.
 void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_RTX_WARP_EXCHANGE && NVIDIAGPU && WG == 32 && RADIX == 8
+  if (f == 4) {
+    for (u32 bit = 1; bit < 8; bit <<= 1) {
+      const u32 partner = lowMe ^ (bit << 2);
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const uint4 lo = as_uint4(u[a]), hi = as_uint4(u[a | bit]);
+        const uint4 xlo = aevumWarpExchangeBits64(lo, partner);
+        const uint4 xhi = aevumWarpExchangeBits64(hi, partner);
+        u[a] = as_double2((lowMe & (bit << 2)) ? xhi : lo);
+        u[a | bit] = as_double2((lowMe & (bit << 2)) ? hi : xlo);
+      }
+    }
+    return;
+  }
+#endif
+
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
@@ -383,6 +423,23 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs using two 4-byte floats.
 void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_RTX_WARP_EXCHANGE && NVIDIAGPU && WG == 32 && RADIX == 8
+  if (f == 4) {
+    for (u32 bit = 1; bit < 8; bit <<= 1) {
+      const u32 partner = lowMe ^ (bit << 2);
+      for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
+        const uint2 lo = as_uint2(u[a]), hi = as_uint2(u[a | bit]);
+        const uint2 xlo = aevumWarpExchangeBits(lo, partner);
+        const uint2 xhi = aevumWarpExchangeBits(hi, partner);
+        u[a] = as_float2((lowMe & (bit << 2)) ? xhi : lo);
+        u[a | bit] = as_float2((lowMe & (bit << 2)) ? hi : xlo);
+      }
+    }
+    return;
+  }
+#endif
+
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
