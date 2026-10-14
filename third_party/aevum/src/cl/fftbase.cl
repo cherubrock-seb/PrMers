@@ -83,7 +83,7 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Entry bar protects the previous exchange's unfinished LDS reads.
     bar(WG);
     for (u32 a = 0; a < 4; ++a)
-      lds[a * WG + lowMe] = u[a + upper * 4];
+      lds[a * WG + lowMe] = u[a + (1 - upper) * 4];
     bar(WG);
     for (u32 a = 0; a < 4; ++a)
       u[a + (1 - upper) * 4] = lds[a * WG + (lowMe ^ 32)];
@@ -467,7 +467,7 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Entry bar protects the previous exchange's unfinished LDS reads.
     bar(WG);
     for (u32 a = 0; a < 4; ++a)
-      lds[a * WG + lowMe] = u[a + upper * 4];
+      lds[a * WG + lowMe] = u[a + (1 - upper) * 4];
     bar(WG);
     for (u32 a = 0; a < 4; ++a)
       u[a + (1 - upper) * 4] = lds[a * WG + (lowMe ^ 32)];
