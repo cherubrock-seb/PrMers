@@ -712,6 +712,17 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
 #if PFA_RADIX == 7
 // Correctness-first direct seven-point DFT.  Keep this simple until profiling
 // identifies the odd-axis transform as the dominant PFA7 cost.
+#if AEVUM_PFA7_GF31_DOT3
+// Inputs stay in 0..M31 (including its redundant zero representation).
+// Three nonnegative 31x31 products fit below 3*M31^2 < 2^64 and below
+// modM31(u64)'s documented 0xFFFFFFFF7FFFFFFF input bound.
+GF31 pfaDot3Reduced31(GF31 a, Z31 ca, GF31 b, Z31 cb, GF31 c, Z31 cc) {
+  const u64 real = (u64)a.x * ca + (u64)b.x * cb + (u64)c.x * cc;
+  const u64 imag = (u64)a.y * ca + (u64)b.y * cb + (u64)c.y * cc;
+  return U2(modM31(real), modM31(imag));
+}
+#endif
+
 void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
  const Z31 c1 = (Z31)141971251U;
  const Z31 c2 = (Z31)405239506U;
@@ -735,6 +746,16 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
  const GF31 b2 = sub(x2, x5);
  const GF31 b3 = sub(x3, x4);
 
+#if AEVUM_PFA7_GF31_DOT3
+ const GF31 t1 = add(x0, pfaDot3Reduced31(a1,c1,a2,c2,a3,c3));
+ const GF31 q1 = pfaDot3Reduced31(b1,s1,b2,s2,b3,s3);
+ const GF31 t2 = add(x0, pfaDot3Reduced31(a1,c2,a2,c3,a3,c1));
+ // Replace subtractions by equivalent nonnegative residue coefficients;
+ // every multiply is accumulated exactly before the sole dot reduction.
+ const GF31 q2 = pfaDot3Reduced31(b1,s2,b2,neg(s3),b3,neg(s1));
+ const GF31 t3 = add(x0, pfaDot3Reduced31(a1,c3,a2,c1,a3,c2));
+ const GF31 q3 = pfaDot3Reduced31(b1,s3,b2,neg(s1),b3,s2);
+#else
  GF31 t1 = x0;
  t1 = add(t1, pfaMulScalar(a1, c1));
  t1 = add(t1, pfaMulScalar(a2, c2));
@@ -759,6 +780,7 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
  q3 = sub(q3, pfaMulScalar(b2, s1));
  q3 = add(q3, pfaMulScalar(b3, s2));
 
+#endif
  u[0] = add(add(x0, a1), add(a2, a3));
  u[1] = add(t1, q1);
  u[6] = sub(t1, q1);
