@@ -1387,6 +1387,7 @@ public:
             << ";safe=1;clean=1";
       if (workload_ == aevum_autotune::Workload::Prp)
         flags << ";shape-confirm=prp-square-v1";
+      if (const char* reg = std::getenv("AEVUM_REGISTER_PROFILES")) flags << ";register-profiles=" << reg;
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,

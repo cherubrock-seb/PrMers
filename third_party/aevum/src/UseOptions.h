@@ -1,7 +1,18 @@
 #pragma once
 #include <string>
+// Exact host-side CUDA limit keys; reject misspellings instead of accepting
+// arbitrary REG prefixes. -1 means compiler default, 1..16 launch bounds.
+inline bool aevumRegisterUseKey(const std::string& key) {
+  for (const char* allowed : {"REGCF64","REGCF3161","REGCF3261","REGCF61",
+       "REGCF323161","REGCF3231","REGCF6431","REGCF31","REGCF32",
+       "REGMI64","REGMI32","REGMI31","REGMI61","REGMO64","REGMO32",
+       "REGMO31","REGMO61","REGTS64","REGTS32","REGTS31","REGTS61"})
+    if (key == allowed) return true;
+  return false;
+}
 // Single key registry shared with Gpu::makeDefines (-use).
 inline bool aevumUseKey(const std::string& key) {
+  if (aevumRegisterUseKey(key)) return true;
   if (key == "AEVUM_PFA7_NUSS8") return true;
   if (key == "AEVUM_PFA_FUSED_INVERSE") return true;
   if (key == "AEVUM_GF61_BETTER_ONEPAIRSQ") return true;
