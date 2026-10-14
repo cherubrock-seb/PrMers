@@ -17,6 +17,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "TuneEntry.h"
 #include "RuntimeAutotune.h"
 #include "PrpUseTune.h"
+#include "UseOptions.h"
 #include "common.h"
 #include "gpuid.h"
 #include "version.h"
