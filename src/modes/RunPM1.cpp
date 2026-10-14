@@ -1549,7 +1549,8 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
                                      const mpz_class& g,
                                      const mpz_class& Mp,
                                      int fftSize,
-                                     const std::string& method)
+                                     const std::string& method,
+                                     bool& resultSaved)
 {
     mpz_class gNew = g;
     for (const std::string& fs : options.knownFactors) {
@@ -1584,8 +1585,20 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
+    resultSaved = wm.appendToResultsTxt(json);
     return found;
+}
+
+// A stage 2 whose result line could not be written to results.txt has not
+// finished its job: report it as an error, so the caller keeps the checkpoints
+// and the worktodo entry instead of retiring the entry without a result.
+static Pm1Stage2Result pm1_stage2_outcome(bool found, bool resultSaved) {
+    if (!resultSaved) {
+        std::cerr << "[PM1] The stage-2 result could not be written to results.txt; "
+                     "the job is kept so that it can be run again.\n";
+        return Pm1Stage2Result::Error;
+    }
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 // True when a stage-2 run did not search its whole range (interrupted or failed).
@@ -2110,10 +2123,11 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
+        bool resultSaved = false;
         const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
-                                                    "ultralowmem GPU one-register product exponent");
+                                                    "ultralowmem GPU one-register product exponent", resultSaved);
         delete eng;
-        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+        return pm1_stage2_outcome(found, resultSaved);
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -2154,10 +2168,11 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
+    bool resultSaved = false;
     const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
-                                                "lowmem streamed product");
+                                                "lowmem streamed product", resultSaved);
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 
@@ -3919,12 +3934,17 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             mpz_class g;
             mpz_gcd(g.get_mpz_t(), Hc.get_mpz_t(), Mp.get_mpz_t());
             mpz_clear(H);
+            const int fftSize = static_cast<int>(eng->get_size());
             delete eng;
             if (g != 1 && g != Mp) {
                 std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
                 writeStageResult(filename, "inverse(H) failed because factor already divides H: factor=" + g.get_str());
                 std::cout << "\n>>> P-1 factor found while building V_1: " << g.get_str() << "\n";
-                return Pm1Stage2Result::Found;
+                // Record it like any stage-2 result (results.txt line, known
+                // factors); it used to be printed only.
+                bool resultSaved = false;
+                const bool found = pm1_record_stage2_result(options, g, Mp, fftSize, "V-trace", resultSaved);
+                return pm1_stage2_outcome(found, resultSaved);
             }
             std::cerr << "[PM1-VTRACE] H is not invertible modulo M_p, but no proper factor was isolated.\n";
             return Pm1Stage2Result::Error;
@@ -3940,18 +3960,23 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (!aevum_vtrace_backend) {
             eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
         }
-        if (!useBabyBatching) {
-            precompute_baby_window(0, babyCount, babyGlobalToLocal);
-        } else {
-            precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
-        }
-        if (!aevum_vtrace_backend) {
-            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
-        }
+        // The pair95 pass loop builds the baby window (and V_D) at the start
+        // of every pass, the first one included; building it here as well
+        // only doubled the precompute of a pair95 run.
+        if (!usePair95) {
+            if (!useBabyBatching) {
+                precompute_baby_window(0, babyCount, babyGlobalToLocal);
+            } else {
+                precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
+            }
+            if (!aevum_vtrace_backend) {
+                eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+            }
 
-        // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
-        eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
-        eng->set((engine::Reg)RGCUR, 2);
+            // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
+            eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+            eng->set((engine::Reg)RGCUR, 2);
+        }
         eng->set((engine::Reg)RACC, 1);
         cur_k = 0;
     } else {
@@ -4089,6 +4114,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << " | queued-tasks=" << bucketTerms << "\n";
                 }
                 precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
+                // Aevum refreshes the V_D multiplicand inside the helper.
+                if (!aevum_vtrace_backend) {
+                    eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+                }
                 eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
                 eng->set((engine::Reg)RGCUR, 2);
                 cur_k = 0;
@@ -4527,6 +4556,13 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     }
 
     mpz_class X  = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
+    {
+        // The low 64 bits of the GCD input identify the stage-2 product, so an
+        // interrupted and resumed run can be compared with an uninterrupted one.
+        mpz_class low = X & ((mpz_class(1) << 64) - 1);
+        std::cout << "[PM1-VTRACE] Stage 2 GCD input res64=" << std::hex << std::setw(16) << std::setfill('0')
+                  << mpz_get_u64(low) << std::dec << std::setfill(' ') << " terms=" << termsAccumulated << "\n";
+    }
     mpz_class g  = gcd_with_dots(X, Mp);
 
     auto gcd_mpz = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
@@ -4583,10 +4619,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json);
-    wm.appendToResultsTxt(json);
+    const bool resultSaved = wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 Pm1Stage2Result App::runPM1Stage2Marin() {
@@ -5276,10 +5312,10 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
+    const bool resultSaved = wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 #include <array>
 #include <cstdlib>
@@ -5873,10 +5909,11 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
 
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    bool resultSaved = false;
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K", resultSaved);
     if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 static inline unsigned u64_bits(uint64_t x){
