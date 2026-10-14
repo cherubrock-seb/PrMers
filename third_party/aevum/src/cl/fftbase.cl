@@ -653,6 +653,53 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
 
 
 #if NTT_GF31 && WG == 128 && RADIX == 8
+#if AEVUM_GF31_RADIX16_INTERLEAVE
+// Complete the LDS/radix2 boundary and the following radix16 in one schedule.
+// Consume output pairs (j,j+4) immediately instead of filling all eight u's
+// before the first butterfly of fft8_16a/b.
+void aevumShuflRadix16GF31(local GF31 *lds2, GF31 *u,
+                           u32 numWG, u32 lowMe) {
+  local GF31 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF31);
+  bar(WG);
+#if LDSPAD
+  for (u32 i = 0; i < 8; ++i)
+    lds[i * (WG + 8) + lowMe] = u[i];
+#else
+  for (u32 i = 0; i < 8; ++i)
+    lds[i * 8 + (lowMe & ~7u) * 8 + (lowMe & 7)] = u[i];
+#endif
+  bar(WG);
+  const u32 upper = lowMe >= WG / 2;
+  for (u32 j = 0; j < 4; ++j) {
+    GF31 pair[2];
+    for (u32 k = 0; k < 2; ++k) {
+      const u32 i = j + k * 4;
+#if LDSPAD
+      const u32 aidx = (i / 2) * (WG / 64) * 8
+          + (((i & 1) * (WG / 2)) / 64) * 8
+          + ((lowMe % (WG / 2)) / 64) * 8
+          + ((lowMe / 8) & 7) * (WG + 8) + (lowMe & 7);
+      const u32 bidx = aidx + 4 * (WG / 64) * 8;
+#else
+      const u32 aidx = i * (WG / 2) + lowMe % (WG / 2);
+      const u32 bidx = 4 * WG + aidx;
+#endif
+      const GF31 a = lds[aidx], b = lds[bidx];
+      pair[k] = upper ? subq(a, b) : addq(a, b);
+    }
+    if (upper) X2t4(pair[0], pair[1]);
+    else if (j == 0) X2(pair[0], pair[1]);
+    else if (j == 1) X2_mul_t8(pair[0], pair[1]);
+    else if (j == 2) X2_mul_t4(pair[0], pair[1]);
+    else X2_mul_3t8(pair[0], pair[1]);
+    u[j] = pair[0]; u[j + 4] = pair[1];
+  }
+  aevumFinishRadix16GF31(u, upper);
+}
+#endif
+
 
 void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
                              u32 f, u32 numWG, u32 lowMe) {
@@ -2457,9 +2504,13 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
+#if AEVUM_GF31_RADIX16_INTERLEAVE
+  aevumShuflRadix16GF31(lds, u, numWG, lowMe);
+#else
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+#endif
 
 #else
 
