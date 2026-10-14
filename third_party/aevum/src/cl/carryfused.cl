@@ -1704,10 +1704,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   local F2 *ldsF2 = (local F2 *) lds61;
 
   F2 uF2[NW];
-#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8
+#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8 && !CUDA_BACKEND
   // Equal-sized elements make every inverse conversion an in-place slot
   // replacement. Forward reconstruction also reads and replaces one slot.
   // Never enable this alias for WordSize=4: the array strides differ.
+  // OpenCL C union member access provides defined representation aliasing.
+  // CUDA C++ keeps separate arrays to avoid inactive-member lifetime rules.
+  typedef char CarryOverlayStrideCheck[
+      sizeof(GF61) == sizeof(Word2) ? 1 : -1];
   union { GF61 modular[NW]; Word2 integer[NW]; } carry_values;
 #define u61 carry_values.modular
 #define wu carry_values.integer
@@ -1752,7 +1756,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   readCarryFusedLine(in61, u61, line, lowMe);
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
 
-#if !(AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8)
+#if !(AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8 && !CUDA_BACKEND)
   Word2 wu[NW];
 #endif
   u32 me_frac_bits = fracBits(lowMe * H * 2);
@@ -2006,7 +2010,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   fft_WIDTH2(lds61, u61, smallTrig61, WMUL, lowMe);
   writeCarryFusedLine(u61, out61, line, lowMe);
-#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8
+#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8 && !CUDA_BACKEND
 #undef u61
 #undef wu
 #endif
