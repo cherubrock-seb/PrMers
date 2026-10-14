@@ -1256,6 +1256,52 @@ void OVERLOAD middleMul(GF61 *u, u32 s, TrigGF61 trig) {
 
 }
 
+
+#ifndef AEVUM_GF61_MIDDLE_PAIR_TABLE
+#define AEVUM_GF61_MIDDLE_PAIR_TABLE 0
+#endif
+#if AEVUM_GF61_MIDDLE_PAIR_TABLE != 0 && AEVUM_GF61_MIDDLE_PAIR_TABLE != 1
+#error AEVUM_GF61_MIDDLE_PAIR_TABLE must be 0 or 1
+#endif
+#if AEVUM_GF61_MIDDLE_PAIR_TABLE && (PFA_RADIX || WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 8)
+#error AEVUM_GF61_MIDDLE_PAIR_TABLE requires non-PFA GF61 512:8:512
+#endif
+#define AEVUM_GF61_MIDDLE_PAIR_TABLE_ACTIVE \
+  (AEVUM_GF61_MIDDLE_PAIR_TABLE && !AEVUM_GF61_CMUL_ALT && !AEVUM_GF61_LIMB32)
+#if AEVUM_GF61_MIDDLE_PAIR_TABLE_ACTIVE && !defined(AEVUM_APPLE_OPENCL12)
+// Canonical inputs allow the existing radix4 quick core bounds. Keep local:
+// some device frontends have failed to resolve imported GF61 overloads.
+void aevumMiddlePairFft4(GF61 *u) {
+  X2q(&u[0], &u[2]);
+  X2q_mul_t4(&u[1], &u[3]);
+  X2q(&u[0], &u[1]);
+  X2q(&u[2], &u[3]);
+  u[0] = modM61q(u[0], 0);
+  for (u32 i = 1; i < 4; ++i) u[i] = modM61q(u[i], 3);
+}
+void middlePairTableFft8GF61(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
+  TrigGF61 low = trig + SMALL_HEIGHT * (MIDDLE - 1) + WIDTH +
+                 SMALL_HEIGHT + WIDTH * SMALL_HEIGHT;
+  const GF61 w4 = TFLOAD(&low[4 * WIDTH * SMALL_HEIGHT + x]);
+#pragma unroll
+  for (u32 j = 0; j < 4; ++j) {
+    const GF61 factor = TFLOAD(&low[j * WIDTH * SMALL_HEIGHT + y * WIDTH + x]);
+    const GF61 a = u[j];
+    const GF61 b = cmul(u[j + 4], w4);
+    // Canonical add/sub is required before cmul: no signed quick operands.
+    u[j] = cmul(add(a, b), factor);
+    u[j + 4] = cmul(sub(a, b), factor);
+  }
+  u[5] = mul_t8(u[5]);
+  u[6] = mul_t4(u[6]);
+  u[7] = mul_3t8(u[7]);
+  aevumMiddlePairFft4(u);
+  aevumMiddlePairFft4(u + 4);
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+#endif
+
 void OVERLOAD middleMul2(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
