@@ -27,16 +27,24 @@ u32 aevumWarpExchangeWord(u32 value, u32 lane) {
         : "=r"(result) : "r"(value), "r"(lane));
   return result;
 }
-uint2 aevumWarpExchangeBits(uint2 value, u32 lane) {
-  return (uint2)(aevumWarpExchangeWord(value.x, lane),
-                 aevumWarpExchangeWord(value.y, lane));
+#if FFT_FP32 | NTT_GF31
+F2 aevumWarpExchange32(F2 value, u32 lane) {
+  union { F2 value; u32 words[2]; } bits;
+  bits.value = value;
+  bits.words[0] = aevumWarpExchangeWord(bits.words[0], lane);
+  bits.words[1] = aevumWarpExchangeWord(bits.words[1], lane);
+  return bits.value;
 }
-uint4 aevumWarpExchangeBits64(uint4 value, u32 lane) {
-  return (uint4)(aevumWarpExchangeWord(value.x, lane),
-                 aevumWarpExchangeWord(value.y, lane),
-                 aevumWarpExchangeWord(value.z, lane),
-                 aevumWarpExchangeWord(value.w, lane));
+#endif
+#if FFT_FP64 | NTT_GF61
+T2 aevumWarpExchange64(T2 value, u32 lane) {
+  union { T2 value; u32 words[4]; } bits;
+  bits.value = value;
+  for (u32 i = 0; i < 4; ++i)
+    bits.words[i] = aevumWarpExchangeWord(bits.words[i], lane);
+  return bits.value;
 }
+#endif
 #endif
 
 #if FFT_FP64 | NTT_GF61
@@ -59,11 +67,11 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     for (u32 bit = 1; bit < 8; bit <<= 1) {
       const u32 partner = lowMe ^ (bit << 2);
       for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
-        const uint4 lo = as_uint4(u[a]), hi = as_uint4(u[a | bit]);
-        const uint4 xlo = aevumWarpExchangeBits64(lo, partner);
-        const uint4 xhi = aevumWarpExchangeBits64(hi, partner);
-        u[a] = as_double2((lowMe & (bit << 2)) ? xhi : lo);
-        u[a | bit] = as_double2((lowMe & (bit << 2)) ? hi : xlo);
+        const T2 lo = u[a], hi = u[a | bit];
+        const T2 xlo = aevumWarpExchange64(lo, partner);
+        const T2 xhi = aevumWarpExchange64(hi, partner);
+        u[a] = (lowMe & (bit << 2)) ? xhi : lo;
+        u[a | bit] = (lowMe & (bit << 2)) ? hi : xlo;
       }
     }
     return;
@@ -429,11 +437,11 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     for (u32 bit = 1; bit < 8; bit <<= 1) {
       const u32 partner = lowMe ^ (bit << 2);
       for (u32 a = 0; a < 8; ++a) if (!(a & bit)) {
-        const uint2 lo = as_uint2(u[a]), hi = as_uint2(u[a | bit]);
-        const uint2 xlo = aevumWarpExchangeBits(lo, partner);
-        const uint2 xhi = aevumWarpExchangeBits(hi, partner);
-        u[a] = as_float2((lowMe & (bit << 2)) ? xhi : lo);
-        u[a | bit] = as_float2((lowMe & (bit << 2)) ? hi : xlo);
+        const F2 lo = u[a], hi = u[a | bit];
+        const F2 xlo = aevumWarpExchange32(lo, partner);
+        const F2 xhi = aevumWarpExchange32(hi, partner);
+        u[a] = (lowMe & (bit << 2)) ? xhi : lo;
+        u[a | bit] = (lowMe & (bit << 2)) ? hi : xlo;
       }
     }
     return;
