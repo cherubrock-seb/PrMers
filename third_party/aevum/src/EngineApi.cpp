@@ -701,6 +701,24 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_loads1)
       use.emplace_back("LOADS", "1");
 
+    // R484/R486: keep FFT writes non-temporal on Radeon VII / gfx906 Type2
+    // PRP. Eight counterbalanced 8192-iteration blocks at M136279841 were
+    // byte-exact; STORES=1 improved mean engine time by 0.4929% with 4/4
+    // paired wins. The combined hot GF61 path improved 0.7726%, including
+    // kCarryFused +1.1202%. Preserve explicit -use STORES precedence.
+    const bool gfx906_type2_prp_stores1 =
+        !shared.args->uses("STORES") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_stores1)
+      use.emplace_back("STORES", "1");
+
     // R99: gfx906 Type2 PRP benefits from the wave64 fast LDS barrier on top
     // of the validated LOADS=1 profile. Eight counterbalanced 10k-iteration
     // runs at M136279841 were word-exact; FAST_BARRIER=1 improved the median
