@@ -30,6 +30,7 @@
 #include <cinttypes>
 #include <cstring>
 #include <cstdlib>
+#include <stdexcept>
 #include <cinttypes>
 
 #define _USE_MATH_DEFINES
@@ -2703,6 +2704,9 @@ void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll) 
 }
 
 void Gpu::regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool lead_in, bool lead_out) {
+  if (preparedHeightReuse && (&prepared == &buf1 ||
+      (!in_place && &prepared == &buf3)))
+    throw std::invalid_argument("prepared height operand aliases multiplication scratch");
   if ((lead_in || lead_out) && !regSupportsPreparedMulLead())
     throw std::runtime_error("Aevum prepared-multiply lead bridge requires a non-PFA short-carry plan");
 
