@@ -339,6 +339,9 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
   local GF61 lds61[LDS_BYTES / sizeof(GF61)];
   local F2 *ldsF2 = (local F2 *) lds61;
   F2 uF2[NW];
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+  F2 highForwardWeights[NW / 2];
+#endif
   GF61 u61[NW];
 
   u32 g = get_group_id(0);
@@ -386,14 +389,29 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig, BigTabFP32 THREAD_WEIG
     if (weight_shift > 61) weight_shift -= 61;
     u32 weight_shift1 = weight_shift;
     // Convert and weight input
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+    if (i < NW / 2) {
+      uF2[i] = U2(w1 * in[p].x, w2 * in[p].y);
+    } else {
+      // Keep high digits unweighted until their paired first butterfly.
+      uF2[i] = U2((F) in[p].x, (F) in[p].y);
+      highForwardWeights[i - NW / 2] = U2(w1, w2);
+    }
+#else
     uF2[i] = U2(in[p].x * w1, in[p].y * w2);
+#endif
     u61[i] = U2(shl(make_Z61(in[p].x), weight_shift0), shl(make_Z61(in[p].y), weight_shift1));      // Form a GF61 from each pair of input words
     // Generate weight shifts and frac_bits for next pair
     combo_counter += combo_bigstep;
     if (weight_shift > 61) weight_shift -= 61;
   }
 
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+  aevumFP32WeightButterfly(uF2, highForwardWeights);
+  fft_WIDTH2(ldsF2, uF2, smallTrigF2, 1, me);
+#else
   fft_WIDTH(ldsF2, uF2, smallTrigF2, 1, me);
+#endif
   writeCarryFusedLine(uF2, outF2, g, me);
 
   fft_WIDTH(lds61, u61, smallTrig61, 1, me);
