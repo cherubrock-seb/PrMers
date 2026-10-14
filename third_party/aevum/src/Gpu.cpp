@@ -530,6 +530,9 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (isAmdCdna2Plus(id)) { defines += toDefine("AMD_BARRIER_NO_WAIT", 1); }
   }
   if (isNvidiaGpu(id)) { defines += toDefine("NVIDIAGPU", 1); }
+  const char* warp_exchange = std::getenv("AEVUM_RTX_WARP_EXCHANGE");
+  if (isNvidiaGpu(id) && warp_exchange && std::strcmp(warp_exchange, "1") == 0)
+    defines += toDefine("AEVUM_RTX_WARP_EXCHANGE", 1);
   if (isNvidiaGpu(id)) { defines += toDefine("CC", getNvidiaComputeCapability(id)); }
 
   if ((fft.carry == CARRY_AUTO && fft.shape.needsLargeCarry(E)) || (fft.carry == CARRY_64)) {
