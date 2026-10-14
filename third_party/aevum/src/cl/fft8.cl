@@ -91,6 +91,32 @@ void OVERLOAD fft8(F2 *u) {
   SWAP(u[3], u[6]);
 }
 
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+// Caller applied the first (i,i+4) add/sub, with high weights fused by FMA.
+void OVERLOAD fft8_skip1(F2 *u) {
+  u[5] = mul_t8_delayed(u[5]);
+  u[6] = mul_t4(u[6]);
+  u[7] = mul_3t8_delayed(u[7]);
+  X2(u[0], u[2]);
+  X2(u[1], u[3]); u[3] = mul_t4(u[3]);
+  X2(u[0], u[1]);
+  X2(u[2], u[3]);
+  fft4CoreSpecial(u + 4);
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+
+void aevumFP32WeightButterfly(F2 *u, F2 *highWeights) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    F2 low = u[i];
+    F2 high = u[i + 4];
+    u[i] = fma(highWeights[i], high, low);
+    u[i + 4] = fma(-highWeights[i], high, low);
+  }
+}
+#endif
+
 #endif
 
 
