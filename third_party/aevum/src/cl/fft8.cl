@@ -269,6 +269,52 @@ void OVERLOAD fft8_16b(F2 *u) {
 
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
+
+#if AEVUM_GF31_RADIX16_INTERLEAVE
+// Derived from gwoltman/gpuowl 43003a780e04ac79fae6ead3aabf7032cf682bc1,
+// src/cl/fft8.cl GF31 fft8_16b: w7/w9 signs are folded into butterflies.
+// Caller has already performed the first pair butterfly during LDS reads.
+void aevumFinishRadix16GF31(GF31 *u, u32 upper) {
+  if (!upper) {
+    X2(u[0], u[2]); X2_mul_t4(u[1], u[3]);
+    X2(u[0], u[1]); X2(u[2], u[3]);
+    X2(u[4], u[6]); X2_mul_t4(u[5], u[7]);
+    X2(u[4], u[5]); X2(u[6], u[7]);
+    SWAP(u[1], u[4]); SWAP(u[3], u[6]);
+    return;
+  }
+  const Z31 C1 = 1556715293, S1 = 978592373;
+  const Z31 negC1 = M31 - C1, negS1 = M31 - S1;
+  // cmul_const's products fit in 62 bits (a cheaper modM31) only for w^7 = (-C1, S1) and w^9 = (-C1, -S1).  So the twiddles are taken as
+  // w = -w^9 and w^3 = -i * w^7, and the -1 and -i folded into each fft4's first-stage add/sub.
+
+  // First half: u1*w = -m1 and u3*w^3 = (m3.y, -m3.x) make fft4's first stage u1 + u3 = (p, -q) and i*(u1 - u3) = (r, -s).
+  GF31 m1 = cmul_const(u[1], U2(negC1, negS1));
+  u[2] = mul_t8(u[2]);
+  GF31 m3 = cmul_const(u[3], U2(negC1, S1));
+  X2(u[0], u[2]);
+  Z31 p = sub(m3.y, m1.x), q = add(m1.y, m3.x), r = sub(m1.y, m3.x), s = add(m1.x, m3.y);
+  u[1] = U2(sub(u[0].x, p), add(u[0].y, q));
+  u[0] = U2(add(u[0].x, p), sub(u[0].y, q));
+  u[3] = U2(sub(u[2].x, r), add(u[2].y, s));
+  u[2] = U2(add(u[2].x, r), sub(u[2].y, s));
+
+  // Second half: u5*w^3 = (m5.y, -m5.x) and u7*w^9 = m7 make fft4's first stage u5 + u7 = (m5.y + m7.x, m7.y - m5.x) and
+  // i*(u5 - u7) = (m5.x + m7.y, m5.y - m7.x).
+  GF31 m5 = cmul_const(u[5], U2(negC1, S1));
+  u[6] = mul_3t8(u[6]);
+  GF31 m7 = cmul_const(u[7], U2(negC1, negS1));
+  X2(u[4], u[6]);
+  u[5] = U2(add(m5.y, m7.x), sub(m7.y, m5.x));
+  u[7] = U2(add(m5.x, m7.y), sub(m5.y, m7.x));
+  X2(u[4], u[5]);
+  X2(u[6], u[7]);
+
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+#endif
+
 void OVERLOAD fft8_16a(GF31 *u) {
   fft8(u);
 }
