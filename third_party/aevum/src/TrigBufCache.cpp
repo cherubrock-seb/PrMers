@@ -1,6 +1,7 @@
 // Copyright Mihai Preda
 
 #include <cstring>
+#include <stdexcept>
 #include "TrigBufCache.h"
 
 #define SAVE_ONE_MORE_WIDTH_MUL  0      // I want to make saving the only option -- but rocm optimizer is inexplicably making it slower in carryfused
@@ -831,7 +832,7 @@ vector<ulong2> genSmallTrigComboGF61(u32 tail_trigs, u32 width, u32 middle, u32 
   return tab;
 }
 
-vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width, bool direct_base_table) {
+vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width, bool direct_base_table, bool pair_table) {
   vector<ulong2> tab;
   { // MIDDLE=1 still needs width and width*height roots for middleMul2.
     GF61 root1hm = GF61::root_one(smallH * middle);
@@ -851,6 +852,26 @@ vector<ulong2> genMiddleTrigGF61(u32 smallH, u32 middle, u32 width, bool direct_
           tab.push_back(root1GF61(root1wmh, x * y));
         }
       }
+    }
+    if (pair_table) {
+      // Four low-half factors; the high-half ratio w^4 is independent of y.
+      const size_t start = tab.size();
+      tab.resize(start + size_t(4) * width * smallH + width);
+      for (u32 k = 0; k < 4; ++k) {
+        const GF61 row0 = root1wmh.pow(size_t(k) * smallH);
+        for (u32 y = 0; y < smallH; ++y) {
+          const GF61 rowStep = row0.mul(root1wmh.pow(y));
+          GF61 value(1u, 0u);
+          for (u32 x = 0; x < width; ++x) {
+            tab[start + size_t(k) * width * smallH + size_t(y) * width + x] =
+                {value.s0().get(), value.s1().get()};
+            value = value.mul(rowStep);
+          }
+        }
+      }
+      for (u32 x = 0; x < width; ++x)
+        tab[start + size_t(4) * width * smallH + x] =
+            root1GF61(root1mw, 4u * x);
     }
   }
   return tab;
@@ -939,7 +960,7 @@ vector<double2> genSmallTrigCombo(Args *args, FFTConfig fft, const vector<KeyVal
   return tab;
 }
 
-vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width, bool gf61_direct_base_table) {
+vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width, bool gf61_direct_base_table, bool gf61_pair_table) {
   vector<double2> tab;
   u32 tabsize;
 
@@ -973,9 +994,10 @@ vector<double2> genMiddleTrig(FFTConfig fft, u32 smallH, u32 middle, u32 width, 
 
   if (fft.NTT_GF61) {
     vector<ulong2> tab3 = genMiddleTrigGF61(
-        smallH, fft.isPfa() ? 1u : middle, width, gf61_direct_base_table);
+        smallH, fft.isPfa() ? 1u : middle, width, gf61_direct_base_table, gf61_pair_table);
     const size_t gf61_size = MIDDLETRIG_GF61_SIZE(width, middle, smallH) +
-        (gf61_direct_base_table ? size_t(width) * size_t(smallH) : 0u);
+        (gf61_direct_base_table ? size_t(width) * size_t(smallH) : 0u) +
+        (gf61_pair_table ? size_t(4) * width * smallH + width : 0u);
     tab3.resize(gf61_size);
     // Append tab3 to tab
     tabsize = tab.size();
@@ -1055,17 +1077,24 @@ TrigPtr TrigBufCache::smallTrigCombo(Args *args, FFTConfig fft, const vector<Key
 TrigPtr TrigBufCache::middleTrig(Args *args, FFTConfig fft, const vector<KeyVal>& extraConf, u32 SMALL_H, u32 MIDDLE, u32 width) {
   lock_guard lock{mut};
   auto& m = middle;
-  const bool gf61_direct_base_table =
+  const u32 pair_table = args->valueFor("AEVUM_GF61_MIDDLE_PAIR_TABLE", 0, fft.shape.spec(), extraConf);
+  if (pair_table > 1) throw std::invalid_argument("AEVUM_GF61_MIDDLE_PAIR_TABLE must be 0 or 1");
+  if (pair_table && (!fft.NTT_GF61 || fft.isPfa() || width != 512 ||
+                     SMALL_H != 512 || MIDDLE != 8))
+    throw std::invalid_argument("AEVUM_GF61_MIDDLE_PAIR_TABLE requires non-PFA GF61 512:8:512");
+  const bool gf61_pair_table = pair_table == 1;
+  const bool gf61_direct_base_table = gf61_pair_table ||
       args->valueFor("AEVUM_GF61_MIDDLE_BASE_TABLE", 0, fft.shape.spec(), extraConf) != 0;
   u32 key_part = make_key_part(fft.FFT_FP64, 0, fft.NTT_GF31, 0, fft.FFT_FP32, 0, fft.NTT_GF61, 0, 0);
-  key_part = key_part * 2u + (gf61_direct_base_table ? 1u : 0u);
+  key_part = key_part * 4u + (gf61_direct_base_table ? 1u : 0u) +
+      (gf61_pair_table ? 2u : 0u);
   decay_t<decltype(m)>::key_type key{SMALL_H, MIDDLE, width, key_part};
 
   TrigPtr p{};
   auto it = m.find(key);
   if (it == m.end() || !(p = it->second.lock())) {
     p = make_shared<TrigBuf>(context, genMiddleTrig(
-        fft, SMALL_H, MIDDLE, width, gf61_direct_base_table));
+        fft, SMALL_H, MIDDLE, width, gf61_direct_base_table, gf61_pair_table));
     m[key] = p;
     middleCache.add(p);
   }
