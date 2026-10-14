@@ -3,6 +3,24 @@
 #include "fft4.cl"
 #include "fft8.cl"
 
+// Opt-in native wave64 radix8 register transpose. Capability fallback retains LDS.
+#ifndef AEVUM_AMD_WAVE64_TRANSPOSE
+#define AEVUM_AMD_WAVE64_TRANSPOSE 0
+#endif
+#if AEVUM_AMD_WAVE64_TRANSPOSE != 0 && AEVUM_AMD_WAVE64_TRANSPOSE != 1
+#error AEVUM_AMD_WAVE64_TRANSPOSE must be 0 or 1
+#endif
+#undef AEVUM_WAVE64_TRANSPOSE_ACTIVE
+#if AEVUM_AMD_WAVE64_TRANSPOSE && AMDGPU && !CUDA_BACKEND && WAVEFRONT == 64 && WG == 64 && RADIX == 8
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_ds_bpermute)
+#define AEVUM_WAVE64_TRANSPOSE_ACTIVE 1
+#endif
+#endif
+#ifndef AEVUM_WAVE64_TRANSPOSE_ACTIVE
+#define AEVUM_WAVE64_TRANSPOSE_ACTIVE 0
+#endif
+
+
 // Calculate the LDS bytes used by shufl
 #if LDSPAD && SHUFL_BYTES == 16 && RADIX == 8
 #define LDS_BYTES     ((WG * RADIX + 7) * SHUFL_BYTES)
@@ -30,6 +48,34 @@
 // only bar(WG) required before next use.  ALSO NOTE: the first shufl call does not need to do bar(WG).  A relatively
 // minor optimization would be to special case the first shufl call.
 void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_WAVE64_TRANSPOSE_ACTIVE
+  if (f == 8) {
+    // Stock mapping: out[i,lane] = in[lane/8, i*8 + lane%8].
+    // Swap each of the three register-index bits with lane bits 3..5.
+    // Each stage snapshots all slots before replacing any of them.
+#pragma unroll
+    for (u32 bit = 1; bit <= 4; bit <<= 1) {
+      uint4 exchanged[RADIX];
+      u32 source_lane = lowMe ^ (bit * 8);
+#pragma unroll
+      for (u32 i = 0; i < RADIX; ++i) {
+        uint4 donor = as_uint4(u[i ^ bit]);
+        uint4 received;
+        received.s0 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s0);
+        received.s1 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s1);
+        received.s2 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s2);
+        received.s3 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s3);
+        exchanged[i] = ((lowMe / 8) ^ i) & bit
+                     ? received : as_uint4(u[i]);
+      }
+#pragma unroll
+      for (u32 i = 0; i < RADIX; ++i) u[i] = as_double2(exchanged[i]);
+    }
+    return;
+  }
+#endif
+
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
@@ -383,6 +429,32 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs using two 4-byte floats.
 void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
+
+#if AEVUM_WAVE64_TRANSPOSE_ACTIVE
+  if (f == 8) {
+    // Stock mapping: out[i,lane] = in[lane/8, i*8 + lane%8].
+    // Swap each of the three register-index bits with lane bits 3..5.
+    // Each stage snapshots all slots before replacing any of them.
+#pragma unroll
+    for (u32 bit = 1; bit <= 4; bit <<= 1) {
+      uint2 exchanged[RADIX];
+      u32 source_lane = lowMe ^ (bit * 8);
+#pragma unroll
+      for (u32 i = 0; i < RADIX; ++i) {
+        uint2 donor = as_uint2(u[i ^ bit]);
+        uint2 received;
+        received.s0 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s0);
+        received.s1 = __builtin_amdgcn_ds_bpermute(source_lane * 4, donor.s1);
+        exchanged[i] = ((lowMe / 8) ^ i) & bit
+                     ? received : as_uint2(u[i]);
+      }
+#pragma unroll
+      for (u32 i = 0; i < RADIX; ++i) u[i] = as_float2(exchanged[i]);
+    }
+    return;
+  }
+#endif
+
 
   u32 mask = f - 1;
   assert((mask & (mask + 1)) == 0);
