@@ -530,6 +530,9 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (isAmdCdna2Plus(id)) { defines += toDefine("AMD_BARRIER_NO_WAIT", 1); }
   }
   const char* gf31_radix16 = std::getenv("AEVUM_GF31_RADIX16_INTERLEAVE");
+  if (gf31_radix16 && std::strcmp(gf31_radix16, "0") != 0 &&
+      std::strcmp(gf31_radix16, "1") != 0)
+    throw std::runtime_error("AEVUM_GF31_RADIX16_INTERLEAVE must be 0 or 1");
   if (gf31_radix16 && std::strcmp(gf31_radix16, "1") == 0)
     defines += toDefine("AEVUM_GF31_RADIX16_INTERLEAVE", 1);
   if (isNvidiaGpu(id)) { defines += toDefine("NVIDIAGPU", 1); }
