@@ -529,6 +529,15 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     // a "back-off" barrier that does not wait for LDS, same as RDNA.
     if (isAmdCdna2Plus(id)) { defines += toDefine("AMD_BARRIER_NO_WAIT", 1); }
   }
+  const char* rtx512_exchange = std::getenv("AEVUM_RTX_512_HYBRID_EXCHANGE");
+  if (rtx512_exchange && std::strcmp(rtx512_exchange, "0") != 0 &&
+      std::strcmp(rtx512_exchange, "1") != 0)
+    throw std::runtime_error("AEVUM_RTX_512_HYBRID_EXCHANGE must be 0 or 1");
+  if (rtx512_exchange && std::strcmp(rtx512_exchange, "1") == 0) {
+    if (!isNvidiaGpu(id))
+      throw std::runtime_error("AEVUM_RTX_512_HYBRID_EXCHANGE requires NVIDIA");
+    defines += toDefine("AEVUM_RTX_512_HYBRID_EXCHANGE", 1);
+  }
   if (isNvidiaGpu(id)) { defines += toDefine("NVIDIAGPU", 1); }
   if (isNvidiaGpu(id)) { defines += toDefine("CC", getNvidiaComputeCapability(id)); }
 
