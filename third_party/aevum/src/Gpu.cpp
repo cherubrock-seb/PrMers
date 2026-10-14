@@ -287,6 +287,16 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_AMD_REVERSELINE_PERMUTE")) {
+    const auto it = config.find("AEVUM_AMD_REVERSELINE_PERMUTE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_AMD_REVERSELINE_PERMUTE selections");
+    config["AEVUM_AMD_REVERSELINE_PERMUTE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_AMD_REVERSELINE_PERMUTE");
+      it != config.end() && it->second != "0" && it->second != "1")
+    throw std::runtime_error("AEVUM_AMD_REVERSELINE_PERMUTE must be 0 or 1");
+
   if (const char* value = std::getenv("AEVUM_PFA_FUSED_INVERSE")) {
     const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
     if (it != config.end() && it->second != value)
