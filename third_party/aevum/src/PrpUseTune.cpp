@@ -41,9 +41,14 @@ std::vector<KeyVal> parse(const std::string& text) {
   std::map<std::string,std::string> values;
   for(auto [k,v]:Args::splitUses(text)) {
     if(!aevumUseKey(k))throw std::runtime_error("unrecognized AEVUM_PRP_USE key: "+k);
+    if (aevumRegisterUseKey(k) && v == "-1") {
+      values.emplace(k, v);
+      continue;
+    }
     if(v.empty() || v.find_first_not_of("0123456789")!=std::string::npos || v.size()>9)
       throw std::runtime_error("AEVUM_PRP_USE requires unsigned integer values: "+k);
     auto n=std::stoul(v);
+    if (aevumRegisterUseKey(k) && n > 255) throw std::runtime_error("CUDA register limit must be -1 or 0..255: "+k);
     if((k=="INPLACE" && n>2) || (k=="MODM31" && n>3) ||
        ((k.rfind("TABMUL_CHAIN",0)==0 || k.rfind("ZEROHACK_",0)==0) && n>1))
       throw std::runtime_error("unsupported AEVUM_PRP_USE value: "+k);
@@ -104,7 +109,7 @@ aevum_autotune::Mode mode() {
 std::string key(const std::string& identity,const std::string& shape,uint32_t p,const std::string& flags) {
   // Exact exponent is deliberate extra protection inside the required band:
   // a near-capacity Type4 result cannot bleed into another workload/band edge.
-  return "prp-use-v4|"+identity+"|shape="+shape+"|p="+std::to_string(p)+"|use-flags="+flags;
+  return "prp-use-v4|register-profiles="+std::string(std::getenv("AEVUM_REGISTER_PROFILES") ? std::getenv("AEVUM_REGISTER_PROFILES") : "0")+"|"+identity+"|shape="+shape+"|p="+std::to_string(p)+"|use-flags="+flags;
 }
 std::filesystem::path path(const std::string& key) {
   uint64_t h=14695981039346656037ULL;for(unsigned char c:key){h^=c;h*=1099511628211ULL;}
