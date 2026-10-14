@@ -1704,7 +1704,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   local F2 *ldsF2 = (local F2 *) lds61;
 
   F2 uF2[NW];
+#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8
+  // Equal-sized elements make every inverse conversion an in-place slot
+  // replacement. Forward reconstruction also reads and replaces one slot.
+  // Never enable this alias for WordSize=4: the array strides differ.
+  union { GF61 modular[NW]; Word2 integer[NW]; } carry_values;
+#define u61 carry_values.modular
+#define wu carry_values.integer
+#else
   GF61 u61[NW];
+#endif
 
   u32 gr = get_group_id(0);
   u32 me = get_local_id(0);
@@ -1743,7 +1752,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   readCarryFusedLine(in61, u61, line, lowMe);
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
 
+#if !(AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8)
   Word2 wu[NW];
+#endif
   u32 me_frac_bits = fracBits(lowMe * H * 2);
 #if !NVIDIAGPU || CUDA_BACKEND
   F2 weights = fancyMul(TFLOAD(&THREAD_WEIGHTS[lowMe]), TSLOAD(&THREAD_WEIGHTS[G_W + line]));
@@ -1995,6 +2006,10 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   fft_WIDTH2(lds61, u61, smallTrig61, WMUL, lowMe);
   writeCarryFusedLine(u61, out61, line, lowMe);
+#if AEVUM_CARRY_SPLIT_FORWARD && WordSize == 8
+#undef u61
+#undef wu
+#endif
 }
 
 
