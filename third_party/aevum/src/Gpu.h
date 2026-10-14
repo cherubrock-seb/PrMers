@@ -123,6 +123,7 @@ private:
 
   /* Kernels for FFT_FP64 or FFT_FP32 */
   bool prpMiddle1 = false;
+  bool preparedHeightReuse = false; // Explicit register-engine MUL_LOW experiment.
   Kernel kprpMiddle1, kprpMiddle1GF31, kprpMiddle1GF61;
   Kernel kfftMidIn;
   Kernel kfftHin;
