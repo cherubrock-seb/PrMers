@@ -1,6 +1,31 @@
 // Copyright (C) Mihai Preda
 
 #if FFT_FP64
+#ifndef AEVUM_FP64_FFT16_SPLIT8
+#define AEVUM_FP64_FFT16_SPLIT8 0
+#endif
+#if AEVUM_FP64_FFT16_SPLIT8 != 0 && AEVUM_FP64_FFT16_SPLIT8 != 1
+#error AEVUM_FP64_FFT16_SPLIT8 must be 0 or 1
+#endif
+#if AEVUM_FP64_FFT16_SPLIT8
+#include "fft8.cl"
+// GPUOwl 62abe816230204b5f02ac81956cc82e960cf7691: radix2, the
+// existing even/odd radix16 tails, then natural-order interleave.
+void OVERLOAD fft16(T2 *u) {
+#pragma unroll
+  for (u32 i = 0; i < 8; ++i) X2(u[i], u[i + 8]);
+  fft8_16a(u);
+  fft8_16b(u + 8);
+  T2 t[16];
+#pragma unroll
+  for (u32 k = 0; k < 8; ++k) {
+    t[2 * k] = u[k]; t[2 * k + 1] = u[k + 8];
+  }
+#pragma unroll
+  for (u32 k = 0; k < 16; ++k) u[k] = t[k];
+}
+#else
+
 
 #if 0
 
@@ -153,6 +178,8 @@ void OVERLOAD fft16(T2 *u) {
 }
 
 #endif
+
+#endif // AEVUM_FP64_FFT16_SPLIT8
 
 #endif
 
