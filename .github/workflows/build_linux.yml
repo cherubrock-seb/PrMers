@@ -43,6 +43,7 @@ jobs:
           make test-aevum-host
           make test-aevum-auto
           make test-aevum-default
+          make test-aevum-device-map
           make test-gui-state
           make test-proof-marin
           make test-bench2-source

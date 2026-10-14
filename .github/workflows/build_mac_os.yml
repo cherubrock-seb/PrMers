@@ -265,6 +265,7 @@ jobs:
           set -euo pipefail
           make test-gm
           make test-aevum-host MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
+          make test-aevum-device-map MACOSX_DEPLOYMENT_TARGET="$MACOSX_DEPLOYMENT_TARGET"
           make test-bench2-source
           make test-bench3-source
           make test-aevum-source
