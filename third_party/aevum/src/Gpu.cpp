@@ -1612,6 +1612,20 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   prpMiddle1 = false;
 #endif
   if (prpMiddle1) log("AEVUM_PRP_PATH middle1 fused input+tail+output; LL unchanged\n");
+  if (const char* value = std::getenv("AEVUM_PREPARED_HEIGHT_REUSE")) {
+    if (std::strcmp(value, "0") != 0 && std::strcmp(value, "1") != 0)
+      throw std::invalid_argument("AEVUM_PREPARED_HEIGHT_REUSE must be 0 or 1");
+    preparedHeightReuse = std::strcmp(value, "1") == 0;
+  }
+#if defined(__APPLE__)
+  if (preparedHeightReuse)
+    throw std::invalid_argument("AEVUM_PREPARED_HEIGHT_REUSE is a non-Apple experiment");
+#endif
+  if (preparedHeightReuse && (fft.isPfa() ||
+      (fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261)))
+    throw std::invalid_argument("AEVUM_PREPARED_HEIGHT_REUSE requires non-PFA Type1 or Type2");
+  if (preparedHeightReuse)
+    log("Aevum prepared height reuse: ON (MUL_LOW operand layout).\n");
   queue.finish();
 }
 
@@ -2701,7 +2715,8 @@ void Gpu::regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool l
   // residue representation visible at API boundaries.
   if (!lead_in) fftP(buf1, dst);
   fftMidIn(buf1);
-  tailMul(buf1, prepared);
+  if (preparedHeightReuse) tailMulLow(buf1, prepared);
+  else tailMul(buf1, prepared);
   fftMidOut(buf1);
 
   if (mulRoePos.empty() || mulRoePos.back() < roePos) mulRoePos.push_back(roePos);
@@ -2749,6 +2764,14 @@ void Gpu::regSquare(Buffer<Word>& io, u32 factor) {
 }
 
 void Gpu::regPrepare(Buffer<Word>& src) {
+  if (preparedHeightReuse) {
+    fftP(buf1, src);
+    fftMidIn(buf1);
+    // Distinct buffers: fftHin changes the layout globally.
+    fftHin(buf2, buf1);
+    replay();
+    return;
+  }
 #if defined(__APPLE__)
   // Preserve the exact FFT3161 arithmetic while avoiding the Apple-only
   // staged generic tailMulGF61 path.  The prepared multiplicand is advanced
@@ -2765,6 +2788,15 @@ void Gpu::regPrepare(Buffer<Word>& src) {
 }
 
 void Gpu::regPrepare(Buffer<double>& prepared, Buffer<Word>& src) {
+  if (preparedHeightReuse) {
+    if (&prepared == &buf1)
+      throw std::invalid_argument("prepared height output must differ from scratch");
+    fftP(buf1, src);
+    fftMidIn(buf1);
+    fftHin(prepared, buf1);
+    replay();
+    return;
+  }
 #if defined(__APPLE__)
   fftP(buf1, src);
   fftMidIn(buf1);
@@ -2777,6 +2809,11 @@ void Gpu::regPrepare(Buffer<double>& prepared, Buffer<Word>& src) {
 }
 
 void Gpu::regMulPrepared(Buffer<Word>& dst, u32 factor) {
+  if (preparedHeightReuse) {
+    if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
+    regMulPreparedStep(dst, buf2, false, false);
+    return;
+  }
   if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
 #if defined(__APPLE__)
   fftP(buf1, dst);
@@ -2793,6 +2830,11 @@ void Gpu::regMulPrepared(Buffer<Word>& dst, u32 factor) {
 }
 
 void Gpu::regMulPrepared(Buffer<Word>& dst, Buffer<double>& prepared, u32 factor) {
+  if (preparedHeightReuse) {
+    if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
+    regMulPreparedStep(dst, prepared, false, false);
+    return;
+  }
   if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
 #if defined(__APPLE__)
   fftP(buf1, dst);
