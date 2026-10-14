@@ -166,6 +166,20 @@ void OVERLOAD fft16(T2 *u) {
 #include "fft8.cl"
 
 void OVERLOAD fft16(F2 *u) {
+#if AEVUM_FP32_RADIX16_SPLIT
+  // Radix-2 produces sums and differences. Existing 1K split-radix helpers
+  // apply the remaining rotations inside their butterflies, then interleave
+  // natural-order even/odd outputs. No GF31/GF61 schedule is changed.
+  for (u32 i = 0; i < 8; ++i) X2(u[i], u[i + 8]);
+  fft8_16a(u);
+  fft8_16b(u + 8);
+  F2 t[16];
+  for (u32 k = 0; k < 8; ++k) {
+    t[2 * k] = u[k];
+    t[2 * k + 1] = u[k + 8];
+  }
+  for (u32 k = 0; k < 16; ++k) u[k] = t[k];
+#else
   float
       C1 = 0.92387953251128674, // cos(tau/16)
       S1 = 0.38268343236508978; // sin(tau/16)
@@ -191,6 +205,7 @@ void OVERLOAD fft16(F2 *u) {
   SWAP(u[5], u[10]);
   SWAP(u[7], u[14]);
   SWAP(u[11], u[13]);
+#endif
 }
 
 #endif
