@@ -297,6 +297,20 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       it != config.end() && it->second != "0" && it->second != "1")
     throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE must be 0 or 1");
 
+
+  if (const char* value = std::getenv("AEVUM_FP64_FFT16_SPLIT8")) {
+    const auto it = config.find("AEVUM_FP64_FFT16_SPLIT8");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_FP64_FFT16_SPLIT8 selections");
+    config["AEVUM_FP64_FFT16_SPLIT8"] = value;
+  }
+  if (const auto it = config.find("AEVUM_FP64_FFT16_SPLIT8"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_FP64_FFT16_SPLIT8 must be 0 or 1");
+    if (it->second == "1" && (!fft.FFT_FP64 || fft.isPfa() || fft.shape.middle != 16))
+      throw std::runtime_error("AEVUM_FP64_FFT16_SPLIT8 requires a non-PFA FP64 MIDDLE16 plan");
+  }
+
   bool pfa3_fused_gfx906_default = false;
   if (!config.count("AEVUM_PFA_FUSED_INVERSE") &&
       fft.isPfa() && fft.pfa_radix == 3 && fft.shape.middle == 3 &&
