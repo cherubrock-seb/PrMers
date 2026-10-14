@@ -973,12 +973,20 @@ KERNEL(G_H * 2) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
 #if NTT_GF61
 
+#ifndef AEVUM_GF61_BETTER_ONEPAIRSQ
+#define AEVUM_GF61_BETTER_ONEPAIRSQ 0
+#endif
+#if AEVUM_GF61_BETTER_ONEPAIRSQ != 0 && AEVUM_GF61_BETTER_ONEPAIRSQ != 1
+#error AEVUM_GF61_BETTER_ONEPAIRSQ must be 0 or 1
+#endif
+
 void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_type) {
   GF61 a = *pa, b = *pb;
   GF61 a2, b2, b2t2, ab, addin, c, d;
 
-// This code should be faster (saves at least one wide mul) but the CUDA compiler makes poorer decisions regarding register usage resulting in local memory usage
-#if ENABLE_BETTER_ONEPAIRSQ
+// Saves one wide multiply. Keep opt-in because compiler register decisions
+// are device-sensitive; production policy enables it only on validated gfx906.
+#if AEVUM_GF61_BETTER_ONEPAIRSQ
   X2qconjb(&a, &b);                             // X2(a, conjugate(b)).  a.x range is 0..2+, a.y range is -1-..1+, b.x range is -1-..1+, b.y range is 0..2+
   a.y += 2*M61;					// a range is  0..2+ / 1-..3+
   b.x += 2*M61;					// b range is 1-..3+ / 0..2+
