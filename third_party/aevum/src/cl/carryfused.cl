@@ -1699,6 +1699,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   local F2 *ldsF2 = (local F2 *) lds61;
 
   F2 uF2[NW];
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+  F2 highForwardWeights[NW / 2];
+#endif
   GF61 u61[NW];
 
   u32 gr = get_group_id(0);
@@ -1954,7 +1957,17 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+    if (i < NW / 2) {
+      uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+    } else {
+      // Keep high digits unweighted until their paired first butterfly.
+      uF2[i] = U2((F) wu[i].x, (F) wu[i].y);
+      highForwardWeights[i - NW / 2] = U2(weight1, weight2);
+    }
+#else
     uF2[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+#endif
     u61[i] = U2(shl(make_Z61(wu[i].x), weight_shift0), shl(make_Z61(wu[i].y), weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
@@ -1962,6 +1975,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     if (weight_shift > 61) weight_shift -= 61;
   }
 
+#if AEVUM_FP32_WEIGHT_BUTTERFLY_ACTIVE
+  aevumFP32WeightButterfly(uF2, highForwardWeights);
+#endif
   fft_WIDTH2(ldsF2, uF2, smallTrigF2, WMUL, lowMe);
   if (gr == H / WMUL) { waitLinesRead(ready); }
   writeCarryFusedLine(uF2, outF2, line, lowMe);
