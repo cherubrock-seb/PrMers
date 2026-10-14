@@ -125,6 +125,9 @@ for B2 in 1000000 4000000 16000000; do
   [[ ! -e "$dir/pm1_m_9941.ckpt" ]] || fail "run 3 left the stage-1 checkpoint"
   n="$(grep -c "\"b2\":$B2" "$dir/results.txt" || true)"
   [[ "$n" == 1 ]] || fail "expected one stage-2 result line, found $n"
+  # The resumed runs must not append the stage-1 result line again.
+  n="$(grep -c . "$dir/results.txt" || true)"
+  [[ "$n" == 2 ]] || fail "expected 2 result lines (stage 1, stage 2) after three runs, found $n"
   echo "M9941 B2=$B2: interrupted at terms $a_terms and $b_terms of $terms, resumed GCD input $got matches"
   found="$B2"
   break
@@ -282,6 +285,8 @@ EOF
     grep -aq "P-1 factor stage 2 found: $FACTOR" "$d/rerun.log" || fail "kill case: the rerun missed the factor"
     n="$(grep -c "\"factors\":\[\"$FACTOR\"\]" "$d/results.txt" || true)"
     [[ "$n" == 1 ]] || fail "kill case: expected the factor line once in results.txt, found $n"
+    n="$(grep -c . "$d/results.txt" || true)"
+    [[ "$n" == 2 ]] || fail "kill case: expected 2 result lines (stage 1, stage 2), found $n"
     if grep -q '^Pminus1=1,2,677,' "$d/worktodo.txt" 2>/dev/null; then fail "kill case: the entry was not retired"; fi
     [[ -z "$(s2_files "$d")" ]] || fail "kill case: stage-2 checkpoint files left: $(s2_files "$d")"
     echo "kill case: factor recorded once after the rerun, entry retired, checkpoint removed"

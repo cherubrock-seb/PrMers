@@ -169,9 +169,13 @@ static const char* pm1_checkpoint_backend_name(const engine* eng) {
 // The sidecar records the backend on its first line.  Stage-1 checkpoints
 // also record the bounds they were built for ("b1=" and "maxe=" lines), so a
 // run with a different B1 or -maxe never resumes a state computed for another
-// exponent E.  Older sidecars have only the backend line.
+// exponent E.  Older sidecars have only the backend line.  The finished stage-1
+// checkpoint written before stage 2 also records ("s1result=saved") that the
+// stage-1 result line is already in results.txt, so a run that resumes stage 2
+// from it does not append that line a second time.
 static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng,
-                                         uint64_t b1 = 0, uint64_t max_e_bits = 0) {
+                                         uint64_t b1 = 0, uint64_t max_e_bits = 0,
+                                         bool stage1_result_saved = false) {
     const std::string path = pm1_checkpoint_backend_sidecar(checkpoint_file);
     const std::string temp = path + ".new";
     {
@@ -180,6 +184,7 @@ static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, con
         out << pm1_checkpoint_backend_name(eng) << '\n';
         if (b1) out << "b1=" << b1 << '\n';
         if (max_e_bits) out << "maxe=" << max_e_bits << '\n';
+        if (stage1_result_saved) out << "s1result=saved\n";
     }
     std::error_code ec;
     fs::rename(temp, path, ec);
@@ -202,6 +207,17 @@ static bool pm1_checkpoint_read_params(const std::string& checkpoint_file, uint6
         else if (line.rfind("maxe=", 0) == 0) { max_e_bits = std::strtoull(line.c_str() + 5, nullptr, 10); have_maxe = true; }
     }
     return have_b1 && have_maxe;
+}
+
+// True when the sidecar says the stage-1 result line of this checkpoint is
+// already in results.txt (see write_pm1_checkpoint_backend).
+static bool pm1_checkpoint_stage1_result_saved(const std::string& checkpoint_file) {
+    std::ifstream in(pm1_checkpoint_backend_sidecar(checkpoint_file));
+    std::string line;
+    while (in && std::getline(in, line)) {
+        if (line == "s1result=saved") return true;
+    }
+    return false;
 }
 
 static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
@@ -6907,11 +6923,16 @@ int App::runPM1Marin() {
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
     std::vector<char> ckpt_restore_data;
+    // Set right before the finished stage-1 checkpoint is written for stage 2
+    // when the stage-1 result line is in results.txt (recorded in the sidecar).
+    bool ckptStage1ResultSaved = false;
+    // A resumed stage 2 whose stage-1 result line was recorded by an earlier run.
+    bool stage1ResultAlreadyRecorded = false;
     auto save_ckpt = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
-        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
+        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS, ckptStage1ResultSaved);
     };
     auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
@@ -7827,6 +7848,7 @@ int App::runPM1Marin() {
         if (stage1AlreadyComplete) {
             std::cout << "[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2." << std::endl;
             if (guiServer_) guiServer_->appendLog("[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2.");
+            stage1ResultAlreadyRecorded = pm1_checkpoint_stage1_result_saved(ckpt_file);
         }
         while (!stage1AlreadyComplete) {
             bool errordone = false;
@@ -8185,7 +8207,12 @@ int App::runPM1Marin() {
     // is no stage-1 result to report, whether or not stage 2 follows; stage 2
     // reports its own result.  Do not record a "no factor" line.
     bool resultSaved = true;
-    if (!options.pm1_no_stage1_gcd) {
+    if (stage1ResultAlreadyRecorded && !options.pm1_no_stage1_gcd) {
+        // Resuming stage 2: the run that finished stage 1 recorded its result
+        // line before it wrote this checkpoint; appending it again would report
+        // the same stage 1 twice.
+        std::cout << "[PM1] Stage 1 result already recorded in results.txt by the run that finished Stage 1; not written again.\n";
+    } else if (!options.pm1_no_stage1_gcd) {
         options.B2 = 0;
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
@@ -8213,6 +8240,7 @@ int App::runPM1Marin() {
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
                 + restored_time;
 
+            ckptStage1ResultSaved = resultSaved && !options.pm1_no_stage1_gcd;
             save_ckpt(
                 0,                 // i
                 elapsed_time_ck,   // et
