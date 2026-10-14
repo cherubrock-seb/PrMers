@@ -1863,6 +1863,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     }
 
     buffers_ = gpu_->makeBufVector(static_cast<u32>(register_count_));
+    prepared_alias_reuse_enabled_ = envExactly("AEVUM_PREPARED_ALIAS_REUSE", "1");
     size_t prepared_count = std::min<size_t>(register_count_, 2);
     if (const char* value = std::getenv("AEVUM_PREPARED_CACHE")) {
       char* end = nullptr;
@@ -1971,7 +1972,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     check_reg(src);
     flush_pending_square();
     if (dst != src) {
+      const size_t source_slot = prepared_alias_reuse_enabled_ ? find_prepared(src, true) : no_prepared;
       invalidate_if(dst);
+      if (source_slot != no_prepared) prepared_slots_[source_slot].regs.push_back(dst);
       if (!timing_enabled_) {
         gpu_->regCopy(reg(dst), reg(src));
       } else {
@@ -1988,9 +1991,17 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     check_reg(dst);
     check_reg(src);
     flush_pending_square();
+    // A canonical copy preserves the mathematical operand. Share its immutable
+    // prepared transform instead of repeating fftP + fftMidIn or copying a
+    // transform-sized buffer. All arithmetic writers invalidate only their alias.
+    const size_t source_slot = prepared_alias_reuse_enabled_ ? find_prepared(src, true) : no_prepared;
     if (dst != src) {
       invalidate_if(dst);
       gpu_->regCopy(reg(dst), reg(src));
+    }
+    if (source_slot != no_prepared) {
+      if (dst != src) prepared_slots_[source_slot].regs.push_back(dst);
+      return;
     }
     if (prepared_buffers_.empty()) return;
     const size_t slot = acquire_prepared(dst);
@@ -2131,7 +2142,7 @@ private:
   enum class PendingKind { None, Square, PreparedMul };
 
   struct PreparedSlot {
-    size_t reg = no_prepared;
+    std::vector<size_t> regs;
     uint64_t stamp = 0;
   };
 
@@ -2173,7 +2184,8 @@ private:
 
   size_t find_prepared(size_t index, bool touch) {
     for (size_t i = 0; i < prepared_slots_.size(); ++i) {
-      if (prepared_slots_[i].reg == index) {
+      const auto& aliases = prepared_slots_[i].regs;
+      if (std::find(aliases.begin(), aliases.end(), index) != aliases.end()) {
         if (touch) prepared_slots_[i].stamp = ++prepared_clock_;
         return i;
       }
@@ -2186,17 +2198,18 @@ private:
     if (existing != no_prepared) return existing;
     size_t slot = no_prepared;
     for (size_t i = 0; i < prepared_slots_.size(); ++i) {
-      if (prepared_slots_[i].reg == no_prepared) { slot = i; break; }
+      if (prepared_slots_[i].regs.empty()) { slot = i; break; }
       if (slot == no_prepared || prepared_slots_[i].stamp < prepared_slots_[slot].stamp) slot = i;
     }
-    prepared_slots_[slot].reg = index;
+    prepared_slots_[slot].regs.assign(1, index);
     prepared_slots_[slot].stamp = ++prepared_clock_;
     return slot;
   }
 
   void invalidate_if(size_t index) {
     for (auto& slot : prepared_slots_) {
-      if (slot.reg == index) slot.reg = no_prepared;
+      auto& aliases = slot.regs;
+      aliases.erase(std::remove(aliases.begin(), aliases.end(), index), aliases.end());
     }
   }
 
@@ -2267,6 +2280,7 @@ private:
   bool pending_ll_ = false;
   bool lead_cache_enabled_ = false;
   bool prepared_mul_lead_enabled_ = false;
+  bool prepared_alias_reuse_enabled_ = false;
   PendingKind pending_kind_ = PendingKind::None;
   size_t pending_reg_ = no_prepared;
   size_t pending_prepared_slot_ = no_prepared;
