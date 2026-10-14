@@ -16,6 +16,7 @@
 #include "FFTConfig.h"
 
 #include <vector>
+#include <map>
 #include <memory>
 #include <filesystem>
 #include <cmath>
@@ -90,6 +91,7 @@ public:
   const Args& args;
 
 private:
+  std::map<std::string, int> registerProfile_;
   std::unique_ptr<Saver<PRPState>> saver;
 
   u64 E;

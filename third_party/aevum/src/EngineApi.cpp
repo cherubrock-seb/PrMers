@@ -17,6 +17,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "TuneEntry.h"
 #include "RuntimeAutotune.h"
 #include "PrpUseTune.h"
+#include "UseOptions.h"
 #include "common.h"
 #include "gpuid.h"
 #include "version.h"
@@ -651,15 +652,35 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   auto report=[&](const char* source,const std::string& profile,double gain=1) {
     if(verbose)log("AEVUM_PRP_USE source=%s shape=%s profile=%s gain=%.5f\n",source,fft.spec().c_str(),profile.empty()?"defaults":profile.c_str(),gain);
   };
+  std::vector<KeyVal> register_overlay;
   if(const char* manual=std::getenv("AEVUM_PRP_USE")) {
-    auto use=parse(manual); report("manual",normalize(use)); return use;
+    auto use=parse(manual);
+    const bool register_only = !use.empty() && std::all_of(
+        use.begin(), use.end(),
+        [](const KeyVal& kv) { return aevumRegisterUseKey(kv.first) || kv.first == "NOREG"; });
+    if (!register_only) {
+      report("manual",normalize(use));
+      return use;
+    }
+    register_overlay = std::move(use);
   }
+  auto finish = [&](const char* source, std::vector<KeyVal> use, double gain=1.0) {
+    for (const auto& kv : register_overlay) {
+      use.erase(std::remove_if(
+          use.begin(), use.end(),
+          [&](const KeyVal& x) { return x.first == kv.first; }),
+          use.end());
+      use.push_back(kv);
+    }
+    report(source,normalize(use),gain);
+    return use;
+  };
   // Issue #36: native tune entries may carry both a validated FFT shape and
   // validated -use policy. Preserve those flags exactly as a higher-priority
   // source; automatic tuning never overwrites a matching tune entry.
   for(const auto& entry:TuneEntry::readTuneFile(*shared.args)) {
     if(entry.fft.spec()==fft.spec() && !entry.use.empty() && entry.fft.maxExp()>=exponent) {
-      report("tune-entry",normalize(entry.use));return entry.use;
+      return finish("tune-entry",entry.use);
     }
   }
   if (fft.shape.fft_type == FFT3261) {
@@ -799,22 +820,22 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
         std::getenv("AEVUM_CARRY_WMUL") == nullptr) {
       use.emplace_back("WMUL", "4");
     }
-    report("type2-prp-auto", normalize(use));
-    return use;
+    return finish("type2-prp-auto", std::move(use));
   }
   const auto control=mode();
   bool manual_kernel=false;
   for(const char* name:{"AEVUM_PFA_USE","AEVUM_RADIX1K","AEVUM_TYPE4_MULTI_Q","AEVUM_CARRY_WMUL",
       "AEVUM_GF61_LIMB32","AEVUM_PRP_MIDDLE1","AEVUM_REG_LEAD_CACHE"})
     if(const char* value=std::getenv(name))if(*value)manual_kernel=true;
-  if(control==aevum_autotune::Mode::Off || manual_kernel || fft.isPfa()) {report("defaults/bypass","");return {};}
+  if(control==aevum_autotune::Mode::Off || manual_kernel || fft.isPfa())
+    return finish("defaults/bypass",{});
 
   std::string flags=normalize(existing);
   for(const auto& [k,v]:shared.args->flags)flags+=';'+k+'='+v;
   const auto cache_key=key(identity,fft.spec(),exponent,flags);
   if(control==aevum_autotune::Mode::Auto)if(auto r=load(cache_key)) {
     auto use=r->plan=="defaults"?std::vector<KeyVal>{}:parse(r->plan);
-    report("cache-hit",normalize(use),r->implementation_speedup);return use;
+    return finish("cache-hit",std::move(use),r->implementation_speedup);
   }
 
   const bool nvidia_asm=isNvidiaGpu(shared.context->deviceId()) && !shared.args->uses("NO_ASM");
@@ -1011,11 +1032,16 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
       state_name,progress.screened,progress.planned,full_planned,progress.finalized,progress.finalists,uint64_t(elapsed()),state.next_screen,state.next_finalist,winning_gain);
   try{persistDecision(cache_key,decision,winner,winning_gain,elapsed());}
   catch(...){if(verbose)log("AEVUM_PRP_USE cache-write-failed; using completed decision\n");}
-  report(decision==Decision::Deferred?"deferred":decision==Decision::Positive?"measured":"measured-defaults",winner,winning_gain);
+  const char* decision_source =
+      decision==Decision::Deferred ? "deferred" :
+      decision==Decision::Positive ? "measured" : "measured-defaults";
   // A deferred winner is not yet final: safe defaults remain active until all
   // shortlisted finalists have been compared and a completed-positive record
   // is atomically committed.
-  return decision==Decision::Positive?parse(winner):std::vector<KeyVal>{};
+  return finish(
+      decision_source,
+      decision==Decision::Positive ? parse(winner) : std::vector<KeyVal>{},
+      winning_gain);
 }
 
 #if defined(CUDA_BACKEND)
@@ -1387,6 +1413,7 @@ public:
             << ";safe=1;clean=1";
       if (workload_ == aevum_autotune::Workload::Prp)
         flags << ";shape-confirm=prp-square-v1";
+      if (const char* reg = std::getenv("AEVUM_REGISTER_PROFILES")) flags << ";register-profiles=" << reg;
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,
