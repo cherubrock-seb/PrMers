@@ -773,9 +773,13 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     if (gfx906_type2_prp_better_onepairsq1)
       use.emplace_back("AEVUM_GF61_BETTER_ONEPAIRSQ", "1");
 
-    if (!shared.args->uses("AEVUM_CARRY_WMUL") &&
+    // R220/R460: carry batching is a WMUL compiler/use option. The public
+    // AEVUM_CARRY_WMUL environment variable is translated to WMUL later in
+    // Runtime construction; AUTO must therefore emit WMUL directly rather
+    // than the environment-variable name.
+    if (!shared.args->uses("WMUL") &&
         std::getenv("AEVUM_CARRY_WMUL") == nullptr) {
-      use.emplace_back("AEVUM_CARRY_WMUL", "4");
+      use.emplace_back("WMUL", "4");
     }
     report("type2-prp-auto", normalize(use));
     return use;
