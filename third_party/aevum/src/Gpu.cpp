@@ -485,16 +485,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
-  // Register keys are host-side CUDA controls, not source specialization macros.
-  // Profiles are enabled by default; AEVUM_REGISTER_PROFILES=0 is the explicit
-  // kill switch. Strip register keys whenever the host-side profile path is
-  // active so they never perturb unrelated kernel source/cache identities.
-  if (const char* enabled = std::getenv("AEVUM_REGISTER_PROFILES");
-      !enabled || std::strcmp(enabled, "0") != 0) {
-    for (auto it = config.begin(); it != config.end();) {
-      if (aevumRegisterUseKey(it->first) || it->first == "NOREG") it = config.erase(it);
-      else ++it;
-    }
+  // Register keys are host-side CUDA controls, never source specialization
+  // macros. Strip them unconditionally so even AEVUM_REGISTER_PROFILES=0
+  // (the host-side kill switch) cannot perturb unrelated source/cache identity.
+  for (auto it = config.begin(); it != config.end();) {
+    if (aevumRegisterUseKey(it->first) || it->first == "NOREG") it = config.erase(it);
+    else ++it;
   }
   string defines = toDefine(config);
   if (doLog) { log("config: %s\n", defines.c_str()); }
