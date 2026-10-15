@@ -124,6 +124,10 @@ struct PointResult {
     std::vector<PlanResult> plans;
 };
 
+void write_plan_progress(const std::filesystem::path& path,
+                         const std::string& phase,
+                         double elapsed_s);
+
 std::string json_escape(const std::string& value) {
     std::ostringstream out;
     for (unsigned char c : value) {
@@ -368,7 +372,8 @@ PlanResult measure_plan(std::uint32_t exponent,
                         const std::string& request,
                         const std::string& resolved_plan,
                         const mpz_class* auto_residue,
-                        mpz_class* measured_residue) {
+                        mpz_class* measured_residue,
+                        const std::filesystem::path* progress_path = nullptr) {
     PlanResult r;
     const auto plan_begin = std::chrono::steady_clock::now();
     const auto progress = [&](const std::string& phase) {
@@ -382,6 +387,8 @@ PlanResult measure_plan(std::uint32_t exponent,
              << " plan=" << (resolved_plan.empty() ? "AUTO" : resolved_plan)
              << " elapsed_s=" << elapsed;
         std::cout << line.str() << std::endl;
+        if (progress_path)
+            write_plan_progress(*progress_path, phase, elapsed);
     };
 
     r.auto_baseline = auto_baseline;
@@ -548,6 +555,46 @@ std::filesystem::path plan_checkpoint_path(const std::filesystem::path& dir,
     std::ostringstream name;
     name << "plan_" << std::setw(2) << std::setfill('0') << index << ".state";
     return dir / name.str();
+}
+
+std::filesystem::path plan_progress_path(const std::filesystem::path& dir,
+                                         std::size_t index) {
+    std::ostringstream name;
+    name << "plan_" << std::setw(2) << std::setfill('0') << index << ".progress";
+    return dir / name.str();
+}
+
+void write_plan_progress(const std::filesystem::path& path,
+                         const std::string& phase,
+                         double elapsed_s) {
+    try {
+        std::filesystem::create_directories(path.parent_path());
+        auto tmp = path;
+        tmp += ".tmp";
+        {
+            std::ofstream out(tmp, std::ios::trunc);
+            if (!out) return;
+            out << std::quoted(phase) << ' '
+                << std::setprecision(17) << elapsed_s << '\n';
+            out.flush();
+            if (!out) return;
+        }
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        ec.clear();
+        std::filesystem::rename(tmp, path, ec);
+        if (ec) std::filesystem::remove(tmp, ec);
+    } catch (...) {
+        // Progress reporting must never make a benchmark fail.
+    }
+}
+
+bool read_plan_progress(const std::filesystem::path& path,
+                        std::string& phase,
+                        double& elapsed_s) {
+    std::ifstream in(path);
+    if (!in) return false;
+    return static_cast<bool>(in >> std::quoted(phase) >> elapsed_s);
 }
 
 void atomic_write_plan_checkpoint(const std::filesystem::path& path,
@@ -763,6 +810,39 @@ PlanWorkerProcessResult run_plan_worker_process(
         cfg, device_index, exponent, plan_index,
         request, resolved_plan, partial_dir);
     const auto started = std::chrono::steady_clock::now();
+    const auto progress_path = plan_progress_path(partial_dir, plan_index);
+    {
+        std::error_code ec;
+        std::filesystem::remove(progress_path, ec);
+    }
+    auto next_heartbeat = started + std::chrono::seconds(10);
+    const auto maybe_heartbeat = [&]() {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_heartbeat) return;
+        next_heartbeat = now + std::chrono::seconds(10);
+
+        const double elapsed = std::chrono::duration<double>(now - started).count();
+        std::string phase = "starting";
+        double phase_elapsed = 0.0;
+        read_plan_progress(progress_path, phase, phase_elapsed);
+
+        std::cout << std::fixed << std::setprecision(3)
+                  << "BENCH3_PLAN_HEARTBEAT p=" << exponent
+                  << " index=" << plan_index
+                  << " request=" << request
+                  << " phase=" << phase
+                  << " worker_elapsed_s=" << phase_elapsed
+                  << " elapsed_s=" << elapsed;
+        if (options.bench3_plan_timeout_sec == 0) {
+            std::cout << " timeout_remaining_s=disabled";
+        } else {
+            const double remaining = std::max(
+                0.0,
+                static_cast<double>(options.bench3_plan_timeout_sec) - elapsed);
+            std::cout << " timeout_remaining_s=" << remaining;
+        }
+        std::cout << std::endl;
+    };
 
     std::cout << "BENCH3_PLAN_WORKER_START p=" << exponent
               << " index=" << plan_index
@@ -811,6 +891,8 @@ PlanWorkerProcessResult run_plan_worker_process(
             break;
         }
 
+        maybe_heartbeat();
+
         if (options.bench3_plan_timeout_sec != 0) {
             const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started).count();
@@ -824,10 +906,17 @@ PlanWorkerProcessResult run_plan_worker_process(
     }
 
     DWORD exit_code = 0;
-    if (GetExitCodeProcess(pi.hProcess, &exit_code))
+    if (GetExitCodeProcess(pi.hProcess, &exit_code)) {
         result.exit_code = static_cast<int>(exit_code);
-    else if (result.error.empty())
+        constexpr DWORD kWindowsConsoleControlExit = 0xC000013Au;
+        if (!result.timed_out && exit_code == kWindowsConsoleControlExit) {
+            result.interrupted = true;
+            result.error =
+                "worker terminated by Windows console control event (0xC000013A)";
+        }
+    } else if (result.error.empty()) {
         result.error = "GetExitCodeProcess failed";
+    }
     CloseHandle(pi.hProcess);
 #else
     std::vector<char*> argv;
@@ -867,6 +956,8 @@ PlanWorkerProcessResult run_plan_worker_process(
             break;
         }
 
+        maybe_heartbeat();
+
         if (options.bench3_plan_timeout_sec != 0) {
             const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started).count();
@@ -892,6 +983,13 @@ PlanWorkerProcessResult run_plan_worker_process(
               << " interrupted=" << (result.interrupted ? "yes" : "no")
               << " elapsed_s=" << elapsed
               << std::endl;
+    {
+        std::error_code ec;
+        std::filesystem::remove(progress_path, ec);
+        auto tmp = progress_path;
+        tmp += ".tmp";
+        std::filesystem::remove(tmp, ec);
+    }
     return result;
 }
 
@@ -913,6 +1011,11 @@ int run_plan_worker(const io::CliOptions& options,
         std::filesystem::path(options.bench3_worker_partial_dir);
     const std::string context =
         checkpoint_context(exponent, device_index, cfg);
+    const auto progress_path = plan_progress_path(partial_dir, plan_index);
+    {
+        std::error_code ec;
+        std::filesystem::remove(progress_path, ec);
+    }
 
     std::cout << "BENCH3_WORKER p=" << exponent
               << " index=" << plan_index
@@ -927,7 +1030,7 @@ int run_plan_worker(const io::CliOptions& options,
         mpz_class auto_residue;
         row = measure_plan(
             exponent, device_index, cfg, true, "AUTO", "",
-            nullptr, &auto_residue);
+            nullptr, &auto_residue, &progress_path);
         if (row.status == "PASS")
             atomic_write_mpz(partial_dir / "auto-residue.raw", auto_residue);
     } else {
@@ -941,7 +1044,7 @@ int run_plan_worker(const io::CliOptions& options,
             exponent, device_index, cfg, false,
             options.bench3_worker_request,
             options.bench3_worker_resolved_plan,
-            &auto_residue, nullptr);
+            &auto_residue, nullptr, &progress_path);
     }
 
     checkpoint_plan(
@@ -972,8 +1075,15 @@ PlanResult measure_plan_isolated(
         options, cfg, device_index, exponent, plan_index,
         request, resolved_plan, partial_dir);
 
-    if (process.interrupted)
+    if (process.interrupted) {
+        std::cout << "BENCH3_PLAN_INTERRUPTED p=" << exponent
+                  << " index=" << plan_index
+                  << " request=" << request;
+        if (!process.error.empty())
+            std::cout << " reason=" << process.error;
+        std::cout << std::endl;
         throw std::runtime_error("bench3 interrupted");
+    }
 
     if (process.timed_out) {
         PlanResult row;
