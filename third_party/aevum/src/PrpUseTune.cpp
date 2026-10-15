@@ -109,7 +109,7 @@ aevum_autotune::Mode mode() {
 std::string key(const std::string& identity,const std::string& shape,uint32_t p,const std::string& flags) {
   // Exact exponent is deliberate extra protection inside the required band:
   // a near-capacity Type4 result cannot bleed into another workload/band edge.
-  return "prp-use-v4|register-profiles="+std::string(std::getenv("AEVUM_REGISTER_PROFILES") ? std::getenv("AEVUM_REGISTER_PROFILES") : "0")+"|"+identity+"|shape="+shape+"|p="+std::to_string(p)+"|use-flags="+flags;
+  return "prp-use-v4|register-profiles="+std::string(std::getenv("AEVUM_REGISTER_PROFILES") ? std::getenv("AEVUM_REGISTER_PROFILES") : "1")+"|"+identity+"|shape="+shape+"|p="+std::to_string(p)+"|use-flags="+flags;
 }
 std::filesystem::path path(const std::string& key) {
   uint64_t h=14695981039346656037ULL;for(unsigned char c:key){h^=c;h*=1099511628211ULL;}

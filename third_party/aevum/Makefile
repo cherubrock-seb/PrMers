@@ -236,6 +236,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/gpu_init_order_test.py
 	python3 tests/engine_lead_cache_test.py
 	python3 tests/native_tune_compat_source_test.py
+	python3 tests/cuda_regcf3161_auto_policy_source_test.py
 	python3 tests/asm_string_braces_test.py
 	python3 tests/middlein_gf61_cmul_source_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
