@@ -300,6 +300,11 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (it->second == "1") {
       if (fft.shape.fft_type != FFT323161)
         throw std::runtime_error("lean i128 carry requires full FP32+GF31+GF61 Type4");
+      // The native 32-bit funnel-window carry only becomes available at
+      // EXP/NWORDS >= 33. Radeon VII paired data regresses below that boundary,
+      // so keep the experiment scoped to the domain with the demonstrated win.
+      if (E / fft.shape.size() < 33)
+        throw std::runtime_error("lean i128 carry requires at least 33 bits/word");
       if (doLog) log("Experimental Type4 lean CRT assembly and dword i128 carry.\n");
     }
   }
