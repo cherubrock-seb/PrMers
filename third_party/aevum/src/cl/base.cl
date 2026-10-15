@@ -187,6 +187,20 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define MIDDLE_CHAIN 0
 #endif
 
+#ifndef AEVUM_GF31_TRIG_POWERS
+#define AEVUM_GF31_TRIG_POWERS 0
+#endif
+#ifndef AEVUM_GF61_TRIG_POWERS
+#define AEVUM_GF61_TRIG_POWERS 0
+#endif
+#if (AEVUM_GF31_TRIG_POWERS != 0 && AEVUM_GF31_TRIG_POWERS != 1) || \
+    (AEVUM_GF61_TRIG_POWERS != 0 && AEVUM_GF61_TRIG_POWERS != 1)
+#error NTT trig power switches must be 0 or 1
+#endif
+#if AEVUM_GF61_TRIG_POWERS && AEVUM_GF61_LIMB32
+#error GF61 trig powers require native 64-bit GF61
+#endif
+
 #if !defined(UNROLL_W)
 #if AMDGPU
 #define UNROLL_W 0
