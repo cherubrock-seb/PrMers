@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
+#include <stdexcept>
 
 void Events::clearCompleted() { while (!empty() && front().isComplete()) { pop_front(); } }
 
@@ -75,6 +76,10 @@ void Queue::add(EventHolder&& e, TimeInfo* ti) {
   if (hasEvents) { events.emplace_back(std::move(e), ti); }
   if (isAuxQueue) return;
   queueCount++;
+#ifdef CUDA_BACKEND
+  // A marker before graph submission could wait behind work not yet queued.
+  if (graphSquareActive_) return;
+#endif
   if (queueCount == MAX_QUEUE_COUNT) queueMarkerEvent();
 }
 
@@ -167,3 +172,22 @@ void Queue::setSquareTime(int time) {
   if (time > 3000) time = 3000;       // Assume a maximum square time of 3000us
   squareTime = time;
 }
+
+#ifdef CUDA_BACKEND
+void Queue::beginCudaGraphSquare() {
+  if (hasEvents || isAuxQueue) throw std::runtime_error("CUDA square graph requires one unprofiled main queue");
+  graphQueueCount_ = queueCount;
+  cudaGraphBatchBegin(get());
+  graphSquareActive_ = true;
+}
+void Queue::endCudaGraphSquare() {
+  cudaGraphBatchEnd(get());
+  graphSquareActive_ = false;
+  if (queueCount >= MAX_QUEUE_COUNT) queueMarkerEvent();
+}
+void Queue::abortCudaGraphSquare() noexcept {
+  cudaGraphBatchAbort(get());
+  graphSquareActive_ = false;
+  queueCount = graphQueueCount_;
+}
+#endif

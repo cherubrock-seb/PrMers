@@ -24,6 +24,10 @@ class Queue : public QueueHolder {
   Events events;
   bool hasEvents;
   bool isAuxQueue;
+#ifdef CUDA_BACKEND
+  int graphQueueCount_{0};
+  bool graphSquareActive_{false};
+#endif
 
   void writeTE(cl_mem buf, u64 size, const void* data, TimeInfo *tInfo);
   void fillBufTE(cl_mem buf, u32 patSize, const void* pattern, u64 size, TimeInfo* tInfo);
@@ -54,6 +58,23 @@ public:
 
   EventHolder createSyncEvent(void) { return enqueueMarker(get()); }                     // Enqueue a synchronization event.  Used to sync work among multiple queues.
   void waitForSyncEvent(EventHolder* e) { enqueueMarkerWithWaits(get(), {e->get()}); }   // Wait for a synchronization event to complete.
+
+#ifdef CUDA_BACKEND
+  void beginCudaGraphSquare();
+  void endCudaGraphSquare();
+  void abortCudaGraphSquare() noexcept;
+  class GraphSquareScope {
+    Queue* queue_;
+  public:
+    GraphSquareScope(Queue& q, bool enabled) : queue_(enabled ? &q : nullptr) {
+      if (queue_) queue_->beginCudaGraphSquare();
+    }
+    GraphSquareScope(const GraphSquareScope&) = delete;
+    GraphSquareScope& operator=(const GraphSquareScope&) = delete;
+    ~GraphSquareScope() { if (queue_) queue_->abortCudaGraphSquare(); }
+    void launch() { if (queue_) { queue_->endCudaGraphSquare(); queue_ = nullptr; } }
+  };
+#endif
 
   void setSquareTime(int);          // Update the time to do one squaring (in microseconds)
   void setSquareKernels(int n) { squareKernels = n; firstSetTime = true; }
