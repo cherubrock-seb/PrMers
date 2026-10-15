@@ -632,11 +632,29 @@ vector<uint2> genSmallTrigGF31(u32 size, u32 radix) {
   vector<uint2> tab;
 
   GF31 root1size = GF31::root_one(size);
-  for (u32 line = 1; line < radix; ++line) {
-    for (u32 col = 0; col < WG; ++col) {
-      tab.push_back(root1GF31(root1size, col * line));
+
+  // WIDTH=256 / RADIX=8 is the mixed 4x8x8 path used by fft8_4.
+  // tabMul8_4a consumes three full 64-value lines; tabMul8_4b then
+  // consumes seven condensed lines sampled every fourth column.
+  if (size == 256 && radix == 8) {
+    for (u32 line = 1; line < radix / 2; ++line) {
+      for (u32 col = 0; col < WG * 2; ++col) {
+        tab.push_back(root1GF31(root1size, col * line));
+      }
+    }
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; col += 4) {
+        tab.push_back(root1GF31(root1size, col * line));
+      }
+    }
+  } else {
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; ++col) {
+        tab.push_back(root1GF31(root1size, col * line));
+      }
     }
   }
+
   tab.resize(size);
   return tab;
 }
@@ -790,11 +808,28 @@ vector<ulong2> genSmallTrigGF61(u32 size, u32 radix) {
   vector<ulong2> tab;
 
   GF61 root1size = GF61::root_one(size);
-  for (u32 line = 1; line < radix; ++line) {
-    for (u32 col = 0; col < WG; ++col) {
-      tab.push_back(root1GF61(root1size, col * line));
+
+  // Match the mixed 4x8x8 WIDTH=256 / RADIX=8 kernel's two-stage
+  // tabMul8_4a/tabMul8_4b layout instead of the ordinary radix-8 table.
+  if (size == 256 && radix == 8) {
+    for (u32 line = 1; line < radix / 2; ++line) {
+      for (u32 col = 0; col < WG * 2; ++col) {
+        tab.push_back(root1GF61(root1size, col * line));
+      }
+    }
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; col += 4) {
+        tab.push_back(root1GF61(root1size, col * line));
+      }
+    }
+  } else {
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; ++col) {
+        tab.push_back(root1GF61(root1size, col * line));
+      }
     }
   }
+
   tab.resize(size);
   return tab;
 }
