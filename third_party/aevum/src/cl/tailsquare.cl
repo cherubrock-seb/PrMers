@@ -628,6 +628,12 @@ KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
   F2 trig = TOLOAD(&smallTrigF2[height_trigs + line_u*G_H*2 + me]);
 #endif
 
+#if AEVUM_GFX906_TAIL_COMMON_PAIR
+  const bool selfPair = line_u == 0;
+  aevumTailRevLineOrSelf(lds, u, selfPair);
+  pairSq(NH/2, u, u + NH/2, trig, selfPair);
+  aevumTailRevLineOrSelf(lds, u, selfPair);
+#else
 #if SINGLE_KERNEL
   // Line 0 and H/2 are special: they pair with themselves, line 0 is offseted by 1.
   if (line_u == 0) {
@@ -643,6 +649,7 @@ KERNEL(G_H * 2) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
     pairSq(NH/2, u, u + NH/2, trig, false);
     revCrossLine(lds, u);
   }
+#endif
 
   dependentLaunch();       // Next kernel will be fftMiddleOutFP32 which must dependentLaunchWait before reading data
 
@@ -1845,6 +1852,12 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   GF61 trig = trig_prefetch;
 #endif
 
+#if AEVUM_GFX906_TAIL_COMMON_PAIR
+  const bool selfPair = line_u == 0;
+  aevumTailRevLineOrSelf(lds, u, selfPair);
+  pairSq(NH/2, u, u + NH/2, trig, selfPair);
+  aevumTailRevLineOrSelf(lds, u, selfPair);
+#else
 #if SINGLE_KERNEL
   // Line 0 and H/2 are special: they pair with themselves, line 0 is offseted by 1.
   if (line_u == 0) {
@@ -1860,6 +1873,7 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
     pairSq(NH/2, u, u + NH/2, trig, false);
     revCrossLine(lds, u);
   }
+#endif
 
   dependentLaunch();       // Next kernel will be fftMiddleOutGF61 which must dependentLaunchWait before reading data
 

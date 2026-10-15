@@ -28,6 +28,10 @@
 #define SINGLE_WIDE    (TAIL_KERNELS < 2)         // Old single-wide tailSquare vs. new double-wide tailSquare
 #define SINGLE_KERNEL  ((TAIL_KERNELS & 1) == 0)  // TailSquare uses a single kernel vs. two kernels
 
+#if AEVUM_GFX906_TAIL_COMMON_PAIR && (!defined(TAIL_KERNELS) || TAIL_KERNELS != 2)
+#error tail common pair requires TAIL_KERNELS=2
+#endif
+
 // 64-bit implementations of reverse routines
 
 #if FFT_FP64 | NTT_GF61
@@ -378,6 +382,29 @@ void OVERLOAD reverseLineBump(local F2 *lds, F2 *u) {
 // These versions are for the kernel(s) that use a double-wide workgroup (u in half the workgroup, v in the other half)
 //
 
+#if AEVUM_GFX906_TAIL_COMMON_PAIR
+// PRPLL a9b863a: select LDS addresses for self/cross reversal instead of
+// keeping a separate line-zero arithmetic body live in the tail kernel.
+// SHUFL_BYTES_H=8 is host-gated; each half owns LDS_BYTES bytes.
+void OVERLOAD aevumTailRevLineOrSelf(local F2 *lds2, F2 *u, bool line0) {
+  u32 me = get_local_id(0);
+  u32 lowMe = me % WG;
+  u32 myHalf = me / WG;
+  u32 outHalf = line0 ? myHalf : (myHalf ^ 1u);
+  u32 off = line0 ? myHalf : 1u;
+  local F2 *ldsOut = lds2 + outHalf * (LDS_BYTES / sizeof(F2));
+  local F2 *ldsIn = lds2 + myHalf * (LDS_BYTES / sizeof(F2));
+  // Full workgroup synchronization keeps both ordinary cross-half accesses
+  // and self-paired line-zero accesses in the same barrier protocol.
+  bar();
+  for (u32 i = 0; i < NH / 2; ++i)
+    ldsOut[(WG * (NH / 2 - i) - lowMe - off) % (NH / 2 * WG)] = u[i + NH / 2];
+  bar();
+  for (u32 i = 0; i < NH / 2; ++i)
+    u[i + NH / 2] = ldsIn[WG * i + lowMe];
+}
+#endif
+
 void OVERLOAD reverse2(local F2 *lds, F2 *u) {
   u32 me = get_local_id(0);
   u32 lowMe = me % WG;
@@ -555,6 +582,29 @@ void OVERLOAD reverse(local GF61 *lds, GF61 *u, bool bump) {
 void OVERLOAD reverseLine(local GF61 *lds, GF61 *u) {
   reverseLine((local T2 *) lds, (T2 *) u);
 }
+
+#if AEVUM_GFX906_TAIL_COMMON_PAIR
+// PRPLL a9b863a: select LDS addresses for self/cross reversal instead of
+// keeping a separate line-zero arithmetic body live in the tail kernel.
+// SHUFL_BYTES_H=8 is host-gated; each half owns LDS_BYTES bytes.
+void OVERLOAD aevumTailRevLineOrSelf(local GF61 *lds2, GF61 *u, bool line0) {
+  u32 me = get_local_id(0);
+  u32 lowMe = me % WG;
+  u32 myHalf = me / WG;
+  u32 outHalf = line0 ? myHalf : (myHalf ^ 1u);
+  u32 off = line0 ? myHalf : 1u;
+  local GF61 *ldsOut = lds2 + outHalf * (LDS_BYTES / sizeof(GF61));
+  local GF61 *ldsIn = lds2 + myHalf * (LDS_BYTES / sizeof(GF61));
+  // Full workgroup synchronization keeps both ordinary cross-half accesses
+  // and self-paired line-zero accesses in the same barrier protocol.
+  bar();
+  for (u32 i = 0; i < NH / 2; ++i)
+    ldsOut[(WG * (NH / 2 - i) - lowMe - off) % (NH / 2 * WG)] = u[i + NH / 2];
+  bar();
+  for (u32 i = 0; i < NH / 2; ++i)
+    u[i + NH / 2] = ldsIn[WG * i + lowMe];
+}
+#endif
 
 void OVERLOAD reverse2(local GF61 *lds, GF61 *u) {
   reverse2((local T2 *) lds, (T2 *) u);

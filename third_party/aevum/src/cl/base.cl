@@ -275,6 +275,16 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #error - unsupported FFT/NTT
 #endif
 
+#ifndef AEVUM_GFX906_TAIL_COMMON_PAIR
+#define AEVUM_GFX906_TAIL_COMMON_PAIR 0
+#endif
+#if AEVUM_GFX906_TAIL_COMMON_PAIR != 0 && AEVUM_GFX906_TAIL_COMMON_PAIR != 1
+#error AEVUM_GFX906_TAIL_COMMON_PAIR must be 0 or 1
+#endif
+#if AEVUM_GFX906_TAIL_COMMON_PAIR && (!AMDGPU || FFT_TYPE != FFT3261 || WIDTH != 512 || MIDDLE != 8 || SMALL_HEIGHT != 512 || FFT_VARIANT != 202 || SHUFL_BYTES_H != 8)
+#error unsupported gfx906 tail common-pair specialization
+#endif
+
 // The FP64 FFT can save a few FP64 ops by applying some of the weights using FMA.  nVidia compilers are clever enough to do this automatically.
 // AMD's rocm compiler needs us to do this explicitly (see carryfused.cl's precompute and fft_common's use of it below).  Only wired up
 // for FFT_TYPE==FFT64 with fft_WIDTH's RADIX 4 or 8 (fft4_skip1 / fft8_skip1 in fft4.cl / fft8.cl); not the 32-thread

@@ -287,6 +287,29 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  bool tail_common_pair = false;
+  if (const char* value = std::getenv("AEVUM_GFX906_TAIL_COMMON_PAIR")) {
+    const auto it = config.find("AEVUM_GFX906_TAIL_COMMON_PAIR");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_GFX906_TAIL_COMMON_PAIR selections");
+    config["AEVUM_GFX906_TAIL_COMMON_PAIR"] = value;
+  }
+  if (const auto it = config.find("AEVUM_GFX906_TAIL_COMMON_PAIR"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_GFX906_TAIL_COMMON_PAIR must be 0 or 1");
+    tail_common_pair = it->second == "1";
+  }
+  if (tail_common_pair) {
+    if (getDeviceName(id).rfind("gfx906", 0) != 0 || fft.isPfa() ||
+        fft.shape.fft_type != FFT3261 || fft.shape.width != 512 ||
+        fft.shape.middle != 8 || fft.shape.height != 512 || fft.variant != 202)
+      throw std::runtime_error("tail common pair requires gfx906 Type2 2:512:8:512:202");
+    if (config.count("SHUFL_BYTES_H") && config.at("SHUFL_BYTES_H") != "8")
+      throw std::runtime_error("tail common pair initially requires SHUFL_BYTES_H=8");
+    config["SHUFL_BYTES_H"] = "8";
+    if (doLog) log("Experimental gfx906 Type2 common tail pair/reversal body.\n");
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
@@ -426,6 +449,9 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (k == "WMUL") wmul = atoi(v.c_str());
     if (k == "PAD") pad_size = atoi(v.c_str());
   }
+
+  if (tail_common_pair && (tail_single_wide || !tail_single_kernel))
+    throw std::runtime_error("tail common pair requires double-wide single-kernel TAIL_KERNELS=2");
 
   if (fft.isPfa() && in_place != 0) {
     log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
