@@ -119,6 +119,8 @@ private:
   u32 wmul{2};                           // Carry-fused width multiplier
   u32 pad_size{0};                       // Padding in bytes
 
+  bool cuda_smem_spill_{false};          // Resolved by clDefines before compiler
+
   Queue queue;
   vector<Queue> auxQueues;
   KernelCompiler compiler;

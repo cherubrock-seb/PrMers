@@ -147,6 +147,10 @@ int getEventInfo(cl_event event);
 cl_context getQueueContext(cl_command_queue q);
 
 #ifdef CUDA_BACKEND
+// JIT one named kernel with shared-memory spilling. Keeps cached PTX intact.
+// Must be called before creating any kernel from this program. No fallback.
+bool cudaEnableKernelSmemSpill(cl_program prog, const char* kernelName);
+
 // Set L2 cache persistence for multiple read-only buffers on the given stream.
 // Computes the address span covering all buffers and sets a single access policy window.
 // Buffers that are nullptr or zero-size are skipped.

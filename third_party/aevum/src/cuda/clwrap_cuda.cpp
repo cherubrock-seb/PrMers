@@ -3,6 +3,7 @@
 // mapping all cl* calls to cu* equivalents via the CUDA Driver API.
 
 #include "tinycuda.h"
+#include "SmemSpillPtx.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 
 #include <cstdio>
@@ -1079,6 +1080,33 @@ int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
 } // extern "C"
 
 // C++ linkage — must be outside the extern "C" block above.
+
+// JIT a private copy: do not persist the pragma into the base PTX cache or
+// change any register/launch bound already produced by the native compiler.
+bool cudaEnableKernelSmemSpill(cl_program prog, const char* kernelName) {
+  if (!prog || !prog->moduleLoaded || !kernelName) return false;
+  string candidate;
+  if (!aevumSmemSpillPtx(prog->ptx, kernelName, candidate)) {
+    fprintf(stderr, "%s: shared spilling needs PTX 9.0+ and a named .maxntid entry\n", kernelName);
+    return false;
+  }
+  ensureContextCurrent();
+  CUmodule replacement{};
+  char errorLog[8192] = {};
+  CUjit_option opts[] = {CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES, CU_JIT_ERROR_LOG_BUFFER};
+  void* values[] = {(void*)(size_t)sizeof(errorLog), errorLog};
+  const CUresult result = cuModuleLoadDataEx(&replacement, candidate.c_str(), 2, opts, values);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "%s: shared-spill JIT rejected (%d): %s\n", kernelName, (int)result, errorLog);
+    return false; // A flag=1 result must never silently use the OFF kernel.
+  }
+  const CUmodule previous = prog->module;
+  prog->module = replacement;
+  cuModuleUnload(previous); // No CUfunction has been created from it yet.
+  fprintf(stderr, "%s: shared-memory spill JIT active; register limits unchanged\n", kernelName);
+  return true;
+}
+
 
 // Set L2 cache persistence for multiple read-only buffers on the given stream.
 // Computes the minimum address span covering all buffers, then sets one access policy

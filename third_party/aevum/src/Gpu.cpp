@@ -272,7 +272,7 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 }
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
-                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, bool &cuda_smem_spill) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -286,6 +286,33 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     // log("Found %s\n", fft.shape.spec().c_str());
     config.insert(it->second.begin(), it->second.end());
   }
+
+  cuda_smem_spill = false;
+  if (const char* value = std::getenv("AEVUM_CUDA_SMEM_SPILL")) {
+    const auto it = config.find("AEVUM_CUDA_SMEM_SPILL");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_CUDA_SMEM_SPILL selections");
+    config["AEVUM_CUDA_SMEM_SPILL"] = value;
+  }
+  if (const auto it = config.find("AEVUM_CUDA_SMEM_SPILL"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL must be 0 or 1");
+    cuda_smem_spill = it->second == "1";
+  }
+  if (cuda_smem_spill) {
+#if defined(CUDA_BACKEND)
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 750)
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL requires CUDA sm_75 or newer");
+#else
+    throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL requires the CUDA backend");
+#endif
+    if (config.count("NOREG") && config.at("NOREG") != "0")
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL conflicts with NOREG");
+    if (doLog)
+      log("AEVUM_CUDA_SMEM_SPILL=1: JIT spill placement for register-limited kernels only.\n");
+  }
+  // Host/JIT control: leave common source definitions and base cache unchanged.
+  config.erase("AEVUM_CUDA_SMEM_SPILL");
 
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
@@ -868,6 +895,7 @@ Gpu::~Gpu() {
 // This feature currently only works for the CUDA compiler.
 string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
 #if CUDA_BACKEND
+  const string spillOption = cuda_smem_spill_ ? "--aevum-smemspill " : "";
   int regs = 0;
   const char *use_override = "";
   // Allow command line to prefer the CUDA compiler's default number of registers
@@ -1006,13 +1034,13 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
   // Get the optional override register count
   int override_regs = registerValue(use_override, 0);
   // If a specified override is small, use the count as a CUDA launch_bounds rather than a maximum register count
-  if (override_regs && (override_regs > 0 && override_regs <= 16)) return string("-DCUDA_MIN_BLOCKS=") + to_string(override_regs) + " ";
+  if (override_regs && (override_regs > 0 && override_regs <= 16)) return string("-DCUDA_MIN_BLOCKS=") + to_string(override_regs) + " " + spillOption;
   // If specified, override the default maximum register count
   if (override_regs) regs = override_regs;
   // Sometimes the results using CUDA compiler's default launch_bounds without setting an explicit launch bounds or maxrrregcount can't be beat
   if (regs == -1) return string("");
   // Format an explicit register count setting
-  return string("--maxrregcount=") + to_string(regs) + " ";
+  return string("--maxrregcount=") + to_string(regs) + " " + spillOption;
 #else
   return string("");
 #endif
@@ -1103,7 +1131,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul)},
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_smem_spill_)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 

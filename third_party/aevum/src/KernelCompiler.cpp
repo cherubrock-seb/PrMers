@@ -160,24 +160,41 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
   Timer timer;
   bool fromCache = true;
 
+  // This host-only option changes JIT placement, not NVRTC source or the
+  // cached PTX. OFF and ON share the original compiled register-limited PTX.
+  string compileArgs = args;
+#ifdef CUDA_BACKEND
+  const string spillMarker = "--aevum-smemspill ";
+  const auto spillPos = compileArgs.find(spillMarker);
+  const bool smemSpill = spillPos != string::npos;
+  if (smemSpill) compileArgs.erase(spillPos, spillMarker.size());
+#endif
+
   Program program;
   string cacheFile;
 
   if (useCache) {
-    string f = kernelName + '-' + to_hex(SHA3::hash(contextHash, fileName, kernelName, args)[0]);
+    string f = kernelName + '-' + to_hex(SHA3::hash(contextHash, fileName, kernelName, compileArgs)[0]);
     cacheFile = cacheDir + '/' + f;
     program = loadBinary(context, deviceId, cacheFile);
   }
 
   if (!program) {
     fromCache = false;
-    program = compile(fileName, args);
+    program = compile(fileName, compileArgs);
   }
 
   if (!program) {
     log("Can't compile %s\n", fileName.c_str());
     throw "Can't compile " + fileName;
   }
+
+#ifdef CUDA_BACKEND
+  // No CUfunction has escaped this program yet. The replacement module is
+  // installed only after a successful JIT; rejection aborts this experiment.
+  if (smemSpill && !cudaEnableKernelSmemSpill(program.get(), kernelName.c_str()))
+    throw std::runtime_error("shared-memory spilling unavailable for " + kernelName);
+#endif
 
   KernelHolder ret;
 #if defined(__APPLE__) && !defined(CUDA_BACKEND)
