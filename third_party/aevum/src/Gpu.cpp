@@ -3980,8 +3980,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
 
     if (doStop) { log("Stopping, please wait..\n"); }
 
-    square(bufData, bufData, leadIn, leadOut, false);
-    leadIn = leadOut;
+    // Production PRP retained-width iterations are eligible for the optional\n    // CUDA graph path; other square callers keep the default prp=false.\n    square(bufData, bufData, leadIn, leadOut, false, false, true);\n    leadIn = leadOut;
 
     if (k == persistK) {
       vector<Word> rawData = readChecked(bufData);
