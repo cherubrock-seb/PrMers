@@ -3,6 +3,16 @@
 #include "math.cl"
 #include "trig.cl"
 
+#ifndef AEVUM_PFA_GF31_COSBASE
+#define AEVUM_PFA_GF31_COSBASE 0
+#endif
+#if AEVUM_PFA_GF31_COSBASE != 0 && AEVUM_PFA_GF31_COSBASE != 1
+#error AEVUM_PFA_GF31_COSBASE must be 0 or 1
+#endif
+#if AEVUM_PFA_GF31_COSBASE && PFA_RADIX != 7 && PFA_RADIX != 9
+#error AEVUM_PFA_GF31_COSBASE requires PFA7 or PFA9
+#endif
+
 #ifndef AEVUM_PFA7_NUSS8
 #define AEVUM_PFA7_NUSS8 0
 #endif
@@ -720,6 +730,87 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
   *o2 = sub(sub(a0, a1), wd);
 }
 
+#if AEVUM_PFA_GF31_COSBASE
+// Adapted from PRPLL 85173461443df1e5d615f193868ca4a3c1e39f40.
+// Each input is in 0..M31. Folding a constant above M31/2 keeps every
+// unsigned product below 2^61; at most four products plus a0 stay below
+// 2^63, hence below modM31(u64)'s 0xFFFFFFFF7FFFFFFF input limit.
+// Unlike reduction-only batching, the shared cosine base removes repeated
+// products. Keep the GF61 schedule (including its gfx906 NUSS8 policy) intact.
+// AEVUM_PFA_GF31_COSBASE_BEGIN
+u64 aevumPfa31Mad(Z31 x, Z31 c, u64 acc) {
+  return c > M31 / 2 ? acc + (u64)(M31 - x) * (M31 - c)
+                     : acc + (u64)x * c;
+}
+
+void aevumPfa31CosBase(GF31 *a, bool inverse) {
+#if PFA_RADIX == 7
+  const Z31 c[PFA_RADIX] = {1U, 141971251U, 405239506U, 526531066U, 526531066U, 405239506U, 141971251U};
+  const Z31 sine[PFA_RADIX] = {0U, 752284155U, 1347360268U, 1073059520U, 1074424127U, 800123379U, 1395199492U};
+#elif PFA_RADIX == 9
+  const Z31 c[PFA_RADIX] = {1U, 1693082228U, 586798891U, 1073741823U, 2015086175U, 2015086175U, 1073741823U, 586798891U, 1693082228U};
+  const Z31 sine[PFA_RADIX] = {0U, 1219784641U, 277691671U, 439735912U, 1205390677U, 942092970U, 1707747735U, 1869791976U, 927699006U};
+#endif
+  const u32 h = (PFA_RADIX - 1) / 2;
+  GF31 sum[(PFA_RADIX - 1) / 2], dif[(PFA_RADIX - 1) / 2], y[PFA_RADIX];
+#pragma unroll
+  for (u32 k = 1; k <= h; ++k) {
+    sum[k - 1] = add(a[k], a[PFA_RADIX - k]);
+    dif[k - 1] = sub(a[k], a[PFA_RADIX - k]);
+  }
+#if PFA_RADIX == 7
+  GF31 total = add(add(sum[0], sum[1]), sum[2]);
+  y[0] = add(a[0], total);
+  const u64 bx = aevumPfa31Mad(total.x, c[1], a[0].x);
+  const u64 by = aevumPfa31Mad(total.y, c[1], a[0].y);
+#else
+  GF31 total = add(add(sum[0], sum[1]), sum[3]);
+  GF31 t = add(a[0], sum[2]);
+  y[0] = add(t, total);
+  const u64 bx = aevumPfa31Mad(total.x, c[1], aevumPfa31Mad(sum[2].x, c[3], a[0].x));
+  const u64 by = aevumPfa31Mad(total.y, c[1], aevumPfa31Mad(sum[2].y, c[3], a[0].y));
+#endif
+#pragma unroll
+  for (u32 j = 1; j <= h; ++j) {
+    u64 pcx = bx, pcy = by, qsx = 0, qsy = 0;
+#if PFA_RADIX == 9
+    if (j == 3) {
+      pcx = aevumPfa31Mad(total.x, c[3], t.x);
+      pcy = aevumPfa31Mad(total.y, c[3], t.y);
+    } else
+#endif
+    {
+#pragma unroll
+      for (u32 k = 1; k <= h; ++k) {
+        const u32 m = j * k % PFA_RADIX;
+#if PFA_RADIX == 9
+        if (k == 3) continue;
+#endif
+        if (m == 1 || m == PFA_RADIX - 1) continue;
+        const Z31 cd = (c[m] + M31 - c[1]) % M31;
+        pcx = aevumPfa31Mad(sum[k - 1].x, cd, pcx);
+        pcy = aevumPfa31Mad(sum[k - 1].y, cd, pcy);
+      }
+    }
+#pragma unroll
+    for (u32 k = 1; k <= h; ++k) {
+      const u32 m = j * k % PFA_RADIX;
+      if (m == 0) continue;
+      const Z31 sk = inverse ? sine[PFA_RADIX - m] : sine[m];
+      qsx = aevumPfa31Mad(dif[k - 1].x, sk, qsx);
+      qsy = aevumPfa31Mad(dif[k - 1].y, sk, qsy);
+    }
+    const GF31 pc = U2(modM31(pcx), modM31(pcy));
+    const GF31 qs = U2(modM31(qsx), modM31(qsy));
+    y[j] = add(pc, qs);
+    y[PFA_RADIX - j] = sub(pc, qs);
+  }
+#pragma unroll
+  for (u32 k = 0; k < PFA_RADIX; ++k) a[k] = y[k];
+}
+// AEVUM_PFA_GF31_COSBASE_END
+#endif
+
 #if PFA_RADIX == 7
 // Correctness-first direct seven-point DFT.  Keep this simple until profiling
 // identifies the odd-axis transform as the dominant PFA7 cost.
@@ -758,7 +849,9 @@ void OVERLOAD aevum_pfa7_nuss8(GF31 *u, Z31 w) {
 #endif
 
 void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
-#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+#if AEVUM_PFA_GF31_COSBASE
+  aevumPfa31CosBase(u, w != (Z31)PFA7_ROOT31);
+#elif AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
   aevum_pfa7_nuss8(u, w);
 #else
  const Z31 c1 = (Z31)141971251U;
@@ -826,6 +919,9 @@ void OVERLOAD pfaForwardMiddle(GF31 *u) {
 #elif PFA_RADIX == 7
   pfaDft7(u, (Z31)PFA7_ROOT31);
 #elif PFA_RADIX == 9
+#if AEVUM_PFA_GF31_COSBASE
+  aevumPfa31CosBase(u, false);
+#else
   const Z31 w9  = (Z31)765383222U;
   const Z31 w92 = (Z31)864490562U;
   const Z31 w94 = (Z31)1072993205U;
@@ -847,6 +943,7 @@ void OVERLOAD pfaForwardMiddle(GF31 *u) {
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = o[i];
 #endif
+#endif
 }
 
 void OVERLOAD pfaInverseMiddle(GF31 *u) {
@@ -864,6 +961,11 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
 #pragma unroll
   for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z31)PFA7_INV7_31);
 #elif PFA_RADIX == 9
+#if AEVUM_PFA_GF31_COSBASE
+  aevumPfa31CosBase(u, true);
+#pragma unroll
+  for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(u[i], (Z31)1908874353U);
+#else
   const Z31 w9  = (Z31)473297587U;
   const Z31 w92 = (Z31)309107220U;
   const Z31 w94 = (Z31)809695498U;
@@ -885,6 +987,7 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
   }
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
+#endif
 #endif
 }
 #endif
