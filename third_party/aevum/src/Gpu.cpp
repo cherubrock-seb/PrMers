@@ -3459,10 +3459,12 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
       assert(!doLL);
       fftW(buf3, buf1);
       carryA(out, buf3);
-      if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
-        // Profiling on RTX 3080 shows the lazy fused gather is substantially
-        // more expensive than the already-existing canonical carryB + fftP
-        // sequence.  Both produce the same retained width-transform state.
+      if (fft.shape.fft_type == FFT3261 ||
+          (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1))) {
+        // Type2 PFA5/15 uses FP32+GF61, while fftPCarryB is intentionally the
+        // paired GF31+GF61 (FFT3161) lazy bridge.  Materialize canonical carryB
+        // and reuse the validated Type2 PFA fftP gather instead.  PFA7 also
+        // keeps this separate bridge because it is faster than the lazy gather.
         carryB(out);
         fftP(buf1, out);
       } else {
