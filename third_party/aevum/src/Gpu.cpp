@@ -273,7 +273,7 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul,
-                 bool &cuda_graph_squares, std::array<bool, 2>& amdMiddleWaves) {
+                 bool &cuda_graph_squares, bool &amdMiddleOutWaves) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -288,31 +288,26 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
-  // Capture host-only per-kernel occupancy switches; do not change common source defines.
-  amdMiddleWaves = {false, false};
-  const char* amdWaveKeys[] = {"AEVUM_GFX906_MI61_WAVES", "AEVUM_GFX906_MO61_WAVES"};
-  for (unsigned i = 0; i < 2; ++i) {
-    const char* key = amdWaveKeys[i];
-    if (const char* value = std::getenv(key)) {
-      const auto it = config.find(key);
-      if (it != config.end() && it->second != value)
-        throw std::runtime_error(string("conflicting ") + key + " selections");
-      config[key] = value;
-    }
-    if (const auto it = config.find(key); it != config.end()) {
-      if (it->second != "0" && it->second != "1")
-        throw std::runtime_error(string(key) + " must be 0 or 1");
-      amdMiddleWaves[i] = it->second == "1";
-      config.erase(it);
-    }
+  // Host-only per-kernel occupancy switch for the isolated gfx906 GF61 middle-out.
+  amdMiddleOutWaves = false;
+  if (const char* value = std::getenv("AEVUM_GFX906_MO61_WAVES")) {
+    const auto it = config.find("AEVUM_GFX906_MO61_WAVES");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_GFX906_MO61_WAVES selections");
+    config["AEVUM_GFX906_MO61_WAVES"] = value;
   }
-  if ((amdMiddleWaves[0] || amdMiddleWaves[1]) &&
-      config.count("NOREG") && config.at("NOREG") != "0")
-    throw std::runtime_error("GF61 middle waves conflict with NOREG");
-  if ((amdMiddleWaves[0] || amdMiddleWaves[1]) &&
+  if (const auto it = config.find("AEVUM_GFX906_MO61_WAVES"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_GFX906_MO61_WAVES must be 0 or 1");
+    amdMiddleOutWaves = it->second == "1";
+    config.erase(it);
+  }
+  if (amdMiddleOutWaves && config.count("NOREG") && config.at("NOREG") != "0")
+    throw std::runtime_error("GF61 middle-out waves conflict with NOREG");
+  if (amdMiddleOutWaves &&
       (!isAmdGpu(id) || getDeviceName(id).rfind("gfx906", 0) != 0 ||
        !fft.NTT_GF61 || fft.isPfa()))
-    throw std::runtime_error("GF61 middle waves require gfx906 and a non-PFA GF61 plan");
+    throw std::runtime_error("GF61 middle-out waves require gfx906 and a non-PFA GF61 plan");
 
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
@@ -560,11 +555,10 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (k == "PAD") pad_size = atoi(v.c_str());
   }
 
-  if ((amdMiddleWaves[0] || amdMiddleWaves[1]) && in_place == 0)
-    throw std::runtime_error("GF61 middle waves require INPLACE=1 or INPLACE=2");
-  if (doLog && (amdMiddleWaves[0] || amdMiddleWaves[1]))
-    log("Experimental gfx906 GF61 middle occupancy: in=%u out=%u waves/SIMD.\n",
-        amdMiddleWaves[0] ? 2u : 0u, amdMiddleWaves[1] ? 2u : 0u);
+  if (amdMiddleOutWaves && in_place == 0)
+    throw std::runtime_error("GF61 middle-out waves require INPLACE=1 or INPLACE=2");
+  if (doLog && amdMiddleOutWaves)
+    log("Experimental gfx906 GF61 middle-out occupancy: 2 waves/SIMD.\n");
 
   if (fft.isPfa() && in_place != 0 && !pfa7_inplace) {
     log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
@@ -1099,9 +1093,7 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
   // Format an explicit register count setting
   return string("--maxrregcount=") + to_string(regs) + " ";
 #else
-  if (which_kernel == MIDIN61 && amdMiddleWaves_[0])
-    return "-DAEVUM_AMD_MIDDLE_WAVES=2 ";
-  if (which_kernel == MIDOUT61 && amdMiddleWaves_[1])
+  if (which_kernel == MIDOUT61 && amdMiddleOutWaves_)
     return "-DAEVUM_AMD_MIDDLE_WAVES=2 ";
   return string("");
 #endif
@@ -1192,7 +1184,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_, amdMiddleWaves_)},
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_, amdMiddleOutWaves_)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
