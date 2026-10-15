@@ -287,6 +287,27 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_PFA_GF31_COSBASE")) {
+    const auto it = config.find("AEVUM_PFA_GF31_COSBASE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA_GF31_COSBASE selections");
+    config["AEVUM_PFA_GF31_COSBASE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA_GF31_COSBASE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA_GF31_COSBASE must be 0 or 1");
+    if (it->second == "1") {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_PFA_GF31_COSBASE does not support Apple staged kernels");
+#endif
+      if (!fft.isPfa() || (fft.pfa_radix != 7 && fft.pfa_radix != 9) ||
+          fft.shape.fft_type != FFT3161 || fft.shape.middle != fft.pfa_radix ||
+          fft.shape.width != 512 || fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error("AEVUM_PFA_GF31_COSBASE requires pfa7/9:1:512:7/9:512:202");
+      if (doLog) log("AEVUM_PFA_GF31_COSBASE=1: GF31 only; GF61 policy preserved, plan=%s.\n", fft.spec().c_str());
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
