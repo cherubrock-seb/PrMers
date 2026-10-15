@@ -287,6 +287,29 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // PRPLL 43003a78's complete radix-16 transform, separate from the
+  // previously tested 1K shuffle/interleave experiment.
+  if (const char* value = std::getenv("AEVUM_GF31_MIDDLE16")) {
+    const auto it = config.find("AEVUM_GF31_MIDDLE16");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_GF31_MIDDLE16 selections");
+    config["AEVUM_GF31_MIDDLE16"] = value;
+  }
+  if (const auto it = config.find("AEVUM_GF31_MIDDLE16"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_GF31_MIDDLE16 must be 0 or 1");
+    if (it->second == "1") {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_GF31_MIDDLE16 does not support Apple staged kernels");
+#endif
+      if (fft.shape.fft_type != FFT3161 || fft.isPfa() ||
+          fft.shape.width != 512 || fft.shape.middle != 16 ||
+          fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error("AEVUM_GF31_MIDDLE16 requires non-PFA 1:512:16:512:202");
+      if (doLog) log("AEVUM_GF31_MIDDLE16=1: complete GF31 radix-16 via even/odd FFT8 and folded constant products.\n");
+    }
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");

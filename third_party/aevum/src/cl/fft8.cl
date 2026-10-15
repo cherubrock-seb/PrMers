@@ -4,6 +4,17 @@
 
 #include "fft4.cl"
 
+#ifndef AEVUM_GF31_MIDDLE16
+#define AEVUM_GF31_MIDDLE16 0
+#endif
+#if AEVUM_GF31_MIDDLE16 != 0 && AEVUM_GF31_MIDDLE16 != 1
+#error AEVUM_GF31_MIDDLE16 must be 0 or 1
+#endif
+#if AEVUM_GF31_MIDDLE16 && (FFT_TYPE != FFT3161 || PFA_RADIX != 0 || WIDTH != 512 || MIDDLE != 16 || SMALL_HEIGHT != 512)
+#error AEVUM_GF31_MIDDLE16 requires the guarded Type1 middle16 plan
+#endif
+
+
 #if FFT_FP64
 
 //#define X2_apply_delay(a, b) { T2 t = a; a = t + M_SQRT1_2 * b; b = t - M_SQRT1_2 * b; }
@@ -272,6 +283,47 @@ void OVERLOAD fft8_16b(F2 *u) {
 void OVERLOAD fft8_16a(GF31 *u) {
   fft8(u);
 }
+#if AEVUM_GF31_MIDDLE16
+void OVERLOAD fft8_16b(GF31 *u) {
+  const Z31 C1 = 1556715293;
+  const Z31 S1 = 978592373;
+  const Z31 negC1 = M31 - C1;
+  const Z31 negS1 = M31 - S1;
+
+  X2t4(u[0], u[4]);
+  X2t4(u[1], u[5]);
+  X2t4(u[2], u[6]);
+  X2t4(u[3], u[7]);
+
+  // cmul_const's products fit in 62 bits (a cheaper modM31) only for w^7 = (-C1, S1) and w^9 = (-C1, -S1).  So the twiddles are taken as
+  // w = -w^9 and w^3 = -i * w^7, and the -1 and -i folded into each fft4's first-stage add/sub.
+
+  // First half: u1*w = -m1 and u3*w^3 = (m3.y, -m3.x) make fft4's first stage u1 + u3 = (p, -q) and i*(u1 - u3) = (r, -s).
+  GF31 m1 = cmul_const(u[1], U2(negC1, negS1));
+  u[2] = mul_t8(u[2]);
+  GF31 m3 = cmul_const(u[3], U2(negC1, S1));
+  X2(u[0], u[2]);
+  Z31 p = sub(m3.y, m1.x), q = add(m1.y, m3.x), r = sub(m1.y, m3.x), s = add(m1.x, m3.y);
+  u[1] = U2(sub(u[0].x, p), add(u[0].y, q));
+  u[0] = U2(add(u[0].x, p), sub(u[0].y, q));
+  u[3] = U2(sub(u[2].x, r), add(u[2].y, s));
+  u[2] = U2(add(u[2].x, r), sub(u[2].y, s));
+
+  // Second half: u5*w^3 = (m5.y, -m5.x) and u7*w^9 = m7 make fft4's first stage u5 + u7 = (m5.y + m7.x, m7.y - m5.x) and
+  // i*(u5 - u7) = (m5.x + m7.y, m5.y - m7.x).
+  GF31 m5 = cmul_const(u[5], U2(negC1, S1));
+  u[6] = mul_3t8(u[6]);
+  GF31 m7 = cmul_const(u[7], U2(negC1, negS1));
+  X2(u[4], u[6]);
+  u[5] = U2(add(m5.y, m7.x), sub(m7.y, m5.x));
+  u[7] = U2(add(m5.x, m7.y), sub(m5.y, m7.x));
+  X2(u[4], u[5]);
+  X2(u[6], u[7]);
+
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+#else
 void OVERLOAD fft8_16b(GF31 *u) {
   const Z31 C1 = 1556715293;
   const Z31 S1 = 978592373;
@@ -302,6 +354,7 @@ void OVERLOAD fft8_16b(GF31 *u) {
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
 }
+#endif
 
 #endif
 
