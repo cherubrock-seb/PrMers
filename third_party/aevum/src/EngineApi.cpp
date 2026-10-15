@@ -17,6 +17,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "TuneEntry.h"
 #include "RuntimeAutotune.h"
 #include "PrpUseTune.h"
+#include "CudaRegisterTune.h"
 #include "UseOptions.h"
 #include "common.h"
 #include "gpuid.h"
@@ -647,7 +648,7 @@ PlanProductionConfirmation confirmPrpPlanProduction(
 // PRP use selection is deliberately downstream of all shape selection paths.
 std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon shared,
     const FFTConfig& fft, const std::string& identity, uint64_t shape_ms, bool shape_ran,
-    const std::vector<KeyVal>& existing, bool verbose) {
+    const std::vector<KeyVal>& existing, bool verbose, bool register_tune = false) {
   using namespace aevum_prp_use;
   auto report=[&](const char* source,const std::string& profile,double gain=1) {
     if(verbose)log("AEVUM_PRP_USE source=%s shape=%s profile=%s gain=%.5f\n",source,fft.spec().c_str(),profile.empty()?"defaults":profile.c_str(),gain);
@@ -678,12 +679,12 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   // Issue #36: native tune entries may carry both a validated FFT shape and
   // validated -use policy. Preserve those flags exactly as a higher-priority
   // source; automatic tuning never overwrites a matching tune entry.
-  for(const auto& entry:TuneEntry::readTuneFile(*shared.args)) {
+  if (!register_tune) for(const auto& entry:TuneEntry::readTuneFile(*shared.args)) {
     if(entry.fft.spec()==fft.spec() && !entry.use.empty() && entry.fft.maxExp()>=exponent) {
       return finish("tune-entry",entry.use);
     }
   }
-  if (fft.shape.fft_type == FFT3261) {
+  if (!register_tune && fft.shape.fft_type == FFT3261) {
     auto use = parse("INPLACE=1,TAIL_TRIGS=0");
     const std::string type2_device_name = openclDeviceName(shared.context->deviceId());
     const std::string type2_device_vendor = openclVendorId(shared.context->deviceId());
@@ -827,23 +828,33 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   for(const char* name:{"AEVUM_PFA_USE","AEVUM_RADIX1K","AEVUM_TYPE4_MULTI_Q","AEVUM_CARRY_WMUL",
       "AEVUM_GF61_LIMB32","AEVUM_PRP_MIDDLE1","AEVUM_REG_LEAD_CACHE"})
     if(const char* value=std::getenv(name))if(*value)manual_kernel=true;
-  if(control==aevum_autotune::Mode::Off || manual_kernel || fft.isPfa())
+  if(control==aevum_autotune::Mode::Off || (!register_tune && manual_kernel) || fft.isPfa())
     return finish("defaults/bypass",{});
 
   std::string flags=normalize(existing);
   for(const auto& [k,v]:shared.args->flags)flags+=';'+k+'='+v;
-  const auto cache_key=key(identity,fft.spec(),exponent,flags);
+  if (register_tune)
+    if (const auto it=shared.args->perFftConfig.find(fft.shape.spec()); it!=shared.args->perFftConfig.end())
+      for (const auto& [k,v]:it->second) flags+=";per-fft:"+k+'='+v;
+  const bool nvidia_asm=isNvidiaGpu(shared.context->deviceId()) && !shared.args->uses("NO_ASM");
+  const auto profiles=register_tune
+      ? aevum_cuda_register_tune::candidates(fft.shape.fft_type, existing)
+      : candidates(nvidia_asm);
+  // Keep the new experiment completely outside the production/OpenCL cache.
+  const auto cache_key=key(register_tune ? "cuda-register-neighborhood-v1|"+identity : identity,
+                           fft.spec(),exponent,flags);
   if(control==aevum_autotune::Mode::Auto)if(auto r=load(cache_key)) {
-    auto use=r->plan=="defaults"?std::vector<KeyVal>{}:parse(r->plan);
-    return finish("cache-hit",std::move(use),r->implementation_speedup);
+    if (!register_tune || r->plan=="defaults" ||
+        std::find(profiles.begin(),profiles.end(),r->plan)!=profiles.end()) {
+      auto use=r->plan=="defaults"?std::vector<KeyVal>{}:parse(r->plan);
+      return finish("cache-hit",std::move(use),r->implementation_speedup);
+    }
   }
 
-  const bool nvidia_asm=isNvidiaGpu(shared.context->deviceId()) && !shared.args->uses("NO_ASM");
-  const auto profiles=candidates(nvidia_asm);
-  // A cold FFT-shape tune gets a smaller implementation slice. Once the shape
-  // is cached the bounded neighbourhood expands automatically. Progress stores
-  // the prior plan size so a later expansion restarts finalist confirmation.
-  const unsigned cap=shape_ran && shape_ms>=3000 ? 6u : 12u;
+  // Register searches expose the full finite list and resume under the same
+  // per-invocation budget. Truncating this list to 12 would never complete it.
+  const unsigned cap=register_tune ? static_cast<unsigned>(profiles.size()) :
+      shape_ran && shape_ms>=3000 ? 6u : 12u;
   const unsigned requested=boundedEnvUnsigned("AEVUM_PRP_USE_BUDGET_MS",cap<=6?6000:10000,100,12000);
   const uint64_t budget=std::min<uint64_t>(requested,shape_ran?(shape_ms<16000?16000-shape_ms:0):requested);
   const unsigned full_planned=static_cast<unsigned>(profiles.size());
@@ -1186,6 +1197,13 @@ public:
         cache_(nullptr) {
     if (exponent_ < 3) throw std::runtime_error("Aevum exponent must be at least 3");
     if (register_count_ == 0) throw std::runtime_error("Aevum register count must be positive");
+
+    const bool cuda_register_tune = aevum_cuda_register_tune::enabled(
+        std::getenv("AEVUM_CUDA_REGISTER_TUNE"));
+#if !defined(CUDA_BACKEND)
+    if (cuda_register_tune)
+      throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE requires the CUDA backend");
+#endif
 
     args_.device = static_cast<int>(device);
     args_.verbose = verbose;
@@ -1852,6 +1870,55 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
           autotune_cache_hit ? 0 : autotune_elapsed_ms, autotune_runtime_ran, pfa_use, verbose);
       for (const auto& kv : profile) {
         pfa_use.erase(std::remove_if(pfa_use.begin(),pfa_use.end(),[&](const KeyVal& x){return x.first==kv.first;}),pfa_use.end());
+        pfa_use.push_back(kv);
+      }
+    }
+#endif
+#if defined(CUDA_BACKEND)
+    if (cuda_register_tune) {
+      if (workload_ != aevum_autotune::Workload::Prp || !explicit_fft_spec || pseudo_auto_spec ||
+          fft.isPfa() || (fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261) ||
+          fft.shape.width != 512 || fft.shape.height != 512 ||
+          (fft.shape.middle != 8 && fft.shape.middle != 16) || fft.variant != 202 ||
+          fft.carry == CARRY_64 || args_.carry == CARRY_64)
+        throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE requires explicit non-PFA PRP Type1/2 512:8/16:512:202 short carry");
+      if (!isNvidiaGpu(selected_device) || getNvidiaComputeCapability(selected_device) < 705)
+        throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE requires NVIDIA sm_75+");
+      if (register_profiles_env && std::strcmp(register_profiles_env,"1") != 0)
+        throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE requires register profiles enabled");
+      if (aevum_prp_use::mode() == aevum_autotune::Mode::Off)
+        throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE requires AEVUM_PRP_USE_TUNE=auto or retune");
+      if (args_.profile || std::getenv("PRPLL_PROFILE") || std::getenv("AEVUM_PRP_USE"))
+        throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE conflicts with profiling or manual AEVUM_PRP_USE");
+      // Preserve explicit register ownership. Built-in device defaults live in
+      // pfa_use and are deliberately the search baseline, not a conflict.
+      auto reject_pinned = [](const auto& values) {
+        for (const auto& kv : values)
+          if (aevumRegisterUseKey(kv.first) || kv.first=="NOREG")
+            throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE conflicts with explicit "+kv.first);
+      };
+      reject_pinned(args_.flags);
+      if (const auto it=args_.perFftConfig.find(fft.shape.spec()); it!=args_.perFftConfig.end())
+        reject_pinned(it->second);
+      for (const auto& entry:TuneEntry::readTuneFile(args_))
+        if (entry.fft.spec()==fft.spec() && !entry.use.empty())
+          throw std::runtime_error("AEVUM_CUDA_REGISTER_TUNE conflicts with a pinned tune.txt use profile");
+      // These environment controls bypass the ordinary Args/config map.
+      // Fingerprint them so cached limits cannot migrate across kernel variants.
+      std::string controls;
+      for (const char* name : {"AEVUM_CUDA_GRAPH_SQUARES", "AEVUM_CUDA_SMEM_SPILL",
+           "AEVUM_GF61_CMUL_ALT", "AEVUM_GF61_MIDDLE_BASE_TABLE", "AEVUM_GF61_BETTER_ONEPAIRSQ",
+           "AEVUM_GF61_LIMB32", "AEVUM_PRP_MIDDLE1", "AEVUM_CARRY_WMUL", "AEVUM_TYPE4_MULTI_Q",
+           "AEVUM_DIRECTIONAL_FUSION", "AEVUM_REG_LEAD_CACHE"})
+        if (const char* value=std::getenv(name)) controls+=';'+std::string(name)+'='+value;
+      const auto identity=aevum_autotune::makeKey(VERSION,device_vendor,device_name,device_driver,
+          device_runtime,workload_,register_count_,exponent_,
+          "safe=1;clean=1;ordinal="+std::to_string(device)+";backend=cuda"+controls);
+      if (verbose) log("AEVUM_CUDA_REGISTER_TUNE=1: per-kernel limits around the resolved production profile; resumable search.\n");
+      auto profile=selectPrpUse(exponent_,register_count_,shared_,fft,identity,0,false,pfa_use,verbose,true);
+      for (const auto& kv:profile) {
+        pfa_use.erase(std::remove_if(pfa_use.begin(),pfa_use.end(),
+            [&](const KeyVal& x){return x.first==kv.first;}),pfa_use.end());
         pfa_use.push_back(kv);
       }
     }
