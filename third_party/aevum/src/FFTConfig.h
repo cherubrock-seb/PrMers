@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdlib>
+#include <stdexcept>
 
 // We pre-calculate the maximum BPW for a number of fft specs.  From these entries we can either look up or interpolate to get the
 // maximum BPW for all variants of an FFT spec.  The variants for which maximum bpw are precomputed are 000, 101, 202, 010, 111, 212.
@@ -51,8 +52,21 @@ inline bool aevumRadix8For1K() {
 }
 #endif
 
+// Explicit width-only experiment. Capture the selection in each shape so
+// an existing engine keeps its radix when the environment changes.
+inline bool aevumExperimentalRadix8Width256() {
+  const char* value = std::getenv("AEVUM_RADIX8_WIDTH256");
+  if (!value) return false;
+  const std::string selected(value);
+  if (selected == "0") return false;
+  if (selected == "1") return true;
+  throw std::runtime_error("AEVUM_RADIX8_WIDTH256 must be 0 or 1");
+}
+
 class FFTShape {
+  bool radix8Width256_ = aevumExperimentalRadix8Width256();
 public:
+  bool experimentalRadix8Width256() const { return radix8Width256_; }
   static std::vector<FFTShape> allShapes(u32 from=0, u32 to = -1);
 
   static vector<FFTShape> multiSpec(const string& spec);
@@ -69,7 +83,8 @@ public:
 
   u32 size() const { return width * height * middle * 2; }
   u32 nW() const {
-    return (width == 256 || (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+    return ((width == 256 && !radix8Width256_) ||
+            (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
   }
   u32 nH() const {
     return (height == 256 || (height == 1024 && !aevumRadix8For1K())) ? 4 : 8;
