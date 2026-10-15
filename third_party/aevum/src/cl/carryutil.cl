@@ -486,6 +486,21 @@ i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_
   // = (((nF2 << 31) - nF2) << 61) + ((n61 - nF2) << 31) - (n61 - nF2) + n31
   // = (((nF2 << 32) - nF2*2) << 60) + ((n61 - nF2) << 31) - (n61 - nF2) + n31
 
+#if AEVUM_EXPERIMENT_LEAN_CARRY128
+  // PRPLL 8ecc245: fold -(nF2 << 61) into the middle term before
+  // assembling i128. RNDVAL's signed 22-bit quotient leaves all these
+  // i64 intermediates in range, including the factor-three case.
+  i64 x = (i64)n61 - nF2;
+  i64 x2 = x - (i64)nF2 * ((i64)1 << 30);
+#if !MUL3
+  i128 v = sub(make_i128((x2 >> 33) + (i64)nF2 * ((i64)1 << 28),
+                         ((u64)x2 << 31) | n31), x);
+#else
+  i64 x2_3 = x2 * 3;
+  i128 v = add(make_i128((x2_3 >> 33) + (i64)(nF2 * 3) * ((i64)1 << 28),
+                         (u64)x2_3 << 31), ((i64)n31 - x) * 3);
+#endif
+#else
   // Compute x = (n61 - nF2)
   i64 x = (i64)n61 - nF2;
   // Compute y = ((n61 - nF2) << 31) + n31
@@ -496,13 +511,14 @@ i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_
 
   // Put the parts together
   i128 v = sub(add(z, y), x);
+#endif
 
   // Optionally calculate roundoff error
   float roundoff = fabs(fma(uF2, 2.0194839183061857038255724444152e-28f, RNDVAL - uF2int));
   *maxROE = max(*maxROE, roundoff);
 
-  // Mul by 3 and add carry
-#if MUL3
+  // The candidate triples the parts before assembling i128.
+#if MUL3 && !AEVUM_EXPERIMENT_LEAN_CARRY128
   v = add(v, add(v, v));
 #endif
   if (hasInCarry) v = add(v, inCarry);
@@ -518,11 +534,27 @@ error - missing weightAndCarryOne implementation
 /*   Split a value + carryIn into a big-or-little word and a carryOut   */
 /************************************************************************/
 
+#if AEVUM_EXPERIMENT_LEAN_CARRY128 && EXP / NWORDS >= 33
+// Extract bits [32+shift, 96+shift) with two native 32-bit funnel shifts.
+// Here 1 <= shift <= 31; no shift-by-32 case is admitted.
+i64 aevumCarry128Window(u64 lo, u64 hi, u32 shift) {
+  i64 middle = make_i64((i32)lo32(hi), hi32(lo));
+  return make_i64(xtract32((i64)hi, shift), (u32)xtract32(middle, shift));
+}
+#endif
+
 Word OVERLOAD carryStep(i128 x, i64 *outCarry, bool isBigWord) {
   u32 nBits = bitlen(isBigWord);
+#if AEVUM_EXPERIMENT_LEAN_CARRY128 && EXP / NWORDS >= 33
+  u64 lo = i128_lo64(x);
+  i32 whi = lowBits((i32)hi32(lo), nBits - 32);
+  *outCarry = aevumCarry128Window(lo, i128_hi64(x), nBits - 32) + (whi < 0);
+  return make_i64(whi, lo32(lo));
+#else
   i64 w = lowBits(i128_lo64(x), nBits);
   *outCarry = i128_shrlo64(x, nBits) + (w < 0);
   return w;
+#endif
 }
 
 Word OVERLOAD carryStep(i96 x, i64 *outCarry, bool isBigWord) {
@@ -619,7 +651,11 @@ Word OVERLOAD carryStepUnsignedSloppy(i128 x, i64 *outCarry, bool isBigWord) {
 // Return a Word using the big word size.  Big word size is a constant which allows for more optimization.
   u64 w = ulowFixedBits(i128_lo64(x), bigwordBits);
   x = i128_masklo64(x, ~((u64)1 << (bigwordBits - 1)));
+#if AEVUM_EXPERIMENT_LEAN_CARRY128 && EXP / NWORDS >= 33
+  *outCarry = aevumCarry128Window(i128_lo64(x), i128_hi64(x), nBits - 32);
+#else
   *outCarry = i128_shrlo64(x, nBits);
+#endif
   return w;
 }
 
@@ -685,7 +721,17 @@ Word OVERLOAD carryStepSignedSloppy(i128 x, i64 *outCarry, bool isBigWord) {
   u64 xlo = i128_lo64(x);
   u64 xlo_topbit = xlo & ((u64)1 << (bigwordBits - 1));
   i64 w = ulowFixedBits(xlo, bigwordBits - 1) - xlo_topbit;
+#if AEVUM_EXPERIMENT_LEAN_CARRY128
+  // Adding the selected top bit contributes exactly one to the quotient,
+  // for either word size. Avoid the preceding full-width add.
+#if EXP / NWORDS >= 33
+  *outCarry = aevumCarry128Window(xlo, i128_hi64(x), nBits - 32) + (xlo_topbit != 0);
+#else
+  *outCarry = i128_shrlo64(x, nBits) + (xlo_topbit != 0);
+#endif
+#else
   *outCarry = i128_shrlo64(add(x, xlo_topbit), nBits);
+#endif
   return w;
 #endif
 }

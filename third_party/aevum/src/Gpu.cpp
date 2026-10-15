@@ -287,6 +287,27 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
+  if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
+    const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_EXPERIMENT_LEAN_CARRY128 selections");
+    config["AEVUM_EXPERIMENT_LEAN_CARRY128"] = value;
+  }
+  if (const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_EXPERIMENT_LEAN_CARRY128 must be 0 or 1");
+    if (it->second == "1") {
+      if (fft.shape.fft_type != FFT323161)
+        throw std::runtime_error("lean i128 carry requires full FP32+GF31+GF61 Type4");
+      // The native 32-bit funnel-window carry only becomes available at
+      // EXP/NWORDS >= 33. Radeon VII paired data regresses below that boundary,
+      // so keep the experiment scoped to the domain with the demonstrated win.
+      if (E / fft.shape.size() < 33)
+        throw std::runtime_error("lean i128 carry requires at least 33 bits/word");
+      if (doLog) log("Experimental Type4 lean CRT assembly and dword i128 carry.\n");
+    }
+  }
   cuda_graph_squares = false;
   if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_SQUARES")) {
     const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES");
