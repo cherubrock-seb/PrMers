@@ -287,6 +287,27 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_FP32_MIDDLE_STATIC_CHAIN")) {
+    const auto it = config.find("AEVUM_FP32_MIDDLE_STATIC_CHAIN");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_FP32_MIDDLE_STATIC_CHAIN selections");
+    config["AEVUM_FP32_MIDDLE_STATIC_CHAIN"] = value;
+  }
+  if (const auto it = config.find("AEVUM_FP32_MIDDLE_STATIC_CHAIN"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_FP32_MIDDLE_STATIC_CHAIN must be 0 or 1");
+    if (it->second == "1") {
+      if (!fft.FFT_FP32 || fft.isPfa() || variant_M(fft.variant) != 1 ||
+          (fft.shape.middle != 8 && fft.shape.middle != 16))
+        throw std::runtime_error("AEVUM_FP32_MIDDLE_STATIC_CHAIN requires a non-PFA FP32 middle-variant-1 MIDDLE8/16 plan");
+      if (config.count("MM_CHAIN") ||
+          (config.count("MM2_CHAIN") && config.at("MM2_CHAIN") != "2"))
+        throw std::runtime_error("AEVUM_FP32_MIDDLE_STATIC_CHAIN requires MM2_CHAIN=2");
+      if (doLog)
+        log("Experimental FP32 static middleMul2 chain: variant-1 MIDDLE%u.\n", fft.shape.middle);
+    }
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");

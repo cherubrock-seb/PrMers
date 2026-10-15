@@ -3,6 +3,13 @@
 #include "math.cl"
 #include "trig.cl"
 
+#ifndef AEVUM_FP32_MIDDLE_STATIC_CHAIN
+#define AEVUM_FP32_MIDDLE_STATIC_CHAIN 0
+#endif
+#if AEVUM_FP32_MIDDLE_STATIC_CHAIN != 0 && AEVUM_FP32_MIDDLE_STATIC_CHAIN != 1
+#error AEVUM_FP32_MIDDLE_STATIC_CHAIN must be 0 or 1
+#endif
+
 #ifndef AEVUM_PFA_GF31_COSBASE
 #define AEVUM_PFA_GF31_COSBASE 0
 #endif
@@ -642,6 +649,27 @@ void OVERLOAD middleMul2(F2 *u, u32 x, u32 y, float factor, TrigFP32 trig) {
       }
     }
 
+#elif MM2_CHAIN == 2 && AEVUM_FP32_MIDDLE_STATIC_CHAIN
+    // Static trip count keeps every u[] index compile-time constant after unrolling.
+    F2 base, base_minus1, base_plus1;
+    #pragma unroll
+    for (u32 i = 1; i <= MIDDLE; i += 3) {
+      if (i-1 == MIDDLE-1) {
+        base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
+        WADD(i-1, base_minus1);
+      } else if (i == MIDDLE-1) {
+        base_minus1 = slowTrig_N(x * y + x * SMALL_HEIGHT * (i - 1), ND / MIDDLE * i) * factor;
+        base = cmulFancy(base_minus1, w);
+        WADD(i-1, base_minus1);
+        WADD(i,   base);
+      } else {
+        base = slowTrig_N(x * y + x * SMALL_HEIGHT * i, ND / MIDDLE * (i + 1)) * factor;
+        cmul_a_by_fancyb_and_conjfancyb(&base_plus1, &base_minus1, base, w);
+        WADD(i-1, base_minus1);
+        WADD(i,   base);
+        WADD(i+1, base_plus1);
+      }
+    }
 #elif MM2_CHAIN == 2
     F2 base, base_minus1, base_plus1;
     for (u32 i = 1; ; i += 3) {
