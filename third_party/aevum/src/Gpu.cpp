@@ -287,6 +287,18 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (fft.shape.experimentalRadix8Width256()) {
+    if (!isNvidiaGpu(id) || fft.shape.width != 256 ||
+        fft.shape.fft_type != FFT3161 || fft.isPfa() || variant_W(fft.variant) == 0)
+      throw std::runtime_error("AEVUM_RADIX8_WIDTH256 requires an explicit NVIDIA non-PFA Type1 WIDTH256 plan with width variant1/2");
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_RADIX8_WIDTH256 is not enabled for Apple");
+#endif
+    if (doLog)
+      log("Experimental NVIDIA width256 radix8: NW=%u G_W=%u; height radix remains NH=%u.\n",
+          fft.shape.nW(), fft.shape.width / fft.shape.nW(), fft.shape.nH());
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
