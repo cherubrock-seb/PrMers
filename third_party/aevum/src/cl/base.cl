@@ -332,7 +332,16 @@ ulong2 OVERLOAD U2(unsigned long long a, unsigned long long b) { return (ulong2)
 #define P(x) global x * restrict
 #define CP(x) const P(x)
 
+// Per-kernel gfx906 experiment: request at least two waves per SIMD.
+// Only the selected GF61 middle compilation receives this define.
+#if AMDGPU && defined(AEVUM_AMD_MIDDLE_WAVES)
+#if AEVUM_AMD_MIDDLE_WAVES != 2
+#error AEVUM_AMD_MIDDLE_WAVES must be 2
+#endif
+#define KERNEL(x) kernel __attribute__((reqd_work_group_size(x, 1, 1), amdgpu_waves_per_eu(2))) void
+#else
 #define KERNEL(x) kernel __attribute__((reqd_work_group_size(x, 1, 1))) void
+#endif
 
 
 // For reasons unknown, loading trig values into nVidia's constant cache has terrible performance

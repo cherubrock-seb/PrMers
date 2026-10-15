@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "Background.h"
 #include "Buffer.h"
 #include "Context.h"
@@ -120,6 +122,7 @@ private:
   u32 pad_size{0};                       // Padding in bytes
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
+  std::array<bool, 2> amdMiddleWaves_{};  // Resolved before compiler creation
 
   Queue queue;
   vector<Queue> auxQueues;
