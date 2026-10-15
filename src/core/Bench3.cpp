@@ -55,6 +55,9 @@ namespace {
 constexpr const char* kSchemaVersion = "bench3.v1";
 constexpr const char* kPlanCheckpointVersion = "bench3.plan.v1";
 constexpr std::size_t kPrpRegisterCount = 8;
+// Keep one exponent where the validated fixed PFA7 plan is legal, so every
+// Bench3 mode actually measures PFA7 instead of only reporting it as illegal.
+constexpr std::uint32_t kPfa7CoverageExponent = 136279841u;
 volatile std::sig_atomic_t g_stop = 0;
 
 void signal_handler(int) { g_stop = 1; }
@@ -218,7 +221,7 @@ DeviceInfo device_info(std::size_t device_index) {
 std::vector<std::uint32_t> full_grid() {
     return {
          37156667u, 58000003u, 77232917u, 82589933u, 100000007u,
-        130000007u, 145000007u, 150000007u, 160000003u, 170000003u,
+        130000007u, kPfa7CoverageExponent, 145000007u, 150000007u, 160000003u, 170000003u,
         175000003u, 180000017u, 196999969u, 197000003u, 200000033u,
         210000017u, 220000013u, 250000013u, 300000007u, 400000009u,
         500000003u, 600000001u
@@ -228,10 +231,11 @@ std::vector<std::uint32_t> full_grid() {
 ModeConfig mode_config(const std::string& mode) {
     if (mode == "quick")
         return {"quick", 16, 64, 3, 64,
-                {145000007u, 170000003u, 197000003u, 210000017u, 500000003u}};
+                {kPfa7CoverageExponent, 145000007u, 170000003u, 197000003u,
+                 210000017u, 500000003u}};
     if (mode == "standard")
         return {"standard", 24, 128, 3, 96,
-                {77232917u, 130000007u, 145000007u, 170000003u,
+                {77232917u, 130000007u, kPfa7CoverageExponent, 145000007u, 170000003u,
                  196999969u, 197000003u, 210000017u, 220000013u,
                  300000007u, 500000003u}};
     if (mode == "dense")
