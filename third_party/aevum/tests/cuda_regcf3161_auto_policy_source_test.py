@@ -23,7 +23,8 @@ for token in (
 
 # Default-on host profile semantics with an explicit kill switch.
 assert 'if (enabled && std::strcmp(enabled, "0") == 0) return {};' in gpu
-assert '!enabled || std::strcmp(enabled, "0") != 0' in gpu
+assert 'for (auto it = config.begin(); it != config.end();)' in gpu
+assert 'aevumRegisterUseKey(it->first) || it->first == "NOREG"' in gpu
 assert 'AEVUM_REGISTER_PROFILES must be 0 or 1' in gpu
 
 # Cache identity must agree with the new default-on semantics.
