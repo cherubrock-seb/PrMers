@@ -485,11 +485,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
-  // Register keys are host-side controls, not source specialization macros.
-  // With opt-in profiles, avoid changing every kernel's code/cache identity
-  // when only one kernel's register bound changes.
+  // Register keys are host-side CUDA controls, not source specialization macros.
+  // Profiles are enabled by default; AEVUM_REGISTER_PROFILES=0 is the explicit
+  // kill switch. Strip register keys whenever the host-side profile path is
+  // active so they never perturb unrelated kernel source/cache identities.
   if (const char* enabled = std::getenv("AEVUM_REGISTER_PROFILES");
-      enabled && std::strcmp(enabled, "1") == 0) {
+      !enabled || std::strcmp(enabled, "0") != 0) {
     for (auto it = config.begin(); it != config.end();) {
       if (aevumRegisterUseKey(it->first) || it->first == "NOREG") it = config.erase(it);
       else ++it;
@@ -1011,7 +1012,9 @@ static std::map<string, int> registerProfile(const Args& args, const FFTConfig& 
   const char* enabled = std::getenv("AEVUM_REGISTER_PROFILES");
   if (enabled && std::strcmp(enabled, "0") != 0 && std::strcmp(enabled, "1") != 0)
     throw std::runtime_error("AEVUM_REGISTER_PROFILES must be 0 or 1");
-  if (!enabled || std::strcmp(enabled, "1") != 0) return {};
+  // Default-on is required for validated automatic CUDA register policies.
+  // Explicit 0 restores the historical compiler defaults and is the kill switch.
+  if (enabled && std::strcmp(enabled, "0") == 0) return {};
   std::map<string, int> result;
   auto apply = [&](const auto& values) {
     for (const auto& [key, value] : values) {
