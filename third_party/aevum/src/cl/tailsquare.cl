@@ -11,6 +11,16 @@
 #include "tailutil.cl"
 #include "middle.cl"
 
+#ifndef AEVUM_PFA7_SINGLE_TAIL
+#define AEVUM_PFA7_SINGLE_TAIL 0
+#endif
+#if AEVUM_PFA7_SINGLE_TAIL != 0 && AEVUM_PFA7_SINGLE_TAIL != 1
+#error AEVUM_PFA7_SINGLE_TAIL must be 0 or 1
+#endif
+#if AEVUM_PFA7_SINGLE_TAIL && (FFT_TYPE != FFT3161 || PFA_RADIX != 7 || WIDTH != 512 || MIDDLE != 7 || SMALL_HEIGHT != 512 || TAIL_KERNELS != 0 || INPLACE != 0 || TAIL_TRIGS31 != 0 || TAIL_TRIGS61 != 0)
+#error AEVUM_PFA7_SINGLE_TAIL requires the guarded Type1 PFA7 single-wide plan
+#endif
+
 #if AEVUM_PRP_MIDDLE1
 #include "prp_middle1.cl"
 #define AEVUM_PRP_TRIG_ARG , Trig middleTrig
@@ -782,7 +792,17 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if PFA_RADIX
+#if AEVUM_PFA7_SINGLE_TAIL
+  // PRPLL's pfaTailLine/TAIL_SELF_PAIRED mechanism, adapted to native
+  // base-field odd roots: each row pairs with itself. Group zero of EACH
+  // row owns the two self-paired lines, with different reversal offsets.
+  const u32 per_row = WIDTH / 2u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (binary_line ? WIDTH - binary_line : WIDTH / 2u);
+#elif PFA_RADIX
   const u32 per_row = WIDTH / 2u - 1u;
   const u32 group = get_group_id(0);
   const u32 row = group / per_row;
@@ -832,14 +852,23 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 #endif
 
 #if SINGLE_KERNEL
+#if AEVUM_PFA7_SINGLE_TAIL
+  if (binary_line == 0) {
+#else
   if (line1 == 0) {
+#endif
     // Line 0 is special: it pairs with itself, offseted by 1.
     reverse(lds, u + NH/2, true);
     pairSq(NH/2, u,   u + NH/2, trig, true);
     reverse(lds, u + NH/2, true);
 
     // Line H/2 also pairs with itself (but without offset).
+#if AEVUM_PFA7_SINGLE_TAIL
+    // Use the identical precomputed upper-line coefficient as tailSquareZero.
+    GF31 trig2 = TOLOAD(&smallTrig31[height_trigs + (WIDTH / 2u) * G_H + me]);
+#else
     GF31 trig2 = cmul(trig, TAILTGF31);
+#endif
     reverse(lds, v + NH/2, false);
     pairSq(NH/2, v,   v + NH/2, trig2, false);
     reverse(lds, v + NH/2, false);
@@ -1685,7 +1714,17 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 
   u32 H = ND / SMALL_HEIGHT;
 
-#if PFA_RADIX
+#if AEVUM_PFA7_SINGLE_TAIL
+  // PRPLL's pfaTailLine/TAIL_SELF_PAIRED mechanism, adapted to native
+  // base-field odd roots: each row pairs with itself. Group zero of EACH
+  // row owns the two self-paired lines, with different reversal offsets.
+  const u32 per_row = WIDTH / 2u;
+  const u32 group = get_group_id(0);
+  const u32 row = group / per_row;
+  const u32 binary_line = group - row * per_row;
+  const u32 line1 = row * WIDTH + binary_line;
+  const u32 line2 = row * WIDTH + (binary_line ? WIDTH - binary_line : WIDTH / 2u);
+#elif PFA_RADIX
   const u32 per_row = WIDTH / 2u - 1u;
   const u32 group = get_group_id(0);
   const u32 row = group / per_row;
@@ -1735,14 +1774,23 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 #endif
 
 #if SINGLE_KERNEL
+#if AEVUM_PFA7_SINGLE_TAIL
+  if (binary_line == 0) {
+#else
   if (line1 == 0) {
+#endif
     // Line 0 is special: it pairs with itself, offseted by 1.
     reverse(lds, u + NH/2, true);
     pairSq(NH/2, u,   u + NH/2, trig, true);
     reverse(lds, u + NH/2, true);
 
     // Line H/2 also pairs with itself (but without offset).
+#if AEVUM_PFA7_SINGLE_TAIL
+    // Use the identical precomputed upper-line coefficient as tailSquareZero.
+    GF61 trig2 = TOLOAD(&smallTrig61[height_trigs + (WIDTH / 2u) * G_H + me]);
+#else
     GF61 trig2 = cmul(trig, TAILTGF61);
+#endif
     reverse(lds, v + NH/2, false);
     pairSq(NH/2, v,   v + NH/2, trig2, false);
     reverse(lds, v + NH/2, false);

@@ -15,6 +15,7 @@ inline bool aevumUseKey(const std::string& key) {
   if (aevumRegisterUseKey(key)) return true;
   if (key == "AEVUM_EXPERIMENT_LEAN_CARRY128") return true;
   if (key == "AEVUM_PFA_GF31_COSBASE") return true;
+  if (key == "AEVUM_PFA7_SINGLE_TAIL") return true;
   if (key == "AEVUM_PFA7_INPLACE") return true;
   if (key == "AEVUM_PFA7_NUSS8") return true;
   if (key == "AEVUM_CUDA_GRAPH_SQUARES") return true;
