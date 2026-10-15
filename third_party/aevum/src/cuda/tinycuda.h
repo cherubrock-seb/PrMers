@@ -26,11 +26,14 @@ typedef _cl_device_id* cl_device_id;
 struct _cl_context { CUcontext ctx; CUdevice dev; };
 typedef _cl_context* cl_context;
 
+class AevumCudaGraphBatch;
+
 // cl_command_queue wraps CUstream
 struct _cl_command_queue {
   CUstream stream;
   cl_context context;
   bool profiling;
+  AevumCudaGraphBatch* squareGraph{nullptr};
 };
 typedef _cl_command_queue* cl_command_queue;
 

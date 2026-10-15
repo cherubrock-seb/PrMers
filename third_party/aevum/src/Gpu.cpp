@@ -272,7 +272,7 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 }
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
-                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, bool &cuda_graph_squares) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -286,6 +286,37 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     // log("Found %s\n", fft.shape.spec().c_str());
     config.insert(it->second.begin(), it->second.end());
   }
+
+  cuda_graph_squares = false;
+  if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_SQUARES")) {
+    const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_CUDA_GRAPH_SQUARES selections");
+    config["AEVUM_CUDA_GRAPH_SQUARES"] = value;
+  }
+  if (const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES must be 0 or 1");
+    cuda_graph_squares = it->second == "1";
+  }
+  if (cuda_graph_squares) {
+#if defined(CUDA_BACKEND)
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 750)
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires CUDA sm_75+");
+#else
+    throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires the CUDA backend");
+#endif
+    if (fft.isPfa() || (fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261) ||
+        fft.carry == CARRY_64 || args.carry == CARRY_64)
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires non-PFA short-carry Type1/Type2");
+    if (args.profile || std::getenv("PRPLL_PROFILE"))
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES conflicts with kernel profiling");
+    if (args.value("MULTI_Q", 0) || (config.count("MULTI_Q") && config.at("MULTI_Q") != "0"))
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires MULTI_Q=0");
+    if (doLog)
+      log("AEVUM_CUDA_GRAPH_SQUARES=1: retained-width squares, fresh arguments for every graph node.\n");
+  }
+  config.erase("AEVUM_CUDA_GRAPH_SQUARES"); // Host-only: identical kernel source/cache and arithmetic.
 
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
@@ -1103,7 +1134,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul)},
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
@@ -3299,6 +3330,10 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
   assert(!(doMul3 && doLL));
+#if defined(CUDA_BACKEND)
+  Queue::GraphSquareScope graph(queue, cuda_graph_squares_ && prp &&
+      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL);
+#endif
 
   // In place FFTs use buf1.  Not in place FFTs also use buf3.
   // If leadIn is LEAD_NONE, in contains the input data, squaring starts at fftP
@@ -3357,6 +3392,9 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
       carryFused(buf1);
     }
   }
+#if defined(CUDA_BACKEND)
+  graph.launch();
+#endif
 }
 
 u32 Gpu::squareLoop(Buffer<Word>& out, Buffer<Word>& in, u64 from, u64 to, bool doTailMul3) {
@@ -3942,7 +3980,9 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
 
     if (doStop) { log("Stopping, please wait..\n"); }
 
-    square(bufData, bufData, leadIn, leadOut, false);
+    // Production PRP retained-width iterations are eligible for the optional
+    // CUDA graph path; other square callers keep the default prp=false.
+    square(bufData, bufData, leadIn, leadOut, false, false, true);
     leadIn = leadOut;
 
     if (k == persistK) {

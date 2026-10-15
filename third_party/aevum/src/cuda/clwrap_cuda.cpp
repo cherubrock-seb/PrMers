@@ -3,6 +3,7 @@
 // mapping all cl* calls to cu* equivalents via the CUDA Driver API.
 
 #include "tinycuda.h"
+#include "GraphBatch.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 
 #include <cstdio>
@@ -137,6 +138,11 @@ int clReleaseProgram(cl_program p) {
 
 int clReleaseCommandQueue(cl_command_queue q) {
   if (q) {
+    if (q->squareGraph) {
+      ensureContextCurrent();
+      cuStreamSynchronize(q->stream);
+      delete q->squareGraph;
+    }
     cuStreamDestroy(q->stream);
     delete q;
   }
@@ -678,6 +684,15 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   size_t ls = localSize ? localSize[0] : 256;
   size_t numBlocks = (gs + ls - 1) / ls;
 
+  if (q->squareGraph && q->squareGraph->active()) {
+    if (q->profiling || nWaits || workDim != 1 ||
+        (globalOffset && globalOffset[0]))
+      throw std::runtime_error("unsupported event/dimension in CUDA square graph");
+    q->squareGraph->add(k, (unsigned)numBlocks, (unsigned)ls);
+    if (event) *event = nullptr;
+    return CL_SUCCESS;
+  }
+
   // Build args array
   void* argPtrs[_cl_kernel::MAX_ARGS];
   k->buildArgPointers(argPtrs);
@@ -1079,6 +1094,22 @@ int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
 } // extern "C"
 
 // C++ linkage — must be outside the extern "C" block above.
+
+void cudaGraphBatchBegin(cl_command_queue q) {
+  if (!q || q->profiling) throw std::runtime_error("CUDA square graph requires an unprofiled queue");
+  ensureContextCurrent();
+  if (!q->squareGraph) q->squareGraph = new AevumCudaGraphBatch;
+  q->squareGraph->begin();
+}
+void cudaGraphBatchEnd(cl_command_queue q) {
+  if (!q || !q->squareGraph) throw std::runtime_error("CUDA square graph not begun");
+  ensureContextCurrent();
+  q->squareGraph->launch(q->stream);
+}
+void cudaGraphBatchAbort(cl_command_queue q) noexcept {
+  if (q && q->squareGraph) q->squareGraph->abort();
+}
+
 
 // Set L2 cache persistence for multiple read-only buffers on the given stream.
 // Computes the minimum address span covering all buffers, then sets one access policy

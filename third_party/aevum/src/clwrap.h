@@ -147,6 +147,11 @@ int getEventInfo(cl_event event);
 cl_context getQueueContext(cl_command_queue q);
 
 #ifdef CUDA_BACKEND
+// Native one-stream square batching. No CUDA stream capture or frozen slots.
+void cudaGraphBatchBegin(cl_command_queue q);
+void cudaGraphBatchEnd(cl_command_queue q);
+void cudaGraphBatchAbort(cl_command_queue q) noexcept;
+
 // Set L2 cache persistence for multiple read-only buffers on the given stream.
 // Computes the address span covering all buffers and sets a single access policy window.
 // Buffers that are nullptr or zero-size are skipped.
