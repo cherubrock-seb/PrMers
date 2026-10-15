@@ -1570,7 +1570,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 // FP64 and FP32 could benefit by starting the next fft8 after the radix-4 tabmul (easy FMA opportunities).
 
 // Code for SIZE=256, RADIX=8
-#elif WG == 32 && NW == 8
+#elif WG == 32 && RADIX == 8
 
 #if FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH
 #error FUSE_WEIGHT_BUTTERFLY not implemented for this fft8_4-based 32-thread path (carryfused.cl's default excludes it; this only fires on an explicit override)
@@ -2220,7 +2220,7 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   finish_tabMul8_fft8(trig, preloads, u, 64, numWG, lowMe, 0);  // We'd rather set save_one_more_mul to 1
 
 // Code for SIZE=256, RADIX=8
-#elif WG == 32 && NW == 8
+#elif WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
@@ -2436,7 +2436,7 @@ void OVERLOAD tabMul8_4b(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
 void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) {
 
 // Code for SIZE=256, RADIX=8
-#if WG == 32 && NW == 8
+#if WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
@@ -2652,7 +2652,7 @@ void OVERLOAD tabMul8_4b(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
 void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 lowMe) {
 
 // Code for SIZE=256, RADIX=8
-#if WG == 32 && NW == 8
+#if WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
