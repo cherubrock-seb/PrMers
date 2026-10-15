@@ -186,6 +186,35 @@ void OVERLOAD fft8(GF61 *u) {
 //***********************************************************************************************************************
 
 #if FFT_FP64
+// Do two fft4s on eight FFT values.  Required by the SIZE=256 / RADIX=8 path.
+void OVERLOAD fft8_4(T2 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+#endif
+
+#if FFT_FP32
+void OVERLOAD fft8_4(F2 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+#endif
+
+#if NTT_GF31
+void OVERLOAD fft8_4(GF31 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+#endif
+
+#if NTT_GF61
+void OVERLOAD fft8_4(GF61 *u) {
+  fft4by(u, 0, 2, 8);
+  fft4by(u, 1, 2, 8);
+}
+#endif
+
+#if FFT_FP64
 
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.

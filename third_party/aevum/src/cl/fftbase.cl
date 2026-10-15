@@ -557,6 +557,106 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 
 
+// Partial-radix shuffle used by the SIZE=256 / RADIX=8 path after fft8_4.
+// gpuowl's newer shuffle takes an explicit completed-radix width r.  Aevum's
+// older shuffle API assumes r == RADIX, so keep the legacy fast paths intact
+// and provide the generic mapping only for this partial exchange.
+#if FFT_FP64 | NTT_GF61
+void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  const u32 mask = f - 1;
+  assert((mask & (mask + 1)) == 0);
+  assert(r && r <= RADIX && RADIX % r == 0);
+
+#define AEVUM_PARTIAL_SHUFL_INDEX(i) ((i) / (RADIX / r) * f + (i) % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask))
+
+#if SHUFL_BYTES == 16
+  local T2 *lds = (local T2 *)lds2;
+  if (numWG > 1) lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T2);
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i] = lds[i * WG + lowMe];
+
+#elif SHUFL_BYTES == 8
+  local T *lds = (local T *)lds2;
+  if (numWG > 1) lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T);
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i].x;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i].x = lds[i * WG + lowMe];
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i].y;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i].y = lds[i * WG + lowMe];
+
+#elif SHUFL_BYTES == 4
+  local int *lds = (local int *)lds2;
+  if (numWG > 1) lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(int);
+
+  barFence(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = as_int4(u[i]).x;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { int4 t = as_int4(u[i]); t.x = lds[i * WG + lowMe]; u[i] = as_double2(t); }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = as_int4(u[i]).y;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { int4 t = as_int4(u[i]); t.y = lds[i * WG + lowMe]; u[i] = as_double2(t); }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = as_int4(u[i]).z;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { int4 t = as_int4(u[i]); t.z = lds[i * WG + lowMe]; u[i] = as_double2(t); }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = as_int4(u[i]).w;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { int4 t = as_int4(u[i]); t.w = lds[i * WG + lowMe]; u[i] = as_double2(t); }
+#else
+#error Unsupported SHUFL_BYTES for partial radix shuffle
+#endif
+
+#undef AEVUM_PARTIAL_SHUFL_INDEX
+}
+#endif
+
+#if FFT_FP32 | NTT_GF31
+void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  const u32 mask = f - 1;
+  assert((mask & (mask + 1)) == 0);
+  assert(r && r <= RADIX && RADIX % r == 0);
+
+#define AEVUM_PARTIAL_SHUFL_INDEX(i) ((i) / (RADIX / r) * f + (i) % (RADIX / r) * WG * r + (lowMe & ~mask) * r + (lowMe & mask))
+
+#if SHUFL_BYTES >= 8
+  local F2 *lds = (local F2 *)lds2;
+  if (numWG > 1) lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F2);
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i] = lds[i * WG + lowMe];
+
+#elif SHUFL_BYTES == 4
+  local F *lds = (local F *)lds2;
+  if (numWG > 1) lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F);
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i].x;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i].x = lds[i * WG + lowMe];
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) lds[AEVUM_PARTIAL_SHUFL_INDEX(i)] = u[i].y;
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) u[i].y = lds[i * WG + lowMe];
+#else
+#error Unsupported SHUFL_BYTES for partial radix shuffle
+#endif
+
+#undef AEVUM_PARTIAL_SHUFL_INDEX
+}
+#endif
+
+
 // AEVUM_GWOLT_SHUFL_FFT2_TYPED
 // Typed Aevum backport of gpuowl 6cf0dc fused shuffle + fft2.
 // Used only by SIZE=1K / RADIX=8 / f=8, so it is only defined there: its SHUFL_BYTES checks must not reject other shapes.
@@ -837,6 +937,9 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
 
 void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl64(lds, u, f, numWG, lowMe);
+}
+void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  shufl64(lds, u, f, r, numWG, lowMe);
 }
 
 void OVERLOAD chainMul4(T2 *u, T2 w) {
@@ -1678,6 +1781,9 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl32(lds, u, f, numWG, lowMe);
 }
+void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  shufl32(lds, u, f, r, numWG, lowMe);
+}
 
 void OVERLOAD fft_RADIX(F2 *u) {
 #if RADIX == 4
@@ -2274,6 +2380,9 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
 void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl32((local F2 *) lds, (F2 *) u, f, numWG, lowMe);
 }
+void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  shufl32((local F2 *) lds, (F2 *) u, f, r, numWG, lowMe);
+}
 
 void OVERLOAD fft_RADIX(GF31 *u) {
 #if RADIX == 4
@@ -2488,6 +2597,9 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
 void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 numWG, u32 lowMe) {
   shufl64((local T2 *) lds, (T2 *) u, f, numWG, lowMe);
+}
+void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 r, u32 numWG, u32 lowMe) {
+  shufl64((local T2 *) lds, (T2 *) u, f, r, numWG, lowMe);
 }
 
 void OVERLOAD fft_RADIX(GF61 *u) {
