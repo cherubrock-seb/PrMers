@@ -275,6 +275,24 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #error - unsupported FFT/NTT
 #endif
 
+#ifndef AEVUM_EXPERIMENT_WIDTH2K
+#define AEVUM_EXPERIMENT_WIDTH2K 0
+#endif
+#if AEVUM_EXPERIMENT_WIDTH2K != 0 && AEVUM_EXPERIMENT_WIDTH2K != 1
+#error AEVUM_EXPERIMENT_WIDTH2K must be 0 or 1
+#endif
+#if WIDTH == 2048
+#if !AEVUM_EXPERIMENT_WIDTH2K || (FFT_TYPE != FFT3161 && FFT_TYPE != FFT3261) || NW != 8
+#error width 2K requires its Type1/2 radix-8 experiment
+#endif
+#if FFT_VARIANT != 202 || WMUL != 1 || INPLACE != 0 || PAD != 0
+#error unsupported width 2K specialization
+#endif
+#if SHUFL_BYTES_W != 8 || LDSPAD_W != 1 || LDSSWIZ_W != 0
+#error width 2K requires the padded 8-byte LDS layout
+#endif
+#endif
+
 // The FP64 FFT can save a few FP64 ops by applying some of the weights using FMA.  nVidia compilers are clever enough to do this automatically.
 // AMD's rocm compiler needs us to do this explicitly (see carryfused.cl's precompute and fft_common's use of it below).  Only wired up
 // for FFT_TYPE==FFT64 with fft_WIDTH's RADIX 4 or 8 (fft4_skip1 / fft8_skip1 in fft4.cl / fft8.cl); not the 32-thread

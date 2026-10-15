@@ -154,6 +154,17 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
 
+  if (w == 2048) {
+    if (!aevumWidth2kEnabled() || (t != FFT3161 && t != FFT3261) ||
+        (m != 2 && m != 4 && m != 8) || (h != 256 && h != 512))
+      throw std::runtime_error("width 2K requires its experiment, Type1/2, middle 2/4/8 and height 256/512");
+    // Same word count as a stock 1K plan; retain a conservative experimental
+    // margin rather than inventing or importing a measured PRPLL BPW limit.
+    bpw = FFTShape{t, 1024u, 2 * m, h}.bpw;
+    for (float& value : bpw) value -= 0.20f;
+    return;
+  }
+
   // PFA replaces the power-of-two middle axis by a coprime odd
   // Good-Thomas axis.  Type 1 uses the paired GF31/GF61 arithmetic and
   // Type 4 adds the FP32 residue plane.  Until dedicated tune data is
@@ -263,7 +274,8 @@ FFTConfig::FFTConfig(const string& input_spec) {
     u32 w = parseInt(v[0]);
     u32 m = parseInt(v[1]);
     u32 h = parseInt(v[2]);
-    if (w != 256 && w != 512 && w != 1024 && w != 4096) {
+    if (w != 256 && w != 512 && w != 1024 && w != 4096 &&
+        !(w == 2048 && aevumWidth2kEnabled())) {
       log("Width must be 256, 512, 1024, or 4096.\n");
       throw "Invalid FFT spec";
     }
@@ -324,6 +336,10 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
   variant{variant},
   carry{carry}
 {
+  if (shape.width == 2048 &&
+      (!aevumWidth2kEnabled() || variant != 202))
+    throw std::runtime_error("experimental width 2K requires explicit variant 202");
+
   // An out-of-range digit (e.g. an FFT spec ending in ":303") would index past the end of the bpw table.  These
   // checks must survive NDEBUG builds, so they are not asserts.
   if (variant_W(variant) >= N_VARIANT_W || variant_M(variant) >= N_VARIANT_M || variant_H(variant) >= N_VARIANT_H) {

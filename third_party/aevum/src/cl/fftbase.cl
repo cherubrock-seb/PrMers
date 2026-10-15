@@ -4,7 +4,10 @@
 #include "fft8.cl"
 
 // Calculate the LDS bytes used by shufl
-#if LDSPAD && SHUFL_BYTES == 16 && RADIX == 8
+#if AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+// PRPLL abf4295: first exchange needs 126 padded 8-byte slots, second 120.
+#define LDS_BYTES     ((WG * RADIX + 126) * SHUFL_BYTES)
+#elif LDSPAD && SHUFL_BYTES == 16 && RADIX == 8
 #define LDS_BYTES     ((WG * RADIX + 7) * SHUFL_BYTES)
 #elif LDSPAD && SHUFL_BYTES == 16 && RADIX == 4
 #define LDS_BYTES     ((WG * RADIX + 12) * SHUFL_BYTES)
@@ -832,6 +835,93 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
 
 #endif
 
+
+#if AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+// PRPLL 27f2a1 + abf4295, narrowed to the padded 8-byte layout.
+// f=1: chunked rows of 32+2, so adjacent stores can share a base.
+// f=16: pad eight after every 128 entries following the first radix-16.
+u32 aevum2KWriteIndex(u32 i, u32 f, u32 me) {
+  if (f == 1)
+    return (me / 32) * 8 * 34 + (me % 32) + i * 34;
+  u32 halfMe = me % 128;
+  return (halfMe / 8) * 136 + (me / 128) * 8 + (me & 7) + i * 16;
+}
+
+u32 aevum2KReadIndex(u32 i, u32 f, u32 me) {
+  u32 r = me % 128;
+  if (f == 1) {
+    u32 m = i * 16 + r / 8;
+    return (m / 32) * 8 * 34 + (r & 7) * 34 + m % 32;
+  }
+  return i * 136 + r;
+}
+
+#if FFT_FP32
+void OVERLOAD aevumShufl2KAndFft2(local F2 *lds2, F2 *u,
+                                    u32 f, u32 numWG, u32 me) {
+  assert(f == 1 || f == 16);
+  local F2 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F2);
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i)
+    lds[aevum2KWriteIndex(i, f, me)] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) {
+    F2 a = lds[aevum2KReadIndex(i, f, me)];
+    F2 b = lds[aevum2KReadIndex(i + 8, f, me)];
+    u[i] = me < 128 ? a+b : a-b;
+  }
+}
+#endif
+
+#if NTT_GF31
+void OVERLOAD aevumShufl2KAndFft2(local GF31 *lds2, GF31 *u,
+                                    u32 f, u32 numWG, u32 me) {
+  assert(f == 1 || f == 16);
+  local GF31 *lds = lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF31);
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i)
+    lds[aevum2KWriteIndex(i, f, me)] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) {
+    GF31 a = lds[aevum2KReadIndex(i, f, me)];
+    GF31 b = lds[aevum2KReadIndex(i + 8, f, me)];
+    u[i] = me < 128 ? addq(a,b) : subq(a,b);
+  }
+}
+#endif
+
+#if NTT_GF61
+void OVERLOAD aevumShufl2KAndFft2(local GF61 *lds2, GF61 *u,
+                                    u32 f, u32 numWG, u32 me) {
+  assert(f == 1 || f == 16);
+  local Z61 *lds = (local Z61 *)lds2;
+  if (numWG > 1)
+    lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(Z61);
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i)
+    lds[aevum2KWriteIndex(i, f, me)] = u[i].x;
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) {
+    Z61 a = lds[aevum2KReadIndex(i, f, me)];
+    Z61 b = lds[aevum2KReadIndex(i + 8, f, me)];
+    u[i].x = me < 128 ? addq(a,b) : subq(a,b);
+  }
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i)
+    lds[aevum2KWriteIndex(i, f, me)] = u[i].y;
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) {
+    Z61 a = lds[aevum2KReadIndex(i, f, me)];
+    Z61 b = lds[aevum2KReadIndex(i + 8, f, me)];
+    u[i].y = me < 128 ? addq(a,b) : subq(a,b);
+  }
+}
+#endif
+#endif
 
 #if FFT_FP64
 
@@ -1750,6 +1840,19 @@ void OVERLOAD tabMul(TrigFP32 trig, F2 *u, u32 f, u32 me) {
 }
 
 // Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+#if AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+// Middle radix-16 outputs are 2*i+h, with a shared twiddle per eight lanes.
+void OVERLOAD aevumTabMul16_2K(TrigFP32 trig, F2 *u, u32 me) {
+  trig += 7 * WG;
+  u32 q = (me % 128) / 8;
+  u32 h = me / 128;
+  for (u32 i = 0; i < 8; ++i) {
+    if (i == 0 && h == 0) continue;
+    u[i] = cmul(u[i], TFLOAD(&trig[(2 * i + h - 1) * 16 + q]));
+  }
+}
+#endif
+
 void OVERLOAD tabMul8_4a(TrigFP32 trig, F2 *u, u32 f, u32 me) {
 
   if (f == 1) {                      // fft8_4 is performed first
@@ -2245,6 +2348,19 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
+// SIZE=2048: 8x16x16 with both radix-2 entrances fused into the exchanges.
+#elif AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  aevumShufl2KAndFft2(lds, u, 1, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
+  aevumTabMul16_2K(trig, u, lowMe);
+  aevumShufl2KAndFft2(lds, u, 16, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
+
 #else
 
   // Old / original version
@@ -2336,6 +2452,19 @@ void OVERLOAD tabMul(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
 }
 
 // Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+#if AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+// Middle radix-16 outputs are 2*i+h, with a shared twiddle per eight lanes.
+void OVERLOAD aevumTabMul16_2K(TrigGF31 trig, GF31 *u, u32 me) {
+  trig += 7 * WG;
+  u32 q = (me % 128) / 8;
+  u32 h = me / 128;
+  for (u32 i = 0; i < 8; ++i) {
+    if (i == 0 && h == 0) continue;
+    u[i] = cmul(u[i], TFLOAD(&trig[(2 * i + h - 1) * 16 + q]));
+  }
+}
+#endif
+
 void OVERLOAD tabMul8_4a(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
 
   if (f == 1) {                      // fft8_4 is performed first
@@ -2461,6 +2590,19 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
+// SIZE=2048: 8x16x16 with both radix-2 entrances fused into the exchanges.
+#elif AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  aevumShufl2KAndFft2(lds, u, 1, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
+  aevumTabMul16_2K(trig, u, lowMe);
+  aevumShufl2KAndFft2(lds, u, 16, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
+
 #else
 
 #if !UNROLL
@@ -2551,6 +2693,19 @@ void OVERLOAD tabMul(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
 }
 
 // Tabmul after doing an fft4 when RADIX=8.  See the SIZE=256 code for example memory and trig layout.
+#if AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+// Middle radix-16 outputs are 2*i+h, with a shared twiddle per eight lanes.
+void OVERLOAD aevumTabMul16_2K(TrigGF61 trig, GF61 *u, u32 me) {
+  trig += 7 * WG;
+  u32 q = (me % 128) / 8;
+  u32 h = me / 128;
+  for (u32 i = 0; i < 8; ++i) {
+    if (i == 0 && h == 0) continue;
+    u[i] = cmul(u[i], TFLOAD(&trig[(2 * i + h - 1) * 16 + q]));
+  }
+}
+#endif
+
 void OVERLOAD tabMul8_4a(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
 
   if (f == 1) {                      // fft8_4 is performed first
@@ -2676,6 +2831,19 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+
+// SIZE=2048: 8x16x16 with both radix-2 entrances fused into the exchanges.
+#elif AEVUM_EXPERIMENT_WIDTH2K && DOING_WIDTH && WG == 256 && RADIX == 8
+
+  fft8(u);
+  tabMul(trig, u, 1, lowMe);
+  aevumShufl2KAndFft2(lds, u, 1, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
+  aevumTabMul16_2K(trig, u, lowMe);
+  aevumShufl2KAndFft2(lds, u, 16, numWG, lowMe);
+
+  if (lowMe < 128) fft8_16a(u); else fft8_16b(u);
 
 #else
 

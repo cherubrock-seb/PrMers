@@ -287,6 +287,28 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (config.count("AEVUM_EXPERIMENT_WIDTH2K"))
+    throw std::runtime_error("AEVUM_EXPERIMENT_WIDTH2K is environment-only");
+  const bool width2k_enabled = aevumWidth2kEnabled();
+  const bool width2k_plan = fft.shape.width == 2048;
+  if (width2k_enabled != width2k_plan)
+    throw std::runtime_error("width 2K experiment requires an explicit 2K-width plan");
+  if (width2k_plan) {
+    if (fft.isPfa() || (fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261) ||
+        fft.variant != 202 || (fft.shape.middle != 2 && fft.shape.middle != 4 && fft.shape.middle != 8) ||
+        (fft.shape.height != 256 && fft.shape.height != 512))
+      throw std::runtime_error("unsupported experimental 2K-width plan");
+    for (const auto& [key, value] : std::vector<KeyVal>{
+             {"WMUL", "1"}, {"SHUFL_BYTES_W", "8"}, {"LDSPAD_W", "1"},
+             {"LDSSWIZ_W", "0"}, {"PAD", "0"}, {"INPLACE", "0"}}) {
+      if (config.count(key) && config.at(key) != value)
+        throw std::runtime_error("width 2K initially requires " + key + "=" + value);
+      config[key] = value;
+    }
+    config["AEVUM_EXPERIMENT_WIDTH2K"] = "1";
+    if (doLog) log("Experimental width 2K: 8x16x16, two padded fused exchanges, WMUL=1.\n");
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)

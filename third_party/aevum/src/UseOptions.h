@@ -13,6 +13,7 @@ inline bool aevumRegisterUseKey(const std::string& key) {
 // Single key registry shared with Gpu::makeDefines (-use).
 inline bool aevumUseKey(const std::string& key) {
   if (aevumRegisterUseKey(key)) return true;
+  if (key == "AEVUM_EXPERIMENT_WIDTH2K" || key == "SHUFL_BYTES_W" || key == "LDSPAD_W" || key == "LDSSWIZ_W") return true;
   if (key == "AEVUM_PFA7_NUSS8") return true;
   if (key == "AEVUM_PFA_FUSED_INVERSE") return true;
   if (key == "AEVUM_GF61_BETTER_ONEPAIRSQ") return true;

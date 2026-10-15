@@ -397,6 +397,13 @@ vector<float2> genSmallTrigFP32(u32 size, u32 radix) {
       tab.push_back(radix / line >= 8 ? root1FancyFP32(size, col * line) : root1FP32(size, col * line));
     }
   }
+  // PRPLL 2K=8x16x16: middle radix-16 twiddles follow 7*WG entries.
+  // Fifteen lines of sixteen ordinary roots occupy entries 1792..2031.
+  if (size == 2048 && radix == 8) {
+    for (u32 line = 1; line < 16; ++line)
+      for (u32 col = 0; col < 16; ++col)
+        tab.push_back(root1FP32(size, 8 * col * line));
+  }
   tab.resize(size);
 
 // New fft_WIDTH and fft_HEIGHT
@@ -637,6 +644,13 @@ vector<uint2> genSmallTrigGF31(u32 size, u32 radix) {
       tab.push_back(root1GF31(root1size, col * line));
     }
   }
+  // PRPLL 2K=8x16x16: middle radix-16 twiddles follow 7*WG entries.
+  // Fifteen lines of sixteen ordinary roots occupy entries 1792..2031.
+  if (size == 2048 && radix == 8) {
+    for (u32 line = 1; line < 16; ++line)
+      for (u32 col = 0; col < 16; ++col)
+        tab.push_back(root1GF31(root1size, 8 * col * line));
+  }
   tab.resize(size);
   return tab;
 }
@@ -794,6 +808,13 @@ vector<ulong2> genSmallTrigGF61(u32 size, u32 radix) {
     for (u32 col = 0; col < WG; ++col) {
       tab.push_back(root1GF61(root1size, col * line));
     }
+  }
+  // PRPLL 2K=8x16x16: middle radix-16 twiddles follow 7*WG entries.
+  // Fifteen lines of sixteen ordinary roots occupy entries 1792..2031.
+  if (size == 2048 && radix == 8) {
+    for (u32 line = 1; line < 16; ++line)
+      for (u32 col = 0; col < 16; ++col)
+        tab.push_back(root1GF61(root1size, 8 * col * line));
   }
   tab.resize(size);
   return tab;

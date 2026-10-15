@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdlib>
+#include <stdexcept>
 
 // We pre-calculate the maximum BPW for a number of fft specs.  From these entries we can either look up or interpolate to get the
 // maximum BPW for all variants of an FFT spec.  The variants for which maximum bpw are precomputed are 000, 101, 202, 010, 111, 212.
@@ -50,6 +51,18 @@ inline bool aevumRadix8For1K() {
   return aevumDefaultRadix8For1K;
 }
 #endif
+
+// Width 2K remains explicit-only until hardware validates geometry and capacity.
+inline bool aevumWidth2kEnabled() {
+  const char* value = std::getenv("AEVUM_EXPERIMENT_WIDTH2K");
+  if (!value) return false;
+  if (std::string(value) != "0" && std::string(value) != "1")
+    throw std::runtime_error("AEVUM_EXPERIMENT_WIDTH2K must be 0 or 1");
+#if defined(__APPLE__)
+  if (value[0] == '1') throw std::runtime_error("width 2K is not wired to Apple staged kernels");
+#endif
+  return value[0] == '1';
+}
 
 class FFTShape {
 public:
