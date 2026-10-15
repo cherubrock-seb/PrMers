@@ -2296,6 +2296,19 @@ void OVERLOAD chainMul4(GF31 *u, GF31 w) {
 }
 
 void OVERLOAD chainMul8(GF31 *u, GF31 w) {
+#if AEVUM_GF31_TRIG_POWERS
+  const GF31 w2 = csqTrig(w), w3 = ccubeTrig(w2, w);
+  const GF31 w4 = csqTrig(w2), w6 = csqTrig(w3);
+  GF31 w5, w7;
+  aevumTrigPair(&w7, &w5, w6, w);
+  u[1] = cmul(u[1], w);
+  u[2] = cmul(u[2], w2);
+  u[3] = cmul(u[3], w3);
+  u[4] = cmul(u[4], w4);
+  u[5] = cmul(u[5], w5);
+  u[6] = cmul(u[6], w6);
+  u[7] = cmul(u[7], w7);
+#else
   u[1] = cmul(u[1], w);
 
   GF31 base = csqTrig(w);
@@ -2306,6 +2319,7 @@ void OVERLOAD chainMul8(GF31 *u, GF31 w) {
     u[i] = cmul(u[i], base);
     base = cmul(base, w);
   }
+#endif
 }
 
 void OVERLOAD chainMul(GF31 *u, GF31 w) {
@@ -2501,6 +2515,12 @@ void OVERLOAD fft_RADIX(GF61 *u) {
 }
 
 void OVERLOAD chainMul4(GF61 *u, GF61 w) {
+#if AEVUM_GF61_TRIG_POWERS
+  const GF61 w2 = csqTrig(w), w3 = ccubeTrig(w2, w);
+  u[1] = cmul(u[1], w);
+  u[2] = cmul(u[2], w2);
+  u[3] = cmul(u[3], w3);
+#else
   u[1] = cmul(u[1], w);
 
   GF61 base = csq(w);
@@ -2508,9 +2528,23 @@ void OVERLOAD chainMul4(GF61 *u, GF61 w) {
 
   base = cmul(base, w);                 //GWBUG - see FP64 version for possible optimization
   u[3] = cmul(u[3], base);
+#endif
 }
 
 void OVERLOAD chainMul8(GF61 *u, GF61 w) {
+#if AEVUM_GF61_TRIG_POWERS
+  const GF61 w2 = csqTrig(w), w3 = ccubeTrig(w2, w);
+  const GF61 w4 = csqTrig(w2), w6 = csqTrig(w3);
+  GF61 w5, w7;
+  aevumTrigPair(&w7, &w5, w6, w);
+  u[1] = cmul(u[1], w);
+  u[2] = cmul(u[2], w2);
+  u[3] = cmul(u[3], w3);
+  u[4] = cmul(u[4], w4);
+  u[5] = cmul(u[5], w5);
+  u[6] = cmul(u[6], w6);
+  u[7] = cmul(u[7], w7);
+#else
   u[1] = cmul(u[1], w);
 
   GF61 w2 = csq(w);
@@ -2521,6 +2555,7 @@ void OVERLOAD chainMul8(GF61 *u, GF61 w) {
     u[i] = cmul(u[i], base);
     base = cmul(base, w);
   }
+#endif
 }
 
 void OVERLOAD chainMul(GF61 *u, GF61 w) {
