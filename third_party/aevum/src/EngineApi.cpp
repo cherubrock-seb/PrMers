@@ -1742,14 +1742,16 @@ const bool register_profiles_enabled =
     !register_profiles_env || std::strcmp(register_profiles_env, "0") != 0;
 bool explicit_cuda_carry_registers =
     args_.uses("REGCF3161") || args_.uses("NOREG");
+bool explicit_cuda_midout61_registers =
+    args_.uses("REGMO61") || args_.uses("NOREG");
 if (const auto it = args_.perFftConfig.find(fft.shape.spec());
     it != args_.perFftConfig.end()) {
   for (const auto& [key, value] : it->second) {
     (void)value;
-    if (key == "REGCF3161" || key == "NOREG") {
+    if (key == "REGCF3161" || key == "NOREG")
       explicit_cuda_carry_registers = true;
-      break;
-    }
+    if (key == "REGMO61" || key == "NOREG")
+      explicit_cuda_midout61_registers = true;
   }
 }
 const bool rtx3080_type1_regcf3161_2 =
@@ -1768,6 +1770,31 @@ if (rtx3080_type1_regcf3161_2) {
   if (verbose) {
     log("AEVUM_CUDA_REG_PROFILE source=rtx3080-type1-auto shape=%s "
         "profile=REGCF3161=2 range=135000013..158000003\n",
+        fft.spec().c_str());
+  }
+}
+
+// R69: on the same validated RTX 3080 Type1 PRP band, allowing the compiler
+// to choose fftMiddleOutGF61 register usage instead of forcing the historical
+// 64-register cap was word-exact and improved 0.80..0.86% across p135..p158.
+// The p150 3x2048 discriminator was +0.852%, 3/3 wins. REGMO31=-1 added no
+// material benefit, so keep this minimal and GF61-only.
+const bool rtx3080_type1_regmo61_default =
+    register_profiles_enabled &&
+    !explicit_cuda_midout61_registers &&
+    workload_ == aevum_autotune::Workload::Prp &&
+    !fft.isPfa() &&
+    device_name == "NVIDIA GeForce RTX 3080" &&
+    getNvidiaComputeCapability(selected_device) == 806u &&
+    exponent_ >= 135000013u &&
+    exponent_ <= 158000003u &&
+    fft.spec() == "1:512:8:512:202";
+
+if (rtx3080_type1_regmo61_default) {
+  pfa_use.emplace_back("REGMO61", "-1");
+  if (verbose) {
+    log("AEVUM_CUDA_REG_PROFILE source=rtx3080-type1-auto shape=%s "
+        "profile=REGMO61=-1 range=135000013..158000003\n",
         fft.spec().c_str());
   }
 }
