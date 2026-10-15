@@ -1,3 +1,18 @@
+// PRPLL 079e8998, restricted to the current gfx906 GF61 512-point path.
+#ifndef AEVUM_GFX906_GF61_HOIST_W
+#define AEVUM_GFX906_GF61_HOIST_W 0
+#endif
+#ifndef AEVUM_GFX906_GF61_HOIST_H
+#define AEVUM_GFX906_GF61_HOIST_H 0
+#endif
+#if (AEVUM_GFX906_GF61_HOIST_W != 0 && AEVUM_GFX906_GF61_HOIST_W != 1) || (AEVUM_GFX906_GF61_HOIST_H != 0 && AEVUM_GFX906_GF61_HOIST_H != 1)
+#error GF61 hoist flags must be 0 or 1
+#endif
+#define AEVUM_GF61_STAGE_HOIST ((DOING_WIDTH && AEVUM_GFX906_GF61_HOIST_W) || (DOING_HEIGHT && AEVUM_GFX906_GF61_HOIST_H))
+#if AEVUM_GF61_STAGE_HOIST && !HAS_ASM
+#error GF61 stage hoist requires AMD inline assembly
+#endif
+
 // Copyright (C) Mihai Preda
 
 #include "fft4.cl"
@@ -2531,6 +2546,10 @@ void OVERLOAD chainMul(GF61 *u, GF61 w) {
 }
 
 void OVERLOAD tabMul(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
+#if AEVUM_GF61_STAGE_HOIST
+  // Identity compiler dependency: issue this step's twiddles after its FFT.
+  __asm volatile("" : "+v"(me));
+#endif
   u32 p = me & ~(f - 1);
 
 // This code uses chained complex multiplies which could be faster on GPUs with great mul throughput or poor memory bandwidth or caching.
@@ -2683,9 +2702,18 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
   __attribute__((opencl_unroll_hint(1)))
 #endif
   for (u32 s = 1; s < WG; s *= RADIX) {
+#if AEVUM_GF61_STAGE_HOIST && WG == 64 && RADIX == 8
+    // Do not keep later stages' LDS addresses/twiddle state live across this one.
+    u32 stageMe = lowMe;
+    __asm volatile("" : "+v"(stageMe));
+    fft_RADIX(u);
+    tabMul(trig, u, s, stageMe);
+    shufl(lds, u, s, numWG, stageMe);
+#else
     fft_RADIX(u);
     tabMul(trig, u, s, lowMe);
     shufl(lds, u, s, numWG, lowMe);
+#endif
   }
   fft_RADIX(u);
 

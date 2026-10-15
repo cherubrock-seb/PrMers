@@ -287,6 +287,33 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  bool gf61_stage_hoist = false;
+  for (const char* key : {"AEVUM_GFX906_GF61_HOIST_W", "AEVUM_GFX906_GF61_HOIST_H"}) {
+    if (const char* value = std::getenv(key)) {
+      const auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting ") + key + " selections");
+      config[key] = value;
+    }
+    if (const auto it = config.find(key); it != config.end()) {
+      if (it->second != "0" && it->second != "1")
+        throw std::runtime_error(string(key) + " must be 0 or 1");
+      gf61_stage_hoist = gf61_stage_hoist || it->second == "1";
+    }
+  }
+  if (gf61_stage_hoist) {
+    if (getDeviceName(id).rfind("gfx906", 0) != 0 || fft.isPfa() ||
+        fft.shape.fft_type != FFT3261 || fft.shape.width != 512 ||
+        fft.shape.height != 512 || fft.shape.middle != 8 || fft.variant != 202)
+      throw std::runtime_error("GF61 stage hoist requires gfx906 Type2 2:512:8:512:202");
+    if (config.count("NO_ASM") && config.at("NO_ASM") != "0")
+      throw std::runtime_error("GF61 stage hoist conflicts with NO_ASM");
+    if (doLog)
+      log("Experimental gfx906 GF61 stage hoist: width=%s height=%s.\n",
+          config.count("AEVUM_GFX906_GF61_HOIST_W") ? config.at("AEVUM_GFX906_GF61_HOIST_W").c_str() : "0",
+          config.count("AEVUM_GFX906_GF61_HOIST_H") ? config.at("AEVUM_GFX906_GF61_HOIST_H").c_str() : "0");
+  }
+
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
   // fftW must still scatter into the distinct canonical buf3 allocation.
