@@ -137,7 +137,9 @@ than production AUTO.
 `-bench3-mode quick|standard|dense|full`
 
 Quick and standard deliberately use bounded exponent grids so a public Bench3
-run remains practical. Dense/full expand coverage and repetitions.
+run remains practical. All modes include M136279841 so the validated fixed
+PFA7 plan has at least one legal benchmark point instead of being skipped for
+capacity at every point. Dense/full expand coverage and repetitions.
 
 Use `-bench3-out PATH`. Bench3 writes:
 
