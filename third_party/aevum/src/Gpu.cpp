@@ -287,6 +287,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  (void)aevumExperimentalRadix8Width256();  // Validate even a reused/copy-constructed plan.
   if (fft.shape.experimentalRadix8Width256()) {
     if (!isNvidiaGpu(id) || fft.shape.width != 256 ||
         fft.shape.fft_type != FFT3161 || fft.isPfa() || variant_W(fft.variant) == 0)
