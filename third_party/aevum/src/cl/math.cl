@@ -985,6 +985,19 @@ GF31 OVERLOAD cmul_const(GF31 a, GF31 b) {
 GF31 OVERLOAD csqTrig(GF31 a) { u32 two_ay = a.y + a.y; return U2(modM31(mad32(two_ay, neg(a.y), (u32)1)), modM31(a.x * (u64)two_ay)); }
 
 // Cube w, a root of unity complex number, given w^2 and w
+#if AEVUM_GF31_TRIG_POWERS
+// Shared products give a*b and a*conjugate(b). Unit-circle b makes the
+// second output a/b. Each input component is in inclusive 0..M31.
+void OVERLOAD aevumTrigPair(GF31 *plus, GF31 *minus, GF31 a, GF31 b) {
+  const u64 p2 = (u64)M31 * M31;
+  const u64 xx = (u64)a.x * b.x, yy = (u64)a.y * b.y;
+  const u64 xy = (u64)a.x * b.y, yx = (u64)a.y * b.x;
+  // Every unsigned argument is nonnegative and at most 2*M31^2 < 2^63.
+  *plus = U2(modM31(xx + p2 - yy), modM31(xy + yx));
+  *minus = U2(modM31(xx + yy), modM31(yx + p2 - xy));
+}
+#endif
+
 GF31 OVERLOAD ccubeTrig(GF31 sq, GF31 w) { u32 tmp = sq.y + sq.y; return U2(modM31(mad32(tmp, neg(w.y), w.x)), modM31(mad32(tmp, w.x, neg(w.y)))); }
 
 // mul with (0, 1). (twiddle of tau/4, sqrt(-1) aka "i").
@@ -1259,6 +1272,16 @@ GF61 OVERLOAD cmul(GF61 a, GF61 b) {
 GF61 OVERLOAD csqTrig(GF61 a) { Z61 ay_sq = weakMul(a.y, a.y, 2, 2); return U2(modM61(1 + neg(ay_sq + ay_sq, 4)), mul2(weakMul(a.x, a.y, 2, 2))); }
 
 // Cube w, a root of unity complex number, given w^2 and w
+#if AEVUM_GF61_TRIG_POWERS
+// Reuse four weak products for a*b and a*conjugate(b).
+void OVERLOAD aevumTrigPair(GF61 *plus, GF61 *minus, GF61 a, GF61 b) {
+  const Z61 xx = weakMul(a.x, b.x, 2, 2), yy = weakMul(a.y, b.y, 2, 2);
+  const Z61 xy = weakMul(a.x, b.y, 2, 2), yx = weakMul(a.y, b.x, 2, 2);
+  *plus = U2(modM61(xx + neg(yy, 3)), modM61(xy + yx));
+  *minus = U2(modM61(xx + yy), modM61(yx + neg(xy, 3)));
+}
+#endif
+
 GF61 OVERLOAD ccubeTrig(GF61 sq, GF61 w) { Z61 tmp = sq.y + sq.y; return U2(modM61(weakMul(tmp, neg(w.y, 2), 3, 3) + w.x), modM61(weakMul(tmp, w.x, 3, 2) + neg(w.y, 2))); }
 
 // a + i*b 
