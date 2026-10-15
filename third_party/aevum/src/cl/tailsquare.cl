@@ -11,6 +11,13 @@
 #include "tailutil.cl"
 #include "middle.cl"
 
+#ifndef AEVUM_TAIL_PAIRSQ_UNROLL
+#define AEVUM_TAIL_PAIRSQ_UNROLL 0
+#endif
+#if AEVUM_TAIL_PAIRSQ_UNROLL != 0 && AEVUM_TAIL_PAIRSQ_UNROLL != 1
+#error AEVUM_TAIL_PAIRSQ_UNROLL must be 0 or 1
+#endif
+
 #if AEVUM_PRP_MIDDLE1
 #include "prp_middle1.cl"
 #define AEVUM_PRP_TRIG_ARG , Trig middleTrig
@@ -46,6 +53,10 @@ void OVERLOAD onePairSq(T2* pa, T2* pb, T2 t_squared) {
 void OVERLOAD pairSq(u32 N, T2 *u, T2 *v, T2 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(2 * foo(u[i]));
@@ -210,6 +221,10 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
 // Special pairSq for double-wide line 0
 void OVERLOAD pairSq2_special(T2 *u, T2 base_squared) {
   u32 me = get_local_id(0);
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (i == 0 && me == 0) {
       u[0] = SWAP_XY(2 * foo(u[0]));
@@ -336,6 +351,10 @@ void OVERLOAD onePairSq(F2* pa, F2* pb, F2 t_squared) {
 void OVERLOAD pairSq(u32 N, F2 *u, F2 *v, F2 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(2 * foo(u[i]));
@@ -558,6 +577,10 @@ KERNEL(G_H) tailSquare(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_ARG) 
 // Special pairSq for double-wide line 0
 void OVERLOAD pairSq2_special(F2 *u, F2 base_squared) {
   u32 me = get_local_id(0);
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (i == 0 && me == 0) {
       u[0] = SWAP_XY(2 * foo(u[0]));
@@ -685,6 +708,10 @@ void OVERLOAD onePairSq(GF31* pa, GF31* pb, GF31 t_squared, const u32 t_squared_
 void OVERLOAD pairSq(u32 N, GF31 *u, GF31 *v, GF31 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(mul2(foo(u[i])));
@@ -873,6 +900,10 @@ KERNEL(G_H) tailSquareGF31(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 // Special pairSq for double-wide line 0
 void OVERLOAD pairSq2_special(GF31 *u, GF31 base_squared) {
   u32 me = get_local_id(0);
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (i == 0 && me == 0) {
       u[0] = SWAP_XY(mul2(foo(u[0])));
@@ -1061,6 +1092,10 @@ void OVERLOAD onePairSq(GF61* pa, GF61* pb, GF61 t_squared, const u32 t_squared_
 void OVERLOAD pairSq(u32 N, GF61 *u, GF61 *v, GF61 base_squared, bool special) {
   u32 me = get_local_id(0);
 
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (special && i == 0 && me == 0) {
       u[i] = SWAP_XY(mul2(foo(u[i])));
@@ -1776,6 +1811,10 @@ KERNEL(G_H) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TRIG_A
 // Special pairSq for double-wide line 0
 void OVERLOAD pairSq2_special(GF61 *u, GF61 base_squared) {
   u32 me = get_local_id(0);
+  // NH is a compile-time constant; keep u[]/v[] indices in registers.
+#if AEVUM_TAIL_PAIRSQ_UNROLL
+#pragma unroll
+#endif
   for (i32 i = 0; i < NH / 4; ++i, base_squared = mul_t8(base_squared)) {
     if (i == 0 && me == 0) {
       u[0] = SWAP_XY(mul2(foo(u[0])));

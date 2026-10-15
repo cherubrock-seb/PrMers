@@ -287,6 +287,23 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  if (const char* value = std::getenv("AEVUM_TAIL_PAIRSQ_UNROLL")) {
+    const auto it = config.find("AEVUM_TAIL_PAIRSQ_UNROLL");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_TAIL_PAIRSQ_UNROLL selections");
+    config["AEVUM_TAIL_PAIRSQ_UNROLL"] = value;
+  }
+  if (const auto it = config.find("AEVUM_TAIL_PAIRSQ_UNROLL"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_TAIL_PAIRSQ_UNROLL must be 0 or 1");
+#if defined(__APPLE__)
+    if (it->second == "1")
+      throw std::runtime_error("AEVUM_TAIL_PAIRSQ_UNROLL is not available on Apple");
+#endif
+    if (doLog && it->second == "1")
+      log("AEVUM_TAIL_PAIRSQ_UNROLL=1: constant-index tail pair loops; plan=%s.\n", fft.spec().c_str());
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
