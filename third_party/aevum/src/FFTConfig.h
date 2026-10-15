@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <cstdlib>
+#include <stdexcept>
 
 // We pre-calculate the maximum BPW for a number of fft specs.  From these entries we can either look up or interpolate to get the
 // maximum BPW for all variants of an FFT spec.  The variants for which maximum bpw are precomputed are 000, 101, 202, 010, 111, 212.
@@ -50,6 +51,16 @@ inline bool aevumRadix8For1K() {
   return aevumDefaultRadix8For1K;
 }
 #endif
+
+// Explicit-only GF61+FP32 odd radices. Environment-only because parsing
+// happens before per-kernel -use configuration is resolved.
+inline bool aevumPfa515Enabled() {
+  const char* value = std::getenv("AEVUM_EXPERIMENT_PFA515");
+  if (!value) return false;
+  if (std::string(value) != "0" && std::string(value) != "1")
+    throw std::runtime_error("AEVUM_EXPERIMENT_PFA515 must be 0 or 1");
+  return value[0] == '1';
+}
 
 class FFTShape {
 public:
@@ -125,7 +136,7 @@ public:
   // bound.  The full FP32 plane is then mathematically redundant.
   bool adaptive_type4_request = false;
   bool adaptive_type4_elided = false;
-  bool isPfa() const { return pfa_radix == 3 || pfa_radix == 7 || pfa_radix == 9; }
+  bool isPfa() const { return pfa_radix == 3 || pfa_radix == 5 || pfa_radix == 7 || pfa_radix == 9 || pfa_radix == 15; }
 
   explicit FFTConfig(const string& spec);
   FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry);

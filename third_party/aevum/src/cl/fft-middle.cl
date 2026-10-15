@@ -424,6 +424,10 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
   fft4(u);
 #elif MIDDLE == 8
   fft8(u);
+#elif PFA_RADIX == 5 && MIDDLE == 5
+  fft5(u);
+#elif PFA_RADIX == 15 && MIDDLE == 15
+  fft15(u);
 #elif PFA_RADIX == 7 && MIDDLE == 7
   fft7(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
@@ -436,7 +440,11 @@ void OVERLOAD fft_MIDDLE(F2 *u) {
 }
 
 void OVERLOAD ifft_MIDDLE(F2 *u) {
-#if PFA_RADIX == 7
+#if PFA_RADIX == 5 || PFA_RADIX == 15
+  fft_MIDDLE(u);
+#pragma unroll
+  for (u32 i = 0; i < MIDDLE; ++i) u[i] *= (1.0f / (float)PFA_RADIX);
+#elif PFA_RADIX == 7
   // The tail hands back SWAP_XY(result), so as with PFA9 the same forward
   // odd-axis DFT applied to swapped data is the inverse transform.  Only the
   // radix normalization is required here.
@@ -1266,8 +1274,55 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
 }
 #endif
 
+#if PFA_RADIX == 5 || PFA_RADIX == 15
+// Folded radix 5 in the base field. Keep the existing canonical helpers;
+// this ports the new geometry without importing PFA7's rejected wide dots.
+void aevumPfaDft5(GF61 *a, bool inverse) {
+  const Z61 c1 = (Z61)PFA515_C1_61, c2 = (Z61)PFA515_C2_61;
+  const Z61 s1 = inverse ? M61 - (Z61)PFA515_S1_61 : (Z61)PFA515_S1_61;
+  const Z61 s2 = inverse ? M61 - (Z61)PFA515_S2_61 : (Z61)PFA515_S2_61;
+  const GF61 x0 = a[0];
+  const GF61 sum1 = add(a[1], a[4]), sum2 = add(a[2], a[3]);
+  const GF61 dif1 = sub(a[1], a[4]), dif2 = sub(a[2], a[3]);
+  const GF61 pc1 = add(x0, add(pfaMulScalar(sum1,c1), pfaMulScalar(sum2,c2)));
+  const GF61 pc2 = add(x0, add(pfaMulScalar(sum1,c2), pfaMulScalar(sum2,c1)));
+  const GF61 qs1 = add(pfaMulScalar(dif1,s1), pfaMulScalar(dif2,s2));
+  const GF61 qs2 = sub(pfaMulScalar(dif1,s2), pfaMulScalar(dif2,s1));
+  a[0] = add(x0, add(sum1, sum2));
+  a[1] = add(pc1, qs1); a[4] = sub(pc1, qs1);
+  a[2] = add(pc2, qs2); a[3] = sub(pc2, qs2);
+}
+
+void aevumPfaDft515(GF61 *a, bool inverse) {
+#if PFA_RADIX == 5
+  aevumPfaDft5(a, inverse);
+#else
+  // Twiddle-free 3 x 5 Good-Thomas: inputs 5*n1+3*n2, outputs
+  // 10*k1+6*k2 mod 15. All private-array indices are statically unrolled.
+  const Z61 w3 = inverse ? (Z61)PFA515_INVROOT3_61 : (Z61)PFA515_ROOT3_61;
+  GF61 b[15];
+#pragma unroll
+  for (u32 n2 = 0; n2 < 5; ++n2) {
+    GF61 t0, t1, t2;
+    pfaDft3(a[3*n2 % 15], a[(5+3*n2) % 15], a[(10+3*n2) % 15],
+            w3, &t0, &t1, &t2);
+    b[3*n2] = t0; b[3*n2+1] = t1; b[3*n2+2] = t2;
+  }
+#pragma unroll
+  for (u32 k1 = 0; k1 < 3; ++k1) {
+    GF61 t[5] = {b[k1], b[3+k1], b[6+k1], b[9+k1], b[12+k1]};
+    aevumPfaDft5(t, inverse);
+#pragma unroll
+    for (u32 k2 = 0; k2 < 5; ++k2) a[(10*k1+6*k2) % 15] = t[k2];
+  }
+#endif
+}
+#endif
+
 void OVERLOAD pfaForwardMiddle(GF61 *u) {
-#if PFA_RADIX == 3
+#if PFA_RADIX == 5 || PFA_RADIX == 15
+  aevumPfaDft515(u, false);
+#elif PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)1669582390241348315UL, &o0, &o1, &o2);
   u[0] = o0; u[1] = o1; u[2] = o2;
@@ -1298,7 +1353,11 @@ void OVERLOAD pfaForwardMiddle(GF61 *u) {
 }
 
 void OVERLOAD pfaInverseMiddle(GF61 *u) {
-#if PFA_RADIX == 3
+#if PFA_RADIX == 5 || PFA_RADIX == 15
+  aevumPfaDft515(u, true);
+#pragma unroll
+  for (u32 i = 0; i < MIDDLE; ++i) u[i] = pfaMulScalar(u[i], (Z61)PFA515_INV_RADIX61);
+#elif PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)636260618972345635UL, &o0, &o1, &o2);
 #ifdef AEVUM_PFA_MIDOUT_INV61
@@ -1393,6 +1452,8 @@ void OVERLOAD fft_MIDDLE(GF61 *u) {
   fft8(u);
 #elif MIDDLE == 16
   fft16(u);
+#elif (PFA_RADIX == 5 || PFA_RADIX == 15) && MIDDLE == PFA_RADIX
+  pfaForwardMiddle(u);
 #elif PFA_RADIX == 3 && MIDDLE == 3
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 7 && MIDDLE == 7

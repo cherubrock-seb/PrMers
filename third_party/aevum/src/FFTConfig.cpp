@@ -160,8 +160,9 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // collected, inherit the next stock power-of-two plan and retain the
   // existing conservative capacity margin.
   if ((t == FFT3161 && (m == 3 || m == 7 || m == 9)) ||
-      (t == FFT323161 && (m == 7 || m == 9))) {
-    const u32 reference_middle = m == 3 ? 4 : (m == 7 ? 8 : 16);
+      (t == FFT323161 && (m == 7 || m == 9)) ||
+      (t == FFT3261 && (m == 5 || m == 15))) {
+    const u32 reference_middle = m == 3 ? 4 : ((m == 5 || m == 7) ? 8 : 16);
     bpw = FFTShape{t, w, reference_middle, h}.bpw;
     for (float& value : bpw) value -= 0.20f;
     return;
@@ -245,10 +246,15 @@ FFTConfig::FFTConfig(const string& input_spec) {
   bool adaptive_type4 = false;
   bool force_full_type4 = false;
   if (startsWith(spec, "pfa3:")) { requested_pfa = 3; spec = spec.substr(5); }
+  else if (startsWith(spec, "pfa5:")) { requested_pfa = 5; spec = spec.substr(5); }
+  else if (startsWith(spec, "pfa15:")) { requested_pfa = 15; spec = spec.substr(6); }
   else if (startsWith(spec, "pfa7:")) { requested_pfa = 7; spec = spec.substr(5); }
   else if (startsWith(spec, "pfa9full:")) { requested_pfa = 9; force_full_type4 = true; spec = spec.substr(9); }
   else if (startsWith(spec, "pfa9fast:")) { requested_pfa = 9; adaptive_type4 = true; spec = spec.substr(9); }
   else if (startsWith(spec, "pfa9:")) { requested_pfa = 9; spec = spec.substr(5); }
+  const bool pfa515_enabled = aevumPfa515Enabled();
+  if ((requested_pfa == 5 || requested_pfa == 15) && !pfa515_enabled)
+    throw std::runtime_error("pfa5:/pfa15: require AEVUM_EXPERIMENT_PFA515=1");
   auto v = split(spec, ':');
 
   enum FFT_TYPES fft_type = FFT3161;
@@ -257,6 +263,9 @@ FFTConfig::FFTConfig(const string& input_spec) {
     for (u32 i = 1; i < v.size(); ++i) v[i-1] = v[i];
     v.resize(v.size() - 1);
   }
+
+  if ((requested_pfa == 5 || requested_pfa == 15) && fft_type != FFT3261)
+    throw std::runtime_error("PFA5/15 is FP32+GF61 only: GF31 has no fifth roots");
 
   // Sanity check the spec
   if (v.size() >= 3) {
@@ -304,8 +313,10 @@ FFTConfig::FFTConfig(const string& input_spec) {
                             (requested_pfa == 3 || requested_pfa == 7 || requested_pfa == 9);
     const bool hybrid_fp32_crt = shape.fft_type == FFT323161 &&
                                  (requested_pfa == 7 || requested_pfa == 9);
-    if ((!paired_ntt && !hybrid_fp32_crt) || shape.middle != requested_pfa)
-      throw std::runtime_error("PFA plans require FFT3161 middle 3/7/9 or FFT323161 middle 7/9");
+    const bool hybrid_gf61 = pfa515_enabled && shape.fft_type == FFT3261 &&
+                             (requested_pfa == 5 || requested_pfa == 15);
+    if ((!paired_ntt && !hybrid_fp32_crt && !hybrid_gf61) || shape.middle != requested_pfa)
+      throw std::runtime_error("PFA plans require Type1 middle 3/7/9, Type4 middle 7/9 or opt-in Type2 middle 5/15");
     pfa_radix = requested_pfa;
     // Keep the existing PFA9 capacity-adaptive policy unchanged.  PFA7 Type4
     // is an explicit full FP32+GF31+GF61 diagnostic path until it has its own

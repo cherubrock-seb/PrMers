@@ -223,6 +223,18 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define PFA_RADIX 0u
 #endif
 
+#ifndef AEVUM_EXPERIMENT_PFA515
+#define AEVUM_EXPERIMENT_PFA515 0
+#endif
+#if AEVUM_EXPERIMENT_PFA515 != 0 && AEVUM_EXPERIMENT_PFA515 != 1
+#error AEVUM_EXPERIMENT_PFA515 must be 0 or 1
+#endif
+#if PFA_RADIX == 5 || PFA_RADIX == 15
+#if !AEVUM_EXPERIMENT_PFA515 || !FFT_FP32 || NTT_GF31 || !NTT_GF61 || MIDDLE != PFA_RADIX
+#error PFA5/15 requires the explicit FP32+GF61 experiment, with no GF31 plane
+#endif
+#endif
+
 #if PFA_RADIX
 #ifndef PFA_LOG2_ROOT_TWO31
 #error PFA_LOG2_ROOT_TWO31 must be supplied for mixed-radix transforms

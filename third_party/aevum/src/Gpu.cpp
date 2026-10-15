@@ -308,6 +308,27 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       if (doLog) log("Experimental Type4 lean CRT assembly and dword i128 carry.\n");
     }
   }
+  if (config.count("AEVUM_EXPERIMENT_PFA515"))
+    throw std::runtime_error("AEVUM_EXPERIMENT_PFA515 is environment-only");
+  const bool pfa515_enabled = aevumPfa515Enabled();
+  const bool pfa515_plan = fft.isPfa() && fft.shape.fft_type == FFT3261 &&
+                          (fft.pfa_radix == 5 || fft.pfa_radix == 15);
+  if (pfa515_plan != pfa515_enabled)
+    throw std::runtime_error("AEVUM_EXPERIMENT_PFA515=1 requires an explicit pfa5:/pfa15: Type2 plan");
+  if (pfa515_plan) {
+#if defined(__APPLE__)
+    throw std::runtime_error("PFA5/15 is not available on Apple");
+#endif
+    if (fft.shape.width > 1024 || fft.shape.height > 1024 || fft.shape.middle != fft.pfa_radix)
+      throw std::runtime_error("PFA5/15 initially supports width/height <=1024 and a pure odd middle");
+    if (config.count("AEVUM_GF61_LIMB32") && config.at("AEVUM_GF61_LIMB32") != "0")
+      throw std::runtime_error("PFA5/15 is not enabled with limb32");
+    config["AEVUM_EXPERIMENT_PFA515"] = "1";
+    config.try_emplace("PAD", "0");
+    if (doLog)
+      log("Experimental Type2 PFA%u: FP32+GF61, explicit canonical boundaries.\n", fft.pfa_radix);
+  }
+
   cuda_graph_squares = false;
   if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_SQUARES")) {
     const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES");
@@ -533,6 +554,18 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (k == "PAD") pad_size = atoi(v.c_str());
   }
 
+  if (pfa515_plan && (in_place != 0 || pad_size != 0))
+    throw std::runtime_error("PFA5/15 initially requires INPLACE=0 and PAD=0");
+
+  if (fft.isPfa() && in_place != 0) {
+    log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
+    in_place = 0;
+    config["INPLACE"] = "0";
+  }
+
+  if (pfa515_plan && (!tail_single_wide || tail_single_kernel))
+    throw std::runtime_error("PFA5/15 requires single-wide two-kernel tails: TAIL_KERNELS=1");
+
   if (fft.isPfa() && in_place != 0 && !pfa7_inplace) {
     log("Native PFA fused fftW scatter requires INPLACE=0; overriding requested INPLACE=%u.\n", in_place);
     in_place = 0;
@@ -640,6 +673,32 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     const u32 nwords = fft.shape.size();
     defines += toDefine("PFA_LOG2_ROOT_TWO31", inverseModSmall(nwords % 31u, 31u));
     defines += toDefine("PFA_LOG2_ROOT_TWO61", inverseModSmall(nwords % 61u, 61u));
+
+    if (pfa515_plan) {
+      constexpr u64 prime61 = (u64(1) << 61) - 1;
+      const u32 r = fft.pfa_radix;
+      const u64 root = pfaPowMod(5, (prime61 - 1) / r, prime61);
+      if (pfaPowMod(root, r, prime61) != 1)
+        throw std::runtime_error("PFA5/15 root-order failure");
+      for (u32 divisor : {3u, 5u})
+        if (r % divisor == 0 && pfaPowMod(root, r / divisor, prime61) == 1)
+          throw std::runtime_error("PFA5/15 root is not primitive");
+      const u64 w5 = pfaPowMod(root, r / 5, prime61);
+      const u64 wi5 = pfaPowMod(w5, 4, prime61);
+      const u64 w52 = pfaPowMod(w5, 2, prime61);
+      const u64 wi52 = pfaPowMod(wi5, 2, prime61);
+      const auto half = [&](u64 x) { return (x >> 1) + ((x & 1) ? (prime61 + 1) / 2 : 0); };
+      defines += toDefine("PFA515_C1_61", half((w5 + wi5) % prime61));
+      defines += toDefine("PFA515_C2_61", half((w52 + wi52) % prime61));
+      defines += toDefine("PFA515_S1_61", half((w5 + prime61 - wi5) % prime61));
+      defines += toDefine("PFA515_S2_61", half((w52 + prime61 - wi52) % prime61));
+      defines += toDefine("PFA515_INV_RADIX61", pfaPowMod(r, prime61 - 2, prime61));
+      if (r == 15) {
+        const u64 w3 = pfaPowMod(root, 5, prime61);
+        defines += toDefine("PFA515_ROOT3_61", w3);
+        defines += toDefine("PFA515_INVROOT3_61", pfaPowMod(w3, 2, prime61));
+      }
+    }
 
     if (fft.pfa_radix == 7) {
       constexpr u64 M31 = (u64(1) << 31) - 1;
@@ -1651,7 +1710,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   if (logFftSize) {
     log("FFT: %s %s (%.2f bpw)\n", numberK(N).c_str(), fft.spec().c_str(), bitsPerWord);
     if (fft.isPfa()) {
-      if (fft.shape.fft_type == FFT323161)
+      if (fft.shape.fft_type == FFT3261)
+        log("Aevum experimental Type2 PFA active: radix-%u, FP32+GF61 canonical carry.\n", fft.pfa_radix);
+      else if (fft.shape.fft_type == FFT323161)
         log("Aevum experimental type-4 PFA active: radix-%u Good-Thomas digit map, FP32+GF31+GF61 planes, binary half-real rows.\n", fft.pfa_radix);
       else
         log("Aevum native PFA active: radix-%u Good-Thomas digit map, binary half-real rows, native GF31/GF61 carry.\n", fft.pfa_radix);
