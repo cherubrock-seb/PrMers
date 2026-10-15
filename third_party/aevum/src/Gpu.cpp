@@ -287,6 +287,35 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  const char* trigPowerKeys[] = {"AEVUM_GF31_TRIG_POWERS", "AEVUM_GF61_TRIG_POWERS"};
+  const char* trigChainKeys[] = {"TABMUL_CHAIN31", "TABMUL_CHAIN61"};
+  for (unsigned i = 0; i < 2; ++i) {
+    const char* key = trigPowerKeys[i];
+    if (const char* value = std::getenv(key)) {
+      const auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting ") + key + " selections");
+      config[key] = value;
+    }
+    if (const auto it = config.find(key); it != config.end()) {
+      if (it->second != "0" && it->second != "1")
+        throw std::runtime_error(string(key) + " must be 0 or 1");
+      if (it->second == "1") {
+        if (fft.isPfa() || (i == 0 ? !fft.NTT_GF31 : !fft.NTT_GF61))
+          throw std::runtime_error(string(key) + " requires the matching non-PFA NTT field");
+        if (i == 0 && fft.shape.nW() != 8 && fft.shape.nH() != 8)
+          throw std::runtime_error("GF31 trig powers require a radix8 width or height");
+#if defined(__APPLE__)
+        throw std::runtime_error("NTT trig powers are not enabled for Apple");
+#endif
+        const auto chain = config.find(trigChainKeys[i]);
+        if (chain != config.end() && chain->second != "1")
+          throw std::runtime_error(string(key) + " requires matching TABMUL_CHAIN=1");
+        config[trigChainKeys[i]] = "1";
+      }
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
