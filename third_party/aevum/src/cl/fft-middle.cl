@@ -1160,6 +1160,16 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 #endif
 
 #if PFA_RADIX
+#ifndef AEVUM_PFA7_GF61_COSBASE
+#define AEVUM_PFA7_GF61_COSBASE 0
+#endif
+#if AEVUM_PFA7_GF61_COSBASE != 0 && AEVUM_PFA7_GF61_COSBASE != 1
+#error AEVUM_PFA7_GF61_COSBASE must be 0 or 1
+#endif
+#if AEVUM_PFA7_GF61_COSBASE && (FFT_TYPE != FFT3161 || PFA_RADIX != 7 || WIDTH != 512 || MIDDLE != 7 || SMALL_HEIGHT != 512 || AEVUM_GF61_LIMB32)
+#error AEVUM_PFA7_GF61_COSBASE requires the guarded native Type1 PFA7 plan
+#endif
+
 GF61 OVERLOAD pfaMulScalar(GF61 a, Z61 s) { return U2(mul(a.x, s), mul(a.y, s)); }
 
 // Same one-multiply radix-3 identity as the GF31 path above.
@@ -1205,8 +1215,68 @@ void OVERLOAD aevum_pfa7_nuss8(GF61 *u, Z61 w) {
 }
 #endif
 
+#if AEVUM_PFA7_GF61_COSBASE
+// Shared cosine base from PRPLL 8517346/f597e42, with the native generator-5
+// root and its inverse. This is NOT the older three-product DOT128 schedule:
+// cbase removes one product from each cosine row (16 vector products total).
+typedef struct { u128 x, y; } AevumPfa61Quick;
+
+AevumPfa61Quick aevumPfa61Mad(GF61 a, Z61 b, AevumPfa61Quick c) {
+  AevumPfa61Quick r = {mad64(a.x,b,c.x), mad64(a.y,b,c.y)};
+  return r;
+}
+AevumPfa61Quick aevumPfa61Mul(GF61 a, Z61 b) {
+  AevumPfa61Quick r = {mul64(a.x,b), mul64(a.y,b)};
+  return r;
+}
+void aevumPfa61Pair(AevumPfa61Quick a, AevumPfa61Quick b, GF61* plus, GF61* minus) {
+  // A sine dot can exceed 2^125. Use the full 128-bit weak reduction, whose
+  // outputs are at most 2*M61+epsilon; then combine in 64 bits.
+  const GF61 pc = U2(weakModM61(a.x,128), weakModM61(a.y,128));
+  const GF61 qs = U2(weakModM61(b.x,128), weakModM61(b.y,128));
+  *plus = modM61(pc+qs);
+  *minus = modM61q(pc-qs,3);
+}
+void aevumPfa7CosBase61(GF61* u, Z61 w) {
+  const Z61 C1 = (Z61)1773674115463894065UL;
+  const Z61 C2_C1 = (Z61)1433256398835224385UL;
+  const Z61 C3_C1 = (Z61)1316171787021022248UL;
+  const Z61 S1 = w==(Z61)PFA7_ROOT61 ? (Z61)673484497713682504UL : (Z61)1632358511500011447UL;
+  const Z61 S2 = w==(Z61)PFA7_ROOT61 ? (Z61)831884051671952528UL : (Z61)1473958957541741423UL;
+  const Z61 S3 = w==(Z61)PFA7_ROOT61 ? (Z61)381307857222696375UL : (Z61)1924535151990997576UL;
+  // Inputs 0..M61+epsilon. Quick sums 0..2*M61+epsilon and positive
+  // differences M61-epsilon..3*M61+epsilon fit in 64 bits.
+  const GF61 a1=u[1]+u[6], a2=u[2]+u[5], a3=u[3]+u[4];
+  const GF61 b1=u[1]-u[6]+U2(2*M61,2*M61);
+  const GF61 b2=u[2]-u[5]+U2(2*M61,2*M61);
+  const GF61 b3=u[3]-u[4]+U2(2*M61,2*M61);
+  const GF61 sum=modM61(a1+a2+a3);
+  const AevumPfa61Quick cbase={mad64(sum.x,C1,u[0].x),mad64(sum.y,C1,u[0].y)};
+  u[0]=modM61(u[0]+sum);
+
+  // One output pair at a time; six wide dots, each below 2^126. No matrix
+  // or dynamically indexed temporaries, and no 128-bit add/sub of two dots.
+  AevumPfa61Quick pc=cbase, qs=aevumPfa61Mul(b1,S1);
+  pc=aevumPfa61Mad(a2,C2_C1,pc); qs=aevumPfa61Mad(b2,S2,qs);
+  pc=aevumPfa61Mad(a3,C3_C1,pc); qs=aevumPfa61Mad(b3,S3,qs);
+  aevumPfa61Pair(pc,qs,&u[1],&u[6]);
+
+  pc=cbase; qs=aevumPfa61Mul(b1,S2);
+  pc=aevumPfa61Mad(a1,C2_C1,pc); qs=aevumPfa61Mad(b2,M61-S3,qs);
+  pc=aevumPfa61Mad(a2,C3_C1,pc); qs=aevumPfa61Mad(b3,M61-S1,qs);
+  aevumPfa61Pair(pc,qs,&u[2],&u[5]);
+
+  pc=cbase; qs=aevumPfa61Mul(b1,S3);
+  pc=aevumPfa61Mad(a1,C3_C1,pc); qs=aevumPfa61Mad(b2,M61-S1,qs);
+  pc=aevumPfa61Mad(a3,C2_C1,pc); qs=aevumPfa61Mad(b3,S2,qs);
+  aevumPfa61Pair(pc,qs,&u[3],&u[4]);
+}
+#endif
+
 void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
-#if AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
+#if AEVUM_PFA7_GF61_COSBASE
+  aevumPfa7CosBase61(u,w);
+#elif AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
   aevum_pfa7_nuss8(u, w);
 #else
  const Z61 c1 = (Z61)1773674115463894065UL;

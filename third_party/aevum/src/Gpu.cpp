@@ -287,6 +287,33 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // PRPLL's shared cosine base removes two products from the six PFA7
+  // dots; isolate GF61 from the independently validated GF31/NUSS8 policy.
+  if (const char* value = std::getenv("AEVUM_PFA7_GF61_COSBASE")) {
+    const auto it = config.find("AEVUM_PFA7_GF61_COSBASE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_GF61_COSBASE selections");
+    config["AEVUM_PFA7_GF61_COSBASE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_GF61_COSBASE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_GF61_COSBASE must be 0 or 1");
+    if (it->second == "1") {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_PFA7_GF61_COSBASE does not support Apple staged kernels");
+#endif
+      if (fft.shape.fft_type != FFT3161 || !fft.isPfa() || fft.pfa_radix != 7 ||
+          fft.shape.width != 512 || fft.shape.middle != 7 ||
+          fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error("AEVUM_PFA7_GF61_COSBASE requires pfa7:1:512:7:512:202");
+      if (const auto limb = config.find("AEVUM_GF61_LIMB32"); limb != config.end() && limb->second != "0")
+        throw std::runtime_error("AEVUM_PFA7_GF61_COSBASE conflicts with AEVUM_GF61_LIMB32");
+      if (const char* limb = std::getenv("AEVUM_GF61_LIMB32"); limb && std::strcmp(limb,"0") != 0)
+        throw std::runtime_error("AEVUM_PFA7_GF61_COSBASE conflicts with AEVUM_GF61_LIMB32");
+      if (doLog) log("AEVUM_PFA7_GF61_COSBASE=1: GF61 shared cosine base and quick dots; GF31 policy preserved.\n");
+    }
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");
