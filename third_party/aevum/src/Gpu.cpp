@@ -287,6 +287,28 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // Experimental PRPLL cosine-base DFTs: only the full FP32 PFA plane.
+  if (const char* value = std::getenv("AEVUM_FP32_PFA_COSBASE")) {
+    const auto it = config.find("AEVUM_FP32_PFA_COSBASE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_FP32_PFA_COSBASE selections");
+    config["AEVUM_FP32_PFA_COSBASE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_FP32_PFA_COSBASE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_FP32_PFA_COSBASE must be 0 or 1");
+    if (it->second == "1") {
+      if (!fft.FFT_FP32 || fft.shape.fft_type != FFT323161 ||
+          !fft.isPfa() || (fft.pfa_radix != 7 && fft.pfa_radix != 9))
+        throw std::runtime_error("AEVUM_FP32_PFA_COSBASE requires full Type4 PFA7 or PFA9");
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_FP32_PFA_COSBASE is not available on Apple");
+#endif
+      if (doLog)
+        log("AEVUM_FP32_PFA_COSBASE=1: plan=%s; FP32 odd-axis DFT only.\n", fft.spec().c_str());
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)
