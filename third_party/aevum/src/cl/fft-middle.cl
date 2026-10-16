@@ -1216,9 +1216,9 @@ void OVERLOAD aevum_pfa7_nuss8(GF61 *u, Z61 w) {
 #endif
 
 #if AEVUM_PFA7_GF61_COSBASE
-// Shared cosine base from PRPLL 8517346/f597e42, with the native generator-5
-// root and its inverse. This is NOT the older three-product DOT128 schedule:
-// cbase removes one product from each cosine row (16 vector products total).
+// Shared cosine/sine bases from PRPLL 8517346/1418b96, with native generator-5
+// roots. Choosing C3 and S3 keeps every dot below 3*M61^2, so f361b5e's cheaper
+// 125-bit reduction is valid for all six dots (14 vector products total).
 typedef struct { u128 x, y; } AevumPfa61Quick;
 
 AevumPfa61Quick aevumPfa61Mad(GF61 a, Z61 b, AevumPfa61Quick c) {
@@ -1229,21 +1229,28 @@ AevumPfa61Quick aevumPfa61Mul(GF61 a, Z61 b) {
   AevumPfa61Quick r = {mul64(a.x,b), mul64(a.y,b)};
   return r;
 }
-void aevumPfa61Pair(AevumPfa61Quick a, AevumPfa61Quick b, GF61* plus, GF61* minus) {
-  // A sine dot can exceed 2^125. Use the full 128-bit weak reduction, whose
-  // outputs are at most 2*M61+epsilon; then combine in 64 bits.
-  const GF61 pc = U2(weakModM61(a.x,128), weakModM61(a.y,128));
-  const GF61 qs = U2(weakModM61(b.x,128), weakModM61(b.y,128));
+void aevumPfa61Pair(AevumPfa61Quick a, AevumPfa61Quick b, u32 sine_bound,
+                    GF61* plus, GF61* minus) {
+  // a < 2*M61^2, b < sine_bound*M61^2, sine_bound = 2 or 3.
+  // Thus pc < 3*M61, qs < (sine_bound+1)*M61; both combinations stay
+  // nonnegative and below 7*M61 before modM61. No full 128-bit fold is needed.
+  const GF61 pc = U2(weakModM61(a.x,125), weakModM61(a.y,125));
+  const GF61 qs = U2(weakModM61(b.x,125), weakModM61(b.y,125));
   *plus = modM61(pc+qs);
-  *minus = modM61q(pc-qs,3);
+  *minus = modM61q(pc-qs,sine_bound+1);
 }
 void aevumPfa7CosBase61(GF61* u, Z61 w) {
-  const Z61 C1 = (Z61)1773674115463894065UL;
-  const Z61 C2_C1 = (Z61)1433256398835224385UL;
-  const Z61 C3_C1 = (Z61)1316171787021022248UL;
-  const Z61 S1 = w==(Z61)PFA7_ROOT61 ? (Z61)673484497713682504UL : (Z61)1632358511500011447UL;
-  const Z61 S2 = w==(Z61)PFA7_ROOT61 ? (Z61)831884051671952528UL : (Z61)1473958957541741423UL;
-  const Z61 S3 = w==(Z61)PFA7_ROOT61 ? (Z61)381307857222696375UL : (Z61)1924535151990997576UL;
+  const Z61 C3 = (Z61)784002893271222362UL;
+  const Z61 C1_C3 = (Z61)989671222192671703UL;
+  const Z61 C2_C3 = (Z61)117084611814202137UL;
+  const Z61 S3 = (Z61)381307857222696375UL;
+  const Z61 S1_S3 = (Z61)292176640490986129UL;
+  const Z61 S2_S3 = (Z61)450576194449256153UL;
+  const Z61 NS2_S3 = (Z61)1092651100319045048UL;
+  const Z61 NS1_S3 = (Z61)1251050654277315072UL;
+  // Inverse roots only reverse the output pairs. Use the same bounded
+  // positive coefficients in both directions; w is constant at each caller.
+  const bool inverse = w != (Z61)PFA7_ROOT61;
   // Inputs 0..M61+epsilon. Quick sums 0..2*M61+epsilon and positive
   // differences M61-epsilon..3*M61+epsilon fit in 64 bits.
   const GF61 a1=u[1]+u[6], a2=u[2]+u[5], a3=u[3]+u[4];
@@ -1251,25 +1258,30 @@ void aevumPfa7CosBase61(GF61* u, Z61 w) {
   const GF61 b2=u[2]-u[5]+U2(2*M61,2*M61);
   const GF61 b3=u[3]-u[4]+U2(2*M61,2*M61);
   const GF61 sum=modM61(a1+a2+a3);
-  const AevumPfa61Quick cbase={mad64(sum.x,C1,u[0].x),mad64(sum.y,C1,u[0].y)};
+  const AevumPfa61Quick cbase={mad64(sum.x,C3,u[0].x),mad64(sum.y,C3,u[0].y)};
   u[0]=modM61(u[0]+sum);
+  // The intermediate u64 sum can wrap, but the true sum minus 2*M61 lies
+  // in M61-epsilon..7*M61+epsilon. Unsigned wraparound preserves that value.
+  const GF61 dsum=modM61(b1+b2+b3-U2(2*M61,2*M61));
+  const AevumPfa61Quick sbase=aevumPfa61Mul(dsum,S3);
 
-  // One output pair at a time; six wide dots, each below 2^126. No matrix
+  // One output pair at a time; six wide dots, each below 3*M61^2. No matrix
   // or dynamically indexed temporaries, and no 128-bit add/sub of two dots.
-  AevumPfa61Quick pc=cbase, qs=aevumPfa61Mul(b1,S1);
-  pc=aevumPfa61Mad(a2,C2_C1,pc); qs=aevumPfa61Mad(b2,S2,qs);
-  pc=aevumPfa61Mad(a3,C3_C1,pc); qs=aevumPfa61Mad(b3,S3,qs);
-  aevumPfa61Pair(pc,qs,&u[1],&u[6]);
+  AevumPfa61Quick pc=cbase, qs=sbase;
+  pc=aevumPfa61Mad(a1,C1_C3,pc); qs=aevumPfa61Mad(b1,S1_S3,qs);
+  pc=aevumPfa61Mad(a2,C2_C3,pc); qs=aevumPfa61Mad(b2,S2_S3,qs);
+  aevumPfa61Pair(pc,qs,2,inverse?&u[6]:&u[1],inverse?&u[1]:&u[6]);
 
-  pc=cbase; qs=aevumPfa61Mul(b1,S2);
-  pc=aevumPfa61Mad(a1,C2_C1,pc); qs=aevumPfa61Mad(b2,M61-S3,qs);
-  pc=aevumPfa61Mad(a2,C3_C1,pc); qs=aevumPfa61Mad(b3,M61-S1,qs);
-  aevumPfa61Pair(pc,qs,&u[2],&u[5]);
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a1,C2_C3,pc); qs=aevumPfa61Mad(b1,NS2_S3,qs);
+  pc=aevumPfa61Mad(a3,C1_C3,pc); qs=aevumPfa61Mad(b3,S1_S3,qs);
+  // This row computes negated sines, so its plus/minus outputs are exchanged.
+  aevumPfa61Pair(pc,qs,2,inverse?&u[2]:&u[5],inverse?&u[5]:&u[2]);
 
-  pc=cbase; qs=aevumPfa61Mul(b1,S3);
-  pc=aevumPfa61Mad(a1,C3_C1,pc); qs=aevumPfa61Mad(b2,M61-S1,qs);
-  pc=aevumPfa61Mad(a3,C2_C1,pc); qs=aevumPfa61Mad(b3,S2,qs);
-  aevumPfa61Pair(pc,qs,&u[3],&u[4]);
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a2,C1_C3,pc); qs=aevumPfa61Mad(b2,NS1_S3,qs);
+  pc=aevumPfa61Mad(a3,C2_C3,pc); qs=aevumPfa61Mad(b3,S2_S3,qs);
+  aevumPfa61Pair(pc,qs,3,inverse?&u[4]:&u[3],inverse?&u[3]:&u[4]);
 }
 #endif
 
