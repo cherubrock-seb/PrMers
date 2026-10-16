@@ -92,8 +92,9 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-lowmem          : (Optional) P-1 stage 1 low-memory mode: 3 GPU registers, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-ultralowmem     : (Optional) P-1 stage 1 ultra-low-memory mode: 1 GPU register, fast3 only, Gerbicz-Li disabled" << std::endl;
     std::cout << "  -pm1-s2-resume2reg   : (Optional) P-1 Stage 2 ultra-low-memory true resume mode: load resume_p...B1_<B1>.p95/.save and compute H^prod(primes) with 2 GPU registers" << std::endl;
+    std::cout << "  -pm1-progress-seconds <0..86400> : Periodic P-1 Stage 1/2 log cadence (default 300s; 0 disables progress only)" << std::endl;
     std::cout << "  -pm1-vtrace          : P-1 Stage 2 scalar trace BSGS (default for normal-memory Stage 2, primorial-aware auto-D)" << std::endl;
-    std::cout << "  -pm1-vtrace-off      : Disable default V-trace and use the previous classic Stage 2 BSGS path" << std::endl;
+    std::cout << "  -pm1-vtrace-off      : Disable scalar-trace V-trace; use classic modular-power baby-step/giant-step Stage 2" << std::endl;
     std::cout << "  -pm1-vtrace-d <D>    : (Optional) Force V-trace D. Use an even primorial/highly-composite D such as 4620/30030" << std::endl;
     std::cout << "  -pm1-vtrace-auto-d   : (Optional) Explicitly auto-select D for V-trace under the default primorial-aware register cap" << std::endl;
     std::cout << "  -pm1-vtrace-deep-d auto : (Optional) Explicit deep primorial-aware auto-D profile; current default is auto" << std::endl;
@@ -147,7 +148,7 @@ void printUsage(const char* progName) {
     std::cout << "  -ecm_check_interval <value> : ECM Error Check interval in seconds (300s by default)" << std::endl;
     std::cout << "  -ecm_progress_ms <value>    : ECM progress update interval in milliseconds (default: 2000 ms)" << std::endl;
     std::cout << "  -ecm-continue-after-factor  : Continue with later curves after finding a new factor (default: stop)" << std::endl;
-    std::cout << "  -p95path <path>      : (Optional) Prime95/mprime directory for ECM Stage2 handoff; enables Prime95 Stage2" << std::endl;
+    std::cout << "  -p95path <path>      : (Optional) Prime95/mprime directory for P-1 and ECM Stage 2 handoff" << std::endl;
     std::cout << "  -nop95stage2         : (Optional) Disable Prime95 Stage2 handoff even if -p95path is set" << std::endl;
     //std::cout << "  -brent [<d>]         : (Optional) use Brent-Suyama variant with default or specified degree d (e.g., -brent 6)" << std::endl;
     //std::cout << "  -bsgs                : (Optional) enable batching of multipliers in ECM stage 2 to reduce ladder calls" << std::endl;
@@ -216,6 +217,15 @@ static bool parse_cli_tail_option(CliOptions& opts,
     }
     else if (std::strcmp(argv[i], "-b1old") == 0 && i + 1 < argc) {
         opts.B1old = std::strtoull(argv[i + 1], nullptr, 10);  // base 10
+        ++i;
+    }
+    else if ((std::strcmp(argv[i], "-pm1-progress-seconds") == 0 ||
+              std::strcmp(argv[i], "--pm1-progress-seconds") == 0) && i + 1 < argc) {
+        char* end = nullptr;
+        const auto seconds = std::strtoull(argv[i + 1], &end, 10);
+        if (end == argv[i + 1] || *end != '\0' || seconds > 86400ULL)
+            throw std::invalid_argument("-pm1-progress-seconds expects 0..86400 seconds");
+        opts.pm1_progress_seconds = seconds;
         ++i;
     }
     else if (std::strcmp(argv[i], "-b2") == 0 && i + 1 < argc) {
