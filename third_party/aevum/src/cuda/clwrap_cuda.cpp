@@ -4,6 +4,7 @@
 
 #include "tinycuda.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
+#include "CudaFill.h"
 
 #include <cstdio>
 #include <cstring>
@@ -787,20 +788,38 @@ int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
 int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
                          size_t patternSize, size_t offset, size_t size,
                          unsigned nWaits, const cl_event* waits, cl_event* event) {
-  CUresult r;
-  if (patternSize == 1) {
+  if (event) *event = nullptr;
+  if (!q || !buf) return CL_INVALID_VALUE;
+  // The CUDA driver memsets 8, 16 or 32-bit values only; CudaFill.h plans the call(s) for any pattern size OpenCL
+  // allows, and rejects what OpenCL rejects instead of writing something the caller did not ask for.
+  cuda_fill::Plan const p = cuda_fill::plan(pattern, patternSize, offset, size, buf->size);
+  CUdeviceptr const dst = buf->ptr + p.offset;
+  CUresult r = CUDA_SUCCESS;
+  switch (p.op) {
+  case cuda_fill::Op::Invalid:
+    return CL_INVALID_VALUE;
+  case cuda_fill::Op::Memset8: {
     unsigned char val;
     memcpy(&val, pattern, 1);
-    r = cuMemsetD8Async(buf->ptr + offset, val, size, q->stream);
-  } else if (patternSize == 4) {
-    unsigned int val;
-    memcpy(&val, pattern, 4);
-    r = cuMemsetD32Async(buf->ptr + offset, val, size / 4, q->stream);
-  } else {
-    // For other pattern sizes, fall back to memset 0 (common case is zero-fill)
-    r = cuMemsetD8Async(buf->ptr + offset, 0, size, q->stream);
+    r = cuMemsetD8Async(dst, val, p.count, q->stream);
+    break;
   }
-  if (event) *event = nullptr;
+  case cuda_fill::Op::Memset16: {
+    unsigned short val;
+    memcpy(&val, pattern, 2);
+    r = cuMemsetD16Async(dst, val, p.count, q->stream);
+    break;
+  }
+  case cuda_fill::Op::Memset32:
+    r = cuMemsetD32Async(dst, cuda_fill::patternWord(pattern, 0), p.count, q->stream);
+    break;
+  case cuda_fill::Op::Strided32:
+    // Word i of every pattern-sized slot: pitch = the pattern, width = one element, height = the slot count.
+    for (unsigned i = 0; i < p.words && r == CUDA_SUCCESS; ++i) {
+      r = cuMemsetD2D32Async(dst + 4 * i, p.pitch, cuda_fill::patternWord(pattern, i), 1, p.count, q->stream);
+    }
+    break;
+  }
   return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
 }
 
