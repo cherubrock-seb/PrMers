@@ -25,6 +25,6 @@ int main() {
     const std::string line = core::pm1::progress_prefix(332746979, 2);
     assert(line.find("[P-1 stage 2 p=332746979]") != std::string::npos);
     assert(line.size() > 35 && line[0] == '[' && line[5] == '-');
-    assert(line.find('\\r') == std::string::npos);
+    assert(line.find('\r') == std::string::npos);
     std::cout << "PM1_PROGRESS_REPORT_POLICY=PASS\n";
 }
