@@ -932,7 +932,7 @@ int App::runPM1Stage2() {
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
-                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::endl;
             if (guiServer_) {
                                 std::ostringstream oss;
@@ -941,7 +941,7 @@ int App::runPM1Stage2() {
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
-                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::endl;
                       guiServer_->appendLog(oss.str());
             }
@@ -2087,7 +2087,7 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
             else   eng->square_mul((engine::Reg)RSTATE);
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last).count() >= 3) {
+            if (core::pm1::progress_due(now, last, options.pm1_progress_seconds)) {
                 const mp_bitcnt_t doneBits = bits - i + 1;
                 const double pct = 100.0 * double(doneBits) / double(bits);
                 const double elapsed = duration<double>(now - texp0).count();
@@ -2145,7 +2145,7 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
             std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent
                       << "% | prime: " << q << " | Iter: " << (i + 1)
                       << "/" << primes.size() << " | Elapsed: " << elapsed
-                      << "s | IPS: " << ips << "\r" << std::flush;
+                      << "s | IPS: " << ips << "\n" << std::flush;
             lastDisplay = now;
         }
         if (interrupted) {
@@ -4157,7 +4157,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << " | terms=" << termsAccumulated << "/" << pair95Tasks.size()
                               << " | pair-skips=" << pair95Paired
                               << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                               << std::flush;
                     lastDisplay = now;
                 }
@@ -4322,7 +4322,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << " | paired-skip=" << skippedPairedUpper
                               << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                               << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                               << std::flush;
                     lastDisplay = now;
                 }
@@ -4402,7 +4402,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                           << " | paired-skip=" << skippedPairedUpper
                           << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                           << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                          << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                          << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                           << std::flush;
                 lastDisplay = now;
             }
@@ -4499,7 +4499,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                       << " | paired-skip=" << skippedPairedUpper
                       << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                       << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                      << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
             lastDisplay = now;
         }
@@ -5206,7 +5206,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
                       << " | prime: " << p_ui
                       << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
                       << " | IPS: " << std::fixed << std::setprecision(2) << ips
-                      << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
 
             lastDisplay = now;
@@ -8520,7 +8520,7 @@ int App::runPM1Stage3Marin() {
                       << "% | b=" << (b + 1) << "/" << B3u
                       << " | K=" << Kmax
                       << " | Elapsed " << elapsedSec << "s | ETA "
-                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
+                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n" << std::endl;
             if (guiServer_) {
                 std::ostringstream oss; oss << "Stage3: " << std::fixed << std::setprecision(2) << percent
                                             << "% | b=" << (b + 1) << "/" << B3u
@@ -9109,7 +9109,7 @@ int App::runPM1Stage4Marin() {
             std::cout << "Stage4: " << std::fixed << std::setprecision(2) << percent
                       << "% | i=" << (bits - i + 1) << "/" << bits
                       << " | Elapsed " << elapsedSec << "s | ETA "
-                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
 
             if (guiServer_) {
