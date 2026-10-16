@@ -17,6 +17,7 @@
 #include "core/Version.hpp"
 #include "core/Pm1Stage2External.hpp"
 #include "core/Pm1Checkpoint.hpp"
+#include "core/Pm1VTraceCheckpoint.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -168,9 +169,13 @@ static const char* pm1_checkpoint_backend_name(const engine* eng) {
 // The sidecar records the backend on its first line.  Stage-1 checkpoints
 // also record the bounds they were built for ("b1=" and "maxe=" lines), so a
 // run with a different B1 or -maxe never resumes a state computed for another
-// exponent E.  Older sidecars have only the backend line.
+// exponent E.  Older sidecars have only the backend line.  The finished stage-1
+// checkpoint written before stage 2 also records ("s1result=saved") that the
+// stage-1 result line is already in results.txt, so a run that resumes stage 2
+// from it does not append that line a second time.
 static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, const engine* eng,
-                                         uint64_t b1 = 0, uint64_t max_e_bits = 0) {
+                                         uint64_t b1 = 0, uint64_t max_e_bits = 0,
+                                         bool stage1_result_saved = false) {
     const std::string path = pm1_checkpoint_backend_sidecar(checkpoint_file);
     const std::string temp = path + ".new";
     {
@@ -179,6 +184,7 @@ static void write_pm1_checkpoint_backend(const std::string& checkpoint_file, con
         out << pm1_checkpoint_backend_name(eng) << '\n';
         if (b1) out << "b1=" << b1 << '\n';
         if (max_e_bits) out << "maxe=" << max_e_bits << '\n';
+        if (stage1_result_saved) out << "s1result=saved\n";
     }
     std::error_code ec;
     fs::rename(temp, path, ec);
@@ -201,6 +207,17 @@ static bool pm1_checkpoint_read_params(const std::string& checkpoint_file, uint6
         else if (line.rfind("maxe=", 0) == 0) { max_e_bits = std::strtoull(line.c_str() + 5, nullptr, 10); have_maxe = true; }
     }
     return have_b1 && have_maxe;
+}
+
+// True when the sidecar says the stage-1 result line of this checkpoint is
+// already in results.txt (see write_pm1_checkpoint_backend).
+static bool pm1_checkpoint_stage1_result_saved(const std::string& checkpoint_file) {
+    std::ifstream in(pm1_checkpoint_backend_sidecar(checkpoint_file));
+    std::string line;
+    while (in && std::getline(in, line)) {
+        if (line == "s1result=saved") return true;
+    }
+    return false;
 }
 
 static bool pm1_checkpoint_backend_matches(const std::string& checkpoint_file,
@@ -1549,7 +1566,8 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
                                      const mpz_class& g,
                                      const mpz_class& Mp,
                                      int fftSize,
-                                     const std::string& method)
+                                     const std::string& method,
+                                     bool& resultSaved)
 {
     mpz_class gNew = g;
     for (const std::string& fs : options.knownFactors) {
@@ -1584,8 +1602,20 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
+    resultSaved = wm.appendToResultsTxt(json);
     return found;
+}
+
+// A stage 2 whose result line could not be written to results.txt has not
+// finished its job: report it as an error, so the caller keeps the checkpoints
+// and the worktodo entry instead of retiring the entry without a result.
+static Pm1Stage2Result pm1_stage2_outcome(bool found, bool resultSaved) {
+    if (!resultSaved) {
+        std::cerr << "[PM1] The stage-2 result could not be written to results.txt; "
+                     "the job is kept so that it can be run again.\n";
+        return Pm1Stage2Result::Error;
+    }
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 // True when a stage-2 run did not search its whole range (interrupted or failed).
@@ -1602,16 +1632,16 @@ static void pm1_fold_stage2(Pm1Stage2Result r, bool& factorFound, Pm1Stage2Resul
     else if (pm1_stage2_incomplete(r)) stop = r;
 }
 
-// Removes the checkpoint of the classic BSGS stage 2 (pm1_s2_m_<p>.ckpt).  That
-// stage 2 deletes it itself when it finishes, but a run that stopped at a
-// different stage-2 variant (V-trace) or right after stage 2 can leave one
-// behind, and it must not outlive the worktodo entry.
-static void pm1_remove_classic_stage2_ckpt(uint64_t exponent) {
-    const std::string base = "pm1_s2_m_" + std::to_string(exponent) + ".ckpt";
-    std::error_code ec;
-    fs::remove(base, ec);
-    fs::remove(base + ".old", ec);
-    fs::remove(base + ".new", ec);
+// Removes the checkpoints of every Marin stage-2 variant: classic BSGS
+// (pm1_s2_m_<p>.ckpt) and V-trace (linear, neg-baby, product-tree and pair95),
+// with their .old/.new files and backend sidecars.  The stage-2 functions no
+// longer delete their checkpoint themselves: the caller does it once the result
+// is saved and the worktodo entry retired, so a stop or crash before that point
+// resumes stage 2 instead of redoing it.  A run that switched variants (e.g.
+// -pm1-vtrace-off after an interrupted V-trace run) must not leave the other
+// variant's file behind either.
+static void pm1_remove_stage2_ckpts(uint64_t exponent) {
+    core::pm1vtrace::removeStage2Checkpoints(exponent);
 }
 
 Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
@@ -2110,10 +2140,11 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
+        bool resultSaved = false;
         const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
-                                                    "ultralowmem GPU one-register product exponent");
+                                                    "ultralowmem GPU one-register product exponent", resultSaved);
         delete eng;
-        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+        return pm1_stage2_outcome(found, resultSaved);
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -2154,10 +2185,11 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
+    bool resultSaved = false;
     const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
-                                                "lowmem streamed product");
+                                                "lowmem streamed product", resultSaved);
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 
@@ -3685,14 +3717,27 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             return -3;
         }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != ckptVersionS2) return -2;
+        if (version != ckptVersionS2) {
+            std::cout << "[PM1-VTRACE] Stage 2 checkpoint " << file << " has version " << version
+                      << " (expected " << ckptVersionS2 << "); not resumed.\n";
+            return -2;
+        }
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-        if (rp != pexp) return -2;
+        if (rp != pexp) {
+            std::cout << "[PM1-VTRACE] Stage 2 checkpoint " << file << " is for exponent " << rp
+                      << ", not " << pexp << "; not resumed.\n";
+            return -2;
+        }
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
         // A checkpoint for other bounds is of no use; leave the engine alone.
-        if (sB1 != B1u || sB2 != B2u || sD != D) return -3;
+        if (sB1 != B1u || sB2 != B2u || sD != D) {
+            std::cout << "[PM1-VTRACE] Stage 2 checkpoint " << file << " is for B1=" << sB1 << ", B2=" << sB2
+                      << ", D=" << sD << "; this run has B1=" << B1u << ", B2=" << B2u << ", D=" << D
+                      << "; not resumed.\n";
+            return -3;
+        }
         if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_k), sizeof(saved_k))) return -2;
@@ -3771,22 +3816,188 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         write_pm1_checkpoint_backend(ckpt_file_s2, e);
     };
 
+    // ---- pair95 Stage-2 checkpoint (version 25, pm1_s2_vtrace_pair95_m_<p>.ckpt) ----
+    // State: the accumulator, V_1, the giant recurrence (V_(k-1)D, V_kD) and the
+    // position of the next task (pass, task index in the pass bucket).  The baby
+    // window and V_D are rebuilt from V_1 when the pass is resumed.  The plan
+    // fields and a hash of the task list are stored so that only a run with the
+    // same plan resumes it (see core/Pm1VTraceCheckpoint.hpp).
     uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
+    namespace pvc = core::pm1vtrace;
+    const std::string ckpt_file_pair95 = "pm1_s2_vtrace_pair95_m_" + std::to_string(pexp) + ".ckpt";
+    const size_t pair95NumPasses = useBabyBatching ? ((babyCount + activeBabyCount - 1) / activeBabyCount) : 1;
+    static constexpr uint32_t pair95CkptRegs[] = {(uint32_t)RACC, (uint32_t)RV1, (uint32_t)RGPREV, (uint32_t)RGCUR};
+    pvc::Pair95Header pair95Run;
+    if (usePair95) {
+        pvc::PlanHash ph;
+        for (uint64_t off : babyOffset) ph.add(off);
+        ph.add(~0ULL);
+        for (const Pair95Task& t : pair95Tasks) {
+            ph.add(t.k);
+            ph.add((uint64_t)(int64_t)t.babyIndex);
+            ph.add(t.qlo);
+            ph.add(t.qhi);
+            ph.add(t.paired ? 1u : 0u);
+        }
+        ph.add(~0ULL);
+        for (const auto& b : pair95TaskBuckets) {
+            ph.add((uint64_t)b.size());
+            for (size_t ti : b) ph.add((uint64_t)ti);
+        }
+        pair95Run.exponent = pexp;
+        pair95Run.B1 = B1u;
+        pair95Run.B2 = B2u;
+        pair95Run.D = D;
+        pair95Run.L = (uint64_t)pair95L;
+        pair95Run.babies = (uint64_t)babyCount;
+        pair95Run.activeBabies = (uint64_t)(useBabyBatching ? activeBabyCount : babyCount);
+        pair95Run.passes = (uint64_t)pair95NumPasses;
+        pair95Run.tasks = (uint64_t)pair95Tasks.size();
+        pair95Run.planHash = ph.h;
+        pair95Run.negAdd = useNegBabyAdd ? 1u : 0u;
+    }
+    auto pair95_bucket_size = [&](uint64_t pass)->uint64_t {
+        return (pass < pair95TaskBuckets.size()) ? (uint64_t)pair95TaskBuckets[(size_t)pass].size() : 0;
+    };
+
+    // Writes the checkpoint through <file>.new, keeps the previous one as
+    // <file>.old.  Only called at the backup interval, on a stop and once at the
+    // end of the loop.  Returns false (and leaves the last checkpoint in place)
+    // when the file could not be written.
+    auto save_pair95 = [&](uint64_t pass, uint64_t taskPos, uint64_t terms, uint64_t primes, double et)->bool {
+        pvc::Pair95Header h = pair95Run;
+        h.pass = pass;
+        h.taskPos = taskPos;
+        h.k = cur_k;
+        h.terms = terms;
+        h.primes = primes;
+        h.elapsed = et;
+        const std::string newf = ckpt_file_pair95 + ".new";
+        bool ok = false;
+        {
+            File f(newf, "wb");
+            ok = pvc::writeHeader(f, h);
+            const uint32_t nregs = (uint32_t)(sizeof(pair95CkptRegs) / sizeof(pair95CkptRegs[0]));
+            ok = ok && f.write(reinterpret_cast<const char*>(&nregs), sizeof(nregs));
+            std::vector<char> one(eng->get_register_data_size());
+            for (uint32_t r : pair95CkptRegs) {
+                ok = ok && f.write(reinterpret_cast<const char*>(&r), sizeof(r));
+                ok = ok && eng->get_data(one, (engine::Reg)r);
+                ok = ok && f.write(one.data(), one.size());
+            }
+            ok = ok && f.write_crc32();
+            ok = f.close() && ok;
+        }
+        if (!ok || !pvc::commitNew(ckpt_file_pair95)) {
+            std::error_code ec;
+            fs::remove(newf, ec);
+            std::cerr << "[PM1-VTRACE-PAIR95] could not write the Stage 2 checkpoint " << ckpt_file_pair95
+                      << "; the previous one (if any) is kept.\n";
+            return false;
+        }
+        write_pm1_checkpoint_backend(ckpt_file_pair95, eng);
+        return true;
+    };
+
+    // 0: loaded (registers set), -1: no file, -2: unreadable (truncated,
+    // corrupt, unknown version), -3: for another job, plan or backend.
+    // Every case but -1 prints why the file is not resumed.
+    auto read_pair95 = [&](const std::string& file, pvc::Pair95Header& out)->int {
+        File f(file);
+        if (!f.exists()) return -1;
+        const std::string tag = "[PM1-VTRACE-PAIR95] Stage 2 checkpoint " + file;
+        std::string reason;
+        if (!pm1_checkpoint_backend_matches(file, eng, &reason, true)) {
+            std::cout << tag << " ignored: " << reason << ".\n";
+            return -3;
+        }
+        pvc::Pair95Header h;
+        int32_t version = 0;
+        const pvc::ReadStatus st = pvc::readHeader(f, h, &version);
+        if (st == pvc::ReadStatus::BadVersion) {
+            std::cout << tag << " has unknown version " << version << " (expected " << pvc::kPair95Version << "); not resumed.\n";
+            return -2;
+        }
+        if (st != pvc::ReadStatus::Ok) {
+            std::cout << tag << " is truncated; not resumed.\n";
+            return -2;
+        }
+        const std::string mm = pvc::mismatch(h, pair95Run);
+        if (!mm.empty()) {
+            std::cout << tag << " belongs to another job or plan: " << mm << "; not resumed.\n";
+            return -3;
+        }
+        const std::string pe = pvc::positionError(h, pair95_bucket_size);
+        if (!pe.empty()) {
+            std::cout << tag << " is corrupt: " << pe << "; not resumed.\n";
+            return -2;
+        }
+        uint32_t nregs = 0;
+        const uint32_t wantRegs = (uint32_t)(sizeof(pair95CkptRegs) / sizeof(pair95CkptRegs[0]));
+        if (!f.read(reinterpret_cast<char*>(&nregs), sizeof(nregs)) || nregs != wantRegs) {
+            std::cout << tag << " is truncated or corrupt (register table); not resumed.\n";
+            return -2;
+        }
+        std::vector<std::vector<char>> images(wantRegs, std::vector<char>(eng->get_register_data_size()));
+        for (uint32_t i = 0; i < wantRegs; ++i) {
+            uint32_t reg = 0;
+            if (!f.read(reinterpret_cast<char*>(&reg), sizeof(reg)) || reg != pair95CkptRegs[i] ||
+                !f.read(images[i].data(), images[i].size())) {
+                std::cout << tag << " is truncated or corrupt (register " << i << "); not resumed.\n";
+                return -2;
+            }
+        }
+        if (!f.check_crc32()) {
+            std::cout << tag << " fails its CRC check (truncated or corrupt); not resumed.\n";
+            return -2;
+        }
+        // Only a file that passed every check reaches the engine.
+        for (uint32_t i = 0; i < wantRegs; ++i) {
+            if (!eng->set_data((engine::Reg)pair95CkptRegs[i], images[i])) {
+                std::cout << tag << ": the engine rejected register " << pair95CkptRegs[i] << "; not resumed.\n";
+                return -2;
+            }
+        }
+        out = h;
+        return 0;
+    };
+
     double restored_time = 0.0;
     uint64_t s2B1=0, s2B2=0, s2D=0;
     bool compactS2Loaded = false;
-    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
-    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
-    bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
-    if (usePair95 && resumed_s2) {
-        std::cout << "[PM1-VTRACE-PAIR95] existing Stage 2 checkpoint ignored; "
-                  << "v95 irregular-pair checkpoints are not implemented yet.\n";
-        resumed_s2 = false;
+    bool resumed_s2 = false;
+    pvc::Pair95Header pair95Resume;
+    bool pair95Resumed = false;
+    if (usePair95) {
+        int r = read_pair95(ckpt_file_pair95, pair95Resume);
+        if (r != 0) {
+            const int rOld = read_pair95(ckpt_file_pair95 + ".old", pair95Resume);
+            if (rOld == 0) {
+                std::cout << "[PM1-VTRACE-PAIR95] resuming from the previous checkpoint " << ckpt_file_pair95 << ".old.\n";
+            } else if (r != -1 || rOld != -1) {
+                std::cout << "[PM1-VTRACE-PAIR95] no usable Stage 2 checkpoint; Stage 2 restarts from the beginning.\n";
+                if (guiServer_) guiServer_->appendLog("[PM1-VTRACE-PAIR95] no usable Stage 2 checkpoint; Stage 2 restarts.");
+            }
+            r = rOld;
+        }
+        if (r == 0) {
+            pair95Resumed = true;
+            resumed_s2 = true;
+            saved_k = pair95Resume.k;
+            restored_time = pair95Resume.elapsed;
+            resume_p_u64 = p0u;
+            resume_idx = 0;
+        }
+    } else {
+        int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
+        if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
+        resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
 
-    if (useBabyBatching && resumed_s2) {
+    // The pair95 checkpoint stores the pass, so it resumes batched runs too.
+    if (useBabyBatching && resumed_s2 && !pair95Resumed) {
         std::cout << "[PM1-VTRACE-BATCH] existing non-batched Stage 2 checkpoint ignored; "
                   << "baby-batched checkpoints are not implemented in v71.\n";
         resumed_s2 = false;
@@ -3919,12 +4130,17 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             mpz_class g;
             mpz_gcd(g.get_mpz_t(), Hc.get_mpz_t(), Mp.get_mpz_t());
             mpz_clear(H);
+            const int fftSize = static_cast<int>(eng->get_size());
             delete eng;
             if (g != 1 && g != Mp) {
                 std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
                 writeStageResult(filename, "inverse(H) failed because factor already divides H: factor=" + g.get_str());
                 std::cout << "\n>>> P-1 factor found while building V_1: " << g.get_str() << "\n";
-                return Pm1Stage2Result::Found;
+                // Record it like any stage-2 result (results.txt line, known
+                // factors); it used to be printed only.
+                bool resultSaved = false;
+                const bool found = pm1_record_stage2_result(options, g, Mp, fftSize, "V-trace", resultSaved);
+                return pm1_stage2_outcome(found, resultSaved);
             }
             std::cerr << "[PM1-VTRACE] H is not invertible modulo M_p, but no proper factor was isolated.\n";
             return Pm1Stage2Result::Error;
@@ -3940,20 +4156,44 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (!aevum_vtrace_backend) {
             eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
         }
-        if (!useBabyBatching) {
-            precompute_baby_window(0, babyCount, babyGlobalToLocal);
-        } else {
-            precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
-        }
-        if (!aevum_vtrace_backend) {
-            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
-        }
+        // The pair95 pass loop builds the baby window (and V_D) at the start
+        // of every pass, the first one included; building it here as well
+        // only doubled the precompute of a pair95 run.
+        if (!usePair95) {
+            if (!useBabyBatching) {
+                precompute_baby_window(0, babyCount, babyGlobalToLocal);
+            } else {
+                precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
+            }
+            if (!aevum_vtrace_backend) {
+                eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+            }
 
-        // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
-        eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
-        eng->set((engine::Reg)RGCUR, 2);
+            // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
+            eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+            eng->set((engine::Reg)RGCUR, 2);
+        }
         eng->set((engine::Reg)RACC, 1);
         cur_k = 0;
+    } else if (pair95Resumed) {
+        // RACC, RV1, RGPREV and RGCUR come from the checkpoint.  The pass loop
+        // rebuilds the baby window and V_D of the saved pass from V_1.
+        cur_k = saved_k;
+        if (!aevum_vtrace_backend) {
+            eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
+        }
+        std::ostringstream oss;
+        oss << "[PM1-VTRACE-PAIR95] Resuming Stage 2 V-trace from checkpoint ";
+        if (pair95Resume.pass >= pair95Resume.passes) {
+            oss << "after the last pass (only the GCD is left)";
+        } else {
+            oss << "at pass " << (pair95Resume.pass + 1) << "/" << pair95Resume.passes
+                << ", task " << pair95Resume.taskPos << "/" << pair95_bucket_size(pair95Resume.pass);
+        }
+        oss << " (terms done=" << pair95Resume.terms << "/" << pair95Resume.tasks
+            << ", k=" << cur_k << ") D=" << D;
+        std::cout << oss.str() << "\n";
+        if (guiServer_) guiServer_->appendLog(oss.str());
     } else {
         cur_k = saved_k;
         bool rebuiltBabyWindow = false;
@@ -4075,11 +4315,43 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         std::cout << "[PM1-VTRACE-PAIR95] executing greedy irregular pair plan"
                   << (useBabyBatching ? " with baby-window batching" : " with resident baby table")
                   << ".\n";
-        const size_t numPasses = useBabyBatching ? ((babyCount + activeBabyCount - 1) / activeBabyCount) : 1;
+        const size_t numPasses = pair95NumPasses;
         const size_t passStep = useBabyBatching ? activeBabyCount : babyCount;
-        for (size_t batchStart = 0; batchStart < babyCount; batchStart += passStep) {
+        // Resume position: the next task to run.  A position at the start of a
+        // pass starts the pass as usual; inside a pass the giant recurrence
+        // (RGPREV, RGCUR, cur_k) comes from the checkpoint.
+        const size_t resumePass = pair95Resumed ? (size_t)pair95Resume.pass : 0;
+        const size_t resumeTask = pair95Resumed ? (size_t)pair95Resume.taskPos : 0;
+        if (pair95Resumed) {
+            termsAccumulated = pair95Resume.terms;
+            primesSeen = pair95Resume.primes;
+        }
+        auto pair95_elapsed = [&]()->double {
+            return duration<double>(high_resolution_clock::now() - t0).count();
+        };
+        // Saves the position (pass, task) and stops: called when a stop was
+        // requested before the task at `task` ran.
+        auto pair95_stop = [&](size_t pass, size_t task)->Pm1Stage2Result {
+            const bool saved = save_pair95(pass, task, termsAccumulated, primesSeen, pair95_elapsed());
+            delete eng;
+            if (saved) {
+                std::cout << "\nInterrupted by user, V-trace pair95 Stage 2 state saved ";
+                if (pass >= numPasses) std::cout << "after the last pass";
+                else std::cout << "at pass " << (pass + 1) << "/" << numPasses << " task " << task;
+                std::cout << " (terms done=" << termsAccumulated << "/" << pair95Tasks.size()
+                          << ", k=" << cur_k << ")\n";
+            } else {
+                std::cout << "\nInterrupted by user during V-trace pair95 Stage 2; the state could not be saved.\n";
+            }
+            interrupted = false;
+            return Pm1Stage2Result::Interrupted;
+        };
+        for (size_t batchStart = resumePass * passStep; batchStart < babyCount; batchStart += passStep) {
             const size_t passNo = batchStart / passStep;
             const size_t batchEnd = std::min(babyCount, batchStart + passStep);
+            const bool resumeInPass = pair95Resumed && passNo == resumePass && resumeTask > 0;
+            const size_t firstTask = resumeInPass ? resumeTask : 0;
+            if (interrupted) return pair95_stop(passNo, firstTask);
             if (useBabyBatching || batchStart == 0) {
                 if (numPasses > 1) {
                     const size_t bucketTerms = (passNo < pair95TaskBuckets.size()) ? pair95TaskBuckets[passNo].size() : 0;
@@ -4089,9 +4361,15 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << " | queued-tasks=" << bucketTerms << "\n";
                 }
                 precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
-                eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
-                eng->set((engine::Reg)RGCUR, 2);
-                cur_k = 0;
+                // Aevum refreshes the V_D multiplicand inside the helper.
+                if (!aevum_vtrace_backend) {
+                    eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+                }
+                if (!resumeInPass) {
+                    eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+                    eng->set((engine::Reg)RGCUR, 2);
+                    cur_k = 0;
+                }
             }
 
             uint64_t passTerms = 0;
@@ -4104,7 +4382,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 bucketPtr = &fallbackAll;
             }
             const auto& bucket = *bucketPtr;
-            for (size_t bucketPos = 0; bucketPos < bucket.size(); ++bucketPos) {
+            for (size_t bucketPos = firstTask; bucketPos < bucket.size(); ++bucketPos) {
                 const size_t ti = bucket[bucketPos];
                 const Pair95Task& task = pair95Tasks[ti];
                 if (task.babyIndex < 0) continue;
@@ -4119,13 +4397,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     return Pm1Stage2Result::Error;
                 }
 
-                if (interrupted) {
-                    delete eng;
-                    std::cout << "\nInterrupted by user during V-trace pair95 Stage 2. "
-                              << "v97 does not checkpoint inside the irregular pair planner yet.\n";
-                    interrupted = false;
-                    return Pm1Stage2Result::Interrupted;
-                }
+                if (interrupted) return pair95_stop(passNo, bucketPos);
 
                 advance_giant_to(task.k);
                 build_trace_term_into((engine::Reg)RTMP, localBaby);
@@ -4156,12 +4428,35 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << std::flush;
                     lastDisplay = now;
                 }
+
+                // Periodic checkpoint at the backup interval (-t); `now` is
+                // the clock read of the progress line above.
+                if (now - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+                    // Position of the next task; the end of a pass is saved as
+                    // the start of the next one.
+                    const bool passDone = (bucketPos + 1 >= bucket.size());
+                    const size_t savePass = passDone ? passNo + 1 : passNo;
+                    const size_t saveTask = passDone ? 0 : bucketPos + 1;
+                    std::cout << "\nBackup V-trace pair95 Stage 2 at pass " << (savePass + 1) << "/" << numPasses
+                              << " task " << saveTask << " (terms done=" << termsAccumulated << "/" << pair95Tasks.size()
+                              << ") start...\n";
+                    if (save_pair95(savePass, saveTask, termsAccumulated, primesSeen, pair95_elapsed())) {
+                        std::cout << "Backup V-trace pair95 Stage 2 done.\n";
+                    }
+                    lastBackup = high_resolution_clock::now();
+                }
             }
             if (numPasses > 1) {
                 std::cout << "\n[PM1-VTRACE-PAIR95] pass " << (passNo + 1)
                           << " accumulated " << passTerms << " term(s).\n";
             }
         }
+        // All terms are in RACC.  Save once more so that a crash or a stop
+        // during the GCD or the result write resumes at the GCD instead of at
+        // the last periodic checkpoint, and honour a stop that arrived after the
+        // last task (the GCD can take minutes on a large exponent).
+        if (interrupted) return pair95_stop(numPasses, 0);
+        save_pair95(numPasses, 0, termsAccumulated, primesSeen, pair95_elapsed());
         skippedPairedUpper = pair95Paired;
         std::cout << "\n[PM1-VTRACE-PAIR95] processed " << pair95Tasks.size()
                   << " terms covering " << denseStage2Primes.size()
@@ -4527,6 +4822,13 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     }
 
     mpz_class X  = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
+    {
+        // The low 64 bits of the GCD input identify the stage-2 product, so an
+        // interrupted and resumed run can be compared with an uninterrupted one.
+        mpz_class low = X & ((mpz_class(1) << 64) - 1);
+        std::cout << "[PM1-VTRACE] Stage 2 GCD input res64=" << std::hex << std::setw(16) << std::setfill('0')
+                  << mpz_get_u64(low) << std::dec << std::setfill(' ') << " terms=" << termsAccumulated << "\n";
+    }
     mpz_class g  = gcd_with_dots(X, Mp);
 
     auto gcd_mpz = [&](const mpz_class& a, const mpz_class& b)->mpz_class{
@@ -4574,19 +4876,17 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << "\n";
     }
 
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+    // The Stage-2 checkpoint is deleted by the caller once the result is
+    // saved and the worktodo entry retired (pm1_remove_stage2_ckpts).
 
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json);
-    wm.appendToResultsTxt(json);
+    const bool resultSaved = wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 Pm1Stage2Result App::runPM1Stage2Marin() {
@@ -4843,14 +5143,25 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             return -3;
         }
         int version = 0; if (!f.read(reinterpret_cast<char*>(&version), sizeof(version))) return -2;
-        if (version != 10) return -2;
+        if (version != 10) {
+            std::cout << "[PM1] Stage 2 checkpoint " << file << " has version " << version << " (expected 10); not resumed.\n";
+            return -2;
+        }
         uint32_t rp = 0; if (!f.read(reinterpret_cast<char*>(&rp), sizeof(rp))) return -2;
-        if (rp != pexp) return -2;
+        if (rp != pexp) {
+            std::cout << "[PM1] Stage 2 checkpoint " << file << " is for exponent " << rp << ", not " << pexp << "; not resumed.\n";
+            return -2;
+        }
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
         // A checkpoint for other bounds is of no use; leave the engine alone.
-        if (sB1 != B1u || sB2 != B2u || sD != D) return -3;
+        if (sB1 != B1u || sB2 != B2u || sD != D) {
+            std::cout << "[PM1] Stage 2 checkpoint " << file << " is for B1=" << sB1 << ", B2=" << sB2
+                      << ", D=" << sD << "; this run has B1=" << B1u << ", B2=" << B2u << ", D=" << D
+                      << "; not resumed.\n";
+            return -3;
+        }
         if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
         if (!f.read(reinterpret_cast<char*>(&saved_idx), sizeof(saved_idx))) return -2;
         if (!f.read(reinterpret_cast<char*>(&et), sizeof(et))) return -2;
@@ -5266,20 +5577,17 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
         std::cout << "\nNo factor P-1 (stage 2) until B2 = " << B2 << "\n";
     }
 
-    // cleanup stage2 ckpts
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+    // The Stage-2 checkpoint is deleted by the caller once the result is
+    // saved and the worktodo entry retired (pm1_remove_stage2_ckpts).
 
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
     wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
+    const bool resultSaved = wm.appendToResultsTxt(json);
 
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 #include <array>
 #include <cstdlib>
@@ -5873,10 +6181,11 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
 
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    bool resultSaved = false;
+    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K", resultSaved);
     if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return pm1_stage2_outcome(found, resultSaved);
 }
 
 static inline unsigned u64_bits(uint64_t x){
@@ -6614,11 +6923,16 @@ int App::runPM1Marin() {
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
     const std::string ckpt_file = ck.str();
     std::vector<char> ckpt_restore_data;
+    // Set right before the finished stage-1 checkpoint is written for stage 2
+    // when the stage-1 result line is in results.txt (recorded in the sidecar).
+    bool ckptStage1ResultSaved = false;
+    // A resumed stage 2 whose stage-1 result line was recorded by an earlier run.
+    bool stage1ResultAlreadyRecorded = false;
     auto save_ckpt = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
         { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
         std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
-        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
+        write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS, ckptStage1ResultSaved);
     };
     auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
         File f(file);
@@ -7486,26 +7800,34 @@ int App::runPM1Marin() {
             return pm1Stage2ExitCode(stage2Stop);
         }
 
-        delete_checkpoints(options.exponent, options.wagstaff, true, false);
-        pm1_remove_classic_stage2_ckpt(options.exponent);
-        { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
-        {
-            // The extension is complete: a leftover _ext.ckpt would otherwise
-            // be offered to the next -b1old run.
-            const std::string ckpt_file_ext = "pm1_m_" + std::to_string(p) + "_ext.ckpt";
-            std::error_code ec;
-            fs::remove(ckpt_file_ext, ec);
-            fs::remove(ckpt_file_ext + ".old", ec);
-            fs::remove(ckpt_file_ext + ".new", ec);
-            fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_ext), ec);
-        }
+        auto remove_job_state = [&]() {
+            delete_checkpoints(options.exponent, options.wagstaff, true, false);
+            pm1_remove_stage2_ckpts(options.exponent);
+            { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
+            {
+                // The extension is complete: a leftover _ext.ckpt would otherwise
+                // be offered to the next -b1old run.
+                const std::string ckpt_file_ext = "pm1_m_" + std::to_string(p) + "_ext.ckpt";
+                std::error_code ec;
+                fs::remove(ckpt_file_ext, ec);
+                fs::remove(ckpt_file_ext + ".old", ec);
+                fs::remove(ckpt_file_ext + ".new", ec);
+                fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_ext), ec);
+            }
+        };
         delete eng;
         if (hasWorktodoEntry_ && !resultSaved) {
             std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
         }
         const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
+        // End of the job: result saved -> worktodo entry retired -> state
+        // deleted.  A crash in between leaves at worst a stale checkpoint,
+        // never a retired job without a result or a lost stage 2.
+        const bool retired = hasWorktodoEntry_ && resultSaved &&
+                             worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
+        remove_job_state();
         if (hasWorktodoEntry_ && resultSaved) {
-                if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+                if (retired) {
                     std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
                     if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n"; guiServer_->appendLog(oss.str()); }
                     bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
@@ -7526,6 +7848,7 @@ int App::runPM1Marin() {
         if (stage1AlreadyComplete) {
             std::cout << "[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2." << std::endl;
             if (guiServer_) guiServer_->appendLog("[PM1] Stage 1 checkpoint is complete; skipping to the GCD and stage 2.");
+            stage1ResultAlreadyRecorded = pm1_checkpoint_stage1_result_saved(ckpt_file);
         }
         while (!stage1AlreadyComplete) {
             bool errordone = false;
@@ -7884,7 +8207,12 @@ int App::runPM1Marin() {
     // is no stage-1 result to report, whether or not stage 2 follows; stage 2
     // reports its own result.  Do not record a "no factor" line.
     bool resultSaved = true;
-    if (!options.pm1_no_stage1_gcd) {
+    if (stage1ResultAlreadyRecorded && !options.pm1_no_stage1_gcd) {
+        // Resuming stage 2: the run that finished stage 1 recorded its result
+        // line before it wrote this checkpoint; appending it again would report
+        // the same stage 1 twice.
+        std::cout << "[PM1] Stage 1 result already recorded in results.txt by the run that finished Stage 1; not written again.\n";
+    } else if (!options.pm1_no_stage1_gcd) {
         options.B2 = 0;
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
@@ -7912,6 +8240,7 @@ int App::runPM1Marin() {
                 std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start_clock).count()
                 + restored_time;
 
+            ckptStage1ResultSaved = resultSaved && !options.pm1_no_stage1_gcd;
             save_ckpt(
                 0,                 // i
                 elapsed_time_ck,   // et
@@ -8010,16 +8339,21 @@ int App::runPM1Marin() {
         return pm1Stage2ExitCode(stage2Stop);
     }
     //else{
-    delete_checkpoints(options.exponent, options.wagstaff, true, false);
-    pm1_remove_classic_stage2_ckpt(options.exponent);
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
     }
     const bool stopAfterResult = core::algo::stop_after_result(resultSaved);
+    // End of the job: result saved -> worktodo entry retired -> state deleted.
+    // A crash in between leaves at worst a stale checkpoint, never a retired
+    // job without a result or a lost stage 2.
+    const bool retired = hasWorktodoEntry_ && resultSaved &&
+                         worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
+    delete_checkpoints(options.exponent, options.wagstaff, true, false);
+    pm1_remove_stage2_ckpts(options.exponent);
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
     if (hasWorktodoEntry_ && resultSaved) {
-        if (worktodoParser_->removeProcessedLine(activeWorktodoRawLine_)) {
+        if (retired) {
             std::cout << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n";
             if (guiServer_) { std::ostringstream oss; oss << "Entry removed from " << options.worktodo_path << " and saved to " << io::WorktodoParser::archivePathFor(options.worktodo_path) << "\n"; guiServer_->appendLog(oss.str()); }
             bool more = io::WorktodoParser::hasPendingEntry(options.worktodo_path);
