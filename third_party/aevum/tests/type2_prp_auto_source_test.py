@@ -25,7 +25,7 @@ assert "fft.shape.middle == 8u" in api
 assert "fft.shape.height == 512u" in api
 assert "fft.variant == 202u" in api
 
-assert 'report("type2-prp-auto"' in api
+assert 'return finish("type2-prp-auto"' in api
 assert 'parse("INPLACE=1,TAIL_TRIGS=0")' in api
 
 assert "kPrpType2MinExponent = 130000000u" in fft
@@ -77,7 +77,7 @@ assert '"AEVUM_GF61_CMUL_ALT"' in use_options
 assert 'shared.args->uses("AEVUM_GF61_CMUL_ALT")' in api
 marker = "const bool gfx906_type2_prp_gf61_cmul_alt0"
 start = api.index(marker)
-end = api.index('report("type2-prp-auto"', start)
+end = api.index('return finish("type2-prp-auto"', start)
 cmul = api[start:end]
 assert "type2_device_name" in cmul
 assert "type2_device_vendor" in cmul
@@ -102,7 +102,7 @@ assert 'use.emplace_back("AEVUM_CARRY_WMUL", "4")' not in api
 # R79 gfx906 Type2 non-temporal FFT-load policy.
 marker = "const bool gfx906_type2_prp_loads1"
 start = api.index(marker)
-end = api.index('report("type2-prp-auto"', start)
+end = api.index('return finish("type2-prp-auto"', start)
 loads = api[start:end]
 assert '!shared.args->uses("LOADS")' in loads
 assert 'type2_device_vendor == "4098"' in loads
@@ -118,7 +118,7 @@ assert "explicit -use LOADS precedence" in api
 # R99 gfx906 Type2 fast-barrier policy.
 marker = "const bool gfx906_type2_prp_fast_barrier1"
 start = api.index(marker)
-end = api.index('report("type2-prp-auto"', start)
+end = api.index('return finish("type2-prp-auto"', start)
 fast_barrier = api[start:end]
 assert '!shared.args->uses("FAST_BARRIER")' in fast_barrier
 assert 'type2_device_vendor == "4098"' in fast_barrier
