@@ -914,7 +914,7 @@ int App::runPM1Stage2() {
         carry.carryGPU(buffers->Qbuf, buffers->blockCarryBuf, limbBytes);
         
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             double done = static_cast<double>(idx + 1);
             double doneSinceResume = static_cast<double>(idx + 1 - resumeIdx);
             double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
@@ -927,7 +927,7 @@ int App::runPM1Stage2() {
             int hours = (static_cast<int>(etaSec) % 86400) / 3600;
             int minutes = (static_cast<int>(etaSec) % 3600) / 60;
             int seconds = static_cast<int>(etaSec) % 60;
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
                       << "prime: " << mpz_get_u64(p) << " | "
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
@@ -1156,7 +1156,7 @@ int App::runPM1() {
                     if (lastIter > 1) backupManager.saveState(buffers->input, lastIter-2);
                     lastBackup = now;
         }
-        if ((((now - lastDisplay >= seconds(10)))) ) {
+        if (((core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds))) ) {
                 std::string res64_x;
                 
 
@@ -2093,10 +2093,10 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
                 const double elapsed = duration<double>(now - texp0).count();
                 const double ips = elapsed > 0.0 ? double(doneBits) / elapsed : 0.0;
                 const double eta = ips > 0.0 ? double(i - 1) / ips : 0.0;
-                std::cout << "Progress: " << std::fixed << std::setprecision(2) << pct
+                std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << pct
                           << "% | Stage2 bits: " << doneBits << "/" << bits
                           << " | Elapsed: " << elapsed << "s | IPS: " << ips
-                          << " | ETA: " << eta << "s\r" << std::flush;
+                          << " | ETA: " << eta << "s\n" << std::flush;
                 last = now;
             }
             if (interrupted) {
@@ -2138,11 +2138,11 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         eng->mul((engine::Reg)RACC, (engine::Reg)RQ);
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             double percent = 100.0 * double(i + 1) / double(primes.size());
             double elapsed = duration<double>(now - t0).count();
             double ips = elapsed > 0.0 ? double(i + 1) / elapsed : 0.0;
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent
                       << "% | prime: " << q << " | Iter: " << (i + 1)
                       << "/" << primes.size() << " | Elapsed: " << elapsed
                       << "s | IPS: " << ips << "\r" << std::flush;
@@ -4141,7 +4141,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 primesSeen += task.paired ? 2u : 1u;
 
                 auto now = high_resolution_clock::now();
-                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                     const double percent = pair95Tasks.empty() ? 100.0 : 100.0 * double(termsAccumulated) / double(pair95Tasks.size());
                     const double elapsedSec = duration<double>(now - start).count();
                     const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
@@ -4150,7 +4150,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     int hours = (int(etaSec) % 86400) / 3600;
                     int minutes = (int(etaSec) % 3600) / 60;
                     int seconds = int(etaSec) % 60;
-                    std::cout << "Progress V-trace pair95: " << std::fixed << std::setprecision(2) << percent
+                    std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace pair95: " << std::fixed << std::setprecision(2) << percent
                               << "% | pass=" << (passNo + 1) << "/" << numPasses
                               << " | bucket-task=" << (bucketPos + 1) << "/" << bucket.size()
                               << " | k=" << task.k
@@ -4301,7 +4301,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 bPrime = next_p;
 
                 auto now = high_resolution_clock::now();
-                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                     const double rangeFrac = double((bPrime > p0u) ? (bPrime - p0u) : 0ull) /
                                              double((B2u > p0u) ? (B2u - p0u) : 1ull);
                     const double passFrac = (double(batchStart) + rangeFrac * double(batchEnd - batchStart)) / double(babyCount);
@@ -4314,7 +4314,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     int hours = (int(etaSec) % 86400) / 3600;
                     int minutes = (int(etaSec) % 3600) / 60;
                     int seconds = int(etaSec) % 60;
-                    std::cout << "Progress V-trace batch: " << std::fixed << std::setprecision(2) << percent
+                    std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace batch: " << std::fixed << std::setprecision(2) << percent
                               << "% | pass=" << (batchStart / activeBabyCount + 1) << "/" << numPasses
                               << " | prime=" << bPrime
                               << " | primes(scanned)=" << primesSeen
@@ -4383,7 +4383,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             skippedPairedUpper += bucket.skippedUpper;
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+            if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                 const double percent = productTreeBuckets.empty() ? 100.0 :
                     100.0 * double(bucketPos + 1) / double(productTreeBuckets.size());
                 const double elapsedSec = duration<double>(now - start).count();
@@ -4394,7 +4394,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 int hours = (int(etaSec) % 86400) / 3600;
                 int minutes = (int(etaSec) % 3600) / 60;
                 int seconds = int(etaSec) % 60;
-                std::cout << "Progress V-trace product-tree: " << std::fixed << std::setprecision(2) << percent
+                std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace product-tree: " << std::fixed << std::setprecision(2) << percent
                           << "% | bucket=" << (bucketPos + 1) << "/" << productTreeBuckets.size()
                           << " | k=" << bucket.k
                           << " | primes=" << primesSeen
@@ -4480,7 +4480,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         ++idx;
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             const double denom = double((B2u > p0u) ? (B2u - p0u) : 1ull);
             const double numer = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
             const double percent = 100.0 * (numer / denom);
@@ -4492,7 +4492,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             int hours = (int(etaSec) % 86400) / 3600;
             int minutes = (int(etaSec) % 3600) / 60;
             int seconds = int(etaSec) % 60;
-            std::cout << "Progress V-trace: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace: " << std::fixed << std::setprecision(2) << percent
                       << "% | prime=" << p_ui
                       << " | primes=" << primesSeen
                       << " | terms=" << termsAccumulated
@@ -5185,7 +5185,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
         ++idx;
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             const size_t done_abs = idx + 1;
             const double denom = double((B2u > p0u) ? (B2u - p0u) : 1ull);
             const double numer = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
@@ -5199,7 +5199,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             int minutes = (int(etaSec) % 3600) / 60;
             int seconds = int(etaSec) % 60;
 
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent
                       << "% | Iter: " << done_abs
                       << " | prime: " << p_ui
                       << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
@@ -7218,7 +7218,7 @@ int App::runPM1Marin() {
                 }
 
                 auto now2 = std::chrono::high_resolution_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
+                if (core::pm1::progress_due(now2, lastDisplay, options.pm1_progress_seconds)) {
                     std::string res64_x_ext;
                     uint64_t bitsDoneNow = processed_bits_ext_base + (bits - i + 1);
                     spinner.displayProgress2(
@@ -7771,7 +7771,7 @@ int App::runPM1Marin() {
                     wbits = 0;
                 }
                 auto now2 = std::chrono::high_resolution_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
+                if (core::pm1::progress_due(now2, lastDisplay, options.pm1_progress_seconds)) {
                     std::string res64_x;
                     spinner.displayProgress2(
                         processed_total_bits + (bits - i + 1),
