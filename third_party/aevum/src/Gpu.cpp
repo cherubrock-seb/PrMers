@@ -393,6 +393,28 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
+  // Incremental PRPLL quick-output/no-fold experiment over the validated
+  // cosine-base graph. Require the baseline explicitly for isolated A/B runs.
+  if (const char* value = std::getenv("AEVUM_PFA7_GF31_QUICK")) {
+    const auto it = config.find("AEVUM_PFA7_GF31_QUICK");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_GF31_QUICK selections");
+    config["AEVUM_PFA7_GF31_QUICK"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_GF31_QUICK"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_GF31_QUICK must be 0 or 1");
+    if (it->second == "1") {
+      if (!config.count("AEVUM_PFA_GF31_COSBASE") || config.at("AEVUM_PFA_GF31_COSBASE") != "1")
+        throw std::runtime_error("AEVUM_PFA7_GF31_QUICK requires AEVUM_PFA_GF31_COSBASE=1");
+      // The preceding cosine-base guard already checks Type1, 512x512,
+      // variant 202 and excludes Apple. PFA9 has different dot bounds.
+      if (fft.pfa_radix != 7)
+        throw std::runtime_error("AEVUM_PFA7_GF31_QUICK requires pfa7:1:512:7:512:202");
+      if (doLog) log("AEVUM_PFA7_GF31_QUICK=1: unfolded constants and combined GF31 output reductions.\n");
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA7_NUSS8")) {
     const auto it = config.find("AEVUM_PFA7_NUSS8");
     if (it != config.end() && it->second != value)

@@ -13,6 +13,16 @@
 #error AEVUM_PFA_GF31_COSBASE requires PFA7 or PFA9
 #endif
 
+#ifndef AEVUM_PFA7_GF31_QUICK
+#define AEVUM_PFA7_GF31_QUICK 0
+#endif
+#if AEVUM_PFA7_GF31_QUICK != 0 && AEVUM_PFA7_GF31_QUICK != 1
+#error AEVUM_PFA7_GF31_QUICK must be 0 or 1
+#endif
+#if AEVUM_PFA7_GF31_QUICK && (!AEVUM_PFA_GF31_COSBASE || PFA_RADIX != 7 || FFT_TYPE != FFT3161 || WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 7)
+#error AEVUM_PFA7_GF31_QUICK requires Type1 PFA7 cosine-base 512x512
+#endif
+
 #ifndef AEVUM_PFA7_NUSS8
 #define AEVUM_PFA7_NUSS8 0
 #endif
@@ -739,8 +749,14 @@ void OVERLOAD pfaDft3(GF31 a0, GF31 a1, GF31 a2, Z31 w, GF31 *o0, GF31 *o1, GF31
 // products. Keep the GF61 schedule (including its gfx906 NUSS8 policy) intact.
 // AEVUM_PFA_GF31_COSBASE_BEGIN
 u64 aevumPfa31Mad(Z31 x, Z31 c, u64 acc) {
+#if AEVUM_PFA7_GF31_QUICK
+  // PRPLL 153b3b2: keep the original constant, avoiding M31-x. Native
+  // generator-5 PFA7 rows satisfy the full quick-output bounds below.
+  return acc + (u64)x * c;
+#else
   return c > M31 / 2 ? acc + (u64)(M31 - x) * (M31 - c)
                      : acc + (u64)x * c;
+#endif
 }
 
 void aevumPfa31CosBase(GF31 *a, bool inverse) {
@@ -800,10 +816,20 @@ void aevumPfa31CosBase(GF31 *a, bool inverse) {
       qsx = aevumPfa31Mad(dif[k - 1].x, sk, qsx);
       qsy = aevumPfa31Mad(dif[k - 1].y, sk, qsy);
     }
+#if AEVUM_PFA7_GF31_QUICK
+    // PRPLL 13bf9a4: combine unreduced cosine/sine dots before modM31.
+    // For either root direction, pc < 0.37*M31^2 and qs < 1.78*M31^2.
+    // K is a multiple of M31; qs < K, pc+K and pc+qs are both below
+    // modM31(u64)'s 0xFFFFFFFF7FFFFFFF limit (and fit before subtraction).
+    const u64 K = (u64)M31 << 32;
+    y[j] = U2(modM31(pcx+qsx), modM31(pcy+qsy));
+    y[PFA_RADIX-j] = U2(modM31(pcx+K-qsx), modM31(pcy+K-qsy));
+#else
     const GF31 pc = U2(modM31(pcx), modM31(pcy));
     const GF31 qs = U2(modM31(qsx), modM31(qsy));
     y[j] = add(pc, qs);
     y[PFA_RADIX - j] = sub(pc, qs);
+#endif
   }
 #pragma unroll
   for (u32 k = 0; k < PFA_RADIX; ++k) a[k] = y[k];
