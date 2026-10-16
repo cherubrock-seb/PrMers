@@ -2030,8 +2030,12 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_resume2reg", json);
-        wm.appendToResultsTxt(json);
+        if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_resume2reg", json) ||
+            !wm.appendToResultsTxt(json)) {
+            std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+            delete eng;
+            return Pm1Stage2Result::Error;
+        }
 
         delete eng;
         return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -4583,8 +4587,12 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json);
-    wm.appendToResultsTxt(json);
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        delete eng;
+        return Pm1Stage2Result::Error;
+    }
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -5276,8 +5284,12 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        delete eng;
+        return Pm1Stage2Result::Error;
+    }
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -6270,6 +6282,7 @@ int App::runPM1Marin() {
 
     const bool want_p95_stage2 = options.p95stage2 && !options.p95path.empty();
     bool p95_stage2_enabled = false;
+    bool external_stage2_report_failure = false;
     fs::path p95_dir;
     fs::path p95_exe;
     auto p95_log = [&](const std::string& s) {
@@ -6458,10 +6471,14 @@ int App::runPM1Marin() {
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_ext", json);
-        wm.appendToResultsTxt(json);
-
-        return true;
+        const bool saved = wm.saveIndividualJson(options.exponent,
+                     std::string(options.mode) + "_stage2_ext", json) &&
+                     wm.appendToResultsTxt(json);
+        if (!saved) {
+            external_stage2_report_failure = true;
+            p95_log("[PM1] External Stage 2 finished but result was not saved; worktodo remains pending.");
+        }
+        return saved;
     };
 
     mpz_class X_old;
@@ -7442,7 +7459,9 @@ int App::runPM1Marin() {
                 factorFound = ext_found || factorFound;
             }
             const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
-            if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+            if (external_stage2_report_failure) {
+                pm1_fold_stage2(Pm1Stage2Result::Error, factorFound, stage2Stop);
+            } else if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
                 std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
                 pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
             } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
@@ -7941,7 +7960,9 @@ int App::runPM1Marin() {
             factorFound = ext_found || factorFound;
         }
         const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
-        if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+        if (external_stage2_report_failure) {
+            pm1_fold_stage2(Pm1Stage2Result::Error, factorFound, stage2Stop);
+        } else if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
             std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
             pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
         } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
