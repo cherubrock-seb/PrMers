@@ -272,7 +272,7 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 }
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
-                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, bool &cuda_graph_squares) {
+                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, bool &cuda_graph_squares, bool &cuda_pfa7_graphs) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -338,6 +338,43 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       log("AEVUM_CUDA_GRAPH_SQUARES=1: retained-width squares, fresh arguments for every graph node.\n");
   }
   config.erase("AEVUM_CUDA_GRAPH_SQUARES"); // Host-only: identical kernel source/cache and arithmetic.
+
+  cuda_pfa7_graphs = false;
+  if (const char* value = std::getenv("AEVUM_CUDA_PFA7_GRAPHS")) {
+    const auto it = config.find("AEVUM_CUDA_PFA7_GRAPHS");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_CUDA_PFA7_GRAPHS selections");
+    config["AEVUM_CUDA_PFA7_GRAPHS"] = value;
+  }
+  if (const auto it = config.find("AEVUM_CUDA_PFA7_GRAPHS"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS must be 0 or 1");
+    cuda_pfa7_graphs = it->second == "1";
+  }
+  if (cuda_pfa7_graphs) {
+#if defined(CUDA_BACKEND)
+    // getNvidiaComputeCapability encodes major * 100 + minor.
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 705)
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS requires CUDA sm_75+");
+#else
+    throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS requires the CUDA backend");
+#endif
+    if (fft.shape.fft_type != FFT3161 || !fft.isPfa() || fft.pfa_radix != 7 ||
+        fft.shape.width != 512 || fft.shape.middle != 7 || fft.shape.height != 512 ||
+        fft.variant != 202 || fft.carry == CARRY_64 || args.carry == CARRY_64 ||
+        E < 10ull * fft.shape.size() ||
+        (config.count("CARRY64") && config.at("CARRY64") != "0"))
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS requires short-carry pfa7:1:512:7:512:202");
+    if (config.count("TAIL_KERNELS") && config.at("TAIL_KERNELS") != "1")
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS requires the production PFA7 TAIL_KERNELS=1 path");
+    if (args.profile || std::getenv("PRPLL_PROFILE"))
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS conflicts with kernel profiling");
+    if (args.value("MULTI_Q", 0) || (config.count("MULTI_Q") && config.at("MULTI_Q") != "0"))
+      throw std::runtime_error("AEVUM_CUDA_PFA7_GRAPHS requires MULTI_Q=0");
+    if (doLog)
+      log("AEVUM_CUDA_PFA7_GRAPHS=1: canonical PFA7 squares, fresh arguments for every graph node.\n");
+  }
+  config.erase("AEVUM_CUDA_PFA7_GRAPHS"); // Host-only: same kernels, cache identity and arithmetic.
 
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
@@ -1155,7 +1192,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_)},
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_, cuda_pfa7_graphs_)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
@@ -3352,8 +3389,14 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   // LL does not do Mul3
   assert(!(doMul3 && doLL));
 #if defined(CUDA_BACKEND)
-  Queue::GraphSquareScope graph(queue, cuda_graph_squares_ && prp &&
-      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL);
+  // EngineApi's PFA7 regSquare enters and leaves canonical words and does not
+  // set prp. Include fftP through carryB in the batch; every host invocation
+  // still advances its ROE/carry slots and snapshots all kernel arguments.
+  const bool retainedGraph = cuda_graph_squares_ && prp &&
+      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH;
+  const bool pfa7Graph = cuda_pfa7_graphs_ &&
+      leadIn == LEAD_NONE && leadOut == LEAD_NONE;
+  Queue::GraphSquareScope graph(queue, (retainedGraph || pfa7Graph) && !doMul3 && !doLL);
 #endif
 
   // In place FFTs use buf1.  Not in place FFTs also use buf3.

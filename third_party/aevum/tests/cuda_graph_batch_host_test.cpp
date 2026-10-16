@@ -116,5 +116,25 @@ int main() {
     assert(last[1].args[1]==uint64_t(40+repeat));
   }
   assert(creates==3 && launches==5);
+  // Canonical Type1 PFA7 fits thirteen computational nodes, including both
+  // width transforms and the separate carry bridge. Check snapshots/updates
+  // at that size, with a buffer and sample-slot change between async submits.
+  for(int repeat=0;repeat<2;++repeat) {
+    b.begin();
+    for(int stage=0;stage<13;++stage) {
+      middle.func=100+stage;
+      set(middle,1000+repeat,100+repeat+stage);
+      b.add(&middle,4096,64);
+    }
+    b.launch(0);
+    const auto& last=submitted.back();
+    assert(last.size()==13);
+    for(int stage=0;stage<13;++stage) {
+      assert(last[stage].f==uintptr_t(100+stage));
+      assert(last[stage].args[0]==uint64_t(1000+repeat));
+      assert(last[stage].args[1]==uint64_t(100+repeat+stage));
+    }
+  }
+  assert(creates==4 && launches==7);
   std::cout<<"argument snapshots, fresh slots, repeated handles, cache, edges and rejection checked\n";
 }
