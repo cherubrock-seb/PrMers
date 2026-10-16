@@ -1545,8 +1545,9 @@ static inline void mpz_mul_u64(mpz_class& a, uint64_t x);
 // part of the GCD that is already a known factor, record a new factor in
 // options.knownFactors, and write the stage-2 result file, the JSON result and
 // the results.txt line (also for "no factor", like the classic BSGS ending).
-// Returns true when a new factor was found.
-static bool pm1_record_stage2_result(io::CliOptions& options,
+// Returns an explicit Error on failed persistence, rather than treating the
+// job as completed and retiring its worktodo entry.
+static Pm1Stage2Result pm1_record_stage2_result(io::CliOptions& options,
                                      const mpz_class& g,
                                      const mpz_class& Mp,
                                      int fftSize,
@@ -1584,9 +1585,12 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
     const std::string json = io::JsonBuilder::generate(options, fftSize, false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
-    return found;
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        return Pm1Stage2Result::Error;
+    }
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 // True when a stage-2 run did not search its whole range (interrupted or failed).
@@ -2115,10 +2119,10 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
-        const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+        const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                     "ultralowmem GPU one-register product exponent");
         delete eng;
-        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+        return report;
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -2159,10 +2163,10 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+    const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                 "lowmem streamed product");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return report;
 }
 
 
@@ -5890,10 +5894,11 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
 
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
-    if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
+    const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    if (guiServer_) guiServer_->appendLog(report == Pm1Stage2Result::Found ? "Stage 2 n^K Factor found" :
+                                          report == Pm1Stage2Result::NotFound ? "No factor" : "Stage 2 n^K reporting failed");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return report;
 }
 
 static inline unsigned u64_bits(uint64_t x){
