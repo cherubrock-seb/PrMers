@@ -21,6 +21,7 @@
  * This code is released as free software. 
  */
 #include "core/Spinner.hpp"
+#include "core/Pm1Progress.hpp"
 #include <iostream>
 #include <iomanip>
 #include <thread>
@@ -176,10 +177,10 @@ void Spinner::displayProgress2(uint64_t iter,
     uint64_t hrs  = sec / 3600;  sec %= 3600;
     uint64_t min  = sec / 60;    sec %= 60;
 
-    const char* color = (pctTotal < 50.0) ? COLOR_RED : ((pctTotal < 90.0) ? COLOR_YELLOW : COLOR_GREEN);
-
+    // displayProgress2 is the P-1 Stage-1 chunk reporter. Keep log lines
+    // single-line, dated, searchable by exponent, and free of ANSI/CR codes.
     std::ostringstream line;
-    line << "\r" << color
+    line << core::pm1::progress_prefix(expo, 1)
          << "Progress: "  << std::fixed << std::setprecision(2) << pctTotal << "% | "
          << "Chunk "      << chunkIndex << "/" << chunkCount << " " << std::fixed << std::setprecision(2) << pctChunk << "% | "
          << "Exp: "       << expo << " | "
@@ -190,7 +191,7 @@ void Spinner::displayProgress2(uint64_t iter,
          << "ETA: "       << days << "d " << hrs << "h " << min << "m " << sec << "s";
     if (!res64.empty()) line << " | RES64: " << res64;
 
-    std::cout << line.str() << COLOR_RESET << std::endl;
+    std::cout << line.str() << std::endl;
 
     if (gui) {
         gui->setProgress(iter, totalIters, res64);
