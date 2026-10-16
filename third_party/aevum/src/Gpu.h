@@ -120,6 +120,7 @@ private:
   u32 pad_size{0};                       // Padding in bytes
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
+  bool cuda_pfa7_graphs_{false};          // Canonical PFA7 squares, independent opt-in
 
   Queue queue;
   vector<Queue> auxQueues;
