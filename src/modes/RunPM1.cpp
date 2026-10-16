@@ -17,6 +17,7 @@
 #include "core/Version.hpp"
 #include "core/Pm1Stage2External.hpp"
 #include "core/Pm1Checkpoint.hpp"
+#include "core/Pm1Progress.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -7383,25 +7384,27 @@ int App::runPM1Marin() {
                 guiServer_->appendLog(oss.str());
             }
         }
-        uint64_t B2save = options.B2; 
-        options.B2 = 0;
-        // JSON + worktodo removal same as usual ...
-        std::string json = io::JsonBuilder::generate(
-            options,
-            static_cast<int>(eng->get_size()),
-            false,
-            "",
-            ""
-        );
-        std::cout << "Manual submission JSON:\n" << json << "\n";
-        io::WorktodoManager wm(options);
-        
-        bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
-        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-        options.B2 = B2save;
-        // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
-        const bool runRequestedStage2 = options.B2 > options.B1 &&
-            (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
+        // A two-stage assignment must not submit its intermediate Stage-1 result.
+        const bool runRequestedStage2 = core::pm1::stage2_required(
+            options.B1, options.B2, newStage1FactorFound,
+            options.pm1_continue_stage2_after_factor);
+        bool resultSaved = true;
+        if (!runRequestedStage2) {
+            const uint64_t B2save = options.B2;
+            options.B2 = 0;
+            const std::string json = io::JsonBuilder::generate(
+                options, static_cast<int>(eng->get_size()), false, "", "");
+            options.B2 = B2save;
+            std::cout << "Manual submission JSON:\n" << json << "\n";
+            io::WorktodoManager wm(options);
+            resultSaved = wm.saveIndividualJson(options.exponent,
+                                                 std::string(options.mode) + "_stage1_ext", json);
+            if (resultSaved) resultSaved = wm.appendToResultsTxt(json);
+        } else {
+            std::cout << core::pm1::progress_prefix(options.exponent, 1)
+                      << "B1=" << options.B1 << " complete; deferring result submission until B2="
+                      << options.B2 << ".\n";
+        }
         if (options.B2 > 0 && options.B2 <= options.B1) {
             std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
         }
@@ -7879,25 +7882,27 @@ int App::runPM1Marin() {
             if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
         }
     }
-    uint64_t B2save = options.B2; 
-    // With the stage-1 GCD skipped nothing was tested for a factor, so there
-    // is no stage-1 result to report, whether or not stage 2 follows; stage 2
-    // reports its own result.  Do not record a "no factor" line.
+    // Only the final stage may publish a two-stage P-1 result.
+    const bool runRequestedStage2 = core::pm1::stage2_required(
+        options.B1, options.B2, newStage1FactorFound,
+        options.pm1_continue_stage2_after_factor);
     bool resultSaved = true;
-    if (!options.pm1_no_stage1_gcd) {
+    if (!runRequestedStage2 && !options.pm1_no_stage1_gcd) {
+        const uint64_t B2save = options.B2;
         options.B2 = 0;
-        std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
+        const std::string json = io::JsonBuilder::generate(
+            options, static_cast<int>(eng->get_size()), false, "", "");
+        options.B2 = B2save;
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        options.B2 = 0;
-        resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
-        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-        options.B2 = B2save;
+        resultSaved = wm.saveIndividualJson(options.exponent,
+                                             std::string(options.mode) + "_stage1", json);
+        if (resultSaved) resultSaved = wm.appendToResultsTxt(json);
+    } else if (runRequestedStage2) {
+        std::cout << core::pm1::progress_prefix(options.exponent, 1)
+                  << "B1=" << options.B1 << " complete; deferring result submission until B2="
+                  << options.B2 << ".\n";
     }
-
-    // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
-    const bool runRequestedStage2 = options.B2 > options.B1 &&
-        (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
     if (options.B2 > 0 && options.B2 <= options.B1) {
         std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
     }
