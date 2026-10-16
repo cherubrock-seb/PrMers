@@ -314,6 +314,26 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
+  // Experimental GF61 PFA7 sine-base extension of the cosine-base quick dots.
+  // Both variants are deliberately opt-in for exact same-plan paired testing.
+  if (const char* value = std::getenv("AEVUM_PFA7_GF61_SINBASE")) {
+    const auto it = config.find("AEVUM_PFA7_GF61_SINBASE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_GF61_SINBASE selections");
+    config["AEVUM_PFA7_GF61_SINBASE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_GF61_SINBASE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_GF61_SINBASE must be 0 or 1");
+    if (it->second == "1") {
+      if (!config.count("AEVUM_PFA7_GF61_COSBASE") || config.at("AEVUM_PFA7_GF61_COSBASE") != "1")
+        throw std::runtime_error("AEVUM_PFA7_GF61_SINBASE requires AEVUM_PFA7_GF61_COSBASE=1");
+      // The COSBASE host policy above has already validated Type1 PFA7,
+      // native geometry, Apple exclusions and limb32 incompatibility.
+      if (doLog) log("AEVUM_PFA7_GF61_SINBASE=1: experimental GF61 dual base quick dots.\n");
+    }
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");
