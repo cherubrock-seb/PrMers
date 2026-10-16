@@ -334,6 +334,25 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     }
   }
 
+  // Choose smaller native dual-base coefficients to enable 125-bit folds.
+  // Keep the parent dual-base graph available for a single-flag A/B gate.
+  if (const char* value = std::getenv("AEVUM_PFA7_GF61_BOUNDED_BASE")) {
+    const auto it = config.find("AEVUM_PFA7_GF61_BOUNDED_BASE");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_GF61_BOUNDED_BASE selections");
+    config["AEVUM_PFA7_GF61_BOUNDED_BASE"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_GF61_BOUNDED_BASE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_GF61_BOUNDED_BASE must be 0 or 1");
+    if (it->second == "1") {
+      if (!config.count("AEVUM_PFA7_GF61_SINBASE") || config.at("AEVUM_PFA7_GF61_SINBASE") != "1")
+        throw std::runtime_error("AEVUM_PFA7_GF61_BOUNDED_BASE requires AEVUM_PFA7_GF61_SINBASE=1");
+      // SINBASE above requires COSBASE and its native Type1/geometry/backend guards.
+      if (doLog) log("AEVUM_PFA7_GF61_BOUNDED_BASE=1: native C3/S3 bases and six 125-bit dot folds.\n");
+    }
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");

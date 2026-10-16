@@ -1172,6 +1172,15 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 #if AEVUM_PFA7_GF61_SINBASE && !AEVUM_PFA7_GF61_COSBASE
 #error AEVUM_PFA7_GF61_SINBASE requires AEVUM_PFA7_GF61_COSBASE
 #endif
+#ifndef AEVUM_PFA7_GF61_BOUNDED_BASE
+#define AEVUM_PFA7_GF61_BOUNDED_BASE 0
+#endif
+#if AEVUM_PFA7_GF61_BOUNDED_BASE != 0 && AEVUM_PFA7_GF61_BOUNDED_BASE != 1
+#error AEVUM_PFA7_GF61_BOUNDED_BASE must be 0 or 1
+#endif
+#if AEVUM_PFA7_GF61_BOUNDED_BASE && (!AEVUM_PFA7_GF61_COSBASE || !AEVUM_PFA7_GF61_SINBASE)
+#error AEVUM_PFA7_GF61_BOUNDED_BASE requires COSBASE=1 and SINBASE=1
+#endif
 #if AEVUM_PFA7_GF61_COSBASE != 0 && AEVUM_PFA7_GF61_COSBASE != 1
 #error AEVUM_PFA7_GF61_COSBASE must be 0 or 1
 #endif
@@ -1246,6 +1255,65 @@ void aevumPfa61Pair(AevumPfa61Quick a, AevumPfa61Quick b, GF61* plus, GF61* minu
   *plus = modM61(pc+qs);
   *minus = modM61q(pc-qs,3);
 }
+#if AEVUM_PFA7_GF61_BOUNDED_BASE
+// PRPLL f361b5e/1418b96: choose bases for the dot bounds as well as product
+// count. Native generator-5 C3/S3 coefficients permit six 125-bit folds.
+void aevumPfa61BoundedPair(AevumPfa61Quick a, AevumPfa61Quick b, u32 sine_bound,
+                    GF61* plus, GF61* minus) {
+  // a < 2*M61^2, b < sine_bound*M61^2, sine_bound = 2 or 3.
+  // Thus pc < 3*M61, qs < (sine_bound+1)*M61; both combinations stay
+  // nonnegative and below 7*M61 before modM61. No full 128-bit fold is needed.
+  const GF61 pc = U2(weakModM61(a.x,125), weakModM61(a.y,125));
+  const GF61 qs = U2(weakModM61(b.x,125), weakModM61(b.y,125));
+  *plus = modM61(pc+qs);
+  *minus = modM61q(pc-qs,sine_bound+1);
+}
+void aevumPfa7BoundedBase61(GF61* u, Z61 w) {
+  const Z61 C3 = (Z61)784002893271222362UL;
+  const Z61 C1_C3 = (Z61)989671222192671703UL;
+  const Z61 C2_C3 = (Z61)117084611814202137UL;
+  const Z61 S3 = (Z61)381307857222696375UL;
+  const Z61 S1_S3 = (Z61)292176640490986129UL;
+  const Z61 S2_S3 = (Z61)450576194449256153UL;
+  const Z61 NS2_S3 = (Z61)1092651100319045048UL;
+  const Z61 NS1_S3 = (Z61)1251050654277315072UL;
+  // Inverse roots only reverse the output pairs. Use the same bounded
+  // positive coefficients in both directions; w is constant at each caller.
+  const bool inverse = w != (Z61)PFA7_ROOT61;
+  // Inputs 0..M61+epsilon. Quick sums 0..2*M61+epsilon and positive
+  // differences M61-epsilon..3*M61+epsilon fit in 64 bits.
+  const GF61 a1=u[1]+u[6], a2=u[2]+u[5], a3=u[3]+u[4];
+  const GF61 b1=u[1]-u[6]+U2(2*M61,2*M61);
+  const GF61 b2=u[2]-u[5]+U2(2*M61,2*M61);
+  const GF61 b3=u[3]-u[4]+U2(2*M61,2*M61);
+  const GF61 sum=modM61(a1+a2+a3);
+  const AevumPfa61Quick cbase={mad64(sum.x,C3,u[0].x),mad64(sum.y,C3,u[0].y)};
+  u[0]=modM61(u[0]+sum);
+  // The intermediate u64 sum can wrap, but the true sum minus 2*M61 lies
+  // in M61-epsilon..7*M61+epsilon. Unsigned wraparound preserves that value.
+  const GF61 dsum=modM61(b1+b2+b3-U2(2*M61,2*M61));
+  const AevumPfa61Quick sbase=aevumPfa61Mul(dsum,S3);
+
+  // One output pair at a time; six wide dots, each below 3*M61^2. No matrix
+  // or dynamically indexed temporaries, and no 128-bit add/sub of two dots.
+  AevumPfa61Quick pc=cbase, qs=sbase;
+  pc=aevumPfa61Mad(a1,C1_C3,pc); qs=aevumPfa61Mad(b1,S1_S3,qs);
+  pc=aevumPfa61Mad(a2,C2_C3,pc); qs=aevumPfa61Mad(b2,S2_S3,qs);
+  aevumPfa61BoundedPair(pc,qs,2,inverse?&u[6]:&u[1],inverse?&u[1]:&u[6]);
+
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a1,C2_C3,pc); qs=aevumPfa61Mad(b1,NS2_S3,qs);
+  pc=aevumPfa61Mad(a3,C1_C3,pc); qs=aevumPfa61Mad(b3,S1_S3,qs);
+  // This row computes negated sines, so its plus/minus outputs are exchanged.
+  aevumPfa61BoundedPair(pc,qs,2,inverse?&u[2]:&u[5],inverse?&u[5]:&u[2]);
+
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a2,C1_C3,pc); qs=aevumPfa61Mad(b2,NS1_S3,qs);
+  pc=aevumPfa61Mad(a3,C2_C3,pc); qs=aevumPfa61Mad(b3,S2_S3,qs);
+  aevumPfa61BoundedPair(pc,qs,3,inverse?&u[4]:&u[3],inverse?&u[3]:&u[4]);
+}
+#endif
+
 void aevumPfa7CosBase61(GF61* u, Z61 w) {
   const Z61 C1 = (Z61)1773674115463894065UL;
   const Z61 C2_C1 = (Z61)1433256398835224385UL;
@@ -1317,7 +1385,9 @@ void aevumPfa7CosBase61(GF61* u, Z61 w) {
 #endif
 
 void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
-#if AEVUM_PFA7_GF61_COSBASE
+#if AEVUM_PFA7_GF61_BOUNDED_BASE
+  aevumPfa7BoundedBase61(u,w);
+#elif AEVUM_PFA7_GF61_COSBASE
   aevumPfa7CosBase61(u,w);
 #elif AEVUM_PFA7_NUSS8 && !AEVUM_GF61_LIMB32 && !defined(AEVUM_APPLE_OPENCL12)
   aevum_pfa7_nuss8(u, w);
