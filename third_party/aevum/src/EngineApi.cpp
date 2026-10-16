@@ -46,6 +46,29 @@ namespace {
 
 thread_local std::string g_last_error;
 
+// Post-PTX limits can produce different machine code from frontend limits.
+// Keep shape/use timings and resumable searches separate across that regime.
+// Unset and literal 0 retain the production cache identities.
+std::string ptxRegisterTuneIdentity(const Args& args) {
+  const std::string key = "AEVUM_CUDA_REG_PTX_CACHE";
+  std::vector<std::string> selections;
+  if (const char* value = std::getenv(key.c_str()); value && std::strcmp(value, "0"))
+    selections.push_back("env=" + std::string(value));
+  if (const auto it = args.flags.find(key); it != args.flags.end() && it->second != "0")
+    selections.push_back("use=" + it->second);
+  for (const auto& [plan, options] : args.perFftConfig)
+    for (const auto& [name, value] : options)
+      if (name == key && value != "0") selections.push_back(plan + '=' + value);
+  if (const char* use = std::getenv("AEVUM_PRP_USE"); use && std::string(use).find(key) != std::string::npos)
+    for (const auto& [name, value] : aevum_prp_use::parse(use))
+      if (name == key && value != "0") selections.push_back("prp-use=" + value);
+  if (selections.empty()) return {};
+  std::sort(selections.begin(), selections.end());
+  std::string identity = ";ptx-reg-cache-v1";
+  for (const auto& value : selections) identity += ':' + value;
+  return identity;
+}
+
 void set_error(const char* text) {
   g_last_error = text ? text : "unknown Aevum engine error";
 }
@@ -831,6 +854,7 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     return finish("defaults/bypass",{});
 
   std::string flags=normalize(existing);
+  flags+=ptxRegisterTuneIdentity(*shared.args);
   for(const auto& [k,v]:shared.args->flags)flags+=';'+k+'='+v;
   const auto cache_key=key(identity,fft.spec(),exponent,flags);
   if(control==aevum_autotune::Mode::Auto)if(auto r=load(cache_key)) {
@@ -1414,6 +1438,7 @@ public:
       if (workload_ == aevum_autotune::Workload::Prp)
         flags << ";shape-confirm=prp-square-v1";
       if (const char* reg = std::getenv("AEVUM_REGISTER_PROFILES")) flags << ";register-profiles=" << reg;
+      flags << ptxRegisterTuneIdentity(args_);
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,

@@ -6,6 +6,9 @@
 #include "Args.h"
 #include "OpenCLStandard.h"
 #include "OpenCLSourceBuilder.h"
+#ifdef CUDA_BACKEND
+#include "cuda/PtxRegisterCache.h"
+#endif
 
 #include <cassert>
 #include <cinttypes>
@@ -160,24 +163,35 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
   Timer timer;
   bool fromCache = true;
 
+  string compileArgs = args;
+#ifdef CUDA_BACKEND
+  const auto regPtx = aevumTakePtxRegisterLimit(args);
+  compileArgs = regPtx.compileArgs;
+#endif
+
   Program program;
   string cacheFile;
 
   if (useCache) {
-    string f = kernelName + '-' + to_hex(SHA3::hash(contextHash, fileName, kernelName, args)[0]);
+    string f = kernelName + '-' + to_hex(SHA3::hash(contextHash, fileName, kernelName, compileArgs)[0]);
     cacheFile = cacheDir + '/' + f;
     program = loadBinary(context, deviceId, cacheFile);
   }
 
   if (!program) {
     fromCache = false;
-    program = compile(fileName, args);
+    program = compile(fileName, compileArgs);
   }
 
   if (!program) {
     log("Can't compile %s\n", fileName.c_str());
     throw "Can't compile " + fileName;
   }
+
+#ifdef CUDA_BACKEND
+  if (regPtx.enabled && !cudaLoadRegLimitedKernel(program.get(), kernelName.c_str(), regPtx.maxRegs, regPtx.minBlocks))
+    throw std::runtime_error("Cannot apply PTX register limit to " + kernelName);
+#endif
 
   KernelHolder ret;
 #if defined(__APPLE__) && !defined(CUDA_BACKEND)

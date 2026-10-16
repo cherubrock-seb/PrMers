@@ -120,6 +120,7 @@ private:
   u32 pad_size{0};                       // Padding in bytes
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
+  bool cuda_reg_ptx_cache_{false};        // Apply register limits after neutral PTX caching
 
   Queue queue;
   vector<Queue> auxQueues;
