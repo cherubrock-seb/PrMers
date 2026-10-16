@@ -4579,11 +4579,6 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << "\n";
     }
 
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
-
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
@@ -4593,6 +4588,13 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         delete eng;
         return Pm1Stage2Result::Error;
     }
+
+    // Retire Stage-2 checkpoints only after the result was persisted.
+    std::remove(ckpt_file_s2.c_str());
+    std::remove((ckpt_file_s2 + ".old").c_str());
+    std::remove((ckpt_file_s2 + ".new").c_str());
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -5276,11 +5278,6 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     }
 
     // cleanup stage2 ckpts
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
-
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
@@ -5290,6 +5287,13 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
         delete eng;
         return Pm1Stage2Result::Error;
     }
+
+    // Retire Stage-2 checkpoints only after the result was persisted.
+    std::remove(ckpt_file_s2.c_str());
+    std::remove((ckpt_file_s2 + ".old").c_str());
+    std::remove((ckpt_file_s2 + ".new").c_str());
+    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
