@@ -1163,6 +1163,15 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 #ifndef AEVUM_PFA7_GF61_COSBASE
 #define AEVUM_PFA7_GF61_COSBASE 0
 #endif
+#ifndef AEVUM_PFA7_GF61_SINBASE
+#define AEVUM_PFA7_GF61_SINBASE 0
+#endif
+#if AEVUM_PFA7_GF61_SINBASE != 0 && AEVUM_PFA7_GF61_SINBASE != 1
+#error AEVUM_PFA7_GF61_SINBASE must be 0 or 1
+#endif
+#if AEVUM_PFA7_GF61_SINBASE && !AEVUM_PFA7_GF61_COSBASE
+#error AEVUM_PFA7_GF61_SINBASE requires AEVUM_PFA7_GF61_COSBASE
+#endif
 #if AEVUM_PFA7_GF61_COSBASE != 0 && AEVUM_PFA7_GF61_COSBASE != 1
 #error AEVUM_PFA7_GF61_COSBASE must be 0 or 1
 #endif
@@ -1256,6 +1265,39 @@ void aevumPfa7CosBase61(GF61* u, Z61 w) {
 
   // One output pair at a time; six wide dots, each below 2^126. No matrix
   // or dynamically indexed temporaries, and no 128-bit add/sub of two dots.
+#if AEVUM_PFA7_GF61_SINBASE
+  // PRPLL sine-base decomposition (gwoltman/gpuowl@1418b96f814a),
+  // rederived for Aevum's generator-5 GF61 roots.  The single shared
+  // sbase eliminates one constant product per sine row: 16 -> 14 total
+  // scalar products over the radix-7 cosine+sine DFT, with six wide dots.
+  // b1+b2+b3 may exceed 64 bits (up to 9*M61); fold the first two before
+  // adding b3 so the unsigned addition cannot wrap modulo 2^64.
+  const GF61 dsum=modM61(modM61(b1+b2)+b3);
+  const AevumPfa61Quick sbase=aevumPfa61Mul(dsum,S1);
+  const bool fwd=w==(Z61)PFA7_ROOT61;
+  const Z61 S2_S1=fwd ? (Z61)158399553958270024UL : (Z61)2147443455255423927UL;
+  const Z61 S3_S1=fwd ? (Z61)2013666368722707822UL : (Z61)292176640490986129UL;
+  const Z61 NS2_S1=fwd ? (Z61)800474459828058919UL : (Z61)1505368549385635032UL;
+  const Z61 NS3_S1=fwd ? (Z61)1251050654277315072UL : (Z61)1054792354936378879UL;
+
+  AevumPfa61Quick pc=cbase, qs=sbase;
+  pc=aevumPfa61Mad(a2,C2_C1,pc); qs=aevumPfa61Mad(b2,S2_S1,qs);
+  pc=aevumPfa61Mad(a3,C3_C1,pc); qs=aevumPfa61Mad(b3,S3_S1,qs);
+  aevumPfa61Pair(pc,qs,&u[1],&u[6]);
+
+  // The second and third sine rows use the NEGATED sine sums, so every
+  // term remains positive in the wide accumulator.  Swap the two outputs
+  // to restore the exact original transform orientation.
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a1,C2_C1,pc); qs=aevumPfa61Mad(b1,NS2_S1,qs);
+  pc=aevumPfa61Mad(a2,C3_C1,pc); qs=aevumPfa61Mad(b2,S3_S1,qs);
+  aevumPfa61Pair(pc,qs,&u[5],&u[2]);
+
+  pc=cbase; qs=sbase;
+  pc=aevumPfa61Mad(a1,C3_C1,pc); qs=aevumPfa61Mad(b1,NS3_S1,qs);
+  pc=aevumPfa61Mad(a3,C2_C1,pc); qs=aevumPfa61Mad(b3,NS2_S1,qs);
+  aevumPfa61Pair(pc,qs,&u[4],&u[3]);
+#else
   AevumPfa61Quick pc=cbase, qs=aevumPfa61Mul(b1,S1);
   pc=aevumPfa61Mad(a2,C2_C1,pc); qs=aevumPfa61Mad(b2,S2,qs);
   pc=aevumPfa61Mad(a3,C3_C1,pc); qs=aevumPfa61Mad(b3,S3,qs);
@@ -1270,6 +1312,7 @@ void aevumPfa7CosBase61(GF61* u, Z61 w) {
   pc=aevumPfa61Mad(a1,C3_C1,pc); qs=aevumPfa61Mad(b2,M61-S1,qs);
   pc=aevumPfa61Mad(a3,C2_C1,pc); qs=aevumPfa61Mad(b3,S2,qs);
   aevumPfa61Pair(pc,qs,&u[3],&u[4]);
+#endif
 }
 #endif
 
