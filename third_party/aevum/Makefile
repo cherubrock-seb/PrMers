@@ -270,6 +270,10 @@ $(OPENCL_STANDARD_TEST): tests/opencl_standard_test.cpp src/OpenCLStandard.h
 test-gpu: $(BIN)/aevum
 	bash tests/gpu_prp_smoke.sh $(BIN)/aevum
 
+.PHONY: test-gpu-pfa-ll
+test-gpu-pfa-ll: $(BIN)/aevum
+	bash tests/gpu_pfa_ll_test.sh $(BIN)/aevum
+
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
 

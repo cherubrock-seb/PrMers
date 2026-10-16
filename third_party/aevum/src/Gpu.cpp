@@ -3239,9 +3239,12 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
     assert(!useLongCarry);
     assert(!doMul3);
     if (fft.isPfa()) {
-      assert(!doLL);
       fftW(buf3, buf1);
-      carryA(out, buf3);
+      if (doLL) {
+        carryLL(out, buf3);
+      } else {
+        carryA(out, buf3);
+      }
       fftPCarryB(buf1, out);
     } else if (doLL) {
       carryFusedLL(buf1);
