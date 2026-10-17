@@ -339,6 +339,41 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   }
   config.erase("AEVUM_CUDA_GRAPH_SQUARES"); // Host-only: identical kernel source/cache and arithmetic.
 
+  // AEVUM_GF61_PAIRED_LDS_GATE_BEGIN
+  // Independent axes; all lower-level geometry/layout controls keep their values.
+  for (const char* key : {"AEVUM_GF61_PAIRED_LDS_W", "AEVUM_GF61_PAIRED_LDS_H"}) {
+    if (const char* value = std::getenv(key)) {
+      const auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting ") + key + " selections");
+      config[key] = value;
+    }
+    const auto it = config.find(key);
+    if (it == config.end()) continue;
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error(string(key) + " must be 0 or 1");
+    if (it->second == "0") { config.erase(it); continue; }
+#if defined(CUDA_BACKEND) || defined(__APPLE__)
+    throw std::runtime_error(string(key) + " requires gfx906 OpenCL");
+#endif
+    if (!isAmdGpu(id) || getDeviceName(id).rfind("gfx906", 0) != 0 || getAmdWavefrontWidth(id) != 64)
+      throw std::runtime_error(string(key) + " requires gfx906 wave64");
+    const bool width = string(key).back() == 'W';
+    if ((fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261) ||
+        fft.shape.width != 512 || fft.shape.height != 512 || fft.variant != 202 ||
+        (fft.isPfa() ? (fft.pfa_radix != 7 || fft.shape.middle != 7 || fft.shape.fft_type != FFT3161) :
+                       (fft.shape.middle != 8 && fft.shape.middle != 16)))
+      throw std::runtime_error(string(key) + " requires 512:8/16:512 Type1/Type2 or canonical Type1 PFA7, variant 202");
+    const string bytes = width ? "SHUFL_BYTES_W" : "SHUFL_BYTES_H";
+    if (config.count(bytes) && config.at(bytes) != "8")
+      throw std::runtime_error(string(key) + " requires " + bytes + "=8");
+    for (const char* conflict : {"NOWG2", "NOLDS2", "NO_ASM"})
+      if (config.count(conflict) && config.at(conflict) != "0")
+        throw std::runtime_error(string(key) + " conflicts with " + conflict);
+    if (doLog) log("%s=1: GF61 512-point paired LDS addresses, unchanged partition size/barriers.\n", key);
+  }
+  // AEVUM_GF61_PAIRED_LDS_GATE_END
+
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
   // fftW must still scatter into the distinct canonical buf3 allocation.

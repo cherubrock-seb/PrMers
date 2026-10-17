@@ -16,6 +16,8 @@
 #define LDS_BYTES     (WG * RADIX * SHUFL_BYTES)
 #endif
 
+#include "gf61_paired_lds.cl"
+
 #if FFT_FP64 | NTT_GF61
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs operating on 64-bit values using LDS_BYTES of LDS memory.
@@ -2487,6 +2489,13 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 #if NTT_GF61
 
 void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 numWG, u32 lowMe) {
+#if WG == 64 && RADIX == 8 && SHUFL_BYTES == 8 && \
+    ((DOING_WIDTH && AEVUM_GF61_PAIRED_LDS_W) || (DOING_HEIGHT && AEVUM_GF61_PAIRED_LDS_H))
+  if (f == 1 || f == 8) {
+    aevumGf61PairedLds(lds, u, f, numWG, lowMe);
+    return;
+  }
+#endif
   shufl64((local T2 *) lds, (T2 *) u, f, numWG, lowMe);
 }
 
