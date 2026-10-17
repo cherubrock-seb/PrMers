@@ -261,7 +261,15 @@ KERNEL(OUT_WG) fftMiddleOutGF61(P(T2) out, CP(T2) in, Trig trig) {
   middleMul(u, x, trig61);
   fft_MIDDLE(u);
 #if AEVUM_GF61_MIDDLE_BASE_TABLE == 1 || AEVUM_GF61_MIDDLE_BASE_TABLE == 2
+#if WIDTH == SMALL_HEIGHT
+  // On square shapes the base twiddle is symmetric in x*y, so the transposed
+  // row-major lookup is equivalent and keeps adjacent middle-out lanes coalesced.
   middleMul2BaseTable(u, y, x, y * WIDTH + x, trig61);
+#else
+  // Rectangular shapes require the canonical [x < SMALL_HEIGHT][y < WIDTH]
+  // row-major address; y*WIDTH+x can select the wrong twiddle or read past the table.
+  middleMul2BaseTable(u, y, x, x * WIDTH + y, trig61);
+#endif
 #else
   middleMul2(u, y, x, trig61);
 #endif
@@ -644,7 +652,15 @@ KERNEL(256) fftMiddleOutGF61(P(T2) out, P(T2) in, Trig trig) {
   middleMul(u, x, trig61);
   fft_MIDDLE(u);
 #if AEVUM_GF61_MIDDLE_BASE_TABLE == 1 || AEVUM_GF61_MIDDLE_BASE_TABLE == 2
+#if WIDTH == SMALL_HEIGHT
+  // On square shapes the base twiddle is symmetric in x*y, so the transposed
+  // row-major lookup is equivalent and keeps adjacent middle-out lanes coalesced.
   middleMul2BaseTable(u, y, x, y * WIDTH + x, trig61);
+#else
+  // Rectangular shapes require the canonical [x < SMALL_HEIGHT][y < WIDTH]
+  // row-major address; y*WIDTH+x can select the wrong twiddle or read past the table.
+  middleMul2BaseTable(u, y, x, x * WIDTH + y, trig61);
+#endif
 #else
   middleMul2(u, y, x, trig61);
 #endif

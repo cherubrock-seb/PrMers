@@ -150,7 +150,7 @@ aevum_engine_sub_u32
 aevum_engine_equal
 ```
 
-`aevum_engine_prepare` stores a transformed multiplicand for repeated multiplication. `aevum_engine_equal` compares two normalized register buffers directly on the GPU and avoids exporting very large residues for routine error checks. Register import and export use little-endian 32-bit words representing an integer modulo `2^p - 1`.
+`aevum_engine_prepare` stores a transformed multiplicand for repeated multiplication. `aevum_engine_equal` compares two registers as residues modulo `2^p - 1`. Identical digit buffers are recognised directly on the GPU, so routine error checks on equal values never export the residues; a digit mismatch, which can also come from equal values left unnormalised by `add`, `sub_reg`, `sub_u32` or `set_u32`, is confirmed on the canonical words before `0` is reported. Register import and export use little-endian 32-bit words representing an integer modulo `2^p - 1`.
 
 Small factors used by `square_mul` and `mul` are applied in the integer register domain with a scratch register. Residue export canonicalizes the final signed carry modulo `2^p - 1` with bounded word access, including positive and negative cyclic carry cases.
 

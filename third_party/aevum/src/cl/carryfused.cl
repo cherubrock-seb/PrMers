@@ -335,6 +335,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
   }
 
+#if HAS_ASM
+  __asm("s_setprio 1");
+#endif
 #if !OLD_FENCE
   // For the last group the carry reading is shifted, so the per-wavefront ready flags are not enough and a
   // barrier is needed.  gr is uniform but "me < G_W" is not, so the barrier is taken outside that guard and
@@ -1912,6 +1915,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   }
 
 #if HAS_ASM
+  // WMUL lanes outside me < G_W also reach the barrier/shuttle phase.
   __asm("s_setprio 1");
 #endif
 #if !OLD_FENCE

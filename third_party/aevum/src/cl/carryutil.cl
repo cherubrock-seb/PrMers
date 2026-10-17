@@ -3,6 +3,14 @@
 #if CARRY64
 typedef i64 CFcarry;
 #else
+// A 32-bit carry cannot hold the carries of a big word once nBits = EXP / NWORDS + 1 exceeds 19 (for FP64 the
+// RNDVAL window would reach bit 51; the NTT carries do not fit in 32 bits either).  The host selects CARRY64
+// itself (FFTShape::needsLargeCarry) and refuses an explicit 32-bit carry past that limit (FFTConfig::carry32TooWide,
+// which also covers this bound); this is only the hard backstop.  Fail the build rather than compute wrong carries
+// if a configuration ever gets past the host gate.
+#if EXP / NWORDS >= 19
+#error "CARRY32 requires EXP / NWORDS <= 18; this exponent needs CARRY64 (carry spec :1)"
+#endif
 typedef i32 CFcarry;
 #endif
 
@@ -142,9 +150,7 @@ void updateStats(global uint *bufROE, u32 posROE, float roundMax) {
 #error AEVUM_ROE_SUBGROUP_REDUCE requires cl_khr_subgroups
 #endif
   // roundMax is non-negative, so uint bit order matches float order exactly.
-  // Reduce inside each hardware subgroup and issue one global atomic per wave
-  // instead of one atomic per work-item.  This avoids the LDS allocation of
-  // work_group_reduce_max while preserving the exact maximum.
+  // Reduce inside each hardware subgroup and issue one global atomic per wave.
   u32 waveRound = sub_group_reduce_max(as_uint(roundMax));
   if (get_sub_group_local_id() == 0) {
     atomic_max(bufROE + posROE, waveRound);

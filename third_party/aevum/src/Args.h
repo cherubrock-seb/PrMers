@@ -8,6 +8,7 @@
 #include <string>
 #include <map>
 #include <filesystem>
+#include <system_error>
 
 namespace fs = std::filesystem;
 
@@ -70,6 +71,8 @@ public:
   fs::path proofResultDir = "proof";
   fs::path proofToVerifyDir = "proof-tmp";
   fs::path cacheDir = "kernel-cache";
+  // The engine library never writes proofs, so it does not create the proof directories.
+  bool createProofDirs = true;
   // fs::path tuneFile = "tune.txt";
 
   bool keepProof = false;
