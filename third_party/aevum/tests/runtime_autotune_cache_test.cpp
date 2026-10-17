@@ -111,7 +111,7 @@ int main() {
     assert(kernelCacheDir() == std::filesystem::path("/xdg/prmers/aevum-kernel-cache"));
     assert(kernelCacheDir().parent_path() == cachePath().parent_path());
     set_env("AEVUM_AUTOTUNE_CACHE", "/pinned/tune/autotune.tsv");
-    assert(kernelCacheDir() == std::filesystem::path("/pinned/tune/aevum-kernel-cache"));
+    assert(kernelCacheDir() == std::filesystem::absolute("/pinned/tune/autotune.tsv").parent_path() / "aevum-kernel-cache");
     set_env("AEVUM_AUTOTUNE_CACHE", nullptr);
     set_env("XDG_CACHE_HOME", nullptr);
     set_env("HOME", nullptr);
