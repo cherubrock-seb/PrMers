@@ -3661,7 +3661,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     // mean a 6+ GiB host vector and may abort at the first periodic backup.
     // We only need the accumulator and current giant recurrence state; baby
     // traces are deterministic and are recomputed on resume.
-    const int ckptVersionS2 = useProductTree ? 23 : 24;
+    // v25 extends the compact V-trace checkpoint with baby-window resume semantics:\n    // saved_idx is the first baby index of the active pass and saved_p is the next\n    // Stage-2 prime to process.  Keep the old v24 meaning for resident-table and\n    // Pair95 paths so incompatible state is never replayed under another planner.\n    const int ckptVersionS2 = useProductTree ? 23 : ((useBabyBatching && !usePair95) ? 25 : 24);
     const bool compactVTraceCkpt = !useProductTree;
     std::ostringstream ck2;
     if (useProductTree) ck2 << "pm1_s2_vtrace_producttree_m_" << pexp << ".ckpt";
@@ -3709,7 +3709,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
         // Buffer the register image and load it into the engine only once the
         // whole file, CRC included, has been accepted.
-        if (version == 24) {
+        if (version == 24 || version == 25) {
             uint32_t nregs = 0;
             if (!f.read(reinterpret_cast<char*>(&nregs), sizeof(nregs))) return -2;
             const size_t rsz = e->get_register_data_size();
@@ -3794,12 +3794,6 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     }
 
     mpz_class Mp = (mpz_class(1) << options.exponent) - 1;
-
-    if (useBabyBatching && resumed_s2) {
-        std::cout << "[PM1-VTRACE-BATCH] existing non-batched Stage 2 checkpoint ignored; "
-                  << "baby-batched checkpoints are not implemented in v71.\n";
-        resumed_s2 = false;
-    }
 
     std::vector<int32_t> babyGlobalToLocal(babyCount, int32_t(-1));
     auto precompute_baby_window = [&](size_t batchStart, size_t batchEnd,
@@ -3966,10 +3960,28 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     } else {
         cur_k = saved_k;
         bool rebuiltBabyWindow = false;
+
+        if (useBabyBatching) {
+            if (activeBabyCount == 0 || resume_idx >= babyCount ||
+                (resume_idx % activeBabyCount) != 0 ||
+                resume_p_u64 < p0u || resume_p_u64 > B2u) {
+                delete eng;
+                std::cerr << "[PM1-VTRACE-BATCH] checkpoint has an invalid baby-pass/prime position; "
+                          << "refusing unsafe replay.\n";
+                return Pm1Stage2Result::Error;
+            }
+        }
+
         if (!aevum_vtrace_backend) {
             eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
         }
-        if (!useBabyBatching) {
+        if (useBabyBatching) {
+            const size_t resumeBatchStart = static_cast<size_t>(resume_idx);
+            precompute_baby_window(resumeBatchStart,
+                                   std::min(babyCount, resumeBatchStart + activeBabyCount),
+                                   babyGlobalToLocal);
+            rebuiltBabyWindow = true;
+        } else {
             if (compactS2Loaded) {
                 std::cout << "[PM1-VTRACE-CKPT] compact checkpoint loaded; recomputing deterministic baby table before resume...\n";
                 precompute_baby_window(0, babyCount, babyGlobalToLocal);
@@ -3984,8 +3996,16 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         } else if (!aevum_vtrace_backend) {
             eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
         }
-        std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
-                  << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
+
+        if (useBabyBatching) {
+            const size_t numPasses = (babyCount + activeBabyCount - 1) / activeBabyCount;
+            std::cout << "[PM1-VTRACE-BATCH] Resuming Stage 2 from checkpoint at pass "
+                      << (resume_idx / activeBabyCount + 1) << "/" << numPasses
+                      << ", prime " << resume_p_u64 << " (k=" << cur_k << ") D=" << D << "\n";
+        } else {
+            std::cout << "[PM1-VTRACE] Resuming Stage 2 V-trace from checkpoint at prime "
+                      << resume_p_u64 << " (idx=" << resume_idx << ", k=" << cur_k << ") D=" << D << "\n";
+        }
     }
 
     uint64_t idx = 0;
@@ -4182,33 +4202,55 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                   << " baby-window pass(es).  This avoids one huge OpenCL register slab.\n";
 
         const size_t numPasses = (babyCount + activeBabyCount - 1) / activeBabyCount;
-        for (size_t batchStart = 0; batchStart < babyCount; batchStart += activeBabyCount) {
+        const size_t resumeBatchStart = resumed_s2 ? static_cast<size_t>(resume_idx) : 0;
+
+        for (size_t batchStart = resumeBatchStart; batchStart < babyCount; batchStart += activeBabyCount) {
             const size_t batchEnd = std::min(babyCount, batchStart + activeBabyCount);
+            const bool resumeThisPass = resumed_s2 && (batchStart == resumeBatchStart);
+
             if (interrupted) {
+                // A restored pass already has a partially accumulated RACC and giant recurrence;
+                // preserve that exact position.  A fresh pass has no terms yet, so checkpoint
+                // its canonical beginning.
+                uint64_t savePrime = p0u;
+                if (resumeThisPass) {
+                    savePrime = resume_p_u64;
+                } else {
+                    eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+                    eng->set((engine::Reg)RGCUR, 2);
+                    cur_k = 0;
+                }
+                const double et = duration<double>(high_resolution_clock::now() - t0).count();
+                save_ckpt_s2(eng, savePrime, static_cast<uint64_t>(batchStart), cur_k, et);
                 delete eng;
-                std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
-                          << "v71 does not checkpoint inside a baby-batched pass.\n";
+                std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
+                          << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                          << ", prime " << savePrime << ".\n";
                 interrupted = false;
                 return Pm1Stage2Result::Interrupted;
             }
 
             std::cout << "[PM1-VTRACE-BATCH] pass " << (batchStart / activeBabyCount + 1)
                       << "/" << numPasses << " babies " << (batchStart + 1)
-                      << ".." << batchEnd << " of " << babyCount << "\n";
+                      << ".." << batchEnd << " of " << babyCount
+                      << (resumeThisPass ? " (resume)" : "") << "\n";
 
+            // Baby traces are deterministic and intentionally not stored in the compact
+            // checkpoint.  Rebuild only the active window.  RACC/RGPREV/RGCUR came from
+            // the checkpoint when resuming and must not be reset in that case.
             precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
 
-            // Restart giant recurrence for this baby window.  RACC is deliberately
-            // NOT reset: all pass products accumulate into the same final GCD value.
-            eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
-            eng->set((engine::Reg)RGCUR, 2);
-            cur_k = 0;
+            if (!resumeThisPass) {
+                eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+                eng->set((engine::Reg)RGCUR, 2);
+                cur_k = 0;
+            }
 
             std::vector<uint64_t> bPrimesRun;
             size_t bDensePos = 0;
             size_t bPos = 0;
             uint64_t bSegLow = 0, bSegHigh = 0;
-            uint64_t bPrime = p0u;
+            uint64_t bPrime = resumeThisPass ? resume_p_u64 : p0u;
             if (denseRun) {
                 auto it = std::lower_bound(denseStage2Primes.begin(), denseStage2Primes.end(), bPrime);
                 if (it == denseStage2Primes.end() || *it != bPrime) {
@@ -4250,9 +4292,12 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
             for (;;) {
                 if (interrupted) {
+                    const double et = duration<double>(high_resolution_clock::now() - t0).count();
+                    save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
                     delete eng;
-                    std::cout << "\nInterrupted by user during V-trace baby-batched Stage 2. "
-                              << "v71 does not checkpoint inside a baby-batched pass.\n";
+                    std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
+                              << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                              << ", prime " << bPrime << " (k=" << cur_k << ").\n";
                     interrupted = false;
                     return Pm1Stage2Result::Interrupted;
                 }
@@ -4330,6 +4375,33 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << std::flush;
                     lastDisplay = now;
                 }
+
+                if (now - lastBackup >= std::chrono::seconds(options.backup_interval)) {
+                    const double et = duration<double>(now - t0).count();
+                    std::cout << "Backup V-trace baby-batched Stage 2 at pass "
+                              << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                              << ", prime " << bPrime << " start...\n";
+                    save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
+                    lastBackup = now;
+                    std::cout << "Backup V-trace baby-batched Stage 2 done.\n";
+                }
+            }
+
+            // Commit a pass boundary.  RACC already contains every term from the
+            // completed pass; the next pass restarts only the giant recurrence.
+            const size_t nextBatchStart = batchStart + activeBabyCount;
+            if (nextBatchStart < babyCount) {
+                eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+                eng->set((engine::Reg)RGCUR, 2);
+                cur_k = 0;
+                const auto now = high_resolution_clock::now();
+                const double et = duration<double>(now - t0).count();
+                save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et);
+                lastBackup = now;
+                std::cout << "[PM1-VTRACE-BATCH] pass "
+                          << (batchStart / activeBabyCount + 1)
+                          << " complete; checkpoint committed for pass "
+                          << (nextBatchStart / activeBabyCount + 1) << "/" << numPasses << ".\n";
             }
         }
         std::cout << "\n[PM1-VTRACE-BATCH] all baby-window passes completed.\n";
