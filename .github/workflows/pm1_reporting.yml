@@ -1,0 +1,30 @@
+name: PM1 reporting host regression
+
+on:
+  pull_request:
+    paths:
+      - 'src/modes/RunPM1.cpp'
+      - 'src/io/CliParser.cpp'
+      - 'src/core/Spinner.cpp'
+      - 'include/core/Pm1Progress.hpp'
+      - 'include/io/CliParser.hpp'
+      - 'tests/pm1_*'
+      - 'Makefile'
+      - '.github/workflows/pm1_reporting.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host-only PM1 policy and reporting (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute host-only regression
+        run: make test-pm1-reporting
