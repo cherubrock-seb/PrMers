@@ -17,6 +17,7 @@
 #include "core/Version.hpp"
 #include "core/Pm1Stage2External.hpp"
 #include "core/Pm1Checkpoint.hpp"
+#include "core/Pm1Progress.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -913,7 +914,7 @@ int App::runPM1Stage2() {
         carry.carryGPU(buffers->Qbuf, buffers->blockCarryBuf, limbBytes);
         
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             double done = static_cast<double>(idx + 1);
             double doneSinceResume = static_cast<double>(idx + 1 - resumeIdx);
             double percent = totalPrimes ? done / static_cast<double>(totalPrimes) * 100.0 : 0.0;
@@ -926,12 +927,12 @@ int App::runPM1Stage2() {
             int hours = (static_cast<int>(etaSec) % 86400) / 3600;
             int minutes = (static_cast<int>(etaSec) % 3600) / 60;
             int seconds = static_cast<int>(etaSec) % 60;
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent << "% | "
                       << "prime: " << mpz_get_u64(p) << " | "
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
-                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::endl;
             if (guiServer_) {
                                 std::ostringstream oss;
@@ -940,7 +941,7 @@ int App::runPM1Stage2() {
                       << "Iter: " << (idx + 1) << " | "
                       << "Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s | "
                       << "IPS: " << std::fixed << std::setprecision(2) << ips << " | "
-                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << "ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::endl;
                       guiServer_->appendLog(oss.str());
             }
@@ -1155,7 +1156,7 @@ int App::runPM1() {
                     if (lastIter > 1) backupManager.saveState(buffers->input, lastIter-2);
                     lastBackup = now;
         }
-        if ((((now - lastDisplay >= seconds(10)))) ) {
+        if (((core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds))) ) {
                 std::string res64_x;
                 
 
@@ -1544,8 +1545,9 @@ static inline void mpz_mul_u64(mpz_class& a, uint64_t x);
 // part of the GCD that is already a known factor, record a new factor in
 // options.knownFactors, and write the stage-2 result file, the JSON result and
 // the results.txt line (also for "no factor", like the classic BSGS ending).
-// Returns true when a new factor was found.
-static bool pm1_record_stage2_result(io::CliOptions& options,
+// Returns an explicit Error on failed persistence, rather than treating the
+// job as completed and retiring its worktodo entry.
+static Pm1Stage2Result pm1_record_stage2_result(io::CliOptions& options,
                                      const mpz_class& g,
                                      const mpz_class& Mp,
                                      int fftSize,
@@ -1583,9 +1585,12 @@ static bool pm1_record_stage2_result(io::CliOptions& options,
     const std::string json = io::JsonBuilder::generate(options, fftSize, false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
     io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
-    return found;
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        return Pm1Stage2Result::Error;
+    }
+    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
 }
 
 // True when a stage-2 run did not search its whole range (interrupted or failed).
@@ -2029,8 +2034,12 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_resume2reg", json);
-        wm.appendToResultsTxt(json);
+        if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_resume2reg", json) ||
+            !wm.appendToResultsTxt(json)) {
+            std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+            delete eng;
+            return Pm1Stage2Result::Error;
+        }
 
         delete eng;
         return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -2082,16 +2091,16 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
             else   eng->square_mul((engine::Reg)RSTATE);
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - last).count() >= 3) {
+            if (core::pm1::progress_due(now, last, options.pm1_progress_seconds)) {
                 const mp_bitcnt_t doneBits = bits - i + 1;
                 const double pct = 100.0 * double(doneBits) / double(bits);
                 const double elapsed = duration<double>(now - texp0).count();
                 const double ips = elapsed > 0.0 ? double(doneBits) / elapsed : 0.0;
                 const double eta = ips > 0.0 ? double(i - 1) / ips : 0.0;
-                std::cout << "Progress: " << std::fixed << std::setprecision(2) << pct
+                std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << pct
                           << "% | Stage2 bits: " << doneBits << "/" << bits
                           << " | Elapsed: " << elapsed << "s | IPS: " << ips
-                          << " | ETA: " << eta << "s\r" << std::flush;
+                          << " | ETA: " << eta << "s\n" << std::flush;
                 last = now;
             }
             if (interrupted) {
@@ -2110,10 +2119,10 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         X -= 1;
         if (X < 0) X += Mp;
         mpz_class g = gcd_with_dots(X, Mp);
-        const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+        const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                     "ultralowmem GPU one-register product exponent");
         delete eng;
-        return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+        return report;
     }
 
     // 3-register streamed product path: H is restored from CPU data for each prime,
@@ -2133,14 +2142,14 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         eng->mul((engine::Reg)RACC, (engine::Reg)RQ);
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             double percent = 100.0 * double(i + 1) / double(primes.size());
             double elapsed = duration<double>(now - t0).count();
             double ips = elapsed > 0.0 ? double(i + 1) / elapsed : 0.0;
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent
                       << "% | prime: " << q << " | Iter: " << (i + 1)
                       << "/" << primes.size() << " | Elapsed: " << elapsed
-                      << "s | IPS: " << ips << "\r" << std::flush;
+                      << "s | IPS: " << ips << "\n" << std::flush;
             lastDisplay = now;
         }
         if (interrupted) {
@@ -2154,10 +2163,10 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
 
     mpz_class X = compute_X_with_dots(eng, (engine::Reg)RACC, Mp);
     mpz_class g = gcd_with_dots(X, Mp);
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
+    const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(),
                                                 "lowmem streamed product");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return report;
 }
 
 
@@ -4136,7 +4145,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 primesSeen += task.paired ? 2u : 1u;
 
                 auto now = high_resolution_clock::now();
-                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                     const double percent = pair95Tasks.empty() ? 100.0 : 100.0 * double(termsAccumulated) / double(pair95Tasks.size());
                     const double elapsedSec = duration<double>(now - start).count();
                     const double ipsTerm  = (elapsedSec > 0.0) ? double(termsAccumulated) / elapsedSec : 0.0;
@@ -4145,14 +4154,14 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     int hours = (int(etaSec) % 86400) / 3600;
                     int minutes = (int(etaSec) % 3600) / 60;
                     int seconds = int(etaSec) % 60;
-                    std::cout << "Progress V-trace pair95: " << std::fixed << std::setprecision(2) << percent
+                    std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace pair95: " << std::fixed << std::setprecision(2) << percent
                               << "% | pass=" << (passNo + 1) << "/" << numPasses
                               << " | bucket-task=" << (bucketPos + 1) << "/" << bucket.size()
                               << " | k=" << task.k
                               << " | terms=" << termsAccumulated << "/" << pair95Tasks.size()
                               << " | pair-skips=" << pair95Paired
                               << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                               << std::flush;
                     lastDisplay = now;
                 }
@@ -4296,7 +4305,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 bPrime = next_p;
 
                 auto now = high_resolution_clock::now();
-                if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+                if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                     const double rangeFrac = double((bPrime > p0u) ? (bPrime - p0u) : 0ull) /
                                              double((B2u > p0u) ? (B2u - p0u) : 1ull);
                     const double passFrac = (double(batchStart) + rangeFrac * double(batchEnd - batchStart)) / double(babyCount);
@@ -4309,7 +4318,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     int hours = (int(etaSec) % 86400) / 3600;
                     int minutes = (int(etaSec) % 3600) / 60;
                     int seconds = int(etaSec) % 60;
-                    std::cout << "Progress V-trace batch: " << std::fixed << std::setprecision(2) << percent
+                    std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace batch: " << std::fixed << std::setprecision(2) << percent
                               << "% | pass=" << (batchStart / activeBabyCount + 1) << "/" << numPasses
                               << " | prime=" << bPrime
                               << " | primes(scanned)=" << primesSeen
@@ -4317,7 +4326,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << " | paired-skip=" << skippedPairedUpper
                               << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                               << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                              << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                               << std::flush;
                     lastDisplay = now;
                 }
@@ -4378,7 +4387,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             skippedPairedUpper += bucket.skippedUpper;
 
             auto now = high_resolution_clock::now();
-            if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+            if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
                 const double percent = productTreeBuckets.empty() ? 100.0 :
                     100.0 * double(bucketPos + 1) / double(productTreeBuckets.size());
                 const double elapsedSec = duration<double>(now - start).count();
@@ -4389,7 +4398,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 int hours = (int(etaSec) % 86400) / 3600;
                 int minutes = (int(etaSec) % 3600) / 60;
                 int seconds = int(etaSec) % 60;
-                std::cout << "Progress V-trace product-tree: " << std::fixed << std::setprecision(2) << percent
+                std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace product-tree: " << std::fixed << std::setprecision(2) << percent
                           << "% | bucket=" << (bucketPos + 1) << "/" << productTreeBuckets.size()
                           << " | k=" << bucket.k
                           << " | primes=" << primesSeen
@@ -4397,7 +4406,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                           << " | paired-skip=" << skippedPairedUpper
                           << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                           << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                          << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                          << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                           << std::flush;
                 lastDisplay = now;
             }
@@ -4475,7 +4484,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         ++idx;
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             const double denom = double((B2u > p0u) ? (B2u - p0u) : 1ull);
             const double numer = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
             const double percent = 100.0 * (numer / denom);
@@ -4487,14 +4496,14 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             int hours = (int(etaSec) % 86400) / 3600;
             int minutes = (int(etaSec) % 3600) / 60;
             int seconds = int(etaSec) % 60;
-            std::cout << "Progress V-trace: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress V-trace: " << std::fixed << std::setprecision(2) << percent
                       << "% | prime=" << p_ui
                       << " | primes=" << primesSeen
                       << " | terms=" << termsAccumulated
                       << " | paired-skip=" << skippedPairedUpper
                       << " | p/s=" << std::fixed << std::setprecision(2) << ipsPrime
                       << " | term/s=" << std::fixed << std::setprecision(2) << ipsTerm
-                      << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << " | ETA=" << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
             lastDisplay = now;
         }
@@ -4574,16 +4583,22 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         std::cout << "\nNo factor P-1 (stage 2 V-trace) until B2 = " << B2 << "\n";
     }
 
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        delete eng;
+        return Pm1Stage2Result::Error;
+    }
+
+    // Retire Stage-2 checkpoints only after the result was persisted.
     std::remove(ckpt_file_s2.c_str());
     std::remove((ckpt_file_s2 + ".old").c_str());
     std::remove((ckpt_file_s2 + ".new").c_str());
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
 
-    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
-    std::cout << "Manual submission JSON:\n" << json << "\n";
-    io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_vtrace", json);
-    wm.appendToResultsTxt(json);
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -5176,7 +5191,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
         ++idx;
 
         auto now = high_resolution_clock::now();
-        if (duration_cast<seconds>(now - lastDisplay).count() >= 3) {
+        if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
             const size_t done_abs = idx + 1;
             const double denom = double((B2u > p0u) ? (B2u - p0u) : 1ull);
             const double numer = double((p_ui > p0u) ? (p_ui - p0u) : 0ull);
@@ -5190,12 +5205,12 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             int minutes = (int(etaSec) % 3600) / 60;
             int seconds = int(etaSec) % 60;
 
-            std::cout << "Progress: " << std::fixed << std::setprecision(2) << percent
+            std::cout << core::pm1::progress_prefix(options.exponent, 2) << "Progress: " << std::fixed << std::setprecision(2) << percent
                       << "% | Iter: " << done_abs
                       << " | prime: " << p_ui
                       << " | Elapsed: " << std::fixed << std::setprecision(2) << elapsedSec << "s"
                       << " | IPS: " << std::fixed << std::setprecision(2) << ips
-                      << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << " | ETA: " << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
 
             lastDisplay = now;
@@ -5267,16 +5282,22 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     }
 
     // cleanup stage2 ckpts
+    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
+    std::cout << "Manual submission JSON:\n" << json << "\n";
+    io::WorktodoManager wm(options);
+    if (!wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json) ||
+        !wm.appendToResultsTxt(json)) {
+        std::cerr << "[PM1] Stage 2 completed but JSON reporting failed; worktodo remains pending.\n";
+        delete eng;
+        return Pm1Stage2Result::Error;
+    }
+
+    // Retire Stage-2 checkpoints only after the result was persisted.
     std::remove(ckpt_file_s2.c_str());
     std::remove((ckpt_file_s2 + ".old").c_str());
     std::remove((ckpt_file_s2 + ".new").c_str());
     { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
 
-    std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
-    std::cout << "Manual submission JSON:\n" << json << "\n";
-    io::WorktodoManager wm(options);
-    wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2", json);
-    wm.appendToResultsTxt(json);
 
     delete eng;
     return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
@@ -5873,10 +5894,11 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
 
     double elapsed = duration<double>(high_resolution_clock::now() - t0).count();
     std::cout << "Elapsed (n^K) = " << std::fixed << std::setprecision(2) << elapsed << " s\n";
-    const bool found = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
-    if (guiServer_) guiServer_->appendLog(found ? "Stage 2 n^K Factor found" : "No factor");
+    const Pm1Stage2Result report = pm1_record_stage2_result(options, g, Mp, (int)eng->get_size(), "n^K");
+    if (guiServer_) guiServer_->appendLog(report == Pm1Stage2Result::Found ? "Stage 2 n^K Factor found" :
+                                          report == Pm1Stage2Result::NotFound ? "No factor" : "Stage 2 n^K reporting failed");
     delete eng;
-    return found ? Pm1Stage2Result::Found : Pm1Stage2Result::NotFound;
+    return report;
 }
 
 static inline unsigned u64_bits(uint64_t x){
@@ -6269,6 +6291,7 @@ int App::runPM1Marin() {
 
     const bool want_p95_stage2 = options.p95stage2 && !options.p95path.empty();
     bool p95_stage2_enabled = false;
+    bool external_stage2_report_failure = false;
     fs::path p95_dir;
     fs::path p95_exe;
     auto p95_log = [&](const std::string& s) {
@@ -6457,10 +6480,14 @@ int App::runPM1Marin() {
         std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage2_ext", json);
-        wm.appendToResultsTxt(json);
-
-        return true;
+        const bool saved = wm.saveIndividualJson(options.exponent,
+                     std::string(options.mode) + "_stage2_ext", json) &&
+                     wm.appendToResultsTxt(json);
+        if (!saved) {
+            external_stage2_report_failure = true;
+            p95_log("[PM1] External Stage 2 finished but result was not saved; worktodo remains pending.");
+        }
+        return saved;
     };
 
     mpz_class X_old;
@@ -7200,7 +7227,7 @@ int App::runPM1Marin() {
                 }
 
                 auto now2 = std::chrono::high_resolution_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
+                if (core::pm1::progress_due(now2, lastDisplay, options.pm1_progress_seconds)) {
                     std::string res64_x_ext;
                     uint64_t bitsDoneNow = processed_bits_ext_base + (bits - i + 1);
                     spinner.displayProgress2(
@@ -7383,25 +7410,27 @@ int App::runPM1Marin() {
                 guiServer_->appendLog(oss.str());
             }
         }
-        uint64_t B2save = options.B2; 
-        options.B2 = 0;
-        // JSON + worktodo removal same as usual ...
-        std::string json = io::JsonBuilder::generate(
-            options,
-            static_cast<int>(eng->get_size()),
-            false,
-            "",
-            ""
-        );
-        std::cout << "Manual submission JSON:\n" << json << "\n";
-        io::WorktodoManager wm(options);
-        
-        bool resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1_ext", json);
-        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-        options.B2 = B2save;
-        // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
-        const bool runRequestedStage2 = options.B2 > options.B1 &&
-            (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
+        // A two-stage assignment must not submit its intermediate Stage-1 result.
+        const bool runRequestedStage2 = core::pm1::stage2_required(
+            options.B1, options.B2, newStage1FactorFound,
+            options.pm1_continue_stage2_after_factor);
+        bool resultSaved = true;
+        if (!runRequestedStage2) {
+            const uint64_t B2save = options.B2;
+            options.B2 = 0;
+            const std::string json = io::JsonBuilder::generate(
+                options, static_cast<int>(eng->get_size()), false, "", "");
+            options.B2 = B2save;
+            std::cout << "Manual submission JSON:\n" << json << "\n";
+            io::WorktodoManager wm(options);
+            resultSaved = wm.saveIndividualJson(options.exponent,
+                                                 std::string(options.mode) + "_stage1_ext", json);
+            if (resultSaved) resultSaved = wm.appendToResultsTxt(json);
+        } else {
+            std::cout << core::pm1::progress_prefix(options.exponent, 1)
+                      << "B1=" << options.B1 << " complete; deferring result submission until B2="
+                      << options.B2 << ".\n";
+        }
         if (options.B2 > 0 && options.B2 <= options.B1) {
             std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
         }
@@ -7439,7 +7468,9 @@ int App::runPM1Marin() {
                 factorFound = ext_found || factorFound;
             }
             const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
-            if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+            if (external_stage2_report_failure) {
+                pm1_fold_stage2(Pm1Stage2Result::Error, factorFound, stage2Stop);
+            } else if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
                 std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
                 pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
             } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
@@ -7749,7 +7780,7 @@ int App::runPM1Marin() {
                     wbits = 0;
                 }
                 auto now2 = std::chrono::high_resolution_clock::now();
-                if (std::chrono::duration_cast<std::chrono::seconds>(now2 - lastDisplay).count() >= 10) {
+                if (core::pm1::progress_due(now2, lastDisplay, options.pm1_progress_seconds)) {
                     std::string res64_x;
                     spinner.displayProgress2(
                         processed_total_bits + (bits - i + 1),
@@ -7879,25 +7910,27 @@ int App::runPM1Marin() {
             if (guiServer_) { std::ostringstream oss; oss << "\nNo P-1 (stage 1) factor up to B1=" << B1 << "\n" << std::endl; guiServer_->appendLog(oss.str()); }
         }
     }
-    uint64_t B2save = options.B2; 
-    // With the stage-1 GCD skipped nothing was tested for a factor, so there
-    // is no stage-1 result to report, whether or not stage 2 follows; stage 2
-    // reports its own result.  Do not record a "no factor" line.
+    // Only the final stage may publish a two-stage P-1 result.
+    const bool runRequestedStage2 = core::pm1::stage2_required(
+        options.B1, options.B2, newStage1FactorFound,
+        options.pm1_continue_stage2_after_factor);
     bool resultSaved = true;
-    if (!options.pm1_no_stage1_gcd) {
+    if (!runRequestedStage2 && !options.pm1_no_stage1_gcd) {
+        const uint64_t B2save = options.B2;
         options.B2 = 0;
-        std::string json = io::JsonBuilder::generate(options, static_cast<int>(eng->get_size()), false, "", "");
+        const std::string json = io::JsonBuilder::generate(
+            options, static_cast<int>(eng->get_size()), false, "", "");
+        options.B2 = B2save;
         std::cout << "Manual submission JSON:\n" << json << "\n";
         io::WorktodoManager wm(options);
-        options.B2 = 0;
-        resultSaved = wm.saveIndividualJson(options.exponent, std::string(options.mode) + "_stage1", json);
-        resultSaved = wm.appendToResultsTxt(json) && resultSaved;
-        options.B2 = B2save;
+        resultSaved = wm.saveIndividualJson(options.exponent,
+                                             std::string(options.mode) + "_stage1", json);
+        if (resultSaved) resultSaved = wm.appendToResultsTxt(json);
+    } else if (runRequestedStage2) {
+        std::cout << core::pm1::progress_prefix(options.exponent, 1)
+                  << "B1=" << options.B1 << " complete; deferring result submission until B2="
+                  << options.B2 << ".\n";
     }
-
-    // A B2 that is not above B1 leaves no stage-2 range (like Prime95, skip it).
-    const bool runRequestedStage2 = options.B2 > options.B1 &&
-        (!newStage1FactorFound || options.pm1_continue_stage2_after_factor);
     if (options.B2 > 0 && options.B2 <= options.B1) {
         std::cout << "[PM1] B2 is not above B1; Stage 2 skipped.\n";
     }
@@ -7936,7 +7969,9 @@ int App::runPM1Marin() {
             factorFound = ext_found || factorFound;
         }
         const auto after_ext = core::pm1AfterExternalStage2(external_used, interrupted);
-        if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
+        if (external_stage2_report_failure) {
+            pm1_fold_stage2(Pm1Stage2Result::Error, factorFound, stage2Stop);
+        } else if (after_ext == core::Pm1AfterExternalStage2::Interrupted) {
             std::cout << "[PM1] Interrupted during the Prime95 Stage 2 handoff; not starting the internal Stage 2.\n";
             pm1_fold_stage2(Pm1Stage2Result::Interrupted, factorFound, stage2Stop);
         } else if (after_ext == core::Pm1AfterExternalStage2::RunInternal) {
@@ -8490,7 +8525,7 @@ int App::runPM1Stage3Marin() {
                       << "% | b=" << (b + 1) << "/" << B3u
                       << " | K=" << Kmax
                       << " | Elapsed " << elapsedSec << "s | ETA "
-                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r" << std::endl;
+                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n" << std::endl;
             if (guiServer_) {
                 std::ostringstream oss; oss << "Stage3: " << std::fixed << std::setprecision(2) << percent
                                             << "% | b=" << (b + 1) << "/" << B3u
@@ -9079,7 +9114,7 @@ int App::runPM1Stage4Marin() {
             std::cout << "Stage4: " << std::fixed << std::setprecision(2) << percent
                       << "% | i=" << (bits - i + 1) << "/" << bits
                       << " | Elapsed " << elapsedSec << "s | ETA "
-                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\r"
+                      << days << "d " << hours << "h " << minutes << "m " << seconds << "s\n"
                       << std::flush;
 
             if (guiServer_) {

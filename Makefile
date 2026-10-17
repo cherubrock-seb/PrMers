@@ -761,3 +761,12 @@ test-bench2-source:
 .PHONY: test-bench3-source
 test-bench3-source:
 	python3 tests/bench3_source_test.py
+
+
+.PHONY: test-pm1-reporting
+# Pure host-side regression; no OpenCL device is required.
+test-pm1-reporting:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/pm1_progress_report_test.cpp -o "$$tmp/pm1_progress_test" && \
+	"$$tmp/pm1_progress_test" && \
+	python3 tests/pm1_reporting_source_test.py

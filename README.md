@@ -347,8 +347,9 @@ Automatic selection compares the native transform sizes for every engine creatio
 | `-pm1` | Enable P-1 factoring |
 | `-b1 <B1>` | Stage 1 bound |
 | `-b2 <B2>` | Stage 2 bound |
+| `-pm1-progress-seconds <0..86400>` | Periodic Stage 1/2 progress logging interval, default 300 s; `0` suppresses progress lines only (not checkpoints or integrity checks) |
 | `-pm1-vtrace` | Use scalar-trace P-1 Stage 2. This is the default for normal-memory Stage 2, with conservative auto-D |
-| `-pm1-vtrace-off` | Disable V-trace and use the previous classic Stage 2 BSGS path |
+| `-pm1-vtrace-off` | Disable scalar-trace V-trace; use the older modular-power baby-step/giant-step algorithm inside PrMers (not a Prime95 delegation) |
 | `-pm1-vtrace-pair95` | Enable the Pair95 prime-pairing planner for V-trace Stage 2 when supported by the build |
 | `-pm1-vtrace-pair95-off` | Disable Pair95 and use the ordinary V-trace prime-pairing planner |
 | `-pm1-vtrace-pair95-l <L>` | Set the Pair95 irregular-unit count, for example `2` or `3` |
@@ -764,6 +765,42 @@ python3 -OO autoprimenet.py
 For multiple GPUs or workers, use one working directory per worker.
 
 ## Prime95 and mprime interop
+
+### P-1 result records and progress logs
+
+For a `Pminus1` worktodo entry with `B2 > B1`, PrMers treats Stage 1 as
+intermediate work: successful Stage 1 by itself does **not** submit an `NF`
+result. A completed Stage 2 publishes the single two-stage result with both
+bounds. If Stage 2 is interrupted or fails, its checkpoint and the worktodo
+entry remain for a retry, with no new partial `NF` submission. If a **new**
+factor is found in Stage 1, Stage 2 is intentionally skipped by default and
+a Stage-1 factor result is submitted; `-pm1-continue-stage2-after-factor`
+overrides that policy. A job with `B2 <= B1` is Stage-1-only.
+
+Progress lines for P-1 Stage 1 and Stage 2 include local date/time, stage,
+and exponent. To emit diagnostics every 10 minutes, or suppress only periodic
+progress while retaining checkpoints and integrity checks:
+
+```text
+prmers.exe -worktodo worktodo.txt -pm1-progress-seconds 600
+prmers.exe -worktodo worktodo.txt -pm1-progress-seconds 0
+```
+
+The default is 300 seconds (formerly 3 seconds for some Stage-2 loops and
+10 seconds for Stage 1). The log is much smaller; an enabled progress message
+is a newline-terminated record rather than a carriage-return screen update.
+
+For comparison, `-pm1-vtrace-off` selects the **classic internal BSGS**
+Stage-2 implementation, not Prime95. To delegate P-1 Stage 2 to Prime95 or
+mprime instead, use `-p95path <path>` (example below). The correct choice
+depends on hardware and bounds; no automatic performance equivalence with
+Prime95 is implied.
+
+**Operational caution:** This change prevents routine duplicate *intermediate*
+Stage-1 reports, but does not retroactively fix historical result files or
+guarantee transactional exactly-once reporting if power is lost precisely
+between writing `results.txt` and retiring a worktodo line. Such a failure
+must still be reconciled against the assignment and submission server.
 
 ### P-1 Stage 2 handoff
 
