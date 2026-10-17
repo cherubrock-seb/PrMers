@@ -392,9 +392,19 @@ vector<float2> genSmallTrigFP32(u32 size, u32 radix) {
   vector<float2> tab;
 
 // old fft_WIDTH and fft_HEIGHT
-  for (u32 line = 1; line < radix; ++line) {
-    for (u32 col = 0; col < WG; ++col) {
-      tab.push_back(radix / line >= 8 ? root1FancyFP32(size, col * line) : root1FP32(size, col * line));
+  // Woltman mixed 4*8*8: three 64-value rows, then seven 8-value rows.
+  if (size == 256 && radix == 8) {
+    for (u32 line = 1; line < radix/2; ++line)
+      for (u32 col = 0; col < WG*2; ++col)
+        tab.push_back(root1FP32(size, col * line));
+    for (u32 line = 1; line < radix; ++line)
+      for (u32 col = 0; col < WG; col += 4)
+        tab.push_back(root1FP32(size, col * line));
+  } else {
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; ++col) {
+        tab.push_back(radix / line >= 8 ? root1FancyFP32(size, col * line) : root1FP32(size, col * line));
+      }
     }
   }
   tab.resize(size);
@@ -632,9 +642,19 @@ vector<uint2> genSmallTrigGF31(u32 size, u32 radix) {
   vector<uint2> tab;
 
   GF31 root1size = GF31::root_one(size);
-  for (u32 line = 1; line < radix; ++line) {
-    for (u32 col = 0; col < WG; ++col) {
-      tab.push_back(root1GF31(root1size, col * line));
+  // Woltman mixed 4*8*8: three 64-value rows, then seven 8-value rows.
+  if (size == 256 && radix == 8) {
+    for (u32 line = 1; line < radix/2; ++line)
+      for (u32 col = 0; col < WG*2; ++col)
+        tab.push_back(root1GF31(root1size, col * line));
+    for (u32 line = 1; line < radix; ++line)
+      for (u32 col = 0; col < WG; col += 4)
+        tab.push_back(root1GF31(root1size, col * line));
+  } else {
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; ++col) {
+        tab.push_back(root1GF31(root1size, col * line));
+      }
     }
   }
   tab.resize(size);
@@ -790,9 +810,19 @@ vector<ulong2> genSmallTrigGF61(u32 size, u32 radix) {
   vector<ulong2> tab;
 
   GF61 root1size = GF61::root_one(size);
-  for (u32 line = 1; line < radix; ++line) {
-    for (u32 col = 0; col < WG; ++col) {
-      tab.push_back(root1GF61(root1size, col * line));
+  // Woltman mixed 4*8*8: three 64-value rows, then seven 8-value rows.
+  if (size == 256 && radix == 8) {
+    for (u32 line = 1; line < radix/2; ++line)
+      for (u32 col = 0; col < WG*2; ++col)
+        tab.push_back(root1GF61(root1size, col * line));
+    for (u32 line = 1; line < radix; ++line)
+      for (u32 col = 0; col < WG; col += 4)
+        tab.push_back(root1GF61(root1size, col * line));
+  } else {
+    for (u32 line = 1; line < radix; ++line) {
+      for (u32 col = 0; col < WG; ++col) {
+        tab.push_back(root1GF61(root1size, col * line));
+      }
     }
   }
   tab.resize(size);
