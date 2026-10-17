@@ -68,7 +68,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-create-fallback test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -123,6 +123,9 @@ test-aevum-reg:
 
 test-aevum-reported-plan:
 	bash tests/test_aevum_reported_plan.sh
+
+test-aevum-create-fallback:
+	bash tests/test_aevum_create_fallback.sh
 
 test-aevum-pfa9-bridge: aevum-engine
 	bash third_party/aevum/scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}

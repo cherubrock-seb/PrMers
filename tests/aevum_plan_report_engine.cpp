@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -46,6 +47,11 @@ FAKE_EXPORT int aevum_engine_resolve_fft(std::uint32_t exponent, const char* fft
 
 FAKE_EXPORT void* aevum_engine_create_ex(std::uint32_t, std::size_t, std::uint32_t, int, const char* fft_spec,
                                          const char*, std::uint32_t) {
+    // test_aevum_create_fallback: engine creation fails the way an unwritable working directory makes it fail.
+    if (const char* fail = std::getenv("FAKE_AEVUM_CREATE_ERROR"); fail && *fail) {
+        g_error = fail;
+        return nullptr;
+    }
     return new Fake{fft_spec && *fft_spec ? fft_spec : kCreated};
 }
 FAKE_EXPORT void* aevum_engine_create(std::uint32_t e, std::size_t r, std::uint32_t d, int v, const char* s, const char* t) {
