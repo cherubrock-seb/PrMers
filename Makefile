@@ -770,3 +770,7 @@ test-pm1-reporting:
 	$(CXX) -std=c++20 -Iinclude -Wall -Wextra -Werror tests/pm1_progress_report_test.cpp -o "$$tmp/pm1_progress_test" && \
 	"$$tmp/pm1_progress_test" && \
 	python3 tests/pm1_reporting_source_test.py
+.PHONY: test-pm1-pfactor-vtrace-resume
+# Source/algebra guard for PFactor decimal parsing and exact baby-pass replay semantics.
+test-pm1-pfactor-vtrace-resume:
+	python3 tests/pm1_pfactor_vtrace_resume_source_test.py
