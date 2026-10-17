@@ -339,6 +339,38 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   }
   config.erase("AEVUM_CUDA_GRAPH_SQUARES"); // Host-only: identical kernel source/cache and arithmetic.
 
+  // AEVUM_FP32_MINIMAX_TRIG_GATE_BEGIN
+  bool fp32MinimaxTrig = false;
+  if (const char* value = std::getenv("AEVUM_FP32_MINIMAX_TRIG")) {
+    const auto it = config.find("AEVUM_FP32_MINIMAX_TRIG");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_FP32_MINIMAX_TRIG selections");
+    config["AEVUM_FP32_MINIMAX_TRIG"] = value;
+  }
+  if (const auto it = config.find("AEVUM_FP32_MINIMAX_TRIG"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_FP32_MINIMAX_TRIG must be 0 or 1");
+    if (it->second == "0") { config.erase(it); }
+    else {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_FP32_MINIMAX_TRIG does not support Apple staged kernels");
+#elif defined(CUDA_BACKEND)
+      if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 75)
+        throw std::runtime_error("AEVUM_FP32_MINIMAX_TRIG requires CUDA sm_75+");
+#else
+      if (!isAmdGpu(id) || getDeviceName(id).rfind("gfx906", 0) != 0 || getAmdWavefrontWidth(id) != 64)
+        throw std::runtime_error("AEVUM_FP32_MINIMAX_TRIG requires gfx906 wave64 OpenCL");
+#endif
+      if (fft.isPfa() || fft.shape.fft_type != FFT3261 || fft.variant != 202 ||
+          fft.shape.width != 512 || fft.shape.height != 512 ||
+          (fft.shape.middle != 8 && fft.shape.middle != 16))
+        throw std::runtime_error("AEVUM_FP32_MINIMAX_TRIG requires non-PFA Type2 512:8/16:512:202");
+      fp32MinimaxTrig = true;
+      if (doLog) log("AEVUM_FP32_MINIMAX_TRIG=1: FP32 4+4 minimax trig, power-of-two input scale.\n");
+    }
+  }
+  // AEVUM_FP32_MINIMAX_TRIG_GATE_END
+
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
   // fftW must still scatter into the distinct canonical buf3 allocation.
@@ -709,7 +741,8 @@ defines += toDefine("TRIG_SCALE", int(coefs.scale));
 defines += toDefine("TRIG_SIN", coefs.sinCoefs);
 defines += toDefine("TRIG_COS", coefs.cosCoefs);
 } else {
-TrigCoefsFP32 const coefs = trigCoefsFP32(fft.shape.size() / 4);
+TrigCoefsFP32 const coefs = fp32MinimaxTrig ? trigCoefsFP32Minimax(fft.shape.size() / 4)
+                                         : trigCoefsFP32(fft.shape.size() / 4);
 auto lit = [](double v) {
 char buf[48];
 snprintf(buf, sizeof(buf), "%#.9gf", (double)(float)v);

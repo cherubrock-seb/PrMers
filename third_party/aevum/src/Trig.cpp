@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <stdexcept>
 
 using namespace std;
 
@@ -118,4 +119,36 @@ scaleCos(COS[i], pow2q)};
 
 log("Trig tab not found for %u (%u * %u)\n", n, mid, twos);
 throw "Trig tab not found";
+}
+
+// GPUOwl 2ba51340f10bf693cf1b54127eb9b2a22f7c01e5: relative-error
+// minimax fits on a in [0,1/4], sin(pi*a) and cos(pi*a)-1, four terms each.
+// The input scale is a pure power of two; the linear sine term is split
+// into a float hi/lo pair. This must be paired with the short kernel path.
+TrigCoefsFP32 trigCoefsFP32Minimax(u32 n) {
+  if (n < 4 || n % 4 != 0) throw std::invalid_argument("FP32 minimax trig requires n divisible by four");
+  const auto [mid, twos] = splitTwos(n);
+  constexpr array<double, 4> sin32 = {
+    3.1415926434166843414531563767044510155135,
+    -5.1677076818660068583343963078491515255835,
+    2.5497610486133892212929096638841713742207,
+    -0.58901220979012759640678479764315066640344};
+  constexpr array<double, 4> cos32 = {
+    -4.9348021974246128677565350369831930064067,
+    4.0587105450337586754386795289537097775925,
+    -1.3351369343568265015110744385968520552305,
+    0.23211605007706233595084109296886418921164};
+  int q = 0;
+  while ((2u << q) <= mid) ++q;
+  const double u = ldexp(1.0, q) / (4.0 * mid), u2 = u * u;
+  TrigCoefsFP32 coefs{};
+  const double s0 = sin32[0] * u;
+  coefs.sinCoefs[0] = float(s0);
+  coefs.sinCoefs[1] = s0 - float(s0);
+  coefs.cosCoefs[0] = 1;
+  double f = u * u2, g = u2;
+  for (u32 i = 1; i < 4; ++i) { coefs.sinCoefs[i + 1] = sin32[i] * f; f *= u2; }
+  for (u32 i = 0; i < 4; ++i) { coefs.cosCoefs[i + 1] = cos32[i] * g; g *= u2; }
+  coefs.scale = ldexp(1.0 / (twos / 4), -q);
+  return coefs;
 }

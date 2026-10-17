@@ -18,6 +18,7 @@ inline bool aevumUseKey(const std::string& key) {
   if (key == "AEVUM_PFA7_INPLACE") return true;
   if (key == "AEVUM_PFA7_NUSS8") return true;
   if (key == "AEVUM_CUDA_GRAPH_SQUARES") return true;
+  if (key == "AEVUM_FP32_MINIMAX_TRIG") return true;
   if (key == "AEVUM_PFA_FUSED_INVERSE") return true;
   if (key == "AEVUM_GF61_BETTER_ONEPAIRSQ") return true;
   if (key == "AEVUM_PFA7_SEPARATE_CARRYB") return true;

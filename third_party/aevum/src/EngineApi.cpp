@@ -46,6 +46,27 @@ namespace {
 
 thread_local std::string g_last_error;
 
+// Keep experimental trig timings/resume records out of production caches.
+std::string fp32MinimaxTuneIdentity(const Args& args) {
+  constexpr const char* key = "AEVUM_FP32_MINIMAX_TRIG";
+  std::vector<std::string> selected;
+  auto add = [&](const std::string& source, const std::string& value) {
+    if (value != "0") selected.push_back(source + ':' + key + '=' + value);
+  };
+  if (const char* value = std::getenv(key)) add("env", value);
+  if (const auto it = args.flags.find(key); it != args.flags.end()) add("use", it->second);
+  for (const auto& [plan, options] : args.perFftConfig)
+    for (const auto& [name, value] : options) if (name == key) add(plan, value);
+  for (const char* name : {"AEVUM_PRP_USE", "AEVUM_PFA_USE"})
+    if (const char* text = std::getenv(name))
+      for (const auto& [option, value] : Args::splitUses(text)) if (option == key) add(name, value);
+  if (selected.empty()) return {};
+  std::sort(selected.begin(), selected.end());
+  std::string identity = ";fp32-minimax-trig-v1";
+  for (const auto& item : selected) identity += ';' + item;
+  return identity;
+}
+
 void set_error(const char* text) {
   g_last_error = text ? text : "unknown Aevum engine error";
 }
@@ -831,6 +852,7 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     return finish("defaults/bypass",{});
 
   std::string flags=normalize(existing);
+  flags += fp32MinimaxTuneIdentity(*shared.args);
   for(const auto& [k,v]:shared.args->flags)flags+=';'+k+'='+v;
   const auto cache_key=key(identity,fft.spec(),exponent,flags);
   if(control==aevum_autotune::Mode::Auto)if(auto r=load(cache_key)) {
@@ -1414,6 +1436,7 @@ public:
       if (workload_ == aevum_autotune::Workload::Prp)
         flags << ";shape-confirm=prp-square-v1";
       if (const char* reg = std::getenv("AEVUM_REGISTER_PROFILES")) flags << ";register-profiles=" << reg;
+      flags << fp32MinimaxTuneIdentity(args_);
       if (const char* ll = std::getenv("AEVUM_FUSED_LL")) flags << ";fusedll=" << ll;
       if (const char* bridge = std::getenv("AEVUM_PREPARED_MUL_LEAD")) flags << ";prep-lead=" << bridge;
       autotune_key = aevum_autotune::makeKey(VERSION, vendor, device_name, driver, runtime,

@@ -20,3 +20,5 @@ std::array<double, 8> cosCoefs;
 };
 
 TrigCoefsFP32 trigCoefsFP32(u32 N);
+// Opt-in short series; entries 5..7 remain zero to preserve the coefficient ABI.
+TrigCoefsFP32 trigCoefsFP32Minimax(u32 N);
