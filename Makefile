@@ -68,7 +68,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 MARIN_TEST_DEVICE ?= 0
 
 .PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
-        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
+        install-aevum-engine test-aevum-host test-aevum-reg test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-device-map test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
 
 all: aevum-engine $(TARGET)
 
@@ -404,6 +404,12 @@ test-marin-invalid-device:
 	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude -Iinclude/marin -DGPU tests/marin_invalid_device_test.cpp -o tests/build-marin-invalid-device/marin-invalid-device-test -lOpenCL
 	tests/build-marin-invalid-device/marin-invalid-device-test
 	rm -rf tests/build-marin-invalid-device
+
+test-aevum-device-map:
+	mkdir -p tests/build-aevum-device-map
+	$(CXX) -std=c++20 -O2 -Wall -Wextra -Iinclude tests/aevum_device_map_test.cpp -o tests/build-aevum-device-map/aevum-device-map-test
+	tests/build-aevum-device-map/aevum-device-map-test
+	rm -rf tests/build-aevum-device-map
 
 test-aevum-source:
 	python3 tests/aevum_lowrange_prp_safety_source_test.py
