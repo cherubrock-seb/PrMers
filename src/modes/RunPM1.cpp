@@ -3688,8 +3688,9 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     auto read_ckpt_s2 = [&](engine* e, const std::string& file,
                             uint64_t& saved_p, uint64_t& saved_idx, uint64_t& saved_k,
                             double& et, uint64_t& sB1, uint64_t& sB2, uint64_t& sD,
-                            bool& compactLoaded)->int{
+                            uint64_t& saved_batch_size, bool& compactLoaded)->int{
         compactLoaded = false;
+        saved_batch_size = 0;
         File f(file);
         if (!f.exists()) return -1;
         std::string backend_reason;
@@ -3704,6 +3705,11 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (!f.read(reinterpret_cast<char*>(&sB1), sizeof(sB1))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sB2), sizeof(sB2))) return -2;
         if (!f.read(reinterpret_cast<char*>(&sD),  sizeof(sD)))  return -2;
+        // v25 also binds the checkpoint to the exact baby-window width.  Auto
+        // memory selection can change between launches; replaying a partial pass
+        // with different window boundaries would duplicate or omit terms.
+        if (version == 25 &&
+            !f.read(reinterpret_cast<char*>(&saved_batch_size), sizeof(saved_batch_size))) return -2;
         // A checkpoint for other bounds is of no use; leave the engine alone.
         if (sB1 != B1u || sB2 != B2u || sD != D) return -3;
         if (!f.read(reinterpret_cast<char*>(&saved_p), sizeof(saved_p))) return -2;
@@ -3751,6 +3757,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
             if (!f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u))) return;
             if (!f.write(reinterpret_cast<const char*>(&D), sizeof(D))) return;
+            if (version == 25) {
+                const uint64_t batchSize = static_cast<uint64_t>(activeBabyCount);
+                if (!f.write(reinterpret_cast<const char*>(&batchSize), sizeof(batchSize))) return;
+            }
             if (!f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p))) return;
             if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
             if (!f.write(reinterpret_cast<const char*>(&cur_k), sizeof(cur_k))) return;
@@ -3786,10 +3796,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
     uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
     double restored_time = 0.0;
-    uint64_t s2B1=0, s2B2=0, s2D=0;
+    uint64_t s2B1=0, s2B2=0, s2D=0, savedBatchSize=0;
     bool compactS2Loaded = false;
-    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
-    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
+    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
+    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
     if (usePair95 && resumed_s2) {
         std::cout << "[PM1-VTRACE-PAIR95] existing Stage 2 checkpoint ignored; "
@@ -3966,7 +3976,9 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         bool rebuiltBabyWindow = false;
 
         if (useBabyBatching) {
-            if (activeBabyCount == 0 || resume_idx >= babyCount ||
+            if (activeBabyCount == 0 ||
+                savedBatchSize != static_cast<uint64_t>(activeBabyCount) ||
+                resume_idx >= babyCount ||
                 (resume_idx % activeBabyCount) != 0 ||
                 resume_p_u64 < p0u || resume_p_u64 > B2u) {
                 delete eng;
