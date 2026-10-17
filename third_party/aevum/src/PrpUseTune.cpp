@@ -41,6 +41,8 @@ std::vector<KeyVal> parse(const std::string& text) {
   std::map<std::string,std::string> values;
   for(auto [k,v]:Args::splitUses(text)) {
     if(!aevumUseKey(k))throw std::runtime_error("unrecognized AEVUM_PRP_USE key: "+k);
+    if (k == "AEVUM_CUDA_REG_PTX_CACHE" && v != "0" && v != "1")
+      throw std::runtime_error("AEVUM_CUDA_REG_PTX_CACHE must be 0 or 1");
     if (aevumRegisterUseKey(k) && v == "-1") {
       values.emplace(k, v);
       continue;
