@@ -3661,7 +3661,11 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     // mean a 6+ GiB host vector and may abort at the first periodic backup.
     // We only need the accumulator and current giant recurrence state; baby
     // traces are deterministic and are recomputed on resume.
-    // v25 extends the compact V-trace checkpoint with baby-window resume semantics:\n    // saved_idx is the first baby index of the active pass and saved_p is the next\n    // Stage-2 prime to process.  Keep the old v24 meaning for resident-table and\n    // Pair95 paths so incompatible state is never replayed under another planner.\n    const int ckptVersionS2 = useProductTree ? 23 : ((useBabyBatching && !usePair95) ? 25 : 24);
+    // v25 extends the compact V-trace checkpoint with baby-window resume semantics:
+    // saved_idx is the first baby index of the active pass and saved_p is the next
+    // Stage-2 prime to process.  Keep the old v24 meaning for resident-table and
+    // Pair95 paths so incompatible state is never replayed under another planner.
+    const int ckptVersionS2 = useProductTree ? 23 : ((useBabyBatching && !usePair95) ? 25 : 24);
     const bool compactVTraceCkpt = !useProductTree;
     std::ostringstream ck2;
     if (useProductTree) ck2 << "pm1_s2_vtrace_producttree_m_" << pexp << ".ckpt";
