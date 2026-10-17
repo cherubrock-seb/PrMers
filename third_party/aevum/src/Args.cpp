@@ -446,5 +446,18 @@ void Args::setDefaults() {
     }
   }
 
-  for (auto& p : {proofResultDir, proofToVerifyDir, cacheDir}) { fs::create_directory(p); }
+  if (createProofDirs) {
+    for (auto& p : {proofResultDir, proofToVerifyDir}) { fs::create_directory(p); }
+  }
+
+  // The kernel cache only saves compile time: run without it rather than fail when it cannot be created.
+  if (useCache) {
+    std::error_code ec;
+    fs::create_directories(cacheDir, ec);
+    if (ec || !fs::is_directory(cacheDir, ec)) {
+      log("Kernel cache disabled: cannot create '%s'%s%s\n", cacheDir.string().c_str(),
+          ec ? ": " : "", ec ? ec.message().c_str() : "");
+      useCache = false;
+    }
+  }
 }

@@ -223,6 +223,19 @@ bool FFTShape::needsLargeCarry(u64 E) const {
   return E / double(size()) > carry32BPW();
 }
 
+// carryFused computes each pair's carry-out before it knows the carry-in from the previous line, then adds the carry-in to
+// the pair's low word and leaves that word's excess, about sqrt(N) in size, unnormalized in the high word.  When 2^bpw is not
+// well above sqrt(N) the inflated words make the next squaring's outputs larger, which inflates the words further, until the
+// convolution overflows.  This is the cutoff of gpuowl cdf2ab1: carryFused failed up to about log2(N)/2 - 0.2 bpw and is back
+// to long carry's magnitudes by log2(N)/2 + 0.5.  The old fixed cutoff of 10 bpw still applies to small transforms.
+double FFTShape::longCarryBPW() const {
+  return std::max(10.0, 0.5 * log2(double(size())) + 0.5);
+}
+
+bool FFTShape::needsLongCarry(u64 E) const {
+  return E / double(size()) < longCarryBPW();
+}
+
 // Return TRUE for "favored" shapes.  That is, those that are most likely to be useful.  To save time in generating bpw data, only these favored
 // shapes have their bpw data pre-computed.  Bpw for non-favored shapes is guessed from the bpw data we do have.  Also. -tune will normally only
 // time favored shapes.  These are the rules for deciding favored shapes:

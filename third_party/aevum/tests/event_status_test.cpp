@@ -11,6 +11,7 @@
 #include "Event.h"
 #include "TimeInfo.h"
 #include "clwrap.h"
+#include "GpuLost.h"
 #include "log.h"
 
 #include <csignal>
@@ -96,6 +97,11 @@ int main() {
     }
     EXPECT(threw, "Queue::waitForMarkerEvent throws on an errored marker");
     EXPECT(what.find(errMes(bad)) != std::string::npos, "the thrown error names the command's status");
+    // A command that failed with CL_OUT_OF_RESOURCES while the queue was running is how a reset GPU shows up here:
+    // the user is told so, not that the device is out of memory.
+    EXPECT(what.rfind(gpulost::kLostPrefix, 0) == 0, "an errored marker reads as a reset or lost GPU");
+    EXPECT(what.find("last checkpoint") != std::string::npos && what.find("memory") == std::string::npos,
+           "the message says the work is safe and does not mention memory");
     queue.markerQueued = false;
   }
   {

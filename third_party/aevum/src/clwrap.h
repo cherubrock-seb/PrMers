@@ -16,6 +16,10 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <stdexcept>
+#include <new>
+
+#include "GpuLost.h"
 
 using cl_queue = cl_command_queue;
 
@@ -54,10 +58,45 @@ class Context;
 std::string getUUID(int seqId);
 
 std::string errMes(int err);
-void check(int err, const char *file, int line, const char *func, string_view mes);
+
+// The user-facing text for an error status: a GPU that was reset or lost, an allocation that did not fit, or (any
+// other code) errMes() followed by the call and its location.  phase says whether the failed call allocates or
+// creates an object (gpulost::Phase::Create) or runs on the device (Run); see GpuLost.h for the rule.
+std::string describeError(int err, std::string_view mes, const char *file, int line, const char *func,
+                          gpulost::Phase phase);
+
+// An OpenCL call that returned an error status (thrown by check()).  what() is the clear message for a GPU that
+// was reset or lost (it starts with gpulost::kLostPrefix) or for an allocation failure.
+class gpu_error : public std::runtime_error {
+public:
+  const int err;
+  const gpulost::Kind kind;
+
+  gpu_error(int err, std::string_view mes, gpulost::Phase phase = gpulost::Phase::Run)
+    : std::runtime_error(describeError(err, mes, nullptr, 0, nullptr, phase)), err(err), kind(gpulost::classify(err, phase)) {}
+
+  gpu_error(int err, const char *file, int line, const char *func, std::string_view mes,
+            gpulost::Phase phase = gpulost::Phase::Run)
+    : std::runtime_error(describeError(err, mes, file, line, func, phase)), err(err), kind(gpulost::classify(err, phase)) {}
+};
+
+// clCreateBuffer could not allocate: out of GPU memory.  A std::bad_alloc, so existing handlers keep working, with
+// a what() that says so (it used to read "std::bad_alloc").
+class gpu_alloc_error : public std::bad_alloc {
+  std::string text;
+public:
+  gpu_alloc_error(int err, size_t size);
+  const char *what() const noexcept override { return text.c_str(); }
+};
+
+void check(int err, const char *file, int line, const char *func, string_view mes,
+           gpulost::Phase phase = gpulost::Phase::Run);
 
 #define CHECK1(err) check(err, __FILE__, __LINE__, __func__, #err)
 #define CHECK2(err, mes) check(err, __FILE__, __LINE__, __func__, mes)
+// For an allocation or creation call (clCreateContext, clCreateBuffer, ...): CL_OUT_OF_RESOURCES then means the
+// device is out of memory rather than reset.
+#define CHECK_CREATE(err, mes) check(err, __FILE__, __LINE__, __func__, mes, gpulost::Phase::Create)
 
 vector<cl_device_id> getAllDeviceIDs();
 string getShortInfo(cl_device_id device);
@@ -72,6 +111,8 @@ bool hasFreeMemInfo(cl_device_id id);
 bool isAmdGpu(cl_device_id id);
 bool isNvidiaGpu(cl_device_id id);
 u32 getNvidiaComputeCapability(cl_device_id id);
+u32 getMaxWorkGroupSize(cl_device_id id);
+u64 getLocalMemSize(cl_device_id id);
 // AMD only (cl_amd_device_attribute_query); 0 when not available (not AMD, or an older driver).
 u32 getAmdWavefrontWidth(cl_device_id id);
 // CDNA2/CDNA3 (gfx90a, gfx94x/gfx95x): natively wave64 like gfx906, but with a "back-off" barrier that
@@ -99,7 +140,7 @@ void saveBinary(cl_program program, string_view fileName);
 
 template<typename T>
 void setArg(cl_kernel k, int pos, const T &value, const string& name) {
-  CHECK2(clSetKernelArg(k, pos, sizeof(value), &value), (name + '[' + to_string(pos) + "] size " + to_string(sizeof(value))).c_str());
+  CHECK2(clSetKernelArg(k, pos, sizeof(value), &value), ("clSetKernelArg " + name + '[' + to_string(pos) + "] size " + to_string(sizeof(value))).c_str());
 }
 
 /*
@@ -134,6 +175,7 @@ void waitForEvents(vector<cl_event>&& waits);
 
 int getKernelNumArgs(cl_kernel k);
 int getWorkGroupSize(cl_kernel k, cl_device_id device, const char *name);
+int getKernelMaxWorkGroupSize(cl_kernel k, cl_device_id device, const char *name);
 std::string getKernelArgName(cl_kernel k, int pos);
 
 cl_device_id getDevice(u32 argsDevId);

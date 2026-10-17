@@ -7,6 +7,7 @@
 #include "PtxRegisterCache.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 #include "CudaFill.h"
+#include "CudaErrorMap.h"
 
 #include <cstdio>
 #include <cstring>
@@ -23,6 +24,7 @@
 #ifdef __linux__
 #include <unistd.h>
 #endif
+#include "CudaEventStatus.h"
 
 using namespace std;
 
@@ -31,8 +33,37 @@ using namespace std;
 // We need to convert these to CUdeviceptr for CUDA kernel launch.
 static unordered_set<cl_mem> g_allocatedBuffers;
 
-// Global CUDA context — set once by clCreateContext, used to ensure current before CUDA calls
+// CUDA autotune temporarily creates a second context. Keep the live
+// contexts in creation order so destroying a temporary tuning context restores
+// the production context used by APIs that do not carry an owning context.
 static CUcontext g_cudaContext = nullptr;
+static vector<CUcontext> g_cudaContexts;
+
+static void rememberCudaContext(CUcontext ctx) {
+  g_cudaContexts.push_back(ctx);
+  g_cudaContext = ctx;
+}
+
+static void forgetCudaContext(CUcontext ctx) {
+  auto it = find(g_cudaContexts.begin(), g_cudaContexts.end(), ctx);
+  if (it != g_cudaContexts.end()) g_cudaContexts.erase(it);
+  g_cudaContext = g_cudaContexts.empty() ? nullptr : g_cudaContexts.back();
+}
+
+// The OpenCL-style status for a CUDA driver result.  Only a result that means a lost, reset or faulted device or
+// context maps to the status that reads as a lost GPU; an out-of-memory maps to the allocation status and anything
+// else to a generic one (see CudaErrorMap.h).  The CUDA error itself is kept for the message.
+static thread_local char g_lastCuError[96];
+
+static int clStatusFromCu(CUresult r) {
+  if (r == CUDA_SUCCESS) { g_lastCuError[0] = 0; return CL_SUCCESS; }
+  const char* name = nullptr;
+  if (cuGetErrorName(r, &name) != CUDA_SUCCESS) name = nullptr;
+  snprintf(g_lastCuError, sizeof(g_lastCuError), "%s (%d)", name ? name : "CUDA error", (int) r);
+  return cuda_error_map::toClStatus((int) r);
+}
+
+const char* aevumCudaLastError() { return g_lastCuError[0] ? g_lastCuError : nullptr; }
 
 static void ensureContextCurrent() {
   if (g_cudaContext) {
@@ -104,10 +135,10 @@ cl_context clCreateContext(const intptr_t*, unsigned nDevices, const cl_device_i
 #endif
   if (r != CUDA_SUCCESS) {
     delete ctx;
-    if (err) *err = CL_OUT_OF_RESOURCES;
+    if (err) *err = clStatusFromCu(r);
     return nullptr;
   }
-  g_cudaContext = ctx->ctx;  // Track for ensureContextCurrent()
+  rememberCudaContext(ctx->ctx);
 
   // L2 persistence: no benefit measured for this workload.
   // cuCtxSetLimit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, 16 * 1024 * 1024);
@@ -118,7 +149,10 @@ cl_context clCreateContext(const intptr_t*, unsigned nDevices, const cl_device_i
 
 int clReleaseContext(cl_context ctx) {
   if (ctx) {
-    cuCtxDestroy(ctx->ctx);
+    const CUcontext dead = ctx->ctx;
+    forgetCudaContext(dead);
+    cuCtxDestroy(dead);
+    if (g_cudaContext) cuCtxSetCurrent(g_cudaContext);
     delete ctx;
   }
   return CL_SUCCESS;
@@ -623,7 +657,7 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
   CUresult r = cuMemAlloc(&buf->ptr, size);
   if (r != CUDA_SUCCESS) {
     delete buf;
-    if (err) *err = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    if (err) *err = clStatusFromCu(r);
     return nullptr;
   }
   // Handle CL_MEM_COPY_HOST_PTR
@@ -667,7 +701,7 @@ cl_command_queue clCreateCommandQueueWithProperties(cl_context ctx, cl_device_id
   CUresult r = cuStreamCreate(&q->stream, CU_STREAM_NON_BLOCKING);
   if (r != CUDA_SUCCESS) {
     delete q;
-    if (err) *err = CL_OUT_OF_RESOURCES;
+    if (err) *err = clStatusFromCu(r);
     return nullptr;
   }
   if (err) *err = CL_SUCCESS;
@@ -714,7 +748,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
     CUresult r = cuLaunchKernel(k->func, numBlocks, 1, 1, ls, 1, 1, 0, q->stream, argPtrs, nullptr);
     cuEventRecord(ev->end, q->stream);
     *event = ev;
-    return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+    return clStatusFromCu(r);
   }
   if (doProfile) {
     static std::map<std::string, double> kTime;
@@ -755,7 +789,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
       fprintf(stderr, "  TOTAL: %.1f ms\n===\n\n", totalMs);
     }
     if (event) *event = nullptr;
-    return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+    return clStatusFromCu(r);
   }
 
   CUresult r = cuLaunchKernel(k->func, numBlocks, 1, 1, ls, 1, 1, 0, q->stream, argPtrs, nullptr);
@@ -766,7 +800,7 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
   }
 
   if (event) *event = nullptr;
-  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+  return clStatusFromCu(r);
 }
 
 int clEnqueueReadBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
@@ -779,7 +813,7 @@ int clEnqueueReadBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
     r = cuStreamSynchronize(q->stream);
   }
   if (event) *event = nullptr;
-  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+  return clStatusFromCu(r);
 }
 
 int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
@@ -791,7 +825,7 @@ int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
     r = cuStreamSynchronize(q->stream);
   }
   if (event) *event = nullptr;
-  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+  return clStatusFromCu(r);
 }
 
 int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
@@ -799,7 +833,7 @@ int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
                          unsigned nWaits, const cl_event* waits, cl_event* event) {
   CUresult r = cuMemcpyDtoDAsync(dst->ptr + dstOffset, src->ptr + srcOffset, size, q->stream);
   if (event) *event = nullptr;
-  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+  return clStatusFromCu(r);
 }
 
 int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
@@ -837,7 +871,7 @@ int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
     }
     break;
   }
-  return r == CUDA_SUCCESS ? CL_SUCCESS : CL_OUT_OF_RESOURCES;
+  return clStatusFromCu(r);
 }
 
 int clEnqueueMarkerWithWaitList(cl_command_queue q, unsigned nWaits, const cl_event* waits, cl_event* event) {
@@ -862,8 +896,9 @@ int clFlush(cl_command_queue q) {
 }
 
 int clFinish(cl_command_queue q) {
-  if (q) cuStreamSynchronize(q->stream);
-  return CL_SUCCESS;
+  // A kernel that faulted leaves a sticky error that cuStreamSynchronize returns: report it here, where the work
+  // is waited for, rather than as the failure of whichever copy comes next.
+  return q ? clStatusFromCu(cuStreamSynchronize(q->stream)) : CL_SUCCESS;
 }
 
 // ---- Events ----
@@ -874,12 +909,14 @@ int clReleaseEvent(cl_event ev) {
 }
 
 int clWaitForEvents(unsigned n, const cl_event* events) {
+  int status = CL_SUCCESS;
   for (unsigned i = 0; i < n; i++) {
     if (events[i] && events[i]->end) {
-      cuEventSynchronize(events[i]->end);
+      int const st = clStatusFromCu(cuEventSynchronize(events[i]->end));
+      if (st != CL_SUCCESS && status == CL_SUCCESS) status = st;  // keep waiting for the rest, report the first error
     }
   }
-  return CL_SUCCESS;
+  return status;
 }
 
 int clGetEventInfo(cl_event ev, cl_event_info info, size_t size, void* value, size_t* sizeRet) {
@@ -887,8 +924,9 @@ int clGetEventInfo(cl_event ev, cl_event_info info, size_t size, void* value, si
   if (info == CL_EVENT_COMMAND_EXECUTION_STATUS) {
     int status = CL_COMPLETE;
     if (ev->end) {
-      CUresult r = cuEventQuery(ev->end);
-      if (r == CUDA_ERROR_NOT_READY) status = CL_RUNNING;
+      // NOT_READY is running; any other failure is the sticky error of a faulted context and is reported as the
+      // (negative) status of the command, not as complete.
+      status = cuda_error_map::eventStatusFromCu((int) cuEventQuery(ev->end));
     }
     if (sizeRet) *sizeRet = sizeof(int);
     if (value && size >= sizeof(int)) memcpy(value, &status, sizeof(int));
@@ -953,6 +991,23 @@ int clGetDeviceInfo(cl_device_id dev, cl_device_info info, size_t size, void* va
     int mhz = 0;
     cuDeviceGetAttribute(&mhz, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, dev->dev);
     unsigned int val = mhz / 1000;  // kHz to MHz
+    if (sizeRet) *sizeRet = sizeof(val);
+    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
+    break;
+  }
+  case CL_DEVICE_MAX_WORK_GROUP_SIZE: {
+    int threads = 0;
+    cuDeviceGetAttribute(&threads, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK, dev->dev);
+    size_t val = threads;
+    if (sizeRet) *sizeRet = sizeof(val);
+    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
+    break;
+  }
+  case CL_DEVICE_LOCAL_MEM_SIZE: {
+    // Kernels declare their shared memory statically, which is limited to this (48KB) without an opt-in
+    int shared = 0;
+    cuDeviceGetAttribute(&shared, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK, dev->dev);
+    u64 val = shared;
     if (sizeRet) *sizeRet = sizeof(val);
     if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
     break;
@@ -1088,6 +1143,14 @@ int clGetKernelWorkGroupInfo(cl_kernel k, cl_device_id dev, cl_kernel_work_group
     size_t wgs[3] = { (size_t)wgSize, 1, 1 };
     if (sizeRet) *sizeRet = sizeof(wgs);
     if (value && size >= sizeof(wgs)) memcpy(value, wgs, sizeof(wgs));
+  } else if (info == CL_KERNEL_WORK_GROUP_SIZE) {
+    // The largest block the compiled kernel can be launched with.  Register use can make this smaller than
+    // the __launch_bounds__ value (e.g. 768 for a 1024-thread carryFused).
+    int maxThreads = 0;
+    cuFuncGetAttribute(&maxThreads, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k->func);
+    size_t const val = maxThreads;
+    if (sizeRet) *sizeRet = sizeof(val);
+    if (value && size >= sizeof(val)) memcpy(value, &val, sizeof(val));
   }
   return CL_SUCCESS;
 }

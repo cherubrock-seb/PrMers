@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.105-pass5-prp-max
+AEVUM_VERSION ?= v0.3.106-pass5-prp-max
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -93,9 +93,11 @@ all: aevum
 
 ENGINE_BIN = build-engine
 ENGINE_SRCS = $(filter-out main.cpp,$(SRCS1))
-ENGINE_OBJS = $(ENGINE_SRCS:%.cpp=$(ENGINE_BIN)/%.o)
+ENGINE_CUDA_SRCS = $(CUDASRCS1)
+ENGINE_CUDA_OBJS = $(ENGINE_CUDA_SRCS:%.cpp=$(ENGINE_BIN)/cuda/%.o)
+ENGINE_OBJS = $(ENGINE_CUDA_OBJS) $(ENGINE_SRCS:%.cpp=$(ENGINE_BIN)/%.o)
 ENGINE_DEPDIR := $(ENGINE_BIN)/.d
-ENGINE_FLAGS = -O3 -DNDEBUG -Wall -std=c++20 $(DARWIN_MIN_FLAGS) -fPIC -fvisibility=hidden -DAEVUM_ENGINE_LIBRARY
+ENGINE_FLAGS = -O3 -DNDEBUG -Wall -std=c++20 $(DARWIN_MIN_FLAGS) -fPIC -fvisibility=hidden -DAEVUM_ENGINE_LIBRARY $(CUDAFLAGS)
 ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
 
 .PHONY: engine-lib
@@ -105,7 +107,7 @@ $(ENGINE_LIB): $(ENGINE_OBJS)
 	$(CXX) $(ENGINE_LINK_FLAGS) -o $@ $^ $(LIBPATH) $(OPENCL_LIBS)
 
 $(ENGINE_BIN)/%.o: src/%.cpp
-	@mkdir -p $(dir $@) $(ENGINE_DEPDIR)
+	@mkdir -p $(dir $@) $(dir $(ENGINE_DEPDIR)/$*.d)
 	$(CXX) $(ENGINE_FLAGS) $(CPPFLAGS) -MMD -MP -MF $(ENGINE_DEPDIR)/$*.d -c $< -o $@
 
 aevum: $(BIN)/aevum
@@ -196,6 +198,7 @@ FFT_SIZE_ONLY_SPEC_TEST := build-tests/aevum-fft-size-only-spec-test
 FFT_SPEC_ROBUSTNESS_TEST := build-tests/aevum-fft-spec-robustness-test
 EVENT_STATUS_TEST := build-tests/aevum-event-status-test
 FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
+WMUL_LIMIT_TEST := build-tests/aevum-wmul-limit-test
 FFT_VARIANT0_1K_TEST := build-tests/aevum-fft-variant0-1k-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
@@ -207,13 +210,14 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
 	python3 tests/pfa9_lead_bridge_source_test.py
 	bash tests/apple_opencl12_kernel_matrix_syntax.sh
 	python3 tests/apple_gf61_ffthin_staging_test.py
+	python3 tests/apple_ffthin_preserves_input_test.py
 	python3 tests/apple_gf31_width_staging_test.py
 	python3 tests/apple_fused_fftp_test.py
 	python3 tests/apple_gf61_scalar_mapping_test.py
@@ -234,12 +238,17 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/apple_canonical_set_u32_test.py
 	bash tests/source_audit.sh
 	python3 tests/gpu_init_order_test.py
+	python3 tests/tail_kernels_range_source_test.py
+	python3 tests/engine_autotune_isolation_test.py
 	python3 tests/engine_lead_cache_test.py
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/cuda_regcf3161_auto_policy_source_test.py
-	python3 tests/asm_string_braces_test.py
+	python3 tests/cuda_engine_lib_makefile_source_test.py
+	python3 tests/cuda_context_lifecycle_source_test.py
 	python3 tests/middlein_gf61_cmul_source_test.py
+	python3 tests/asm_string_braces_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
+	python3 tests/pfa7_nuss8_model_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
@@ -251,6 +260,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	$(AUTOTUNE_CACHE_TEST)
 	$(EVENT_STATUS_TEST)
 	$(FFT8_SKIP1_TEST)
+	$(WMUL_LIMIT_TEST)
 	$(FFT_VARIANT0_1K_TEST)
 
 $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
@@ -259,6 +269,10 @@ $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.
 
 test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 	$(FFT_VARIANT0_1K_TEST)
+
+$(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
 
 $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
@@ -316,6 +330,10 @@ $(OPENCL_STANDARD_TEST): tests/opencl_standard_test.cpp src/OpenCLStandard.h
 
 test-gpu: $(BIN)/aevum
 	bash tests/gpu_prp_smoke.sh $(BIN)/aevum
+
+.PHONY: test-gpu-pfa-ll
+test-gpu-pfa-ll: $(BIN)/aevum
+	bash tests/gpu_pfa_ll_test.sh $(BIN)/aevum
 
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
@@ -424,6 +442,16 @@ $(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -DAEVUM_FORCE_RADIX4_1K=1 -Isrc tests/radix1k_policy_test.cpp -o $@
 
+# The CUDA backend reports a sticky CUDA error from clGetEventInfo / clFinish (plain ints, no CUDA needed).
+CUDA_EVENT_STATUS_TEST := build-tests/aevum-cuda-event-status-test
+.PHONY: test-cuda-event-status
+test-host: test-cuda-event-status
+test-cuda-event-status: $(CUDA_EVENT_STATUS_TEST)
+	$(CUDA_EVENT_STATUS_TEST)
+$(CUDA_EVENT_STATUS_TEST): tests/cuda_event_status_test.cpp src/cuda/CudaEventStatus.h src/cuda/CudaErrorMap.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_event_status_test.cpp -o $@
+
 # PR136 cumulative semantic integration
 .PHONY: test-pr136-small-items
 test-host: test-pr136-small-items
@@ -441,6 +469,19 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# fftMiddleOutGF61 direct base table (AEVUM_GF61_MIDDLE_BASE_TABLE) against the stock twiddles
+GF61_MIDDLE_BASE_TABLE_TEST := build-tests/aevum-gf61-middle-base-table-test
+GF61_MIDDLE_BASE_TABLE_SRCS := src/clwrap.cpp src/log.cpp src/TrigBufCache.cpp src/AllocTrac.cpp src/gpuid.cpp src/Args.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+.PHONY: test-gf61-middle-base-table
+test-host: test-gf61-middle-base-table
+test-gf61-middle-base-table: $(GF61_MIDDLE_BASE_TABLE_TEST)
+	$(GF61_MIDDLE_BASE_TABLE_TEST)
+
+$(GF61_MIDDLE_BASE_TABLE_TEST): tests/gf61_middle_base_table_kernel_test.cpp $(GF61_MIDDLE_BASE_TABLE_SRCS) src/TrigBufCache.h $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc tests/gf61_middle_base_table_kernel_test.cpp $(GF61_MIDDLE_BASE_TABLE_SRCS) $(TEST_GC_LINK) $(OPENCL_LIBS) -o $@
+
 # CUDA clEnqueueFillBuffer planning for all OpenCL pattern sizes.
 CUDA_FILL_TEST := build-tests/aevum-cuda-fill-test
 .PHONY: test-cuda-fill
@@ -451,3 +492,83 @@ test-cuda-fill: $(CUDA_FILL_TEST)
 $(CUDA_FILL_TEST): tests/cuda_fill_test.cpp src/cuda/CudaFill.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_fill_test.cpp -o $@
+# carryFused low-bpw cutoff (long carry below max(10, log2(N)/2 + 0.5) bpw)
+FFT_LONG_CARRY_CUTOFF_TEST := build-tests/aevum-fft-long-carry-cutoff-test
+.PHONY: test-fft-long-carry-cutoff
+test-host: test-fft-long-carry-cutoff
+test-fft-long-carry-cutoff: $(FFT_LONG_CARRY_CUTOFF_TEST)
+	$(FFT_LONG_CARRY_CUTOFF_TEST)
+
+$(FFT_LONG_CARRY_CUTOFF_TEST): tests/fft_long_carry_cutoff_test.cpp src/Gpu.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/fft_long_carry_cutoff_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
+ENGINE_EQUAL_GPU_TEST := build-tests/aevum-engine-equal-canonical-gpu-test
+
+.PHONY: test-engine-equal-gpu
+test-engine-equal-gpu: engine-lib $(ENGINE_EQUAL_GPU_TEST)
+	$(ENGINE_EQUAL_GPU_TEST) $(ENGINE_LIB) $(if $(AEVUM_TEST_DEVICE),$(AEVUM_TEST_DEVICE),0) . "$(AEVUM_TEST_FFT)"
+
+$(ENGINE_EQUAL_GPU_TEST): tests/engine_equal_canonical_gpu_test.cpp src/EngineApi.h
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) $< $(DL_LIBS) -o $@
+# A reset or lost GPU is reported as such, an allocation failure as out of memory (host only, no device).
+GPU_LOST_ERROR_TEST := build-tests/aevum-gpu-lost-error-test
+.PHONY: test-gpu-lost-error
+test-host: test-gpu-lost-error
+test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
+	$(GPU_LOST_ERROR_TEST)
+$(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
+CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
+.PHONY: test-cuda-error-map
+test-host: test-cuda-error-map
+test-cuda-error-map: $(CUDA_ERROR_MAP_TEST)
+	$(CUDA_ERROR_MAP_TEST)
+$(CUDA_ERROR_MAP_TEST): tests/cuda_error_map_test.cpp src/cuda/CudaErrorMap.h src/GpuLost.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_error_map_test.cpp -o $@
+DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
+
+.PHONY: test-data-layout
+test-host: test-data-layout
+test-data-layout: $(DATA_LAYOUT_TEST)
+	$(DATA_LAYOUT_TEST)
+
+$(DATA_LAYOUT_TEST): tests/data_layout_test.cpp src/DataLayout.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< -o $@
+# Explicit 32-bit carry gate (cherubrock-seb/PrMers#104)
+FFT_CARRY32_GATE_TEST := build-tests/aevum-fft-carry32-gate-test
+.PHONY: test-fft-carry32-gate
+test-host: test-fft-carry32-gate
+test-fft-carry32-gate: $(FFT_CARRY32_GATE_TEST)
+	$(FFT_CARRY32_GATE_TEST)
+$(FFT_CARRY32_GATE_TEST): tests/fft_carry32_gate_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/fft_carry32_gate_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
+# Trig cache key fields (cherubrock-seb/PrMers#107)
+TRIG_CACHE_KEY_TEST := build-tests/aevum-trig-cache-key-test
+.PHONY: test-trig-cache-key
+test-host: test-trig-cache-key
+test-trig-cache-key: $(TRIG_CACHE_KEY_TEST)
+	$(TRIG_CACHE_KEY_TEST)
+
+$(TRIG_CACHE_KEY_TEST): tests/trig_cache_key_test.cpp src/TrigBufCache.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/trig_cache_key_test.cpp -o $@
+# Strict integer parsing for -use values (cherubrock-seb/PrMers#130)
+STRICT_INT_TEST := build-tests/aevum-strict-int-test
+.PHONY: test-strict-int
+test-host: test-strict-int
+test-strict-int: $(STRICT_INT_TEST)
+	$(STRICT_INT_TEST)
+
+$(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
