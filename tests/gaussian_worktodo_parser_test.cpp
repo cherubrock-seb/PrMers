@@ -224,6 +224,25 @@ return 44;
 }
 std::cout << "ZERO_TESTS_SAVED=PASS\n";
 
+// Regression for the exact GIMPS/Prime95 form reported from the field:
+// Pfactor=[AID,]1,2,p,-1,how_far_factored,tests_saved.  tests_saved is a
+// floating-point estimate and values such as 1.3 are valid.
+auto forumFractional =
+parseStrictPfactor("Pfactor=0123456789ABCDEF0123456789ABCDEF,1,2,268113067,-1,80,1.3");
+const auto forumFractionalExpected =
+math::choosePm1Bounds(268113067u, 80.0, 1.3);
+
+if (!forumFractional || !forumFractional->pm1Test ||
+forumFractional->exponent != 268113067u ||
+forumFractional->sieveDepth != 80.0 ||
+forumFractional->aid != "0123456789ABCDEF0123456789ABCDEF" ||
+forumFractional->B1 != forumFractionalExpected.B1 ||
+forumFractional->B2 != forumFractionalExpected.B2) {
+std::cerr << "PFACTOR_FRACTIONAL_TESTS_SAVED=FAIL\n";
+return 46;
+}
+std::cout << "PFACTOR_FRACTIONAL_TESTS_SAVED=PASS\n";
+
 auto hugeFinite =
 parseStrictPfactor("Pfactor=N/A,1,2,130000001,-1,1e300,1e300");
 const auto hugeExpected =
