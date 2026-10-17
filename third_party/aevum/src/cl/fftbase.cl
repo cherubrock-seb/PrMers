@@ -1801,7 +1801,7 @@ void OVERLOAD chainMul4(F2 *u, F2 w) {
   u[2] = cmul(u[2], base);
 
   F a = mul2(base.y);
-  base = (F2)(fma(a, -w.y, w.x), fma(a, w.x, -w.y));
+  base = U2(fma(a, -w.y, w.x), fma(a, w.x, -w.y));
   u[3] = cmul(u[3], base);
 }
 
