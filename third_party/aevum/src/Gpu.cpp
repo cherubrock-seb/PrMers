@@ -339,6 +339,30 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
       if (doLog) log("Experimental Type4 lean CRT assembly and dword i128 carry.\n");
     }
   }
+  if (const char* value = std::getenv("AEVUM_GF61_SM120")) {
+    const auto it = config.find("AEVUM_GF61_SM120");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_GF61_SM120 selections");
+    config["AEVUM_GF61_SM120"] = value;
+  }
+  if (const auto it = config.find("AEVUM_GF61_SM120"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_GF61_SM120 must be 0 or 1");
+    if (it->second == "1") {
+#if defined(CUDA_BACKEND)
+      if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 200 || !fft.NTT_GF61)
+        throw std::runtime_error("AEVUM_GF61_SM120 requires CUDA GF61 and sm_20+");
+#else
+      throw std::runtime_error("AEVUM_GF61_SM120 requires the CUDA backend");
+#endif
+      if ((config.count("NO_ASM") && config.at("NO_ASM") != "0") ||
+          (config.count("AEVUM_GF61_LIMB32") && config.at("AEVUM_GF61_LIMB32") != "0"))
+        throw std::runtime_error("AEVUM_GF61_SM120 conflicts with NO_ASM or limb32");
+      if (doLog)
+        log("AEVUM_GF61_SM120=1: paired modM61/weakModM61 specialization; performance target sm_120.\n");
+    }
+  }
+
   cuda_graph_squares = false;
   if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_SQUARES")) {
     const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES");

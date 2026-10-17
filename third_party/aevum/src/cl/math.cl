@@ -2,6 +2,14 @@
 
 #pragma once
 
+// PRPLL e8db6e6: opt-in until native hardware validation.
+#ifndef AEVUM_GF61_SM120
+#define AEVUM_GF61_SM120 0
+#endif
+#if AEVUM_GF61_SM120 != 0 && AEVUM_GF61_SM120 != 1
+#error AEVUM_GF61_SM120 must be 0 or 1
+#endif
+
 // Access parts of a 64-bit value
 
 u32 OVERLOAD lo32(u64 x) { return (u32)x; }
@@ -1057,7 +1065,23 @@ u64 OVERLOAD get_Z61(Z61 a) { Z61 m = a - M61; return (m & 0x8000000000000000ULL
 i64 OVERLOAD get_balanced_Z61(Z61 a) { return (hi32(a) >= 0x10000000) ? (i64)(a - M61) : (i64)a; }  // Get balanced value in range -M61/2 to M61/2
 
 // Internal routine to bring Z61 value into the range 0..M61+epsilon
-Z61 OVERLOAD modM61(Z61 a) { return (a & M61) + (a >> 61); }
+Z61 OVERLOAD modM61(Z61 a) {
+#if AEVUM_GF61_SM120 && HAS_PTX >= 200
+  // Keep the three top bits in a 32-bit carry chain. On sm_120 the plain
+  // 64-bit expression otherwise needs zero-filled operand register pairs.
+  uint2 r = as_uint2(a);
+  __asm("{\n\t"
+        ".reg .u32 top;\n\t"
+        "shr.b32    top, %1, 29;\n\t"
+        "and.b32    %1, %1, 536870911;\n\t"
+        "add.cc.u32 %0, %0, top;\n\t"
+        "addc.u32   %1, %1, 0;\n\t"
+        "}" : "+r"(r.x), "+r"(r.y));
+  return as_ulong(r);
+#else
+  return (a & M61) + (a >> 61);
+#endif
+}
 GF61 OVERLOAD modM61(GF61 a) { return U2(modM61(a.x), modM61(a.y)); }
 // Internal routine to negate a value by adding the specified number of M61s -- no mod M61 reduction
 Z61 OVERLOAD neg(Z61 a, const u32 m61_count) { return m61_count * M61 - a; }
@@ -1124,7 +1148,7 @@ GF61 OVERLOAD shl31(GF61 a) { return U2(shl31(a.x), shl31(a.y)); }
 
 u64 OVERLOAD weakModM61(u128 a, u32 num_bits) {
 // This is faster on TitanV, CUDA 13.0.  No difference on 5070Ti.
-#if HAS_PTX >= 320        // shf instruction requires sm_32 support or higher
+#if HAS_PTX >= 320 && !AEVUM_GF61_SM120 // Legacy 32-bit funnel-shift path
   uint2 alo = as_uint2(u128_lo64(a));
   uint2 ahi = as_uint2(u128_hi64(a));
   if (num_bits <= 125) {
