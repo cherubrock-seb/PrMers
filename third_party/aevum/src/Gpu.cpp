@@ -271,7 +271,35 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
   return r;
 }
 
-string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
+// Select the validated height radix before constructing kernels/twiddle buffers.
+// Match clDefines precedence exactly; do not mutate shared Args or FFTShape.
+static u32 aevumHeightRadix(const Args& args, cl_device_id id, const FFTConfig& fft,
+                            const vector<KeyVal>& extraConf) {
+  const char* key = "AEVUM_RADIX8_H256";
+  const string* value = nullptr;
+  for (const auto& kv : extraConf) if (kv.first == key) { value = &kv.second; break; }
+  if (!value) {
+    const auto it = args.flags.find(key);
+    if (it != args.flags.end()) value = &it->second;
+  }
+  if (!value) {
+    const auto it = args.perFftConfig.find(fft.shape.spec());
+    if (it != args.perFftConfig.end())
+      for (const auto& kv : it->second) if (kv.first == key) { value = &kv.second; break; }
+  }
+  if (!value || *value == "0") return fft.shape.nH();
+  if (*value != "1") throw std::runtime_error("AEVUM_RADIX8_H256 must be 0 or 1");
+#if defined(__APPLE__)
+  throw std::runtime_error("AEVUM_RADIX8_H256 does not support Apple staged kernels");
+#endif
+  if (!isNvidiaGpu(id) || fft.isPfa() || fft.shape.height != 256 || fft.shape.width == 256 ||
+      (fft.shape.fft_type != FFT3161 && fft.shape.fft_type != FFT3261) ||
+      variant_H(fft.variant) == 0)
+    throw std::runtime_error("AEVUM_RADIX8_H256 requires NVIDIA, non-PFA Type1/Type2, height 256, width != 256 and nonzero height variant");
+  return 8;
+}
+
+string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRadix, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, bool &cuda_graph_squares) {
   map<string, string> config;
 
@@ -286,6 +314,9 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     // log("Found %s\n", fft.shape.spec().c_str());
     config.insert(it->second.begin(), it->second.end());
   }
+
+  if (doLog && config.count("AEVUM_RADIX8_H256") && config.at("AEVUM_RADIX8_H256") == "1")
+    log("AEVUM_RADIX8_H256=1: plan=%s; NH=%u; height decomposition 4*8*8.\n", fft.spec().c_str(), heightRadix);
 
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
@@ -608,7 +639,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
                     {"MIDDLE", fft.shape.middle},
                     {"CARRY_LEN", CARRY_LEN},
                     {"NW", fft.shape.nW()},
-                    {"NH", fft.shape.nH()},
+                    {"NH", heightRadix},
                     {"PFA_RADIX", fft.pfa_radix}
                   });
 
@@ -741,35 +772,35 @@ defines += toDefine("TRIG_COS", cosCoefs + '}');
   if (fft.FFT_FP64 && fft.NTT_GF31) {
     // GF31 data is located after the FP64 data.  Compute size of the FP64 data and trigs.
     defines += toDefine("DISTGF31",      FP64_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF31", MIDDLETRIG_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.FFT_FP32 && fft.NTT_GF31 && fft.NTT_GF61) {
     // GF31 and GF61 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     u32 sz1, sz2, sz3, sz4;
     defines += toDefine("DISTGF31",      sz1 = FP32_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF31", sz2 = SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF31", sz2 = SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF31", sz3 = MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF31", sz4 = SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF31", sz4 = SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTGF61",      sz1 + GF31_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF61", sz2 + SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF61", sz2 + SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF61", sz3 + MIDDLETRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF61", sz4 + SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF61", sz4 + SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.FFT_FP32 && fft.NTT_GF31) {
     // GF31 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     defines += toDefine("DISTGF31",      FP32_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF31", MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.FFT_FP32 && fft.NTT_GF61) {
     // GF61 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     defines += toDefine("DISTGF61",      FP32_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF61", MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.NTT_GF31 && fft.NTT_GF61) {
     defines += toDefine("DISTGF31",      0);
@@ -778,9 +809,9 @@ defines += toDefine("TRIG_COS", cosCoefs + '}');
     defines += toDefine("DISTHTRIGGF31", 0);
     // GF61 data is located after the GF31 data.  Compute size of the GF31 data and trigs.
     defines += toDefine("DISTGF61",      GF31_DATA_SIZE(fft.shape.width, fft.shape.middle, fft.shape.height, in_place, pad_size) / 2);
-    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTMTRIGGF61", MIDDLETRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
-    defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, fft.shape.nH()));
+    defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.NTT_GF31) {
     defines += toDefine("DISTGF31",      0);
@@ -1151,11 +1182,11 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   BIG_H(SMALL_H * fft.shape.middle),
   hN(N / 2),
   nW(fft.shape.nW()),
-  nH(fft.shape.nH()),
+  nH(aevumHeightRadix(args, shared.context->deviceId(), fft, extraConf)),
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_)},
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, cuda_graph_squares_)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 

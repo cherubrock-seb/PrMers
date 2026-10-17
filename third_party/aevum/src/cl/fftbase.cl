@@ -16,6 +16,111 @@
 #define LDS_BYTES     (WG * RADIX * SHUFL_BYTES)
 #endif
 
+// The first shuffle of 4*8*8 has radix 4 with eight values per lane.
+// Keep the existing LDS allocation and per-line offset. The mixed permutation
+// is dst = i/2 + (i%2)*128 + lane*4; reads use i*32 + lane.
+#if AEVUM_RADIX8_H256 && WG == 32 && RADIX == 8
+#if FFT_FP64 || NTT_GF61
+void aevum_shuffle4_256_64(local T2 *lds2, T2 *u, u32 numWG, u32 me) {
+  local char *group = (local char *)lds2;
+  if (numWG > 1) group += (get_local_id(0) / WG) * LDS_BYTES;
+#if SHUFL_BYTES == 16
+  local T2 *lds = (local T2 *)group;
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) lds[i/2 + (i%2)*128 + me*4] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) u[i] = lds[i*32 + me];
+#elif SHUFL_BYTES == 8
+  local u64 *lds = (local u64 *)group;
+#pragma unroll
+  for (u32 part = 0; part < 2; ++part) {
+    bar(WG);
+    for (u32 i = 0; i < 8; ++i) {
+      ulong2 bits = as_ulong2(u[i]);
+      lds[i/2 + (i%2)*128 + me*4] = part == 0 ? bits.x : bits.y;
+    }
+    bar(WG);
+    for (u32 i = 0; i < 8; ++i) {
+      ulong2 bits = as_ulong2(u[i]);
+      if (part == 0) bits.x = lds[i*32 + me]; else bits.y = lds[i*32 + me];
+      u[i] = as_double2(bits);
+    }
+  }
+#elif SHUFL_BYTES == 4
+  local int *lds = (local int *)group;
+#pragma unroll
+  for (u32 part = 0; part < 4; ++part) {
+    barFence(WG);
+    for (u32 i = 0; i < 8; ++i) {
+      int4 bits = as_int4(u[i]);
+      lds[i/2 + (i%2)*128 + me*4] = part == 0 ? bits.x : part == 1 ? bits.y : part == 2 ? bits.z : bits.w;
+    }
+    bar(WG);
+    for (u32 i = 0; i < 8; ++i) {
+      int4 bits = as_int4(u[i]);
+      int v = lds[i*32 + me];
+      if (part == 0) bits.x = v;
+      else if (part == 1) bits.y = v;
+      else if (part == 2) bits.z = v;
+      else bits.w = v;
+      u[i] = as_double2(bits);
+    }
+  }
+#else
+#error unsupported SHUFL_BYTES for AEVUM_RADIX8_H256
+#endif
+}
+#if FFT_FP64
+void OVERLOAD shufl(local T2 *lds, T2 *u, u32 f, u32 r, u32 n, u32 me) {
+  assert(f == 1 && r == 4); aevum_shuffle4_256_64(lds, u, n, me);
+}
+#endif
+#if NTT_GF61
+void OVERLOAD shufl(local GF61 *lds, GF61 *u, u32 f, u32 r, u32 n, u32 me) {
+  assert(f == 1 && r == 4); aevum_shuffle4_256_64((local T2 *)lds, (T2 *)u, n, me);
+}
+#endif
+#endif
+#if FFT_FP32 || NTT_GF31
+void aevum_shuffle4_256_32(local F2 *lds2, F2 *u, u32 numWG, u32 me) {
+  local char *group = (local char *)lds2;
+  if (numWG > 1) group += (get_local_id(0) / WG) * LDS_BYTES;
+#if SHUFL_BYTES >= 8
+  local F2 *lds = (local F2 *)group;
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) lds[i/2 + (i%2)*128 + me*4] = u[i];
+  bar(WG);
+  for (u32 i = 0; i < 8; ++i) u[i] = lds[i*32 + me];
+#elif SHUFL_BYTES == 4
+  local u32 *lds = (local u32 *)group;
+#pragma unroll
+  for (u32 part = 0; part < 2; ++part) {
+    bar(WG);
+    for (u32 i = 0; i < 8; ++i)
+      lds[i/2 + (i%2)*128 + me*4] = as_uint(part == 0 ? u[i].x : u[i].y);
+    bar(WG);
+    for (u32 i = 0; i < 8; ++i) {
+      F v = as_float(lds[i*32 + me]);
+      if (part == 0) u[i].x = v; else u[i].y = v;
+    }
+  }
+#else
+#error unsupported SHUFL_BYTES for AEVUM_RADIX8_H256
+#endif
+}
+#if FFT_FP32
+void OVERLOAD shufl(local F2 *lds, F2 *u, u32 f, u32 r, u32 n, u32 me) {
+  assert(f == 1 && r == 4); aevum_shuffle4_256_32(lds, u, n, me);
+}
+#endif
+#if NTT_GF31
+void OVERLOAD shufl(local GF31 *lds, GF31 *u, u32 f, u32 r, u32 n, u32 me) {
+  assert(f == 1 && r == 4); aevum_shuffle4_256_32((local F2 *)lds, (F2 *)u, n, me);
+}
+#endif
+#endif
+#endif
+
 #if FFT_FP64 | NTT_GF61
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs operating on 64-bit values using LDS_BYTES of LDS memory.
@@ -1570,7 +1675,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 // FP64 and FP32 could benefit by starting the next fft8 after the radix-4 tabmul (easy FMA opportunities).
 
 // Code for SIZE=256, RADIX=8
-#elif WG == 32 && NW == 8
+#elif WG == 32 && RADIX == 8
 
 #if FUSE_WEIGHT_BUTTERFLY && DOING_WIDTH
 #error FUSE_WEIGHT_BUTTERFLY not implemented for this fft8_4-based 32-thread path (carryfused.cl's default excludes it; this only fires on an explicit override)
@@ -2220,7 +2325,7 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   finish_tabMul8_fft8(trig, preloads, u, 64, numWG, lowMe, 0);  // We'd rather set save_one_more_mul to 1
 
 // Code for SIZE=256, RADIX=8
-#elif WG == 32 && NW == 8
+#elif WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
@@ -2436,7 +2541,7 @@ void OVERLOAD tabMul8_4b(TrigGF31 trig, GF31 *u, u32 f, u32 me) {
 void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) {
 
 // Code for SIZE=256, RADIX=8
-#if WG == 32 && NW == 8
+#if WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
@@ -2652,7 +2757,7 @@ void OVERLOAD tabMul8_4b(TrigGF61 trig, GF61 *u, u32 f, u32 me) {
 void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32 lowMe) {
 
 // Code for SIZE=256, RADIX=8
-#if WG == 32 && NW == 8
+#if WG == 32 && RADIX == 8
 
   fft8_4(u);
   tabMul8_4a(trig, u, 1, lowMe);
