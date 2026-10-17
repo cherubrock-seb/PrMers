@@ -21,6 +21,8 @@ assert "math::choosePm1Bounds(268113067u, 80.0, 1.3)" in parser_test
 # active baby-window start and saved_p is the next prime in that pass.
 assert "useBabyBatching && !usePair95) ? 25 : 24" in pm1
 assert "version == 24 || version == 25" in pm1
+assert "const uint64_t batchSize = static_cast<uint64_t>(activeBabyCount)" in pm1
+assert "savedBatchSize != static_cast<uint64_t>(activeBabyCount)" in pm1
 assert "resumeBatchStart = resumed_s2 ? static_cast<size_t>(resume_idx) : 0" in pm1
 assert "bPrime = resumeThisPass ? resume_p_u64 : p0u" in pm1
 assert "save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);" in pm1
