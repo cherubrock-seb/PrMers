@@ -618,7 +618,24 @@ engine* engine::create_gpu(const uint32_t p, const size_t reg_count, const size_
             }
         }
 
-        engine* created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec, static_cast<std::uint32_t>(selected_workload));
+        engine* created = nullptr;
+        try {
+            created = create_aevum_engine(p, reg_count, device, verbose, runtime_fft_spec,
+                                          static_cast<std::uint32_t>(selected_workload));
+        } catch (const util::gpulost::GpuLostError&) {
+            throw;
+        } catch (const std::exception& e) {
+            if (configured == gpu_backend::auto_select) {
+                const std::string reason = std::string("Aevum engine unavailable, Marin fallback: ") + e.what();
+                std::cout << "[Backend Auto] " << aevum_workload_name(selected_workload)
+                          << ": Warning: " << reason << std::endl;
+                publish("Auto", "Marin", reason, 0, "");
+                return new engine_gpu(p, reg_count, device, verbose);
+            }
+            publish("Forced Aevum rejected", "Unavailable", e.what(), 0, runtime_fft_spec);
+            throw std::runtime_error(std::string("Forced Aevum engine could not be created "
+                                                 "(-engine-marin or -backend-auto run Marin instead): ") + e.what());
+        }
 
         // The plugin chooses the plan when the engine is created (runtime autotune, tune.txt replay, device
         // profiles), which can differ from the policy's resolver preview that was logged and published above.
