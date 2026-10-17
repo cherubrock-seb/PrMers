@@ -4,6 +4,7 @@
 
 #include "tinycuda.h"
 #include "GraphBatch.h"
+#include "PtxRegisterCache.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 #include "CudaFill.h"
 
@@ -534,6 +535,7 @@ cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
     if (err) *err = CL_INVALID_KERNEL_NAME;
     return nullptr;
   }
+  prog->kernelExported = true;
 
   // Shared memory carveout: default adaptive carveout is optimal for mixed kernel workloads.
 
@@ -1113,6 +1115,29 @@ int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
 } // extern "C"
 
 // C++ linkage — must be outside the extern "C" block above.
+
+bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRegs, int minBlocks) {
+  if (!prog || !prog->moduleLoaded || prog->kernelExported)
+    throw std::runtime_error("PTX register limit must precede kernel creation");
+  ensureContextCurrent();
+  const string limited = aevumPtxWithRegisterLimit(prog->ptx, kernelName, maxRegs, minBlocks);
+  CUmodule replacement{};
+  char errors[8192] = {};
+  CUjit_option options[] = {CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES, CU_JIT_ERROR_LOG_BUFFER};
+  void* values[] = {(void*)(size_t)sizeof(errors), errors};
+  const CUresult result = cuModuleLoadDataEx(&replacement, limited.c_str(), 2, options, values);
+  if (result != CUDA_SUCCESS) {
+    fprintf(stderr, "%s: PTX register-limit JIT failed (%d): %s\n", kernelName, int(result), errors);
+    return false; // Keep the original program intact; caller fails instead of running it.
+  }
+  // No kernel has escaped from this freshly loaded program. Release the
+  // neutral module only after the replacement loaded successfully.
+  cuModuleUnload(prog->module);
+  prog->module = replacement;
+  // Do not replace prog->ptx: saveBinary must only persist the neutral image.
+  fprintf(stderr, "%s: PTX register limit active (maxnreg=%d, minnctapersm=%d)\n", kernelName, maxRegs, minBlocks);
+  return true;
+}
 
 void cudaGraphBatchBegin(cl_command_queue q) {
   if (!q || q->profiling) throw std::runtime_error("CUDA square graph requires an unprofiled queue");

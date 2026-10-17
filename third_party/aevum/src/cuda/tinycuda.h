@@ -52,6 +52,7 @@ struct _cl_program {
   CUmodule module;        // Loaded module (after cuModuleLoadData)
   bool compiled;
   bool moduleLoaded;
+  bool kernelExported{false}; // Prevent replacement while an existing CUfunction refers to this module
 
   _cl_program() : module{}, compiled{false}, moduleLoaded{false} {}
 };
