@@ -16,7 +16,7 @@ trap 'rm -rf "$BUILD"' EXIT
   -Wextra \
   -I"$ROOT/include" \
   "$ROOT/tests/legacy_checkpoint_set_test.cpp" \
-  "$ROOT/src/core/BackupManager.cpp" \
+  "$ROOT/src/core/BackupManager.cpp" "$ROOT/src/util/OpenCLError.cpp" \
   -o "$BUILD/legacy-checkpoint-set-test" \
   -lOpenCL -lgmpxx -lgmp
 

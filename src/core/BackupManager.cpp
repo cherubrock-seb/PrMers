@@ -22,6 +22,7 @@
  */
 #include "core/BackupManager.hpp"
 #include "core/ProofCheckpoint.hpp"
+#include "util/OpenCLError.hpp"
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -554,6 +555,22 @@ bool BackupManager::saveStatePM1S2Host(const std::vector<uint64_t>& hq, const st
     return true;
 }
 
+namespace {
+
+// A failed read leaves the host copy all zero.  Saving that would replace a good checkpoint with a state that
+// resumes to a wrong result, so stop instead (a reset or lost GPU says so) and keep the files on disk as they are.
+void readForSave(cl_command_queue queue, cl_mem buf, size_t bytes, void* host, const char* name) {
+    const cl_int err = clEnqueueReadBuffer(queue, buf, CL_TRUE, 0, bytes, host, 0, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        const std::string what = std::string("clEnqueueReadBuffer (checkpoint ") + name + ")";
+        util::throwClError(err, util::gpulost::Phase::Run, what,
+                           what + " failed: " + util::getCLErrorString(err) + " (" + std::to_string(err) +
+                               "); the saved state was not updated");
+    }
+}
+
+} // namespace
+
 void BackupManager::saveStatePM1S2(cl_mem hqBuf,
                                    cl_mem qBuf,
                                    uint64_t idx,
@@ -561,8 +578,8 @@ void BackupManager::saveStatePM1S2(cl_mem hqBuf,
 {
     if(!marin_){
         std::vector<uint64_t> hq(bytes / sizeof(uint64_t)), q(bytes / sizeof(uint64_t));
-        clEnqueueReadBuffer(queue_, hqBuf, CL_TRUE, 0, bytes, hq.data(), 0, nullptr, nullptr);
-        clEnqueueReadBuffer(queue_, qBuf, CL_TRUE, 0, bytes, q.data(), 0, nullptr, nullptr);
+        readForSave(queue_, hqBuf, bytes, hq.data(), "hq");
+        readForSave(queue_, qBuf, bytes, q.data(), "q");
         saveStatePM1S2Host(hq, q, idx);
     }
 }
@@ -684,15 +701,15 @@ void BackupManager::saveState(cl_mem buffer, uint64_t iter, const mpz_class* E_p
     if (marin_) return;
     const size_t bytes = vectorSize_ * sizeof(uint64_t);
     std::vector<uint64_t> x(vectorSize_);
-    clEnqueueReadBuffer(queue_, buffer, CL_TRUE, 0, bytes, x.data(), 0, nullptr, nullptr);
+    readForSave(queue_, buffer, bytes, x.data(), "residue");
     GerbiczLiHost host;
     if (gl) {
         host.bufd.resize(vectorSize_);
         host.lastBufd.resize(vectorSize_);
         host.correct.resize(vectorSize_);
-        clEnqueueReadBuffer(queue_, gl->bufd, CL_TRUE, 0, bytes, host.bufd.data(), 0, nullptr, nullptr);
-        clEnqueueReadBuffer(queue_, gl->lastBufd, CL_TRUE, 0, bytes, host.lastBufd.data(), 0, nullptr, nullptr);
-        clEnqueueReadBuffer(queue_, gl->correct, CL_TRUE, 0, bytes, host.correct.data(), 0, nullptr, nullptr);
+        readForSave(queue_, gl->bufd, bytes, host.bufd.data(), "bufd");
+        readForSave(queue_, gl->lastBufd, bytes, host.lastBufd.data(), "last_correct_bufd");
+        readForSave(queue_, gl->correct, bytes, host.correct.data(), "last_correct_state");
         host.itersave = gl->itersave;
         host.jsave = gl->jsave;
     }
