@@ -44,7 +44,7 @@ jobs:
           make -C third_party/aevum test-engine-api
 
   macos-build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
