@@ -261,7 +261,7 @@ class Hook(gdb.Breakpoint):
         return False
 Hook("fopen", internal=True)
 gdb.execute("run")
-if Hook.seen >= 2:
+if Hook.seen >= 1:
     print("HOOK-KILLED")
     gdb.execute("kill")
 EOF
