@@ -499,7 +499,11 @@ test-pm1-lowmem-stage1-ckpt: all
 	bash tests/pm1_lowmem_stage1_ckpt_test.sh $${PRMERS_TEST_DEVICE:-0}
 
 test-pm1-vtrace-low-prime: all
-	bash tests/pm1_vtrace_low_prime_test.sh $${PRMERS_TEST_DEVICE:-0}
+	bash tests/pm1_vtrace_low_prime_test.sh ${PRMERS_TEST_DEVICE:-0}
+
+.PHONY: test-pm1-vtrace-ckpt-header
+test-pm1-vtrace-ckpt-header:
+	bash tests/test_pm1_vtrace_ckpt_header.sh
 
 test-pm1-prime95-stage2-result: all
 	bash tests/pm1_prime95_stage2_result_test.sh $${PRMERS_TEST_DEVICE:-0}
