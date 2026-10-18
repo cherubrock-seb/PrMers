@@ -505,6 +505,10 @@ test-pm1-vtrace-low-prime: all
 test-pm1-vtrace-ckpt-header:
 	bash tests/test_pm1_vtrace_ckpt_header.sh
 
+.PHONY: test-pm1-vtrace-pair95-resume
+test-pm1-vtrace-pair95-resume: all
+	bash tests/pm1_vtrace_pair95_resume_test.sh ${PRMERS_TEST_DEVICE:-0}
+
 test-pm1-prime95-stage2-result: all
 	bash tests/pm1_prime95_stage2_result_test.sh $${PRMERS_TEST_DEVICE:-0}
 
