@@ -435,6 +435,9 @@ void NttEngine::squareInPlace(cl_mem A, math::Carry& carry, size_t limbBytes) {
 }
 
 void NttEngine::copy(cl_mem src, cl_mem dst, size_t bytes) {
+    // A buffer onto itself is a no-op, but clEnqueueCopyBuffer rejects it (CL_MEM_COPY_OVERLAP).  mulInPlace(A, ...)
+    // copies A into input and back, and the legacy P-1 stage 2 calls it with A = input.
+    if (src == dst) return;
     const cl_int err = clEnqueueCopyBuffer(queue_, src, dst, 0, 0, bytes, 0, nullptr, nullptr);
     if (err != CL_SUCCESS) {
         util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueCopyBuffer", "clEnqueueCopyBuffer failed with error " + std::to_string(err));
