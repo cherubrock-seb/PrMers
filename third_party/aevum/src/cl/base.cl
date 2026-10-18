@@ -826,6 +826,16 @@ void OVERLOAD write(u32 WG, u32 N, GF61 *u, global GF61 *out, u32 base) {
 #define FAST_BARRIER 0
 #endif
 
+// Reconverge lanes inside one NVIDIA warp around per-warp hand-offs.
+// AMD GCN wavefronts execute in lockstep; on NVIDIA Volta+ independent thread
+// scheduling requires an explicit warp barrier when one lane publishes state
+// on behalf of the other lanes.
+void sync(void) {
+#if HAS_PTX >= 600
+  __asm("bar.warp.sync 0xffffffff;" : : );
+#endif
+}
+
 // Create a barrier across all threads.  Primarily used to coordinate access to local memory.
 // A local memory fence is optional.  This is a DANGEROUS practice!!
 // On Radeon VII and Radeon PRO VII barrier with no local memory fence works (in most cases -- see barFence routine) and is much faster.
