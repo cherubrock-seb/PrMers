@@ -1566,7 +1566,15 @@ void subtract_reg_group_apply(__global uint64 * restrict const reg,
 
 	virtual ~engine_gpu_flat()
 	{
-		release_gpu_resources_for_lowmem_handoff();
+		// A destructor must not throw: that is std::terminate.  The engine is usually destroyed while an
+		// OpenCL error (a reset or lost GPU) unwinds, and the clFinish of the release then fails again on the
+		// dead device.  Log that and free the rest without it; ~gpu and ~device do not throw.  The explicit
+		// low-memory handoff still throws, since its caller has to know.
+		try { release_gpu_resources_for_lowmem_handoff(); }
+		catch (const std::exception & e) { std::cerr << "Warning: releasing the GPU engine: " << e.what() << std::endl; }
+		catch (...) { std::cerr << "Warning: releasing the GPU engine failed" << std::endl; }
+		delete _gpu;
+		_gpu = nullptr;
 	}
 
 	size_t get_size() const override { return _n; }
@@ -2563,7 +2571,10 @@ public:
         }
     }
 
-    virtual ~engine_gpu() { release_gpu_resources_for_lowmem_handoff(); }
+    // Must not throw (see ~engine_gpu_flat), so no flush_all() here: it reads the paged registers back from the
+    // GPU, which fails on a lost device, only to fill host backing that is freed with this object.
+    // ~engine_gpu_flat releases the device and logs instead of throwing.
+    virtual ~engine_gpu() { _flat.reset(); }
 
     void release_gpu_resources_for_lowmem_handoff() override
     {
