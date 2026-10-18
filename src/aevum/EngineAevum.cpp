@@ -1,5 +1,7 @@
 #include "aevum/EngineAevum.hpp"
+#include "aevum/DeviceMap.hpp"
 #include "marin/engine.h"
+#include "marin/ocl.h"
 #include "util/GpuLost.hpp"
 
 #include <algorithm>
@@ -97,6 +99,67 @@ void close_library(NativeLibrary library) {
     if (library) dlclose(library);
 }
 #endif
+
+// The Aevum plugin numbers every OpenCL device of every platform, while
+// PrMers/Marin numbers GPU devices first and falls back to all devices only
+// when no GPU exists. Translate the user-visible PrMers index to Aevum's
+// plugin index by matching the actual cl_device_id.
+std::vector<cl_device_id> aevum_opencl_devices() {
+    cl_platform_id platforms[16];
+    cl_uint platform_count = 0;
+    if (clGetPlatformIDs(16, platforms, &platform_count) != CL_SUCCESS) return {};
+    platform_count = std::min<cl_uint>(platform_count, 16);
+    std::vector<cl_device_id> out;
+    for (cl_uint p = 0; p < platform_count; ++p) {
+        cl_device_id devices[64];
+        cl_uint device_count = 0;
+        if (clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, 64, devices, &device_count) != CL_SUCCESS) continue;
+        device_count = std::min<cl_uint>(device_count, 64);
+        out.insert(out.end(), devices, devices + device_count);
+    }
+    return out;
+}
+
+std::string opencl_device_name(cl_device_id id) {
+    char name[256] = {};
+    if (clGetDeviceInfo(id, CL_DEVICE_NAME, sizeof(name) - 1, name, nullptr) != CL_SUCCESS) return "unknown";
+    return name;
+}
+
+struct AevumDevice {
+    std::size_t index;
+    std::string name;
+};
+
+AevumDevice resolve_aevum_device(std::size_t device) {
+    std::vector<cl_device_id> prmers_devices;
+    try {
+        const ocl::platform platform;
+        for (std::size_t i = 0; i < platform.get_device_count(); ++i) {
+            prmers_devices.push_back(platform.get_device(i));
+        }
+    } catch (const std::exception&) {
+        prmers_devices.clear();
+    }
+
+    const auto mapped = aevum_device_map::map_index(prmers_devices, aevum_opencl_devices(), device);
+    switch (mapped.status) {
+    case aevum_device_map::Status::mapped:
+        return {mapped.index, opencl_device_name(prmers_devices[device])};
+    case aevum_device_map::Status::out_of_range:
+        throw std::runtime_error(
+            "Invalid OpenCL device index " + std::to_string(device) + ": " +
+            std::to_string(prmers_devices.size()) + " device(s) available.");
+    case aevum_device_map::Status::not_found:
+        throw std::runtime_error(
+            "Aevum cannot open OpenCL device " + std::to_string(device) + " ('" +
+            opencl_device_name(prmers_devices[device]) +
+            "'): the device is missing from the plugin's OpenCL device list");
+    case aevum_device_map::Status::no_devices:
+        break;
+    }
+    return {device, std::string()};
+}
 
 struct Api {
     using version_fn = const char* (*)();
@@ -284,11 +347,13 @@ public:
     engine_aevum(uint32_t exponent, std::size_t register_count, std::size_t device, bool verbose, const std::string& fft_spec, uint32_t workload)
         : exponent_(exponent), register_count_(register_count), api_(api()) {
         const std::string tune_dir = api_.tune_dir().string();
+        const AevumDevice aevum_device = resolve_aevum_device(device);
+        const auto plugin_device = static_cast<uint32_t>(aevum_device.index);
         if (api_.create_ex) {
-            handle_ = api_.create_ex(exponent, register_count, static_cast<uint32_t>(device), verbose ? 1 : 0,
+            handle_ = api_.create_ex(exponent, register_count, plugin_device, verbose ? 1 : 0,
                                     fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str(), workload);
         } else {
-            handle_ = api_.create(exponent, register_count, static_cast<uint32_t>(device), verbose ? 1 : 0,
+            handle_ = api_.create(exponent, register_count, plugin_device, verbose ? 1 : 0,
                                   fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str());
         }
         if (!handle_) fail("create");
