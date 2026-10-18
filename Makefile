@@ -331,6 +331,16 @@ test-proof-verify-cpu:
 test-proof-cpu-fallback-verify: all
 	bash tests/run_proof_cpu_fallback_verify.sh $${AEVUM_TEST_DEVICE:-0}
 
+# A proof residue whose GPU read fails is not saved (the read is replaced in the test; no OpenCL device is used,
+# but the test links the objects of the build).
+.PHONY: test-proof-residue-read-fault
+test-proof-residue-read-fault: all
+	rm -rf tests/build-proof-residue-read-fault
+	mkdir -p tests/build-proof-residue-read-fault
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(PLATFORM_CXXFLAGS) tests/proof_residue_read_fault_test.cpp $(filter-out $(SRC_DIR)/main.o,$(OBJS)) -o tests/build-proof-residue-read-fault/proof-residue-read-fault-test $(LDFLAGS) $(PLATFORM_LDFLAGS)
+	tests/build-proof-residue-read-fault/proof-residue-read-fault-test tests/build-proof-residue-read-fault/scratch
+	rm -rf tests/build-proof-residue-read-fault
+
 test-proof-checkpoint-readback:
 	bash tests/test_proof_checkpoint_readback.sh
 
