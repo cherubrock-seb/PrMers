@@ -79,6 +79,13 @@ assert "run_plan_worker_process" in bench
 assert "measure_plan_isolated" in bench
 assert "BENCH3_PLAN_WORKER_START" in bench
 assert "BENCH3_PLAN_WORKER_EXIT" in bench
+assert "BENCH3_PLAN_HEARTBEAT" in bench
+assert "timeout_remaining_s=" in bench
+assert "plan_progress_path" in bench
+assert "write_plan_progress" in bench
+assert "read_plan_progress" in bench
+assert "0xC000013Au" in bench
+assert "BENCH3_PLAN_INTERRUPTED" in bench
 assert "BENCH3_PLAN_TIMEOUT" in bench
 assert 'row.status = "TIMEOUT"' in bench
 assert "CreateProcessA" in bench
