@@ -3937,7 +3937,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     };
 
     double restored_time = 0.0;
-    uint64_t s2B1=0, s2B2=0, s2D=0;
+    uint64_t s2B1=0, s2B2=0, s2D=0, savedBatchSize=0;
     bool compactS2Loaded = false;
     bool resumed_s2 = false;
     pvc::Pair95Header pair95Resume;
@@ -3963,8 +3963,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             resume_idx = 0;
         }
     } else {
-        int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
-        if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, compactS2Loaded);
+        int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
+        if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
         resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
     }
 
