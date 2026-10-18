@@ -3936,13 +3936,12 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             mpz_class g;
             mpz_gcd(g.get_mpz_t(), Hc.get_mpz_t(), Mp.get_mpz_t());
             mpz_clear(H);
-            delete eng;
             if (g != 1 && g != Mp) {
-                std::string filename = "stage2_vtrace_result_B2_" + B2.get_str() + "_p_" + std::to_string(options.exponent) + ".txt";
-                writeStageResult(filename, "inverse(H) failed because factor already divides H: factor=" + g.get_str());
-                std::cout << "\n>>> P-1 factor found while building V_1: " << g.get_str() << "\n";
-                return Pm1Stage2Result::Found;
+                const int fftSize = static_cast<int>(eng->get_size());
+                delete eng;
+                return pm1_record_stage2_result(options, g, Mp, fftSize, "V-trace V1 inverse");
             }
+            delete eng;
             std::cerr << "[PM1-VTRACE] H is not invertible modulo M_p, but no proper factor was isolated.\n";
             return Pm1Stage2Result::Error;
         }
@@ -3957,20 +3956,24 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (!aevum_vtrace_backend) {
             eng->set_multiplicand((engine::Reg)RMUL_V1, (engine::Reg)RV1);
         }
-        if (!useBabyBatching) {
-            precompute_baby_window(0, babyCount, babyGlobalToLocal);
-        } else {
-            precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
-        }
-        if (!aevum_vtrace_backend) {
-            eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
-        }
+        // pair95 rebuilds the active baby window at the start of each pass.
+        // Avoid building pass 0 twice on a fresh pair95 run.
+        if (!usePair95) {
+            if (!useBabyBatching) {
+                precompute_baby_window(0, babyCount, babyGlobalToLocal);
+            } else {
+                precompute_baby_window(0, std::min(activeBabyCount, babyCount), babyGlobalToLocal);
+            }
+            if (!aevum_vtrace_backend) {
+                eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
+            }
 
-        // Giant recurrence W_k = V_{kD}.  At k=0, W_0=2 and W_-1=V_D because V_-D=V_D.
-        eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
-        eng->set((engine::Reg)RGCUR, 2);
+            // Giant recurrence W_k = V_{kD}. At k=0, W_0=2 and W_-1=V_D.
+            eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
+            eng->set((engine::Reg)RGCUR, 2);
+            cur_k = 0;
+        }
         eng->set((engine::Reg)RACC, 1);
-        cur_k = 0;
     } else {
         cur_k = saved_k;
         bool rebuiltBabyWindow = false;
