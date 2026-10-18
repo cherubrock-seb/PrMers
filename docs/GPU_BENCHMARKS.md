@@ -161,12 +161,19 @@ AUTO exact residue is persisted alongside the AUTO checkpoint so resumed
 alternatives are still compared against the same exact reference.
 
 Use `-bench3-plan-timeout N` to bound one isolated plan worker to `N` seconds.
-The default is 300 seconds; `0` disables the timeout. A timed-out plan is
-reported as `TIMEOUT`; worker/runtime failures are reported as `ERROR`.
-Either status keeps the exponent point partial and retryable rather than
-publishing a completed `records/` entry. On a normal resume, existing PASS
+The default is 300 seconds; `0` disables the timeout. While an isolated worker
+is still running, the controller prints a `BENCH3_PLAN_HEARTBEAT` every
+10 seconds with the most recently published worker phase, total elapsed time,
+and the remaining timeout. This makes slow setup/JIT, exactness, timing, or
+production-probe phases visible instead of looking hung.
+
+A timed-out plan is reported as `TIMEOUT`; worker/runtime failures are reported
+as `ERROR`. Either status keeps the exponent point partial and retryable rather
+than publishing a completed `records/` entry. On a normal resume, existing PASS
 checkpoints are reused while TIMEOUT and ERROR checkpoints are deliberately
-rerun.
+rerun. On Windows, process exit `0xC000013A` is recognized as a console-control
+interruption and stops Bench3 as an interruption rather than misclassifying the
+worker as an ordinary plan error.
 
 Plan checkpoint contexts are bound to the Bench3 schema and source SHA, mode,
 exponent, measurement counts, device index, OpenCL vendor/device name, driver
