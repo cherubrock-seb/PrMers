@@ -31,6 +31,7 @@
 #include "core/AlgoUtils.hpp"
 #include "core/GmChainProgress.hpp"
 #include "core/Pm1Checkpoint.hpp"
+#include "core/Pm1VTraceCheckpoint.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
 #include "core/ProofSet.hpp"
@@ -1411,12 +1412,13 @@ int App::runInner() {
             bool ran_local = false;
 
             std::ostringstream s1; s1 << "pm1_m_" << options.exponent << ".ckpt";
-            std::ostringstream s2; s2 << "pm1_s2_m_" << options.exponent << ".ckpt";
             const std::string s1f = s1.str();
-            const std::string s2f = s2.str();
 
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
-            bool haveS2 = File(s2f).exists() || File(s2f + ".old").exists() || File(s2f + ".new").exists();
+            bool haveS2 = false;
+            for (const std::string& f : core::pm1vtrace::stage2CheckpointFiles(options.exponent)) {
+                haveS2 = haveS2 || File(f).exists() || File(f + ".old").exists() || File(f + ".new").exists();
+            }
             if(options.s3only){
                 std::ostringstream msg;
                 msg << "S3 only requested " 
@@ -1455,7 +1457,14 @@ int App::runInner() {
                 std::cout << msg.str() << std::endl;
                 if (guiServer_) { guiServer_->appendLog(msg.str()); guiServer_->setStatus("P-1 Stage 2 resume2reg"); }
 
-                rc_local = pm1Stage2ExitCode(runPM1Stage2Marin());
+                const Pm1Stage2Result r2 = runPM1Stage2Marin();
+                // This direct entry has no worktodo entry to retire. Once Stage 2
+                // searched its complete range, remove every Stage-2 checkpoint
+                // variant so stale state is not offered to a later run.
+                if (r2 == Pm1Stage2Result::Found || r2 == Pm1Stage2Result::NotFound) {
+                    core::pm1vtrace::removeStage2Checkpoints(options.exponent);
+                }
+                rc_local = pm1Stage2ExitCode(r2);
                 ran_local = true;
             }
             else {
