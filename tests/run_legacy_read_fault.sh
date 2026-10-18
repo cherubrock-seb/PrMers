@@ -5,7 +5,8 @@
 # CL_INVALID_COMMAND_QUEUE, what a reset or lost GPU returns.  Before the fix the status was ignored: a failed
 # Gerbicz-Li flag read printed "Check passed!" and saved the state as verified, a failed final residue read
 # reported the prime M21701 as composite with res64 0000000000000000, and a failed checkpoint read saved zeros.
-# Legacy LL (opt-in) reported a composite as prime when its result read failed.
+# Legacy LL (opt-in) reported a composite as prime when its result read failed, and legacy P-1 reported "no factor"
+# for M269 (factor 13822297) when its stage 1 or stage 2 result read failed.
 # Each case must now exit with an error that says the GPU was reset or lost, and write no result.
 #
 # The reads of a short run are counted first (with the shim logging only), so the failing read is picked by
@@ -87,6 +88,21 @@ if [ "$rc" != 1 ] || ! grep -q '"status":"C"' "$WORK/llbase/results.txt" 2>/dev/
 fi
 llfull="$(sort -n "$WORK/llbase.reads" | tail -n 1)"
 check ll-result "$llfull" "$(grep -cx "$llfull" "$WORK/llbase.reads")"
+
+# Legacy P-1 of M269: the stage 1 result read is the last residue read of a stage-1-only run, the stage 2
+# result read the last one of a run with stage 2.
+EXP=269
+for case in "pm1-stage1:-pm1 -b1 2141" "pm1-stage2:-pm1 -b1 4 -b2 2141 -pm1-vtrace-off"; do
+    name="${case%%:*}"
+    read -r -a MODE <<< "${case#*:}"
+    rc="$(run "$WORK/$name-base" PRMERS_FAULT_READ_LOG="$WORK/$name.reads")"
+    if ! grep -aq 'found: 13822297' "$WORK/$name-base/run.log"; then
+        echo "FAIL($name-base): legacy P-1 of M269 without a fault did not find 13822297 (exit $rc)"
+        tail -n 5 "$WORK/$name-base/run.log"; fail=1; continue
+    fi
+    pfull="$(sort -n "$WORK/$name.reads" | tail -n 1)"
+    check "$name" "$pfull" "$(grep -cx "$pfull" "$WORK/$name.reads")"
+done
 
 if [ "$fail" -ne 0 ]; then echo "Legacy read fault regression: FAIL"; exit 1; fi
 echo "Legacy read fault regression: PASS"
