@@ -88,8 +88,20 @@ jobs:
           make -C third_party/aevum CUDA=1 engine-lib -j"$(nproc)" CXX=g++ DL_LIBS= ENGINE_LINK_FLAGS='-shared -static-libstdc++ -static-libgcc' CUDAFLAGS="-DCUDA_BACKEND -Isrc/cuda -I\"$P/include\"" OPENCL_LIBS="-L\"$P/lib/x64\" -l:cuda.lib -l:nvrtc.lib"
           test -s third_party/aevum/build-engine/libaevum_engine.so
           objdump -p third_party/aevum/build-engine/libaevum_engine.so > deps.txt
-          grep -qi nvcuda.dll deps.txt
-          grep -qi nvrtc deps.txt
+          echo '=== PE DLL IMPORTS ==='
+          grep -i 'DLL Name:' deps.txt || true
+          echo '=== CUDA IMPORT SYMBOLS ==='
+          nm third_party/aevum/build-engine/libaevum_engine.so | grep -Ei 'cuInit|nvrtcCompileProgram' | head -20 || true
+          # NVIDIA's CUDA import library may name the runtime CUDA.DLL rather than nvcuda.dll.
+          # Check real PE imports rather than requiring a particular toolkit's DLL spelling.
+          if ! grep -Eiq 'DLL Name:[[:space:]]*(nvcuda|cuda)\.dll' deps.txt; then
+            echo 'ERROR: neither CUDA.DLL nor nvcuda.dll is imported by the compiled engine'
+            exit 1
+          fi
+          if ! grep -Eiq 'DLL Name:.*nvrtc' deps.txt; then
+            echo 'ERROR: NVRTC import dependency is missing'
+            exit 1
+          fi
       - name: Repack original Windows executable with CUDA engine
         shell: pwsh
         env:
