@@ -533,13 +533,22 @@ void clear_naf_checkpoint(const std::filesystem::path& path) {
 
 std::string json_escape_fast(const std::string& s) {
     std::ostringstream out;
-    for (char c : s) {
+    for (char raw : s) {
+        const unsigned char c = static_cast<unsigned char>(raw);
         if (c == '\\') out << "\\\\";
         else if (c == '"') out << "\\\"";
+        else if (c == '\b') out << "\\b";
+        else if (c == '\f') out << "\\f";
         else if (c == '\n') out << "\\n";
         else if (c == '\r') out << "\\r";
         else if (c == '\t') out << "\\t";
-        else out << c;
+        else if (c < 0x20) {
+            // RFC 8259 forbids raw control characters in a string.
+            char buf[8];
+            std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+            out << buf;
+        }
+        else out << raw;
     }
     return out.str();
 }
