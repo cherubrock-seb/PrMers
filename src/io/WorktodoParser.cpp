@@ -777,8 +777,17 @@ bool WorktodoParser::removeProcessedLine(const std::string& rawLine) {
         tempFile << line << "\n";
     }
 
+    // getline also stops on a read error.  The copy then ends part way through, and renaming it over the
+    // worktodo file would drop every entry after that point: keep the file as it is.  Only a read that
+    // reached the end of the file is complete (a line too long for a string stops it without eof).
+    const bool readComplete = inFile.eof() && !inFile.bad();
     inFile.close();
     tempFile.close();
+    if (!readComplete) {
+        std::cerr << "Failed reading " << filename_ << "; it was left unchanged\n";
+        std::remove(tmpPath.c_str());
+        return false;
+    }
     if (!removed) {
         std::remove(tmpPath.c_str());
         return false;
