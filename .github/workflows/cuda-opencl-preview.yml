@@ -101,7 +101,19 @@ jobs:
             exit 1
           fi
           nm third_party/aevum/build-engine/libaevum_engine.so > symbols.txt
-          if ! grep -Eq '[[:space:]]T cuInit
+          if ! grep -Fq ' T cuInit' symbols.txt; then
+            echo 'ERROR: CUDA driver API entrypoint cuInit missing'
+            exit 1
+          fi
+          if ! grep -Fq ' B pfn_cuInit' symbols.txt; then
+            echo 'ERROR: CUDA driver loader pfn_cuInit missing'
+            exit 1
+          fi
+          if ! grep -Fq ' I __imp_nvrtcCompileProgram' symbols.txt; then
+            echo 'ERROR: NVRTC compile function import missing'
+            exit 1
+          fi
+          echo 'CUDA imports and dynamic driver loader validated.'
       - name: Repack original Windows executable with CUDA engine
         shell: pwsh
         env:
