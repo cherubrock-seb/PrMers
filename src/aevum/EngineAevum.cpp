@@ -8,6 +8,9 @@
 #include <cmath>
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <iomanip>
+#include <sstream>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -351,21 +354,83 @@ Api& api() {
     return instance;
 }
 
-// The separate CUDA engine is optional. Loading it only after an NVIDIA
-// OpenCL GPU is identified keeps AMD/Intel systems independent of CUDA/NVRTC.
-// A conservative one-GPU gate avoids mapping OpenCL index N to the wrong CUDA
-// ordinal on mixed or multi-GPU machines.
-bool one_nvidia_gpu(std::size_t device) {
+// Map the selected PrMers OpenCL GPU to the same physical CUDA GPU.
+// CUDA_VISIBLE_DEVICES may reorder/filter devices (common on Kaggle). Never
+// assume that an OpenCL index equals a CUDA ordinal.
+std::optional<uint32_t> mapped_cuda_device(std::size_t device) {
+#if defined(__APPLE__)
+    (void)device;
+    return std::nullopt;
+#else
     try {
         const ocl::platform devices;
-        if (device != 0 || devices.get_device_count() != 1) return false;
-        const cl_device_id gpu = devices.get_device(0);
+        if (device >= devices.get_device_count()) return std::nullopt;
+        const cl_device_id gpu = devices.get_device(device);
         char vendor[256] = {};
-        return clGetDeviceInfo(gpu, CL_DEVICE_VENDOR, sizeof(vendor) - 1, vendor, nullptr) == CL_SUCCESS &&
-               std::strstr(vendor, "NVIDIA") != nullptr;
+        if (clGetDeviceInfo(gpu, CL_DEVICE_VENDOR, sizeof(vendor) - 1, vendor, nullptr) != CL_SUCCESS ||
+            std::strstr(vendor, "NVIDIA") == nullptr) return std::nullopt;
+        // Query the driver at runtime. PrMers remains buildable and loadable
+        // without CUDA headers, the CUDA toolkit, or an NVIDIA driver.
+#if defined(_WIN32)
+        NativeLibrary driver = open_library("nvcuda.dll");
+#else
+        NativeLibrary driver = open_library("libcuda.so.1");
+#endif
+        if (!driver) return std::nullopt;
+        struct DriverGuard {
+            NativeLibrary lib;
+            ~DriverGuard() { close_library(lib); }
+        } guard{driver};
+#if defined(_WIN32)
+        const auto symbol = [driver](const char* name) -> void* {
+            return reinterpret_cast<void*>(GetProcAddress(driver, name));
+        };
+#else
+        const auto symbol = [driver](const char* name) -> void* { return dlsym(driver, name); };
+#endif
+        auto cu_init = reinterpret_cast<int (*)(unsigned)>(symbol("cuInit"));
+        auto cu_count = reinterpret_cast<int (*)(int*)>(symbol("cuDeviceGetCount"));
+        auto cu_pci = reinterpret_cast<int (*)(char*, int, int)>(symbol("cuDeviceGetPCIBusId"));
+        if (!cu_init || !cu_count || !cu_pci || cu_init(0) != 0) return std::nullopt;
+        int count = 0;
+        if (cu_count(&count) != 0 || count <= 0) return std::nullopt;
+
+        // cl_nv_device_attribute_query exposes NVIDIA PCI bus/slot.
+        constexpr cl_device_info pci_bus_nv = static_cast<cl_device_info>(0x4008);
+        constexpr cl_device_info pci_slot_nv = static_cast<cl_device_info>(0x4009);
+        cl_uint bus = 0, slot = 0;
+        const bool pci_known =
+            clGetDeviceInfo(gpu, pci_bus_nv, sizeof(bus), &bus, nullptr) == CL_SUCCESS &&
+            clGetDeviceInfo(gpu, pci_slot_nv, sizeof(slot), &slot, nullptr) == CL_SUCCESS;
+        std::optional<uint32_t> match;
+        for (int ordinal = 0; ordinal < count; ++ordinal) {
+            char pci_id[64] = {};
+            if (cu_pci(pci_id, sizeof(pci_id), ordinal) != 0) continue;
+            unsigned domain = 0, cuda_bus = 0, cuda_slot = 0, function = 0;
+            if (std::sscanf(pci_id, "%x:%x:%x.%x", &domain, &cuda_bus, &cuda_slot, &function) != 4)
+                continue;
+            if (pci_known && cuda_bus == bus &&
+                (cuda_slot == slot || cuda_slot == (slot >> 3))) {
+                if (match) return std::nullopt; // Ambiguous: fail closed.
+                match = static_cast<uint32_t>(ordinal);
+            }
+        }
+        if (pci_known) return match;
+        // No PCI extension: only a single exposed CUDA GPU is unambiguous,
+        // and only if OpenCL exposes a single NVIDIA GPU.
+        std::size_t nvidia_count = 0;
+        for (std::size_t i = 0; i < devices.get_device_count(); ++i) {
+            char name[256] = {};
+            if (clGetDeviceInfo(devices.get_device(i), CL_DEVICE_VENDOR,
+                                sizeof(name) - 1, name, nullptr) == CL_SUCCESS &&
+                std::strstr(name, "NVIDIA")) ++nvidia_count;
+        }
+        if (count == 1 && nvidia_count == 1) return uint32_t{0};
+        return std::nullopt;
     } catch (...) {
-        return false;
+        return std::nullopt;
     }
+#endif
 }
 
 std::filesystem::path optional_cuda_engine(const Api& opencl) {
@@ -380,10 +445,14 @@ std::filesystem::path optional_cuda_engine(const Api& opencl) {
 }
 
 struct Probe {
-    double us_per_square = 0.0;
+    double us_per_operation = 0.0;
     std::vector<uint32_t> residue;
+    std::string plan;
 };
 
+// Run the SAME workload proxy in both plugins. Keep this bounded: kernel
+// compilation is potentially expensive, and PRP can have very large operands.
+// The plugin still owns per-workload FFT auto selection (including tune.txt).
 Probe probe_backend(Api& engine_api, uint32_t exponent, std::size_t registers,
                     uint32_t device, const std::string& fft_spec, uint32_t workload) {
     const auto tune = engine_api.tune_dir().string();
@@ -397,23 +466,55 @@ Probe probe_backend(Api& engine_api, uint32_t exponent, std::size_t registers,
     }
     try {
         const std::size_t count = engine_api.word_count(handle);
-        if (count == 0 || count > (1u << 25)) throw std::runtime_error("Invalid probe word count");
-        if (!engine_api.set_u32(handle, 0, 3)) throw std::runtime_error("Probe initialization failed");
-        // The same seed and number of squarings on both backends must produce
-        // byte-identical canonical residues before the speed is trusted.
-        for (int n = 0; n < 24; ++n) {
-            if (!engine_api.square_mul(handle, 0, 1)) throw std::runtime_error("Probe warmup failed");
+        const std::size_t transform = engine_api.transform_size(handle);
+        if (count == 0 || count > (1u << 25) || transform == 0)
+            throw std::runtime_error("Invalid Aevum probe dimensions");
+        Probe measured;
+        if (engine_api.plan_spec) {
+            std::array<char, 96> plan{};
+            if (engine_api.plan_spec(handle, plan.data(), plan.size())) measured.plan = plan.data();
         }
+        if (!engine_api.set_u32(handle, 0, 3)) throw std::runtime_error("Probe init failed");
+
+        // P-1/ECM do significant prepared multiplication; PRP uses a mixture
+        // of squares and factor-3 squares; LL uses ordinary squares. Probe all
+        // these paths, rather than comparing pure squarings for every mode.
+        const bool mixed = (workload == 3u || workload == 4u || workload == 6u) &&
+                           registers >= 3;
+        if (mixed) {
+            if (!engine_api.set_u32(handle, 1, 5) ||
+                !engine_api.prepare(handle, 2, 1))
+                throw std::runtime_error("Prepared-multiply probe setup failed");
+        }
+        const auto step = [&](int i) {
+            int ok = 1;
+            if (mixed && (i % 4) == 1) {
+                ok = engine_api.mul(handle, 0, 2, 1);
+            } else if (mixed && workload == 6u && i % 4 == 2) {
+                ok = engine_api.add(handle, 0, 1) &&
+                     engine_api.sub_reg(handle, 0, 1);
+            } else if (workload == 2u) {
+                // LL's dominant fused square-minus-two must be part of the
+                // measured path; pure-square timing would be misleading.
+                ok = engine_api.square_mul(handle, 0, 1) &&
+                     engine_api.sub_u32(handle, 0, 2);
+            } else {
+                const uint32_t factor = workload == 1u && i % 16 == 0 ? 3u : 1u;
+                ok = engine_api.square_mul(handle, 0, factor);
+            }
+            if (!ok) throw std::runtime_error("Aevum workload probe operation failed");
+        };
+        constexpr int warmup = 4;
+        const int repetitions = transform >= (1u << 24) ? 12 :
+                                transform >= (1u << 23) ? 24 : 64;
+        for (int i = 0; i < warmup; ++i) step(i);
         if (!engine_api.sync(handle)) throw std::runtime_error("Probe warmup sync failed");
         const auto start = std::chrono::steady_clock::now();
-        constexpr int repetitions = 256;
-        for (int n = 0; n < repetitions; ++n) {
-            if (!engine_api.square_mul(handle, 0, 1)) throw std::runtime_error("Probe square failed");
-        }
+        for (int i = 0; i < repetitions; ++i) step(i + warmup);
         if (!engine_api.sync(handle)) throw std::runtime_error("Probe timing sync failed");
         const auto end = std::chrono::steady_clock::now();
-        Probe measured;
-        measured.us_per_square = std::chrono::duration<double, std::micro>(end - start).count() / repetitions;
+        measured.us_per_operation =
+            std::chrono::duration<double, std::micro>(end - start).count() / repetitions;
         measured.residue.resize(count);
         if (!engine_api.get_words(handle, 0, measured.residue.data(), count))
             throw std::runtime_error("Probe residue readback failed");
@@ -425,51 +526,68 @@ Probe probe_backend(Api& engine_api, uint32_t exponent, std::size_t registers,
     }
 }
 
-Api& choose_api(uint32_t exponent, std::size_t registers, std::size_t device,
-                const std::string& fft_spec, uint32_t workload) {
+struct BackendChoice {
+    Api& plugin;
+    uint32_t cuda_ordinal;
+};
+
+// Persistent in-process cache: avoid re-probing identical workloads and FFT
+// requests on every engine creation. No unsafe cross-device reuse.
+BackendChoice choose_api(uint32_t exponent, std::size_t registers, std::size_t device,
+                         const std::string& fft_spec, uint32_t workload) {
     Api& opencl = api();
-    // An explicit plugin path is authoritative. This also retains compatibility
-    // with the previously published OpenCL-only and CUDA-only archives.
-    if (std::getenv("AEVUM_ENGINE_LIB")) return opencl;
-    const char* preference = std::getenv("AEVUM_BACKEND");
-    if (preference && std::string(preference) == "opencl") return opencl;
-    if (!one_nvidia_gpu(device)) return opencl;
+    // Explicit plugin paths retain their established semantics.
+    if (std::getenv("AEVUM_ENGINE_LIB")) return {opencl, 0};
+    const char* env_mode = std::getenv("AEVUM_BACKEND");
+    const std::string mode = env_mode ? env_mode : "auto";
+    if (mode == "opencl") return {opencl, 0};
+    const auto ordinal = mapped_cuda_device(device);
+    if (!ordinal) return {opencl, 0};
     const auto cuda_path = optional_cuda_engine(opencl);
-    if (cuda_path.empty() || !std::filesystem::is_regular_file(cuda_path)) return opencl;
+    if (cuda_path.empty() || !std::filesystem::is_regular_file(cuda_path))
+        return {opencl, 0};
 
     static std::mutex selector_mutex;
     static std::unique_ptr<Api> cuda;
     static std::map<std::string, bool> cache;
+    const char* tune_env = std::getenv("AEVUM_TUNE_DIR");
     const std::string key = std::to_string(exponent) + ":" + std::to_string(registers) +
-        ":" + std::to_string(device) + ":" + std::to_string(workload) + ":" + fft_spec;
+        ":" + std::to_string(device) + ":" + std::to_string(*ordinal) +
+        ":" + std::to_string(workload) + ":" + fft_spec +
+        ":" + (tune_env ? tune_env : "") + ":" + mode;
     std::lock_guard<std::mutex> lock(selector_mutex);
-    if (auto it = cache.find(key); it != cache.end()) return it->second && cuda ? *cuda : opencl;
+    if (auto it = cache.find(key); it != cache.end())
+        return {it->second && cuda ? *cuda : opencl, *ordinal};
     try {
         if (!cuda) cuda = std::make_unique<Api>(cuda_path);
-        // PRP is the only workload currently calibrated. Preserve the known
-        // OpenCL behavior for P-1, LL, ECM and other workloads until tested.
-        if (workload != 1u) {
-            cache[key] = false;
-            return opencl;
-        }
-        const auto baseline_device = static_cast<uint32_t>(resolve_aevum_device(device).index);
-        const Probe ocl_result = probe_backend(opencl, exponent, registers, baseline_device, fft_spec, workload);
-        const Probe cuda_result = probe_backend(*cuda, exponent, registers, 0, fft_spec, workload);
-        // Fail closed: the fallback is always the established OpenCL plugin.
-        const bool use_cuda = cuda_result.residue == ocl_result.residue &&
-                              cuda_result.us_per_square > 0 &&
-                              cuda_result.us_per_square < 0.97 * ocl_result.us_per_square;
+        const uint32_t opencl_ordinal =
+            static_cast<uint32_t>(resolve_aevum_device(device).index);
+        const Probe ocl_result = probe_backend(opencl, exponent, registers,
+                                               opencl_ordinal, fft_spec, workload);
+        const Probe cuda_result = probe_backend(*cuda, exponent, registers,
+                                                *ordinal, fft_spec, workload);
+        const bool exact = cuda_result.residue == ocl_result.residue;
+        // A 3% margin avoids selecting CUDA based on timing noise. The
+        // explicit 'cuda' override is for diagnostics, but exactness is still
+        // mandatory and failures always fall back to the OpenCL plugin.
+        const bool use_cuda = exact && cuda_result.us_per_operation > 0 &&
+            (mode == "cuda" ||
+             cuda_result.us_per_operation < 0.97 * ocl_result.us_per_operation);
         cache[key] = use_cuda;
-        std::cout << "[Backend Aevum] CUDA/OpenCL probe: CUDA=" << cuda_result.us_per_square
-                  << " us, OpenCL=" << ocl_result.us_per_square
-                  << " us, exact=" << (cuda_result.residue == ocl_result.residue ? "yes" : "no")
-                  << ", selected=" << (use_cuda ? "CUDA" : "OpenCL") << std::endl;
-        return use_cuda ? *cuda : opencl;
+        std::cout << "[Backend Aevum] CUDA/OpenCL auto: workload=" << workload
+                  << " gpu=" << device << " cuda-ordinal=" << *ordinal
+                  << " OpenCL=" << ocl_result.us_per_operation << " us"
+                  << " (" << ocl_result.plan << ")"
+                  << " CUDA=" << cuda_result.us_per_operation << " us"
+                  << " (" << cuda_result.plan << ")"
+                  << " exact=" << (exact ? "yes" : "no")
+                  << " selected=" << (use_cuda ? "CUDA" : "OpenCL") << std::endl;
+        return {use_cuda ? *cuda : opencl, *ordinal};
     } catch (const std::exception& error) {
         cache[key] = false;
         std::cerr << "[Backend Aevum] CUDA unavailable or probe failed; using OpenCL: "
                   << error.what() << std::endl;
-        return opencl;
+        return {opencl, *ordinal};
     }
 }
 
@@ -477,9 +595,10 @@ class engine_aevum final : public engine {
 public:
     engine_aevum(uint32_t exponent, std::size_t register_count, std::size_t device, bool verbose, const std::string& fft_spec, uint32_t workload)
         : exponent_(exponent), register_count_(register_count),
-          api_(choose_api(exponent, register_count, device, fft_spec, workload)) {
+          choice_(choose_api(exponent, register_count, device, fft_spec, workload)),
+          api_(choice_.plugin) {
         const std::string tune_dir = api_.tune_dir().string();
-        const auto plugin_device = api_.is_cuda ? uint32_t{0}
+        const auto plugin_device = api_.is_cuda ? choice_.cuda_ordinal
             : static_cast<uint32_t>(resolve_aevum_device(device).index);
         if (api_.create_ex) {
             handle_ = api_.create_ex(exponent, register_count, plugin_device, verbose ? 1 : 0,
@@ -764,6 +883,7 @@ private:
 
     uint32_t exponent_;
     std::size_t register_count_;
+    BackendChoice choice_;
     Api& api_;
     Handle handle_ = nullptr;
     std::size_t transform_size_ = 0;

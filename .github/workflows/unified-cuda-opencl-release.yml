@@ -6,6 +6,7 @@ on:
       - src/aevum/EngineAevum.cpp
       - Makefile
       - tests/dual_backend_source_test.py
+      - .github/workflows/build_mac_os.yml
       - .github/workflows/unified-cuda-opencl-release.yml
   pull_request:
     branches: [main]
@@ -13,13 +14,13 @@ on:
       - src/aevum/EngineAevum.cpp
       - Makefile
       - tests/dual_backend_source_test.py
+      - .github/workflows/build_mac_os.yml
       - .github/workflows/unified-cuda-opencl-release.yml
   workflow_dispatch:
 permissions:
   contents: write
 env:
-  TAG: v4.20.97-alpha-v100.45-dual-auto
-  OLD_TAG: v4.20.97-alpha-v100.44-cuda-opencl-preview1
+  TAG: v4.20.97-alpha-v100.46-multimode-auto
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -34,21 +35,23 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/dual_backend_source_test.py
+          make test-aevum-device-map
+          make test-aevum-auto
           make -j"$(nproc)" MARCH=x86-64 KERNEL_PATH=./kernels/
           test -s prmers
           test -s third_party/aevum/build-engine/libaevum_engine.so
           mkdir -p stage/third_party/aevum/build-engine stage/kernels dist
           cp prmers stage/
           cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/
-          make -C third_party/aevum clean
-          make -C third_party/aevum CUDA=1 engine-lib -j"$(nproc)" OPENCL_LIBS='-L/usr/local/cuda/lib64/stubs -L/usr/local/cuda/lib64 -lcuda -lnvrtc'
-          readelf -d third_party/aevum/build-engine/libaevum_engine.so | tee deps.txt
+          make aevum-dual
+          test -s third_party/aevum/build-engine/libaevum_engine_cuda.so
+          readelf -d third_party/aevum/build-engine/libaevum_engine_cuda.so | tee deps.txt
           grep -q libnvrtc deps.txt
           grep -q libcuda deps.txt
-          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/libaevum_engine_cuda.so
+          cp third_party/aevum/build-engine/libaevum_engine_cuda.so stage/third_party/aevum/build-engine/
           cp -R kernels/. stage/kernels/
           cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
-          printf '%s\n' 'CUDA 13.x NVRTC is optional; without NVIDIA CUDA, the loader uses OpenCL.' 'Dual-backend selector runtime requires further GPU validation.' > stage/README_DUAL_BACKEND.txt
+          printf '%s\n' 'AUTO measures CUDA and OpenCL per supported workload with a matching-residue safety gate.' 'Missing driver, NVRTC, plugin or GPU mapping: OpenCL fallback.' 'Real-GPU runtime validation still required.' > stage/README_DUAL_BACKEND.txt
           tar -czf dist/prmers-linux-unified.tar.gz -C stage .
           tar -tzf dist/prmers-linux-unified.tar.gz > archive_list.txt
           grep -q libaevum_engine_cuda.so archive_list.txt
@@ -72,36 +75,37 @@ jobs:
             mingw-w64-ucrt-x86_64-gmp
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
-      - name: Compile both backends from main
+      - uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: '13.2.0'
+          method: network
+      - name: Build Windows host and OpenCL/CUDA engines from main
         shell: msys2 {0}
         run: |
           set -euo pipefail
           python tests/dual_backend_source_test.py
-          # The pinned Aevum vendor source is unchanged from v100.44.
-          # Reuse its already CI-linked, checksum-verified Windows CUDA engine;
-          # rebuild the main executable and OpenCL engine from this commit.
-          mkdir -p prebuilt
-          curl -fL --retry 3 'https://github.com/cherubrock-seb/PrMers/releases/download/v4.20.97-alpha-v100.44-cuda-opencl-preview1/prmers-windows-cuda-experimental.zip' -o prebuilt/cuda.zip
-          echo 'bc114420e89c398251887be40a64fdc7ee43b3e9ccf230265445af2434a1e451  prebuilt/cuda.zip' | sha256sum -c -
-          mkdir -p prebuilt/unpacked
-          unzip -oq prebuilt/cuda.zip -d prebuilt/unpacked
+          python tests/native_pfa_cli_source_test.py
           make -j"$(nproc)" MARCH=x86-64
           test -s prmers.exe
+          : "$CUDA_PATH"
+          CUDA_ROOT="$(cygpath -u "$CUDA_PATH")"
+          make aevum-dual AEVUM_CUDA_ROOT="$CUDA_ROOT"
+          test -s third_party/aevum/build-engine/libaevum_engine.so
+          test -s third_party/aevum/build-engine/aevum_engine_cuda.dll
+          objdump -p third_party/aevum/build-engine/aevum_engine_cuda.dll > deps.txt
+          grep -Eiq 'DLL Name:.*nvrtc' deps.txt
           mkdir -p stage/third_party/aevum/build-engine stage/kernels
           cp prmers.exe stage/
           cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/aevum_engine.dll
-          mapfile -t cuda_dlls < <(find prebuilt/unpacked -type f -iname 'aevum_engine.dll')
-          test "${#cuda_dlls[@]}" -eq 1
-          objdump -p "${cuda_dlls[0]}" > deps.txt
-          grep -Eiq 'DLL Name:.*nvrtc' deps.txt
-          cp "${cuda_dlls[0]}" stage/third_party/aevum/build-engine/aevum_engine_cuda.dll
+          cp third_party/aevum/build-engine/aevum_engine_cuda.dll stage/third_party/aevum/build-engine/
           cp -R kernels/. stage/kernels/
           cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
           for lib in libgmp-10.dll libgmpxx-4.dll libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
             if test -f "/ucrt64/bin/$lib"; then cp "/ucrt64/bin/$lib" stage/; fi
           done
           if test -f /ucrt64/bin/OpenCL.dll; then cp /ucrt64/bin/OpenCL.dll stage/; fi
-          printf '%s\n' 'CUDA is optional; without NVIDIA CUDA, the loader uses OpenCL.' > stage/README_DUAL_BACKEND.txt
+          printf '%s\n' 'AUTO measures CUDA and OpenCL per workload with a matching-residue safety gate.' \
+            'If CUDA is absent or unsafe, OpenCL is retained.' > stage/README_DUAL_BACKEND.txt
       - name: Package portable Windows ZIP
         shell: pwsh
         run: |
@@ -113,9 +117,12 @@ jobs:
           name: unified-windows
           path: dist/*
           if-no-files-found: error
+  macos:
+    uses: ./.github/workflows/build_mac_os.yml
+
   publish:
-    if: github.event_name != 'pull_request'
-    needs: [linux, windows]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -123,7 +130,12 @@ jobs:
           pattern: unified-*
           path: dist
           merge-multiple: true
-      - name: Release checked main binaries and promote existing preview
+      - uses: actions/download-artifact@v4
+        with:
+          name: prmers-macos-release-packages
+          path: dist
+          merge-multiple: true
+      - name: Release checked main binaries
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -131,21 +143,21 @@ jobs:
           set -euo pipefail
           cd dist
           sha256sum *.tar.gz *.zip > SHA256SUMS.txt
-          test "$(wc -l < SHA256SUMS.txt)" -eq 2
+          test "$(wc -l < SHA256SUMS.txt)" -eq 5
           cat > NOTES.md <<'EOF'
-          Unified PrMers executable for Windows and Linux: OpenCL default and optional NVIDIA CUDA plugin in the same package.
+          PrMers v100.46: unified Aevum CUDA/OpenCL selection for PRP, Lucas-Lehmer, P-1 (including low-memory), ECM and generic workloads wherever Aevum is supported.
 
-          On a supported single-NVIDIA-GPU system, the runtime benchmarks OpenCL and CUDA squarings with an identical residue and uses CUDA only if at least 3% faster. Missing CUDA driver/NVRTC/plugin, unsupported devices, probe errors or residue mismatch automatically select OpenCL.
+          Aevum's existing per-workload FFT selector remains authoritative, including tune.txt and explicit FFT overrides. On NVIDIA, a bounded workload-aware probe verifies canonical residue agreement, selecting CUDA only if at least 3% faster. Missing CUDA/NVRTC, unsupported GPU mapping, errors and mismatches safely retain OpenCL.
 
-          Source: 'make' builds OpenCL; 'make aevum-dual' builds both engines with the CUDA Toolkit. Windows CUDA binary is reused from the checksum-verified v100.44 build of the identical Aevum source; the Windows host executable and OpenCL plugin are rebuilt from this commit. Set AEVUM_BACKEND=opencl to bypass probing. Explicit AEVUM_ENGINE_LIB remains supported.
+          GPU mapping checks PCI identities where available, including multi-GPU systems. Ambiguous mapping fails closed to OpenCL. Windows and Linux ship both engines; macOS arm64, x86_64 and universal2 ship OpenCL without requiring CUDA.
 
-          CUDA requires NVIDIA driver and CUDA 13.x NVRTC runtime. Cross-platform build/link and GPU-less static checks are validated. The new dual-selector runtime needs further NVIDIA hardware validation before general recommendation. macOS continues to use OpenCL-only releases.
+          Source: make builds OpenCL without CUDA prerequisites; make aevum-dual builds both plugins with CUDA Toolkit; make install installs available plugins. AEVUM_BACKEND=opencl disables CUDA selection; AEVUM_BACKEND=cuda provides diagnostic opt-in subject to the residue safety gate. Explicit AEVUM_ENGINE_LIB retains priority.
+
+          CI validates builds, packaging and GPU-less checks; cross-vendor hardware correctness and end-to-end performance still require real-GPU validation.
           EOF
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.45 unified CUDA/OpenCL" --notes-file NOTES.md
+            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.46 multi-mode CUDA/OpenCL auto" --notes-file NOTES.md
           fi
-          gh release edit "$OLD_TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
-          gh release view "$OLD_TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease

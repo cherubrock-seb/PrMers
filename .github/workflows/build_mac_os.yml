@@ -1,6 +1,7 @@
 name: Build portable macOS packages
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       source_ref:
