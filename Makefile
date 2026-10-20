@@ -92,9 +92,11 @@ install: all
 	install -m 644 kernels/*.cl $(DESTDIR)$(KERNEL_PATH)
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
 	install -m 755 third_party/aevum/build-engine/libaevum_engine.so $(DESTDIR)$(PREFIX)/lib/prmers/
-	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
-		install -m 755 third_party/aevum/build-engine/libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/; \
-	fi
+	@for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do \
+		if [ -f third_party/aevum/build-engine/$name ]; then \
+			install -m 755 third_party/aevum/build-engine/$name $(DESTDIR)$(PREFIX)/lib/prmers/; \
+		fi; \
+	done
 	install -d $(DESTDIR)$(PREFIX)/share/prmers/aevum
 	install -m 644 third_party/aevum/tune.txt $(DESTDIR)$(PREFIX)/share/prmers/aevum/
 
@@ -106,9 +108,11 @@ package: all
 	mkdir -p package/$(PACKAGE)/third_party/aevum/build-engine
 	cp $(TARGET) package/$(PACKAGE)
 	cp third_party/aevum/build-engine/libaevum_engine.so package/$(PACKAGE)/third_party/aevum/build-engine/
-	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
-		cp third_party/aevum/build-engine/libaevum_engine_cuda.so package/$(PACKAGE)/third_party/aevum/build-engine/; \
-	fi
+	@for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do \
+		if [ -f third_party/aevum/build-engine/$name ]; then \
+			cp third_party/aevum/build-engine/$name package/$(PACKAGE)/third_party/aevum/build-engine/; \
+		fi; \
+	done
 	cp -r kernels package/$(PACKAGE)
 	bsdtar -czvf $(PACKAGE).zip -C package $(PACKAGE)
 
@@ -578,9 +582,11 @@ test-aevum-apple-port-source:
 install-aevum-engine: aevum-engine
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
 	install -m 755 third_party/aevum/build-engine/libaevum_engine.so $(DESTDIR)$(PREFIX)/lib/prmers/
-	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
-		install -m 755 third_party/aevum/build-engine/libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/; \
-	fi
+	@for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do \
+		if [ -f third_party/aevum/build-engine/$name ]; then \
+			install -m 755 third_party/aevum/build-engine/$name $(DESTDIR)$(PREFIX)/lib/prmers/; \
+		fi; \
+	done
 	install -d $(DESTDIR)$(PREFIX)/share/prmers/aevum
 	install -m 644 third_party/aevum/tune.txt $(DESTDIR)$(PREFIX)/share/prmers/aevum/
 
