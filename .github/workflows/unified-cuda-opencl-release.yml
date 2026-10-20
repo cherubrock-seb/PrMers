@@ -1,0 +1,140 @@
+name: Unified CUDA/OpenCL release
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/aevum/EngineAevum.cpp
+      - Makefile
+      - tests/dual_backend_source_test.py
+      - .github/workflows/unified-cuda-opencl-release.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  TAG: v4.20.97-alpha-v100.45-dual-auto
+  OLD_TAG: v4.20.97-alpha-v100.44-cuda-opencl-preview1
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:13.0.2-devel-ubuntu24.04
+    steps:
+      - run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates g++ make python3 binutils libgmp-dev ocl-icd-opencl-dev
+      - uses: actions/checkout@v4
+      - name: Compile both backends from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/dual_backend_source_test.py
+          make -j"$(nproc)" MARCH=x86-64 KERNEL_PATH=./kernels/
+          test -s prmers
+          test -s third_party/aevum/build-engine/libaevum_engine.so
+          mkdir -p stage/third_party/aevum/build-engine stage/kernels dist
+          cp prmers stage/
+          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/
+          make -C third_party/aevum clean
+          make -C third_party/aevum CUDA=1 engine-lib -j"$(nproc)" OPENCL_LIBS='-L/usr/local/cuda/lib64/stubs -L/usr/local/cuda/lib64 -lcuda -lnvrtc'
+          readelf -d third_party/aevum/build-engine/libaevum_engine.so | tee deps.txt
+          grep -q libnvrtc deps.txt
+          grep -q libcuda deps.txt
+          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/libaevum_engine_cuda.so
+          cp -R kernels/. stage/kernels/
+          cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
+          printf '%s\n' 'CUDA 13.x NVRTC is optional; without NVIDIA CUDA, the loader uses OpenCL.' 'Dual-backend selector runtime requires further GPU validation.' > stage/README_DUAL_BACKEND.txt
+          tar -czf dist/prmers-linux-unified.tar.gz -C stage .
+          tar -tzf dist/prmers-linux-unified.tar.gz | grep -q libaevum_engine_cuda.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-linux
+          path: dist/*
+          if-no-files-found: error
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git make python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gmp
+            mingw-w64-ucrt-x86_64-opencl-headers
+            mingw-w64-ucrt-x86_64-opencl-icd
+      - uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: '13.2.0'
+          method: network
+      - name: Compile both backends from main
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          python tests/dual_backend_source_test.py
+          test -n "$CUDA_PATH"
+          P="$(cygpath -u "$CUDA_PATH")"
+          test -f "$P/include/nvrtc.h"
+          make -j"$(nproc)" MARCH=x86-64
+          test -s prmers.exe
+          mkdir -p stage/third_party/aevum/build-engine stage/kernels
+          cp prmers.exe stage/
+          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/aevum_engine.dll
+          make -C third_party/aevum clean
+          make -C third_party/aevum CUDA=1 engine-lib -j"$(nproc)" CXX=g++ DL_LIBS= ENGINE_LINK_FLAGS='-shared -static-libstdc++ -static-libgcc' CUDAFLAGS="-DCUDA_BACKEND -Isrc/cuda -I\"$P/include\"" OPENCL_LIBS="-L\"$P/lib/x64\" -l:cuda.lib -l:nvrtc.lib"
+          objdump -p third_party/aevum/build-engine/libaevum_engine.so > deps.txt
+          grep -Eiq 'DLL Name:.*nvrtc' deps.txt
+          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/aevum_engine_cuda.dll
+          cp -R kernels/. stage/kernels/
+          cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
+          for lib in libgmp-10.dll libgmpxx-4.dll libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
+            if test -f "/ucrt64/bin/$lib"; then cp "/ucrt64/bin/$lib" stage/; fi
+          done
+          if test -f /ucrt64/bin/OpenCL.dll; then cp /ucrt64/bin/OpenCL.dll stage/; fi
+          printf '%s\n' 'CUDA is optional; without NVIDIA CUDA, the loader uses OpenCL.' > stage/README_DUAL_BACKEND.txt
+      - name: Package portable Windows ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path 'stage/*' -DestinationPath 'dist/prmers-windows-unified.zip' -CompressionLevel Optimal
+          [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'dist/prmers-windows-unified.zip')).Dispose()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-windows
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: unified-*
+          path: dist
+          merge-multiple: true
+      - name: Release checked main binaries and promote existing preview
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          test "$(wc -l < SHA256SUMS.txt)" -eq 2
+          cat > NOTES.md <<'EOF'
+          Unified PrMers executable for Windows and Linux: OpenCL default and optional NVIDIA CUDA plugin in the same package.
+
+          On a supported single-NVIDIA-GPU system, the runtime benchmarks OpenCL and CUDA squarings with an identical residue and uses CUDA only if at least 3% faster. Missing CUDA driver/NVRTC/plugin, unsupported devices, probe errors or residue mismatch automatically select OpenCL.
+
+          Source: 'make' builds OpenCL; 'make aevum-dual' builds both engines with the CUDA Toolkit. Set AEVUM_BACKEND=opencl to bypass probing. Explicit AEVUM_ENGINE_LIB remains supported.
+
+          CUDA requires NVIDIA driver and CUDA 13.x NVRTC runtime. Cross-platform build/link and GPU-less static checks are validated. The new dual-selector runtime needs further NVIDIA hardware validation before general recommendation. macOS continues to use OpenCL-only releases.
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.45 unified CUDA/OpenCL" --notes-file NOTES.md
+          fi
+          gh release edit "$OLD_TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
+          gh release view "$OLD_TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease
