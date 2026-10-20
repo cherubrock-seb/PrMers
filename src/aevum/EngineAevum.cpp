@@ -493,6 +493,11 @@ Probe probe_backend(Api& engine_api, uint32_t exponent, std::size_t registers,
             } else if (mixed && workload == 6u && i % 4 == 2) {
                 ok = engine_api.add(handle, 0, 1) &&
                      engine_api.sub_reg(handle, 0, 1);
+            } else if (workload == 2u) {
+                // LL's dominant fused square-minus-two must be part of the
+                // measured path; pure-square timing would be misleading.
+                ok = engine_api.square_mul(handle, 0, 1) &&
+                     engine_api.sub_u32(handle, 0, 2);
             } else {
                 const uint32_t factor = workload == 1u && i % 16 == 0 ? 3u : 1u;
                 ok = engine_api.square_mul(handle, 0, factor);
