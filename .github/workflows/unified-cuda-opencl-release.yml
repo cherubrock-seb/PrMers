@@ -50,7 +50,9 @@ jobs:
           cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
           printf '%s\n' 'CUDA 13.x NVRTC is optional; without NVIDIA CUDA, the loader uses OpenCL.' 'Dual-backend selector runtime requires further GPU validation.' > stage/README_DUAL_BACKEND.txt
           tar -czf dist/prmers-linux-unified.tar.gz -C stage .
-          tar -tzf dist/prmers-linux-unified.tar.gz | grep -q libaevum_engine_cuda.so
+          tar -tzf dist/prmers-linux-unified.tar.gz > archive_list.txt
+          grep -q libaevum_engine_cuda.so archive_list.txt
+          grep -q libaevum_engine.so archive_list.txt
       - uses: actions/upload-artifact@v4
         with:
           name: unified-linux
