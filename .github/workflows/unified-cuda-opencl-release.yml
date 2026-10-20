@@ -7,6 +7,13 @@ on:
       - Makefile
       - tests/dual_backend_source_test.py
       - .github/workflows/unified-cuda-opencl-release.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - src/aevum/EngineAevum.cpp
+      - Makefile
+      - tests/dual_backend_source_test.py
+      - .github/workflows/unified-cuda-opencl-release.yml
   workflow_dispatch:
 permissions:
   contents: write
@@ -104,6 +111,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
   publish:
+    if: github.event_name != 'pull_request'
     needs: [linux, windows]
     runs-on: ubuntu-24.04
     steps:
