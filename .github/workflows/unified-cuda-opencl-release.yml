@@ -6,6 +6,8 @@ on:
       - src/aevum/EngineAevum.cpp
       - Makefile
       - tests/dual_backend_source_test.py
+      - scripts/build_aevum_cuda.sh
+      - tests/test_aevum_cuda_auto_build.py
       - .github/workflows/build_mac_os.yml
       - .github/workflows/unified-cuda-opencl-release.yml
   pull_request:
@@ -14,13 +16,15 @@ on:
       - src/aevum/EngineAevum.cpp
       - Makefile
       - tests/dual_backend_source_test.py
+      - scripts/build_aevum_cuda.sh
+      - tests/test_aevum_cuda_auto_build.py
       - .github/workflows/build_mac_os.yml
       - .github/workflows/unified-cuda-opencl-release.yml
   workflow_dispatch:
 permissions:
   contents: write
 env:
-  TAG: v4.20.97-alpha-v100.46-multimode-auto
+  TAG: v4.20.97-alpha-v100.47-cuda-autobuild
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -35,11 +39,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/dual_backend_source_test.py
+          python3 tests/test_aevum_cuda_auto_build.py
           make test-aevum-device-map
           make test-aevum-auto
+          # Validate a fresh serial build: users should be able to run plain
+          # 'make' with no -j flag or special CUDA setup.
+          make MARCH=x86-64 KERNEL_PATH=./kernels/
+          # Also validate the incremental parallel code path.
+          # Exercise the serial default before the incremental parallel build.
+          make MARCH=x86-64
           make -j"$(nproc)" MARCH=x86-64 KERNEL_PATH=./kernels/
           test -s prmers
           test -s third_party/aevum/build-engine/libaevum_engine.so
+          # The *ordinary* make must now auto-build CUDA without manual steps.
+          test -s third_party/aevum/build-engine/libaevum_engine_cuda.so
           mkdir -p stage/third_party/aevum/build-engine stage/kernels dist
           cp prmers stage/
           cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/
@@ -84,9 +97,12 @@ jobs:
         run: |
           set -euo pipefail
           python tests/dual_backend_source_test.py
+          python tests/test_aevum_cuda_auto_build.py
           python tests/native_pfa_cli_source_test.py
           make -j"$(nproc)" MARCH=x86-64
           test -s prmers.exe
+          # Standard make detects the installed Windows CUDA SDK.
+          test -s third_party/aevum/build-engine/aevum_engine_cuda.dll
           : "$CUDA_PATH"
           CUDA_ROOT="$(cygpath -u "$CUDA_PATH")"
           make aevum-dual AEVUM_CUDA_ROOT="$CUDA_ROOT"
@@ -145,19 +161,19 @@ jobs:
           sha256sum *.tar.gz *.zip > SHA256SUMS.txt
           test "$(wc -l < SHA256SUMS.txt)" -eq 5
           cat > NOTES.md <<'EOF'
-          PrMers v100.46: unified Aevum CUDA/OpenCL selection for PRP, Lucas-Lehmer, P-1 (including low-memory), ECM and generic workloads wherever Aevum is supported.
+          PrMers v100.47: CUDA Toolkit auto-detection during standard source builds; retains unified Aevum CUDA/OpenCL selection for PRP, Lucas-Lehmer, P-1 (including low-memory), ECM and generic workloads wherever Aevum is supported.
 
           Aevum's existing per-workload FFT selector remains authoritative, including tune.txt and explicit FFT overrides. On NVIDIA, a bounded workload-aware probe verifies canonical residue agreement, selecting CUDA only if at least 3% faster. Missing CUDA/NVRTC, unsupported GPU mapping, errors and mismatches safely retain OpenCL.
 
           GPU mapping checks PCI identities where available, including multi-GPU systems. Ambiguous mapping fails closed to OpenCL. Windows and Linux ship both engines; macOS arm64, x86_64 and universal2 ship OpenCL without requiring CUDA.
 
-          Source: make builds OpenCL without CUDA prerequisites; make aevum-dual builds both plugins with CUDA Toolkit; make install installs available plugins. AEVUM_BACKEND=opencl disables CUDA selection; AEVUM_BACKEND=cuda provides diagnostic opt-in subject to the residue safety gate. Explicit AEVUM_ENGINE_LIB retains priority.
+          Source: plain make automatically builds OpenCL and, when a complete CUDA Toolkit SDK is detected, the optional CUDA plugin in an independent incremental build tree. On machines without CUDA, make succeeds with OpenCL only and prints how to install the optional CUDA Toolkit. make AEVUM_CUDA_MODE=off forces an OpenCL-only build; make aevum-dual or make AEVUM_CUDA_MODE=required requires an SDK. make install installs available plugins. AEVUM_BACKEND=opencl disables CUDA selection; AEVUM_BACKEND=cuda provides diagnostic opt-in subject to the residue safety gate. Explicit AEVUM_ENGINE_LIB retains priority.
 
           CI validates builds, packaging and GPU-less checks; cross-vendor hardware correctness and end-to-end performance still require real-GPU validation.
           EOF
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.46 multi-mode CUDA/OpenCL auto" --notes-file NOTES.md
+            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.47 CUDA auto-build and multi-mode GPU selector" --notes-file NOTES.md
           fi
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets

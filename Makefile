@@ -67,10 +67,10 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 
 MARIN_TEST_DEVICE ?= 0
 
-.PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine aevum-dual \
+.PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine aevum-engine-auto aevum-dual \
         install-aevum-engine test-aevum-host test-aevum-reg test-aevum-create-fallback test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-device-map test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
 
-all: aevum-engine $(TARGET)
+all: aevum-engine $(TARGET) aevum-engine-auto
 
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(PLATFORM_CXXFLAGS) $(CPPFLAGS) $^ -o $@ $(LDFLAGS) $(PLATFORM_LDFLAGS)
@@ -125,45 +125,32 @@ aevum-cuda:
 aevum-engine:
 	$(MAKE) -C third_party/aevum engine-lib
 
-# Optional dual build from one source tree. The standard 'make' never requires
-# CUDA, so source builds on AMD/Intel/macOS remain fully supported.
-# With CUDA Toolkit: make aevum-dual
-# Linux CUDA SDK locations may be overridden via AEVUM_CUDA_LIBS / FLAGS.
-ifeq ($(OS),Windows_NT)
-AEVUM_CUDA_ROOT ?= $(shell cygpath -u "$(CUDA_PATH)")
-AEVUM_CUDA_LIBS ?= -L"$(AEVUM_CUDA_ROOT)/lib/x64" -l:cuda.lib -l:nvrtc.lib
-AEVUM_CUDA_LINK_FLAGS ?= DL_LIBS= CXX=g++ ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
-else
-AEVUM_CUDA_ROOT ?= /usr/local/cuda
-AEVUM_CUDA_LIBS ?= -L$(AEVUM_CUDA_ROOT)/lib64/stubs -L$(AEVUM_CUDA_ROOT)/lib64 -lcuda -lnvrtc
-AEVUM_CUDA_LINK_FLAGS ?=
-endif
-AEVUM_CUDA_FLAGS ?= -DCUDA_BACKEND -Isrc/cuda -I"$(AEVUM_CUDA_ROOT)/include"
+# Default 'make' auto-detects CUDA SDK headers/NVRTC/link libraries, but
+# NEVER needs them to build the normal OpenCL engine. Both backends are built
+# in independent object directories for incremental and parallel safety.
+#
+# make                 => OpenCL + CUDA if a complete SDK is available
+# make AEVUM_CUDA_MODE=off => OpenCL only, no SDK detection
+# make aevum-dual       => require CUDA SDK and CUDA compilation (strict)
+# make AEVUM_CUDA_MODE=required => require CUDA SDK even in default build
+#
+# AEVUM_CUDA_ROOT/CUDA_HOME/CUDA_PATH, AEVUM_CUDA_LIBS and
+# AEVUM_CUDA_FLAGS allow nonstandard SDK layouts. No NVIDIA driver is
+# required to compile when the Toolkit contains the driver stub library.
+AEVUM_CUDA_MODE ?= auto
+AEVUM_CUDA_ROOT ?=
+AEVUM_CUDA_LIBS ?=
+AEVUM_CUDA_FLAGS ?=
 
-# A single source build produces OpenCL plus optional native CUDA. Rebuild
-# OpenCL after CUDA to avoid stale CUDA .o files poisoning the next 'make'.
-# Missing toolkit fails this OPT-IN target, never the ordinary build/install.
+aevum-engine-auto: aevum-engine
+	+@AEVUM_MAKE="$(MAKE)" AEVUM_CUDA_ROOT="$(AEVUM_CUDA_ROOT)" \
+	  AEVUM_CUDA_LIBS='$(AEVUM_CUDA_LIBS)' AEVUM_CUDA_FLAGS='$(AEVUM_CUDA_FLAGS)' \
+	  sh scripts/build_aevum_cuda.sh "$(AEVUM_CUDA_MODE)"
+
 aevum-dual: aevum-engine
-	@set -eu; \
-	  if [ "$(shell uname -s)" = "Darwin" ]; then \
-	    echo "macOS supports OpenCL only; use make."; exit 0; \
-	  fi; \
-	  tmp=$$(mktemp -d); \
-	  cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/opencl.so"; \
-	  trap 'if test -f "$$tmp/opencl.so"; then mkdir -p third_party/aevum/build-engine; cp "$$tmp/opencl.so" third_party/aevum/build-engine/libaevum_engine.so; fi; rm -rf "$$tmp"' EXIT; \
-	  $(MAKE) -C third_party/aevum clean; \
-	  $(MAKE) -C third_party/aevum CUDA=1 engine-lib \
-	    $(AEVUM_CUDA_LINK_FLAGS) \
-	    CUDAFLAGS='$(AEVUM_CUDA_FLAGS)' OPENCL_LIBS='$(AEVUM_CUDA_LIBS)'; \
-	  if [ "$(OS)" = "Windows_NT" ]; then \
-	    cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/aevum_engine_cuda.dll"; \
-	  else \
-	    cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/libaevum_engine_cuda.so"; \
-	  fi; \
-	  $(MAKE) -C third_party/aevum clean; \
-	  $(MAKE) -C third_party/aevum engine-lib; \
-	  cp "$$tmp/"*cuda.* third_party/aevum/build-engine/; \
-	  echo "Aevum OpenCL + optional CUDA plugins built and installed in build-engine."
+	+@AEVUM_MAKE="$(MAKE)" AEVUM_CUDA_ROOT="$(AEVUM_CUDA_ROOT)" \
+	  AEVUM_CUDA_LIBS='$(AEVUM_CUDA_LIBS)' AEVUM_CUDA_FLAGS='$(AEVUM_CUDA_FLAGS)' \
+	  sh scripts/build_aevum_cuda.sh required
 
 test-aevum-host:
 	$(MAKE) -C third_party/aevum test-host
@@ -579,7 +566,7 @@ test-backend-matrix: all
 test-aevum-apple-port-source:
 	bash tests/source_v9942_apple_port_audit.sh
 
-install-aevum-engine: aevum-engine
+install-aevum-engine: aevum-engine-auto
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
 	install -m 755 third_party/aevum/build-engine/libaevum_engine.so $(DESTDIR)$(PREFIX)/lib/prmers/
 	@for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do \
@@ -593,6 +580,7 @@ install-aevum-engine: aevum-engine
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(TARGET)
 	rm -f $(DESTDIR)$(PREFIX)/lib/prmers/libaevum_engine.so
+	rm -f $(DESTDIR)$(PREFIX)/lib/prmers/libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/aevum_engine_cuda.dll
 	rm -rf $(DESTDIR)$(PREFIX)/share/prmers/aevum
 	rm -rf $(DESTDIR)$(KERNEL_PATH)
 
@@ -601,7 +589,7 @@ clean:
 
 clean-all: clean
 	$(MAKE) -C third_party/aevum clean
-	rm -rf third_party/aevum/build-tests tests/build-aevum-reg package
+	rm -rf third_party/aevum/build-engine-cuda third_party/aevum/build-tests tests/build-aevum-reg package
 
 .PHONY: native-pfa-build native-pfa-host-test native-pfa-gpu-test
 native-pfa-build: all

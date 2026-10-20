@@ -40,7 +40,12 @@ for token in (
 
 assert "workload != 1u" not in src, "PRP-only backend gate reintroduced"
 assert "one_nvidia_gpu(device)" not in src, "One-GPU backend gate reintroduced"
-assert "aevum-dual:" in make and "CUDA=1 engine-lib" in make
+assert "aevum-dual: aevum-engine" in make
+assert "all: aevum-engine $(TARGET) aevum-engine-auto" in make
+assert "AEVUM_CUDA_MODE ?= auto" in make
+assert "scripts/build_aevum_cuda.sh" in make
+assert "ENGINE_BIN=build-engine-cuda" in Path("scripts/build_aevum_cuda.sh").read_text()
+assert "OpenCL-only build remains functional" in Path("scripts/build_aevum_cuda.sh").read_text()
 assert "for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do" in make
 assert "install -m 755 third_party/aevum/build-engine/$name $(DESTDIR)$(PREFIX)/lib/prmers/" in make
 assert "make aevum-dual" in workflow
