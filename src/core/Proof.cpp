@@ -26,6 +26,7 @@
 #include "math/Carry.hpp"
 #include "io/Sha3Hash.h"
 #include "util/Timer.hpp"
+#include "util/OpenCLError.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -333,7 +334,11 @@ bool Proof::verify(const GpuContext& gpu, uint32_t npower) const {
     k += its;
     
     // Flush GPU operations
-    clFinish(gpu.ctx.getQueue());
+    const cl_int finishErr = clFinish(gpu.ctx.getQueue());
+    if (finishErr != CL_SUCCESS) {
+      util::throwClError(finishErr, util::gpulost::Phase::Run, "clFinish (proof verification)",
+                         std::string("clFinish failed during proof verification: ") + util::getCLErrorString(finishErr));
+    }
     
     // Log progress for long operations
     if (span > logStep && k % logStep == 0) {

@@ -22,6 +22,7 @@
  */
 #include "core/ProofManager.hpp"
 #include "io/JsonBuilder.hpp"
+#include "util/OpenCLError.hpp"
 #include <vector>
 #include <iostream>
 #include <filesystem>
@@ -84,10 +85,17 @@ ProofManager::ProofManager(uint32_t exponent, int proofLevel,
 void ProofManager::checkpoint(cl_mem buf, uint32_t iter) {
     if (! proofSet_.shouldCheckpoint(iter)) return;
 
+    // A failed read leaves host all zero, and that would be saved (and read back fine) as the proof residue of
+    // this iteration, which makes the proof built from it fail or be wrong.  Stop instead.
     std::vector<uint64_t> host(n_);
-    clEnqueueReadBuffer(queue_, buf, CL_TRUE, 0,
-                        n_ * sizeof(uint64_t),
-                        host.data(), 0, nullptr, nullptr);
+    const cl_int err = clEnqueueReadBuffer(queue_, buf, CL_TRUE, 0,
+                                           n_ * sizeof(uint64_t),
+                                           host.data(), 0, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueReadBuffer (proof residue)",
+                           "Failed to read the proof residue of iteration " + std::to_string(iter) +
+                               " from the GPU: " + util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+    }
 
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
 
