@@ -41,7 +41,8 @@ for token in (
 assert "workload != 1u" not in src, "PRP-only backend gate reintroduced"
 assert "one_nvidia_gpu(device)" not in src, "One-GPU backend gate reintroduced"
 assert "aevum-dual:" in make and "CUDA=1 engine-lib" in make
-assert "libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/" in make
+assert "for name in libaevum_engine_cuda.so aevum_engine_cuda.dll; do" in make
+assert "install -m 755 third_party/aevum/build-engine/$name $(DESTDIR)$(PREFIX)/lib/prmers/" in make
 assert "make aevum-dual" in workflow
 assert "uses: ./.github/workflows/build_mac_os.yml" in workflow
 assert "needs: [linux, windows, macos]" in workflow
