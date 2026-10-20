@@ -43,12 +43,6 @@ Linux and Windows unified release archives ship the ordinary OpenCL engine and o
 
 Extract the package intact; `-aevum` forces the Aevum engine while keeping its FFT plan automatic. Without `-aevum`, the ordinary Marin/Aevum backend selection policy still applies.
 
-## Kaggle T4 ×2 smoke validation
-
-`notebooks/kaggle_dual_backend_validation.ipynb` and `scripts/kaggle_dual_backend_smoke.py` install native dependencies, build both engines on Kaggle for glibc compatibility, then exercise AUTO and forced OpenCL on GPU indices 0 and 1 across PRP, LL, P-1, ECM and Gaussian P-1.
-
-These validation files contain **no database credentials or production campaign tasks**. They must not be confused with complete end-to-end mathematical correctness certification, multi-day benchmark results or successful operation of any external database.
-
 ## Release validation
 
 CI builds/link-checks and packages Linux, Windows, macOS Intel, macOS arm64 and macOS universal2. GPU-less runners do not validate hardware-runtime correctness. Real CUDA/OpenCL runs on independent NVIDIA hardware and AMD/Intel OpenCL regression checks are necessary before a broad rollout.
