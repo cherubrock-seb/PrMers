@@ -143,7 +143,7 @@ cd PrMers
 make
 ```
 
-That is the entire **source build**, with or without an NVIDIA GPU or CUDA SDK. On systems with a working OpenCL driver, run `./prmers -v` or `./prmers 136279841`. Parallel compilation (`make -j4` or `make -j"$(nproc)"`) is optional, not required.
+That is the entire **source build**, with or without an NVIDIA GPU or CUDA SDK. Verify the executable with `./prmers -v`. For normal GPU calculations, **either install** with `sudo make install` (which provides system-wide kernels), **or build for execution from the source directory** using `make KERNEL_PATH=./kernels/` *from a clean checkout*. If you previously compiled with another `KERNEL_PATH`, first run `make clean` before changing it. Parallel compilation (`make -j4` or `make -j"$(nproc)"`) is optional, not required.
 
 **Optional: enable native CUDA builds on NVIDIA systems.** A working NVIDIA driver alone is *not* the CUDA development Toolkit. PrMers detects the Toolkit's `cuda.h`, `nvrtc.h`, NVRTC library and CUDA driver link library (SDK stub or system library). Install the SDK once and rerun the **same `make` command**.
 
@@ -177,7 +177,7 @@ sudo make install
 
 This installs `/usr/local/bin/prmers`, the OpenCL engine under `/usr/local/lib/prmers/`, the CUDA engine there **if built**, and kernels/tuning data under `/usr/local/share/prmers/`. The installation does not install CUDA or drivers.
 
-For a self-contained folder (run from the extracted/build directory), compile with `make KERNEL_PATH=./kernels/`; `make clean` is only needed when switching build settings that affect already-compiled host objects.
+For a self-contained folder (running `./prmers` directly from the checkout), build from a fresh checkout with `make KERNEL_PATH=./kernels/`; otherwise run `make clean` before changing the existing `KERNEL_PATH`. A portable-kernel build is **not** compatible with `make install` as-is: switch back to the default kernel path and rebuild first.
 
 ### Windows — MSYS2 UCRT64 Make (recommended for both engines)
 
