@@ -92,6 +92,9 @@ install: all
 	install -m 644 kernels/*.cl $(DESTDIR)$(KERNEL_PATH)
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
 	install -m 755 third_party/aevum/build-engine/libaevum_engine.so $(DESTDIR)$(PREFIX)/lib/prmers/
+	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
+		install -m 755 third_party/aevum/build-engine/libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/; \
+	fi
 	install -d $(DESTDIR)$(PREFIX)/share/prmers/aevum
 	install -m 644 third_party/aevum/tune.txt $(DESTDIR)$(PREFIX)/share/prmers/aevum/
 
@@ -103,6 +106,9 @@ package: all
 	mkdir -p package/$(PACKAGE)/third_party/aevum/build-engine
 	cp $(TARGET) package/$(PACKAGE)
 	cp third_party/aevum/build-engine/libaevum_engine.so package/$(PACKAGE)/third_party/aevum/build-engine/
+	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
+		cp third_party/aevum/build-engine/libaevum_engine_cuda.so package/$(PACKAGE)/third_party/aevum/build-engine/; \
+	fi
 	cp -r kernels package/$(PACKAGE)
 	bsdtar -czvf $(PACKAGE).zip -C package $(PACKAGE)
 
@@ -119,23 +125,41 @@ aevum-engine:
 # CUDA, so source builds on AMD/Intel/macOS remain fully supported.
 # With CUDA Toolkit: make aevum-dual
 # Linux CUDA SDK locations may be overridden via AEVUM_CUDA_LIBS / FLAGS.
-AEVUM_CUDA_LIBS ?= -L/usr/local/cuda/lib64/stubs -L/usr/local/cuda/lib64 -lcuda -lnvrtc
-AEVUM_CUDA_FLAGS ?= -DCUDA_BACKEND -Isrc/cuda -I/usr/local/cuda/include
+ifeq ($(OS),Windows_NT)
+AEVUM_CUDA_ROOT ?= $(shell cygpath -u "$(CUDA_PATH)")
+AEVUM_CUDA_LIBS ?= -L"$(AEVUM_CUDA_ROOT)/lib/x64" -l:cuda.lib -l:nvrtc.lib
+AEVUM_CUDA_LINK_FLAGS ?= DL_LIBS= CXX=g++ ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
+else
+AEVUM_CUDA_ROOT ?= /usr/local/cuda
+AEVUM_CUDA_LIBS ?= -L$(AEVUM_CUDA_ROOT)/lib64/stubs -L$(AEVUM_CUDA_ROOT)/lib64 -lcuda -lnvrtc
+AEVUM_CUDA_LINK_FLAGS ?=
+endif
+AEVUM_CUDA_FLAGS ?= -DCUDA_BACKEND -Isrc/cuda -I"$(AEVUM_CUDA_ROOT)/include"
+
+# A single source build produces OpenCL plus optional native CUDA. Rebuild
+# OpenCL after CUDA to avoid stale CUDA .o files poisoning the next 'make'.
+# Missing toolkit fails this OPT-IN target, never the ordinary build/install.
 aevum-dual: aevum-engine
 	@set -eu; \
-	  tmp=$(mktemp -d); \
-	  trap 'cp "$tmp/opencl.so" third_party/aevum/build-engine/libaevum_engine.so; rm -rf "$tmp"' EXIT; \
-	  cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/opencl.so"; \
+	  if [ "$(shell uname -s)" = "Darwin" ]; then \
+	    echo "macOS supports OpenCL only; use make."; exit 0; \
+	  fi; \
+	  tmp=$$(mktemp -d); \
+	  cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/opencl.so"; \
+	  trap 'if test -f "$$tmp/opencl.so"; then mkdir -p third_party/aevum/build-engine; cp "$$tmp/opencl.so" third_party/aevum/build-engine/libaevum_engine.so; fi; rm -rf "$$tmp"' EXIT; \
 	  $(MAKE) -C third_party/aevum clean; \
 	  $(MAKE) -C third_party/aevum CUDA=1 engine-lib \
-	    CUDAFLAGS="$(AEVUM_CUDA_FLAGS)" OPENCL_LIBS="$(AEVUM_CUDA_LIBS)"; \
+	    $(AEVUM_CUDA_LINK_FLAGS) \
+	    CUDAFLAGS='$(AEVUM_CUDA_FLAGS)' OPENCL_LIBS='$(AEVUM_CUDA_LIBS)'; \
 	  if [ "$(OS)" = "Windows_NT" ]; then \
-	    cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/aevum_engine_cuda.dll"; \
+	    cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/aevum_engine_cuda.dll"; \
 	  else \
-	    cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/libaevum_engine_cuda.so"; \
+	    cp third_party/aevum/build-engine/libaevum_engine.so "$$tmp/libaevum_engine_cuda.so"; \
 	  fi; \
-	  cp "$tmp"/*cuda.* third_party/aevum/build-engine/; \
-	  echo "Dual Aevum plugins built (OpenCL default plus optional CUDA)."
+	  $(MAKE) -C third_party/aevum clean; \
+	  $(MAKE) -C third_party/aevum engine-lib; \
+	  cp "$$tmp/"*cuda.* third_party/aevum/build-engine/; \
+	  echo "Aevum OpenCL + optional CUDA plugins built and installed in build-engine."
 
 test-aevum-host:
 	$(MAKE) -C third_party/aevum test-host
@@ -554,6 +578,9 @@ test-aevum-apple-port-source:
 install-aevum-engine: aevum-engine
 	install -d $(DESTDIR)$(PREFIX)/lib/prmers
 	install -m 755 third_party/aevum/build-engine/libaevum_engine.so $(DESTDIR)$(PREFIX)/lib/prmers/
+	@if [ -f third_party/aevum/build-engine/libaevum_engine_cuda.so ]; then \
+		install -m 755 third_party/aevum/build-engine/libaevum_engine_cuda.so $(DESTDIR)$(PREFIX)/lib/prmers/; \
+	fi
 	install -d $(DESTDIR)$(PREFIX)/share/prmers/aevum
 	install -m 644 third_party/aevum/tune.txt $(DESTDIR)$(PREFIX)/share/prmers/aevum/
 
