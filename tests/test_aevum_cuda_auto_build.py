@@ -28,8 +28,8 @@ def invoke(mode, root, vendor, fake_make, log, *, windows=False, failure=False):
     fake_bin = fake_make.parent / ("fake-bin-windows" if windows else "fake-bin-linux")
     fake_bin.mkdir(exist_ok=True)
     uname = fake_bin / "uname"
-    uname.write_text("#!/bin/sh\\nprintf 'MINGW64_NT\\n'\\n" if windows
-                     else "#!/bin/sh\\nprintf 'Linux\\n'\\n")
+    uname.write_text("#!/bin/sh\nprintf 'MINGW64_NT\\n'\n" if windows
+                     else "#!/bin/sh\nprintf 'Linux\\n'\n")
     uname.chmod(0o755)
     env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
     return subprocess.run(["sh", str(SCRIPT), mode], env=env, text=True,
