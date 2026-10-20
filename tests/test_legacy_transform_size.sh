@@ -18,7 +18,7 @@ trap 'rm -rf "$BUILD"' EXIT
   "$ROOT/tests/legacy_transform_size_test.cpp" \
   "$ROOT/src/math/Precompute.cpp" \
   "$ROOT/src/math/Mod64.cpp" \
-  "$ROOT/src/core/BackupManager.cpp" \
+  "$ROOT/src/core/BackupManager.cpp" "$ROOT/src/util/OpenCLError.cpp" \
   -o "$BUILD/legacy-transform-size-test" \
   -lOpenCL -lgmpxx -lgmp
 
