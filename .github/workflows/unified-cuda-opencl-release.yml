@@ -67,33 +67,34 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git make python
+            git make python curl unzip
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-gmp
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
-      - uses: Jimver/cuda-toolkit@v0.2.36
-        with:
-          cuda: '13.2.0'
-          method: network
       - name: Compile both backends from main
         shell: msys2 {0}
         run: |
           set -euo pipefail
           python tests/dual_backend_source_test.py
-          test -n "$CUDA_PATH"
-          P="$(cygpath -u "$CUDA_PATH")"
-          test -f "$P/include/nvrtc.h"
+          # The pinned Aevum vendor source is unchanged from v100.44.
+          # Reuse its already CI-linked, checksum-verified Windows CUDA engine;
+          # rebuild the main executable and OpenCL engine from this commit.
+          mkdir -p prebuilt
+          curl -fL --retry 3 'https://github.com/cherubrock-seb/PrMers/releases/download/v4.20.97-alpha-v100.44-cuda-opencl-preview1/prmers-windows-cuda-experimental.zip' -o prebuilt/cuda.zip
+          echo 'bc114420e89c398251887be40a64fdc7ee43b3e9ccf230265445af2434a1e451  prebuilt/cuda.zip' | sha256sum -c -
+          mkdir -p prebuilt/unpacked
+          unzip -oq prebuilt/cuda.zip -d prebuilt/unpacked
           make -j"$(nproc)" MARCH=x86-64
           test -s prmers.exe
           mkdir -p stage/third_party/aevum/build-engine stage/kernels
           cp prmers.exe stage/
           cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/aevum_engine.dll
-          make -C third_party/aevum clean
-          make -C third_party/aevum CUDA=1 engine-lib -j"$(nproc)" CXX=g++ DL_LIBS= ENGINE_LINK_FLAGS='-shared -static-libstdc++ -static-libgcc' CUDAFLAGS="-DCUDA_BACKEND -Isrc/cuda -I\"$P/include\"" OPENCL_LIBS="-L\"$P/lib/x64\" -l:cuda.lib -l:nvrtc.lib"
-          objdump -p third_party/aevum/build-engine/libaevum_engine.so > deps.txt
+          mapfile -t cuda_dlls < <(find prebuilt/unpacked -type f -iname 'aevum_engine.dll')
+          test "${#cuda_dlls[@]}" -eq 1
+          objdump -p "${cuda_dlls[0]}" > deps.txt
           grep -Eiq 'DLL Name:.*nvrtc' deps.txt
-          cp third_party/aevum/build-engine/libaevum_engine.so stage/third_party/aevum/build-engine/aevum_engine_cuda.dll
+          cp "${cuda_dlls[0]}" stage/third_party/aevum/build-engine/aevum_engine_cuda.dll
           cp -R kernels/. stage/kernels/
           cp third_party/aevum/tune.txt stage/third_party/aevum/tune.txt
           for lib in libgmp-10.dll libgmpxx-4.dll libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll; do
@@ -136,7 +137,7 @@ jobs:
 
           On a supported single-NVIDIA-GPU system, the runtime benchmarks OpenCL and CUDA squarings with an identical residue and uses CUDA only if at least 3% faster. Missing CUDA driver/NVRTC/plugin, unsupported devices, probe errors or residue mismatch automatically select OpenCL.
 
-          Source: 'make' builds OpenCL; 'make aevum-dual' builds both engines with the CUDA Toolkit. Set AEVUM_BACKEND=opencl to bypass probing. Explicit AEVUM_ENGINE_LIB remains supported.
+          Source: 'make' builds OpenCL; 'make aevum-dual' builds both engines with the CUDA Toolkit. Windows CUDA binary is reused from the checksum-verified v100.44 build of the identical Aevum source; the Windows host executable and OpenCL plugin are rebuilt from this commit. Set AEVUM_BACKEND=opencl to bypass probing. Explicit AEVUM_ENGINE_LIB remains supported.
 
           CUDA requires NVIDIA driver and CUDA 13.x NVRTC runtime. Cross-platform build/link and GPU-less static checks are validated. The new dual-selector runtime needs further NVIDIA hardware validation before general recommendation. macOS continues to use OpenCL-only releases.
           EOF
