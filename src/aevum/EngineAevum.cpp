@@ -7,6 +7,10 @@
 #include <algorithm>
 #include <cmath>
 #include <array>
+#include <chrono>
+#include <map>
+#include <mutex>
+#include <optional>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -184,6 +188,7 @@ struct Api {
 
     NativeLibrary library = nullptr;
     std::string path;
+    bool is_cuda = false;
     version_fn version = nullptr;
     error_fn last_error = nullptr;
     resolve_fn resolve_fft = nullptr;
@@ -281,8 +286,10 @@ struct Api {
         return AEVUM_ENGINE_DEFAULT_TUNE_DIR;
     }
 
-    Api() {
+    explicit Api(const std::filesystem::path& required_path = {}) {
         std::vector<std::filesystem::path> candidates;
+        if (!required_path.empty()) candidates.push_back(required_path);
+        if (required_path.empty()) {
         if (const char* env = std::getenv("AEVUM_ENGINE_LIB")) candidates.emplace_back(env);
         const auto add_candidates = [&](const std::filesystem::path& root) {
             candidates.emplace_back(root / "third_party/aevum/build-engine/libaevum_engine.so");
@@ -297,6 +304,7 @@ struct Api {
         add_candidates(executable_dir());
         add_candidates(std::filesystem::current_path());
         candidates.emplace_back(AEVUM_ENGINE_DEFAULT_LIB);
+        }
 
         std::string errors;
         for (const auto& candidate : candidates) {
@@ -304,6 +312,7 @@ struct Api {
             library = open_library(candidate);
             if (library) {
                 path = candidate.string();
+                is_cuda = candidate.filename().string().find("cuda") != std::string::npos;
                 break;
             }
             errors += candidate.string() + ": " + library_error_text() + "\n";
@@ -338,17 +347,140 @@ struct Api {
 };
 
 Api& api() {
-    static Api instance;
+    static Api instance; // OpenCL remains the guaranteed baseline.
     return instance;
+}
+
+// The separate CUDA engine is optional. Loading it only after an NVIDIA
+// OpenCL GPU is identified keeps AMD/Intel systems independent of CUDA/NVRTC.
+// A conservative one-GPU gate avoids mapping OpenCL index N to the wrong CUDA
+// ordinal on mixed or multi-GPU machines.
+bool one_nvidia_gpu(std::size_t device) {
+    try {
+        const ocl::platform devices;
+        if (device != 0 || devices.get_device_count() != 1) return false;
+        const cl_device_id gpu = devices.get_device(0);
+        char vendor[256] = {};
+        return clGetDeviceInfo(gpu, CL_DEVICE_VENDOR, sizeof(vendor) - 1, vendor, nullptr) == CL_SUCCESS &&
+               std::strstr(vendor, "NVIDIA") != nullptr;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::filesystem::path optional_cuda_engine(const Api& opencl) {
+    const auto dir = std::filesystem::path(opencl.path).parent_path();
+#if defined(_WIN32)
+    return dir / "aevum_engine_cuda.dll";
+#elif defined(__APPLE__)
+    return {}; // No supported native CUDA backend on modern macOS.
+#else
+    return dir / "libaevum_engine_cuda.so";
+#endif
+}
+
+struct Probe {
+    double us_per_square = 0.0;
+    std::vector<uint32_t> residue;
+};
+
+Probe probe_backend(Api& engine_api, uint32_t exponent, std::size_t registers,
+                    uint32_t device, const std::string& fft_spec, uint32_t workload) {
+    const auto tune = engine_api.tune_dir().string();
+    const char* spec = fft_spec.empty() ? nullptr : fft_spec.c_str();
+    Handle handle = engine_api.create_ex
+        ? engine_api.create_ex(exponent, registers, device, 0, spec, tune.c_str(), workload)
+        : engine_api.create(exponent, registers, device, 0, spec, tune.c_str());
+    if (!handle) {
+        const char* detail = engine_api.last_error ? engine_api.last_error() : nullptr;
+        throw std::runtime_error(detail && *detail ? detail : "Aevum probe create failed");
+    }
+    try {
+        const std::size_t count = engine_api.word_count(handle);
+        if (count == 0 || count > (1u << 25)) throw std::runtime_error("Invalid probe word count");
+        if (!engine_api.set_u32(handle, 0, 3)) throw std::runtime_error("Probe initialization failed");
+        // The same seed and number of squarings on both backends must produce
+        // byte-identical canonical residues before the speed is trusted.
+        for (int n = 0; n < 24; ++n) {
+            if (!engine_api.square_mul(handle, 0, 1)) throw std::runtime_error("Probe warmup failed");
+        }
+        if (!engine_api.sync(handle)) throw std::runtime_error("Probe warmup sync failed");
+        const auto start = std::chrono::steady_clock::now();
+        constexpr int repetitions = 256;
+        for (int n = 0; n < repetitions; ++n) {
+            if (!engine_api.square_mul(handle, 0, 1)) throw std::runtime_error("Probe square failed");
+        }
+        if (!engine_api.sync(handle)) throw std::runtime_error("Probe timing sync failed");
+        const auto end = std::chrono::steady_clock::now();
+        Probe measured;
+        measured.us_per_square = std::chrono::duration<double, std::micro>(end - start).count() / repetitions;
+        measured.residue.resize(count);
+        if (!engine_api.get_words(handle, 0, measured.residue.data(), count))
+            throw std::runtime_error("Probe residue readback failed");
+        engine_api.destroy(handle);
+        return measured;
+    } catch (...) {
+        engine_api.destroy(handle);
+        throw;
+    }
+}
+
+Api& choose_api(uint32_t exponent, std::size_t registers, std::size_t device,
+                const std::string& fft_spec, uint32_t workload) {
+    Api& opencl = api();
+    // An explicit plugin path is authoritative. This also retains compatibility
+    // with the previously published OpenCL-only and CUDA-only archives.
+    if (std::getenv("AEVUM_ENGINE_LIB")) return opencl;
+    const char* preference = std::getenv("AEVUM_BACKEND");
+    if (preference && std::string(preference) == "opencl") return opencl;
+    if (!one_nvidia_gpu(device)) return opencl;
+    const auto cuda_path = optional_cuda_engine(opencl);
+    if (cuda_path.empty() || !std::filesystem::is_regular_file(cuda_path)) return opencl;
+
+    static std::mutex selector_mutex;
+    static std::unique_ptr<Api> cuda;
+    static std::map<std::string, bool> cache;
+    const std::string key = std::to_string(exponent) + ":" + std::to_string(registers) +
+        ":" + std::to_string(device) + ":" + std::to_string(workload) + ":" + fft_spec;
+    std::lock_guard<std::mutex> lock(selector_mutex);
+    if (auto it = cache.find(key); it != cache.end()) return it->second && cuda ? *cuda : opencl;
+    try {
+        if (!cuda) cuda = std::make_unique<Api>(cuda_path);
+        // PRP is the only workload currently calibrated. Preserve the known
+        // OpenCL behavior for P-1, LL, ECM and other workloads until tested.
+        if (workload != 1u) {
+            cache[key] = false;
+            return opencl;
+        }
+        const auto baseline_device = static_cast<uint32_t>(resolve_aevum_device(device).index);
+        const Probe ocl_result = probe_backend(opencl, exponent, registers, baseline_device, fft_spec, workload);
+        const Probe cuda_result = probe_backend(*cuda, exponent, registers, 0, fft_spec, workload);
+        // Fail closed: the fallback is always the established OpenCL plugin.
+        const bool use_cuda = cuda_result.residue == ocl_result.residue &&
+                              cuda_result.us_per_square > 0 &&
+                              cuda_result.us_per_square < 0.97 * ocl_result.us_per_square;
+        cache[key] = use_cuda;
+        std::cout << "[Backend Aevum] CUDA/OpenCL probe: CUDA=" << cuda_result.us_per_square
+                  << " us, OpenCL=" << ocl_result.us_per_square
+                  << " us, exact=" << (cuda_result.residue == ocl_result.residue ? "yes" : "no")
+                  << ", selected=" << (use_cuda ? "CUDA" : "OpenCL") << std::endl;
+        return use_cuda ? *cuda : opencl;
+    } catch (const std::exception& error) {
+        cache[key] = false;
+        std::cerr << "[Backend Aevum] CUDA unavailable or probe failed; using OpenCL: "
+                  << error.what() << std::endl;
+        return opencl;
+    }
 }
 
 class engine_aevum final : public engine {
 public:
     engine_aevum(uint32_t exponent, std::size_t register_count, std::size_t device, bool verbose, const std::string& fft_spec, uint32_t workload)
-        : exponent_(exponent), register_count_(register_count), api_(api()) {
+        : exponent_(exponent), register_count_(register_count),
+          api_(choose_api(exponent, register_count, device, fft_spec, workload)) {
         const std::string tune_dir = api_.tune_dir().string();
-        const AevumDevice aevum_device = resolve_aevum_device(device);
-        const auto plugin_device = static_cast<uint32_t>(aevum_device.index);
+        const auto plugin_device = api_.is_cuda ? uint32_t{0}
+            : static_cast<uint32_t>(resolve_aevum_device(device).index);
         if (api_.create_ex) {
             handle_ = api_.create_ex(exponent, register_count, plugin_device, verbose ? 1 : 0,
                                     fft_spec.empty() ? nullptr : fft_spec.c_str(), tune_dir.c_str(), workload);
@@ -378,6 +510,7 @@ public:
                   << " | plan=" << (plan_spec_.empty() ? "unknown" : plan_spec_)
                   << " | radix1k=" << (radix1k_8 ? "8(explicit-override)" : "4(safe-default)")
                   << " | regs=" << register_count_
+                  << " | backend=" << (api_.is_cuda ? "CUDA" : "OpenCL")
                   << " | plugin=" << api_.path
                   << " | tune=" << api_.tune_dir().string()
                   << " | version=" << (api_.version ? api_.version() : "unknown") << std::endl;

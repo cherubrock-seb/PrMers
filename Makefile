@@ -67,7 +67,7 @@ $(SRC_DIR)/modes/RunGaussianMersenneFactor.o: CPPFLAGS += -include $(INC_DIR)/co
 
 MARIN_TEST_DEVICE ?= 0
 
-.PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine \
+.PHONY: all clean install uninstall package aevum aevum-cuda aevum-engine aevum-dual \
         install-aevum-engine test-aevum-host test-aevum-reg test-aevum-create-fallback test-aevum-auto test-aevum-default test-aevum-pfa9-bridge test-gui-state test-gui-http test-pm1-bounds test-pm1-external-stage2-interrupt test-proof-marin test-ecm-torsion test-ecm-mont-stage2-resume test-marin-ibdwt-bound test-marin-split-aux test-worktodo-manager test-marin-ll-radix5 test-tiny-exponent test-proof-power test-proof-verify test-compact-bits-wrap test-mersenne-reduce test-proof-cpu-fallback test-proof-checkpoint-readback test-proof-fallback-power test-final-carry-digit0 test-marin-invalid-device test-aevum-device-map test-aevum-source test-aevum-auto-gpu test-backend-matrix test-aevum-apple-port-source test-gm test-proof-residue-cleanup test-proof-resume-power test-wagstaff-worktodo clean-all
 
 all: aevum-engine $(TARGET)
@@ -114,6 +114,28 @@ aevum-cuda:
 
 aevum-engine:
 	$(MAKE) -C third_party/aevum engine-lib
+
+# Optional dual build from one source tree. The standard 'make' never requires
+# CUDA, so source builds on AMD/Intel/macOS remain fully supported.
+# With CUDA Toolkit: make aevum-dual
+# Linux CUDA SDK locations may be overridden via AEVUM_CUDA_LIBS / FLAGS.
+AEVUM_CUDA_LIBS ?= -L/usr/local/cuda/lib64/stubs -L/usr/local/cuda/lib64 -lcuda -lnvrtc
+AEVUM_CUDA_FLAGS ?= -DCUDA_BACKEND -Isrc/cuda -I/usr/local/cuda/include
+aevum-dual: aevum-engine
+	@set -eu; \
+	  tmp=$(mktemp -d); \
+	  trap 'cp "$tmp/opencl.so" third_party/aevum/build-engine/libaevum_engine.so; rm -rf "$tmp"' EXIT; \
+	  cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/opencl.so"; \
+	  $(MAKE) -C third_party/aevum clean; \
+	  $(MAKE) -C third_party/aevum CUDA=1 engine-lib \
+	    CUDAFLAGS="$(AEVUM_CUDA_FLAGS)" OPENCL_LIBS="$(AEVUM_CUDA_LIBS)"; \
+	  if [ "$(OS)" = "Windows_NT" ]; then \
+	    cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/aevum_engine_cuda.dll"; \
+	  else \
+	    cp third_party/aevum/build-engine/libaevum_engine.so "$tmp/libaevum_engine_cuda.so"; \
+	  fi; \
+	  cp "$tmp"/*cuda.* third_party/aevum/build-engine/; \
+	  echo "Dual Aevum plugins built (OpenCL default plus optional CUDA)."
 
 test-aevum-host:
 	$(MAKE) -C third_party/aevum test-host
