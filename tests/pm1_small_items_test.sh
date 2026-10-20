@@ -2,7 +2,9 @@
 # Regression checks for small P-1 driver defects:
 #  1. -nogcd-stage1 without stage 2 must not record a "no factor" result (the
 #     GCD never ran; M269 B1=2141 does have the factor 13822297), and with
-#     stage 2 requested it must not emit a stage-1 result either.
+#     stage 2 requested it must not emit a stage-1 result either.  A normal run
+#     reports stage 1 only when no stage 2 follows; otherwise only the final
+#     stage-2 result is published.
 #  2. -s3 must run stage 3 only, not fall through into stage 1.
 #  3. A GMP-ECM .save file whose CHECKSUM does not match its residue must be
 #     rejected when extending a stage-1 run.
@@ -66,9 +68,17 @@ if grep -aq '"b2":0[^0-9]' "$WORK/nogcd2/results.txt" 2>/dev/null; then fail "no
 run nogcd3 50 269 -pm1 -b1 2141 -b2 2142 -nogcd-stage1
 if ls "$WORK"/nogcd3/*_stage1_result.json >/dev/null 2>&1; then fail "nogcd3: stage-1 result JSON written"; fi
 if [ -s "$WORK/nogcd3/results.txt" ]; then fail "nogcd3: results.txt records a result although nothing was tested"; fi
-# A normal run (GCD enabled) still reports stage 1 as before.
-run gcd1 50 269 -pm1 -b1 100 -b2 5000
+# A normal run (GCD enabled) without stage 2 still reports stage 1.
+run gcd1 50 269 -pm1 -b1 100
 ls "$WORK"/gcd1/*_stage1_result.json >/dev/null || fail "gcd1: stage-1 result JSON missing with the GCD enabled"
+grep -aq '"b1":100' "$WORK/gcd1/results.txt" || fail "gcd1: results.txt lacks the stage-1 result"
+# With stage 2 requested, only the final result is published: stage 1 defers,
+# and the stage-2 result (M269 has the factor 13822297 below B2=5000) is recorded.
+run gcd2 50 269 -pm1 -b1 100 -b2 5000
+grep -aq 'deferring result submission until B2=5000' "$WORK/gcd2/run.log" || fail "gcd2: stage 1 did not defer its result to stage 2"
+if ls "$WORK"/gcd2/*_stage1_result.json >/dev/null 2>&1; then fail "gcd2: stage-1 result JSON written although stage 2 was requested"; fi
+grep -aq '"b2":5000' "$WORK/gcd2/results.txt" || fail "gcd2: results.txt lacks the final stage-2 result"
+grep -aq '13822297' "$WORK/gcd2/results.txt" || fail "gcd2: the stage-2 factor 13822297 is not in results.txt"
 
 # 2. -s3 must not fall through into stage 1.
 run s3 50 269 -pm1 -b1 100 -b2 100
