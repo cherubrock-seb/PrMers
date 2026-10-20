@@ -1,0 +1,21 @@
+name: Promote checked CUDA/OpenCL preview release
+on:
+  push:
+    branches: [exp/cuda-opencl-preview-v10044]
+    paths:
+      - .github/workflows/promote-cuda-preview.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Promote existing release without changing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit v4.20.97-alpha-v100.44-cuda-opencl-preview1 --repo "$GITHUB_REPOSITORY" --prerelease=false
+          gh release view v4.20.97-alpha-v100.44-cuda-opencl-preview1 --repo "$GITHUB_REPOSITORY" --json url,isPrerelease
+          test "$(gh release view v4.20.97-alpha-v100.44-cuda-opencl-preview1 --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" = false
