@@ -27,15 +27,27 @@ The PrMers log displays both the active FFT `plan=` and `backend=CUDA` or `backe
 
 ## Compiling from sources
 
-Run `make` for the OpenCL default. CUDA is **never** required for this build. To build both engines from the same source tree, install CUDA Toolkit headers/driver stubs/NVRTC and run:
+**Ordinary `make` is now the recommended command.** It always compiles the OpenCL engine, then checks whether a *complete* NVIDIA CUDA development SDK is installed. If available, it also compiles the CUDA engine **automatically** into independent incremental objects and copies the resulting sibling plugin next to OpenCL. GPU availability and runtime selection are separate: even without an NVIDIA GPU, building CUDA is safe when the SDK is installed.
 
 ```sh
-make
-make aevum-dual
-make install PREFIX=/usr/local
+make -j4                 # OpenCL plus optional auto-detected CUDA
+make install             # Install the available engines
 ```
 
-The dual build produces `libaevum_engine.so` and `libaevum_engine_cuda.so` (Linux) or `aevum_engine_cuda.dll` (Windows). The Makefile performs separate clean builds so CUDA object files do not contaminate the OpenCL library. On Windows, build with MSYS2/UCRT64 and a compatible CUDA SDK; set `AEVUM_CUDA_ROOT` if needed. On macOS, only the OpenCL engine is compiled/installed.
+An SDK is **never required** for ordinary builds on AMD, Intel or macOS. Without CUDA, `make` succeeds and explicitly explains how CUDA may be installed. The Toolkit is optional and must **not** be installed automatically or with administrator privileges by the build.
+
+On Ubuntu/Debian, **after adding NVIDIA's CUDA apt repository**, use `sudo apt update && sudo apt install cuda-toolkit` (see the [official NVIDIA installation guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/)). The Toolkit-only package is preferable to the combined CUDA-and-driver package when you just need to compile. On Windows, install the Toolkit from [NVIDIA CUDA Downloads](https://developer.nvidia.com/cuda-downloads) and build with MSYS2/UCRT64; on macOS CUDA remains unavailable.
+
+```sh
+make AEVUM_CUDA_MODE=off       # Force OpenCL-only, skip optional CUDA checks
+make aevum-dual               # Explicit strict CUDA SDK requirement
+make AEVUM_CUDA_MODE=required # Strict SDK requirement from plain make
+make AEVUM_CUDA_ROOT=/custom/cuda
+```
+
+The detection covers standard Linux Toolkit layouts, NVIDIA SDK stubs and driver-provided `libcuda.so.1` (as on Kaggle), plus Windows CUDA_PATH/MSYS2. An advanced SDK layout can override `AEVUM_CUDA_ROOT`, `AEVUM_CUDA_FLAGS` and `AEVUM_CUDA_LIBS`.
+
+The dual build produces `libaevum_engine.so` and `libaevum_engine_cuda.so` (Linux) or `aevum_engine_cuda.dll` (Windows). OpenCL and CUDA objects are isolated in `build-engine/` and `build-engine-cuda/`; running `make` again is incremental and does not clean/rebuild OpenCL just to check CUDA. An auto CUDA build error reports a warning while preserving the working OpenCL build; strict mode fails so release CI catches genuine CUDA regressions.
 
 ## Binaries
 
