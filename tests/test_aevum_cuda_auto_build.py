@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix="prmers-cuda-autobuild-") as td:
     assert r.returncode == 0 and "OpenCL-only" in r.stdout, r.stdout
     assert not log.exists(), "No SDK must not trigger CUDA compilation"
     r = invoke("required", root, vendor, fake_make, log)
-    assert r.returncode != 0 and "cuda-toolkit" in r.stdout, r.stdout
+    assert r.returncode != 0 and "CUDA development SDK not found" in r.stdout, r.stdout
     r = invoke("off", root, vendor, fake_make, log)
     assert r.returncode == 0 and not log.exists(), r.stdout
 
