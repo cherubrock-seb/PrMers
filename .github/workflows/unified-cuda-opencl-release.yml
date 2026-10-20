@@ -42,6 +42,12 @@ jobs:
           python3 tests/test_aevum_cuda_auto_build.py
           make test-aevum-device-map
           make test-aevum-auto
+          # Validate a fresh serial build: users should be able to run plain
+          # 'make' with no -j flag or special CUDA setup.
+          make MARCH=x86-64 KERNEL_PATH=./kernels/
+          # Also validate the incremental parallel code path.
+          # Exercise the serial default before the incremental parallel build.
+          make MARCH=x86-64
           make -j"$(nproc)" MARCH=x86-64 KERNEL_PATH=./kernels/
           test -s prmers
           test -s third_party/aevum/build-engine/libaevum_engine.so
