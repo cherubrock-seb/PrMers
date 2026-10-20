@@ -127,95 +127,128 @@ Then open the URL printed by the program.
 
 ## Build from source
 
-### Requirements
+**For Linux and Windows (MSYS2), plain `make` is enough.** No special CUDA option and no `-j` flag are required. PrMers always builds its OpenCL engine first; when the **complete NVIDIA CUDA Toolkit** is detected, the same command also builds the optional CUDA engine. With no Toolkit installed (including AMD/Intel machines), `make` completes successfully with OpenCL only and prints a clear installation hint.
 
-- C++20 compiler
-- OpenCL runtime and headers
-- GMP development library
-- Make or CMake
+The CUDA/OpenCL *runtime* selection is separate: when PrMers uses Aevum on an NVIDIA GPU, it checks which backend is faster and verifies matching residues. It does **not** blindly prefer CUDA. The existing automatic Marin/Aevum policy remains in force.
 
-Ubuntu or Debian:
+### Linux (Ubuntu / Debian)
 
-```bash
-sudo apt-get update
-sudo apt-get install -y g++ make ocl-icd-opencl-dev opencl-headers libgmp-dev
-```
-
-### Linux and macOS with Makefile
+Install PrMers' mandatory build dependencies:
 
 ```bash
+sudo apt update
+sudo apt install -y git g++ make ocl-icd-opencl-dev opencl-headers libgmp-dev
 git clone https://github.com/cherubrock-seb/PrMers.git
 cd PrMers
-make -j"$(nproc)"
-```
-
-Build with the optional Aevum shared engine when its source is present under `third_party/aevum`:
-
-```bash
 make
 ```
 
-For the public repositories, the recommended layout is to keep Aevum in its own GPLv3 repository and attach it to PrMers as a Git submodule or external shared-library dependency:
+That is the entire **source build**, with or without an NVIDIA GPU or CUDA SDK. On systems with a working OpenCL driver, run `./prmers -v` or `./prmers 136279841`. Parallel compilation (`make -j4` or `make -j"$(nproc)"`) is optional, not required.
+
+**Optional: enable native CUDA builds on NVIDIA systems.** A working NVIDIA driver alone is *not* the CUDA development Toolkit. PrMers detects the Toolkit's `cuda.h`, `nvrtc.h`, NVRTC library and CUDA driver link library (SDK stub or system library). Install the SDK once and rerun the **same `make` command**.
+
+For **Ubuntu 24.04 x86_64**, with the official NVIDIA package repository:
 
 ```bash
-git submodule add https://github.com/cherubrock-seb/aevum-engine third_party/aevum
-git submodule update --init --recursive
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt update
+sudo apt install -y cuda-toolkit
 make
 ```
 
-Install system-wide:
+For Ubuntu 22.04, Debian, other architectures or distributions, **do not reuse the Ubuntu 24.04 repository URL**: select your OS using [NVIDIA's official CUDA Linux installation guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/) and then install its `cuda-toolkit` package. The SDK can be installed without replacing an existing working NVIDIA driver; verify driver compatibility separately when running CUDA.
+
+The expected build messages are:
+
+```text
+[Aevum] CUDA SDK found: ... (NVRTC=..., driver link=...)
+[Aevum] Compiling optional CUDA plugin in separate directory (OpenCL untouched).
+[Aevum] CUDA plugin ready: third_party/aevum/build-engine/libaevum_engine_cuda.so
+```
+
+If no complete Toolkit is found, the message states that CUDA is optional and offers an installation URL. `make` still succeeds, and the OpenCL engine is usable.
+
+Install to the system (optional):
 
 ```bash
 sudo make install
 ```
 
-Installed paths:
+This installs `/usr/local/bin/prmers`, the OpenCL engine under `/usr/local/lib/prmers/`, the CUDA engine there **if built**, and kernels/tuning data under `/usr/local/share/prmers/`. The installation does not install CUDA or drivers.
 
-```text
-/usr/local/bin/prmers
-/usr/local/share/prmers/
-```
+For a self-contained folder (run from the extracted/build directory), compile with `make KERNEL_PATH=./kernels/`; `make clean` is only needed when switching build settings that affect already-compiled host objects.
 
-When building a local zip or test copy, pass the kernel path explicitly:
+### Windows — MSYS2 UCRT64 Make (recommended for both engines)
+
+Install [MSYS2](https://www.msys2.org/) and open the **UCRT64 terminal**, not the MSYS or MinGW32 shell:
 
 ```bash
-make clean
-make -j"$(nproc)" KERNEL_PATH=./kernels/
+pacman -Syu
+pacman -S --needed --noconfirm git make python \
+  mingw-w64-ucrt-x86_64-gcc \
+  mingw-w64-ucrt-x86_64-gmp \
+  mingw-w64-ucrt-x86_64-opencl-headers \
+  mingw-w64-ucrt-x86_64-opencl-icd
+git clone https://github.com/cherubrock-seb/PrMers.git
+cd PrMers
+make
 ```
 
-### Windows with CMake and vcpkg
+This builds PrMers and OpenCL **without requiring CUDA**. On NVIDIA Windows systems, install the optional [NVIDIA CUDA Toolkit for Windows](https://developer.nvidia.com/cuda-downloads) (include CUDA headers, NVRTC and import libraries). Restart the UCRT64 terminal so `CUDA_PATH` is visible, and simply run `make` again. The SDK is detected automatically; `prmers.exe` and the optional `aevum_engine_cuda.dll` are built in the source tree. Keep the OpenCL and CUDA plugin libraries together when copying binaries.
+
+Windows GPU use also requires a compatible installed NVIDIA driver. NVIDIA's [Windows installation guide](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/) describes the driver/toolkit requirements.
+
+### macOS (Intel and Apple Silicon)
+
+CUDA is not supported by this build on macOS; `make` compiles the supported OpenCL engine normally and does not require the NVIDIA Toolkit.
+
+```bash
+brew install gmp
+git clone https://github.com/cherubrock-seb/PrMers.git
+cd PrMers
+make
+```
+
+On macOS the default GPU computation backend remains **Marin**, with the existing supported Aevum PRP/LL modes available by explicit selection. P-1 and ECM continue to use Marin under the established macOS safety policy.
+
+### Advanced build controls and diagnostics
+
+| Command | Behavior |
+|---|---|
+| `make` | OpenCL always; auto-build CUDA if the complete SDK is detected |
+| `make -j4` | Exactly the same functionality, with parallel compilation |
+| `make AEVUM_CUDA_MODE=off` | Skip **compiling** CUDA, never require Toolkit |
+| `make aevum-dual` | Require the SDK and a successful CUDA build; error otherwise |
+| `make AEVUM_CUDA_MODE=required` | Require CUDA compilation through the ordinary `make` target |
+| `make AEVUM_CUDA_ROOT=/custom/cuda` | Explicit SDK location; advanced overrides `AEVUM_CUDA_LIBS` and `AEVUM_CUDA_FLAGS` also supported |
+| `make clean-all` | Clean compiled host, OpenCL and CUDA build outputs |
+
+The CUDA plugin is compiled independently in `third_party/aevum/build-engine-cuda/`, leaving OpenCL's objects untouched. Re-running `make` with no source changes is incremental: CUDA will **not** be rebuilt from scratch unnecessarily. The detector supports NVIDIA SDK driver stubs and Kaggle-style `libcuda.so.1` driver libraries.
+
+`AEVUM_CUDA_MODE=off` changes **what is built**, not which existing plugin can run. If a CUDA plugin was already built, it may remain in the output folder; to force OpenCL at runtime set `AEVUM_BACKEND=opencl`. To inspect the Aevum backend explicitly:
+
+```bash
+AEVUM_BACKEND=auto ./prmers 136279841 -aevum
+AEVUM_BACKEND=opencl ./prmers 136279841 -aevum
+```
+
+The logs identify `backend=CUDA` or `backend=OpenCL` and the actual FFT `plan=`. No option is necessary for ordinary automatic use.
+
+### Other build system: CMake (Windows / vcpkg)
+
+The alternative CMake route currently builds the PrMers host executable and its regular OpenCL dependencies; it does **not** yet provide the same automatic Aevum CUDA/OpenCL dual-plugin construction as the Makefile. **Use MSYS2 UCRT64 `make` for the unified source-build behavior.**
 
 ```powershell
 git clone https://github.com/cherubrock-seb/PrMers.git
 cd PrMers
 git clone https://github.com/microsoft/vcpkg.git
-cd vcpkg
-.\bootstrap-vcpkg.bat
-cd ..
-
-cmake -S . -B build ^
-  -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake ^
-  -DCMAKE_BUILD_TYPE=Release
-
+.\vcpkg\bootstrap-vcpkg.bat
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-Copy required DLLs from `vcpkg\installed\x64-windows\bin` next to `prmers.exe`, or add that directory to `PATH`.
-
-### Windows with MSYS2 UCRT64
-
-```bash
-pacman -Syu
-pacman -S --noconfirm make \
-  mingw-w64-ucrt-x86_64-gcc \
-  mingw-w64-ucrt-x86_64-opencl-headers \
-  mingw-w64-ucrt-x86_64-opencl-icd-loader \
-  mingw-w64-ucrt-x86_64-gmp
-
-make -j"$(nproc)"
-```
-
-
+Make sure the required vcpkg dependencies are installed, and copy any required runtime DLLs alongside `prmers.exe` or add their folder to `PATH`.
 
 ### Strict backend requests in v99.9
 
