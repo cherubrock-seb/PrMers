@@ -23,8 +23,15 @@ def invoke(mode, root, vendor, fake_make, log, *, windows=False, failure=False):
     )
     env.pop("AEVUM_CUDA_LIBS", None)
     env.pop("AEVUM_CUDA_FLAGS", None)
-    if windows:
-        env["PATH"] = str(fake_make.parent / "fake-bin") + os.pathsep + env.get("PATH", "")
+    # Simulate target OS explicitly so the host regression test runs on
+    # Windows/MSYS and Linux regardless of the actual CI runner.
+    fake_bin = fake_make.parent / ("fake-bin-windows" if windows else "fake-bin-linux")
+    fake_bin.mkdir(exist_ok=True)
+    uname = fake_bin / "uname"
+    uname.write_text("#!/bin/sh\\nprintf 'MINGW64_NT\\n'\\n" if windows
+                     else "#!/bin/sh\\nprintf 'Linux\\n'\\n")
+    uname.chmod(0o755)
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
     return subprocess.run(["sh", str(SCRIPT), mode], env=env, text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
 
@@ -79,11 +86,6 @@ with tempfile.TemporaryDirectory(prefix="prmers-cuda-autobuild-") as td:
     assert r.returncode != 0, r.stdout
 
     # Simulated Windows/MSYS path with native CUDA import libraries.
-    fake_bin = temp / "fake-bin"
-    fake_bin.mkdir()
-    uname = fake_bin / "uname"
-    uname.write_text("#!/bin/sh\nprintf 'MINGW64_NT\\n'\n")
-    uname.chmod(0o755)
     win_sdk = temp / "windows SDK"
     (win_sdk / "include").mkdir(parents=True)
     (win_sdk / "lib" / "x64").mkdir(parents=True)
