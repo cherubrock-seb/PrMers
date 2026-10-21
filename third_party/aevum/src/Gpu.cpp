@@ -2981,8 +2981,18 @@ bool Gpu::regSupportsLeadCache() const {
   // Keep the already validated Apple canonical-boundary path unchanged.
   return false;
 #else
+  // Experimental-only PFA7 lead cache, for controlled CUDA/OpenCL A/B on
+  // NVIDIA. Keep default and PFA9 policies unchanged; never ship this as
+  // an automatic default without word-exact GPU + long PRP validation.
+  const char* pfa7_optin = std::getenv("AEVUM_PFA7_LEAD_EXPERIMENT");
+  const bool experimental_pfa7 = pfa7_optin && std::strcmp(pfa7_optin, "1") == 0 &&
+      fft.isPfa() && fft.shape.fft_type == FFT3161 &&
+      fft.pfa_radix == 7 && fft.shape.width == 512 &&
+      fft.shape.middle == 7 && fft.shape.height == 512 &&
+      fft.variant == 202 && isNvidiaGpu(id);
   return !useLongCarry && (!fft.isPfa() ||
-         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9));
+         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9) ||
+         experimental_pfa7);
 #endif
 }
 
