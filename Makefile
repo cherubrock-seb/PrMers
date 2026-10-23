@@ -814,6 +814,11 @@ test-pm1-b1-limit: all
 test-pm1-legacy-loop-bound: all
 	bash tests/pm1_legacy_loop_bound_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+# Legacy (-marin) P-1 stage 2 runs to the end and finds its factor (runs prmers; PoCL's CPU device is enough).
+.PHONY: test-pm1-legacy-stage2
+test-pm1-legacy-stage2: all
+	bash tests/pm1_legacy_stage2_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-bench2-source
 test-bench2-source:
 	python3 tests/bench2_source_test.py
