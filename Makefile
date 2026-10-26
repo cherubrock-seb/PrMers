@@ -164,6 +164,11 @@ test-aevum-create-fallback:
 test-aevum-reported-plan:
 	bash tests/test_aevum_reported_plan.sh
 
+.PHONY: test-aevum-factor-safe-resolver
+test-aevum-factor-safe-resolver:
+	bash tests/test_aevum_factor_safe_resolver.sh
+	python3 tests/llsafe_factor_capacity_source_test.py
+
 test-aevum-pfa9-bridge: aevum-engine
 	bash third_party/aevum/scripts/test_pfa9_lead_bridge_ubuntu.sh $${AEVUM_TEST_DEVICE:-1} $${AEVUM_TEST_EXPONENT:-175000039}
 
