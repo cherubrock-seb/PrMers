@@ -21,8 +21,14 @@ on:
       - .github/workflows/build_mac_os.yml
       - .github/workflows/unified-cuda-opencl-release.yml
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a new immutable release only after real-GPU selector approval
+        required: false
+        type: boolean
+        default: false
 permissions:
-  contents: write
+  contents: read
 env:
   TAG: v4.20.97-alpha-v100.47-cuda-autobuild
 jobs:
@@ -38,6 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 tests/release_version_consistency_test.py --expected-tag "$TAG"
           python3 tests/dual_backend_source_test.py
           python3 tests/test_aevum_cuda_auto_build.py
           make test-aevum-device-map
@@ -50,6 +57,7 @@ jobs:
           make MARCH=x86-64
           make -j"$(nproc)" MARCH=x86-64 KERNEL_PATH=./kernels/
           test -s prmers
+          python3 tests/release_version_consistency_test.py --binary ./prmers --expected-tag "$TAG"
           test -s third_party/aevum/build-engine/libaevum_engine.so
           # The *ordinary* make must now auto-build CUDA without manual steps.
           test -s third_party/aevum/build-engine/libaevum_engine_cuda.so
@@ -96,11 +104,13 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
+          python tests/release_version_consistency_test.py --expected-tag "$TAG"
           python tests/dual_backend_source_test.py
           python tests/test_aevum_cuda_auto_build.py
           python tests/native_pfa_cli_source_test.py
           make -j"$(nproc)" MARCH=x86-64
           test -s prmers.exe
+          python tests/release_version_consistency_test.py --binary ./prmers.exe --expected-tag "$TAG"
           # Standard make detects the installed Windows CUDA SDK.
           test -s third_party/aevum/build-engine/aevum_engine_cuda.dll
           : "$CUDA_PATH"
@@ -137,7 +147,10 @@ jobs:
     uses: ./.github/workflows/build_mac_os.yml
 
   publish:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    # Do not publish on main pushes. An explicit, approved dispatch is required.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_release == true && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
     needs: [linux, windows, macos]
     runs-on: ubuntu-24.04
     steps:
@@ -172,8 +185,8 @@ jobs:
           CI validates builds, packaging and GPU-less checks; cross-vendor hardware correctness and end-to-end performance still require real-GPU validation.
           EOF
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.47 CUDA auto-build and multi-mode GPU selector" --notes-file NOTES.md
+            echo "Refusing to overwrite already-published release $TAG" >&2
+            exit 1
           fi
+          gh release create "$TAG" ./*.tar.gz ./*.zip ./SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "PrMers v100.47 CUDA auto-build and multi-mode GPU selector" --notes-file NOTES.md
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets
