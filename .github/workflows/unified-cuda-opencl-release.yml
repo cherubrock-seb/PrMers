@@ -27,8 +27,10 @@ on:
         required: false
         type: boolean
         default: false
+# The reusable macOS workflow declares contents: write for its legacy tag job.
+# Match its caller permission, but publication below remains dispatch-only.
 permissions:
-  contents: read
+  contents: write
 env:
   TAG: v4.20.97-alpha-v100.47-cuda-autobuild
 jobs:
