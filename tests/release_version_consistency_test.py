@@ -61,7 +61,7 @@ def test_gitless_package_version(root, expected):
     """Resolve a package version from a minimal exported source tree without .git."""
     make = shutil.which("make")
     if not make:
-        raise ValueError("GNU make is required for the source-archive version gate")
+        raise ValueError("make is required for the source-archive version gate")
     with tempfile.TemporaryDirectory(prefix="prmers-no-git-version-") as scratch:
         work = pathlib.Path(scratch)
         (work / "src").mkdir()
@@ -69,9 +69,13 @@ def test_gitless_package_version(root, expected):
         shutil.copyfile(root / "Makefile", work / "Makefile")
         shutil.copyfile(root / "include/core/Version.hpp", work / "include/core/Version.hpp")
         assert not (work / ".git").exists()
+        # macOS ships GNU make 3.81, which supports -f but not --eval.
+        # Read the real exported Makefile first, then add an isolated probe
+        # target without changing the source tree's build or release rules.
+        probe = work / "release-version-probe.mk"
+        probe.write_text("print-release-version:\\n\\t@printf '%s\\\\n' '$(VERSION)'\\n".replace("\\n", "\n").replace("\\t", "\t"), encoding="utf-8")
         result = subprocess.run(
-            [make, "-s", "--no-print-directory",
-             "--eval=print-release-version: ; @printf '%s\\n' '$(VERSION)'",
+            [make, "-s", "-f", "Makefile", "-f", probe.name,
              "print-release-version"],
             cwd=work, text=True, capture_output=True, timeout=20, check=False)
         if result.returncode != 0 or result.stdout.strip() != expected:
