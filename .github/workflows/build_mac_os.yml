@@ -367,6 +367,11 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
+      # The universal package identity gate runs a repository test script.
+      - name: Checkout source for package identity validation
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - name: Download architecture stages
         uses: actions/download-artifact@v4
         with:
