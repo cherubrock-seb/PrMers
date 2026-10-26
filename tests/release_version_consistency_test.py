@@ -8,8 +8,10 @@ must report that same identity via -v.  Works on Linux, Windows and macOS.
 import argparse
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def source_version(header_text):
@@ -55,6 +57,28 @@ def self_test():
     assert release_tag("env:\n  TAG: v1.2.3\n") == "v1.2.3"
 
 
+def test_gitless_package_version(root, expected):
+    """Resolve a package version from a minimal exported source tree without .git."""
+    make = shutil.which("make")
+    if not make:
+        raise ValueError("GNU make is required for the source-archive version gate")
+    with tempfile.TemporaryDirectory(prefix="prmers-no-git-version-") as scratch:
+        work = pathlib.Path(scratch)
+        (work / "src").mkdir()
+        (work / "include/core").mkdir(parents=True)
+        shutil.copyfile(root / "Makefile", work / "Makefile")
+        shutil.copyfile(root / "include/core/Version.hpp", work / "include/core/Version.hpp")
+        assert not (work / ".git").exists()
+        result = subprocess.run(
+            [make, "-s", "--no-print-directory",
+             "--eval=print-release-version: ; @printf '%s\\n' '$(VERSION)'",
+             "print-release-version"],
+            cwd=work, text=True, capture_output=True, timeout=20, check=False)
+        if result.returncode != 0 or result.stdout.strip() != expected:
+            raise ValueError("Git-less source package VERSION failed: %r stderr=%r" %
+                             (result.stdout.strip(), result.stderr))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", help="Built or staged executable to check with -v")
@@ -73,6 +97,7 @@ def main():
         raise ValueError("Makefile VERSION must derive from Version.hpp, without git")
     self_test()
     verify_version(version, tag)
+    test_gitless_package_version(root, tag)
     if args.expected_tag:
         verify_version(version, args.expected_tag)
     if args.binary:
