@@ -73,7 +73,7 @@ def test_gitless_package_version(root, expected):
         # Read the real exported Makefile first, then add an isolated probe
         # target without changing the source tree's build or release rules.
         probe = work / "release-version-probe.mk"
-        probe.write_text("print-release-version:\\n\\t@printf '%s\\\\n' '$(VERSION)'\\n".replace("\\n", "\n").replace("\\t", "\t"), encoding="utf-8")
+        probe.write_text("print-release-version:\n\t@printf '%s\\n' '$(VERSION)'\n", encoding="utf-8")
         result = subprocess.run(
             [make, "-s", "-f", "Makefile", "-f", probe.name,
              "print-release-version"],
