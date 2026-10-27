@@ -25,8 +25,8 @@ assert "const uint64_t batchSize = static_cast<uint64_t>(activeBabyCount)" in pm
 assert "savedBatchSize != static_cast<uint64_t>(activeBabyCount)" in pm1
 assert "resumeBatchStart = resumed_s2 ? static_cast<size_t>(resume_idx) : 0" in pm1
 assert "bPrime = resumeThisPass ? resume_p_u64 : p0u" in pm1
-assert "save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);" in pm1
-assert "save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et);" in pm1
+assert "save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et)" in pm1
+assert "save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et)" in pm1
 assert "Resuming Stage 2 from checkpoint at pass" in pm1
 assert "Backup V-trace baby-batched Stage 2 at pass" in pm1
 assert "auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, uint64_t cur_k, double et)->bool" in pm1
