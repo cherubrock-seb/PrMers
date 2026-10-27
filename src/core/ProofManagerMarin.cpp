@@ -24,6 +24,7 @@
 #include "core/ProofManager.hpp"
 #include "core/ProofVerifyCpu.hpp"
 #include "io/JsonBuilder.hpp"
+#include "util/OpenCLError.hpp"
 #include "ui/WebGuiServer.hpp"
 #include <vector>
 #include <iostream>
@@ -49,9 +50,15 @@ void ProofManagerMarin::checkpoint(cl_mem buf, uint32_t iter) {
 
     // read back the buffer from GPU
     std::vector<uint64_t> host(n_);
-    clEnqueueReadBuffer(queue_, buf, CL_TRUE, 0,
-                        n_ * sizeof(uint64_t),
-                        host.data(), 0, nullptr, nullptr);
+    const cl_int err = clEnqueueReadBuffer(queue_, buf, CL_TRUE, 0,
+                                           n_ * sizeof(uint64_t),
+                                           host.data(), 0, nullptr, nullptr);
+    if (err != CL_SUCCESS) {
+        // Never save the all-zero host buffer as the proof residue.
+        util::throwClError(err, util::gpulost::Phase::Run, "clEnqueueReadBuffer (proof residue)",
+                           "Failed to read the proof residue of iteration " + std::to_string(iter) +
+                               " from the GPU: " + util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+    }
 
     // Get residue from NTT buffer using compactBits
     auto words = io::JsonBuilder::compactBits(host, digitWidth_, exponent_);
