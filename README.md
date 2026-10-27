@@ -381,6 +381,7 @@ Automatic selection compares the native transform sizes for every engine creatio
 | `-b1 <B1>` | Stage 1 bound |
 | `-b2 <B2>` | Stage 2 bound |
 | `-pm1-progress-seconds <0..86400>` | Periodic Stage 1/2 progress logging interval, default 300 s; `0` suppresses progress lines only (not checkpoints or integrity checks) |
+| `-pm1-no-progress-seconds <0..86400>` | Opt-in V-trace Stage-2 no-progress watchdog, default `0` (disabled). On timeout it reports the active phase and exits with code 124 without attempting to overwrite the last verified checkpoint; choose a value comfortably above the longest expected GPU/setup operation. |
 | `-pm1-vtrace` | Use scalar-trace P-1 Stage 2. This is the default for normal-memory Stage 2, with conservative auto-D |
 | `-pm1-vtrace-off` | Disable scalar-trace V-trace; use the older modular-power baby-step/giant-step algorithm inside PrMers (not a Prime95 delegation) |
 | `-pm1-vtrace-pair95` | Enable the Pair95 prime-pairing planner for V-trace Stage 2 when supported by the build |
