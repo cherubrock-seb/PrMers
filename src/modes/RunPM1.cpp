@@ -19,6 +19,7 @@
 #include "core/Pm1Checkpoint.hpp"
 #include "core/Pm1VTraceCheckpoint.hpp"
 #include "core/Pm1Progress.hpp"
+#include "core/Pm1NoProgressWatchdog.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -4304,6 +4305,32 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         }
     };
 
+    std::unique_ptr<core::pm1::NoProgressWatchdog> noProgressWatchdog;
+    if (options.pm1_no_progress_seconds != 0) {
+        const std::uint64_t timeoutSeconds = options.pm1_no_progress_seconds;
+        noProgressWatchdog = std::make_unique<core::pm1::NoProgressWatchdog>(
+            timeoutSeconds,
+            [timeoutSeconds](const std::string& phase, std::uint64_t progress) {
+                std::fprintf(stderr,
+                             "\n[PM1-WATCHDOG] no V-trace Stage 2 advancement for %llu s; "
+                             "phase=%s progress=%llu. Exiting with code 124; "
+                             "the last verified checkpoint is left untouched.\n",
+                             static_cast<unsigned long long>(timeoutSeconds),
+                             phase.c_str(),
+                             static_cast<unsigned long long>(progress));
+                std::fflush(nullptr);
+                std::_Exit(124);
+            });
+        std::cout << "[PM1-WATCHDOG] enabled with timeout=" << timeoutSeconds
+                  << " s. This opt-in timeout must exceed the longest expected GPU/setup operation.\n";
+    }
+    auto watchdog_phase = [&](const char* phase) {
+        if (noProgressWatchdog) noProgressWatchdog->set_phase(phase);
+    };
+    auto watchdog_advance = [&](const char* phase) {
+        if (noProgressWatchdog) noProgressWatchdog->advance(phase);
+    };
+
     if (usePair95) {
         std::cout << "[PM1-VTRACE-PAIR95] executing greedy irregular pair plan"
                   << (useBabyBatching ? " with baby-window batching" : " with resident baby table")
@@ -4325,6 +4352,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         // Saves the position (pass, task) and stops: called when a stop was
         // requested before the task at `task` ran.
         auto pair95_stop = [&](size_t pass, size_t task)->Pm1Stage2Result {
+            noProgressWatchdog.reset();
             const bool saved = save_pair95(pass, task, termsAccumulated, primesSeen, pair95_elapsed());
             delete eng;
             if (saved) {
@@ -4353,7 +4381,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << ".." << batchEnd << " of " << babyCount
                               << " | queued-tasks=" << bucketTerms << "\n";
                 }
+                watchdog_advance("pair95-pass-setup");
+                watchdog_phase("pair95-baby-precompute");
                 precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
+                watchdog_advance("pair95-baby-precompute");
                 // Aevum refreshes the V_D multiplicand inside the helper.
                 if (!aevum_vtrace_backend) {
                     eng->set_multiplicand((engine::Reg)RMUL_VD, (engine::Reg)RVD);
@@ -4392,6 +4423,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
                 if (interrupted) return pair95_stop(passNo, bucketPos);
 
+                watchdog_phase("pair95-task");
                 advance_giant_to(task.k);
                 build_trace_term_into((engine::Reg)RTMP, localBaby);
                 eng->set_multiplicand((engine::Reg)RMUL_TMP, (engine::Reg)RTMP);
@@ -4399,6 +4431,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 ++termsAccumulated;
                 ++passTerms;
                 primesSeen += task.paired ? 2u : 1u;
+                watchdog_advance("pair95-task");
 
                 auto now = high_resolution_clock::now();
                 if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
@@ -4433,6 +4466,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     std::cout << "\nBackup V-trace pair95 Stage 2 at pass " << (savePass + 1) << "/" << numPasses
                               << " task " << saveTask << " (terms done=" << termsAccumulated << "/" << pair95Tasks.size()
                               << ") start...\n";
+                    watchdog_phase("checkpoint-write");
                     if (save_pair95(savePass, saveTask, termsAccumulated, primesSeen, pair95_elapsed())) {
                         std::cout << "Backup V-trace pair95 Stage 2 done.\n";
                         lastBackup = high_resolution_clock::now();
@@ -4449,6 +4483,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         // the last periodic checkpoint, and honour a stop that arrived after the
         // last task (the GCD can take minutes on a large exponent).
         if (interrupted) return pair95_stop(numPasses, 0);
+        watchdog_phase("checkpoint-write");
         save_pair95(numPasses, 0, termsAccumulated, primesSeen, pair95_elapsed());
         skippedPairedUpper = pair95Paired;
         std::cout << "\n[PM1-VTRACE-PAIR95] processed " << pair95Tasks.size()
@@ -4471,6 +4506,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 // A restored pass already has a partially accumulated RACC and giant recurrence;
                 // preserve that exact position.  A fresh pass has no terms yet, so checkpoint
                 // its canonical beginning.
+                noProgressWatchdog.reset();
                 uint64_t savePrime = p0u;
                 if (resumeThisPass) {
                     savePrime = resume_p_u64;
@@ -4501,7 +4537,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             // Baby traces are deterministic and intentionally not stored in the compact
             // checkpoint.  Rebuild only the active window.  RACC/RGPREV/RGCUR came from
             // the checkpoint when resuming and must not be reset in that case.
+            watchdog_advance("baby-batch-pass-setup");
+            watchdog_phase("baby-batch-precompute");
             precompute_baby_window(batchStart, batchEnd, babyGlobalToLocal);
+            watchdog_advance("baby-batch-precompute");
 
             if (!resumeThisPass) {
                 eng->copy((engine::Reg)RGPREV, (engine::Reg)RVD);
@@ -4555,6 +4594,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
             for (;;) {
                 if (interrupted) {
+                    noProgressWatchdog.reset();
                     const double et = duration<double>(high_resolution_clock::now() - t0).count();
                     const bool saved = save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
                     delete eng;
@@ -4569,6 +4609,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     return Pm1Stage2Result::Interrupted;
                 }
 
+                watchdog_phase("baby-batch-prime");
                 const uint64_t q = bPrime;
                 ++primesSeen;
                 const TracePair tp = make_pair_for_prime(q);
@@ -4611,6 +4652,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
                     ++termsAccumulated;
                 }
+                watchdog_advance("baby-batch-prime");
 
                 uint64_t next_p = 0;
                 if (!bAdvancePrime(next_p)) break;
@@ -4648,6 +4690,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     std::cout << "Backup V-trace baby-batched Stage 2 at pass "
                               << (batchStart / activeBabyCount + 1) << "/" << numPasses
                               << ", prime " << bPrime << " start...\n";
+                    watchdog_phase("checkpoint-write");
                     if (save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et)) {
                         lastBackup = now;
                         std::cout << "Backup V-trace baby-batched Stage 2 done.\n";
@@ -4664,6 +4707,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 cur_k = 0;
                 const auto now = high_resolution_clock::now();
                 const double et = duration<double>(now - t0).count();
+                watchdog_phase("checkpoint-write");
                 if (!save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et)) {
                     delete eng;
                     std::cerr << "[PM1-VTRACE-BATCH] pass boundary could not be checkpointed; refusing to continue without a durable resume point.\n";
@@ -4687,6 +4731,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         for (; bucketPos < productTreeBuckets.size(); ++bucketPos) {
             if (interrupted) {
                 double et = duration<double>(high_resolution_clock::now() - t0).count();
+                noProgressWatchdog.reset();
                 const bool saved = save_ckpt_s2(eng, productTreeBuckets[bucketPos].k, (uint64_t)bucketPos, cur_k, et);
                 delete eng;
                 if (saved) {
@@ -4699,6 +4744,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 return Pm1Stage2Result::Interrupted;
             }
 
+            watchdog_phase("product-tree-bucket");
             const ProductTreeBucket& bucket = productTreeBuckets[bucketPos];
             advance_giant_to(bucket.k);
 
@@ -4733,6 +4779,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
             primesSeen += bucket.primeCount;
             skippedPairedUpper += bucket.skippedUpper;
+            watchdog_advance("product-tree-bucket");
 
             auto now = high_resolution_clock::now();
             if (core::pm1::progress_due(now, lastDisplay, options.pm1_progress_seconds)) {
@@ -4766,6 +4813,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 const uint64_t saveK = (bucketPos + 1 < productTreeBuckets.size()) ? productTreeBuckets[bucketPos + 1].k : bucket.k;
                 std::cout << "\nBackup V-trace product-tree Stage 2 at bucket " << saveIdx
                           << " k=" << saveK << " start...\n";
+                watchdog_phase("checkpoint-write");
                 if (save_ckpt_s2(eng, saveK, saveIdx, cur_k, et)) {
                     lastBackup = now0;
                     std::cout << "Backup V-trace product-tree Stage 2 done.\n";
@@ -4778,6 +4826,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     for (;;) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
+            noProgressWatchdog.reset();
             const bool saved = save_ckpt_s2(eng, p_ui, idx, cur_k, et);
             delete eng;
             if (saved) {
@@ -4790,6 +4839,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             return Pm1Stage2Result::Interrupted;
         }
 
+        watchdog_phase("linear-prime");
         const uint64_t q = p_ui;
         ++primesSeen;
         const TracePair tp = make_pair_for_prime(q);
@@ -4830,6 +4880,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             eng->mul((engine::Reg)RACC, (engine::Reg)RMUL_TMP);
             ++termsAccumulated;
         }
+        watchdog_advance("linear-prime");
 
         uint64_t next_p = 0;
         if (!advancePrime(next_p)) break;
@@ -4865,6 +4916,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
             double et = duration<double>(now0 - t0).count();
             std::cout << "\nBackup V-trace Stage 2 at prime " << p_ui << " idx=" << idx << " k=" << cur_k << " start...\n";
+            watchdog_phase("checkpoint-write");
             if (save_ckpt_s2(eng, p_ui, idx, cur_k, et)) {
                 lastBackup = now0;
                 std::cout << "Backup V-trace Stage 2 done.\n";
@@ -4873,6 +4925,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     }
 
     }
+
+    noProgressWatchdog.reset();
 
     std::cout << "\n";
     auto t1 = high_resolution_clock::now();
