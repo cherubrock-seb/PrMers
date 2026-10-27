@@ -3743,51 +3743,56 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         return 0;
     };
 
-    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, uint64_t cur_k, double et){
-        const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
+    auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, uint64_t cur_k, double et)->bool{
+        const std::string newf = ckpt_file_s2 + ".new";
+        bool ok = true;
         {
             File f(newf, "wb");
             int version = ckptVersionS2;
-            if (!f.write(reinterpret_cast<const char*>(&version), sizeof(version))) return;
-            if (!f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp))) return;
-            if (!f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u))) return;
-            if (!f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u))) return;
-            if (!f.write(reinterpret_cast<const char*>(&D), sizeof(D))) return;
-            if (version == 25) {
+            ok = f.write(reinterpret_cast<const char*>(&version), sizeof(version));
+            ok = ok && f.write(reinterpret_cast<const char*>(&pexp), sizeof(pexp));
+            ok = ok && f.write(reinterpret_cast<const char*>(&B1u), sizeof(B1u));
+            ok = ok && f.write(reinterpret_cast<const char*>(&B2u), sizeof(B2u));
+            ok = ok && f.write(reinterpret_cast<const char*>(&D), sizeof(D));
+            if (ok && version == 25) {
                 const uint64_t batchSize = static_cast<uint64_t>(activeBabyCount);
-                if (!f.write(reinterpret_cast<const char*>(&batchSize), sizeof(batchSize))) return;
+                ok = f.write(reinterpret_cast<const char*>(&batchSize), sizeof(batchSize));
             }
-            if (!f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p))) return;
-            if (!f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx))) return;
-            if (!f.write(reinterpret_cast<const char*>(&cur_k), sizeof(cur_k))) return;
-            if (!f.write(reinterpret_cast<const char*>(&et), sizeof(et))) return;
+            ok = ok && f.write(reinterpret_cast<const char*>(&cur_p), sizeof(cur_p));
+            ok = ok && f.write(reinterpret_cast<const char*>(&cur_idx), sizeof(cur_idx));
+            ok = ok && f.write(reinterpret_cast<const char*>(&cur_k), sizeof(cur_k));
+            ok = ok && f.write(reinterpret_cast<const char*>(&et), sizeof(et));
 
-            if (compactVTraceCkpt) {
+            if (ok && compactVTraceCkpt) {
                 const std::vector<size_t> regs = compact_vtrace_regs();
                 const uint32_t nregs = (uint32_t)regs.size();
-                if (!f.write(reinterpret_cast<const char*>(&nregs), sizeof(nregs))) return;
+                ok = f.write(reinterpret_cast<const char*>(&nregs), sizeof(nregs));
                 const size_t rsz = e->get_register_data_size();
                 std::vector<char> one(rsz);
                 for (size_t r : regs) {
+                    if (!ok) break;
                     const uint32_t reg = (uint32_t)r;
-                    if (!f.write(reinterpret_cast<const char*>(&reg), sizeof(reg))) return;
-                    if (!e->get_data(one, (engine::Reg)r)) return;
-                    if (!f.write(one.data(), rsz)) return;
+                    ok = f.write(reinterpret_cast<const char*>(&reg), sizeof(reg));
+                    ok = ok && e->get_data(one, (engine::Reg)r);
+                    ok = ok && f.write(one.data(), rsz);
                 }
-                f.write_crc32();
-            } else {
+            } else if (ok) {
                 const size_t cksz = e->get_checkpoint_size();
                 std::vector<char> data(cksz);
-                if (!e->get_checkpoint(data)) return;
-                if (!f.write(data.data(), cksz)) return;
-                f.write_crc32();
+                ok = e->get_checkpoint(data);
+                ok = ok && f.write(data.data(), cksz);
             }
+            ok = ok && f.write_crc32();
+            ok = f.close() && ok;
         }
-        std::remove(oldf.c_str());
-        struct stat st;
-        if ((stat(ckpt_file_s2.c_str(), &st) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file_s2.c_str());
+        if (!ok || !core::pm1vtrace::commitNew(ckpt_file_s2)) {
+            std::remove(newf.c_str());
+            std::cerr << "[PM1-VTRACE] could not commit Stage 2 checkpoint " << ckpt_file_s2
+                      << "; the previous valid checkpoint (if any) is kept.\n";
+            return false;
+        }
         write_pm1_checkpoint_backend(ckpt_file_s2, e);
+        return true;
     };
 
     // ---- pair95 Stage-2 checkpoint (version 25, pm1_s2_vtrace_pair95_m_<p>.ckpt) ----
@@ -4430,8 +4435,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                               << ") start...\n";
                     if (save_pair95(savePass, saveTask, termsAccumulated, primesSeen, pair95_elapsed())) {
                         std::cout << "Backup V-trace pair95 Stage 2 done.\n";
+                        lastBackup = high_resolution_clock::now();
                     }
-                    lastBackup = high_resolution_clock::now();
                 }
             }
             if (numPasses > 1) {
@@ -4475,11 +4480,15 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     cur_k = 0;
                 }
                 const double et = duration<double>(high_resolution_clock::now() - t0).count();
-                save_ckpt_s2(eng, savePrime, static_cast<uint64_t>(batchStart), cur_k, et);
+                const bool saved = save_ckpt_s2(eng, savePrime, static_cast<uint64_t>(batchStart), cur_k, et);
                 delete eng;
-                std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
-                          << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
-                          << ", prime " << savePrime << ".\n";
+                if (saved) {
+                    std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
+                              << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                              << ", prime " << savePrime << ".\n";
+                } else {
+                    std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint could not be saved.\n";
+                }
                 interrupted = false;
                 return Pm1Stage2Result::Interrupted;
             }
@@ -4547,11 +4556,15 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             for (;;) {
                 if (interrupted) {
                     const double et = duration<double>(high_resolution_clock::now() - t0).count();
-                    save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
+                    const bool saved = save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
                     delete eng;
-                    std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
-                              << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
-                              << ", prime " << bPrime << " (k=" << cur_k << ").\n";
+                    if (saved) {
+                        std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint saved "
+                                  << "at pass " << (batchStart / activeBabyCount + 1) << "/" << numPasses
+                                  << ", prime " << bPrime << " (k=" << cur_k << ").\n";
+                    } else {
+                        std::cout << "\nInterrupted by user; V-trace baby-batched Stage 2 checkpoint could not be saved.\n";
+                    }
                     interrupted = false;
                     return Pm1Stage2Result::Interrupted;
                 }
@@ -4635,9 +4648,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                     std::cout << "Backup V-trace baby-batched Stage 2 at pass "
                               << (batchStart / activeBabyCount + 1) << "/" << numPasses
                               << ", prime " << bPrime << " start...\n";
-                    save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
-                    lastBackup = now;
-                    std::cout << "Backup V-trace baby-batched Stage 2 done.\n";
+                    if (save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et)) {
+                        lastBackup = now;
+                        std::cout << "Backup V-trace baby-batched Stage 2 done.\n";
+                    }
                 }
             }
 
@@ -4650,7 +4664,11 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 cur_k = 0;
                 const auto now = high_resolution_clock::now();
                 const double et = duration<double>(now - t0).count();
-                save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et);
+                if (!save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et)) {
+                    delete eng;
+                    std::cerr << "[PM1-VTRACE-BATCH] pass boundary could not be checkpointed; refusing to continue without a durable resume point.\n";
+                    return Pm1Stage2Result::Error;
+                }
                 lastBackup = now;
                 std::cout << "[PM1-VTRACE-BATCH] pass "
                           << (batchStart / activeBabyCount + 1)
@@ -4669,10 +4687,14 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         for (; bucketPos < productTreeBuckets.size(); ++bucketPos) {
             if (interrupted) {
                 double et = duration<double>(high_resolution_clock::now() - t0).count();
-                save_ckpt_s2(eng, productTreeBuckets[bucketPos].k, (uint64_t)bucketPos, cur_k, et);
+                const bool saved = save_ckpt_s2(eng, productTreeBuckets[bucketPos].k, (uint64_t)bucketPos, cur_k, et);
                 delete eng;
-                std::cout << "\nInterrupted by user, V-trace product-tree Stage 2 state saved at bucket "
-                          << bucketPos << " k=" << cur_k << "\n";
+                if (saved) {
+                    std::cout << "\nInterrupted by user, V-trace product-tree Stage 2 state saved at bucket "
+                              << bucketPos << " k=" << cur_k << "\n";
+                } else {
+                    std::cout << "\nInterrupted by user; V-trace product-tree Stage 2 checkpoint could not be saved.\n";
+                }
                 interrupted = false;
                 return Pm1Stage2Result::Interrupted;
             }
@@ -4744,9 +4766,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
                 const uint64_t saveK = (bucketPos + 1 < productTreeBuckets.size()) ? productTreeBuckets[bucketPos + 1].k : bucket.k;
                 std::cout << "\nBackup V-trace product-tree Stage 2 at bucket " << saveIdx
                           << " k=" << saveK << " start...\n";
-                save_ckpt_s2(eng, saveK, saveIdx, cur_k, et);
-                lastBackup = now0;
-                std::cout << "Backup V-trace product-tree Stage 2 done.\n";
+                if (save_ckpt_s2(eng, saveK, saveIdx, cur_k, et)) {
+                    lastBackup = now0;
+                    std::cout << "Backup V-trace product-tree Stage 2 done.\n";
+                }
             }
         }
         std::cout << "\n[PM1-VTRACE-PRODUCT-TREE] processed " << productTreeBuckets.size()
@@ -4755,10 +4778,14 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     for (;;) {
         if (interrupted) {
             double et = duration<double>(high_resolution_clock::now() - t0).count();
-            save_ckpt_s2(eng, p_ui, idx, cur_k, et);
+            const bool saved = save_ckpt_s2(eng, p_ui, idx, cur_k, et);
             delete eng;
-            std::cout << "\nInterrupted by user, V-trace Stage 2 state saved at prime " << p_ui
-                      << " idx=" << idx << " k=" << cur_k << "\n";
+            if (saved) {
+                std::cout << "\nInterrupted by user, V-trace Stage 2 state saved at prime " << p_ui
+                          << " idx=" << idx << " k=" << cur_k << "\n";
+            } else {
+                std::cout << "\nInterrupted by user; V-trace Stage 2 checkpoint could not be saved.\n";
+            }
             interrupted = false;
             return Pm1Stage2Result::Interrupted;
         }
@@ -4838,9 +4865,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (now0 - lastBackup >= std::chrono::seconds(options.backup_interval)) {
             double et = duration<double>(now0 - t0).count();
             std::cout << "\nBackup V-trace Stage 2 at prime " << p_ui << " idx=" << idx << " k=" << cur_k << " start...\n";
-            save_ckpt_s2(eng, p_ui, idx, cur_k, et);
-            lastBackup = now0;
-            std::cout << "Backup V-trace Stage 2 done.\n";
+            if (save_ckpt_s2(eng, p_ui, idx, cur_k, et)) {
+                lastBackup = now0;
+                std::cout << "Backup V-trace Stage 2 done.\n";
+            }
         }
     }
 
