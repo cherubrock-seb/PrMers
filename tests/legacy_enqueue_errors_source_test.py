@@ -60,4 +60,14 @@ assert len(reads) == 1, "BackupManager reads must go through readForSave"
 helper = backup[backup.index("void readForSave("):]
 assert helper.index("clEnqueueReadBuffer(") < helper.index("util::throwClError")
 
+# The legacy P-1 stages check theirs too (a failed final read reported "no factor").
+pm1 = code_only((ROOT / "src/modes/RunPM1.cpp").read_text())
+legacy_pm1 = pm1[pm1.index("int App::runPM1Stage2()"):pm1.index("int App::runPM1Stage1SLnTorusMarin()")]
+for call in ("clEnqueueReadBuffer(", "clEnqueueWriteBuffer(", "clEnqueueCopyBuffer(", "clFinish("):
+    for m in re.finditer(re.escape(call), legacy_pm1):
+        before = legacy_pm1[max(0, m.start() - 20):m.start()]
+        assert before.endswith("checkPm1Cl("), "unchecked " + call + " in legacy P-1: " + legacy_pm1[m.start():m.start() + 120]
+for m in re.finditer(r"clCreateBuffer\(", legacy_pm1):
+    assert "checkPm1Create(" in legacy_pm1[m.start():m.start() + 400], "unchecked clCreateBuffer in legacy P-1"
+
 print("Legacy NTT enqueue error source regression: PASS")

@@ -19,6 +19,7 @@
 #include "core/Pm1Checkpoint.hpp"
 #include "core/Pm1VTraceCheckpoint.hpp"
 #include "core/Pm1Progress.hpp"
+#include "util/OpenCLError.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -154,6 +155,23 @@ static inline mpz_class mpz_from_u64(uint64_t x) {
 }
 
 namespace fs = std::filesystem;
+
+// The legacy (-marin) P-1 stages: a failed read leaves the host buffer all zero, and stage 1 then reported "no
+// factor" from x = 0 (gcd(-1, Mp) = 1), stage 2 from Q = 0.  Every buffer creation, read, write, copy and wait
+// goes through these, so the run stops instead (a reset or lost GPU says so).
+static void checkPm1Cl(cl_int err, const std::string& what) {
+    if (err != CL_SUCCESS) {
+        util::throwClError(err, util::gpulost::Phase::Run, what,
+                           what + " failed: " + util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+    }
+}
+
+static void checkPm1Create(cl_int err, const std::string& name) {
+    if (err != CL_SUCCESS) {
+        util::throwClError(err, util::gpulost::Phase::Create, "clCreateBuffer " + name,
+                           util::describeClAllocFailure(err, name));
+    }
+}
 
 static std::string pm1_checkpoint_backend_sidecar(const std::string& checkpoint_file) {
     std::string base = checkpoint_file;
@@ -779,7 +797,9 @@ int App::runPM1Stage2() {
 
     cl_int err;
     buffers->Hbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
-    clEnqueueCopyBuffer(context.getQueue(), buffers->input, buffers->Hbuf, 0, 0, limbBytes, 0, nullptr, nullptr);
+    checkPm1Create(err, "Hbuf");
+    checkPm1Cl(clEnqueueCopyBuffer(context.getQueue(), buffers->input, buffers->Hbuf, 0, 0, limbBytes, 0, nullptr, nullptr),
+               "clEnqueueCopyBuffer (H)");
 
     math::Carry carry(context, context.getQueue(), program->getProgram(),
                       precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
@@ -797,6 +817,7 @@ int App::runPM1Stage2() {
     carry.carryGPU(buffers->input, buffers->blockCarryBuf, limbBytes);
 
     buffers->evenPow[0] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    checkPm1Create(err, "evenPow");
     nttEngine->copy(buffers->input, buffers->evenPow[0], limbBytes);
     auto ensureEvenPow = [&](unsigned long needIdx) {
         while (buffers->evenPow.size() <= needIdx) {
@@ -804,6 +825,7 @@ int App::runPM1Stage2() {
             cl_mem buf = clCreateBuffer(context.getContext(),
                                         CL_MEM_READ_WRITE,
                                         limbBytes, nullptr, &err);
+            checkPm1Create(err, "evenPow");
 
             nttEngine->copy(buffers->evenPow[kPrev], buf, limbBytes);
             nttEngine->mulInPlace(buf, buffers->evenPow[0], carry, limbBytes);
@@ -819,6 +841,7 @@ int App::runPM1Stage2() {
     }
     for (unsigned long k = 1; k < nbEven; ++k) {
         buffers->evenPow[k] = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+        checkPm1Create(err, "evenPow");
         nttEngine->copy(buffers->evenPow[k - 1], buffers->evenPow[k], limbBytes);
         nttEngine->mulInPlace(buffers->evenPow[k], buffers->evenPow[0], carry, limbBytes);
         
@@ -842,6 +865,7 @@ int App::runPM1Stage2() {
    
 
     buffers->Hq = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    checkPm1Create(err, "Hq");
     nttEngine->copy(buffers->Hbuf, buffers->input, limbBytes);
 
     mpz_class p_prev;
@@ -861,10 +885,13 @@ int App::runPM1Stage2() {
     nttEngine->copy(buffers->input, buffers->Hq, limbBytes);
 
     buffers->Qbuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    checkPm1Create(err, "Qbuf");
     std::vector<uint64_t> one(limbs, 0ULL); one[0] = 1ULL;
-    clEnqueueWriteBuffer(context.getQueue(), buffers->Qbuf, CL_TRUE, 0, limbBytes, one.data(), 0, nullptr, nullptr);
+    checkPm1Cl(clEnqueueWriteBuffer(context.getQueue(), buffers->Qbuf, CL_TRUE, 0, limbBytes, one.data(), 0, nullptr, nullptr),
+               "clEnqueueWriteBuffer (Q)");
 
     buffers->tmp = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, limbBytes, nullptr, &err);
+    checkPm1Create(err, "tmp");
 
     size_t     idx     = 0;
     //uint64_t resumeIdx = 0;
@@ -954,7 +981,8 @@ int App::runPM1Stage2() {
         }*/
         if (options.iterforce2 > 0 && (idx + 1) % options.iterforce2 == 0) {
             char dummy;
-            clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, sizeof(dummy), &dummy, 0, nullptr, nullptr);
+            checkPm1Cl(clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0, sizeof(dummy), &dummy, 0, nullptr, nullptr),
+                       "clEnqueueReadBuffer (sync)");
         }
 
 
@@ -969,7 +997,7 @@ int App::runPM1Stage2() {
             return 0;
         }*/
         if (interrupted) {
-            clFinish(context.getQueue());
+            checkPm1Cl(clFinish(context.getQueue()), "clFinish");
             backupManager.saveStatePM1S2(buffers->Hq, buffers->Qbuf, idx, limbBytes);
             return 0;
         }
@@ -977,7 +1005,8 @@ int App::runPM1Stage2() {
     }
 
     std::vector<uint64_t> hostQ(limbs);
-    clEnqueueReadBuffer(context.getQueue(), buffers->Qbuf, CL_TRUE, 0, limbBytes, hostQ.data(), 0, nullptr, nullptr);
+    checkPm1Cl(clEnqueueReadBuffer(context.getQueue(), buffers->Qbuf, CL_TRUE, 0, limbBytes, hostQ.data(), 0, nullptr, nullptr),
+               "clEnqueueReadBuffer (stage 2 result)");
     carry.handleFinalCarry(hostQ, precompute.getDigitWidth());
     mpz_class Q = util::vectToMpz(hostQ, precompute.getDigitWidth(), Mp);
     mpz_class g; mpz_gcd(g.get_mpz_t(), Q.get_mpz_t(), Mp.get_mpz_t());
@@ -1070,7 +1099,9 @@ int App::runPM1() {
         x[0] = 1ULL;
         resumeIter = bits;
     }
-    buffers->input = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, x.size() * sizeof(uint64_t), x.data(), nullptr);
+    cl_int inputErr = CL_SUCCESS;
+    buffers->input = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, x.size() * sizeof(uint64_t), x.data(), &inputErr);
+    checkPm1Create(inputErr, "input");
 
     math::Carry carry(context, context.getQueue(), program->getProgram(), precompute.getN(), precompute.getDigitWidth(), buffers->digitWidthMaskBuf);
 
@@ -1111,7 +1142,7 @@ int App::runPM1() {
                                 oss << "\nInterrupted signal received\n " << std::endl;
                       guiServer_->appendLog(oss.str());
             }
-            clFinish(context.getQueue());
+            checkPm1Cl(clFinish(context.getQueue()), "clFinish");
             backupManager.saveState(buffers->input, lastIter-1, &E);
             //backupManager.saveState(buffers->input, lastIter);
             //std::cout << "\nInterrupted by user, state saved at iteration "
@@ -1133,14 +1164,14 @@ int App::runPM1() {
             //if((i+1)%100000 != 0){
 
                 char dummy;
-                clEnqueueReadBuffer(
+                checkPm1Cl(clEnqueueReadBuffer(
                         context.getQueue(),
                         buffers->input,
                         CL_TRUE, 0,
                         sizeof(dummy),
                         &dummy,
                         0, nullptr, nullptr
-                    );
+                    ), "clEnqueueReadBuffer (sync)");
                 
             
             //}
@@ -1203,9 +1234,9 @@ int App::runPM1() {
             }
     std::vector<uint64_t> hostData(precompute.getN());
 
-    clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
+    checkPm1Cl(clEnqueueReadBuffer(context.getQueue(), buffers->input, CL_TRUE, 0,
                         hostData.size() * sizeof(uint64_t), hostData.data(),
-                        0, nullptr, nullptr);
+                        0, nullptr, nullptr), "clEnqueueReadBuffer (stage 1 result)");
     std::cout << "Handle final carry start" << std::endl;
     if (guiServer_) {
                                 std::ostringstream oss;
