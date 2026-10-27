@@ -657,6 +657,12 @@ test-legacy-prp-resume: all
 test-marin-ocl-exec-errors:
 	bash tests/test_marin_ocl_exec_errors_device.sh $(MARIN_TEST_DEVICE)
 
+# Marin engine destructors on a lost GPU: no std::terminate, the lost-GPU error reaches the caller (OpenCL device,
+# PoCL works; the release calls are made to fail inside the test).
+.PHONY: test-marin-destructor-lost-device
+test-marin-destructor-lost-device:
+	bash tests/test_marin_destructor_lost_device.sh $(MARIN_TEST_DEVICE)
+
 .PHONY: test-legacy-program-small
 
 test-legacy-program-small:
