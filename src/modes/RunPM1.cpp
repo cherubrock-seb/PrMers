@@ -4331,19 +4331,22 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (noProgressWatchdog) noProgressWatchdog->advance(phase);
     };
 
+    unsigned long watchdogTestStallMs = 0;
+    if (const char* value = std::getenv("PRMERS_TEST_PM1_WATCHDOG_STALL_MS")) {
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(value, &end, 10);
+        if (end != value && *end == '\0' && parsed > 0 && parsed <= 60000UL) {
+            watchdogTestStallMs = parsed;
+        }
+    }
     bool watchdogTestStallInjected = false;
     auto watchdog_test_stall = [&](const char* phase) {
-        // Deterministic integration-test hook only. It is inert unless the
-        // explicitly test-named environment variable is present.
-        if (watchdogTestStallInjected || !noProgressWatchdog) return;
-        const char* value = std::getenv("PRMERS_TEST_PM1_WATCHDOG_STALL_MS");
-        if (!value || !*value) return;
-        char* end = nullptr;
-        const unsigned long ms = std::strtoul(value, &end, 10);
-        if (end == value || *end != '\0' || ms == 0 || ms > 60000UL) return;
+        // Deterministic integration-test hook only. The environment value is
+        // parsed once above; normal runs pay no getenv cost in the prime loop.
+        if (watchdogTestStallInjected || watchdogTestStallMs == 0 || !noProgressWatchdog) return;
         watchdogTestStallInjected = true;
         watchdog_phase(phase);
-        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(watchdogTestStallMs));
     };
 
     if (usePair95) {
