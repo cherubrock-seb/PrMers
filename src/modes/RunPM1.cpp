@@ -4331,6 +4331,21 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (noProgressWatchdog) noProgressWatchdog->advance(phase);
     };
 
+    bool watchdogTestStallInjected = false;
+    auto watchdog_test_stall = [&](const char* phase) {
+        // Deterministic integration-test hook only. It is inert unless the
+        // explicitly test-named environment variable is present.
+        if (watchdogTestStallInjected || !noProgressWatchdog) return;
+        const char* value = std::getenv("PRMERS_TEST_PM1_WATCHDOG_STALL_MS");
+        if (!value || !*value) return;
+        char* end = nullptr;
+        const unsigned long ms = std::strtoul(value, &end, 10);
+        if (end == value || *end != '\0' || ms == 0 || ms > 60000UL) return;
+        watchdogTestStallInjected = true;
+        watchdog_phase(phase);
+        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    };
+
     if (usePair95) {
         std::cout << "[PM1-VTRACE-PAIR95] executing greedy irregular pair plan"
                   << (useBabyBatching ? " with baby-window batching" : " with resident baby table")
@@ -4840,6 +4855,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         }
 
         watchdog_phase("linear-prime");
+        watchdog_test_stall("test-stall-linear-prime");
         const uint64_t q = p_ui;
         ++primesSeen;
         const TracePair tp = make_pair_for_prime(q);
