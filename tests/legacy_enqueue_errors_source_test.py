@@ -36,4 +36,28 @@ for name in ("void NttEngine::mulInPlace(", "void NttEngine::mulInPlace3("):
     assert "clCreateBuffer" in fn
     assert "if (err != CL_SUCCESS)" in fn and throws(fn), name
 
+# The legacy PRP/LL loop must check every read, write and wait: a failed read left the host buffer as it was and
+# that was used as the GPU's answer (a Gerbicz-Li check passed, a residue of 0 was reported or saved).
+import re
+
+
+def code_only(text):
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+loop = code_only((ROOT / "src/modes/RunPrpOrLl.cpp").read_text())
+for call in ("clEnqueueReadBuffer(", "clEnqueueWriteBuffer(", "clFinish(", "clWaitForEvents("):
+    for m in re.finditer(re.escape(call), loop):
+        before = loop[max(0, m.start() - 20):m.start()]
+        assert before.endswith("checkLegacyCl("), "unchecked " + call + " in RunPrpOrLl.cpp: " + loop[m.start():m.start() + 120]
+assert "clEnqueueMarkerWithWaitList" not in loop and "cl_event" not in loop, "leaked event in RunPrpOrLl.cpp"
+assert "cl_uint ok = 0u;" in loop, "the Gerbicz-Li flag must start as failed on the host"
+
+backup = code_only((ROOT / "src/core/BackupManager.cpp").read_text())
+reads = [m.start() for m in re.finditer(r"clEnqueueReadBuffer\(", backup)]
+assert len(reads) == 1, "BackupManager reads must go through readForSave"
+helper = backup[backup.index("void readForSave("):]
+assert helper.index("clEnqueueReadBuffer(") < helper.index("util::throwClError")
+
 print("Legacy NTT enqueue error source regression: PASS")

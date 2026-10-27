@@ -351,6 +351,12 @@ test-legacy-checkpoint-set:
 test-legacy-checkpoint-mismatch: all
 	bash tests/run_legacy_checkpoint_mismatch.sh $${AEVUM_TEST_DEVICE:-0}
 
+# A failed GPU read in the legacy PRP/LL loop stops the run instead of passing a check or reporting a residue of 0
+# (runs prmers with a preloaded clEnqueueReadBuffer fault shim; PoCL's CPU device is enough).
+.PHONY: test-legacy-read-fault
+test-legacy-read-fault: all
+	bash tests/run_legacy_read_fault.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-legacy-check-equal
 
 test-legacy-check-equal:

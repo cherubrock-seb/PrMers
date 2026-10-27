@@ -94,6 +94,30 @@ using core::algo::product_tree_range_u64;
 using core::algo::compute_X_with_dots;
 using core::algo::gcd_with_dots;
 
+namespace {
+
+// Every read, write and wait of the legacy loop goes through this.  A failed read leaves the host buffer as it
+// was (zeros, or the flag the host itself wrote), and that used to be taken as the GPU's answer: a failed
+// Gerbicz-Li read passed the check, a failed final read reported the residue 0.  Throw instead, so the run stops
+// with the OpenCL error (a reset or lost GPU says so) and nothing is saved or reported from that buffer.
+void checkLegacyCl(cl_int err, const std::string& what) {
+    if (err != CL_SUCCESS) {
+        util::throwClError(err, util::gpulost::Phase::Run, what,
+                           what + " failed: " + util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+    }
+}
+
+// Releases the Gerbicz-Li flag buffers on every way out of the loop, including an exception.
+struct ClMemRelease {
+    cl_mem& mem;
+    ~ClMemRelease() {
+        if (mem != nullptr) clReleaseMemObject(mem);
+        mem = nullptr;
+    }
+};
+
+} // namespace
+
 int App::runPrpOrLl() {
     
     Printer::banner(options);
@@ -125,12 +149,17 @@ int App::runPrpOrLl() {
                     << " mode)" << std::endl;
         }
     }
+    cl_int inputErr = CL_SUCCESS;
     buffers->input = clCreateBuffer(
         context.getContext(),
         CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
         x.size() * sizeof(uint64_t),
-        x.data(), nullptr
+        x.data(), &inputErr
     );
+    if (inputErr != CL_SUCCESS) {
+        util::throwClError(inputErr, util::gpulost::Phase::Create, "clCreateBuffer input",
+                           util::describeClAllocFailure(inputErr, "input"));
+    }
     std::cout << "Sampling 100 iterations for IPS estimation...\n";
     if (guiServer_) {
                     std::ostringstream oss;
@@ -148,14 +177,14 @@ int App::runPrpOrLl() {
         tuneIterforce();
         return 0;
     }
-    clEnqueueWriteBuffer(
+    checkLegacyCl(clEnqueueWriteBuffer(
             context.getQueue(),
             buffers->input,
             CL_TRUE, 0,
             x.size() * sizeof(uint64_t),
             x.data(),
             0, nullptr, nullptr
-        );
+        ), "clEnqueueWriteBuffer (initial residue)");
     
 
     math::Carry carry(
@@ -402,6 +431,7 @@ int App::runPrpOrLl() {
             }
             exit(1);
     }
+    ClMemRelease releaseOkBuf{outOkBuf};
     cl_mem outIdxBuf = clCreateBuffer(context.getContext(), CL_MEM_READ_WRITE, sizeof(cl_uint), nullptr, &err);
     if (err != CL_SUCCESS) {
             std::cerr << util::describeClAllocFailure(err, "outIdxBuf") << std::endl;
@@ -413,6 +443,7 @@ int App::runPrpOrLl() {
             }
             exit(1);
     }
+    ClMemRelease releaseIdxBuf{outIdxBuf};
     
     
     // A proof residue that cannot be written or read back makes the proof
@@ -440,23 +471,23 @@ int App::runPrpOrLl() {
         if (options.erroriter > 0 && iter + 1 == options.erroriter && !errordone) {
             errordone = true;
             uint64_t limb0;
-            clEnqueueReadBuffer(
+            checkLegacyCl(clEnqueueReadBuffer(
                 context.getQueue(),
                 buffers->input,
                 CL_TRUE, 0,
                 sizeof(uint64_t),
                 &limb0,
                 0, nullptr, nullptr
-            );
+            ), "clEnqueueReadBuffer (error injection)");
             limb0 += 1;
-            clEnqueueWriteBuffer(
+            checkLegacyCl(clEnqueueWriteBuffer(
                 context.getQueue(),
                 buffers->input,
                 CL_TRUE, 0,
                 sizeof(uint64_t),
                 &limb0,
                 0, nullptr, nullptr
-            );
+            ), "clEnqueueWriteBuffer (error injection)");
             std::cout << "Injected error at iteration " << (iter + 1) << std::endl;
             if (guiServer_) {
                     std::ostringstream oss;
@@ -484,14 +515,14 @@ int App::runPrpOrLl() {
             std::string res64_x;  
 
             {
-                clEnqueueReadBuffer(
+                checkLegacyCl(clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
                     CL_TRUE, 0,
                     hostData.size() * sizeof(uint64_t),
                     hostData.data(),
                     0, nullptr, nullptr
-                );
+                ), "clEnqueueReadBuffer (residue)");
 
                 
                 bool debug = false;
@@ -536,26 +567,26 @@ int App::runPrpOrLl() {
             
             if((iter+1)%1000000000 != 0){
                 char dummy;
-                clEnqueueReadBuffer(
+                checkLegacyCl(clEnqueueReadBuffer(
                         context.getQueue(),
                         buffers->input,
                         CL_TRUE, 0,
                         sizeof(dummy),
                         &dummy,
                         0, nullptr, nullptr
-                    );
+                    ), "clEnqueueReadBuffer (sync)");
             }
             else{
                 std::vector<uint64_t> hostData(precompute.getN());
                 std::string res64_x;  
-                clEnqueueReadBuffer(
+                checkLegacyCl(clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
                     CL_TRUE, 0,
                     hostData.size() * sizeof(uint64_t),
                     hostData.data(),
                     0, nullptr, nullptr
-                );
+                ), "clEnqueueReadBuffer (residue)");
 
                 
                 bool debug = false;
@@ -686,9 +717,13 @@ int App::runPrpOrLl() {
                     );
                 }
 
-                cl_uint ok = 1u;
-                clEnqueueWriteBuffer(context.getQueue(), outOkBuf,  CL_FALSE, 0, sizeof(ok),  &ok,  0, nullptr, nullptr);
-                
+                // The kernel clears the flag on a mismatch.  The host copy starts at 0, so only a read that
+                // really returned the device's flag can pass the check.
+                const cl_uint okInit = 1u;
+                cl_uint ok = 0u;
+                checkLegacyCl(clEnqueueWriteBuffer(context.getQueue(), outOkBuf, CL_FALSE, 0, sizeof(okInit), &okInit, 0, nullptr, nullptr),
+                              "clEnqueueWriteBuffer (Gerbicz-Li flag)");
+
                 kernels->runCheckEqual(
                     buffers->bufd,
                     buffers->input,
@@ -696,9 +731,8 @@ int App::runPrpOrLl() {
                     static_cast<cl_uint>(precompute.getN())
                 );
 
-                cl_event okEvt;
-                clEnqueueReadBuffer(context.getQueue(), outOkBuf, CL_FALSE, 0, sizeof(ok), &ok, 0, nullptr, &okEvt);
-                clWaitForEvents(1, &okEvt);
+                checkLegacyCl(clEnqueueReadBuffer(context.getQueue(), outOkBuf, CL_TRUE, 0, sizeof(ok), &ok, 0, nullptr, nullptr),
+                              "clEnqueueReadBuffer (Gerbicz-Li flag)");
 
                 if (ok == 1u) {
                     std::cout << "[Gerbicz Li] Check passed! iter=" << iter << "\n";
@@ -714,9 +748,7 @@ int App::runPrpOrLl() {
                     verified_done = iter + 1;
                     jsave = j;
                     errcheck_retry.passed();
-                    cl_event postEvt;
-                    clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
-                    clWaitForEvents(1, &postEvt);
+                    checkLegacyCl(clFinish(context.getQueue()), "clFinish (Gerbicz-Li)");
                 } else {
                     std::cout << "[Gerbicz Li] Mismatch \n"
                             << "[Gerbicz Li] Check FAILED! iter=" << iter << "\n"
@@ -734,8 +766,6 @@ int App::runPrpOrLl() {
                             "Try the default Aevum or -engine-marin backend instead of -marin.");
                         std::cout << "[Gerbicz Li] " << reason << "\n";
                         if (guiServer_) guiServer_->appendLog(std::string("[Gerbicz Li] ") + reason);
-                        if (outOkBuf != nullptr)  clReleaseMemObject(outOkBuf);
-                        if (outIdxBuf != nullptr) clReleaseMemObject(outIdxBuf);
                         throw std::runtime_error(reason);
                     }
                     j = jsave;
@@ -749,9 +779,7 @@ int App::runPrpOrLl() {
                     checkpass = 0;
                     nttEngine->copy(buffers->last_correct_state, buffers->input, limbBytes);
                     nttEngine->copy(buffers->last_correct_bufd, buffers->bufd, limbBytes);
-                    cl_event postEvt;
-                    clEnqueueMarkerWithWaitList(context.getQueue(), 0, nullptr, &postEvt);
-                    clWaitForEvents(1, &postEvt);
+                    checkLegacyCl(clFinish(context.getQueue()), "clFinish (Gerbicz-Li)");
                 }
             }
         }
@@ -765,14 +793,14 @@ int App::runPrpOrLl() {
                 lastBackup = now;
                 double backupElapsed = timer.elapsed();
                 std::vector<uint64_t> hostData(precompute.getN());
-                clEnqueueReadBuffer(
+                checkLegacyCl(clEnqueueReadBuffer(
                     context.getQueue(),
                     buffers->input,
                     CL_TRUE, 0,
                     hostData.size() * sizeof(uint64_t),
                     hostData.data(),
                     0, nullptr, nullptr
-                );
+                ), "clEnqueueReadBuffer (residue)");
                 {
                     auto dataCopy       = hostData;
                     auto elapsed        = timer.elapsed();
@@ -808,8 +836,8 @@ int App::runPrpOrLl() {
         
 
     }
-    if (outOkBuf != nullptr)  clReleaseMemObject(outOkBuf);
-    if (outIdxBuf != nullptr) clReleaseMemObject(outIdxBuf);
+    if (outOkBuf != nullptr)  { clReleaseMemObject(outOkBuf);  outOkBuf = nullptr; }
+    if (outIdxBuf != nullptr) { clReleaseMemObject(outIdxBuf); outIdxBuf = nullptr; }
 
     if (interrupted) {
         std::cout << "\nInterrupted signal received\n " << std::endl;
@@ -818,7 +846,7 @@ int App::runPrpOrLl() {
                                 oss << "\nInterrupted signal received\n " << std::endl;
                                 guiServer_->appendLog(oss.str());
                         }
-        clFinish(queue);
+        checkLegacyCl(clFinish(queue), "clFinish");
         queued = 0;
         // saveState records iteration + 1 as the number of iterations done. When the loop was
         // interrupted before its first iteration the buffer is still at the resumed state, so
@@ -837,7 +865,7 @@ int App::runPrpOrLl() {
         return 0;
     }
     if (queued > 0) {
-        clFinish(queue);
+        checkLegacyCl(clFinish(queue), "clFinish");
         queued = 0;
     }
     std::vector<uint64_t> hostData(precompute.getN());
@@ -846,14 +874,14 @@ int App::runPrpOrLl() {
 
 
     {
-        clEnqueueReadBuffer(
+        checkLegacyCl(clEnqueueReadBuffer(
             context.getQueue(),
             buffers->input,
             CL_TRUE, 0,
             hostData.size() * sizeof(uint64_t),
             hostData.data(),
             0, nullptr, nullptr
-        );
+        ), "clEnqueueReadBuffer (final residue)");
 
          
         carry.handleFinalCarry(hostData,
@@ -868,14 +896,14 @@ int App::runPrpOrLl() {
             saveCheckpoint(totalIters - 1);
         };
         if (options.wagstaff) {
-            clEnqueueWriteBuffer(
+            checkLegacyCl(clEnqueueWriteBuffer(
                 context.getQueue(),
                 buffers->input,
                 CL_TRUE, 0,
                 hostData.size() * sizeof(uint64_t),
                 hostData.data(),
                 0, nullptr, nullptr
-            );
+            ), "clEnqueueWriteBuffer (final residue)");
             saveFinalState();
             spinner.displayProgress(
                 lastIter+1,
@@ -982,14 +1010,14 @@ int App::runPrpOrLl() {
             return isWagstaffPRP ? 0 : 1;
         }
 
-        clEnqueueWriteBuffer(
+        checkLegacyCl(clEnqueueWriteBuffer(
             context.getQueue(),
             buffers->input,
             CL_TRUE, 0,
             hostData.size() * sizeof(uint64_t),
             hostData.data(),
             0, nullptr, nullptr
-        );
+        ), "clEnqueueWriteBuffer (final residue)");
 
         // Checkpoint the final result at iteration totalIters (after all p iterations are complete)
         if (options.proof) {
@@ -1103,14 +1131,14 @@ int App::runPrpOrLl() {
     logger.logEnd(finalElapsed);
 
     std::vector<uint64_t> hostResult(precompute.getN());
-    clEnqueueReadBuffer(
+    checkLegacyCl(clEnqueueReadBuffer(
         context.getQueue(),
         buffers->input,
         CL_TRUE, 0,
         hostResult.size() * sizeof(uint64_t),
         hostResult.data(),
         0, nullptr, nullptr
-    );
+    ), "clEnqueueReadBuffer (result)");
 
 
     auto [isPrime, res64, res2048] = io::JsonBuilder::computeResult(hostResult, options, precompute.getDigitWidth());
