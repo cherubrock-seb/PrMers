@@ -94,7 +94,7 @@ if [ "$rc" -ne 124 ]; then
   exit 1
 fi
 
-grep -aq 'Resuming Stage 2 from checkpoint' "$WORK/watchdog.log" || {
+grep -aq 'Resuming Stage 2 V-trace from checkpoint' "$WORK/watchdog.log" || {
   echo "FAIL: watchdog run did not resume the durable checkpoint" >&2
   tail -80 "$WORK/watchdog.log" >&2
   exit 1
@@ -122,6 +122,8 @@ if find "$WORK" -maxdepth 1 -type f -name '*stage2*result*.json' | grep -q .; th
   exit 1
 fi
 
+echo "WATCHDOG_TIMEOUT_DIAGNOSTIC=$(grep -a '\\[PM1-WATCHDOG\\] no V-trace Stage 2 advancement' "$WORK/watchdog.log" | tail -1)"
+echo "WATCHDOG_CHECKPOINT_SHA256=$(sha256sum "$CKPT" | awk '{print $1}')"
 echo "WATCHDOG_TIMEOUT_EXIT=124"
 echo "WATCHDOG_CHECKPOINT_PRESERVED=PASS"
 echo "WATCHDOG_RESULT_NOT_PUBLISHED=PASS"
