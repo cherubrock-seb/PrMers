@@ -29,6 +29,13 @@ assert "save_ckpt_s2(eng, bPrime, static_cast<uint64_t>(batchStart), cur_k, et);
 assert "save_ckpt_s2(eng, p0u, static_cast<uint64_t>(nextBatchStart), cur_k, et);" in pm1
 assert "Resuming Stage 2 from checkpoint at pass" in pm1
 assert "Backup V-trace baby-batched Stage 2 at pass" in pm1
+assert "auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, uint64_t cur_k, double et)->bool" in pm1
+assert "ok = ok && f.write_crc32();" in pm1
+assert "ok = f.close() && ok;" in pm1
+assert "core::pm1vtrace::commitNew(ckpt_file_s2)" in pm1
+assert "the previous valid checkpoint (if any) is kept" in pm1
+assert "checkpoint could not be saved" in pm1
+assert "pass boundary could not be checkpointed; refusing to continue without a durable resume point" in pm1
 
 # The old behaviour explicitly discarded any Stage-2 checkpoint and admitted
 # that an interrupted pass could not be resumed.
