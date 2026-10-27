@@ -113,7 +113,7 @@ inline const std::set<std::string>& oneValueOptions() {
     static const std::set<std::string> k = {
         "--b2start", "--gm-base", "--gm-factor-chunk-bits", "--gm-family", "--gm-replay-block", "--gm-sieve",
         "--gm-tf-chunk", "--gm-tf-sieve",
-        "--pm1-vtrace-baby-batch", "--pm1-vtrace-d", "--pm1-vtrace-deep-d", "--pm1-vtrace-max-batches",
+        "--pm1-no-progress-seconds", "--pm1-vtrace-baby-batch", "--pm1-vtrace-d", "--pm1-vtrace-deep-d", "--pm1-vtrace-max-batches",
         "--pm1-vtrace-max-regs", "--pm1-vtrace-pair95-l", "--pm1-vtrace-product-tree-width",
         "--s2from", "--stage2start",
         "-K", "-aevum-fft", "-b1", "-b1old", "-b2", "-b2start", "-b3", "-b4", "-brent", "-c", "-checklevel",
@@ -121,7 +121,7 @@ inline const std::set<std::string>& oneValueOptions() {
         "-erroriter", "-f", "-factors", "-filemers", "-glblock", "-gm-base", "-gm-factor-chunk-bits",
         "-gm-family", "-gm-replay-block", "-gm-sieve", "-gm-tf-chunk", "-gm-tf-sieve", "-host", "-http",
         "-iterforce", "-iterforce2", "-kernelpath", "-l1", "-l2", "-l3", "-l5", "-llsafeb", "-maxe", "-memlim",
-        "-nmax", "-p95path", "-password", "-pm1-vtrace-baby-batch", "-pm1-vtrace-d", "-pm1-vtrace-deep-d",
+        "-nmax", "-p95path", "-password", "-pm1-no-progress-seconds", "-pm1-vtrace-baby-batch", "-pm1-vtrace-d", "-pm1-vtrace-deep-d",
         "-pm1-vtrace-max-batches", "-pm1-vtrace-max-regs", "-pm1-vtrace-pair95-l",
         "-pm1-vtrace-product-tree-width", "-proof", "-res64_display_interval", "-s2from", "-seed", "-sigma",
         "-stage2start", "-t", "-tbits", "-user", "-vtrace-baby-batch", "-vtrace-d", "-vtrace-deep-d",
