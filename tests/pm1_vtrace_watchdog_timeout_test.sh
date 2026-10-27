@@ -100,7 +100,7 @@ grep -aq 'Resuming Stage 2 V-trace from checkpoint' "$WORK/watchdog.log" || {
   exit 1
 }
 
-grep -aq '\[PM1-WATCHDOG\] no V-trace Stage 2 advancement for 1 s; phase=test-stall-linear-prime' "$WORK/watchdog.log" || {
+grep -aFq '[PM1-WATCHDOG] no V-trace Stage 2 advancement for 1 s; phase=test-stall-linear-prime' "$WORK/watchdog.log" || {
   echo "FAIL: expected watchdog timeout diagnostic is missing" >&2
   tail -80 "$WORK/watchdog.log" >&2
   exit 1
@@ -122,7 +122,7 @@ if find "$WORK" -maxdepth 1 -type f -name '*stage2*result*.json' | grep -q .; th
   exit 1
 fi
 
-echo "WATCHDOG_TIMEOUT_DIAGNOSTIC=$(grep -a '\\[PM1-WATCHDOG\\] no V-trace Stage 2 advancement' "$WORK/watchdog.log" | tail -1)"
+echo "WATCHDOG_TIMEOUT_DIAGNOSTIC=$(grep -aF '[PM1-WATCHDOG] no V-trace Stage 2 advancement' "$WORK/watchdog.log" | tail -1)"
 echo "WATCHDOG_CHECKPOINT_SHA256=$(sha256sum "$CKPT" | awk '{print $1}')"
 echo "WATCHDOG_TIMEOUT_EXIT=124"
 echo "WATCHDOG_CHECKPOINT_PRESERVED=PASS"
