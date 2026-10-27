@@ -841,3 +841,9 @@ test-pm1-reporting:
 # Source/algebra guard for PFactor decimal parsing and exact baby-pass replay semantics.
 test-pm1-pfactor-vtrace-resume:
 	python3 tests/pm1_pfactor_vtrace_resume_source_test.py
+
+.PHONY: test-pm1-vtrace-watchdog-timeout
+# GPU integration: creates a durable V-trace checkpoint, injects a test-only
+# monitored stall, and requires exit 124 with byte-identical checkpoint state.
+test-pm1-vtrace-watchdog-timeout: all
+	bash tests/pm1_vtrace_watchdog_timeout_test.sh ${PRMERS_TEST_DEVICE:-0}
