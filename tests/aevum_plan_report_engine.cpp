@@ -13,12 +13,16 @@ thread_local std::string g_error;
 
 const char* const kPreview = "4:512:8:512:202";   // what the device-neutral native PRP resolver reports (4M)
 const char* const kCreated = "1:1K:16:256:101";   // what an engine created without a plan runs (8M)
+const char* const kFactorUnsafe = "1:256:4:256:101"; // p=21000013 ordinary-LL AUTO preview (512K)
+const char* const kFactorSafe = "1:512:4:256:101";   // promoted factor-3-safe plan (1M)
 
 struct Fake {
     std::string plan;
 };
 
 std::size_t transform_of(const std::string& plan) {
+    if (plan == kFactorUnsafe) return 524288u;
+    if (plan == kFactorSafe) return 1048576u;
     return plan == kPreview ? 4194304u : 8388608u;
 }
 }
@@ -39,7 +43,22 @@ FAKE_EXPORT int aevum_engine_resolve_fft(std::uint32_t exponent, const char* fft
     g_error.clear();
     if (!output || exponent < 3) return 0;
     const std::string req = fft_spec ? fft_spec : "";
-    const std::string spec = req == "native-prp:auto" ? kPreview : req.empty() ? kCreated : req;
+    std::string spec;
+    if (req == "native-prp:auto") {
+        spec = kPreview;
+    } else if (!req.empty()) {
+        spec = req;
+    } else if (exponent == 21000013u) {
+        spec = kFactorUnsafe;
+    } else if (exponent > 21000013u && exponent < 30000000u) {
+        if (const char* fail = std::getenv("FAKE_AEVUM_FACTOR_SAFE_NONE"); fail && *fail) {
+            g_error = "No admissible factor-safe plan";
+            return 0;
+        }
+        spec = kFactorSafe;
+    } else {
+        spec = kCreated;
+    }
     if (spec.size() + 1 > output_size) return 0;
     std::memcpy(output, spec.c_str(), spec.size() + 1);
     return 1;

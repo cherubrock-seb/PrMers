@@ -11,6 +11,7 @@
 #include "io/WorktodoParser.hpp"
 #include "io/WorktodoManager.hpp"
 #include "marin/engine.h"
+#include "aevum/EngineAevum.hpp"
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
@@ -457,6 +458,42 @@ int App::runLlSafeMarin()
 
     const uint32_t p = static_cast<uint32_t>(options.exponent);
     const bool verbose = true;
+
+    // LL-SAFE's paired-complex recurrence executes square_mul(..., 3), so an
+    // FFT plan that is safe for ordinary LL squaring may not have enough
+    // dynamic range. Preserve explicit user plans (the engine's runtime guard
+    // rejects an unsafe one), but make implicit Aevum AUTO capacity-aware.
+    const engine::gpu_backend requested_backend = engine::configured_gpu_backend();
+    const std::string requested_fft = engine::configured_aevum_fft_spec();
+    if (requested_fft.empty() &&
+        (requested_backend == engine::gpu_backend::auto_select ||
+         requested_backend == engine::gpu_backend::aevum)) {
+        std::size_t safe_transform = 0;
+        std::string safe_fft;
+        std::string safe_reason;
+        if (aevum_engine_resolve_factor_safe_fft(
+                p, 3u, &safe_transform, &safe_fft, &safe_reason)) {
+            engine::configure_gpu_backend(
+                requested_backend, safe_fft, engine::gpu_workload::ll);
+            if (verbose) {
+                std::cout << "[LL-SAFE factor-capacity guard] factor=3 plan="
+                          << safe_fft << " transform=" << safe_transform << std::endl;
+            }
+        } else if (requested_backend == engine::gpu_backend::aevum) {
+            throw std::runtime_error(
+                "Forced Aevum LL-SAFE cannot obtain a factor-3-safe FFT plan: " +
+                safe_reason);
+        } else {
+            engine::configure_gpu_backend(
+                engine::gpu_backend::marin, "", engine::gpu_workload::ll);
+            if (verbose) {
+                std::cout << "[LL-SAFE factor-capacity guard] no factor-3-safe "
+                             "Aevum AUTO plan; falling back to Marin: "
+                          << safe_reason << std::endl;
+            }
+        }
+    }
+
     engine* eng = engine::create_gpu(p, static_cast<size_t>(18), static_cast<size_t>(options.device_id), verbose);
     const char* ll_backend_name = eng->is_aevum_backend() ? "Aevum" : "Marin";
     if (verbose) std::cout << "LL-SAFE on 2^" << p << " - 1 using " << ll_backend_name
