@@ -278,6 +278,10 @@ test-worktodo-archive-dir:
 test-worktodo-archive-dir-run: all
 	bash tests/worktodo_archive_dir_run_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-worktodo-read-error
+test-worktodo-read-error:
+	bash tests/test_worktodo_read_error.sh
+
 .PHONY: test-worktodo-exponent-range
 test-worktodo-exponent-range:
 	bash tests/test_worktodo_exponent_range.sh
