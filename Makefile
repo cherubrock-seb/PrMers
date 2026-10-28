@@ -320,6 +320,10 @@ test-quick-checker:
 test-json-res64-small-exponent:
 	bash tests/test_json_res64_small_exponent.sh
 
+.PHONY: test-json-escape-control
+test-json-escape-control:
+	bash tests/test_json_escape_control.sh
+
 .PHONY: test-self-exe-restart
 test-self-exe-restart:
 	bash tests/test_self_exe_restart.sh

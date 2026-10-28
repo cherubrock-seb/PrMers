@@ -315,9 +315,12 @@ static std::string fileMD5(const std::string& filePath) {
     return std::move(h).finish();
 }
 
+// A JSON string: RFC 8259 forbids raw control characters (U+0000 to U+001F), so the ones without a short form
+// are written as \u00XX.  Bytes from 0x80 up (UTF-8) pass through unchanged.
 static std::string jsonEscape(const std::string& s) {
     std::ostringstream o;
-    for (char c : s) {
+    for (char raw : s) {
+        const unsigned char c = static_cast<unsigned char>(raw);
         switch (c) {
             case '"':  o << "\\\""; break;
             case '\\': o << "\\\\"; break;
@@ -326,7 +329,15 @@ static std::string jsonEscape(const std::string& s) {
             case '\n': o << "\\n";  break;
             case '\r': o << "\\r";  break;
             case '\t': o << "\\t";  break;
-            default:   o << c;      break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(c));
+                    o << buf;
+                } else {
+                    o << raw;
+                }
+                break;
         }
     }
     return "\"" + o.str() + "\"";
