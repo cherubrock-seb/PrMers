@@ -26,5 +26,11 @@ assert pm1.count("core::pm1::progress_prefix(options.exponent, 2)") >= 6
 assert "core::pm1::progress_prefix(expo, 1)" in spinner
 assert "-pm1-progress-seconds" in cli
 assert "pm1_progress_seconds = 300" in opts
+assert "-pm1-no-progress-seconds" in cli
+assert "pm1_no_progress_seconds = 0" in opts
+assert "NoProgressWatchdog" in pm1
+assert "[PM1-WATCHDOG]" in pm1
+assert "std::_Exit(124)" in pm1
+assert "PRMERS_TEST_PM1_WATCHDOG_STALL_MS" in pm1
 assert "P-1 and ECM Stage 2 handoff" in cli
 print("PM1_REPORTING_SOURCE_GATE=PASS")
