@@ -12,8 +12,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -143,6 +146,43 @@ int main() {
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "runnable line after malformed ones is pending");
         write(wt, "PRP=1,2,521,-1\nPRP=garbage\n");
         expect(io::WorktodoParser::hasPendingEntry(wt.string()), "runnable line before a malformed one is pending");
+    }
+
+    // An unreadable worktodo file is an error, not "no more entries": a missing or empty file is false.
+    {
+        auto pendingOrThrow = [](const fs::path& p, bool& threw) {
+            threw = false;
+            try {
+                return io::WorktodoParser::hasPendingEntry(p.string());
+            } catch (const std::runtime_error& e) {
+                threw = std::string(e.what()).find(p.string()) != std::string::npos;
+                return false;
+            }
+        };
+        bool threw = false;
+        const fs::path wt = dir / "unreadable.txt";
+        pendingOrThrow(dir / "still_missing.txt", threw);
+        expect(!threw, "missing file does not throw");
+        write(wt, "");
+        expect(!pendingOrThrow(wt, threw) && !threw, "empty file is false, no throw");
+        write(wt, "# nothing\n");
+        expect(!pendingOrThrow(wt, threw) && !threw, "comment-only file is false, no throw");
+
+        const fs::path asDir = dir / "worktodo_is_a_directory";
+        fs::create_directories(asDir);
+        pendingOrThrow(asDir, threw);
+        expect(threw, "a directory in place of the worktodo file throws");
+
+        write(wt, "PRP=1,2,521,-1\n");
+        if (geteuid() != 0) {
+            fs::permissions(wt, fs::perms::none);
+            pendingOrThrow(wt, threw);
+            expect(threw, "a file without read permission throws");
+            fs::permissions(wt, fs::perms::owner_read | fs::perms::owner_write);
+            expect(pendingOrThrow(wt, threw) && !threw, "readable again: pending, no throw");
+        } else {
+            std::cout << "SKIP: chmod 000 case (running as root)\n";
+        }
     }
 
     // PRP residue type: Prime95 order is k,b,n,c,tf,tests_saved,base,residue_type.
