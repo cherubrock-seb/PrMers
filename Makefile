@@ -432,6 +432,11 @@ test-gpu-lost-message:
 test-interrupt-exit-code: all
 	python3 tests/interrupt_exit_code_test.py ./prmers $${PRMERS_TEST_DEVICE:-0} INT
 
+# -tune (legacy PRP iterforce tuning) stops on SIGINT, SIGTERM and SIGHUP (runs prmers; PoCL's CPU device is enough).
+.PHONY: test-tune-stop
+test-tune-stop: all
+	bash tests/run_tune_stop.sh $${PRMERS_TEST_DEVICE:-0}
+
 # A stop that lands after the result was saved still retires the entry and deletes the state (needs gdb; skips without it).
 .PHONY: test-stop-after-result
 test-stop-after-result: all

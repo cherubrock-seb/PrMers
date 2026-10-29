@@ -241,6 +241,14 @@ void App::tuneIterforce() {
     uint64_t sampleIters = std::min<uint64_t>(64, defaultTestIters);
     std::cout << "Sampling " << sampleIters << " iterations at iterforce=10\n";
     double sampleIps = measureIps(10, sampleIters);
+    // A stop (Ctrl-C, SIGTERM, SIGHUP, GUI Stop) ends the tuning: it was never looked at, and the search ran on
+    // for its many one-minute measurements.
+    auto stopped = []() {
+        if (!core::algo::stop_requested_any()) return false;
+        std::cout << "Tuning stopped\n";
+        return true;
+    };
+    if (stopped()) return;
     std::cout << "Estimated IPS: " << sampleIps << "\n";
 
     uint64_t testIters = static_cast<uint64_t>(sampleIps * maxTestSeconds);
@@ -258,7 +266,9 @@ void App::tuneIterforce() {
     while (low < high) {
         uint64_t mid = low + (high - low) / 2;
         double ipsMid = measureIps(mid, testIters);
+        if (stopped()) return;
         double ipsNext = measureIps(mid + 50, testIters);
+        if (stopped()) return;
         std::cout << "iterforce=" << mid << " IPS=" << ipsMid
                   << " | " << (mid+1) << " IPS=" << ipsNext << "\n";
         if (ipsMid < ipsNext) {
@@ -306,7 +316,8 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
     std::cout << "    Running iterforce=" << testIterforce << ": [";
 
     auto start = high_resolution_clock::now();
-    for (uint64_t iter = 1; iter <= testIters; ++iter) {
+    uint64_t done = 0;   // a stop ends the measurement early: the rate is that of the iterations run
+    for (uint64_t iter = 1; iter <= testIters && !core::algo::stop_requested_any(); ++iter, ++done) {
         nttEngine->forward(buffers->input, iter - 1);
         nttEngine->inverse(buffers->input, iter - 1);
         carry.carryGPU(
@@ -323,7 +334,7 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
 
     options.iterforce = oldIterforce;
     double seconds = duration_cast<duration<double>>(end - start).count();
-    return testIters / seconds;
+    return done / seconds;
 }
 
 
