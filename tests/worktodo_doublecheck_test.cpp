@@ -55,6 +55,32 @@ void expectPrp(const std::string& line) {
     }
 }
 
+// A Test=/DoubleCheck= line with four or more fields that is not the Mersenne k,b,n,c form 1,2,E,-1 is not a
+// Prime95 line (that has at most exponent,how_far_factored,has_been_pminus1ed after the assignment ID).
+// It must be skipped, not run as an LL test of its first field.  The valid line after it is the entry.
+void expectSkipped(const std::string& badLine) {
+    const auto path = std::filesystem::temp_directory_path() / "prmers_doublecheck_skip_test.txt";
+    {
+        std::ofstream out(path);
+        out << badLine << "\nTest=127,70,1\n";
+    }
+    io::WorktodoParser parser(path.string());
+    const auto entry = parser.parse();
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    if (!entry || !entry->llTest || entry->exponent != 127U) {
+        std::cerr << "FAIL " << badLine << ": expected the line to be skipped, got ";
+        if (!entry) std::cerr << "no entry\n";
+        else std::cerr << "exponent=" << entry->exponent << "\n";
+        ++failures;
+    } else if (io::WorktodoParser::isValidEntryLine(badLine)) {
+        std::cerr << "FAIL " << badLine << ": isValidEntryLine accepts it\n";
+        ++failures;
+    } else {
+        std::cout << "PASS " << badLine << " -> skipped\n";
+    }
+}
+
 } // namespace
 
 int main() {
@@ -72,6 +98,16 @@ int main() {
     expectLl("DoubleCheck=127,70,1", true);
     expectLl("DoubleCheck=" + aid + ",127,70,1", true);
     expectLl("Test=127,70,1", false);
+
+    // Four or more fields that are not 1,2,E,-1: skipped (they used to run the first field as the exponent).
+    expectSkipped("Test=3,2,100,-1");
+    expectSkipped("Test=1,2,127,+1");
+    expectSkipped("DoubleCheck=1,2,127,+1");
+    expectSkipped("Test=" + aid + ",3,2,100,-1");
+    expectSkipped("DoubleCheck=N/A,3,2,100,-1");
+    expectSkipped("Test=127,70,1,5");
+    expectSkipped("test=3,2,100,-1");
+    expectSkipped("Test=1,3,127,-1");
 
     // PRP lines never carry the flag.
     expectPrp("PRP=1,2,127,-1");
