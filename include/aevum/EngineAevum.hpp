@@ -33,3 +33,8 @@ engine* create_aevum_engine(uint32_t exponent,
 // is not an Aevum engine or the plugin cannot report it.  This can differ from the plan the resolver predicted
 // before creation, because autotune, tune.txt replay and device profiles are applied when the engine is created.
 std::string aevum_engine_active_plan(const engine* eng);
+
+// Identity of the Aevum plugin PrMers loads (version string, path, size and modification time of the library, and of
+// the CUDA plugin next to it when present).  A plugin swapped through AEVUM_ENGINE_LIB, or rebuilt in place, gives a
+// different string.  "unavailable" if no plugin can be loaded.
+std::string aevum_plugin_identity();
