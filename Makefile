@@ -365,6 +365,15 @@ test-legacy-checkpoint-mismatch: all
 test-legacy-read-fault: all
 	bash tests/run_legacy_read_fault.sh $${AEVUM_TEST_DEVICE:-0}
 
+# A failed GPU read or wait in -memtest stops the test and fails it, instead of reporting a pass for memory it never
+# checked: the source check, then memtest runs with a preloaded fault shim (PoCL's CPU device is enough).
+.PHONY: test-memtest-read-errors test-memtest-read-fault
+test-memtest-read-errors:
+	python3 tests/memtest_read_errors_source_test.py
+
+test-memtest-read-fault: all
+	bash tests/run_memtest_read_fault.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-legacy-check-equal
 
 test-legacy-check-equal:

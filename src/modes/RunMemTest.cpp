@@ -14,6 +14,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "util/OpenCLError.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -174,8 +175,9 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     cl_mem err_expect = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
     cl_mem err_current = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
     cl_mem err_second = clCreateBuffer(ctx, CL_MEM_READ_WRITE, sizeof(cl_ulong)*64, nullptr, &err);
-    if (err != CL_SUCCESS) { std::cerr << "error buffers alloc failed\n"; clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1; }
-    auto zero_err = [&](){ cl_uint z=0; clEnqueueWriteBuffer(queue, err_count, CL_TRUE, 0, sizeof(z), &z, 0, nullptr, nullptr); };
+    // (err only holds the status of the last one)
+    if (err != CL_SUCCESS || !err_count || !err_addr || !err_expect || !err_current || !err_second) { std::cerr << "error buffers alloc failed\n"; clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1; }
+    auto zero_err = [&]() -> cl_int { cl_uint z=0; return clEnqueueWriteBuffer(queue, err_count, CL_TRUE, 0, sizeof(z), &z, 0, nullptr, nullptr); };
     cl_kernel k_write = clCreateKernel(prog, "kernel_write", &err);
     cl_kernel k_rw = clCreateKernel(prog, "kernel_readwrite", &err);
     cl_kernel k_read = clCreateKernel(prog, "kernel_read", &err);
@@ -183,6 +185,7 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     cl_kernel k_a_r = clCreateKernel(prog, "kernel1_read", &err);
     cl_kernel k_m_w = clCreateKernel(prog, "kernel_modtest_write", &err);
     cl_kernel k_m_r = clCreateKernel(prog, "kernel_modtest_read", &err);
+    if (!k_write || !k_rw || !k_read || !k_a_w || !k_a_r || !k_m_w || !k_m_r) { std::cerr << "clCreateKernel failed\n"; clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx); return -1; }
     size_t gws[1] = { 64*1024 }, lws[1] = { 64 };
     auto now = std::chrono::high_resolution_clock::now;
     auto dur = [&](auto t0, auto t1){ return std::chrono::duration<double>(t1-t0).count(); };
@@ -254,58 +257,85 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     if (std::signal(SIGHUP, onint) == SIG_IGN || core::algo::sighup_inherited_ignored()) std::signal(SIGHUP, SIG_IGN);   // nohup
 #endif
     bool interrupted = false;
-    for (size_t bi = 0; bi < bufs.size() && !interrupted; ++bi) {
+    // A failed OpenCL call stops the test, and it fails: a failed error count read left the count at 0, so memory
+    // that was never checked passed.  err keeps the first failed status of the calls since the last check
+    // (or-ing the codes together gave a different code), cl_failure the message the test stops with.
+    bool failed = false;
+    std::string cl_failure;
+    auto keep = [&](cl_int e){ if (err == CL_SUCCESS) err = e; };
+    auto fails = [&](cl_int e, const std::string& what) -> bool {
+        if (e == CL_SUCCESS) return false;
+        cl_failure = util::describeClError(e, util::gpulost::Phase::Run, what,
+                                           what + " failed: " + util::getCLErrorString(e) + " (" + std::to_string(e) + ")");
+        failed = true;
+        return true;
+    };
+    // Reads the error report of a pass that found errors; false (and failed set) if a read failed.
+    auto read_report = [&](std::vector<cl_ulong>& addr, std::vector<cl_ulong>& ex, std::vector<cl_ulong>& cuv, std::vector<cl_ulong>& sec2) -> bool {
+        return !fails(clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr), "clEnqueueReadBuffer (error addresses)")
+            && !fails(clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr), "clEnqueueReadBuffer (expected values)")
+            && !fails(clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr), "clEnqueueReadBuffer (read values)")
+            && !fails(clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr), "clEnqueueReadBuffer (second read values)");
+    };
+    for (size_t bi = 0; bi < bufs.size() && !interrupted && !failed; ++bi) {
         cl_mem parent = bufs[bi];
         size_t want = bsz[bi];
         size_t sector = 256ull*1024*1024; if (sector > want) sector = want; sector = (sector/align)*align; if (sector == 0) sector = align;
         size_t sectors = (want + sector - 1) / sector;
         std::cout << "Buffer " << (bi+1) << "/" << bufs.size() << " sectors: " << sectors << " x " << (sector/(1024*1024)) << " MB\n";
         if (guiServer_) { std::ostringstream oss; oss << "Buffer " << (bi+1) << "/" << bufs.size() << " sectors: " << sectors << " x " << (sector/(1024*1024)) << " MB"; guiServer_->appendLog(oss.str()); }
-        for (size_t s=0; s<sectors && !interrupted; ++s) {
+        for (size_t s=0; s<sectors && !interrupted && !failed; ++s) {
             size_t off = s*sector; size_t sz = std::min(sector, want - off);
             cl_buffer_region reg; reg.origin = off; reg.size = sz;
             cl_int err2=CL_SUCCESS;
             cl_mem sub = clCreateSubBuffer(parent, CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &reg, &err2);
-            if (err2 != CL_SUCCESS) { std::cerr << "clCreateSubBuffer failed: " << err2 << "\n"; break; }
-            zero_err();
+            if (err2 != CL_SUCCESS) {
+                cl_failure = util::describeClError(err2, util::gpulost::Phase::Create, "clCreateSubBuffer",
+                                                   "clCreateSubBuffer failed: " + std::string(util::getCLErrorString(err2)) + " (" + std::to_string(err2) + ")");
+                failed = true;
+                break;
+            }
+            err = CL_SUCCESS;
+            if (fails(zero_err(), "clEnqueueWriteBuffer (error count)")) { clReleaseMemObject(sub); break; }
             auto t0 = now();
-            err = clSetKernelArg(k_a_w, 0, sizeof(cl_mem), &sub); err|=clSetKernelArg(k_a_w,1,sizeof(cl_ulong),&sz);
+            keep(clSetKernelArg(k_a_w, 0, sizeof(cl_mem), &sub)); keep(clSetKernelArg(k_a_w,1,sizeof(cl_ulong),&sz));
             show("addr W", bi, sectors, s, -1, 0);
-            err|=clEnqueueNDRangeKernel(queue,k_a_w,1,nullptr,gws,lws,0,nullptr,nullptr);
-            err|=clFinish(queue);
+            keep(clEnqueueNDRangeKernel(queue,k_a_w,1,nullptr,gws,lws,0,nullptr,nullptr));
+            keep(clFinish(queue));
+            if (fails(err, "memtest kernel (address write)")) { clReleaseMemObject(sub); break; }
             auto t1 = now();
             addr_w_time += dur(t0,t1);
             total_write += sz; addr_bytes_w += sz;
             steps_done++; show("addr W", bi, sectors, s, -1, 0);
             if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
-            err|=clSetKernelArg(k_a_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_a_r,1,sizeof(cl_ulong),&sz);
-            err|=clSetKernelArg(k_a_r,2,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_a_r,3,sizeof(cl_mem),&err_addr);
-            err|=clSetKernelArg(k_a_r,4,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_a_r,5,sizeof(cl_mem),&err_current);
-            err|=clSetKernelArg(k_a_r,6,sizeof(cl_mem),&err_second);
+            keep(clSetKernelArg(k_a_r,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_a_r,1,sizeof(cl_ulong),&sz));
+            keep(clSetKernelArg(k_a_r,2,sizeof(cl_mem),&err_count)); keep(clSetKernelArg(k_a_r,3,sizeof(cl_mem),&err_addr));
+            keep(clSetKernelArg(k_a_r,4,sizeof(cl_mem),&err_expect)); keep(clSetKernelArg(k_a_r,5,sizeof(cl_mem),&err_current));
+            keep(clSetKernelArg(k_a_r,6,sizeof(cl_mem),&err_second));
             show("addr R", bi, sectors, s, -1, 0);
-            err|=clEnqueueNDRangeKernel(queue,k_a_r,1,nullptr,gws,lws,0,nullptr,nullptr);
-            err|=clFinish(queue);
+            keep(clEnqueueNDRangeKernel(queue,k_a_r,1,nullptr,gws,lws,0,nullptr,nullptr));
+            keep(clFinish(queue));
+            if (fails(err, "memtest kernel (address read)")) { clReleaseMemObject(sub); break; }
             auto t2 = now();
             addr_r_time += dur(t1,t2);
             total_read += sz; addr_bytes_r += sz;
-            cl_uint ec=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec), &ec, 0, nullptr, nullptr);
+            cl_uint ec=0;
+            if (fails(clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec), &ec, 0, nullptr, nullptr), "clEnqueueReadBuffer (error count)")) { clReleaseMemObject(sub); break; }
             addr_err_total += ec;
             if (ec) {
                 std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
-                clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                if (!read_report(addr, ex, cuv, sec2)) { clReleaseMemObject(sub); break; }
                 for (size_t i=0;i<std::min<size_t>(ec,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({0,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
             }
             steps_done++; show("addr R", bi, sectors, s, -1, 0);
             if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
-            zero_err();
+            if (fails(zero_err(), "clEnqueueWriteBuffer (error count)")) { clReleaseMemObject(sub); break; }
             cl_ulong p1 = rnd64(); cl_ulong p2 = ~p1;
-            err = clSetKernelArg(k_write,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_write,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_write,2,sizeof(cl_ulong),&p1);
+            keep(clSetKernelArg(k_write,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_write,1,sizeof(cl_ulong),&sz)); keep(clSetKernelArg(k_write,2,sizeof(cl_ulong),&p1));
             auto t3 = now();
             show("inv W", bi, sectors, s, -1, 0);
-            err|=clEnqueueNDRangeKernel(queue,k_write,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+            keep(clEnqueueNDRangeKernel(queue,k_write,1,nullptr,gws,lws,0,nullptr,nullptr)); keep(clFinish(queue));
+            if (fails(err, "memtest kernel (inversion write)")) { clReleaseMemObject(sub); break; }
             auto t4 = now();
             inv_w_time += dur(t3,t4);
             total_write += sz; inv_bytes_w += sz;
@@ -313,91 +343,88 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
             if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
             for (int it=0; it<iters; ++it) {
                 auto trw0 = now();
-                err|=clSetKernelArg(k_rw,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_rw,1,sizeof(cl_ulong),&sz);
-                err|=clSetKernelArg(k_rw,2,sizeof(cl_ulong),&p1); err|=clSetKernelArg(k_rw,3,sizeof(cl_ulong),&p2);
-                err|=clSetKernelArg(k_rw,4,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_rw,5,sizeof(cl_mem),&err_addr);
-                err|=clSetKernelArg(k_rw,6,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_rw,7,sizeof(cl_mem),&err_current);
-                err|=clSetKernelArg(k_rw,8,sizeof(cl_mem),&err_second);
+                keep(clSetKernelArg(k_rw,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_rw,1,sizeof(cl_ulong),&sz));
+                keep(clSetKernelArg(k_rw,2,sizeof(cl_ulong),&p1)); keep(clSetKernelArg(k_rw,3,sizeof(cl_ulong),&p2));
+                keep(clSetKernelArg(k_rw,4,sizeof(cl_mem),&err_count)); keep(clSetKernelArg(k_rw,5,sizeof(cl_mem),&err_addr));
+                keep(clSetKernelArg(k_rw,6,sizeof(cl_mem),&err_expect)); keep(clSetKernelArg(k_rw,7,sizeof(cl_mem),&err_current));
+                keep(clSetKernelArg(k_rw,8,sizeof(cl_mem),&err_second));
                 if ((it & 7) == 0) show("inv RW", bi, sectors, s, it, iters);
-                err|=clEnqueueNDRangeKernel(queue,k_rw,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                keep(clEnqueueNDRangeKernel(queue,k_rw,1,nullptr,gws,lws,0,nullptr,nullptr)); keep(clFinish(queue));
+                if (fails(err, "memtest kernel (inversion read-write)")) break;
                 auto trw1 = now();
                 inv_rw_time += dur(trw0,trw1);
                 total_read += sz; total_write += sz; inv_bytes_rw_r += sz; inv_bytes_rw_w += sz;
-                cl_uint ec_it=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec_it), &ec_it, 0, nullptr, nullptr);
+                cl_uint ec_it=0;
+                if (fails(clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec_it), &ec_it, 0, nullptr, nullptr), "clEnqueueReadBuffer (error count)")) break;
                 if (ec_it) {
                     inv_err_total += ec_it;
                     std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
-                    clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                    if (!read_report(addr, ex, cuv, sec2)) break;
                     for (size_t i=0;i<std::min<size_t>(ec_it,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({1,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
-                    zero_err();
+                    if (fails(zero_err(), "clEnqueueWriteBuffer (error count)")) break;
                 }
                 cl_ulong t = p1; p1 = p2; p2 = t;
                 steps_done++; if ((it & 7) == 7) show("inv RW", bi, sectors, s, it+1, iters);
                 if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
             }
-            if (interrupted) { clReleaseMemObject(sub); break; }
-            err|=clSetKernelArg(k_read,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_read,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_read,2,sizeof(cl_ulong),&p1);
-            err|=clSetKernelArg(k_read,3,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_read,4,sizeof(cl_mem),&err_addr);
-            err|=clSetKernelArg(k_read,5,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_read,6,sizeof(cl_mem),&err_current);
-            err|=clSetKernelArg(k_read,7,sizeof(cl_mem),&err_second);
+            if (interrupted || failed) { clReleaseMemObject(sub); break; }
+            keep(clSetKernelArg(k_read,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_read,1,sizeof(cl_ulong),&sz)); keep(clSetKernelArg(k_read,2,sizeof(cl_ulong),&p1));
+            keep(clSetKernelArg(k_read,3,sizeof(cl_mem),&err_count)); keep(clSetKernelArg(k_read,4,sizeof(cl_mem),&err_addr));
+            keep(clSetKernelArg(k_read,5,sizeof(cl_mem),&err_expect)); keep(clSetKernelArg(k_read,6,sizeof(cl_mem),&err_current));
+            keep(clSetKernelArg(k_read,7,sizeof(cl_mem),&err_second));
             auto t5 = now();
             show("inv R", bi, sectors, s, -1, 0);
-            err|=clEnqueueNDRangeKernel(queue,k_read,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+            keep(clEnqueueNDRangeKernel(queue,k_read,1,nullptr,gws,lws,0,nullptr,nullptr)); keep(clFinish(queue));
+            if (fails(err, "memtest kernel (inversion read)")) { clReleaseMemObject(sub); break; }
             auto t6 = now();
             inv_r_time += dur(t5,t6);
             total_read += sz; inv_bytes_r += sz;
-            cl_uint ec2=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec2), &ec2, 0, nullptr, nullptr);
+            cl_uint ec2=0;
+            if (fails(clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec2), &ec2, 0, nullptr, nullptr), "clEnqueueReadBuffer (error count)")) { clReleaseMemObject(sub); break; }
             inv_err_total += ec2;
             if (ec2) {
                 std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
-                clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
-                clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                if (!read_report(addr, ex, cuv, sec2)) { clReleaseMemObject(sub); break; }
                 for (size_t i=0;i<std::min<size_t>(ec2,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({1,(uint32_t)bi,(uint32_t)s,0,addr[i],ex[i],cuv[i],sec2[i]});
             }
             steps_done++; show("inv R", bi, sectors, s, -1, 0);
             if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; clReleaseMemObject(sub); break; }
-            zero_err();
+            if (fails(zero_err(), "clEnqueueWriteBuffer (error count)")) { clReleaseMemObject(sub); break; }
             cl_ulong mp1 = 0xAAAAAAAAAAAAAAAAull, mp2 = 0x5555555555555555ull;
-            for (uint32_t offmod=0; offmod<MOD_SZ_HOST && !interrupted; ++offmod) {
-                err = clSetKernelArg(k_m_w,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_w,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_w,2,sizeof(cl_uint),&offmod); err|=clSetKernelArg(k_m_w,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_w,4,sizeof(cl_ulong),&mp2);
+            for (uint32_t offmod=0; offmod<MOD_SZ_HOST && !interrupted && !failed; ++offmod) {
+                keep(clSetKernelArg(k_m_w,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_m_w,1,sizeof(cl_ulong),&sz)); keep(clSetKernelArg(k_m_w,2,sizeof(cl_uint),&offmod)); keep(clSetKernelArg(k_m_w,3,sizeof(cl_ulong),&mp1)); keep(clSetKernelArg(k_m_w,4,sizeof(cl_ulong),&mp2));
                 auto t7 = now();
                 show("mod W", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
-                err|=clEnqueueNDRangeKernel(queue,k_m_w,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                keep(clEnqueueNDRangeKernel(queue,k_m_w,1,nullptr,gws,lws,0,nullptr,nullptr)); keep(clFinish(queue));
+                if (fails(err, "memtest kernel (modulo write)")) break;
                 auto t8 = now();
                 mod_w_time += dur(t7,t8);
                 total_write += sz; mod_bytes_w += sz;
                 steps_done++; show("mod W", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
-                err|=clSetKernelArg(k_m_r,0,sizeof(cl_mem),&sub); err|=clSetKernelArg(k_m_r,1,sizeof(cl_ulong),&sz); err|=clSetKernelArg(k_m_r,2,sizeof(cl_uint),&offmod);
-                err|=clSetKernelArg(k_m_r,3,sizeof(cl_ulong),&mp1); err|=clSetKernelArg(k_m_r,4,sizeof(cl_ulong),&mp2);
-                err|=clSetKernelArg(k_m_r,5,sizeof(cl_mem),&err_count); err|=clSetKernelArg(k_m_r,6,sizeof(cl_mem),&err_addr);
-                err|=clSetKernelArg(k_m_r,7,sizeof(cl_mem),&err_expect); err|=clSetKernelArg(k_m_r,8,sizeof(cl_mem),&err_current);
-                err|=clSetKernelArg(k_m_r,9,sizeof(cl_mem),&err_second);
+                keep(clSetKernelArg(k_m_r,0,sizeof(cl_mem),&sub)); keep(clSetKernelArg(k_m_r,1,sizeof(cl_ulong),&sz)); keep(clSetKernelArg(k_m_r,2,sizeof(cl_uint),&offmod));
+                keep(clSetKernelArg(k_m_r,3,sizeof(cl_ulong),&mp1)); keep(clSetKernelArg(k_m_r,4,sizeof(cl_ulong),&mp2));
+                keep(clSetKernelArg(k_m_r,5,sizeof(cl_mem),&err_count)); keep(clSetKernelArg(k_m_r,6,sizeof(cl_mem),&err_addr));
+                keep(clSetKernelArg(k_m_r,7,sizeof(cl_mem),&err_expect)); keep(clSetKernelArg(k_m_r,8,sizeof(cl_mem),&err_current));
+                keep(clSetKernelArg(k_m_r,9,sizeof(cl_mem),&err_second));
                 auto t9 = now();
                 show("mod R", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
-                err|=clEnqueueNDRangeKernel(queue,k_m_r,1,nullptr,gws,lws,0,nullptr,nullptr); err|=clFinish(queue);
+                keep(clEnqueueNDRangeKernel(queue,k_m_r,1,nullptr,gws,lws,0,nullptr,nullptr)); keep(clFinish(queue));
+                if (fails(err, "memtest kernel (modulo read)")) break;
                 auto t10 = now();
                 mod_r_time += dur(t9,t10);
                 total_read += sz; mod_bytes_r += sz;
-                cl_uint ec3=0; clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec3), &ec3, 0, nullptr, nullptr);
+                cl_uint ec3=0;
+                if (fails(clEnqueueReadBuffer(queue, err_count, CL_TRUE, 0, sizeof(ec3), &ec3, 0, nullptr, nullptr), "clEnqueueReadBuffer (error count)")) break;
                 mod_err_total += ec3;
                 if (ec3) {
                     std::vector<cl_ulong> addr(64), ex(64), cuv(64), sec2(64);
-                    clEnqueueReadBuffer(queue, err_addr, CL_TRUE, 0, addr.size()*sizeof(cl_ulong), addr.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_expect, CL_TRUE, 0, ex.size()*sizeof(cl_ulong), ex.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_current, CL_TRUE, 0, cuv.size()*sizeof(cl_ulong), cuv.data(), 0, nullptr, nullptr);
-                    clEnqueueReadBuffer(queue, err_second, CL_TRUE, 0, sec2.size()*sizeof(cl_ulong), sec2.data(), 0, nullptr, nullptr);
+                    if (!read_report(addr, ex, cuv, sec2)) break;
                     for (size_t i=0;i<std::min<size_t>(ec3,addr.size());++i) if (samples.size()<samples.capacity()) samples.push_back({2,(uint32_t)bi,(uint32_t)s,offmod,addr[i],ex[i],cuv[i],sec2[i]});
-                    zero_err();
                 }
                 steps_done++; show("mod R", bi, sectors, s, static_cast<int>(offmod + 1u), MOD_SZ_HOST);
                 if (stop_flag || core::algo::stop_requested_any()) { interrupted = true; break; }
-                zero_err();
+                if (fails(zero_err(), "clEnqueueWriteBuffer (error count)")) break;
             }
             clReleaseMemObject(sub);
         }
@@ -442,7 +469,8 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     } else {
         rpt << "No sample errors captured.\n";
     }
-    if (stop_flag || interrupted) rpt << "Status: interrupted by signal, partial results shown above.\n";
+    if (failed) rpt << "Status: FAILED, stopped by an OpenCL error: the memory was not fully tested.\n  " << cl_failure << "\n";
+    else if (stop_flag || interrupted) rpt << "Status: interrupted by signal, partial results shown above.\n";
     rpt << "==============================\n";
     std::cout << rpt.str();
     if (guiServer_) guiServer_->appendLog(rpt.str());
@@ -450,5 +478,9 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     clReleaseKernel(k_write); clReleaseKernel(k_rw); clReleaseKernel(k_read); clReleaseKernel(k_a_w); clReleaseKernel(k_a_r); clReleaseKernel(k_m_w); clReleaseKernel(k_m_r);
     clReleaseMemObject(err_count); clReleaseMemObject(err_addr); clReleaseMemObject(err_expect); clReleaseMemObject(err_current); clReleaseMemObject(err_second);
     clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx);
+    if (failed) {
+        std::cerr << "Memtest failed: " << cl_failure << "\n";
+        return -1;
+    }
     return interrupted ? 1 : 0;
 }
