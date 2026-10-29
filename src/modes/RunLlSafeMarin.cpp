@@ -4,6 +4,7 @@
 #include "core/App.hpp"
 #include "core/QuickChecker.hpp"
 #include "core/Printer.hpp"
+#include "core/CheckpointLocation.hpp"
 #include "core/ProofSet.hpp"
 #include "core/ProofSetMarin.hpp"
 #include "math/Carry.hpp"
@@ -124,7 +125,10 @@ int App::runLlSafeMarinDoubling()
         guiServer_->appendLog(oss.str());
     }
     std::ostringstream ck; ck << "llsafe2_m_" << p << ".ckpt";
-    const std::string ckpt_file = ck.str();
+    // The checkpoint is kept under -f, with the other state of the run (the working directory
+    // when -f is empty). An older version kept it in the working directory whatever -f said.
+    core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+    const std::string ckpt_file = ckpt_loc.file();
     const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
     // Checkpoint v3 stores the iteration of the last verified block boundary
@@ -161,6 +165,7 @@ int App::runLlSafeMarinDoubling()
 
     auto save_ckpt = [&](uint32_t i, uint32_t isv, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        ckpt_loc.prepareWrite();
         auto write_new = [&]() -> bool {
             File f(newf, "wb");
             if (!f.exists()) return false;
@@ -185,7 +190,7 @@ int App::runLlSafeMarinDoubling()
         std::remove(oldf.c_str());
         struct stat s;
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file.c_str());
+        if (std::rename(newf.c_str(), ckpt_file.c_str()) == 0) ckpt_loc.removeLegacy();
     };
 
     const size_t RV = 0, RU = 1, RVC = 2, RUC = 3, RTMP = 4, RVCHK = 5, RUCHK = 6, RSCR [[maybe_unused]] = 7;
@@ -193,6 +198,17 @@ int App::runLlSafeMarinDoubling()
     uint32_t ri = 0, ri_itersave = kItersaveUnknown; double restored_time = 0.0;
     int r = read_ckpt(ckpt_file, ri, ri_itersave, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", ri, ri_itersave, restored_time);
+    if (r != 0 && ckpt_loc.legacyCandidate()) {
+        // Nothing under -f: the checkpoint of an older version, in the working directory.
+        int rl = read_ckpt(ckpt_loc.legacyFile(), ri, ri_itersave, restored_time);
+        if (rl < 0) rl = read_ckpt(ckpt_loc.legacyFile() + ".old", ri, ri_itersave, restored_time);
+        if (rl == 0) {
+            r = 0;
+            ckpt_loc.adoptLegacy();
+            std::cout << ckpt_loc.legacyNote() << std::endl;
+            if (guiServer_) guiServer_->appendLog(ckpt_loc.legacyNote());
+        }
+    }
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
         if (guiServer_) {
@@ -439,9 +455,7 @@ const bool results_saved = wm.appendToResultsTxt(json);
 // On any persistence failure keep the checkpoint so the completed work
 // can be recovered and saved again rather than silently lost.
 if (individual_saved && results_saved) {
-    std::remove(ckpt_file.c_str());
-    std::remove((ckpt_file + ".old").c_str());
-    std::remove((ckpt_file + ".new").c_str());
+    ckpt_loc.removeAll();
 } else {
     std::cerr << "[LL-SAFE2] Result persistence failed; keeping checkpoint for recovery.\n";
 }
@@ -507,7 +521,10 @@ int App::runLlSafeMarin()
     if (guiServer_) { std::ostringstream oss; oss << "LL-SAFE on 2^" << p << " - 1"; guiServer_->setStatus(oss.str()); }
 
     std::ostringstream ck; ck << "llsafe_m_" << p << ".ckpt";
-    const std::string ckpt_file = ck.str();
+    // The checkpoint is kept under -f, with the other state of the run (the working directory
+    // when -f is empty). An older version kept it in the working directory whatever -f said.
+    core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+    const std::string ckpt_file = ckpt_loc.file();
     const uint32_t checkpoint_backend = eng->is_aevum_backend() ? 2u : 1u;
 
     auto read_ckpt = [&](const std::string& file, uint64_t& iter_done, uint64_t& itersave, uint64_t& jsave, double& et)->int{
@@ -549,6 +566,7 @@ int App::runLlSafeMarin()
 
     auto save_ckpt = [&](uint64_t iter_done, uint64_t itersave, uint64_t jsave, double et){
         const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+        ckpt_loc.prepareWrite();
         auto write_new = [&]() -> bool {
             File f(newf, "wb");
             if (!f.exists()) return false;
@@ -574,7 +592,7 @@ int App::runLlSafeMarin()
         std::remove(oldf.c_str());
         struct stat s;
         if ((stat(ckpt_file.c_str(), &s) == 0) && (std::rename(ckpt_file.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file.c_str());
+        if (std::rename(newf.c_str(), ckpt_file.c_str()) == 0) ckpt_loc.removeLegacy();
     };
 
     const size_t RRES_A=0, RRES_B=1, RACC_A=2, RACC_B=3, RCHK_A=4, RCHK_B=5, RSAVE_R_A=6, RSAVE_R_B=7, RSAVE_F_A=8, RSAVE_F_B=9, RBASE_A=10, RBASE_B=11, RTa=12, RTb=13, RM0=14, RM1=15, RPREV_A=16, RPREV_B=17;
@@ -631,6 +649,17 @@ int App::runLlSafeMarin()
     uint64_t itersave_meta = 0, jsave_meta = 0;
     int r = read_ckpt(ckpt_file, iter_done, itersave_meta, jsave_meta, restored_time);
     if (r < 0) r = read_ckpt(ckpt_file + ".old", iter_done, itersave_meta, jsave_meta, restored_time);
+    if (r != 0 && ckpt_loc.legacyCandidate()) {
+        // Nothing under -f: the checkpoint of an older version, in the working directory.
+        int rl = read_ckpt(ckpt_loc.legacyFile(), iter_done, itersave_meta, jsave_meta, restored_time);
+        if (rl < 0) rl = read_ckpt(ckpt_loc.legacyFile() + ".old", iter_done, itersave_meta, jsave_meta, restored_time);
+        if (rl == 0) {
+            r = 0;
+            ckpt_loc.adoptLegacy();
+            std::cout << ckpt_loc.legacyNote() << std::endl;
+            if (guiServer_) guiServer_->appendLog(ckpt_loc.legacyNote());
+        }
+    }
     if (r == 0) {
         std::cout << "Resuming from a checkpoint." << std::endl;
         if (guiServer_) { std::ostringstream oss; oss << "Resuming from a checkpoint."; guiServer_->appendLog(oss.str()); }
@@ -857,7 +886,7 @@ int App::runLlSafeMarin()
                          worktodoParser_->removeProcessedLine(activeWorktodoRawLine_);
 
     if (resultSaved && (!hasWorktodoEntry_ || retired)) {
-        delete_checkpoints(p, options.wagstaff, false, true);
+        ckpt_loc.removeAll();
     } else {
         std::string msg = !resultSaved
             ? "[LL-SAFE] Result could not be saved; keeping the checkpoint"

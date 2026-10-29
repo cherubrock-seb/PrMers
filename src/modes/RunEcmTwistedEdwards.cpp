@@ -1,4 +1,5 @@
 #include "core/App.hpp"
+#include "core/CheckpointLocation.hpp"
 #include "core/AlgoUtils.hpp"
 #define NOMINMAX
 #include "core/App.hpp"
@@ -1678,13 +1679,19 @@ int App::runECMMarinTwistedEdwards()
 
     if (!options.seed) {
         for (uint64_t c = 0; c < curves; ++c) {
-            const std::string ckpt2_file      = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            // The checkpoints are kept under -f; one that an older version left in the working
+            // directory counts when nothing of that stage is under -f.
+            const core::CheckpointLocation loc2(options.save_path, "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+            const std::string ckpt2_file      = loc2.file();
             const std::string ckpt2_file_o    = ckpt2_file + ".old";
 
             uint64_t s = 0;
             bool has_seed = false;
             if (try_probe_te_ckpt2(ckpt2_file, s, has_seed) ||
-                try_probe_te_ckpt2(ckpt2_file_o, s, has_seed)) {
+                try_probe_te_ckpt2(ckpt2_file_o, s, has_seed) ||
+                (loc2.legacyCandidate() &&
+                 (try_probe_te_ckpt2(loc2.legacyFile(), s, has_seed) ||
+                  try_probe_te_ckpt2(loc2.legacyFile() + ".old", s, has_seed)))) {
                 resume_curve_idx   = c;
                 resume_curve_seed  = s;
                 have_resume_seed   = has_seed;
@@ -1695,11 +1702,14 @@ int App::runECMMarinTwistedEdwards()
 
         if (!have_resume_stage2) {
             for (uint64_t c = 0; c < curves; ++c) {
-                const std::string ckpt_file   = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+                const core::CheckpointLocation loc1(options.save_path, "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+                const std::string ckpt_file   = loc1.file();
                 const std::string ckpt_file_o = ckpt_file + ".old";
 
                 uint64_t s = 0;
-                if (try_probe_te_ckpt(ckpt_file, s) || try_probe_te_ckpt(ckpt_file_o, s)) {
+                if (try_probe_te_ckpt(ckpt_file, s) || try_probe_te_ckpt(ckpt_file_o, s) ||
+                    (loc1.legacyCandidate() &&
+                     (try_probe_te_ckpt(loc1.legacyFile(), s) || try_probe_te_ckpt(loc1.legacyFile() + ".old", s)))) {
                     resume_curve_idx  = c;
                     resume_curve_seed = s;
                     have_resume_seed  = true;
@@ -1897,8 +1907,10 @@ int App::runECMMarinTwistedEdwards()
         
 
 
-        const std::string ckpt_file      = "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-        const std::string ckpt2_file     = "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        core::CheckpointLocation ckpt1_loc(options.save_path, "ecm_te_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+        core::CheckpointLocation ckpt2_loc(options.save_path, "ecm2_te_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+        const std::string ckpt_file      = ckpt1_loc.file();
+        const std::string ckpt2_file     = ckpt2_loc.file();
 
         mpz_class s2_base_Xpos, s2_base_Ypos, s2_base_Tpos;
         mpz_class s2_base_Xneg, s2_base_Yneg, s2_base_Tneg;
@@ -1936,6 +1948,7 @@ int App::runECMMarinTwistedEdwards()
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+            ckpt1_loc.prepareWrite();
             {
                 File f(newf, "wb");
                 int version = kTeCkptS1Sigma;
@@ -1963,7 +1976,9 @@ int App::runECMMarinTwistedEdwards()
             fs::remove(ckpt_file + ".old", ec);
             fs::rename(ckpt_file,         ckpt_file + ".old", ec);
             fs::rename(ckpt_file + ".new",ckpt_file,          ec);
+            const bool renamed_ok = !ec;
             fs::remove(ckpt_file + ".old", ec);
+            if (renamed_ok) ckpt1_loc.removeLegacy();
         };
 
         auto read_ckpt_one = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
@@ -2013,6 +2028,17 @@ int App::runECMMarinTwistedEdwards()
         auto read_ckpt = [&](uint32_t& ri, uint32_t& rnb, double& et)->int{
             int rr = read_ckpt_one(ckpt_file, ri, rnb, et);
             if (rr < 0) rr = read_ckpt_one(ckpt_file + ".old", ri, rnb, et);
+            if (rr != 0 && ckpt1_loc.legacyCandidate()) {
+                // Nothing under -f: the checkpoint of an older version, in the working directory.
+                int rl = read_ckpt_one(ckpt1_loc.legacyFile(), ri, rnb, et);
+                if (rl < 0) rl = read_ckpt_one(ckpt1_loc.legacyFile() + ".old", ri, rnb, et);
+                if (rl == 0) {
+                    rr = 0;
+                    ckpt1_loc.adoptLegacy();
+                    std::cout << ckpt1_loc.legacyNote() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(ckpt1_loc.legacyNote());
+                }
+            }
             return rr;
         };
 
@@ -2023,6 +2049,7 @@ int App::runECMMarinTwistedEdwards()
                                  uint32_t chunk_bits_saved,
                                  uint32_t chunk_steps_done_saved){
             const std::string oldf = ckpt2_file + ".old", newf = ckpt2_file + ".new";
+            ckpt2_loc.prepareWrite();
             {
                 File f(newf, "wb");
                 int version = kTeCkptS2Sigma;
@@ -2065,6 +2092,7 @@ int App::runECMMarinTwistedEdwards()
             fs::remove(ckpt2_file + ".old", ec);
             if (fs::exists(ckpt2_file)) fs::rename(ckpt2_file, ckpt2_file + ".old", ec);
             fs::rename(ckpt2_file + ".new", ckpt2_file, ec);
+            if (!ec) ckpt2_loc.removeLegacy();
             fs::remove(ckpt2_file + ".new", ec);
         };
 
@@ -2166,6 +2194,17 @@ int App::runECMMarinTwistedEdwards()
             resume_s2_steps_done = 0;
             int rr = read_ckpt2_one(ckpt2_file, idx, cnt_bits, et);
             if (rr < 0) rr = read_ckpt2_one(ckpt2_file + ".old", idx, cnt_bits, et);
+            if (rr != 0 && ckpt2_loc.legacyCandidate()) {
+                // Nothing under -f: the checkpoint of an older version, in the working directory.
+                int rl = read_ckpt2_one(ckpt2_loc.legacyFile(), idx, cnt_bits, et);
+                if (rl < 0) rl = read_ckpt2_one(ckpt2_loc.legacyFile() + ".old", idx, cnt_bits, et);
+                if (rl == 0) {
+                    rr = 0;
+                    ckpt2_loc.adoptLegacy();
+                    std::cout << ckpt2_loc.legacyNote() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(ckpt2_loc.legacyNote());
+                }
+            }
             return rr;
         };
 
@@ -3211,9 +3250,7 @@ int App::runECMMarinTwistedEdwards()
             std::cout << "[ECM] Checking resumed Stage1 state at iteration " << start_i << std::endl;
             if (!check_invariant()) {
                 std::cout << "[ECM] Resumed Stage1 checkpoint fails the curve invariant, discarding it and restarting this curve" << std::endl;
-                std::error_code rm_ec;
-                fs::remove(ckpt_file, rm_ec);
-                fs::remove(ckpt_file + ".old", rm_ec);
+                ckpt1_loc.removeAll();
                 have_last_good_state = false;
                 resumed = false;
                 if (!have_fresh_state || !eng->set_checkpoint(fresh_state)) {
@@ -3513,8 +3550,8 @@ int App::runECMMarinTwistedEdwards()
                 std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
                 // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
                 std::error_code ec0;
-                fs::remove(ckpt_file, ec0);  fs::remove(ckpt_file + ".old", ec0);  fs::remove(ckpt_file + ".new", ec0);
-                fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
                 delete eng;
                 continue;
             }
@@ -3581,8 +3618,8 @@ int App::runECMMarinTwistedEdwards()
                 }
 
                 std::error_code ec0;
-                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                fs::remove(ckpt2_file, ec0); fs::remove(ckpt2_file + ".old", ec0); fs::remove(ckpt2_file + ".new", ec0);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
 
                 if (!known) {
                     result_factor = gf;
@@ -3617,7 +3654,7 @@ int App::runECMMarinTwistedEdwards()
                 p95_log(std::string("[ECM] Curve ") + std::to_string(c + 1) + "/" + std::to_string(curves) + " | Prime95 Stage2 enqueue failed, falling back to internal Stage2");
             } else {
                 std::error_code ecq;
-                fs::remove(ckpt_file, ecq); fs::remove(ckpt_file + ".old", ecq); fs::remove(ckpt_file + ".new", ecq);
+                ckpt1_loc.removeAll();
                 std::ostringstream fin;
                 fin << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 delegated to Prime95 background";
                 std::cout << fin.str() << std::endl;
@@ -3664,8 +3701,8 @@ int App::runECMMarinTwistedEdwards()
                 }
 
                 std::error_code ec;
-                fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
-                fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
 
                 if (!known) {
                     const std::string fs = gg.get_str();
@@ -3978,23 +4015,21 @@ int App::runECMMarinTwistedEdwards()
             if (handled_known_factor) continue;
             if (abort_curve) {
                 std::error_code ec;
-                fs::remove(ckpt_file, ec);  fs::remove(ckpt_file + ".old", ec);  fs::remove(ckpt_file + ".new", ec);
-                fs::remove(ckpt2_file, ec); fs::remove(ckpt2_file + ".old", ec); fs::remove(ckpt2_file + ".new", ec);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
                 delete eng;
                 continue;
             }
 
             std::error_code ec2;
-            fs::remove(ckpt2_file, ec2);
-            fs::remove(ckpt2_file + ".old", ec2);
-            fs::remove(ckpt2_file + ".new", ec2);
+            ckpt2_loc.removeAll();
 
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
             { std::ostringstream s2s; s2s<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" | Stage2 elapsed="<<std::fixed<<std::setprecision(2)<<elapsed2<<" s"; std::cout<<s2s.str()<<std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
         }
 
         // The curve is complete: drop its checkpoint before a background stop can return.
-        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+        std::error_code ec; ckpt1_loc.removeAll();
         if (p95_stage2_enabled && p95_poll_background(false)) {
             return p95_finalize_background_stop(eng);
         }

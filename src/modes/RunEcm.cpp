@@ -1,3 +1,4 @@
+#include "core/CheckpointLocation.hpp"
 #include "core/App.hpp"
 #include "core/AlgoUtils.hpp"
 #define NOMINMAX
@@ -623,11 +624,19 @@ int App::runECMMarin()
     // would use for that curve; a checkpoint from some other seed is not ours.
     if (!options.seed && (!forceCurveSeed || forcedSeedSeries)) {
         for (uint64_t c = 0; c < curves; ++c) {
-            const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-            const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string name1 = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const std::string name2 = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+            const core::CheckpointLocation loc1(options.save_path, name1), loc2(options.save_path, name2);
             uint64_t s = 0;
-            if (try_probe_mont_ckpt(ckpt2, s) || try_probe_mont_ckpt(ckpt2 + ".old", s) ||
-                try_probe_mont_ckpt(ckpt_file, s) || try_probe_mont_ckpt(ckpt_file + ".old", s)) {
+            // The checkpoints are kept under -f; one that an older version left in the working
+            // directory counts when nothing of that stage is under -f.
+            bool probed = try_probe_mont_ckpt(loc2.file(), s) || try_probe_mont_ckpt(loc2.file() + ".old", s) ||
+                          try_probe_mont_ckpt(loc1.file(), s) || try_probe_mont_ckpt(loc1.file() + ".old", s);
+            if (!probed && loc2.legacyCandidate())
+                probed = try_probe_mont_ckpt(loc2.legacyFile(), s) || try_probe_mont_ckpt(loc2.legacyFile() + ".old", s);
+            if (!probed && loc1.legacyCandidate())
+                probed = try_probe_mont_ckpt(loc1.legacyFile(), s) || try_probe_mont_ckpt(loc1.legacyFile() + ".old", s);
+            if (probed) {
                 if (forcedSeedSeries && s != (c == 0 ? forcedCurveSeedValue : mix64(forcedCurveSeedValue, c))) continue;
                 resume_curve_idx = c;
                 resume_curve_seed = s;
@@ -708,8 +717,10 @@ int App::runECMMarin()
             base_seed = forcedCurveSeedValue;
         }
 
-        const std::string ckpt_file = "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
-        const std::string ckpt2     = "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt";
+        core::CheckpointLocation ckpt1_loc(options.save_path, "ecm_m_"  + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+        core::CheckpointLocation ckpt2_loc(options.save_path, "ecm2_m_" + std::to_string(p) + "_c" + std::to_string(c) + ".ckpt");
+        const std::string ckpt_file = ckpt1_loc.file();
+        const std::string ckpt2     = ckpt2_loc.file();
         uint64_t torsion_curve_k = 0;   // scalar k of the torsion-family curve (modes 1, 2, 4, 5)
         auto ckpt_stale_notice = [&](const std::string& file, const char* why) {
             std::cout << "[ECM] Ignoring checkpoint " << file << ": " << why << "; restarting this curve" << std::endl;
@@ -754,6 +765,7 @@ int App::runECMMarin()
 
         auto save_ckpt = [&](uint32_t i, double et){
             const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
+            ckpt1_loc.prepareWrite();
             {
                 File f(newf, "wb");
                 int version = ckpt_expect_te_stage1 ? 5 : (ckpt_torsion_family ? kCkptTorsionS1 : 1);
@@ -786,7 +798,9 @@ int App::runECMMarin()
             fs::remove(ckpt_file + ".old", ec);
             fs::rename(ckpt_file,         ckpt_file + ".old", ec);
             fs::rename(ckpt_file + ".new",ckpt_file,          ec);
+            const bool renamed_ok = !ec;
             fs::remove(ckpt_file + ".old", ec);
+            if (renamed_ok) ckpt1_loc.removeLegacy();
         };
 
         auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
@@ -856,6 +870,7 @@ int App::runECMMarin()
                                  uint32_t chunk_bits_saved,
                                  uint32_t chunk_steps_done_saved){
             const std::string oldf = ckpt2 + ".old", newf = ckpt2 + ".new";
+            ckpt2_loc.prepareWrite();
             {
                 File f(newf, "wb");
                 int version = (pm_effective == 0) ? 9 : (ckpt_torsion_family ? kCkptTorsionS2 : 6);
@@ -902,6 +917,7 @@ int App::runECMMarin()
             fs::remove(ckpt2 + ".old", ec);
             if (fs::exists(ckpt2)) fs::rename(ckpt2, ckpt2 + ".old", ec);
             fs::rename(ckpt2 + ".new", ckpt2, ec);
+            if (!ec) ckpt2_loc.removeLegacy();
             fs::remove(ckpt2 + ".new", ec);
             return 0;
         };
@@ -1123,7 +1139,19 @@ int App::runECMMarin()
         };
 
         uint32_t s2_idx = 0, s2_cnt = 0; double s2_et = 0.0;
-        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et); resume_stage2 = (rr2 == 0);
+        bool resume_stage2 = false; { int rr2 = read_ckpt2(ckpt2, s2_idx, s2_cnt, s2_et); if (rr2 < 0) rr2 = read_ckpt2(ckpt2 + ".old", s2_idx, s2_cnt, s2_et);
+            if (rr2 != 0 && ckpt2_loc.legacyCandidate()) {
+                // Nothing under -f: the checkpoint of an older version, in the working directory.
+                int rl = read_ckpt2(ckpt2_loc.legacyFile(), s2_idx, s2_cnt, s2_et);
+                if (rl < 0) rl = read_ckpt2(ckpt2_loc.legacyFile() + ".old", s2_idx, s2_cnt, s2_et);
+                if (rl == 0) {
+                    rr2 = 0;
+                    ckpt2_loc.adoptLegacy();
+                    std::cout << ckpt2_loc.legacyNote() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(ckpt2_loc.legacyNote());
+                }
+            }
+            resume_stage2 = (rr2 == 0);
             if (!resume_stage2) {
                 // A checkpoint that was rejected part-way through (truncated or damaged) must not
                 // leave its position behind: stage 2 would start in the middle of the prime list.
@@ -1636,7 +1664,22 @@ int App::runECMMarin()
             uint32_t start_i = 0, nb_ck = 0; double saved_et = 0.0;
             int rr_ck = read_ckpt(ckpt_file, start_i, nb_ck, saved_et);
             if (rr_ck < 0) rr_ck = read_ckpt(ckpt_file + ".old", start_i, nb_ck, saved_et);
+            if (rr_ck != 0 && ckpt1_loc.legacyCandidate()) {
+                // Nothing under -f: the checkpoint of an older version, in the working directory.
+                int rl = read_ckpt(ckpt1_loc.legacyFile(), start_i, nb_ck, saved_et);
+                if (rl < 0) rl = read_ckpt(ckpt1_loc.legacyFile() + ".old", start_i, nb_ck, saved_et);
+                if (rl == 0) {
+                    rr_ck = 0;
+                    ckpt1_loc.adoptLegacy();
+                    std::cout << ckpt1_loc.legacyNote() << std::endl;
+                    if (guiServer_) guiServer_->appendLog(ckpt1_loc.legacyNote());
+                }
+            }
             if (rr_ck != 0) { start_i = 0; nb_ck = 0; saved_et = 0.0; }
+            else if (start_i > 0) {
+                std::ostringstream rs; rs << "[ECM] Curve " << (c+1) << "/" << curves << " | resumed from Stage1 checkpoint at iteration " << start_i;
+                std::cout << rs.str() << std::endl; if (guiServer_) guiServer_->appendLog(rs.str());
+            }
             auto t0 = high_resolution_clock::now(); auto last_save = t0; auto last_ui = t0;
             std::vector<short> stage1_naf;
             size_t total_bits = mpz_sizeinbase(K.get_mpz_t(),2);
@@ -1732,8 +1775,8 @@ int App::runECMMarin()
                     std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
                     // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
                     std::error_code ec0;
-                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    ckpt1_loc.removeAll();
+                    ckpt2_loc.removeAll();
                     delete eng;
                     continue;
                 }
@@ -1749,8 +1792,8 @@ int App::runECMMarin()
                     std::cout<<"[ECM] Curve "<<(c+1)<<": stage 1 gcd=N (singular or all prime factors at once), skipping curve\n";
                     // The curve is finished: drop its checkpoints so a later resume does not pick it up again.
                     std::error_code ec0;
-                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    ckpt1_loc.removeAll();
+                    ckpt2_loc.removeAll();
                     delete eng;
                     continue;
                 }
@@ -1780,8 +1823,8 @@ int App::runECMMarin()
                 if (guiServer_) { std::ostringstream oss; oss<<"[ECM] "<<(known?"Known ":"")<<"factor: "<<gg.get_str(); guiServer_->appendLog(oss.str()); }
 
                 std::error_code ec0;
-                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
 
                 curves_tested_for_found=(uint32_t)(c+1); options.curves_tested_for_found=(uint32_t)(c+1);
 
@@ -1837,8 +1880,8 @@ int App::runECMMarin()
                 }
 
                 std::error_code ec0;
-                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
 
                 if (!known) {
                     if (std::find(options.knownFactors.begin(), options.knownFactors.end(), gg.get_str()) == options.knownFactors.end()) {
@@ -2158,14 +2201,14 @@ int App::runECMMarin()
                 }
                 if (abort_curve) {
                     std::error_code ec0;
-                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    ckpt1_loc.removeAll();
+                    ckpt2_loc.removeAll();
                     delete eng;
                     continue;
                 }
 
                 std::error_code ec2;
-                fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+                ckpt2_loc.removeAll();
 
                 double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
                 { std::ostringstream s2s; s2s << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 elapsed=" << std::fixed << std::setprecision(2) << elapsed2 << " s"; std::cout << s2s.str() << std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
@@ -2219,8 +2262,8 @@ auto setup_stage2_base = [&]() -> int {
                 if (setup_rc == 1) continue;
                 if (setup_rc < 0) {
                     std::error_code ec0;
-                    fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                    fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                    ckpt1_loc.removeAll();
+                    ckpt2_loc.removeAll();
                     delete eng;
                     continue;
                 }
@@ -2405,8 +2448,8 @@ auto setup_stage2_base = [&]() -> int {
                         // every restart to this curve) and release the engine.
                         std::cout << "\n[ECM] Curve " << (c+1) << ": Stage2 Z is 0 mod N, skipping curve\n";
                         std::error_code ec0;
-                        fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                        fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                        ckpt1_loc.removeAll();
+                        ckpt2_loc.removeAll();
                         delete eng;
                         next_curve_after_stage2 = true;
                         break;
@@ -2459,14 +2502,14 @@ auto setup_stage2_base = [&]() -> int {
             if (gg2 == N) {
                 std::cout << "[ECM] Curve " << (c+1) << ": Stage2 gcd=N, skipping curve\n";
                 std::error_code ec0;
-                fs::remove(ckpt_file, ec0); fs::remove(ckpt_file + ".old", ec0); fs::remove(ckpt_file + ".new", ec0);
-                fs::remove(ckpt2, ec0); fs::remove(ckpt2 + ".old", ec0); fs::remove(ckpt2 + ".new", ec0);
+                ckpt1_loc.removeAll();
+                ckpt2_loc.removeAll();
                 delete eng;
                 continue;
             }
 
             std::error_code ec2;
-            fs::remove(ckpt2, ec2); fs::remove(ckpt2 + ".old", ec2); fs::remove(ckpt2 + ".new", ec2);
+            ckpt2_loc.removeAll();
 
             double elapsed2 = duration<double>(high_resolution_clock::now() - t2_0).count() + saved_et2;
             { std::ostringstream s2s; s2s << "[ECM] Curve " << (c+1) << "/" << curves << " | Stage2 elapsed=" << std::fixed << std::setprecision(2) << elapsed2 << " s"; std::cout << s2s.str() << std::endl; if (guiServer_) guiServer_->appendLog(s2s.str()); }
@@ -2482,7 +2525,7 @@ auto setup_stage2_base = [&]() -> int {
             }
         }
 
-        std::error_code ec; fs::remove(ckpt_file, ec); fs::remove(ckpt_file + ".old", ec); fs::remove(ckpt_file + ".new", ec);
+        std::error_code ec; ckpt1_loc.removeAll();
         { std::ostringstream fin; fin<<"[ECM] Curve "<<(c+1)<<"/"<<curves<<" done"; std::cout<<fin.str()<<std::endl; if (guiServer_) guiServer_->appendLog(fin.str()); }
         delete eng;
     }
