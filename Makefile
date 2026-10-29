@@ -809,6 +809,10 @@ test-ecm-resume-seed-factor: all
 test-ckpt-save-path: all
 	bash tests/ckpt_save_path_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-pm1-ckpt-save-path
+test-pm1-ckpt-save-path: all
+	bash tests/pm1_ckpt_save_path_test.sh $${PRMERS_TEST_DEVICE:-0}
+
 .PHONY: test-ecm-stage2-zero-z
 test-ecm-stage2-zero-z: ; python3 tests/ecm_stage2_zero_z_source_test.py
 
