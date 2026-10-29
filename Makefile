@@ -9,7 +9,8 @@ OBJS        := $(patsubst $(SRC_DIR)/%.cpp,$(SRC_DIR)/%.o,$(SRCS))
 DEPS        := $(OBJS:.o=.d)
 
 UNAME_S := $(shell uname -s)
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo 4.20.97-alpha-v100.13-gm-vtrace-aevum-r1)
+# Keep package names consistent with -v, including when building a source tarball without .git.
+VERSION := $(shell sed -n 's/.*PRMERS_VERSION = "\([^"]*\)";.*/v\1/p' $(INC_DIR)/core/Version.hpp)
 GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 PACKAGE := prmers-$(VERSION)
 

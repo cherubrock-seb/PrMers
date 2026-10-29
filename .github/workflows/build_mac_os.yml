@@ -345,6 +345,7 @@ jobs:
           grep -q 'No admissible FFT3161 plan' <<<"$LOADER_OUTPUT"
           ! grep -q 'plugin unavailable' <<<"$LOADER_OUTPUT"
           "$STAGE/prmers" -v
+          python3 tests/release_version_consistency_test.py --binary "$STAGE/prmers"
           bash "$STAGE/scripts/check_macos_minos.sh" "$MACOSX_DEPLOYMENT_TARGET" \
             "$STAGE/prmers" \
             "$STAGE/third_party/aevum/build-engine/libaevum_engine.so" \
@@ -366,6 +367,11 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "12.0"
     steps:
+      # The universal package identity gate runs a repository test script.
+      - name: Checkout source for package identity validation
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref || github.ref }}
       - name: Download architecture stages
         uses: actions/download-artifact@v4
         with:
@@ -411,6 +417,7 @@ jobs:
           grep -q 'No admissible FFT3161 plan' <<<"$LOADER_OUTPUT"
           ! grep -q 'plugin unavailable' <<<"$LOADER_OUTPUT"
           universal/prmers -v
+          python3 tests/release_version_consistency_test.py --binary universal/prmers
           file universal/prmers universal/third_party/aevum/build-engine/libaevum_engine.so
 
           tar -czf dist/prmers-macos-arm64.tar.gz -C "$ARM" .
