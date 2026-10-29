@@ -282,6 +282,10 @@ test-worktodo-archive-dir-run: all
 test-worktodo-read-error:
 	bash tests/test_worktodo_read_error.sh
 
+.PHONY: test-results-save-path-mkdir
+test-results-save-path-mkdir:
+	bash tests/results_save_path_mkdir_test.sh
+
 .PHONY: test-worktodo-exponent-range
 test-worktodo-exponent-range:
 	bash tests/test_worktodo_exponent_range.sh

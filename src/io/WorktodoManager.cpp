@@ -22,11 +22,22 @@
 // src/io/WorktodoManager.cpp
 #include "io/WorktodoManager.hpp"
 #include "io/CliParser.hpp"
+#include <filesystem>
 #include <fstream>
+#include <system_error>
 #include <iostream>
 #include <iomanip>
 
 namespace io {
+
+// The save path (-f) may not exist yet: a run that ends before it writes anything else there (a
+// short P-1, ECM or LL-SAFE job, or one that resumed from a checkpoint in the working directory)
+// must still be able to write its result files.  Errors are left to the open that follows.
+static void ensureSaveDir(const std::string& dir) {
+    if (dir.empty()) return;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+}
 
 WorktodoManager::WorktodoManager(const io::CliOptions& opts)
   : options_(opts)
@@ -39,6 +50,7 @@ bool WorktodoManager::saveIndividualJson(uint32_t p,
     // ex: ./save/100003_prp_result.json
     std::string file = options_.save_path + "/"
                      + std::to_string(p) + "_" + mode + "_result.json";
+    ensureSaveDir(options_.save_path);
     std::ofstream out(file);
     if (!out) {
         std::cerr << "Cannot open " << file << " for writing JSON\n";
@@ -58,6 +70,7 @@ bool WorktodoManager::appendToResultsTxt(const std::string& jsonResult) const
 {
     // ex: ./save/results.txt
     std::string resultPath = options_.save_path + "/results.txt";
+    ensureSaveDir(options_.save_path);
     std::ofstream resOut(resultPath, std::ios::app);
     if (!resOut) {
         std::cerr << "Cannot open " << resultPath << " for appending\n";
