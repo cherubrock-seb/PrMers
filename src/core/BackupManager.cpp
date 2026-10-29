@@ -669,6 +669,9 @@ uint64_t BackupManager::loadState(std::vector<uint64_t>& x) {
         // 4) Pas de fichier valide → nouvelle session
         std::cout << "No valid loop file, initializing fresh state\n";
         resume = 0;
+        // The Gerbicz-Li files left beside an unusable .loop belong to the state that went with it,
+        // not to this fresh one: the loaders must give their defaults.
+        stateDiscarded_ = true;
         fresh();
     }
 
