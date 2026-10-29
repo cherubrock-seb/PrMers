@@ -442,6 +442,11 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     } else {
         rpt << "No sample errors captured.\n";
     }
+    // A memtest that found errors, or could not allocate any memory to test, fails: it used to exit 0 either way.
+    const bool nothing_tested = bufs.empty();
+    const std::string found = std::to_string(total_err) + (total_err == 1 ? " memory error found" : " memory errors found");
+    if (total_err) rpt << "Status: FAILED, " << found << ".\n";
+    else if (nothing_tested) rpt << "Status: FAILED, no GPU memory could be allocated: nothing was tested.\n";
     if (stop_flag || interrupted) rpt << "Status: interrupted by signal, partial results shown above.\n";
     rpt << "==============================\n";
     std::cout << rpt.str();
@@ -450,5 +455,9 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     clReleaseKernel(k_write); clReleaseKernel(k_rw); clReleaseKernel(k_read); clReleaseKernel(k_a_w); clReleaseKernel(k_a_r); clReleaseKernel(k_m_w); clReleaseKernel(k_m_r);
     clReleaseMemObject(err_count); clReleaseMemObject(err_addr); clReleaseMemObject(err_expect); clReleaseMemObject(err_current); clReleaseMemObject(err_second);
     clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx);
+    if (total_err || nothing_tested) {
+        std::cerr << "Memtest failed: " << (total_err ? found : std::string("nothing was tested")) << "\n";
+        return -1;
+    }
     return interrupted ? 1 : 0;
 }

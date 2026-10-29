@@ -429,6 +429,11 @@ test-gpu-lost-message:
 	python3 tests/gpu_lost_sources_test.py
 	rm -rf tests/build-gpu-lost-message
 
+# A memtest that found memory errors, or could not allocate any memory to test, exits with a failure, not 0.
+.PHONY: test-memtest-exit-status
+test-memtest-exit-status:
+	python3 tests/memtest_exit_status_source_test.py
+
 test-interrupt-exit-code: all
 	python3 tests/interrupt_exit_code_test.py ./prmers $${PRMERS_TEST_DEVICE:-0} INT
 
