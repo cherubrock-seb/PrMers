@@ -469,7 +469,13 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     } else {
         rpt << "No sample errors captured.\n";
     }
+    // PR #339 handles OpenCL execution failures first. MarkRose PR #341 adds
+    // failing exit/report semantics for actual memory errors and zero coverage.
+    const bool nothing_tested = bufs.empty();
+    const std::string found = std::to_string(total_err) + (total_err == 1 ? " memory error found" : " memory errors found");
     if (failed) rpt << "Status: FAILED, stopped by an OpenCL error: the memory was not fully tested.\n  " << cl_failure << "\n";
+    else if (total_err) rpt << "Status: FAILED, " << found << ".\n";
+    else if (nothing_tested) rpt << "Status: FAILED, no GPU memory could be allocated: nothing was tested.\n";
     else if (stop_flag || interrupted) rpt << "Status: interrupted by signal, partial results shown above.\n";
     rpt << "==============================\n";
     std::cout << rpt.str();
@@ -480,6 +486,10 @@ __kernel void kernel_modtest_read(__global char* ptr, ulong memsize, uint offset
     clReleaseProgram(prog); clReleaseCommandQueue(queue); clReleaseContext(ctx);
     if (failed) {
         std::cerr << "Memtest failed: " << cl_failure << "\n";
+        return -1;
+    }
+    if (total_err || nothing_tested) {
+        std::cerr << "Memtest failed: " << (total_err ? found : std::string("nothing was tested")) << "\n";
         return -1;
     }
     return interrupted ? 1 : 0;
