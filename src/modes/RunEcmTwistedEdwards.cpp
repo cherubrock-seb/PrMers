@@ -17,6 +17,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/CheckpointCommit.hpp"
 #include "core/EcmPrime95Handoff.hpp"
 #include <sys/stat.h>
 #include <cstdio>
@@ -1957,13 +1958,9 @@ int App::runECMMarinTwistedEdwards()
                 if (!eng->get_checkpoint(data)) return;
                 if (!f.write(data.data(), cksz)) return;
 
-                f.write_crc32();
+                if (!(f.write_crc32() && f.close())) { std::cerr << "[ECM] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
             }
-            std::error_code ec;
-            fs::remove(ckpt_file + ".old", ec);
-            fs::rename(ckpt_file,         ckpt_file + ".old", ec);
-            fs::rename(ckpt_file + ".new",ckpt_file,          ec);
-            fs::remove(ckpt_file + ".old", ec);
+            if (!core::ckptcommit::commit(ckpt_file)) { std::cerr << "[ECM] Warning: could not replace checkpoint " << ckpt_file << "; keeping the previous one\n"; return; }
         };
 
         auto read_ckpt_one = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
@@ -2059,13 +2056,9 @@ int App::runECMMarinTwistedEdwards()
                 if (!eng->get_checkpoint(data)) return;
                 if (!f.write(data.data(), cksz)) return;
 
-                f.write_crc32();
+                if (!(f.write_crc32() && f.close())) { std::cerr << "[ECM] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
             }
-            std::error_code ec;
-            fs::remove(ckpt2_file + ".old", ec);
-            if (fs::exists(ckpt2_file)) fs::rename(ckpt2_file, ckpt2_file + ".old", ec);
-            fs::rename(ckpt2_file + ".new", ckpt2_file, ec);
-            fs::remove(ckpt2_file + ".new", ec);
+            if (!core::ckptcommit::commit(ckpt2_file, true)) { std::cerr << "[ECM] Warning: could not replace checkpoint " << ckpt2_file << "; keeping the previous one\n"; return; }
         };
 
         auto save_ckpt2 = [&](uint32_t idx, double et, uint32_t cnt_bits){

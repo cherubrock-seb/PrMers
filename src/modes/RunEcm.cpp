@@ -17,6 +17,7 @@
 #include "marin/file.h"
 #include "ui/WebGuiServer.hpp"
 #include "core/Version.hpp"
+#include "core/CheckpointCommit.hpp"
 #include <sys/stat.h>
 #include <cstdio>
 #include <map>
@@ -780,13 +781,9 @@ int App::runECMMarin()
                 std::vector<char> data(cksz);
                 if (!eng->get_checkpoint(data)) return;
                 if (!f.write(data.data(), cksz)) return;
-                f.write_crc32();
+                if (!(f.write_crc32() && f.close())) { std::cerr << "[ECM] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
             }
-            std::error_code ec;
-            fs::remove(ckpt_file + ".old", ec);
-            fs::rename(ckpt_file,         ckpt_file + ".old", ec);
-            fs::rename(ckpt_file + ".new",ckpt_file,          ec);
-            fs::remove(ckpt_file + ".old", ec);
+            if (!core::ckptcommit::commit(ckpt_file)) { std::cerr << "[ECM] Warning: could not replace checkpoint " << ckpt_file << "; keeping the previous one\n"; return; }
         };
 
         auto read_ckpt = [&](const std::string& file, uint32_t& ri, uint32_t& rnb, double& et)->int{
@@ -896,13 +893,9 @@ int App::runECMMarin()
                 std::vector<char> data(cksz);
                 if (!eng->get_checkpoint(data)) return -1;
                 if (!f.write(data.data(), cksz)) return -1;
-                f.write_crc32();
+                if (!(f.write_crc32() && f.close())) { std::cerr << "[ECM] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return -1; }
             }
-            std::error_code ec;
-            fs::remove(ckpt2 + ".old", ec);
-            if (fs::exists(ckpt2)) fs::rename(ckpt2, ckpt2 + ".old", ec);
-            fs::rename(ckpt2 + ".new", ckpt2, ec);
-            fs::remove(ckpt2 + ".new", ec);
+            if (!core::ckptcommit::commit(ckpt2, true)) { std::cerr << "[ECM] Warning: could not replace checkpoint " << ckpt2 << "; keeping the previous one\n"; return -1; }
             return 0;
         };
 

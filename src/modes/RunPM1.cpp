@@ -17,6 +17,7 @@
 #include "core/Version.hpp"
 #include "core/Pm1Stage2External.hpp"
 #include "core/Pm1Checkpoint.hpp"
+#include "core/CheckpointCommit.hpp"
 #include "core/Pm1VTraceCheckpoint.hpp"
 #include "core/Pm1Progress.hpp"
 #include "util/OpenCLError.hpp"
@@ -5271,7 +5272,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     };
 
     auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, double et, uint64_t Dsave){
-        const std::string oldf = ckpt_file_s2 + ".old", newf = ckpt_file_s2 + ".new";
+        const std::string newf = ckpt_file_s2 + ".new";
         {
             File f(newf, "wb");
             int version = 10;
@@ -5288,12 +5289,9 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             std::vector<char> data(cksz);
             if (!e->get_checkpoint(data)) return;
             if (!f.write(data.data(), cksz)) return;
-            f.write_crc32();
+            if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
-        std::remove(oldf.c_str());
-        struct stat s;
-        if ((stat(ckpt_file_s2.c_str(), &s) == 0) && (std::rename(ckpt_file_s2.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file_s2.c_str());
+        if (!core::ckptcommit::commit(ckpt_file_s2, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s2 << "; keeping the previous one\n"; return; }
         write_pm1_checkpoint_backend(ckpt_file_s2, e);
     };
 
@@ -7032,9 +7030,9 @@ int App::runPM1Marin() {
     const std::string ckpt_file = ck.str();
     std::vector<char> ckpt_restore_data;
     auto save_ckpt = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
-        const std::string oldf = ckpt_file + ".old", newf = ckpt_file + ".new";
-        { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
-        std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file, oldf, ec); fs::rename(ckpt_file + ".new", ckpt_file, ec); fs::remove(oldf, ec);
+        const std::string newf = ckpt_file + ".new";
+        { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; } }
+        if (!core::ckptcommit::commit(ckpt_file)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file << "; keeping the previous one\n"; return; }
         write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
     };
     auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
@@ -7231,9 +7229,9 @@ int App::runPM1Marin() {
             std::vector<char> ckpt_ext_restore_data;
 
             auto save_ckpt_ext = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
-                const std::string oldf = ckpt_file_ext + ".old", newf = ckpt_file_ext + ".new";
-                { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; f.write_crc32(); }
-                std::error_code ec; fs::remove(oldf, ec); fs::rename(ckpt_file_ext, oldf, ec); fs::rename(ckpt_file_ext + ".new", ckpt_file_ext, ec); fs::remove(oldf, ec);
+                const std::string newf = ckpt_file_ext + ".new";
+                { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; } }
+                if (!core::ckptcommit::commit(ckpt_file_ext)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_ext << "; keeping the previous one\n"; return; }
                 write_pm1_checkpoint_backend(ckpt_file_ext, eng);
             };
 
@@ -8504,7 +8502,7 @@ int App::runPM1Stage3Marin() {
         return 0;
     };
     auto save_ckpt_s3 = [&](engine* e, uint64_t cur_b, double et){
-        const std::string oldf = ckpt_file_s3 + ".old", newf = ckpt_file_s3 + ".new";
+        const std::string newf = ckpt_file_s3 + ".new";
         {
             File f(newf, "wb");
             int version = 2;
@@ -8517,12 +8515,9 @@ int App::runPM1Stage3Marin() {
             std::vector<char> data(cksz);
             if (!e->get_checkpoint(data)) return;
             if (!f.write(data.data(), cksz)) return;
-            f.write_crc32();
+            if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
-        std::remove(oldf.c_str());
-        struct stat s;
-        if ((stat(ckpt_file_s3.c_str(), &s) == 0) && (std::rename(ckpt_file_s3.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file_s3.c_str());
+        if (!core::ckptcommit::commit(ckpt_file_s3, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s3 << "; keeping the previous one\n"; return; }
     };
 
     engine* eng = engine::create_gpu(pexp, regsS3, static_cast<size_t>(options.device_id), verbose);
@@ -9247,7 +9242,7 @@ int App::runPM1Stage4Marin() {
     };
 
     auto save_ckpt_s4 = [&](engine* e, uint64_t cur_i, double et){
-        const std::string oldf = ckpt_file_s4 + ".old", newf = ckpt_file_s4 + ".new";
+        const std::string newf = ckpt_file_s4 + ".new";
         {
             File f(newf, "wb");
             int version = 1;
@@ -9263,12 +9258,9 @@ int App::runPM1Stage4Marin() {
             std::vector<char> data(cksz);
             if (!e->get_checkpoint(data)) return;
             if (!f.write(data.data(), cksz)) return;
-            f.write_crc32();
+            if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
-        std::remove(oldf.c_str());
-        struct stat s;
-        if ((stat(ckpt_file_s4.c_str(), &s) == 0) && (std::rename(ckpt_file_s4.c_str(), oldf.c_str()) != 0)) return;
-        std::rename(newf.c_str(), ckpt_file_s4.c_str());
+        if (!core::ckptcommit::commit(ckpt_file_s4, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s4 << "; keeping the previous one\n"; return; }
     };
 
     bool resumed = false;

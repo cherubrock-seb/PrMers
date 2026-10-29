@@ -814,6 +814,10 @@ test-ecm-prime95-handoff: ; bash tests/ecm_prime95_handoff_test.sh
 .PHONY: test-ecm-prime95-handoff-resume
 test-ecm-prime95-handoff-resume: ; bash tests/ecm_prime95_handoff_resume_test.sh $${PRMERS_TEST_DEVICE:-0}
 
+.PHONY: test-checkpoint-commit
+test-checkpoint-commit:
+	bash tests/checkpoint_commit_test.sh
+
 .PHONY: test-gm-factor-checkpoint-write-failure
 test-gm-factor-checkpoint-write-failure:
 	bash tests/gm_factor_checkpoint_write_failure_test.sh
