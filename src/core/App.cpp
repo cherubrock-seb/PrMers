@@ -1426,11 +1426,14 @@ int App::runInner() {
             bool ran_local = false;
 
             std::ostringstream s1; s1 << "pm1_m_" << options.exponent << ".ckpt";
-            const std::string s1f = s1.str();
+            // The checkpoints are under -f, or (from an older version) in the working directory:
+            // readFile() is the one the stage will read.
+            const std::string s1f = core::CheckpointLocation(options.save_path, s1.str()).readFile();
 
             bool haveS1 = File(s1f).exists() || File(s1f + ".old").exists();
             bool haveS2 = false;
-            for (const std::string& f : core::pm1vtrace::stage2CheckpointFiles(options.exponent)) {
+            for (const std::string& name : core::pm1vtrace::stage2CheckpointFiles(options.exponent)) {
+                const std::string f = core::CheckpointLocation(options.save_path, name).readFile();
                 haveS2 = haveS2 || File(f).exists() || File(f + ".old").exists() || File(f + ".new").exists();
             }
             if(options.s3only){
@@ -1476,7 +1479,7 @@ int App::runInner() {
                 // searched its complete range, remove every Stage-2 checkpoint
                 // variant so stale state is not offered to a later run.
                 if (r2 == Pm1Stage2Result::Found || r2 == Pm1Stage2Result::NotFound) {
-                    core::pm1vtrace::removeStage2Checkpoints(options.exponent);
+                    core::pm1vtrace::removeStage2Checkpoints(options.exponent, options.save_path);
                 }
                 rc_local = pm1Stage2ExitCode(r2);
                 ran_local = true;

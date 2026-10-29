@@ -20,6 +20,7 @@
 #include "core/Pm1Checkpoint.hpp"
 #include "core/CheckpointCommit.hpp"
 #include "core/Pm1VTraceCheckpoint.hpp"
+#include "core/CheckpointLocation.hpp"
 #include "core/Pm1Progress.hpp"
 #include "util/OpenCLError.hpp"
 #include "core/Pm1NoProgressWatchdog.hpp"
@@ -1642,11 +1643,24 @@ static void pm1_fold_stage2(Pm1Stage2Result r, bool& factorFound, Pm1Stage2Resul
     else if (pm1_stage2_incomplete(r)) stop = r;
 }
 
+// P-1 checkpoints are kept under the save path (-f), with the other state of the run (the
+// working directory when -f is empty); see core/CheckpointLocation.hpp.  Earlier versions kept
+// them in the working directory whatever -f said, so a stage that finds none under -f reads one
+// of the same name there (CheckpointLocation::readFile).  Once it has resumed from it, it adopts
+// it: the old copy is removed when the run writes its own checkpoint under -f, or at the end of
+// the job.
+static void pm1_adopt_if_legacy(core::CheckpointLocation& loc, const std::string& used, ui::WebGuiServer* gui) {
+    if (!loc.isLegacy(used)) return;
+    loc.adoptLegacy();
+    std::cout << loc.legacyNote() << std::endl;
+    if (gui) gui->appendLog(loc.legacyNote());
+}
+
 // Removes every current Marin Stage-2 checkpoint variant, including pair95.
 // Interrupted/failed Stage 2 returns before this helper is called, so resumable
 // state is preserved; successful jobs retire all stale Stage-2 variants.
-static void pm1_remove_stage2_ckpts(uint64_t exponent) {
-    core::pm1vtrace::removeStage2Checkpoints(exponent);
+static void pm1_remove_stage2_ckpts(uint64_t exponent, const std::string& savePath) {
+    core::pm1vtrace::removeStage2Checkpoints(exponent, savePath);
 }
 
 Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
@@ -1749,7 +1763,8 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
         };
 
         std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
-        std::string ckpt_file = ck.str();
+        core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+        std::string ckpt_file = ckpt_loc.readFile();
         int rr = -1;
         for (const size_t s1Regs : {size_t(3), size_t(11)}) {
             rr = load_h_from(ckpt_file, s1Regs);
@@ -1765,6 +1780,7 @@ Pm1Stage2Result App::runPM1Stage2MarinLowMem() {
                       << " (tried 3 and 11 registers).\n";
             return Pm1Stage2Result::Error;
         }
+        pm1_adopt_if_legacy(ckpt_loc, ckpt_file, guiServer_.get());
         std::cout << "[PM1] Low-memory Stage 2 loaded H from " << ckpt_file
                   << " through the Marin checkpoint path.\n";
     }
@@ -3701,7 +3717,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     if (useProductTree) ck2 << "pm1_s2_vtrace_producttree_m_" << pexp << ".ckpt";
     else if (useNegBabyAdd) ck2 << "pm1_s2_vtrace_negadd_m_" << pexp << ".ckpt";
     else ck2 << "pm1_s2_vtrace_m_" << pexp << ".ckpt";
-    const std::string ckpt_file_s2 = ck2.str();
+    core::CheckpointLocation ckpt_loc_s2(options.save_path, ck2.str());   // under -f (see pm1_adopt_if_legacy)
+    const std::string ckpt_file_s2 = ckpt_loc_s2.file();
 
     auto compact_vtrace_regs = [&](){
         std::vector<size_t> regs;
@@ -3826,6 +3843,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             return false;
         }
         write_pm1_checkpoint_backend(ckpt_file_s2, e);
+        ckpt_loc_s2.removeLegacy();
         return true;
     };
 
@@ -3837,7 +3855,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     // same plan resumes it (see core/Pm1VTraceCheckpoint.hpp).
     uint64_t resume_idx = 0, resume_p_u64 = 0, cur_k = 0, saved_k = 0;
     namespace pvc = core::pm1vtrace;
-    const std::string ckpt_file_pair95 = "pm1_s2_vtrace_pair95_m_" + std::to_string(pexp) + ".ckpt";
+    core::CheckpointLocation ckpt_loc_pair95(options.save_path, "pm1_s2_vtrace_pair95_m_" + std::to_string(pexp) + ".ckpt");
+    const std::string ckpt_file_pair95 = ckpt_loc_pair95.file();
     const size_t pair95NumPasses = useBabyBatching ? ((babyCount + activeBabyCount - 1) / activeBabyCount) : 1;
     static constexpr uint32_t pair95CkptRegs[] = {(uint32_t)RACC, (uint32_t)RV1, (uint32_t)RGPREV, (uint32_t)RGCUR};
     pvc::Pair95Header pair95Run;
@@ -3909,6 +3928,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             return false;
         }
         write_pm1_checkpoint_backend(ckpt_file_pair95, eng);
+        ckpt_loc_pair95.removeLegacy();
         return true;
     };
 
@@ -3982,11 +4002,14 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     pvc::Pair95Header pair95Resume;
     bool pair95Resumed = false;
     if (usePair95) {
-        int r = read_pair95(ckpt_file_pair95, pair95Resume);
+        const std::string ckpt_read_pair95 = ckpt_loc_pair95.readFile();
+        int r = read_pair95(ckpt_read_pair95, pair95Resume);
+        if (r == 0) pm1_adopt_if_legacy(ckpt_loc_pair95, ckpt_read_pair95, guiServer_.get());
         if (r != 0) {
-            const int rOld = read_pair95(ckpt_file_pair95 + ".old", pair95Resume);
+            const int rOld = read_pair95(ckpt_read_pair95 + ".old", pair95Resume);
             if (rOld == 0) {
-                std::cout << "[PM1-VTRACE-PAIR95] resuming from the previous checkpoint " << ckpt_file_pair95 << ".old.\n";
+                pm1_adopt_if_legacy(ckpt_loc_pair95, ckpt_read_pair95, guiServer_.get());
+                std::cout << "[PM1-VTRACE-PAIR95] resuming from the previous checkpoint " << ckpt_read_pair95 << ".old.\n";
             } else if (r != -1 || rOld != -1) {
                 std::cout << "[PM1-VTRACE-PAIR95] no usable Stage 2 checkpoint; Stage 2 restarts from the beginning.\n";
                 if (guiServer_) guiServer_->appendLog("[PM1-VTRACE-PAIR95] no usable Stage 2 checkpoint; Stage 2 restarts.");
@@ -4002,8 +4025,10 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
             resume_idx = 0;
         }
     } else {
-        int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
-        if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
+        const std::string ckpt_read_s2 = ckpt_loc_s2.readFile();
+        int rs2 = read_ckpt_s2(eng, ckpt_read_s2, resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
+        if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_read_s2 + ".old", resume_p_u64, resume_idx, saved_k, restored_time, s2B1, s2B2, s2D, savedBatchSize, compactS2Loaded);
+        if (rs2 == 0) pm1_adopt_if_legacy(ckpt_loc_s2, ckpt_read_s2, guiServer_.get());
         resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
     }
 
@@ -4081,7 +4106,8 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
         if (!eng_load) { delete eng; return Pm1Stage2Result::Error; }
 
         std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
-        const std::string ckpt_file = ck.str();
+        core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+        const std::string ckpt_file = ckpt_loc.readFile();
 
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
@@ -4116,6 +4142,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 
         int rr = read_ckpt_stage1(eng_load, ckpt_file);
         if (rr < 0) rr = read_ckpt_stage1(eng_load, ckpt_file + ".old");
+        if (rr == 0) pm1_adopt_if_legacy(ckpt_loc, ckpt_file, guiServer_.get());
         if (rr != 0) {
             delete eng_load; delete eng;
             std::cerr << "[PM1-VTRACE] cannot load pm1 stage1 checkpoint " << ckpt_file << "\n";
@@ -5059,10 +5086,7 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
     }
 
     // Retire Stage-2 checkpoints only after the result was persisted.
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+    ckpt_loc_s2.removeAll();   // with its backend sidecar
 
 
     delete eng;
@@ -5310,7 +5334,8 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
 
     // ---- Stage2 checkpoint ----
     std::ostringstream ck2; ck2 << "pm1_s2_m_" << pexp << ".ckpt";
-    const std::string ckpt_file_s2 = ck2.str();
+    core::CheckpointLocation ckpt_loc_s2(options.save_path, ck2.str());   // under -f (see pm1_adopt_if_legacy)
+    const std::string ckpt_file_s2 = ckpt_loc_s2.file();
 
     auto read_ckpt_s2 = [&](engine* e, const std::string& file,
                             uint64_t& saved_p, uint64_t& saved_idx, double& et,
@@ -5347,6 +5372,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
 
     auto save_ckpt_s2 = [&](engine* e, uint64_t cur_p, uint64_t cur_idx, double et, uint64_t Dsave){
         const std::string newf = ckpt_file_s2 + ".new";
+        ckpt_loc_s2.prepareWrite();
         {
             File f(newf, "wb");
             int version = 10;
@@ -5366,6 +5392,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
             if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
         if (!core::ckptcommit::commit(ckpt_file_s2, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s2 << "; keeping the previous one\n"; return; }
+        ckpt_loc_s2.removeLegacy();
         write_pm1_checkpoint_backend(ckpt_file_s2, e);
     };
 
@@ -5411,8 +5438,10 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     double restored_time = 0.0;
     uint64_t s2B1=0, s2B2=0, s2D=0;
 
-    int rs2 = read_ckpt_s2(eng, ckpt_file_s2, resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
-    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_file_s2 + ".old", resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
+    const std::string ckpt_read_s2 = ckpt_loc_s2.readFile();
+    int rs2 = read_ckpt_s2(eng, ckpt_read_s2, resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
+    if (rs2 != 0) rs2 = read_ckpt_s2(eng, ckpt_read_s2 + ".old", resume_p_u64, resume_idx, restored_time, s2B1, s2B2, s2D);
+    if (rs2 == 0) pm1_adopt_if_legacy(ckpt_loc_s2, ckpt_read_s2, guiServer_.get());
     bool resumed_s2 = (rs2 == 0) && (s2B1 == B1u) && (s2B2 == B2u) && (s2D == D);
 
     if (!resumed_s2) {
@@ -5420,7 +5449,8 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
         engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, (size_t)options.device_id, verbose);
 
         std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
-        const std::string ckpt_file = ck.str();
+        core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+        const std::string ckpt_file = ckpt_loc.readFile();
 
         auto read_ckpt_stage1 = [&](engine* e, const std::string& file)->int{
             File f(file);
@@ -5462,6 +5492,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
 
         int rr = read_ckpt_stage1(eng_load, ckpt_file);
         if (rr < 0) rr = read_ckpt_stage1(eng_load, ckpt_file + ".old");
+        if (rr == 0) pm1_adopt_if_legacy(ckpt_loc, ckpt_file, guiServer_.get());
         if (rr != 0) {
             delete eng_load; delete eng;
             std::cerr << "Stage 2: cannot load pm1 stage1 checkpoint.\n";
@@ -5755,10 +5786,7 @@ Pm1Stage2Result App::runPM1Stage2Marin() {
     }
 
     // Retire Stage-2 checkpoints only after the result was persisted.
-    std::remove(ckpt_file_s2.c_str());
-    std::remove((ckpt_file_s2 + ".old").c_str());
-    std::remove((ckpt_file_s2 + ".new").c_str());
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_s2), ec); }
+    ckpt_loc_s2.removeAll();   // with its backend sidecar
 
 
     delete eng;
@@ -6244,18 +6272,21 @@ Pm1Stage2Result App::runPM1Stage2MarinNKVersion() {
         if (!e->set_checkpoint(data)) return -2;
         return 0;
     };
-    int rr = read_ckpt_s1(eng_s1, ck.str());
-    if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
-    if (rr != 0 && (File(ck.str()).exists() || File(ck.str() + ".old").exists())) {
+    core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+    const std::string ckpt_s1 = ckpt_loc.readFile();
+    int rr = read_ckpt_s1(eng_s1, ckpt_s1);
+    if (rr < 0) rr = read_ckpt_s1(eng_s1, ckpt_s1 + ".old");
+    if (rr != 0 && (File(ckpt_s1).exists() || File(ckpt_s1 + ".old").exists())) {
         for (const size_t alt : {size_t(11), size_t(3), size_t(2), size_t(1)}) {
             if (alt == s1Regs) continue;
             delete eng_s1;
             eng_s1 = engine::create_gpu(pexp, alt, (size_t)options.device_id, options.debug);
-            rr = read_ckpt_s1(eng_s1, ck.str());
-            if (rr < 0) rr = read_ckpt_s1(eng_s1, ck.str() + ".old");
+            rr = read_ckpt_s1(eng_s1, ckpt_s1);
+            if (rr < 0) rr = read_ckpt_s1(eng_s1, ckpt_s1 + ".old");
             if (rr == 0) break;
         }
     }
+    if (rr == 0) pm1_adopt_if_legacy(ckpt_loc, ckpt_s1, guiServer_.get());
     if (rr != 0) { delete eng_s1; std::cout << "Stage 2 (n^K): cannot load stage-1 checkpoint\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 2 (n^K): cannot load stage-1 checkpoint"; guiServer_->appendLog(oss.str()); } return Pm1Stage2Result::Error; }
     mpz_t H; mpz_init(H); eng_s1->get_mpz(H, (engine::Reg)0); delete eng_s1;
 
@@ -7101,12 +7132,15 @@ int App::runPM1Marin() {
     const size_t RSAVE_R= (pm1_lowmem_stage1 || ultralowmem_delta_extend) ? 0u : 9u;
     const size_t RBASE  = ultralowmem_delta_extend ? 1u : (pm1_ultralowmem_stage1 ? 0u : (pm1_lowmem_stage1 ? 2u : 10u));
     std::ostringstream ck; ck << "pm1_m_" << p << ".ckpt";
-    const std::string ckpt_file = ck.str();
+    core::CheckpointLocation ckpt_loc(options.save_path, ck.str());   // under -f (see pm1_adopt_if_legacy)
+    const std::string ckpt_file = ckpt_loc.file();
     std::vector<char> ckpt_restore_data;
     auto save_ckpt = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
         const std::string newf = ckpt_file + ".new";
+        ckpt_loc.prepareWrite();
         { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; } }
         if (!core::ckptcommit::commit(ckpt_file)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file << "; keeping the previous one\n"; return; }
+        ckpt_loc.removeLegacy();
         write_pm1_checkpoint_backend(ckpt_file, eng, B1, MAX_E_BITS);
     };
     auto read_ckpt = [&](const std::string& file, uint64_t& ri, double& et, uint64_t& chk, uint64_t& blks, uint64_t& bib, uint64_t& cbl, uint8_t& inlot, mpz_class& ceacc, mpz_class& cwbits, uint64_t& chunkIdx, uint64_t& startP, uint8_t& first, uint64_t& processedBits, uint64_t& bitsInChunk)->int{
@@ -7234,9 +7268,10 @@ int App::runPM1Marin() {
         // residue must be 3^E(B1_new) and nothing else.  read_ckpt itself would
         // also accept a legacy checkpoint without that record.
         uint64_t ck_b1 = 0, ck_maxe = 0;
-        const bool params_ok = pm1_checkpoint_read_params(ckpt_file, ck_b1, ck_maxe) && ck_b1 == B1 && ck_maxe == MAX_E_BITS;
+        const std::string ckpt_read = ckpt_loc.readFile();
+        const bool params_ok = pm1_checkpoint_read_params(ckpt_read, ck_b1, ck_maxe) && ck_b1 == B1 && ck_maxe == MAX_E_BITS;
         const int rr = params_ok
-            ? read_ckpt(ckpt_file, ri, et, x_chk, x_blks, x_bib, x_cbl, x_inlot, x_eacc, x_wbits, x_chunk, x_start, x_first, x_processed, x_bits)
+            ? read_ckpt(ckpt_read, ri, et, x_chk, x_blks, x_bib, x_cbl, x_inlot, x_eacc, x_wbits, x_chunk, x_start, x_first, x_processed, x_bits)
             : -1;
         if (rr == 0 && ri == 0 && x_bits == 0) {
             if (!eng->set_checkpoint(ckpt_restore_data)) {
@@ -7246,11 +7281,14 @@ int App::runPM1Marin() {
             }
             restored_time = et;
             extStage1Complete = true;
+            pm1_adopt_if_legacy(ckpt_loc, ckpt_read, guiServer_.get());
         }
     }
     if (!doExtend) {
-        int rr = read_ckpt(ckpt_file, resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
-        if (rr < 0) rr = read_ckpt(ckpt_file + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
+        const std::string ckpt_read = ckpt_loc.readFile();
+        int rr = read_ckpt(ckpt_read, resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
+        if (rr < 0) rr = read_ckpt(ckpt_read + ".old", resumeI_ck, restored_time, gl_checkpass_ck, gl_blocks_since_check_ck, gl_bits_in_block_ck, gl_current_block_len_ck, in_lot_ck, eacc_ck, wbits_ck, chunkIndex, startPrime, firstChunk_ck, processed_total_bits, bits_in_chunk_ck);
+        if (rr == 0) pm1_adopt_if_legacy(ckpt_loc, ckpt_read, guiServer_.get());
         if (rr == 0) {
             if (!eng->set_checkpoint(ckpt_restore_data)) {
                 std::cerr << "[PM1] Cannot load checkpoint " << ckpt_file << " into the engine\n";
@@ -7298,13 +7336,16 @@ int App::runPM1Marin() {
             // Checkpoint spécifique à la phase d'extension
             std::ostringstream ckext;
             ckext << "pm1_m_" << p << "_ext.ckpt";
-            const std::string ckpt_file_ext = ckext.str();
+            core::CheckpointLocation ckpt_loc_ext(options.save_path, ckext.str());   // under -f (see pm1_adopt_if_legacy)
+            const std::string ckpt_file_ext = ckpt_loc_ext.file();
             std::vector<char> ckpt_ext_restore_data;
 
             auto save_ckpt_ext = [&](uint64_t i, double et, uint64_t chk, uint64_t blks, uint64_t bib, uint64_t cbl, uint8_t inlot, const mpz_class& ceacc, const mpz_class& cwbits, uint64_t chunkIdx, uint64_t startP, uint8_t first, uint64_t processedBits, uint64_t bitsInChunk){
                 const std::string newf = ckpt_file_ext + ".new";
+                ckpt_loc_ext.prepareWrite();
                 { File f(newf, "wb"); if (!core::pm1ckpt::writeHeader(f, p, i, et)) return; const size_t cksz = eng->get_checkpoint_size(); std::vector<char> data(cksz); if (!eng->get_checkpoint(data)) return; if (!f.write(data.data(), cksz)) return; if (!f.write(reinterpret_cast<const char*>(&chk), sizeof(chk))) return; if (!f.write(reinterpret_cast<const char*>(&blks), sizeof(blks))) return; if (!f.write(reinterpret_cast<const char*>(&bib), sizeof(bib))) return; if (!f.write(reinterpret_cast<const char*>(&cbl), sizeof(cbl))) return; if (!f.write(reinterpret_cast<const char*>(&inlot), sizeof(inlot))) return; char* eacc_hex_c = mpz_get_str(nullptr, 16, ceacc.get_mpz_t()); uint32_t eacc_len = eacc_hex_c ? (uint32_t)std::strlen(eacc_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&eacc_len), sizeof(eacc_len))) { if (eacc_hex_c) std::free(eacc_hex_c); return; } if (eacc_len && !f.write(eacc_hex_c, eacc_len)) { std::free(eacc_hex_c); return; } if (eacc_hex_c) std::free(eacc_hex_c); char* wbits_hex_c = mpz_get_str(nullptr, 16, cwbits.get_mpz_t()); uint32_t wbits_len = wbits_hex_c ? (uint32_t)std::strlen(wbits_hex_c) : 0; if (!f.write(reinterpret_cast<const char*>(&wbits_len), sizeof(wbits_len))) { if (wbits_hex_c) std::free(wbits_hex_c); return; } if (wbits_len && !f.write(wbits_hex_c, wbits_len)) { std::free(wbits_hex_c); return; } if (wbits_hex_c) std::free(wbits_hex_c); if (!f.write(reinterpret_cast<const char*>(&chunkIdx), sizeof(chunkIdx))) return; if (!f.write(reinterpret_cast<const char*>(&startP), sizeof(startP))) return; if (!f.write(reinterpret_cast<const char*>(&first), sizeof(first))) return; if (!f.write(reinterpret_cast<const char*>(&processedBits), sizeof(processedBits))) return; if (!f.write(reinterpret_cast<const char*>(&bitsInChunk), sizeof(bitsInChunk))) return; if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; } }
                 if (!core::ckptcommit::commit(ckpt_file_ext)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_ext << "; keeping the previous one\n"; return; }
+                ckpt_loc_ext.removeLegacy();
                 write_pm1_checkpoint_backend(ckpt_file_ext, eng);
             };
 
@@ -7353,8 +7394,9 @@ int App::runPM1Marin() {
             uint64_t processedBits_ext_ck = 0;
             bool restored_ext = false;
 
-            int rr_ext = read_ckpt_ext(ckpt_file_ext, resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
-            if (rr_ext < 0) rr_ext = read_ckpt_ext(ckpt_file_ext + ".old", resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
+            const std::string ckpt_read_ext = ckpt_loc_ext.readFile();
+            int rr_ext = read_ckpt_ext(ckpt_read_ext, resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
+            if (rr_ext < 0) rr_ext = read_ckpt_ext(ckpt_read_ext + ".old", resumeI_ext_ck, restored_time_ext, gl_checkpass_ext_ck, gl_blocks_since_check_ext_ck, gl_bits_in_block_ext_ck, gl_current_block_len_ext_ck, in_lot_ext_ck, eacc_ext_ck, wbits_ext_ck, chunkIdx_ext, startP_ext, firstChunk_ext_ck, processedBits_ext_ck, bits_in_chunk_ext_ck);
             if (rr_ext == 0 && bits_in_chunk_ext_ck == (uint64_t)bits && resumeI_ext_ck >= 1 && resumeI_ext_ck <= (uint64_t)bits) {
                 if (!eng->set_checkpoint(ckpt_ext_restore_data)) {
                     std::cerr << "[PM1] Cannot load extension checkpoint " << ckpt_file_ext << " into the engine\n";
@@ -7362,6 +7404,7 @@ int App::runPM1Marin() {
                     return -1;
                 }
                 restored_ext = true;
+                pm1_adopt_if_legacy(ckpt_loc_ext, ckpt_read_ext, guiServer_.get());
             } else if (rr_ext == 0 && bits_in_chunk_ext_ck == (uint64_t)bits) {
                 std::cout << "[PM1] Ignoring extension checkpoint " << ckpt_file_ext << ": its resume position "
                           << resumeI_ext_ck << " is outside the extension's " << (uint64_t)bits << " bits\n";
@@ -7977,18 +8020,12 @@ int App::runPM1Marin() {
             return pm1Stage2ExitCode(stage2Stop);
         }
 
-        delete_checkpoints(options.exponent, options.wagstaff, true, false);
-        pm1_remove_stage2_ckpts(options.exponent);
-        { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
+        ckpt_loc.removeAll();   // with its backend sidecar
+        pm1_remove_stage2_ckpts(options.exponent, options.save_path);
         {
             // The extension is complete: a leftover _ext.ckpt would otherwise
             // be offered to the next -b1old run.
-            const std::string ckpt_file_ext = "pm1_m_" + std::to_string(p) + "_ext.ckpt";
-            std::error_code ec;
-            fs::remove(ckpt_file_ext, ec);
-            fs::remove(ckpt_file_ext + ".old", ec);
-            fs::remove(ckpt_file_ext + ".new", ec);
-            fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file_ext), ec);
+            core::CheckpointLocation(options.save_path, "pm1_m_" + std::to_string(p) + "_ext.ckpt").removeAll();
         }
         delete eng;
         if (hasWorktodoEntry_ && !resultSaved) {
@@ -8505,9 +8542,8 @@ int App::runPM1Marin() {
         return pm1Stage2ExitCode(stage2Stop);
     }
     //else{
-    delete_checkpoints(options.exponent, options.wagstaff, true, false);
-    pm1_remove_stage2_ckpts(options.exponent);
-    { std::error_code ec; fs::remove(pm1_checkpoint_backend_sidecar(ckpt_file), ec); }
+    ckpt_loc.removeAll();   // with its backend sidecar
+    pm1_remove_stage2_ckpts(options.exponent, options.save_path);
     if (eng != nullptr) delete eng;
     if (hasWorktodoEntry_ && !resultSaved) {
         std::cerr << "Result could not be saved; keeping the entry in " << options.worktodo_path << "\n";
@@ -8554,7 +8590,8 @@ int App::runPM1Stage3Marin() {
     static constexpr size_t regsS3 = 15;
 
     std::ostringstream ck3; ck3 << "pm1_s3_m_" << pexp << ".ckpt";
-    const std::string ckpt_file_s3 = ck3.str();
+    core::CheckpointLocation ckpt_loc_s3(options.save_path, ck3.str());   // under -f (see pm1_adopt_if_legacy)
+    const std::string ckpt_file_s3 = ckpt_loc_s3.file();
 
     auto read_ckpt_s3 = [&](engine* e, const std::string& file, uint64_t& saved_b, double& et, uint64_t& sB3)->int{
         File f(file);
@@ -8575,6 +8612,7 @@ int App::runPM1Stage3Marin() {
     };
     auto save_ckpt_s3 = [&](engine* e, uint64_t cur_b, double et){
         const std::string newf = ckpt_file_s3 + ".new";
+        ckpt_loc_s3.prepareWrite();
         {
             File f(newf, "wb");
             int version = 2;
@@ -8590,6 +8628,7 @@ int App::runPM1Stage3Marin() {
             if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
         if (!core::ckptcommit::commit(ckpt_file_s3, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s3 << "; keeping the previous one\n"; return; }
+        ckpt_loc_s3.removeLegacy();
     };
 
     engine* eng = engine::create_gpu(pexp, regsS3, static_cast<size_t>(options.device_id), verbose);
@@ -8675,7 +8714,8 @@ int App::runPM1Stage3Marin() {
         } else {
             engine* eng_load = engine::create_gpu(pexp, baseRegsStage1, static_cast<size_t>(options.device_id), verbose);
             std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
-            const std::string ckpt_file = ck.str();
+            core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+            const std::string ckpt_file = ckpt_loc.readFile();
 
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
@@ -8713,6 +8753,7 @@ int App::runPM1Stage3Marin() {
 
             int rr = read_ckpt_s1(eng_load, ckpt_file);
             if (rr < 0) rr = read_ckpt_s1(eng_load, ckpt_file + ".old");
+            if (rr == 0) pm1_adopt_if_legacy(ckpt_loc, ckpt_file, guiServer_.get());
             if (rr != 0) { delete eng_load; delete eng; std::cerr << "Stage 3: cannot load pm1 stage1 checkpoint.\n"; if (guiServer_) { std::ostringstream oss; oss << "Stage 3: cannot load pm1 stage1 checkpoint.\n"; guiServer_->appendLog(oss.str()); } mpz_clear(Hs1); return -2; }
 
             eng_load->get_mpz(Hs1, static_cast<engine::Reg>(RSTATE));
@@ -8741,8 +8782,10 @@ int App::runPM1Stage3Marin() {
     uint64_t resume_b = 0, s3B3 = 0;
     double restored_time = 0.0;
     {
-        int rs3 = read_ckpt_s3(eng, ckpt_file_s3, resume_b, restored_time, s3B3);
+        const std::string ckpt_read_s3 = ckpt_loc_s3.readFile();
+        int rs3 = read_ckpt_s3(eng, ckpt_read_s3, resume_b, restored_time, s3B3);
         if (rs3 == 0 && s3B3 == B3u) {
+            pm1_adopt_if_legacy(ckpt_loc_s3, ckpt_read_s3, guiServer_.get());
             resumed_s3 = true;
             if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 3 at b=" << resume_b << "/" << B3u; guiServer_->appendLog(oss.str()); }
             std::cout << "Resuming Stage 3 at b=" << resume_b << "/" << B3u << "\n";
@@ -9033,9 +9076,7 @@ int App::runPM1Stage3Marin() {
         std::free(s);
     }
 
-    std::remove(ckpt_file_s3.c_str());
-    std::remove((ckpt_file_s3 + ".old").c_str());
-    std::remove((ckpt_file_s3 + ".new").c_str());
+    ckpt_loc_s3.removeAll();
     options.computer_name = "STAGE3";
     std::string json = io::JsonBuilder::generate(options, static_cast<int>(context.getTransformSize()), false, "", "");
     std::cout << "Manual submission JSON:\n" << json << "\n";
@@ -9225,7 +9266,8 @@ int App::runPM1Stage4Marin() {
         if (!loaded) {
             engine* eng_load = engine::create_gpu(pexp, 11, static_cast<size_t>(options.device_id), verbose);
             std::ostringstream ck; ck << "pm1_m_" << pexp << ".ckpt";
-            const std::string ckpt_file = ck.str();
+            core::CheckpointLocation ckpt_loc(options.save_path, ck.str());
+            const std::string ckpt_file = ckpt_loc.readFile();
 
             auto read_ckpt_s1 = [&](engine* e, const std::string& file)->int{
                 File f(file);
@@ -9264,6 +9306,7 @@ int App::runPM1Stage4Marin() {
             int rr = read_ckpt_s1(eng_load, ckpt_file);
             if (rr < 0) rr = read_ckpt_s1(eng_load, ckpt_file + ".old");
             if (rr == 0) {
+                pm1_adopt_if_legacy(ckpt_loc, ckpt_file, guiServer_.get());
                 eng_load->get_mpz(Hs1, static_cast<engine::Reg>(0 /*RSTATE*/));
                 loaded = true;
                 std::cout << "Stage 4: using PM1 S1 state from " << ckpt_file << "\n";
@@ -9290,7 +9333,8 @@ int App::runPM1Stage4Marin() {
 
     // ---- Stage4 checkpointing (engine state + bit index)
     std::ostringstream ck4; ck4 << "pm1_s4_m_" << pexp << ".ckpt";
-    const std::string ckpt_file_s4 = ck4.str();
+    core::CheckpointLocation ckpt_loc_s4(options.save_path, ck4.str());   // under -f (see pm1_adopt_if_legacy)
+    const std::string ckpt_file_s4 = ckpt_loc_s4.file();
 
     auto read_ckpt_s4 = [&](engine* e, const std::string& file, uint64_t& saved_i, double& et)->int{
         File f(file);
@@ -9315,6 +9359,7 @@ int App::runPM1Stage4Marin() {
 
     auto save_ckpt_s4 = [&](engine* e, uint64_t cur_i, double et){
         const std::string newf = ckpt_file_s4 + ".new";
+        ckpt_loc_s4.prepareWrite();
         {
             File f(newf, "wb");
             int version = 1;
@@ -9333,14 +9378,17 @@ int App::runPM1Stage4Marin() {
             if (!(f.write_crc32() && f.close())) { std::cerr << "[PM1] Warning: could not write checkpoint " << newf << "; keeping the previous one\n"; return; }
         }
         if (!core::ckptcommit::commit(ckpt_file_s4, true)) { std::cerr << "[PM1] Warning: could not replace checkpoint " << ckpt_file_s4 << "; keeping the previous one\n"; return; }
+        ckpt_loc_s4.removeLegacy();
     };
 
     bool resumed = false;
     uint64_t resume_i = 0;
     double restored_time = 0.0;
     {
-        int rs = read_ckpt_s4(eng, ckpt_file_s4, resume_i, restored_time);
+        const std::string ckpt_read_s4 = ckpt_loc_s4.readFile();
+        int rs = read_ckpt_s4(eng, ckpt_read_s4, resume_i, restored_time);
         if (rs == 0) {
+            pm1_adopt_if_legacy(ckpt_loc_s4, ckpt_read_s4, guiServer_.get());
             resumed = true;
             std::cout << "Resuming Stage 4 at i=" << resume_i << "/" << Ebits << "\n";
             if (guiServer_) { std::ostringstream oss; oss << "Resuming Stage 4 at i=" << resume_i << "/" << Ebits; guiServer_->appendLog(oss.str()); }
@@ -9620,9 +9668,7 @@ int App::runPM1Stage4Marin() {
         if (guiServer_) guiServer_->appendLog("No factor (stage 4).");
     }
 
-    std::remove(ckpt_file_s4.c_str());
-    std::remove((ckpt_file_s4 + ".old").c_str());
-    std::remove((ckpt_file_s4 + ".new").c_str());
+    ckpt_loc_s4.removeAll();
 
     // ---- JSON output / append : same pattern as Stage 3
     options.computer_name = "STAGE4";

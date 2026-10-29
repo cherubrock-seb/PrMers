@@ -23,6 +23,8 @@
 // in the .backend sidecar, like for the other P-1 checkpoints.
 #pragma once
 
+#include "core/CheckpointLocation.hpp"
+
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -165,14 +167,12 @@ inline std::vector<std::string> stage2CheckpointFiles(uint64_t exponent) {
     };
 }
 
-// Removes them with their .old/.new files and their backend sidecars.
-inline void removeStage2Checkpoints(uint64_t exponent) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
+// Removes them, under the save path (-f; the working directory when empty), with their .old/.new
+// files and their backend sidecars, and any copy in the working directory this run adopted
+// (core/CheckpointLocation.hpp).
+inline void removeStage2Checkpoints(uint64_t exponent, const std::string& savePath = "") {
     for (const std::string& base : stage2CheckpointFiles(exponent)) {
-        for (const char* suffix : {"", ".old", ".new", ".backend", ".backend.new"}) {
-            fs::remove(base + suffix, ec);
-        }
+        CheckpointLocation(savePath, base).removeAll();
     }
 }
 
