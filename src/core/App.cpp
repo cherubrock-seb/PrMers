@@ -275,8 +275,23 @@ void App::tuneIterforce() {
 
 
 
+// The IPS benchmark (the sample before a legacy PRP/LL test, and -tune) times its waits: a wait that failed (a reset
+// or lost GPU, a driver timeout) returned at once, and the benchmark gave a rate far too high, which -tune sized its
+// iterforce search from.  Throw instead, so the run stops with the OpenCL error (a reset or lost GPU says so).
+static void checkIpsCl(cl_int err, const std::string& what) {
+    if (err != CL_SUCCESS) {
+        util::throwClError(err, util::gpulost::Phase::Run, what,
+                           what + " failed: " + util::getCLErrorString(err) + " (" + std::to_string(err) + ")");
+    }
+}
+
 double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
-    uint64_t oldIterforce = options.iterforce;
+    // options.iterforce is the benchmark's for the time of the measurement, and is restored on every way out.
+    struct IterforceRestore {
+        uint64_t& value;
+        uint64_t saved;
+        ~IterforceRestore() { value = saved; }
+    } restoreIterforce{options.iterforce, options.iterforce};
     options.iterforce = testIterforce;
 
     if (!buffers->input) {
@@ -314,14 +329,13 @@ double App::measureIps(uint64_t testIterforce, uint64_t testIters) {
             buffers->blockCarryBuf,
             precompute.getN() * sizeof(uint64_t)
         );
-        if (iter % options.iterforce == 0) clFinish(context.getQueue());
+        if (iter % options.iterforce == 0) checkIpsCl(clFinish(context.getQueue()), "clFinish (IPS benchmark)");
         if (iter % markInterval == 0) std::cout << "." << std::flush;
     }
-    clFinish(context.getQueue());
+    checkIpsCl(clFinish(context.getQueue()), "clFinish (IPS benchmark)");
     auto end = high_resolution_clock::now();
     std::cout << "]\n";
 
-    options.iterforce = oldIterforce;
     double seconds = duration_cast<duration<double>>(end - start).count();
     return testIters / seconds;
 }

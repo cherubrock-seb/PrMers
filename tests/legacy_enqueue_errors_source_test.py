@@ -70,4 +70,15 @@ for call in ("clEnqueueReadBuffer(", "clEnqueueWriteBuffer(", "clEnqueueCopyBuff
 for m in re.finditer(r"clCreateBuffer\(", legacy_pm1):
     assert "checkPm1Create(" in legacy_pm1[m.start():m.start() + 400], "unchecked clCreateBuffer in legacy P-1"
 
+# The IPS benchmark (the sample before a legacy PRP/LL test, and -tune) checks its waits: a failed one returned at
+# once and was timed as a rate far too high.
+app = code_only((ROOT / "src/core/App.cpp").read_text())
+ips = app[app.index("double App::measureIps("):app.index("void App::adoptLegacyProofResidues(")]
+finishes = list(re.finditer(r"clFinish\(", ips))
+assert len(finishes) == 2, f"expected 2 clFinish calls in measureIps, found {len(finishes)}"
+for m in finishes:
+    before = ips[max(0, m.start() - 20):m.start()]
+    assert before.endswith("checkIpsCl("), "unchecked clFinish in measureIps: " + ips[m.start():m.start() + 80]
+assert "~IterforceRestore()" in ips, "measureIps must restore options.iterforce when it throws"
+
 print("Legacy NTT enqueue error source regression: PASS")

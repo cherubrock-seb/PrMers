@@ -1,10 +1,13 @@
-// LD_PRELOAD shim for tests/run_legacy_read_fault.sh: makes one clEnqueueReadBuffer fail, as it does when the GPU
-// is reset or lost part way through a run.  Every other call goes to the real OpenCL library.
+// LD_PRELOAD shim for tests/run_legacy_read_fault.sh and tests/run_ips_finish_fault.sh: makes one clEnqueueReadBuffer
+// or clFinish fail, as it does when the GPU is reset or lost part way through a run.  Every other call goes to the
+// real OpenCL library.
 //
 //   PRMERS_FAULT_READ_BYTES  only reads of exactly this many bytes are counted (unset or 0: every read)
 //   PRMERS_FAULT_READ_NTH    the counted read that fails, 1-based (unset or 0: none fails)
 //   PRMERS_FAULT_READ_CODE   the status it returns (default -36, CL_INVALID_COMMAND_QUEUE)
 //   PRMERS_FAULT_READ_LOG    a file that gets one line "<bytes>" per read, to find the read to fail
+//   PRMERS_FAULT_FINISH_NTH  the clFinish that fails, 1-based (unset or 0: none fails); it returns
+//                            PRMERS_FAULT_READ_CODE too
 #define _GNU_SOURCE
 #define CL_TARGET_OPENCL_VERSION 300
 #include <CL/cl.h>
@@ -12,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+typedef cl_int (*finish_fn)(cl_command_queue);
 typedef cl_int (*read_fn)(cl_command_queue, cl_mem, cl_bool, size_t, size_t, void*, cl_uint, const cl_event*,
                           cl_event*);
 
@@ -44,4 +48,18 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue queue, cl_m
         return (code && *code) ? (cl_int)strtol(code, NULL, 10) : CL_INVALID_COMMAND_QUEUE;
     }
     return real(queue, buffer, blocking, offset, size, ptr, numEvents, waitList, event);
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clFinish(cl_command_queue queue) {
+    static finish_fn real = NULL;
+    static unsigned long long seen = 0;
+    if (!real) real = (finish_fn)dlsym(RTLD_NEXT, "clFinish");
+
+    const unsigned long long nth = env_u64("PRMERS_FAULT_FINISH_NTH");
+    if (nth != 0 && ++seen == nth) {
+        const char* code = getenv("PRMERS_FAULT_READ_CODE");
+        fprintf(stderr, "[fault shim] failing clFinish #%llu\n", seen);
+        return (code && *code) ? (cl_int)strtol(code, NULL, 10) : CL_INVALID_COMMAND_QUEUE;
+    }
+    return real(queue);
 }
