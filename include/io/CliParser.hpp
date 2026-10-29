@@ -128,6 +128,7 @@ struct CliOptions {
     // This is intended for 10GB GPUs such as RTX 3080 and does not recompute from base 3.
     bool pm1_s2_resume2reg = false;
     uint64_t pm1_progress_seconds = 300; // 0 disables periodic PM1 progress; checkpoints remain active
+    uint64_t pm1_no_progress_seconds = 0; // 0 disables the opt-in V-trace Stage-2 no-progress watchdog
     bool pm1_vtrace = false;          // Accepted legacy flag; normal-memory P-1 Stage 2 uses V-trace by default
     bool pm1_vtrace_off = false;      // Disable default V-trace Stage 2 and use the classic BSGS path
     uint64_t pm1_vtrace_D = 0;        // Optional giant-step D override; default is auto-D, fallback 630
