@@ -140,7 +140,7 @@ int App::runPrpOrLl() {
 
 
     std::vector<uint64_t> x(precompute.getN(), 0ULL);
-    uint64_t resumeIter = backupManager.loadState(x);
+    uint64_t resumeIter = backupManager.loadState(x, totalIters);
     if (resumeIter == 0) {
         x[0] = (options.mode == "prp") ? 3ULL : 4ULL;
         if(options.debug){
