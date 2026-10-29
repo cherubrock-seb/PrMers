@@ -17,6 +17,9 @@
 #include <cmath>
 #include <filesystem>
 #include <system_error>
+#include <stdexcept>
+#include <cerrno>
+#include <cstring>
 
 namespace io {
 
@@ -207,7 +210,11 @@ bool WorktodoParser::hasPendingEntry(const std::string& filename) {
     if (firstActionableLineIsGmtf(filename)) return true;
     WorktodoParser parser(filename);
     parser.quiet_ = true;
-    return parser.parse().has_value();
+    if (parser.parse().has_value()) return true;
+    // A file that exists but cannot be read is not "no more entries": the queue is still there.
+    if (!parser.readError_.empty())
+        throw std::runtime_error("Cannot read " + filename + ": " + parser.readError_);
+    return false;
 }
 
 bool WorktodoParser::isValidEntryLine(const std::string& line) {
@@ -231,7 +238,14 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
     } else {
         fileStream.open(filename_);
         if (!fileStream.is_open()) {
+            const int openErrno = errno;
             logErr << "Cannot open " << filename_ << "\n";
+            // A missing file is just an empty queue; any other reason it cannot be opened is a read error.
+            std::error_code ec;
+            const std::filesystem::file_status st = std::filesystem::status(filename_, ec);
+            const bool missing = ec == std::errc::no_such_file_or_directory || ec == std::errc::not_a_directory ||
+                                 (!ec && st.type() == std::filesystem::file_type::not_found);
+            if (!missing) readError_ = std::strerror(openErrno ? openErrno : EACCES);
             return std::nullopt;
         }
         input = &fileStream;
@@ -711,6 +725,8 @@ continue;
         }
     }
 
+    // getline also stops on a read error (EIO, a directory): that is not the end of the queue.
+    if (!text_ && file.bad()) readError_ = "read error";
     logErr << "No valid entry found in " << filename_ << "\n";
     return std::nullopt;
 }

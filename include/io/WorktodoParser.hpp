@@ -77,6 +77,9 @@ public:
     // so "restart for the next entry" is only taken when the restarted process will find one.
     // A GMTF= line counts when it is the first actionable line: the Gaussian trial-factoring
     // pre-parser runs it on the restart.
+    // Throws std::runtime_error when the file exists but cannot be read (permissions, I/O error, not a
+    // regular file) and holds no entry that was read before the failure: that is not "no more entries".
+    // A missing or empty file is simply false.
     static bool hasPendingEntry(const std::string& filename);
     // Take the lock appendLine()/removeProcessedLine() hold while they write. restart_self holds it
     // through the exec, so a GUI append on another thread is never cut off half-written (a truncated
@@ -86,6 +89,7 @@ public:
 private:
     std::string filename_;
     bool quiet_ = false;   // dry run: parse() prints nothing
+    std::string readError_;   // set by parse() when the file exists but could not be read
     const std::string* text_ = nullptr;   // isValidEntryLine(): parse this text instead of the file
 };
 
