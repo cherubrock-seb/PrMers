@@ -437,6 +437,12 @@ test-interrupt-exit-code: all
 test-stop-after-result: all
 	python3 tests/stop_after_result_test.py ./prmers $${PRMERS_TEST_DEVICE:-0}
 
+# A failed clFinish in the IPS benchmark (legacy PRP/LL sample, -tune) stops the run instead of giving a rate
+# (runs prmers with a preloaded clFinish fault shim; PoCL's CPU device is enough).
+.PHONY: test-ips-finish-fault
+test-ips-finish-fault: all
+	bash tests/run_ips_finish_fault.sh $${AEVUM_TEST_DEVICE:-0}
+
 .PHONY: test-worktodo-small-items
 test-worktodo-small-items:
 	bash tests/test_worktodo_small_items.sh
