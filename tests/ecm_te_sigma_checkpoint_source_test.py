@@ -27,7 +27,7 @@ assert not re.search(r'"ecm2?_m_"', src)
 body = src[src.index('int rr = read_ckpt(start_i'):]
 body = body[:body.index('auto t0 = high_resolution_clock::now();')]
 assert 'check_invariant()' in body
-assert 'fresh_state' in body and 'fs::remove(ckpt_file' in body
+assert 'fresh_state' in body and ('fs::remove(ckpt_file' in body or 'ckpt1_loc.removeAll()' in body)
 
 # rollback retries are bounded
 assert 'kMaxInvariantRetries' in src and 'invariant_fail_streak' in src
