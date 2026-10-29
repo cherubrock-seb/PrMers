@@ -285,6 +285,10 @@ std::optional<WorktodoEntry> WorktodoParser::parse() {
         //   Test=1,2,n,-1
         const bool looksLikeKbncMersenne =
             (parts.size() >= 4 && parts[0] == "1" && parts[1] == "2" && parts[3] == "-1");
+        // Prime95 has at most three fields here (exponent, how_far_factored, has_been_pminus1ed).
+        // A line with more that is not the Mersenne k,b,n,c form (Test=3,2,100,-1 or Test=1,2,127,+1)
+        // is not a Prime95 line: skip it instead of testing its first field as the exponent.
+        if (isLL && !looksLikeKbncMersenne && parts.size() >= 4) continue;
         if (isLL && !looksLikeKbncMersenne && !parts.empty() && isIntegerToken(parts[0])) {
             try {
                 uint64_t exp74 = std::stoull(parts[0]);
