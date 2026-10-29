@@ -4,11 +4,11 @@
 # = 2*677*45*31891 + 1, which stage 2 only reaches at the prime 31891 (B1=10
 # covers 45), long after the interrupt.  The resumed run must still find it.
 #
-# The interrupt is sent as soon as the stage-2 loop has started, not after a
-# fixed time, so it lands at the same point of the run on a slow or a fast
-# device.  The saved position must also be one the resume logic can get wrong
-# (see below) and lie before the factor's prime; if an attempt lands elsewhere
-# it is repeated.
+# The interrupted run saves its state at every step (-t 0), which stretches the stage-2 loop from about half a
+# second to several seconds.  The interrupt is sent once the loop has saved 50 steps, not after a fixed time, so it
+# lands at about the same point of the run on a slow or a fast device, and a signal that is delivered late because
+# the machine is busy still lands well before the factor's prime.  The saved position must also be one the resume
+# logic can get wrong (see below) and lie before the factor's prime; if an attempt lands elsewhere it is repeated.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEVICE="${1:-0}"
@@ -28,10 +28,10 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   dir="$WORK/try$attempt"
   mkdir "$dir"
   ln -s "$ROOT/kernels" "$dir/kernels"
-  # Start in the background and send SIGINT as soon as the stage-2 loop starts.
-  ( cd "$dir" && exec timeout --signal=INT --kill-after=10s 300 "$ROOT/prmers" "${ARGS[@]}" >first.log 2>&1 ) &
+  # Start in the background and send SIGINT once the stage-2 loop has saved 50 steps.
+  ( cd "$dir" && exec timeout --signal=INT --kill-after=10s 300 "$ROOT/prmers" "${ARGS[@]}" -t 0 >first.log 2>&1 ) &
   pid=$!
-  until grep -aq 'PM1-CLASSIC' "$dir/first.log" 2>/dev/null; do
+  until [ "$(grep -ac 'Backup Stage 2 at prime' "$dir/first.log" 2>/dev/null || true)" -ge 50 ]; do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.005
   done
