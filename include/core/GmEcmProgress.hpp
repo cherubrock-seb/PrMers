@@ -32,13 +32,15 @@ inline std::uint64_t load(const std::filesystem::path& file, const std::string& 
 
 inline void save(const std::filesystem::path& file, const std::string& key, std::uint64_t done) {
     const std::filesystem::path tmp = file.string() + ".new";
+    std::error_code ec;
     {
         std::ofstream out(tmp, std::ios::trunc);
         out << magic() << '\n' << key << '\n' << done << '\n';
-        if (!out) return;
+        out.close();   // flush now so a full disk is seen before the rename
+        if (!out) { std::filesystem::remove(tmp, ec); return; }
     }
-    std::error_code ec;
     std::filesystem::rename(tmp, file, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
 }
 
 inline void clear(const std::filesystem::path& file) {
