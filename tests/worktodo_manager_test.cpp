@@ -27,8 +27,11 @@ int main() {
         return 1;
     }
 
+    // A save path that cannot be created (a regular file stands where a directory is needed).  A path that merely does not
+    // exist yet is created: see results_save_path_mkdir_test.cpp.
+    { std::ofstream blocker(base / "blocker"); blocker << "x"; }
     io::CliOptions bad;
-    bad.save_path = (base / "missing" / "dir").string();
+    bad.save_path = (base / "blocker" / "dir").string();
     io::WorktodoManager badWm(bad);
     if (badWm.saveIndividualJson(127, "prp", "{}")) {
         std::cerr << "saveIndividualJson must report failure for an unwritable path\n";
