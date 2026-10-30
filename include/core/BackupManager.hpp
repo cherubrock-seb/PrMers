@@ -58,8 +58,13 @@ public:
                   );
 
     // read the saved set into x (and keep its Gerbicz-Li part for the calls below); return the
-    // resume iteration, 0 for a fresh start
-    uint64_t loadState(std::vector<uint64_t>& x);
+    // resume iteration, 0 for a fresh start. totalIters is the number of iterations of the test:
+    // a saved position beyond it is a damaged file (the legacy .loop file has no checksum), so the
+    // state is discarded with a warning and 0 is returned. A position equal to totalIters is a
+    // finished test whose final checkpoint was kept, and is accepted.
+    uint64_t loadState(std::vector<uint64_t>& x, uint64_t totalIters = UINT64_MAX);
+    // True when a saved resume position can belong to a test of totalIters iterations.
+    static bool resumeWithinTotal(uint64_t resume, uint64_t totalIters) { return resume <= totalIters; }
     void loadGerbiczLiBufDState(std::vector<uint64_t>& x);
     void loadGerbiczLiCorrectState(std::vector<uint64_t>& x);
     void loadGerbiczLiCorrectBufDState(std::vector<uint64_t>& x);
