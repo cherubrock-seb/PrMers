@@ -768,9 +768,28 @@ static PM1Prime95Stage2Result p95_run_pm1_stage2_task(const fs::path& p95_dir,
 }
 
 
+// -b2start (or a worktodo B2_start) is read only by the low-memory stage 2 and the Prime95
+// handoff.  The other stage-2 paths search the whole (B1, B2]; say so rather than letting the
+// option pass silently.  Returns the notice, or an empty string when nothing is ignored.
+static std::string pm1_b2start_ignored_notice(const io::CliOptions& o, const char* stage2_name) {
+    if (o.pm1_lowmem || o.B2Start <= o.B1 || o.B2 <= o.B1) return std::string();
+    std::ostringstream w;
+    w << "[PM1] Warning: -b2start " << o.B2Start << " is ignored by the " << stage2_name
+      << " Stage 2; it searches all of (" << o.B1 << ", " << o.B2
+      << "]. Use -pm1-lowmem to start Stage 2 at -b2start.";
+    return w.str();
+}
+
 int App::runPM1Stage2() {
     using namespace std::chrono;
     bool debug = false;
+    {
+        const std::string w = pm1_b2start_ignored_notice(options, "legacy");
+        if (!w.empty()) {
+            std::cerr << w << "\n";
+            if (guiServer_) guiServer_->appendLog(w);
+        }
+    }
     //mpz_class B1(static_cast<unsigned long>(options.B1));
     mpz_class B1 = mpz_from_u64(options.B1);
     mpz_class B2 = mpz_from_u64(options.B2);
@@ -5096,6 +5115,13 @@ Pm1Stage2Result App::runPM1Stage2MarinVTrace() {
 Pm1Stage2Result App::runPM1Stage2Marin() {
     const bool useVTraceDefault = (!options.pm1_vtrace_off && !options.pm1_lowmem);
     const bool useVTrace = (!options.pm1_vtrace_off && (options.pm1_vtrace || useVTraceDefault));
+    {
+        const std::string w = pm1_b2start_ignored_notice(options, useVTrace ? "V-trace" : "classic BSGS");
+        if (!w.empty()) {
+            std::cerr << w << "\n";
+            if (guiServer_) guiServer_->appendLog(w);
+        }
+    }
     if (useVTrace) {
         if (options.pm1_lowmem) {
             std::cerr << "[PM1-VTRACE] V-trace is a normal-memory Stage 2 path; do not combine it with -pm1-lowmem/-pm1-ultralowmem.\n";

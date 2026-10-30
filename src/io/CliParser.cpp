@@ -110,7 +110,7 @@ void printUsage(const char* progName) {
     std::cout << "  -pm1-vtrace-pair95-l <N> : Force Pair95 irregular level count; 0/omitted = auto, common values 2 or 3" << std::endl;
     std::cout << "  -pm1-vtrace-product-tree : (Experimental) Use v62 bucket-local product-tree accumulation, opt-in" << std::endl;
     std::cout << "  -pm1-vtrace-product-tree-width <N> : (Experimental) Product-tree scratch/chunk width, default 16" << std::endl;
-    std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested" << std::endl;
+    std::cout << "  -b2start <value>     : (Optional) Stage 2 lower bound/start for split ranges. With -pm1-s2-resume2reg, -b1 remains the Stage-1 resume bound and primes in (-b2start,-b2] are tested. Only the low-memory Stage 2 and the Prime95 Stage 2 handoff use it; the default V-trace and classic Stage 2 warn and search all of (-b1,-b2]" << std::endl;
     std::cout << "  -nogcd-stage1        : (Optional) skip the ordinary P-1 Stage 1 GCD after writing PM1 resume/checkpoint; useful before Stage 2" << std::endl;
     std::cout << "  -pm1-continue-stage2-after-factor : Continue requested Stage 2 even when Stage 1 finds a new factor (default: stop)" << std::endl;
     std::cout << "  -checklevel <value>  : (Optional) Will force gerbicz check every B*<value> by default check is done every 10 min and at the end." << std::endl;
